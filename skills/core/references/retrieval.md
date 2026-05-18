@@ -29,7 +29,16 @@ At session start, `<project>/PROJECT.md` and `~/.core/dm-profile.md` are read. F
 
 ### Tier 2 — Typed-edge walk
 
-Start from an anchor unit (typically discovered via Tier 1). Read its frontmatter `edges:` list. Follow edges of relevant types up to **2-3 hops maximum**. Build a visited-set in scratchpad to prevent cycles. Stop following a branch when its terminal candidate fails the prune threshold (below).
+**Preferred:** run `graph-walk.py` from the plugin:
+
+```bash
+python3 ~/.claude/skills/core/scripts/graph-walk.py <seed-unit-path> \
+    --intent topic1,topic2 --format json
+```
+
+This returns a scored, hop-ordered candidate list. Read the top results. Fall back to manual traversal only if the script isn't reachable in the current harness context.
+
+**Manual fallback:** Start from an anchor unit (typically discovered via Tier 1). Read its frontmatter `edges:` list. Follow edges of relevant types up to **2-3 hops maximum**. Build a visited-set in scratchpad to prevent cycles. Stop following a branch when its terminal candidate fails the prune threshold (below).
 
 **Hop caps:**
 

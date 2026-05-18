@@ -93,6 +93,46 @@ def _coerce(value: str):
     return v
 
 
+def _parse_inline_map(text: str) -> dict:
+    """Parse a YAML inline mapping like 'type: cites, target: foo.md, note: "bar baz"'.
+    Input should be the content between the outer braces (braces already stripped)."""
+    result: dict = {}
+    i = 0
+    n = len(text)
+    while i < n:
+        while i < n and text[i] in " ,":
+            i += 1
+        if i >= n:
+            break
+        colon = text.find(":", i)
+        if colon == -1:
+            break
+        key = text[i:colon].strip()
+        i = colon + 1
+        while i < n and text[i] == " ":
+            i += 1
+        if i < n and text[i] == '"':
+            j = i + 1
+            while j < n:
+                if text[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if text[j] == '"':
+                    break
+                j += 1
+            val = text[i + 1:j]
+            i = j + 1
+        else:
+            j = i
+            while j < n and text[j] != ",":
+                j += 1
+            val = text[i:j].strip()
+            i = j
+        if key:
+            result[key] = val
+    return result
+
+
 def parse_frontmatter(text: str) -> tuple[dict, str]:
     if not text.startswith("---\n"):
         return {}, text
@@ -127,7 +167,12 @@ def parse_frontmatter(text: str) -> tuple[dict, str]:
                 current_list = None
         elif stripped.startswith("- "):
             item = stripped[2:].strip()
-            if ":" in item and not item.startswith("http"):
+            if item.startswith("{") and item.endswith("}"):
+                # Inline YAML dict: {type: cites, target: foo.md, note: "..."}
+                current_dict = _parse_inline_map(item[1:-1])
+                if current_list is not None:
+                    current_list.append(current_dict)
+            elif ":" in item and not item.startswith("http"):
                 key, _, val = item.partition(":")
                 current_dict = {key.strip(): _coerce(val)}
                 if current_list is not None:
@@ -281,6 +326,69 @@ def score_proxy_RS(unit: Unit, today: date | None = None) -> float:
     return signal_R(unit, today) * signal_S(unit)
 
 
+def extract_edges(unit: Unit) -> list[dict]:
+    """Return a list of {type, target, note?} dicts from the unit's frontmatter.
+
+    Handles both block format (sequential key: value lines) and inline dict
+    format ({type: X, target: Y, note: Z}) — both occur in practice.
+    """
+    edges_raw = unit.fm.get("edges") or []
+    if not isinstance(edges_raw, list):
+        return []
+    result = []
+    for item in edges_raw:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") and item.get("target"):
+            result.append({"type": str(item["type"]),
+                           "target": str(item["target"]),
+                           "note": str(item.get("note", ""))})
+    return result
+
+
+# ---------- Section mapping for PROJECT.md render ----------
+
+# Maps unit type or filename prefix → PROJECT.md section name.
+# Section names match the canonical six sections in PROJECT.md.
+_TYPE_TO_SECTION: dict[str, str] = {
+    "decision": "Decisions & Risks",
+    "risk": "Decisions & Risks",
+    "person": "People",
+    "deliverable": "Moves",
+    "principle": "Notes",
+    "explainer": "Notes",
+    "review-finding": "Notes",
+    "observation": "Notes",
+    "topic": "Notes",
+    "reference": "Notes",
+    "feedback": "Notes",
+}
+
+_PREFIX_TO_SECTION: dict[str, str] = {
+    "dc-": "Decisions & Risks",
+    "risk-": "Decisions & Risks",
+    "who-": "People",
+    "del-": "Moves",
+    "rf-": "Notes",
+    "exp-": "Notes",
+    "pr-": "Notes",
+    "obs-": "Notes",
+    "topic-": "Notes",
+}
+
+
+def unit_section(unit: Unit) -> str:
+    """Map a unit to its PROJECT.md section."""
+    typ = str(unit.fm.get("type", "")).lower()
+    if typ in _TYPE_TO_SECTION:
+        return _TYPE_TO_SECTION[typ]
+    stem = unit.path.stem.lower()
+    for prefix, section in _PREFIX_TO_SECTION.items():
+        if stem.startswith(prefix):
+            return section
+    return "Notes"
+
+
 # ---------- CLI diagnostic ----------
 
 def _iter_units(memories_dir: Path):
@@ -303,6 +411,10 @@ def _cli(argv: list[str]) -> int:
                         help="Comma-separated session intent topics for alignment signal")
     parser.add_argument("--today", default=None,
                         help="Override today's date as YYYY-MM-DD (for reproducible scoring)")
+    parser.add_argument("--sections", action="store_true",
+                        help="Group top-K units per PROJECT.md section instead of flat ranking")
+    parser.add_argument("--top-per-section", type=int, default=5,
+                        help="Units per section in --sections mode (default: 5)")
     args = parser.parse_args(argv)
 
     memories_dir = Path(args.memories_dir).resolve()
@@ -318,12 +430,50 @@ def _cli(argv: list[str]) -> int:
         ranked.append((score(u, intent, today), u))
     ranked.sort(key=lambda t: t[0], reverse=True)
 
+    if args.sections:
+        return _cli_sections(ranked, args.top_per_section, today, intent)
+
     print(f"Ranking {len(ranked)} units in {memories_dir}")
     print(f"Date: {today.isoformat()}, intent topics: {intent or '(none)'}")
     print("-" * 64)
     for s, u in ranked[: args.top]:
         topics = u.fm.get("topics") or []
         print(f"  {s:.3f}  {u.id:42s}  topics={topics}")
+    return 0
+
+
+def _cli_sections(ranked: list[tuple[float, Unit]], top_k: int,
+                  today: date, intent: list[str]) -> int:
+    """--sections mode: emit JSON of top-K units per PROJECT.md section.
+
+    Output shape:
+        {"section_name": [{"unit_id": ..., "path": ..., "priority": ...}, ...], ...}
+
+    The agent uses this as the canonical candidate partition for PROJECT.md renders.
+    """
+    import json
+
+    sections: dict[str, list[dict]] = {
+        "What & Why": [],
+        "State": [],
+        "People": [],
+        "Moves": [],
+        "Decisions & Risks": [],
+        "Notes": [],
+    }
+
+    # State section: units with type 'observation' or pinned=always, top few
+    # Other sections: by type/prefix mapping
+    for s, u in ranked:
+        sec = unit_section(u)
+        bucket = sections.get(sec, sections["Notes"])
+        if len(bucket) < top_k:
+            bucket.append({"unit_id": u.id, "path": str(u.path),
+                           "priority": round(s, 4),
+                           "type": u.fm.get("type", ""),
+                           "topics": u.fm.get("topics") or []})
+
+    print(json.dumps(sections, indent=2))
     return 0
 
 

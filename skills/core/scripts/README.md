@@ -39,6 +39,32 @@ python3 ~/.claude/skills/core/scripts/validate.py <project-path>
 
 Used by the validation protocol (weekly auto + on-demand health checks).
 
+### `graph-walk.py`
+
+Tier 2 edge traversal for CORE retrieval, per DC-68/retrieval.md. Given a seed unit, walks typed edges up to a hop cap applying the R·S proxy from `priority.py:score_proxy_RS()` for branch pruning. Deterministic alternative to LLM-by-hand edge traversal.
+
+```bash
+python3 ~/.claude/skills/core/scripts/graph-walk.py <project>/_memories/dc-67-no-mcp.md \
+    --hops 2 --intent memory-architecture --format text
+```
+
+Used by the Tier 2 retrieval protocol: call this to get edge-reachable candidates, then Read the top results.
+
+### `check-units.py`
+
+Unit store integrity validator. Two modes (combined by default):
+
+- **schema**: required frontmatter fields, valid status/type enums, edge target existence
+- **integrity**: orphan detection, dangling edges, stale flagging (R·S < 0.05), INDEX-decisions drift, cold-store eligibility
+
+```bash
+python3 ~/.claude/skills/core/scripts/check-units.py <project>
+python3 ~/.claude/skills/core/scripts/check-units.py <project> --mode schema
+python3 ~/.claude/skills/core/scripts/check-units.py <project> --json
+```
+
+Exit codes: 0 = all pass, 1 = warnings, 2 = failures. Run at `/finalize` to surface hygiene work. Run `--mode schema` after writing a new unit to catch structural errors immediately.
+
 ## What lives elsewhere
 
 Some prescriptive code belongs at the harness level rather than the skill level — the harness fires it, not CORE.
