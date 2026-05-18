@@ -1,0 +1,7 @@
+{
+  "name": "core",
+  "source": {
+    "source": "github",
+    "repo": "dbatesai/core-plugin"
+  }
+}
