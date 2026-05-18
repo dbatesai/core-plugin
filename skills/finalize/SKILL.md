@@ -6,7 +6,7 @@ user-invocable: true
 
 # `/finalize`
 
-You're closing the session. In v2 this is a **reconciliation point**, not the primary state-capture event. Project state has been updating continuously through the session — observations get written as the user talks, units get graduated as patterns emerge, PROJECT.md sections re-render when something meaningful changes. Finalize verifies that everything's coherent, writes the human-readable handoff, runs memory hygiene, and ensures the next bootstrap finds a clean state.
+You're closing the session. This is a **reconciliation point**, not the primary state-capture event. Project state has been updating continuously through the session — observations get written as the user talks, units get graduated as patterns emerge, PROJECT.md sections re-render when something meaningful changes. Finalize verifies that everything's coherent, writes the human-readable handoff, runs memory hygiene, and ensures the next bootstrap finds a clean state.
 
 Execute every step in order. Don't skip.
 
@@ -52,7 +52,7 @@ Invoke `protocols/hygiene.md` for a comprehensive pass. This is the canonical pl
 - Retire confirmations — any unit whose claim disappeared from PROJECT.md this session gets `status: retired`.
 - Cold-store proposals — surface any archived-and-retired-and-365d+ units.
 - Index regeneration — see Step 2.
-- File-cap monitoring — check PROJECT.md, IMPROVEMENT_LOG.md, and any other synthesis file against the Read tool threshold; if any are over, follow the graduation pattern (the DECISIONS.md graduation pattern from v2 design works for any over-cap synthesis).
+- File-cap monitoring — check PROJECT.md and any other synthesis file against the Read tool threshold; if any are over, follow the graduation pattern documented in `protocols/hygiene.md`.
 - Continuous self-evaluation — review session-level signals (under-recall, over-recall, voice drift, smuggled architecture); write the retrospective at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`.
 
 The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in `references/hygiene-strategies.md` and run as part of this comprehensive pass.
@@ -98,19 +98,7 @@ Handoffs are write-only from your perspective — facts worth keeping are alread
 
 ---
 
-## Step 5 — Update IMPROVEMENT_LOG if skill changed
-
-If any files under `~/.claude/skills/core/` were edited this session:
-
-1. Append an entry to `<project>/IMPROVEMENT_LOG.md` (project-root, dev-meta — not shipped with skill).
-2. Be specific about what changed and why. Future sessions should be able to reconstruct the reasoning from the entry.
-3. If the log exceeds the size threshold per `protocols/hygiene.md`, rotation fires via Step 3's comprehensive pass.
-
-If no skill files changed: `<date> — No skill changes this session.`
-
----
-
-## Step 6 — Update auto-memory
+## Step 5 — Update auto-memory
 
 Auto-memory is scratch cache; the bootstrap rebuilds it from current synthesis. Still, capture session-level insights that should accelerate the next session's load:
 
@@ -124,28 +112,10 @@ Apply the memory hygiene rules: update stale memories rather than adding duplica
 
 ---
 
-## Step 7 — Sync skill changes if any landed
+## Step 6 — Closing declaration
 
-If files under `~/.claude/skills/core/` were modified this session, mirror them into the project repo's `core-skill/` folder so they're version-controlled:
+After all steps complete, declare in plain voice. Concrete shape:
 
-```bash
-rsync -av ~/.claude/skills/core/ <project>/core-skill/
-```
-
-The mirror uses `-av` without `--delete` so files that exist only in the dev mirror (e.g., public-only README variants) aren't clobbered. If you need a strict mirror — usually only at major version cuts — use `--delete` explicitly and confirm with the user first (Mode B).
-
-This is automatic in v2 — no manual publish required for the dev mirror. Public publish happens separately via `<project>/.claude/scripts/publish-skill.sh` when the user requests a release push (push is always Mode B — explicit yes required).
-
----
-
-## Step 8 — Closing declaration
-
-After all steps complete, declare in plain voice:
-
-> *"Session closed. Handoff at `_handoffs/handoff-2026-05-17.md`. PROJECT.md rendered from current units. Hygiene pass complete — N archives, M retires, no cold-stores this pass. No skill changes this session."*
-
-Or with skill changes:
-
-> *"Session closed. Handoff at `_handoffs/handoff-2026-05-17.md`. PROJECT.md rendered. Hygiene pass complete. Skill changes mirrored to core-skill/ — ready for explicit push when you want to publish."*
+> *"Session closed. Handoff at `_handoffs/handoff-<date>.md`. PROJECT.md rendered from current units. Hygiene pass complete — N archives, M retires, no cold-stores this pass."*
 
 If anything couldn't be completed, name it explicitly. Don't silently skip a step. Surface the blocker plainly and recommend a next move.
