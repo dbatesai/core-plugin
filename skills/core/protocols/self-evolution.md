@@ -28,7 +28,7 @@ The structural adjustment options, in order of cost:
 
 1. **Add an edge.** A single missing `cites` or `references-topic` often fixes retrieval. Free.
 2. **Restructure a unit.** Split into two, merge two into one, change the prefix. Cheap but breaks existing cites — handle inverse-edge updates.
-3. **Re-tune priority weights** in `_memories/_lib/priority.py`. Cheap; document the change in the hygiene retrospective.
+3. **Re-tune priority weights** in the plugin's `scripts/priority.py` (DC-77 — weights live in the plugin and propagate via plugin update, not per-project copies). Document the change in the hygiene retrospective.
 4. **Evolve query shape** — change how you phrase retrieval prompts internally.
 5. **Escalate infrastructure** — vector store, graph DB, or other. Earned only after repeated trip-wire firings per DC-67. Two consecutive Explore-miss cycles pointing at the same gap means it's time for a new DC.
 
@@ -87,14 +87,7 @@ After every substantial multi-agent run, write a structured effectiveness report
 | Wish I had | Concrete experiments for the next run |
 | Improvement tracking | Status of prior "Wish I Had" items tested this run: tested / improved outcome / no difference / made things worse |
 
-**Named failure modes — assess each explicitly:**
-
-- **Premature convergence:** Agreement arrived before real adversarial pressure or independent reasoning.
-- **Collapsing consensus:** Positions abandoned due to social pressure or narrative momentum rather than evidence.
-- **Superficial confidence:** Claims stated with more confidence than the evidence warrants.
-- **Agent agreement quality:** Was agreement earned through evidence and challenge, or just reflexive?
-
-Historical strongest signal: superficial confidence was the #1 recurring quality risk. Every report addresses it specifically.
+The four named failure modes (premature convergence, collapsing consensus, superficial confidence, agreement quality) live in `protocols/analysis.md` §8. Assess each explicitly in the effectiveness report — the same four names — and call out which one drove the strongest signal this run. Historical pattern: superficial confidence has been the recurring #1.
 
 You read recent effectiveness reports before composing a new analysis-protocol invocation. Prior reports are direct calibration input.
 

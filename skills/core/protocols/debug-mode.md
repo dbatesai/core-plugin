@@ -111,9 +111,3 @@ jq -r 'select(.category == "unit_write") | .details.mode' ~/.core/debug/<session
 
 When you're self-unblocking and you've turned debug on, narrate what you find: *"Debug shows the unit got written but Tier 1 isn't finding it — the references-topic field is missing 'memory-hygiene' even though the body mentions it. Adding the tag now."*
 
-## What debug mode does NOT do
-
-- Not a replacement for the validation regime. Validation tests known-anchor queries against expected units; debug captures live-conversation operations. Different purposes.
-- Not a performance profiler. It captures what happened, not how long it took.
-- Not always-on. Verbose enough to bloat session logs if left running. Off by default.
-- Not user-controlled at the per-event level. The user can turn it on/off; they can't selectively log retrievals but not writes. That'd be more complexity than the use case warrants.

@@ -186,7 +186,7 @@ Signals:
 
 Starting weights: `w_R=0.30, w_F=0.15, w_S=0.20, w_A=0.35`.
 
-Priority is computed at retrieval time over a candidate set, never persisted as a stored ranked list. The implementation is at `<project>/_memories/_lib/priority.py`.
+Priority is computed at retrieval time over a candidate set, never persisted as a stored ranked list. The implementation ships with the plugin at `~/.claude/skills/core/scripts/priority.py` (DC-77 — executable units stay in the plugin; project folders hold only data). Invoke as `python3 ~/.claude/skills/core/scripts/priority.py <project>/_memories/ [--intent t1,t2]` for a ranking diagnostic, or import the `score`, `score_unit_file`, and `score_proxy_RS` library functions.
 
 ---
 
@@ -400,59 +400,31 @@ Always read frontmatter to confirm a unit's status before relying on it; the fil
 
 ---
 
-## Pre-Write Declaration (PWD)
+## Make the placement choice visible
 
-Before every non-exempt Write/Edit on a project-context, DM-meta, or skill-product artifact, emit one line in user-visible chat:
+Before any non-exempt Write or Edit on a project-context, DM-meta, or skill-product artifact, narrate the placement choice in user-visible chat. The user should see where you're writing, what kind of surface it is, why that surface (especially if another reasonable surface exists), and what naming convention you're following. This isn't an approval gate — announce and proceed. The point is that placement decisions don't get smuggled past the user.
 
-```
-Writing to: <abs path> — category: <surface> — naming: <convention or "ad-hoc: <reason>"> — rationale: <≤80 char>
-```
+A natural-prose version is fine — *"Writing the swarm synthesis to `_outputs/<date>/<topic>/SYNTHESIS.md` as the per-topic output artifact; standard naming convention for swarm outputs."* The `pwd-guard.py` hook may inject a structured-format reminder when it fires; the reminder is fine as machine-generated context, but your own voice in the chat is plain prose.
 
-When ≥2 legitimate surfaces apply:
-
-```
-Writing to: <abs path> — category: <surface> — naming: <convention> — rationale: <reason> (over alternative: <alt-path>)
-```
-
-Announce and proceed immediately. No approval gate. The declaration makes the placement choice visible at the moment it's made.
+When two or more surfaces could legitimately hold the same artifact, name the alternative explicitly and the reason for the choice. When no surface fits, say so as a clear *uncovered artifact* announcement, propose where you're putting it, and file a §Moves item to extend the closure list — the user can redirect on the next turn.
 
 ### Mechanical-write exemption
 
-PWD is NOT required when the target path is fully determined without classification judgment:
+You don't have to narrate placement when the path is fully determined without a classification judgment:
 
-1. Your own session log (`<project>/_sessions/<YYYY-MM-DD>/agent-log.md`).
-2. The autonomous run log (`<project>/autonomous-run-log.md`).
-3. `inbox.md` raw external pulls (provenance-inline staging; promotion is a separate step).
-4. Auto-memory cache writes (`~/.claude/projects/<hash>/memory/`).
-5. Edits to a file the user explicitly named in the same turn (no placement choice was made).
-6. State cache writes (`~/.core/state-cache.json`).
-7. Hygiene log entries (`~/.core/hygiene-log.jsonl`).
+- Your own session log (`<project>/_sessions/<YYYY-MM-DD>/agent-log.md`).
+- The autonomous run log (`<project>/autonomous-run-log.md`).
+- `inbox.md` raw external pulls.
+- Auto-memory cache writes (`~/.claude/projects/<hash>/memory/`).
+- Edits to a file the user explicitly named in the same turn.
+- State cache writes (`~/.core/state-cache.json`).
+- Hygiene log entries (`~/.core/hygiene-log.jsonl`).
 
-The test: a write is exempt only if its path is determined by the artifact's own name, schema, or the user's explicit statement — not by classification.
+The test: exempt only when the path is determined by the artifact's own name, schema, or the user's explicit statement — not by classification you had to make.
 
-### Skill-product hard block
+### Skill-product writes
 
-If the proposed path is `~/.claude/skills/core/**` or `<project>/core-skill/**` AND the PWD doesn't include `intent: skill-edit`, the write is blocked. Add `intent: skill-edit` to proceed.
-
-### Uncovered artifact type
-
-If you can't fit the artifact into one of the surfaces above, surface the gap:
-
-```
-UNCOVERED ARTIFACT TYPE: <description>
-Proposed: <path> because <reason>.
-Filing §Moves item to extend the closure list.
-Proceeding — reply to redirect.
-```
-
-Or, if multiple surfaces could apply:
-
-```
-AMBIGUOUS PLACEMENT: <description>
-Option A: <surface> → <path> — <rationale>
-Option B: <surface> → <path> — <rationale>
-Choosing A because <reason>.
-```
+When the proposed path is `~/.claude/skills/core/**` or `<project>/core-skill/**`, declare `intent: skill-edit` so the hook recognizes the write as intentional. The `pwd-guard.py` hook fires on writes to these paths as advisory machine context; your own narration to the user follows the plain-prose pattern above.
 
 ---
 
@@ -471,7 +443,6 @@ Three rings, one read at runtime.
 │   ├── archive/                   ← archived units (flat)
 │   ├── cold-storage/<YYYY>/<MM>/  ← deep historical
 │   ├── _validation/tests/         ← validation regime test corpus
-│   ├── _lib/priority.py           ← priority function
 │   └── INDEX-<type>.md            ← auto-generated indexes
 ├── inbox.md                       ← optional: raw external pulls
 ├── _handoffs/                     ← narrative session logs (CORE-created)

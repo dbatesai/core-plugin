@@ -105,8 +105,3 @@ For multi-agent runs specifically:
 - Findings worth keeping become units (`type: review-finding`, prefix `rf-`) with edges to the implicated files or other units.
 - Effectiveness observations land in `~/.core/swarm-effectiveness/` and feed the continuous self-evaluation loop in `protocols/self-evolution.md`.
 
-## What this protocol is NOT
-
-Not the swarm-orchestration playbook. That lives in `protocols/analysis.md` — sizing, phase structure, anti-anchoring enforcement, agent composition, persuasion log, deep audit, monitor pattern. Read that when you actually invoke multi-agent. This protocol is "what every task carries forward, solo or swarm" + "when to escalate from solo to swarm."
-
-Not a list of swarm templates. The v1 `templates/swarm-review.md`, `swarm-implement.md`, `swarm-research.md` are reference patterns inside `protocols/analysis.md`'s scope, not a routing decision the user makes. You pick composition based on the task; the spec describes the criteria.

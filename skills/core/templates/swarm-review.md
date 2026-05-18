@@ -22,12 +22,7 @@ Optional. Recommended when running more than 6 agents to track inter-agent messa
 
 The DM is running this swarm in its own context — there is no second orchestrator. The DM intervenes directly via SendMessage, phase restarts, or a halt when the swarm drifts, convergence looks premature, or a risk condition triggers. These are course-correction tools for when the swarm is off-course, not levers for second-guessing normal role execution. Every intervention is logged.
 
-## Hardware Scaling
-
-| Machine | Recommended Agents |
-|---|---|
-| M5 Pro (24GB) | 4-5 agents (trim to 2 generators + 1 critic + 1 sentinel) |
-| M4 Pro (48GB) | 6-8 agents (full roster + optional monitor) |
+Hardware budget caps the upper end of the roster — see `protocols/execution.md` §Hardware Profile. Default cut for a review swarm at constrained budget: 2 generators + 1 critic + 1 sentinel.
 
 ## Phases
 

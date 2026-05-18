@@ -1,64 +1,86 @@
 # CORE Scripts
 
-The CORE skill is 100% inference-based markdown — no executable scripts ship with the skill itself. Scripts that support CORE are generated from these behavioral specifications and live outside the skill directory.
+## Why scripts ship in the plugin
 
-If you need to recreate a script, read the specification below and generate it. The spec describes purpose, inputs, outputs, and behavior — enough for any LLM to produce a correct implementation on any platform.
+The plugin form factor exists specifically so CORE can ship prescriptive code for surfaces the inference model needs to rely on — deterministic computation, indexing, retrieval math, integrity checks, parse/validate operations, graph traversal. The skill-only era forced "100% markdown specs the LLM derives from each session." The plugin era escapes that constraint deliberately. Per DC-77: **executable units stay in the plugin; project folders hold only data.**
 
----
+When a surface earns its way into "the agent relies on this being right every time," the response is to ship code here, not to write a longer markdown spec.
 
-## post-compact-inject.sh
+## What ships in this directory
 
-**Lives at:** `~/.claude/hooks/post-compact-inject.sh` (or equivalent hooks directory for your harness)
+### `priority.py`
 
-**Purpose:** After the harness compacts the conversation history, this hook re-injects the workspace's most critical operational context into the new context window. Without it, the DM loses workspace identity, active agenda, and synthesis state after compaction and must start cold.
+The DC-69 priority function. Computes `priority(unit, t) = w_R·R + w_F·F + w_S·S + w_A·A + P` over CORE memory units. Importable library (`score`, `score_unit_file`, `score_proxy_RS`) and a CLI diagnostic that ranks a project's units by priority for a given session intent.
 
-**Trigger:** `PostCompact` hook event in harness settings.
+```bash
+python3 ~/.claude/skills/core/scripts/priority.py <project>/_memories/ \
+    --intent topic1,topic2 --top 10
+```
 
-**Output format:** JSON to stdout with the shape:
+Used by Tier 2 retrieval (R·S proxy for walk pruning) and full-priority ranking at retrieval time. Weights live in this file so tuning propagates to every project via the next plugin update — not per-project drift.
+
+### `generate-decisions-index.py`
+
+Walks `<project>/_memories/dc-*.md`, parses YAML frontmatter, extracts H1 summaries, and writes `_memories/INDEX-decisions.md`. Pure logic over the units; deterministic output.
+
+```bash
+python3 ~/.claude/skills/core/scripts/generate-decisions-index.py [<project>/_memories/]
+```
+
+Invoked by the memory hygiene protocol's "regenerate canonical indexes" step.
+
+### `validate.py`
+
+The CORE retrieval validation runner. Reads `<project>/_memories/_validation/tests/test-*.yaml`, simulates Tier 1 retrieval (grep), scores precision and recall against expected/forbidden unit lists, and writes a report to `<project>/outputs/validation/<date>/REPORT.md`.
+
+```bash
+python3 ~/.claude/skills/core/scripts/validate.py <project-path>
+```
+
+Used by the validation protocol (weekly auto + on-demand health checks).
+
+## What lives elsewhere
+
+Some prescriptive code belongs at the harness level rather than the skill level — the harness fires it, not CORE.
+
+### `post-compact-inject.sh` — harness hook
+
+A `PostCompact` hook that re-injects critical workspace context into a fresh context window after compaction. Without it, the agent loses workspace identity, active agenda, and synthesis state after compaction and must start cold.
+
+**Lives at:** `~/.claude/hooks/post-compact-inject.sh` (or equivalent hooks directory for your harness).
+
+**Trigger:** `PostCompact` hook event configured in harness settings.
+
+**Output format:** JSON to stdout:
 ```json
 {
   "hookSpecificOutput": {
     "hookEventName": "PostCompact",
-    "additionalContext": "<string injected into new context window>"
+    "additionalContext": "<string injected into the new context window>"
   }
 }
 ```
 
 **Behavior:**
-1. Look for `workspace.json` in the current working directory. If not found, output a minimal JSON message saying no workspace is available and exit cleanly — do not fail.
-2. If found, read `workspace_id`, `name`, and `data_path` from the pointer.
-3. Read `PROJECT.md` at the project folder root. Extract:
-   - §State — the one or two current-status sentences.
-   - §Moves — top unchecked priorities (first ~5 items).
-   - §Decisions & Risks — count of open risks; surface any flagged as high-impact or with a stale `last-reviewed` date.
-4. Identify the most recently modified file in `<project>/_handoffs/` and include its filename only (do not read the body — handoffs are narrative, not authoritative state).
-5. Assemble an `additionalContext` string that tells the DM: workspace name and ID, current state, top Moves, open-risk count (with any stale/high-impact items called out), and which handoff is most recent.
-6. Output the JSON and exit 0.
+1. Look for `workspace.json` in the current working directory. If not found, output a minimal JSON message saying no workspace is available and exit 0 — never fail in a way that blocks the session.
+2. Read `workspace_id`, `name`, and `data_path` from the pointer.
+3. Read `PROJECT.md` at the project root. Extract: §State (one or two current-status sentences), §Moves (top ~5 unchecked priorities), §Decisions & Risks (open-risk count, flag any high-impact or stale-`last-reviewed` items).
+4. Identify the most recently modified file in `<project>/_handoffs/` and include its filename only — don't read the body. Handoffs are narrative, not authoritative state.
+5. Assemble the `additionalContext` string. Output the JSON. Exit 0.
 
-**Guard:** If workspace.json is absent, exit 0 with a graceful message. Never error in a way that blocks the session.
+If `workspace.json` is absent, exit 0 with a graceful message.
 
----
+### Swarm log visualization
 
-## generate-swarm-analysis.py
+For interactive HTML visualization of multi-agent session logs (agent reasoning chains, position changes, adversarial exchanges, convergence), use the `agent-interactions` skill. It produces a single self-contained HTML file from any directory of agent logs.
 
-**Lives at:** Project scripts directory (e.g., `~/Documents/Projects/CORE/.claude/scripts/`) — not part of the skill.
+A CORE-specific eight-field-schema visualizer (Persuasion Log / Mind Changes / Minority Views with their CORE-prescribed shapes) is not currently shipped. If the generic skill output proves insufficient for reviewing CORE swarm runs in real use, that's the prompt to author a CORE-specific renderer here.
 
-**Purpose:** Takes agent session logs from a swarm run and generates a self-contained interactive HTML visualization. Makes it easy to review agent reasoning chains, position changes, adversarial exchanges, and final convergence across all eight output fields.
+## Adding new scripts
 
-**Usage:**
-```bash
-generate-swarm-analysis.py <session-log-directory> [--output <path>] [--open]
-```
+Two questions to answer first:
 
-**Inputs:** A directory containing agent log files in markdown format (one per agent per session). Each log is structured around the eight-field output schema.
+1. **Does this surface need to be deterministic across sessions?** If the answer is "yes, the agent relies on this being right every time," it earns prescription. Examples: computing a numeric score, generating an index, parsing structured data, walking a graph, computing precision/recall.
+2. **Does this surface need to be the same across all projects using CORE?** If yes, it belongs in the plugin (one source of truth, propagates via plugin update). Per-project copies create drift.
 
-**Output:** A single `.html` file, fully self-contained — no external dependencies, opens in any browser.
-
-**Visualization requirements:**
-- Display each agent's contributions by round — follow one agent across rounds or compare all agents within a round.
-- Highlight Persuasion Log and Mind Changes entries prominently — these are CORE's primary differentiators.
-- Show Minority Views distinctly — never buried or collapsed by default.
-- Make Confidence scores and round-to-round changes visible.
-- Tone should reflect the adversarial nature: disagreement is signal, not noise.
-
-**Guard:** If the input directory contains no recognizable agent logs, output a clear error. Do not generate an empty or misleading HTML file.
+If both are yes, write the script here. If "deterministic across sessions" is no, it's probably inference-territory and a markdown spec is the better answer.

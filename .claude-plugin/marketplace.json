@@ -5,13 +5,13 @@
     "email": "david_bates@mac.com"
   },
   "metadata": {
-    "description": "CORE — project intelligence in chat with a critic baked in.",
+    "description": "CORE — project intelligence in chat with a critic baked in. The `/core` agent plus four companion utilities.",
     "version": "2.0.0"
   },
   "plugins": [
     {
       "name": "core",
-      "description": "A project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence.",
+      "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Ships with four companion utilities — `/orient`, `/finalize`, `/vibecheck`, `/file-reorganize` — that CORE invokes internally and that you can also call directly.",
       "version": "2.0.0",
       "source": "./",
       "category": "productivity",

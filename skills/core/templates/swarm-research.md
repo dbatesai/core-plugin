@@ -14,12 +14,7 @@ Multi-source investigation, comparison, and fact-finding. Research swarms produc
 
 NOT needed. Research swarms are read-only -- no destructive operations.
 
-## Hardware Scaling
-
-| Machine | Recommended Agents |
-|---|---|
-| M5 Pro (24GB) | 3 agents (2 researchers + 1 synthesizer, DM plays fact-checker) |
-| M4 Pro (48GB) | 5 agents (full roster) |
+Hardware budget caps the upper end of the roster — see `protocols/execution.md` §Hardware Profile. Default cut for a research swarm at constrained budget: 2 researchers + 1 synthesizer, with the DM playing fact-checker.
 
 ## DM Intervention
 

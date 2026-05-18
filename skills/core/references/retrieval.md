@@ -44,7 +44,7 @@ Start from an anchor unit (typically discovered via Tier 1). Read its frontmatte
 When following an edge to a candidate unit:
 
 1. Read the candidate's frontmatter
-2. Compute the **R·S proxy** — recency times source-type weight — using `_memories/_lib/priority.py:score_proxy_RS(unit)`
+2. Compute the **R·S proxy** — recency times source-type weight — using `~/.claude/skills/core/scripts/priority.py:score_proxy_RS(unit)` (DC-77 — priority logic ships with the plugin, not per-project)
 3. If R·S < **0.3**, prune this branch — do NOT continue walking from this candidate
 4. If R·S ≥ 0.3, the candidate enters the result set; recursion continues from this candidate
 

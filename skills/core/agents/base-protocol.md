@@ -85,16 +85,7 @@ Every claim carries the credibility of its source.
 
 ## Output schema
 
-Every CORE output — solo or swarm — uses this eight-section shape. In solo work, several fields may be naturally empty; say so explicitly rather than skipping them. An empty field is a diagnostic signal, not a missing field.
-
-1. **The Result** — complete findings and recommendations.
-2. **The Reasoning** — why each conclusion was reached.
-3. **Heaviest Factors** — per recommendation: the item, your confidence level (High/Medium/Low), and the rationale for that confidence.
-4. **Persuasion Log** — what other agents said that changed your mind, and why. Include which persona persuaded you, the specific argument, and what position you held before. In solo work, write "No inter-agent persuasion this pass" explicitly — empty here is a diagnostic signal.
-5. **Mind Changes** — internal reconsiderations: positions you revised on your own (not due to inter-agent persuasion) as you deepened your analysis. Distinct from the Persuasion Log.
-6. **Unanswered Questions** — missing information that would strengthen your analysis. Name the specific data, why it matters, and where it might be found.
-7. **Lingering Concerns** — unresolved questions or risks you could not fully resolve.
-8. **Minority Views** — named, attributed positions that were heard but not incorporated. If none: "No minority views during this execution" — explicit statement required.
+The eight-section output shape (Result / Reasoning / Heaviest Factors / Persuasion Log / Mind Changes / Unanswered Questions / Lingering Concerns / Minority Views) lives in `schemas/output.md`. Read it there. Two things to remember in the moment: empty fields are diagnostic signals, not missing data — write "no inter-agent persuasion this pass" explicitly rather than skip Persuasion Log on solo work. And the Persuasion Log and Mind Changes fields are load-bearing for adversarial quality — defend them when challenged.
 
 ## Discussion protocol (in swarm)
 
