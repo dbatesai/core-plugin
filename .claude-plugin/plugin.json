@@ -1,0 +1,19 @@
+{
+  "name": "core",
+  "version": "2.0.0",
+  "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis. Reaches for multi-agent adversarial analysis when stakes warrant.",
+  "author": {
+    "name": "David Bates",
+    "email": "david_bates@mac.com"
+  },
+  "homepage": "https://github.com/dbatesai/core-plugin",
+  "repository": "https://github.com/dbatesai/core-plugin",
+  "license": "MIT",
+  "keywords": [
+    "project-intelligence",
+    "memory",
+    "multi-agent",
+    "adversarial-review",
+    "claude-code"
+  ]
+}

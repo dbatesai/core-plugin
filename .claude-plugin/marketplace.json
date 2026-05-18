@@ -1,0 +1,34 @@
+{
+  "name": "core",
+  "owner": {
+    "name": "David Bates",
+    "email": "david_bates@mac.com"
+  },
+  "metadata": {
+    "description": "CORE — project intelligence in chat with a critic baked in.",
+    "version": "2.0.0"
+  },
+  "plugins": [
+    {
+      "name": "core",
+      "description": "A project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence.",
+      "version": "2.0.0",
+      "source": "./",
+      "category": "productivity",
+      "author": {
+        "name": "David Bates",
+        "email": "david_bates@mac.com"
+      },
+      "homepage": "https://github.com/dbatesai/core-plugin",
+      "repository": "https://github.com/dbatesai/core-plugin",
+      "license": "MIT",
+      "keywords": [
+        "project-intelligence",
+        "memory",
+        "multi-agent",
+        "adversarial-review",
+        "claude-code"
+      ]
+    }
+  ]
+}
