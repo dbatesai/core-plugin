@@ -36,7 +36,7 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 2. **Update touched units.** For every unit you wrote to during the session, verify frontmatter — `updated:` timestamp, `last_accessed:`, `access_count:`, edges. Make sure inverse edges are set on `supersedes` / `depends-on` / `conflicts-with`.
 
-3. **Regenerate indexes.** Run the index generators for any unit types that changed this session — typically `_memories/INDEX-decisions.md` via `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.py` (ships with the plugin per DC-77).
+3. **Regenerate indexes.** Run the index generators for any unit types that changed this session — typically `_memories/INDEX-decisions.md` via `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs` (ships with the plugin per DC-77).
 
 4. **Render PROJECT.md from units.** Walk canonical units, compose the six sections (What & Why / State / People / Moves / Decisions & Risks / Notes), and show the user the draft.
 

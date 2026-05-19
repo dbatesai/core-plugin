@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/pwd-guard.py\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pwd-guard.mjs\"",
             "async": false
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/voice-reminder.sh\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/voice-reminder.mjs\"",
             "async": true
           }
         ]

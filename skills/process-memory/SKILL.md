@@ -43,7 +43,7 @@ For each file in `_memories/observations/<YYYY-MM>/` not yet reviewed this sessi
 Compare `_memories/dc-*.md` count against `_memories/INDEX-decisions.md` entries. If counts or ids don't match, regenerate:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.py" "<project>/_memories"
+node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs" "<project>/_memories"
 ```
 
 Same for `INDEX-risks.md` against `_memories/risk-*.md`.

@@ -46,10 +46,10 @@ Fields:
 
 ## Runner
 
-The runner is at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.py`. Invocation:
+The runner is at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.mjs`. Invocation:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.py <project-path>
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.mjs <project-path>
 ```
 
 The runner walks `<project-path>/_memories/_validation/tests/test-*.yaml`, runs each test, scores precision and recall, writes a report to `<project-path>/_outputs/validation/<YYYY-MM-DD>/REPORT.md`, and exits with status 0 on pass / 1 on any FAIL.

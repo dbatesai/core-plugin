@@ -29,10 +29,10 @@ At session start, `<project>/PROJECT.md` and `~/.core/dm-profile.md` are read. F
 
 ### Tier 2 — Typed-edge walk
 
-**Preferred:** run `graph-walk.py` from the plugin:
+**Preferred:** run `graph-walk.mjs` from the plugin:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.py <seed-unit-path> \
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.mjs <seed-unit-path> \
     --intent topic1,topic2 --format json
 ```
 
@@ -53,7 +53,7 @@ This returns a scored, hop-ordered candidate list. Read the top results. Fall ba
 When following an edge to a candidate unit:
 
 1. Read the candidate's frontmatter
-2. Compute the **R·S proxy** — recency times source-type weight — using `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.py:score_proxy_RS(unit)` (DC-77 — priority logic ships with the plugin, not per-project)
+2. Compute the **R·S proxy** — recency times source-type weight — using `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs:scoreProxyRS(unit)` (DC-77 — priority logic ships with the plugin, not per-project)
 3. If R·S < **0.3**, prune this branch — do NOT continue walking from this candidate
 4. If R·S ≥ 0.3, the candidate enters the result set; recursion continues from this candidate
 

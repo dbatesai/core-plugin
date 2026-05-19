@@ -6,51 +6,53 @@ The plugin form factor exists specifically so CORE can ship prescriptive code fo
 
 When a surface earns its way into "the agent relies on this being right every time," the response is to ship code here, not to write a longer markdown spec.
 
+Per DC-80, all scripts ship as `.mjs` (Node.js ESM). Node is the only runtime Claude Code guarantees on every supported platform (Mac, Windows, Linux). Invoke via `node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs"`.
+
 ## What ships in this directory
 
-### `priority.py`
+### `priority.mjs`
 
-The DC-69 priority function. Computes `priority(unit, t) = w_R·R + w_F·F + w_S·S + w_A·A + P` over CORE memory units. Importable library (`score`, `score_unit_file`, `score_proxy_RS`) and a CLI diagnostic that ranks a project's units by priority for a given session intent.
+The DC-69 priority function. Computes `priority(unit, t) = w_R·R + w_F·F + w_S·S + w_A·A + P` over CORE memory units. Importable library (`score`, `scoreUnitFile`, `scoreProxyRS`) and a CLI diagnostic that ranks a project's units by priority for a given session intent.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.py <project>/_memories/ \
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories/ \
     --intent topic1,topic2 --top 10
 ```
 
 Used by Tier 2 retrieval (R·S proxy for walk pruning) and full-priority ranking at retrieval time. Weights live in this file so tuning propagates to every project via the next plugin update — not per-project drift.
 
-### `generate-decisions-index.py`
+### `generate-decisions-index.mjs`
 
 Walks `<project>/_memories/dc-*.md`, parses YAML frontmatter, extracts H1 summaries, and writes `_memories/INDEX-decisions.md`. Pure logic over the units; deterministic output.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.py [<project>/_memories/]
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs [<project>/_memories/]
 ```
 
 Invoked by the memory hygiene protocol's "regenerate canonical indexes" step.
 
-### `validate.py`
+### `validate.mjs`
 
 The CORE retrieval validation runner. Reads `<project>/_memories/_validation/tests/test-*.yaml`, simulates Tier 1 retrieval (grep), scores precision and recall against expected/forbidden unit lists, and writes a report to `<project>/outputs/validation/<date>/REPORT.md`.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.py <project-path>
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.mjs <project-path>
 ```
 
 Used by the validation protocol (weekly auto + on-demand health checks).
 
-### `graph-walk.py`
+### `graph-walk.mjs`
 
-Tier 2 edge traversal for CORE retrieval, per DC-68/retrieval.md. Given a seed unit, walks typed edges up to a hop cap applying the R·S proxy from `priority.py:score_proxy_RS()` for branch pruning. Deterministic alternative to LLM-by-hand edge traversal.
+Tier 2 edge traversal for CORE retrieval, per DC-68/retrieval.md. Given a seed unit, walks typed edges up to a hop cap applying the R·S proxy from `priority.mjs:scoreProxyRS()` for branch pruning. Deterministic alternative to LLM-by-hand edge traversal.
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.py <project>/_memories/dc-67-no-mcp.md \
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.mjs <project>/_memories/dc-67-no-mcp.md \
     --hops 2 --intent memory-architecture --format text
 ```
 
 Used by the Tier 2 retrieval protocol: call this to get edge-reachable candidates, then Read the top results.
 
-### `check-units.py`
+### `check-units.mjs`
 
 Unit store integrity validator. Two modes (combined by default):
 
@@ -58,9 +60,9 @@ Unit store integrity validator. Two modes (combined by default):
 - **integrity**: orphan detection, dangling edges, stale flagging (R·S < 0.05), INDEX-decisions drift, cold-store eligibility
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.py <project>
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.py <project> --mode schema
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.py <project> --json
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs <project>
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs <project> --mode schema
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs <project> --json
 ```
 
 Exit codes: 0 = all pass, 1 = warnings, 2 = failures. Run at `/finalize` to surface hygiene work. Run `--mode schema` after writing a new unit to catch structural errors immediately.
@@ -109,4 +111,4 @@ Two questions to answer first:
 1. **Does this surface need to be deterministic across sessions?** If the answer is "yes, the agent relies on this being right every time," it earns prescription. Examples: computing a numeric score, generating an index, parsing structured data, walking a graph, computing precision/recall.
 2. **Does this surface need to be the same across all projects using CORE?** If yes, it belongs in the plugin (one source of truth, propagates via plugin update). Per-project copies create drift.
 
-If both are yes, write the script here. If "deterministic across sessions" is no, it's probably inference-territory and a markdown spec is the better answer.
+If both are yes, write the script here as `.mjs`. If "deterministic across sessions" is no, it's probably inference-territory and a markdown spec is the better answer.
