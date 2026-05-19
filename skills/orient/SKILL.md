@@ -55,18 +55,6 @@ If you find an edit, surface it in the readiness receipt before the agenda.
 
 ---
 
-## Step 3.5 — Loop catch-up
-
-The 30-minute `/process-memory` loop runs only during active sessions. If the last session ended hours ago, the loop has been silent — observations have piled up, indexes may have drifted, queue items haven't been reviewed.
-
-Read `<project>/_memories/_loop-state.json`. If `now - last_run > 60 minutes`, invoke `/process-memory` to dispatch one catch-up pass before composing readiness. It runs in the background; results land while you finish the rest of the orient steps.
-
-Read `<project>/_memories/_loop-queue.md` if it exists. Count entries — these are items the loop queued for user review at `/finalize`. Note the count for the readiness receipt. If the count is high (say, >5), flag it as something to address sooner rather than later.
-
-If `_loop-state.json` doesn't exist, this workspace has never run the loop. Skip catch-up here — bootstrap registers the loop fresh once readiness lands.
-
----
-
 ## Step 4 — Apply elapsed-time signals
 
 Per `protocols/startup.md` §Phase 5:

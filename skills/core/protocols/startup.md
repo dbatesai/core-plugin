@@ -149,13 +149,13 @@ Starting calibrations — tune based on observed behavior:
 
 Apply these before composing readiness. If any of them escalate, lead with the escalation.
 
-## Loop catch-up
+## Memory processing nudge
 
-Read `<project>/_memories/_loop-state.json` if it exists. If `now - last_run > 60 minutes`, the memory-processing loop hasn't run during the gap between sessions — there may be observations to graduate, indexes to regen, queue items to surface. Invoke `/process-memory` to dispatch one catch-up pass. It runs in the background; results land while you compose readiness. Narrate one line: *"Loop has been idle since [time]; dispatching a catch-up pass before readiness."*
+Read `<project>/_memories/_pm-state.json` if it exists. If `now - last_run > 24 hours` (or the file doesn't exist), include a one-line prompt in the readiness summary:
 
-Then read `<project>/_memories/_loop-queue.md` if it exists. Count entries — items needing user review at `/finalize`. Surface the count in the readiness summary so the user knows what's waiting.
+> *"Memory processing hasn't run in [X hours/days] — worth running `/process-memory` when you get a moment."*
 
-If `_loop-state.json` doesn't exist at all, this workspace has never run the loop. Skip the catch-up — the bootstrap will register the loop fresh in the next step.
+Don't block on it. It's a nudge, not a gate.
 
 ## Compose the readiness summary
 
@@ -177,20 +177,6 @@ Target voice:
 What to skip: handoff content (not part of the bootstrap read); auto-memory cited as authoritative (it's scratch cache); session log summaries (per-session artifacts, not state); a full section-by-section recital (the user sees PROJECT.md when they want the full view).
 
 After readiness lands, wait for the user's next move. The agenda topics get resolved or explicitly deferred before implementation work begins.
-
-## Register the memory-processing loop
-
-Right after readiness composes — before the first user turn — register the 30-minute memory-processing loop for this session. This is the routine background curation that keeps the unit store, indexes, and rolling handoff current during the session, so `/finalize` doesn't have to do all the work at close.
-
-First time the loop registers in a given workspace (no `_loop-state.json` exists yet), narrate plainly:
-
-> *"Memory-processing loop starting now — runs every 30 minutes in the background. You won't be interrupted. Decisions that need your call land in `_loop-queue.md` for review at `/finalize`."*
-
-Returning workspaces (loop has run before): one quieter line is enough.
-
-> *"Memory-processing loop registered for this session."*
-
-Then invoke `/loop 30m /process-memory` to set up the recurrence. The loop dies with the session; the next session re-registers cleanly. No persistent state to clean up between sessions.
 
 ## Long sessions — write the early handoff stub
 

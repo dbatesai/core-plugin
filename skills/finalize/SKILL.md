@@ -6,22 +6,9 @@ user-invocable: true
 
 # `/finalize`
 
-You're closing the session. This is a **reconciliation point**, not the primary state-capture event. Project state has been updating continuously through the session — observations get written as the user talks, units get graduated as patterns emerge, PROJECT.md sections re-render when something meaningful changes, and the 30-minute `/process-memory` loop has been running routine hygiene in the background. Finalize verifies that everything's coherent, picks up what the loop queued for user review, writes the human-readable handoff, and ensures the next bootstrap finds a clean state.
+You're closing the session. Project state has been updating continuously — observations get written as the user talks, units get graduated as patterns emerge, PROJECT.md sections re-render when something meaningful changes. Finalize is where you verify everything's coherent, run the hygiene pass, write the human-readable handoff, and leave a clean state for the next bootstrap.
 
 Execute every step in order. Don't skip.
-
----
-
-## Step 0 — Read what the loop already did
-
-Before doing any reconciliation work, read what the memory-processing loop has handled during the session:
-
-1. Read `<project>/_memories/_loop-state.json` — gives `last_run`, `passes_this_session`, and `last_pass_outputs` (what got graduated, regenerated, queued).
-2. Read `<project>/_memories/_loop-queue.md` — these are the items the loop deferred to your judgment. Surface them now so the rest of the session-close pass works against a clean queue.
-
-If the loop ran during the session, expect: most observations already graduated, indexes already regenerated, file-cap warnings already surfaced, the rolling handoff already accumulating loop-pass blocks. You're picking up the user-gated decisions and the deep-graduation borderline cases.
-
-For each entry in `_loop-queue.md`, present it to the user with a one-line context and ask for accept / reject / defer. Apply in batch.
 
 ---
 
@@ -57,19 +44,18 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 ---
 
-## Step 3 — Memory hygiene reconciliation pass
+## Step 3 — Memory hygiene pass
 
-The 30-minute loop has been running routine hygiene continuously — recent-observation graduation, INDEX regen, file-cap monitoring, handoff diff-append. `/finalize` is now the reconciliation point, not the canonical comprehensive pass:
+Walk the unit store and run the hygiene operations from `protocols/hygiene.md`:
 
-- **Decide on `_loop-queue.md` items** — addressed in Step 0. If any items still need attention here, finish them.
-- **Archive proposals** — present any low-priority candidates the loop surfaced (R·S < 0.05, no recent reference) for `y / N / per-unit` approval. User-authored units always gate here.
-- **Retire confirmations** — any unit whose claim disappeared from PROJECT.md this session gets `status: retired`. (Loop already retires on PROJECT.md edits during the session; this catches anything that slipped.)
+- **Archive proposals** — surface low-priority candidates (R·S < 0.05, no recent reference) for `y / N / per-unit` approval. User-authored units always gate here.
+- **Retire confirmations** — any unit whose claim disappeared from PROJECT.md this session gets `status: retired`.
 - **Cold-store proposals** — surface any archived-and-retired-and-365d+ units.
-- **Index regeneration** — handled by the loop continuously; verify state in Step 2 and only re-run if you see drift.
-- **File-cap reconciliation** — loop has been surfacing warnings to `_loop-queue.md`. If any synthesis file is over the Read-tool threshold, follow the graduation pattern in `protocols/hygiene.md`.
+- **Index regeneration** — re-run if you see drift from Step 2; also run for any unit types changed this session.
+- **File-cap check** — if any synthesis file is over the Read-tool threshold, follow the graduation pattern in `protocols/hygiene.md`.
 - **Continuous self-evaluation** — review session-level signals (under-recall, over-recall, voice drift, smuggled architecture); write the retrospective at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`.
 
-The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in `references/hygiene-strategies.md`. Most fire as part of normal loop work; pick up anything the loop didn't reach.
+The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in `references/hygiene-strategies.md`.
 
 ---
 
