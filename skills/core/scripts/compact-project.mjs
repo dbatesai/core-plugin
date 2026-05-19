@@ -19,10 +19,10 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DECISIONS_HEADER = '**Decisions (dated, append-only):**';
-const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
+export const DECISIONS_HEADER = '**Decisions (dated, append-only):**';
+export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
 
-function parseFrontmatter(text) {
+export function parseFrontmatter(text) {
   if (!text.startsWith('---\n')) return [{}, text];
   const end = text.indexOf('\n---', 4);
   if (end === -1) return [{}, text];
@@ -41,7 +41,7 @@ function parseFrontmatter(text) {
   return [fm, body];
 }
 
-function loadUnits(memoriesDir) {
+export function loadUnits(memoriesDir) {
   const units = new Map();
   for (const fname of readdirSync(memoriesDir)) {
     if (!fname.startsWith('dc-') || !fname.endsWith('.md')) continue;
@@ -65,7 +65,7 @@ function loadUnits(memoriesDir) {
   return units;
 }
 
-function extractSummary(entry) {
+export function extractSummary(entry) {
   const bodyMatch = entry.match(/\*\*DC-\d+:\s*([^*]+?)\*\*\s*(.*)/s);
   if (!bodyMatch) return '';
   const afterTitle = bodyMatch[2];
@@ -74,7 +74,7 @@ function extractSummary(entry) {
   return afterTitle.slice(0, 140).trim();
 }
 
-function isAlreadyStub(entry) {
+export function isAlreadyStub(entry) {
   if (entry.includes('\n')) {
     const nonEmpty = entry.split('\n').filter(l => l.trim()).length;
     if (nonEmpty > 1) return false;
@@ -84,7 +84,7 @@ function isAlreadyStub(entry) {
   return true;
 }
 
-function buildStub(dc, entryDateBacktick, units, fallbackTitle) {
+export function buildStub(dc, entryDateBacktick, units, fallbackTitle) {
   const unit = units.get(dc);
   if (!unit) return null;
   // Prefer the unit's H1 title; fall back to the title extracted from the
@@ -94,7 +94,7 @@ function buildStub(dc, entryDateBacktick, units, fallbackTitle) {
   return `- ${entryDateBacktick} — **DC-${dc}: ${title}** → \`_memories/${unit.filename}\`${status}`;
 }
 
-function extractFallbackTitle(entryBlock, dc) {
+export function extractFallbackTitle(entryBlock, dc) {
   // Match the bold prefix `**DC-XX: <title>**` or `**DC-XX: <title>.**` in
   // the existing entry text. Title runs from after the colon to the first
   // closing `**` marker.
@@ -104,7 +104,7 @@ function extractFallbackTitle(entryBlock, dc) {
   return m[1].trim().replace(/\.$/, '');
 }
 
-function compactDecisions(text, units) {
+export function compactDecisions(text, units) {
   const decIdx = text.indexOf(DECISIONS_HEADER);
   if (decIdx === -1) return { text, stats: { compacted: 0, skipped: 0, missing: 0 } };
 

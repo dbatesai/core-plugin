@@ -23,25 +23,25 @@ import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.m
 
 // ---------- Schema constants ----------
 
-const REQUIRED_FIELDS = new Set(['id', 'type', 'status', 'created', 'updated', 'topics']);
-const VALID_STATUSES = new Set(['active', 'retired', 'archived']);
-const VALID_TYPES = new Set([
+export const REQUIRED_FIELDS = new Set(['id', 'type', 'status', 'created', 'updated', 'topics']);
+export const VALID_STATUSES = new Set(['active', 'retired', 'archived']);
+export const VALID_TYPES = new Set([
   'decision', 'risk', 'person', 'deliverable', 'principle',
   'explainer', 'review-finding', 'observation', 'topic', 'reference',
   'feedback', 'memory',
 ]);
-const VALID_EDGE_TYPES = new Set([
+export const VALID_EDGE_TYPES = new Set([
   'cites', 'supersedes', 'depends-on', 'conflicts-with',
   'references-person', 'references-topic',
   'depended-on-by', 'supersedes-claim',
 ]);
 
-const ARCHIVE_RS_THRESHOLD = 0.05;
-const STALE_DAYS = 90;
+export const ARCHIVE_RS_THRESHOLD = 0.05;
+export const STALE_DAYS = 90;
 
 // ---------- Unit iteration ----------
 
-function iterActiveUnits(memoriesDir) {
+export function iterActiveUnits(memoriesDir) {
   const skipDirs = new Set(['archive', 'cold-storage', '_validation']);
   const units = [];
   let entries;
@@ -63,7 +63,7 @@ function iterActiveUnits(memoriesDir) {
   return units;
 }
 
-function iterAllUnitFiles(memoriesDir) {
+export function iterAllUnitFiles(memoriesDir) {
   const paths = [];
   function walk(dir) {
     let entries;
@@ -85,7 +85,7 @@ function iterAllUnitFiles(memoriesDir) {
 
 // ---------- Schema checks ----------
 
-function checkSchema(units, memoriesDir, report) {
+export function checkSchema(units, memoriesDir, report) {
   const allFiles = new Set(iterAllUnitFiles(memoriesDir).map(p => basename(p, '.md')));
 
   for (const u of units) {
@@ -138,7 +138,7 @@ function checkSchema(units, memoriesDir, report) {
 
 // ---------- Integrity checks ----------
 
-function checkIntegrity(units, memoriesDir, today, report) {
+export function checkIntegrity(units, memoriesDir, today, report) {
   const backlinks = {};
   for (const u of units) backlinks[basename(u.path, '.md')] = new Set();
   for (const u of units) {

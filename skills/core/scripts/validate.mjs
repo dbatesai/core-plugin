@@ -15,7 +15,7 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-function parseFrontmatter(content) {
+export function parseFrontmatter(content) {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return {};
   const fmText = match[1];
@@ -55,7 +55,7 @@ function parseFrontmatter(content) {
   return result;
 }
 
-function loadTests(projectPath) {
+export function loadTests(projectPath) {
   const testsDir = join(projectPath, '_memories/_validation/tests');
   const tests = [];
   let entries;
@@ -69,7 +69,7 @@ function loadTests(projectPath) {
   return tests;
 }
 
-const STOPWORDS = new Set([
+export const STOPWORDS = new Set([
   'the','and','for','are','was','but','not','you','all','any',
   'can','had','has','his','her','how','its','may','now','one',
   'our','out','own','see','she','two','use','via','way','who',
@@ -84,7 +84,7 @@ const STOPWORDS = new Set([
   'dont','isnt','wont','cant','doesnt','wouldnt','couldnt',
 ]);
 
-function simulateRetrievalTier1(query, projectPath, topK = 3) {
+export function simulateRetrievalTier1(query, projectPath, topK = 3) {
   const unitsDir = join(projectPath, '_memories');
   const rawTerms = query.split(/\s+/).map(t => t.toLowerCase().replace(/[.,?!()\[\]"']/g, ''));
   const terms = rawTerms.filter(t => t.length >= 3 && !STOPWORDS.has(t));
@@ -119,7 +119,7 @@ function simulateRetrievalTier1(query, projectPath, topK = 3) {
   return scored.slice(0, topK).map(x => x[1]);
 }
 
-function scorePrecisionRecall(retrieved, expected, forbidden) {
+export function scorePrecisionRecall(retrieved, expected, forbidden) {
   const retSet = new Set(retrieved);
   const expSet = new Set(expected || []);
   const forbSet = new Set(forbidden || []);
