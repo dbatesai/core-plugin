@@ -54,6 +54,7 @@ Walk the unit store and run the hygiene operations from `protocols/hygiene.md`:
 - **Index regeneration** — re-run if you see drift from Step 2; also run for any unit types changed this session.
 - **File-cap check** — if any synthesis file is over the Read-tool threshold, follow the graduation pattern in `protocols/hygiene.md`.
 - **Continuous self-evaluation** — review session-level signals (under-recall, over-recall, voice drift, smuggled architecture); write the retrospective at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`.
+- **Retrieval-quality surfacing** — run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project>` and narrate top anomalies in plain voice. Same shape `/process-memory` uses. If the project has no `_sessions/*/retrieval-log.jsonl` yet, say so in one sentence; don't pretend the corpus exists.
 
 The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in `references/hygiene-strategies.md`.
 
@@ -109,6 +110,17 @@ Auto-memory is scratch cache; the bootstrap rebuilds it from current synthesis. 
 Update the `MEMORY.md` index in the same operation. Don't write project-specific facts as authoritative here — those live in PROJECT.md or `_memories/`. Auto-memory carries pointers and summaries.
 
 Apply the memory hygiene rules: update stale memories rather than adding duplicates; remove memories that were proven wrong; keep `MEMORY.md` current.
+
+### Refresh the auto-memory index — Haiku subagent
+
+After capturing session-specific memories, refresh `MEMORY.md` from the top-priority canonical units. This is a mechanical formatting operation — perfect Haiku territory.
+
+Dispatch a Haiku subagent with:
+- The output of `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories --top 30` (top 30 priority-ranked units).
+- The current `~/.claude/projects/<mapped-cwd>/memory/MEMORY.md` contents (so user-added entries get preserved).
+- Instructions: format each top unit as a one-line index entry — `- [Title](file.md) — one-line hook` — preserve user-added entries that are still relevant, drop entries pointing to retired units, keep the file under 200 lines.
+
+The subagent runs background — the user doesn't wait on it. Narrate the dispatch ("Haiku is refreshing MEMORY.md from top units in the background.") but don't block the closing declaration on it.
 
 ---
 
