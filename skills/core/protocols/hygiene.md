@@ -67,13 +67,14 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 
 | Trigger | What runs |
 |---|---|
-| `/finalize` | Canonical comprehensive pass — every verb evaluated, graduation candidates surfaced, indexes regenerated, archive proposals presented |
-| Meaningful change in-session | Continuous self-evaluation samples retrieval quality; verbs fire only when criteria are met, not on every write |
-| On-demand user request | "Run hygiene now," "graduate this," "archive the old decisions about X" |
+| `/process-memory` loop (every 30 min during a session) | Routine pass — recent-observation graduation, INDEX drift regen, file-cap check, handoff diff-append, queue user-gated items. Never asks the user anything. Runs as a background `Agent` so the session isn't blocked. See `skills/process-memory/SKILL.md`. |
+| `/finalize` | Reconciliation pass — catches what the loop missed, runs deep graduation on borderline cases the loop queued, surfaces user-gated archive proposals, retrospective, push gate. Much faster when the loop has kept up. |
+| `/orient` catch-up | If `_loop-state.json` shows the loop hasn't run in >60 min (off-hours gap), bootstrap dispatches one catch-up pass before composing readiness. Also surfaces `_loop-queue.md` count. |
+| On-demand user request | "Run hygiene now," "graduate this," "archive the old decisions about X" — user can also invoke `/process-memory` manually for a forced pass. |
 | Meaningful PROJECT.md change | User removes fact → retire-trigger fires for the affected units |
 | Edit-detection hash mismatch | Reconciliation pass runs as a follow-on after edit-detection captures the user's change |
 
-The `/finalize` pass is the heaviest. Mid-session firings are lightweight — they don't move every unit or regenerate every index; they fire only what's actually triggered.
+The `/process-memory` loop is the workhorse — it does the routine, mechanical work continuously so `/finalize` and `/orient` stop being load-bearing for memory-architecture health. `/finalize` becomes a thin reconciliation point: read what the loop already did, decide on the user-gated items it queued, retrospective. The loop and the brackets together cover both ends — the loop catches in-session work; the catch-up at `/orient` covers off-hours gaps.
 
 ### Mid-session debounce and batching
 

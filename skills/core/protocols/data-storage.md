@@ -443,6 +443,9 @@ Three rings, one read at runtime.
 │   ├── archive/                   ← archived units (flat)
 │   ├── cold-storage/<YYYY>/<MM>/  ← deep historical
 │   ├── _validation/tests/         ← validation regime test corpus
+│   ├── _loop-queue.md             ← user-gated items the loop queued for /finalize review
+│   ├── _loop-state.json           ← memory-processing loop state (last_run, last pass outputs)
+│   ├── .loop-lock                 ← transient lock during a loop pass (5-min stale-out)
 │   └── INDEX-<type>.md            ← auto-generated indexes
 ├── inbox.md                       ← optional: raw external pulls
 ├── _handoffs/                     ← narrative session logs (CORE-created)
@@ -451,6 +454,8 @@ Three rings, one read at runtime.
 ├── docs/                          ← architecture, explainers (user surface)
 └── .claude/                       ← harness config + scripts
 ```
+
+`_loop-queue.md`, `_loop-state.json`, and `.loop-lock` are written by `/process-memory` (the 30-min memory-processing loop). Queue items are surfaced at `/finalize` and `/orient`. State carries `last_run` so off-hours catch-up at `/orient` can decide whether to dispatch a synchronous pass. The lock is transient and ages out at 5 minutes if a pass crashes.
 
 **DM operational ring** — `~/.core/`
 
