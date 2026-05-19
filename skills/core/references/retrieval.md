@@ -81,7 +81,7 @@ The subagent runs its own Read + Grep + reasoning loop. It can follow edges or d
 
 The LLM reasoning inside the subagent IS the semantic layer. No precomputed embeddings. No vector store. The subagent handles synonymy, polysemy, negation, and context-dependent meaning in ways a vector similarity score cannot.
 
-**Cost discipline:** Tier 3 invocations cost tokens. Reserve for questions Tier 1+2 actually failed on. If a Tier 3 invocation succeeds where Tier 1+2 failed, log the query pattern to `~/.core/retrieval-metrics.jsonl` so the memory hygiene's trip-wire check can detect repeated failures across sessions (per DC-67 trip-wire #3: documented repeated Explore-miss pattern earns a vector store).
+**Cost discipline:** Tier 3 invocations cost tokens. Reserve for questions Tier 1+2 actually failed on. Every Tier 3 event — hit or miss — lands in the per-project retrieval log (`<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`) per the §Logging section below. The hygiene trip-wire check reads that log via `analyze-retrieval-quality.mjs` and detects repeated failures across sessions (per DC-67 trip-wire #3: documented repeated Explore-miss pattern earns a vector store).
 
 ---
 

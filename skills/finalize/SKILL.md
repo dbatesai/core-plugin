@@ -118,7 +118,7 @@ After capturing session-specific memories, refresh `MEMORY.md` from the top-prio
 Dispatch a Haiku subagent with:
 - The output of `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories --top 30` (top 30 priority-ranked units).
 - The current `~/.claude/projects/<mapped-cwd>/memory/MEMORY.md` contents (so user-added entries get preserved).
-- Instructions: format each top unit as a one-line index entry — `- [Title](file.md) — one-line hook` — preserve user-added entries that are still relevant, drop entries pointing to retired units, keep the file under 200 lines.
+- Instructions: format each top unit as a one-line markdown bullet linking to its unit file, followed by an em-dash and a one-line hook (matching the existing entries already in `MEMORY.md`). Preserve user-added entries that are still relevant, drop entries pointing to retired units, keep the file under 200 lines.
 
 The subagent runs background — the user doesn't wait on it. Narrate the dispatch ("Haiku is refreshing MEMORY.md from top units in the background.") but don't block the closing declaration on it.
 
