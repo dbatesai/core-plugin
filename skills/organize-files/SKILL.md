@@ -133,7 +133,7 @@ For content-staleness candidates (no clean-path sibling, just stale content vs c
 
 Explicit markers like "IN PROGRESS" or "DO NOT DISTRIBUTE" may confirm an inference, but don't depend on them — reason from the content. A file can be the final version and still be labeled "draft," and a rejected spec can still say "pending review."
 
-Always state the specific evidence: *"docs/architecture.md is stale — has explicit `### Task Manager` section describing two-tier DM/TM orchestration. PROJECT.md §Decisions records that TM was folded into DM on 2026-04-20 (DC-11..15). The canonical architecture lives at `core-skill/ARCHITECTURE.md` (706 lines, DM-only). This file describes a superseded architectural state."*
+Always state the specific evidence: *"docs/architecture.md is stale — has explicit `### Task Manager` section describing two-tier DM/TM orchestration. PROJECT.md §Decisions records that TM was folded into DM on 2026-04-20 (DC-11..15). The canonical architecture lives at `core-plugin/ARCHITECTURE.md` (706 lines, DM-only). This file describes a superseded architectural state."*
 
 ---
 
@@ -220,7 +220,7 @@ Add a one-line redirect header to archived `.md` files:
 
 For archived content-stale files where there is no canonical replacement at a single path, name the *current-truth anchor* instead:
 ```markdown
-> **[ARCHIVED]** Superseded by [tm-fold decision, 2026-04-20] — current architecture in PROJECT.md §State + core-skill/ARCHITECTURE.md
+> **[ARCHIVED]** Superseded by [tm-fold decision, 2026-04-20] — current architecture in PROJECT.md §State + core-plugin/ARCHITECTURE.md
 ```
 
 Skip HTML, binary, JSON, and other non-Markdown files — headers there are noise, and HTML in particular won't render the blockquote helpfully.
