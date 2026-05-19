@@ -93,7 +93,7 @@ export function walk(seedPath, {
   return results;
 }
 
-function main(argv) {
+export function main(argv) {
   let seedArg = null;
   let memoriesArg = null;
   let hops = 2;

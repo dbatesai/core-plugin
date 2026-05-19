@@ -96,6 +96,7 @@ Read the right protocol before you act. Don't carry protocol detail in working m
 Supporting references:
 
 - `references/retrieval.md` — four-tier retrieval ladder (Tier 0 in-context → Tier 1 Grep → Tier 2 typed-edge walk → Tier 3 Explore subagent).
+- `references/model-assignments.md` — model tier per pipeline stage; consult before dispatching graduation, render, external pulls.
 - `references/hygiene-strategies.md` — deeper hygiene sub-protocols (graduation reasoning, archive integrity, edge reconciliation).
 - `agents/base-protocol.md` — included in every spawned agent prompt; carries the reasoning discipline that applies whether you're solo or in a swarm.
 - `schemas/output.md` — output schema for multi-agent runs.
@@ -169,3 +170,5 @@ Reserve extended thinking for the work that warrants it. Standard inference is f
 | Risk assessment, graduation reasoning, accept/reject decisions | Extended |
 | Adversarial loops, synthesis, deep-audit calls | Extended |
 | Phase transitions, status updates | Standard |
+
+Full per-stage matrix at `references/model-assignments.md`. The most common dispatch decision — graduation Sonnet vs Opus — boils down to: clear trigger and one clear successor → Sonnet; multi-session pattern, ambiguous relationships, or "this might connect to several things and I'm not sure how" → Opus. When uncertain, Opus.

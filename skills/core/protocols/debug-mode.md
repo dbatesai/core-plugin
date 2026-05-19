@@ -26,6 +26,8 @@ Debug mode turns off when:
 
 ## What gets logged
 
+**Debug augments the always-on retrieval log.** Every Tier 1+ retrieval event already writes a base log line to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl` regardless of debug state — that runs continuously and feeds `analyze-retrieval-quality.mjs`. Debug mode adds verbose diagnostic fields (full candidate set per tier, scores discarded, why a tier was judged insufficient) inline on the same per-retrieval write. The base log stays in place; debug enriches.
+
 Six categories of operation:
 
 - **Retrievals** — query, tier reached, candidate set (top N + scores), the chosen subset, why those were chosen.

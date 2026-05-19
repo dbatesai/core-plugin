@@ -81,7 +81,7 @@ The subagent runs its own Read + Grep + reasoning loop. It can follow edges or d
 
 The LLM reasoning inside the subagent IS the semantic layer. No precomputed embeddings. No vector store. The subagent handles synonymy, polysemy, negation, and context-dependent meaning in ways a vector similarity score cannot.
 
-**Cost discipline:** Tier 3 invocations cost tokens. Reserve for questions Tier 1+2 actually failed on. If a Tier 3 invocation succeeds where Tier 1+2 failed, log the query pattern to `~/.core/retrieval-metrics.jsonl` so the memory hygiene's trip-wire check can detect repeated failures across sessions (per DC-67 trip-wire #3: documented repeated Explore-miss pattern earns a vector store).
+**Cost discipline:** Tier 3 invocations cost tokens. Reserve for questions Tier 1+2 actually failed on. Every Tier 3 event — hit or miss — lands in the per-project retrieval log (`<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`) per the §Logging section below. The hygiene trip-wire check reads that log via `analyze-retrieval-quality.mjs` and detects repeated failures across sessions (per DC-67 trip-wire #3: documented repeated Explore-miss pattern earns a vector store).
 
 ---
 
@@ -96,17 +96,43 @@ This feeds the priority function's recency (R) and frequency (F) signals for nex
 
 ---
 
-## Logging
+## Logging — always on
 
-Each retrieval event appends one line to `~/.core/retrieval-metrics.jsonl`:
+Every Tier 1+ retrieval event writes one JSONL record to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`. The log is operational telemetry, not diagnostic scaffolding — debug mode augments these entries with verbose diagnostic fields but does not replace the base log. The corpus is what makes retrieval-quality analysis possible across sessions.
 
-```json
-{"unit_id": "dc-67-no-mcp", "tier": 1, "timestamp": "2026-05-17T19:42:11Z", "query": "no mcp memory server"}
+The writer is the agent inline. There is no harness hook that intercepts retrieval and writes the log; when you run a retrieval, you write the entry. Per-event schema:
+
+```jsonl
+{
+  "ts": "2026-05-19T14:32:00Z",
+  "session": "<session-id-or-date-slug>",
+  "trigger": "session-start | mid-conversation | subagent",
+  "intent_topics": ["topic-1", "topic-2"],
+  "tier_reached": 2,
+  "units_retrieved": [
+    {"id": "dc-12-routing-rewrite", "score": 0.87, "tier": 1},
+    {"id": "dc-09-router-design-review", "score": 0.72, "tier": 2}
+  ],
+  "dip_back_count": 1,
+  "escalation_path": [1, 2]
+}
 ```
 
-For Tier 2 walks: log the seed unit and the result set as separate lines, all with the same `query` field, so the memory hygiene can reconstruct walk effectiveness.
+- `tier_reached`: highest tier that fired in this event.
+- `escalation_path`: the sequence of tiers attempted, in order.
+- `dip_back_count`: how many additional retrieval calls happened *after* this one in the same response turn. Implicit usefulness signal — if you retrieved a unit and immediately needed to dip back for more context, that unit was less useful than the score predicted.
 
-For Tier 3 misses (subagent returned no relevant answer): append with `"result": "miss"`. Tier 1/2 misses don't get logged — the trip-wire only fires on Tier 3 patterns.
+For Tier 2 walks, log the seed unit and the result set together as one event (one JSONL line). For Tier 3 misses (Explore returned no relevant answer), set `units_retrieved: []`, `tier_reached: 3`, and add `"result": "miss"`. The DC-67 trip-wire — repeated Tier 3 misses on similar queries — now runs per-project against this log via `scripts/analyze-retrieval-quality.mjs`.
+
+### Reading the corpus
+
+The analyzer ships in the plugin:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project> [--since-days N | --all] [--json]
+```
+
+Default window is 30 days. Output: tier distribution, top dip-back units (precision proxy), top escalation topics (recall proxy). `/process-memory` and `/finalize` call this script and surface anomalies in plain language.
 
 ---
 

@@ -53,6 +53,26 @@ Location: `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`
 
 You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `~/.core/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, you can add it under Mode A (autonomous, narrated).
 
+### External-source observations — three-layer filtering
+
+Observations from external sources (Teams, SharePoint, Jira, Confluence, Figma, anything else with an MCP) flow through three filtering layers before anything lands on disk. The disk-write volume stays proportional to relevance, not to source volume.
+
+| Layer | Where | Model | Disk write? |
+|---|---|---|---|
+| 1. Source-side scoping | MCP query parameters | n/a (mechanical) | No |
+| 2. In-memory cheap filter | Pull subagent context | Haiku | No |
+| 3. Relevance judgment + extraction | Relevance subagent | Sonnet (default), Opus (multi-session context calls) | **Yes** — only here |
+
+**Layer 1** is critical for high-volume sources. The pull subagent never asks Teams for all messages — it queries with parameters informed by project context: topic vocabulary from `~/.core/topics.md`, relevant keywords from current units, time scope, channel/space/project scope. The MCP query is shaped by what the project cares about *before* anything transfers.
+
+**Layer 2** runs entirely in the pull subagent's context. Keyword + topic-vocabulary scan; drops obvious misses. Nothing written.
+
+**Layer 3** is the Sonnet relevance agent. It receives the filtered candidates from Layer 2, a brief of the current unit-store topic vocabulary, and any relevant PROJECT.md context. It decides what's actually relevant to *this project* and extracts the specific signal worth recording. Only Layer 3 output gets written to `_memories/observations/`. Same schema as in-conversation observations — the source is opaque to anything downstream.
+
+The pull subagent must be initialized with project context before dispatch — without it, Layer 1 collapses and Layer 2 has to carry more work than it should. The main agent hands the pull subagent a brief (topic vocabulary, scope, keywords) as part of the dispatch prompt.
+
+Model assignments per layer live in `references/model-assignments.md`. When in doubt at Layer 3 — multi-session implications, ambiguous cross-project signals — escalate to Opus.
+
 ### Tier 2 — Units
 
 Graduated, reasoned facts. Rich frontmatter, typed edges, body with the full reasoning.
@@ -134,6 +154,27 @@ The graduation step is where the LLM's value lives — noticing connections acro
 6. Edge back to source observations via `cites` with `note: "graduated from"`.
 7. Source observations stay in place — the raw record is preserved.
 
+### Dispatch gate — Sonnet vs Opus
+
+Graduation runs as a subagent, not in the main agent's context. Classify the call before dispatching:
+
+| Signal | Path |
+|---|---|
+| Clear trigger (explicit user cue, direct repeated references, in-conversation decision with one clear successor) | **Sonnet, standard reasoning, background mid-session / blocking at `/finalize`** |
+| Complex call (multi-session pattern, ambiguous relationship to existing units, implications touch several units non-obviously) | **Opus, extended thinking, blocking** |
+| You find yourself reasoning "this might connect to several things and I'm not sure how" | **Opus** |
+| Genuinely unsure which path applies | **Opus** |
+
+Missed graduations on complex observations compound across sessions. When uncertain, Opus.
+
+The graduation subagent — both paths — can invoke Tier 3 retrieval (Explore) internally when it needs to answer "what existing units does this observation touch semantically?" That's a Sonnet subagent spawned from inside the graduation subagent's context, not a separate dispatch from the main agent.
+
+### Mode A vs Mode B at graduation
+
+Most graduations are Mode A — the subagent completes, writes the unit, narrates the outcome to the main agent which narrates to the user. Mode B fires when the graduated unit would supersede or conflict with an existing canonical unit. The graduation subagent surfaces the conflict to the main agent; the main agent surfaces it to the user; the unit doesn't land until the user confirms.
+
+Full matrix at `references/model-assignments.md`.
+
 ### Anti-miss bias
 
 When in doubt, write the unit. A slightly-too-eager unit is cheap. A missed critical fact isn't. Hard calls — should this be one unit or three, what's the right edge structure, which existing unit does this supersede — are candidates for invoking `protocols/analysis.md`. Multi-agent earns its cost on classification and structural calls.
@@ -161,6 +202,10 @@ Auto-memory at `~/.claude/projects/*/memory/` is queried alongside `_memories/` 
 **The semantic tier is where graduation-style reasoning happens.** The Explore subagent is strictly more capable than a vector store at single-user scale because it has the full LLM as its embedding model — it can reason about queries in context, distinguish polysemy, recognize negations, and synthesize structured answers with citations rather than chunks.
 
 Detail in `references/retrieval.md`.
+
+### Logging is always on
+
+Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`. This is base operational telemetry — not debug-mode-gated. The writer is the agent inline at the retrieval site; there is no hook. Schema and reading patterns in `references/retrieval.md`.
 
 ---
 

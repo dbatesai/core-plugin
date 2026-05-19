@@ -106,6 +106,26 @@ If over ~66KB, surface a recommendation but do not auto-compact — IMPROVEMENT_
 
 ---
 
+## Step 6.5 — Retrieval quality scan
+
+Run the retrieval-quality analyzer over the last 30 days of session logs:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs" "<project>"
+```
+
+Read the output. The three signals worth surfacing in plain voice:
+
+- **Dip-back rate** above ~50% on a unit retrieved more than 3 times → the unit isn't satisfying queries that find it. Either the body needs sharpening, the topic tags don't match what surfaces it, or it should split into two units.
+- **Tier-2+ escalation rate** above ~70% on a topic that appears in more than 3 events → the lexical layer isn't finding what it should. Either there's no unit yet for that topic, or the existing units have mismatched tags.
+- **Tier 3 fires** repeatedly on similar queries → DC-67 trip-wire territory. Note the pattern for the user.
+
+Narrate one or two top anomalies in plain voice. Don't dump the raw report. If everything is clean, say so in one sentence ("Retrieval quality looked clean — 47 events, T1=60% / T2=30% / T3=11%, no unit dipping back over 30%.").
+
+If the project has no `_sessions/<date>/retrieval-log.jsonl` files yet, the analyzer reports "No retrieval events found" — surface that as a one-liner ("No retrieval log yet — the corpus builds with use.").
+
+---
+
 ## Step 7 — Write state
 
 Update `<project>/_memories/_pm-state.json` with the current timestamp:
@@ -127,6 +147,7 @@ Tell the user what happened across all steps in one tight block:
 - Indexes: regenerated (and whether anything changed)
 - PROJECT.md: before/after bytes if compacted, or "under cap" if not
 - IMPROVEMENT_LOG.md: under cap, or surfaced recommendation
+- Retrieval quality: tier distribution + any anomalies, or "clean"
 - Anything else worth knowing
 
 Two or three sentences if everything was clean. Longer only if there's something the user needs to act on.

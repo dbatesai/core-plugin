@@ -354,7 +354,7 @@ function _cliSections(ranked, topK) {
   return 0;
 }
 
-function _cli(argv) {
+export function main(argv) {
   let memoriesDirArg = '_memories';
   let topN = 10;
   let intentStr = '';
@@ -398,5 +398,5 @@ function _cli(argv) {
 
 // Entry point when run directly
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  process.exit(_cli(process.argv.slice(2)));
+  process.exit(main(process.argv.slice(2)));
 }

@@ -141,6 +141,22 @@ Graduation — observation becoming unit — is the highest-value reasoning move
 
 Storage and retrieval aren't frozen — they evolve based on observed performance.
 
+### Retrieval-quality surfacing — always at hygiene passes
+
+At every `/finalize` and `/process-memory` invocation, call:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project>
+```
+
+Default window is the last 30 days. The analyzer returns tier distribution, top dip-back units (precision proxy), and top tier-escalation topics (recall proxy). The main agent narrates the top anomalies in plain language — not the raw report dump.
+
+Example narration shape:
+- "Last 30 days: 47 retrievals across 5 sessions. dc-12-routing-rewrite is dipping back 75% of the time when we hit it — the unit's body or its topic tags might not match what we keep needing it for. Worth a look."
+- "Topic 'performance' escalates to Tier 3 every time we touch it — the lexical layer isn't finding what it should. Either there's no unit yet, or the unit exists with different tags."
+
+These observations feed the structural adjustment options below — add an edge, restructure a unit, re-tune weights, evolve query shape. The point is closing the loop from retrieval behavior → logged → surfaced → tuned.
+
 ### What to watch
 
 - **Under-recall** — you asked a query, the relevant unit didn't surface. Why? Wrong tier? Topics mis-tagged? Edge missing?

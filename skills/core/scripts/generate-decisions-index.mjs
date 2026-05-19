@@ -18,10 +18,10 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DC_PATTERN = /^dc-(\d+)-.+\.md$/;
-const SUMMARY_MAX = 100;
+export const DC_PATTERN = /^dc-(\d+)-.+\.md$/;
+export const SUMMARY_MAX = 100;
 
-function parseFrontmatter(text) {
+export function parseFrontmatter(text) {
   if (!text.startsWith('---\n')) return [{}, text];
   const end = text.indexOf('\n---', 4);
   if (end === -1) return [{}, text];
@@ -40,7 +40,7 @@ function parseFrontmatter(text) {
   return [fm, body];
 }
 
-function extractSummary(body) {
+export function extractSummary(body) {
   for (const line of body.split('\n')) {
     const s = line.trim();
     if (s.startsWith('# ')) return s.slice(2).trim();
@@ -52,19 +52,19 @@ function extractSummary(body) {
   return '';
 }
 
-function bestDate(fm) {
+export function bestDate(fm) {
   for (const key of ['updated', 'created', 'date']) {
     if (fm[key]) return String(fm[key]).slice(0, 10);
   }
   return 'unknown';
 }
 
-function truncate(text, maxLen = SUMMARY_MAX) {
+export function truncate(text, maxLen = SUMMARY_MAX) {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 1).trimEnd() + '…';
 }
 
-function buildIndex(memoriesDir) {
+export function buildIndex(memoriesDir) {
   const rows = [];
   for (const fname of readdirSync(memoriesDir).sort()) {
     const m = fname.match(DC_PATTERN);
@@ -101,7 +101,7 @@ function buildIndex(memoriesDir) {
   return lines.join('\n');
 }
 
-function main(argv) {
+export function main(argv) {
   const memoriesDir = argv[0]
     ? resolve(argv[0])
     : resolve(process.cwd(), '_memories');
