@@ -36,7 +36,7 @@ Suppression state persists at `~/.core/swarm-effectiveness/archive-reconciliatio
 
 **Calibration defaults** — starting points to tune after a few cycles, not fixed rules: 14-day recency gate (skip files modified too recently), ≥3 match threshold (below this is noise), top-10 candidates per cycle.
 
-Example: DC-24 archived on 2026-05-13. Three sessions later it showed up 5 times across protocols and handoffs. Sub-protocol 3b surfaced it; the user added a one-line stub back to §D&R.
+Example: a decision unit archived three months back keeps showing up in protocols and handoffs as new work references it. Sub-protocol 3b surfaces it; the user decides whether to un-archive and surface in §D&R or suppress for a few cycles.
 
 ### 3c — Compaction Volume
 

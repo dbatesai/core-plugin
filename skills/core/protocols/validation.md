@@ -52,7 +52,7 @@ The runner is at `~/.claude/skills/core/scripts/validate.py`. Invocation:
 python3 ~/.claude/skills/core/scripts/validate.py <project-path>
 ```
 
-The runner walks `<project-path>/_memories/_validation/tests/test-*.yaml`, runs each test, scores precision and recall, writes a report to `<project-path>/outputs/validation/<YYYY-MM-DD>/REPORT.md`, and exits with status 0 on pass / 1 on any FAIL.
+The runner walks `<project-path>/_memories/_validation/tests/test-*.yaml`, runs each test, scores precision and recall, writes a report to `<project-path>/_outputs/validation/<YYYY-MM-DD>/REPORT.md`, and exits with status 0 on pass / 1 on any FAIL.
 
 The current runner simulates Tier 1 retrieval (OR-of-terms grep). Future versions add Tier 2 edge-walk simulation and Tier 3 Explore-subagent invocation. The thresholds and report shape stay constant across versions.
 
@@ -68,7 +68,7 @@ Aggregate pass rate is reported alongside individual results.
 
 ## § 5 — Output
 
-`<project-path>/outputs/validation/<YYYY-MM-DD>/REPORT.md` contains:
+`<project-path>/_outputs/validation/<YYYY-MM-DD>/REPORT.md` contains:
 
 - Headline: aggregate pass/investigate/fail counts.
 - Per-test result table: status, precision, recall, query (truncated).
@@ -93,7 +93,7 @@ When a test fails:
 
 The autonomous-first contract from the execution plan applies: try autonomous resolution first; surface only when the failure mode is genuinely blocking.
 
-## § 8 — David's subjective read
+## § 8 — User's subjective read
 
 Quantitative thresholds aren't the whole story. The validation report includes a final field: *"Did retrieval feel right in real use?"* The user's subjective experience is data — if the numbers say 90% pass but conversations felt thin, the regime is missing something. Surface the subjective read in the next hygiene retrospective.
 

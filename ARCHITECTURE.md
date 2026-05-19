@@ -1,6 +1,6 @@
 # Architecture
 
-The how and why behind CORE's v2 design. The skill itself is the contract; this doc explains the reasoning that backs it. Every sentence here either describes a decision the architecture rests on or shows you something concrete you can do with it — internal design reasoning that the reader can't act on goes in `core-skill-v2-spec.md` (project repo) instead.
+The how and why behind CORE's v2 design. The skill itself is the contract; this doc explains the reasoning that backs it. Every sentence here either describes a decision the architecture rests on or shows you something concrete you can do with it.
 
 ## The reframe
 
@@ -8,7 +8,7 @@ CORE started as a multi-agent adversarial reasoning framework — a `/core` skil
 
 In May 2026 it reframed (DC-64, 2026-05-16d). The reframe: **CORE is project intelligence in chat with a critic baked in, not a multi-agent framework.** A single competent agent that knows the project's context, watches data sources, remembers across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Multi-agent swarms are one tool the agent reaches for. Not the product.
 
-What changed in practice: the swarm machinery moved from being the default execution path to being an internal protocol (`protocols/analysis.md`) the agent invokes when stakes warrant. The memory architecture went from informal "auto-memory + handoffs + DECISIONS.md" to a structured unit store with typed edges and a four-tier retrieval ladder. PROJECT.md went from hand-edited synthesis to render-from-units with edit-detection and propagation back. Plain voice became the rule the project enforces in seven places (see the explainer at `docs/explainers/overview.md` for the layer list).
+What changed in practice: the swarm machinery moved from being the default execution path to being an internal protocol (`protocols/analysis.md`) the agent invokes when stakes warrant. The memory architecture went from informal "auto-memory + handoffs + DECISIONS.md" to a structured unit store with typed edges and a four-tier retrieval ladder. PROJECT.md went from hand-edited synthesis to render-from-units with edit-detection and propagation back. Plain voice became the rule the project enforces in several places — SKILL.md's opening, per-protocol headers, the per-turn voice-reminder hook, and the agent's own continuous self-evaluation.
 
 The reframe doesn't drop the adversarial discipline. The anti-anchoring rule (Critic frames before reading Generator), the persuasion log, the four named failure modes, the external-audience test — they apply to all reasoning, solo or swarm. The discipline didn't change; the staffing did.
 
@@ -156,17 +156,16 @@ Triggers: user says "debug on," agent self-flips during self-unblock, validation
 
 Lifecycle: per-session, 30-day archive, 90-day cold-store.
 
-## What ships vs. what's development scaffolding
+## What ships vs. what lives where
 
-| Surface | Ships? | Lives in |
-|---|---|---|
-| Skill product | Yes | `~/.claude/skills/core/` → mirrored to `dbatesai/core-skill` |
-| Project workshop | No | `~/Documents/Projects/CORE/` (private repo `dbatesai/core`) |
-| User's project context | No (user-owned) | `<user-project>/_memories/` + `<user-project>/PROJECT.md` |
-| Cross-project operational meta | No (machine-local) | `~/.core/` |
-| Auto-memory | No (machine-local) | `~/.claude/projects/<hash>/memory/` |
+| Surface | Where it lives |
+|---|---|
+| Skill product (this plugin) | Installed via the marketplace into `~/.claude/plugins/` or `~/.claude/skills/core/` for clone-install. |
+| User's project context | User-owned. `<user-project>/_memories/` plus the rendered `<user-project>/PROJECT.md`. |
+| Cross-project operational meta | Machine-local at `~/.core/` — DM profile, workspace registry, dream cycles, swarm effectiveness. |
+| Auto-memory | Machine-local at `~/.claude/projects/<hash>/memory/`. Cached, rebuilt each bootstrap. |
 
-The skill product is intentionally minimal — protocols, agents, references, scripts, schemas, templates. The project workshop holds session logs, plans, handoffs, IMPROVEMENT_LOG, the spec — all the dev-meta. Two repos by design.
+The skill product is intentionally minimal — protocols, agents, references, scripts, schemas, templates. Everything else lives in user-owned or machine-local space, by design.
 
 ## Diagrams
 
@@ -222,7 +221,6 @@ flowchart TD
 
 ## Where to read next
 
-- `core-skill-v2-spec.md` — the design contract.
 - `protocols/data-storage.md` — unit format, edges, retrieval, promotion modes.
 - `protocols/hygiene.md` — the three verbs and continuous self-evaluation.
 - `protocols/analysis.md` — multi-agent machinery and research mode.
@@ -230,5 +228,3 @@ flowchart TD
 - `protocols/execution.md` — execution discipline, solo and swarm.
 - `references/retrieval.md` — deeper retrieval ladder detail.
 - `references/hygiene-strategies.md` — deeper hygiene sub-protocols.
-
-The eight explainers at `docs/explainers/` (project repo) walk each piece of this architecture in plain voice with diagrams, written for a reader who hasn't seen CORE.

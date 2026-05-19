@@ -1,6 +1,6 @@
 # CORE Retrieval Protocol (v2.0)
 
-How the DM (and Explore subagents acting on its behalf) gets information from the project's memory into context. Per DC-67/68/69. Backing research at `_outputs/2026-05-16/memory-layer-research/SYNTHESIS.md` (in CORE's source-data repo).
+How the DM (and Explore subagents acting on its behalf) gets information from the project's memory into context. Per DC-67/68/69.
 
 ---
 

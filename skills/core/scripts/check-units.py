@@ -41,7 +41,7 @@ VALID_STATUSES = {"active", "retired", "archived"}
 VALID_TYPES = {
     "decision", "risk", "person", "deliverable", "principle",
     "explainer", "review-finding", "observation", "topic", "reference",
-    "feedback", "memory",  # memory is legacy/auto-memory type
+    "feedback", "memory",
 }
 
 VALID_EDGE_TYPES = {

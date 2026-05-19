@@ -59,30 +59,30 @@ Graduated, reasoned facts. Rich frontmatter, typed edges, body with the full rea
 
 ```yaml
 ---
-id: dc-72-v2-execution-plan
+id: dc-12-routing-rewrite
 type: decision
 status: active
-created: 2026-05-17T18:45:00Z
-updated: 2026-05-17T18:45:00Z
+created: 2026-04-02T18:45:00Z
+updated: 2026-04-02T18:45:00Z
 confidence: 0.90
 sources:
-  - _handoffs/handoff-2026-05-17d.md
-  - docs/plans/2026-05-17-v2-execution-plan.md
+  - _handoffs/handoff-2026-04-02.md
+  - docs/plans/routing-rewrite-plan.md
 references-person:
-  - david-bates
+  - alex
 references-topic:
-  - v2-build
-  - memory-architecture
-  - autonomous-execution
+  - routing
+  - auth
+  - api-rewrite
 edges:
-  - {type: cites, target: dc-71-v2-spec-drafted, note: "executes spec"}
-  - {type: supersedes, target: dc-60-pivot-personal-tool, note: "subsumes by adopting v2 as the delivery"}
+  - {type: cites, target: dc-09-router-design-review, note: "executes design"}
+  - {type: supersedes, target: dc-04-routing-hotfix, note: "subsumes the hotfix path"}
 canonical: true
-last_accessed: 2026-05-17T18:45:00Z
+last_accessed: 2026-04-02T18:45:00Z
 access_count: 1
 ---
-The v2 execution plan locks 8 phases and 38 steps for the
-autonomous build. ...
+The routing rewrite locks 4 phases for the migration to the new
+auth boundary. ...
 ```
 
 Location: `<project>/_memories/<prefix>-<slug>.md` — flat layout per DC-68, with the type encoded in the filename prefix.
@@ -232,9 +232,9 @@ When the user removes a fact from PROJECT.md, that fact is gone. You don't re-de
 
 If the same fact would have surfaced again on the next render, the retired status keeps it out. Resurrection requires the user actively un-retiring it.
 
-### David's broad authority (per DC-72)
+### Authority over PROJECT.md sits with the user
 
-The user (David) explicitly granted broad authority to manage PROJECT.md "in whatever way is best for maintaining project context accurately and thoroughly." Render mechanics, edit-detection, propagation back to units — these are tools, not the goal. Accuracy and thoroughness are what matter. The mechanisms can change.
+The user owns PROJECT.md. Manage it in whatever way best serves accuracy and thoroughness. Render mechanics, edit-detection, propagation back to units — these are tools, not the goal. Accuracy and thoroughness are what matter. The mechanisms can change.
 
 ---
 
@@ -379,7 +379,7 @@ Unit prefix convention (locked at plan revision 2026-05-17, per DC-68 + Invarian
 | Explainer | `exp-` | `_memories/exp-overview.md` | flat |
 | Review finding | `rf-` | `_memories/rf-v2-adversarial-review.md` | flat |
 | Principle | `pr-` | `_memories/pr-anti-resurrection.md` | flat |
-| Person | `who-` | `_memories/who-david-bates.md` | flat |
+| Person | `who-` | `_memories/who-alex.md` | flat |
 | Deliverable | `del-` | `_memories/del-explainer-set.md` | flat |
 | Topic | `topic-` | `_memories/topic-voice-discipline.md` | flat |
 | Observation | `obs-<YYYY-MM-DD-HHMM>-` | `_memories/observations/2026-05/obs-2026-05-17-1432-architect-timeline.md` | sub-dir by month |
@@ -424,7 +424,7 @@ The test: exempt only when the path is determined by the artifact's own name, sc
 
 ### Skill-product writes
 
-When the proposed path is `~/.claude/skills/core/**` or `<project>/core-skill/**`, declare `intent: skill-edit` so the hook recognizes the write as intentional. The `pwd-guard.py` hook fires on writes to these paths as advisory machine context; your own narration to the user follows the plain-prose pattern above.
+When the proposed path is `~/.claude/skills/core/**` or `~/.claude/plugins/**/skills/core/**`, declare `intent: skill-edit` so the hook recognizes the write as intentional. The `pwd-guard.py` hook fires on writes to these paths as advisory machine context; your own narration to the user follows the plain-prose pattern above.
 
 ---
 

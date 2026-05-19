@@ -6,7 +6,7 @@ Usage: python3 validate.py <project-path>
 Reads test corpus from <project-path>/_memories/_validation/tests/test-*.yaml
 Runs Tier 1 retrieval simulation (grep) for each test
 Scores precision + recall against expected/forbidden unit lists
-Writes report to <project-path>/outputs/validation/<date>/REPORT.md
+Writes report to <project-path>/_outputs/validation/<date>/REPORT.md
 
 Layout per DC-68: units are FLAT at <project>/_memories/, not in type-subdirectories.
 """

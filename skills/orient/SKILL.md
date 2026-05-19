@@ -73,7 +73,7 @@ If any of these escalate, lead with the escalation in readiness.
 
 The receipt is conversational, not a form. Target shape:
 
-> *"Picking up on CORE. Last session closed on Wednesday with the v2 execution plan locked. PROJECT.md says we're mid-build: Phase 1 foundations done, Phase 2 in progress. Top of §Moves is the autonomous v2 build per docs/plans/2026-05-17-v2-execution-plan.md. One stale risk worth flagging: R-DM-SMUGGLING last reviewed three days ago. Ready."*
+> *"Picking up on the [project name]. Last session closed Wednesday with the routing rework merged. PROJECT.md says we're mid-migration: Phase 1 done, Phase 2 in progress. Top of §Moves is the auth-rewrite review. One stale risk worth flagging: R-3 last reviewed three weeks ago. Ready."*
 
 What's in the receipt:
 

@@ -85,7 +85,7 @@ If the project folder turns out to have pre-existing content that wasn't visible
 
 ## Load — cold-start migration
 
-The project has substantive prior content but no v2 unit store. Run comprehensive migration per `core-skill-v2-spec.md` §9 before doing anything else.
+The project has substantive prior content but no v2 unit store. Run comprehensive migration per the steps below before doing anything else.
 
 **Write the migration-in-progress flag first.** Before any other migration action, create `<project>/_memories/.migration-in-progress` — a single line with the session timestamp and a brief reason is enough (`2026-05-18T11:23:00Z — cold-start migration begun`). This flag guards against re-invocation mid-migration silently routing to the returning-workspace load on a partial store. If the flag is already present from a prior interrupted session, read it, decide whether to resume from the partial state or restart, and rewrite the flag with this session's timestamp either way. The flag is removed at the end as the explicit signal that migration completed cleanly.
 
@@ -164,7 +164,7 @@ What to include:
 
 Target voice:
 
-> *"Picking up on CORE. Last session closed on Wednesday with the v2 plan locked. PROJECT.md says we're at: v2 execution plan ready, memory v2 Steps 1–9 implemented, DECISIONS.md graduation queued. Top of §Moves is the autonomous v2 build per docs/plans/2026-05-17-v2-execution-plan.md. One stale risk worth flagging: R-DM-SMUGGLING last reviewed 2026-05-14. Ready."*
+> *"Picking up on the [project name]. Last session closed Wednesday with the routing rework merged. PROJECT.md says we're mid-migration: Phase 1 done, Phase 2 in progress. Top of §Moves is the auth-rewrite review. One stale risk worth flagging: R-3 last reviewed three weeks ago. Ready."*
 
 What to skip: handoff content (not part of the bootstrap read); auto-memory cited as authoritative (it's scratch cache); session log summaries (per-session artifacts, not state); a full section-by-section recital (the user sees PROJECT.md when they want the full view).
 

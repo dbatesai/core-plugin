@@ -1,6 +1,6 @@
 # Research Document Schema
 
-The canonical shape for research documents persisted to `~/.core/research/`. The multi-agent analysis protocol at `protocols/analysis.md` (Research mode) produces documents in this shape. Historical documents may carry `source_skill: "core-analysis"` from the pre-v2 sub-skill.
+The canonical shape for research documents persisted to `~/.core/research/`. The multi-agent analysis protocol at `protocols/analysis.md` (Research mode) produces documents in this shape.
 
 ---
 

@@ -22,7 +22,7 @@ The strongest signal on what makes multi-agent work is that unexpected personas 
 
 ## The discipline that pairs with discretion
 
-More composition freedom means more DM-smuggling risk — the pattern caught 2026-05-14 where the DM made architectural decisions without surfacing them. The fix isn't fewer roles; it's the discipline of naming what you're doing. When you compose a new lens, announce it. When you adjust the roster from a saved configuration, say what changed. The user should see the composition, not have it smuggled past them.
+More composition freedom means more DM-smuggling risk — the pattern where the DM makes architectural decisions without surfacing them. The fix isn't fewer roles; it's the discipline of naming what you're doing. When you compose a new lens, announce it. When you adjust the roster from a saved configuration, say what changed. The user should see the composition, not have it smuggled past them.
 
 ---
 

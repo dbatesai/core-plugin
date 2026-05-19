@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: Session closing skill — reconcile state, write handoff, render PROJECT.md from units, run memory hygiene, sync skill changes if any landed this session
+description: Session closing skill — reconcile state, write handoff, render PROJECT.md from units, run memory hygiene
 user-invocable: true
 ---
 
@@ -36,7 +36,7 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 2. **Update touched units.** For every unit you wrote to during the session, verify frontmatter — `updated:` timestamp, `last_accessed:`, `access_count:`, edges. Make sure inverse edges are set on `supersedes` / `depends-on` / `conflicts-with`.
 
-3. **Regenerate indexes.** Run the index generators for any unit types that changed this session — typically `_memories/INDEX-decisions.md` via `<project>/.claude/scripts/generate-decisions-index.py`.
+3. **Regenerate indexes.** Run the index generators for any unit types that changed this session — typically `_memories/INDEX-decisions.md` via `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.py` (ships with the plugin per DC-77).
 
 4. **Render PROJECT.md from units.** Walk canonical units, compose the six sections (What & Why / State / People / Moves / Decisions & Risks / Notes), and show the user the draft.
 

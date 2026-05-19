@@ -2,10 +2,9 @@
 """PreToolUse hook: remind the agent to declare `intent: skill-edit` when writing
 to CORE skill-product surfaces.
 
-Matches three install shapes:
+Matches two install shapes:
   - Plugin install (Claude Code marketplace or local-path):
         ~/.claude/plugins/cache/<marketplace>/core/<version>/skills/core/**
-  - Workshop mirror (new layout): <workshop>/core-skill/skills/core/**
   - Legacy direct install:        ~/.claude/skills/core/**
 
 Reads stdin as JSON per Claude Code's PreToolUse hook contract; outputs an
@@ -18,8 +17,7 @@ import sys
 
 SKILL_PATHS = [
     "/.claude/skills/core/",   # legacy direct install (clone-into-skills)
-    "/skills/core/",           # plugin install + workshop mirror new layout
-    "/core-skill/",            # workshop mirror catch-all (covers root-level docs)
+    "/skills/core/",           # plugin install (matches /plugins/.../skills/core/**)
 ]
 
 
@@ -39,7 +37,7 @@ def main():
         "  Writing to: <abs path> — category: skill product — naming: <convention> — rationale: <≤80c>\n"
         "  intent: skill-edit\n"
         "If this write is intentional skill editing, declare PWD with intent: skill-edit and proceed.\n"
-        "If this destination is wrong, reconsider — see 7-rule routing sheet in protocols/data-storage.md."
+        "If this destination is wrong, reconsider — see protocols/data-storage.md §\"What lives where\" for the three-surface model."
     )
 
     print(json.dumps({

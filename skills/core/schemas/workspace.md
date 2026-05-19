@@ -37,66 +37,20 @@ A **delivery workspace** is the DM's **operational meta** about **source data** 
 
 ---
 
-## Manifest File (`~/.core/workspaces/<id>/workspace.json`) — Optional Fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `current_swarm` | object \| null | Tracks the DM's active swarm for this workspace (v1.2.x Observatory feature). Written by `update_swarm_status` with patch semantics; read by `read_dashboard_state`. Absent or null when idle. |
-| `swarm_artifact_id` | string \| null | Identifier for the Cowork Swarm Live View artifact. Set by `update_swarm_status` when the artifact is first created; persists across multiple swarm runs in the same workspace. Used to call `update_artifact()` in subsequent sessions. |
-
----
-
-## current_swarm Field (v1.2.x, Observatory feature)
-
-Tracks the DM's active swarm for this workspace. Written by `update_swarm_status` (patch semantics); read by `read_dashboard_state`. Absent or null when idle.
-
-```json
-"current_swarm": {
-  "status": "idle | running | halted | complete",
-  "phase": "Phase 2: Critic Analysis",
-  "agent_count": 5,
-  "agent_names": ["Vellum", "Fold", "Spar", "Reed", "Vex"],
-  "agent_roles": {
-    "Vellum": "generator",
-    "Fold": "generator",
-    "Spar": "critic",
-    "Reed": "critic",
-    "Vex": "monitor"
-  },
-  "task_summary": "F9 install-time permissions review",
-  "started_at": "2026-05-12T22:00:00.000Z",
-  "updated_at": "2026-05-12T22:15:00.000Z",
-  "completed_at": null
-}
-```
-
-**Status lifecycle**
-
-| Status | Written when |
-|---|---|
-| `"running"` | Phase 1 spawn; also when resuming after a halted state |
-| `"halted"` | DM calls `AskUserQuestion` mid-swarm; graceful halt |
-| `"complete"` | Swarm accepted; result delivered |
-| `"idle"` (or field absent) | Reset to `"idle"` (or omitted) at session start |
-
-**Related top-level field:** `swarm_artifact_id` (string \| null) is stored at the manifest root (not inside `current_swarm`) so it persists across multiple swarm runs for the same workspace. Set by `update_swarm_status` when the Cowork Swarm Live View artifact is first created. Used by the DM to call `update_artifact({ id: swarm_artifact_id, ... })` in subsequent sessions.
-
----
-
 ## Example
 
 ```json
 {
-  "workspace_id": "ws-core-framework",
-  "name": "CORE Framework",
-  "project_path": "/Users/dbates/Documents/Projects/CORE",
+  "workspace_id": "ws-example-project",
+  "name": "Example Project",
+  "project_path": "/Users/<user>/Documents/Projects/example-project",
   "created": "2026-03-15T10:00:00Z",
   "last_active": "2026-03-31T14:30:00Z",
   "session_log_refs": [
-    "/Users/dbates/Documents/Projects/CORE/sessions/2026-03-15",
-    "/Users/dbates/Documents/Projects/CORE/sessions/2026-03-28"
+    "/Users/<user>/Documents/Projects/example-project/_sessions/2026-03-15",
+    "/Users/<user>/Documents/Projects/example-project/_sessions/2026-03-28"
   ],
-  "dm_notes": "Framework is self-referential — changes to CORE affect how CORE evaluates those changes. Extra adversarial rigor needed. User prefers direct pushback on stale assumptions."
+  "dm_notes": "User prefers concrete examples over abstract framings. Push back hard on scope creep. Cross-reference with the design doc at docs/architecture.md when discussing structural choices."
 }
 ```
 
@@ -125,9 +79,9 @@ The index is an array of workspace summary objects:
 ```json
 [
   {
-    "workspace_id": "ws-core-framework",
-    "name": "CORE Framework",
-    "project_path": "/Users/dbates/Documents/Projects/CORE",
+    "workspace_id": "ws-example-project",
+    "name": "Example Project",
+    "project_path": "/Users/<user>/Documents/Projects/example-project",
     "last_active": "2026-03-31T14:30:00Z"
   }
 ]

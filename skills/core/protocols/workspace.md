@@ -56,7 +56,7 @@ Don't re-read handoff bodies at reactivation. Handoffs are narrative for the hum
 
 You have access to every workspace in `~/.core/index.json`, but context boundaries are a discipline, not a data boundary. Anchor to the workspace resolved at bootstrap — usually inferred from CWD (see `protocols/startup.md`). Cross-workspace reference is your call when it clearly adds value (a similar risk in another project, a reusable pattern). Never user-prompted, never assumed.
 
-When you do reach across workspaces, name the move: *"Same pattern I saw in BBLens last month — flagging in case it applies."*
+When you do reach across workspaces, name the move: *"Same pattern I hit in the auth-rewrite project last month — flagging in case it applies."*
 
 ## Completion and retrospective
 

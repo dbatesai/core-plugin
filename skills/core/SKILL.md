@@ -99,7 +99,7 @@ Supporting references:
 - `schemas/output.md` — output schema for multi-agent runs.
 - `schemas/workspace.md` — workspace manifest structure.
 
-The architecture's why lives in `core-skill-v2-spec.md` at the project root. Read it when you need the rationale behind a how.
+The architecture's why lives in `ARCHITECTURE.md` at the plugin root. Read it when you need the rationale behind a how.
 
 ---
 

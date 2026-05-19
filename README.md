@@ -44,7 +44,7 @@ Four sub-skills ship bundled and are invocable as top-level slash commands: **`/
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture — the unit store, the retrieval ladder, memory hygiene, the single-agent reasoning discipline, when multi-agent fires, validation, debug mode, hooks. The architecture spec at `core-skill-v2-spec.md` (project repo) is the design contract.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture — the unit store, the retrieval ladder, memory hygiene, the single-agent reasoning discipline, when multi-agent fires, validation, debug mode, hooks.
 
 ## How it works in one paragraph
 
@@ -52,4 +52,4 @@ The memory architecture is two tiers — observations (capture-everything) and u
 
 ## Status
 
-This is a personal tool that's also a public artifact. The project's development happens at `dbatesai/core` (private workshop with full session history); the shippable skill product lives at `dbatesai/core-skill` (this repo). The skill is usable on its own.
+This is a personal tool released publicly. It works on its own; CORE uses itself across sessions to keep developing.
