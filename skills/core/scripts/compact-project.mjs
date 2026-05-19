@@ -178,7 +178,7 @@ export function compactDecisions(text, units) {
   return { text: joined, stats: { compacted, skipped, missing } };
 }
 
-function main(argv) {
+export function main(argv) {
   const projectDir = argv[0]
     ? resolve(argv[0])
     : resolve(process.cwd());

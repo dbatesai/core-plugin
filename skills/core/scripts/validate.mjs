@@ -134,7 +134,7 @@ export function scorePrecisionRecall(retrieved, expected, forbidden) {
   return [Math.round(precision * 100) / 100, Math.round(recall * 100) / 100];
 }
 
-function main(argv) {
+export function main(argv) {
   if (!argv[0]) {
     process.stderr.write('Usage: node validate.mjs <project-path>\n');
     process.exit(1);

@@ -214,7 +214,7 @@ export function checkIntegrity(units, memoriesDir, today, report) {
 
 // ---------- Output ----------
 
-function printReport(report, memoriesDir, mode, today) {
+export function printReport(report, memoriesDir, mode, today) {
   const counts = { PASS: 0, WARN: 0, FAIL: 0 };
   for (const f of report) counts[f.level] = (counts[f.level] || 0) + 1;
   console.log(`\nUnit store: ${memoriesDir}`);
@@ -239,7 +239,7 @@ function printReport(report, memoriesDir, mode, today) {
   }
 }
 
-function jsonReport(report, memoriesDir, mode, today) {
+export function jsonReport(report, memoriesDir, mode, today) {
   const counts = { PASS: 0, WARN: 0, FAIL: 0 };
   for (const f of report) counts[f.level] = (counts[f.level] || 0) + 1;
   const out = {
@@ -252,7 +252,7 @@ function jsonReport(report, memoriesDir, mode, today) {
   console.log(JSON.stringify(out, null, 2));
 }
 
-function exitCode(report) {
+export function exitCode(report) {
   const counts = { FAIL: 0, WARN: 0 };
   for (const f of report) if (f.level === 'FAIL' || f.level === 'WARN') counts[f.level]++;
   if (counts.FAIL) return 2;
@@ -262,7 +262,7 @@ function exitCode(report) {
 
 // ---------- CLI ----------
 
-function main(argv) {
+export function main(argv) {
   let projectArg = '.';
   let mode = 'all';
   let asJson = false;

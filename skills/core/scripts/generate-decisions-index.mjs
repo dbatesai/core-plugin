@@ -101,7 +101,7 @@ export function buildIndex(memoriesDir) {
   return lines.join('\n');
 }
 
-function main(argv) {
+export function main(argv) {
   const memoriesDir = argv[0]
     ? resolve(argv[0])
     : resolve(process.cwd(), '_memories');
