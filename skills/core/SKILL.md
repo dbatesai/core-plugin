@@ -68,7 +68,7 @@ A few words mean specific things in this skill:
 | Word | What it means |
 |---|---|
 | Harness | The agent interface (Claude Code, Codex, ChatGPT, etc.). CORE is a skill installed into a harness. |
-| Skill | This `/core` product — protocols + agents + templates at `~/.claude/skills/core/`. |
+| Skill | This `/core` product — protocols + agents + templates. Installed under `${CLAUDE_PLUGIN_ROOT}/skills/core/` for marketplace installs, `~/.claude/skills/core/` for legacy direct installs. |
 | Source data | The project being analyzed or developed. |
 | Project synthesis | `<project>/PROJECT.md` — the rendered six-section view (What & Why / State / People / Moves / Decisions & Risks / Notes). |
 | Unit store | `<project>/_memories/` — flat directory of canonical project context, one fact per file. |

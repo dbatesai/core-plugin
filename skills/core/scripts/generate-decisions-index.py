@@ -9,8 +9,8 @@ by the numeric DC id, and writes the markdown table.
 Per DC-77 the script ships with the plugin (not per-project). Run from any
 CORE project root, or pass an explicit memories dir:
 
-    python3 ~/.claude/skills/core/scripts/generate-decisions-index.py
-    python3 ~/.claude/skills/core/scripts/generate-decisions-index.py \\
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.py
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.py \\
         <project>/_memories/
 
 The header comment in the regenerated file points back here so a future
@@ -114,7 +114,7 @@ def build_index(memories_dir: Path) -> str:
         "# Decisions Index",
         "",
         "> Auto-generated from `_memories/dc-*.md` frontmatter (flat layout per DC-68).",
-        "> Do not edit manually — re-run `~/.claude/skills/core/scripts/generate-decisions-index.py`",
+        "> Do not edit manually — re-run `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.py`",
         "> to regenerate. Script ships with the plugin per DC-77.",
         "",
         f"**{len(rows)} decisions indexed.**",

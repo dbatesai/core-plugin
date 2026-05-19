@@ -16,7 +16,7 @@ Three surfaces, three responsibilities. Don't mix them.
 
 - **DM operational meta** — `~/.core/` — your operational layer across projects. `dm-profile.md` is your cross-project home. `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
 
-- **Skill product** — `~/.claude/skills/core/` — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
+- **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
 
 The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's DM meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
 
@@ -186,7 +186,7 @@ Signals:
 
 Starting weights: `w_R=0.30, w_F=0.15, w_S=0.20, w_A=0.35`.
 
-Priority is computed at retrieval time over a candidate set, never persisted as a stored ranked list. The implementation ships with the plugin at `~/.claude/skills/core/scripts/priority.py` (DC-77 — executable units stay in the plugin; project folders hold only data). Invoke as `python3 ~/.claude/skills/core/scripts/priority.py <project>/_memories/ [--intent t1,t2]` for a ranking diagnostic, or import the `score`, `score_unit_file`, and `score_proxy_RS` library functions.
+Priority is computed at retrieval time over a candidate set, never persisted as a stored ranked list. The implementation ships with the plugin at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.py` (DC-77 — executable units stay in the plugin; project folders hold only data). Invoke as `python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.py <project>/_memories/ [--intent t1,t2]` for a ranking diagnostic, or import the `score`, `score_unit_file`, and `score_proxy_RS` library functions.
 
 ---
 
@@ -471,7 +471,7 @@ Three rings, one read at runtime.
 └── research/                      ← cross-project knowledge library
 ```
 
-**Skill ring** — `~/.claude/skills/core/`
+**Skill ring** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace) or `~/.claude/skills/core/` (legacy direct install)
 
 Read-only at runtime. Writes require `intent: skill-edit` declaration.
 

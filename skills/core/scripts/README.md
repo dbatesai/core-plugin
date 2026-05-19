@@ -13,7 +13,7 @@ When a surface earns its way into "the agent relies on this being right every ti
 The DC-69 priority function. Computes `priority(unit, t) = w_R·R + w_F·F + w_S·S + w_A·A + P` over CORE memory units. Importable library (`score`, `score_unit_file`, `score_proxy_RS`) and a CLI diagnostic that ranks a project's units by priority for a given session intent.
 
 ```bash
-python3 ~/.claude/skills/core/scripts/priority.py <project>/_memories/ \
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.py <project>/_memories/ \
     --intent topic1,topic2 --top 10
 ```
 
@@ -24,7 +24,7 @@ Used by Tier 2 retrieval (R·S proxy for walk pruning) and full-priority ranking
 Walks `<project>/_memories/dc-*.md`, parses YAML frontmatter, extracts H1 summaries, and writes `_memories/INDEX-decisions.md`. Pure logic over the units; deterministic output.
 
 ```bash
-python3 ~/.claude/skills/core/scripts/generate-decisions-index.py [<project>/_memories/]
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.py [<project>/_memories/]
 ```
 
 Invoked by the memory hygiene protocol's "regenerate canonical indexes" step.
@@ -34,7 +34,7 @@ Invoked by the memory hygiene protocol's "regenerate canonical indexes" step.
 The CORE retrieval validation runner. Reads `<project>/_memories/_validation/tests/test-*.yaml`, simulates Tier 1 retrieval (grep), scores precision and recall against expected/forbidden unit lists, and writes a report to `<project>/outputs/validation/<date>/REPORT.md`.
 
 ```bash
-python3 ~/.claude/skills/core/scripts/validate.py <project-path>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.py <project-path>
 ```
 
 Used by the validation protocol (weekly auto + on-demand health checks).
@@ -44,7 +44,7 @@ Used by the validation protocol (weekly auto + on-demand health checks).
 Tier 2 edge traversal for CORE retrieval, per DC-68/retrieval.md. Given a seed unit, walks typed edges up to a hop cap applying the R·S proxy from `priority.py:score_proxy_RS()` for branch pruning. Deterministic alternative to LLM-by-hand edge traversal.
 
 ```bash
-python3 ~/.claude/skills/core/scripts/graph-walk.py <project>/_memories/dc-67-no-mcp.md \
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.py <project>/_memories/dc-67-no-mcp.md \
     --hops 2 --intent memory-architecture --format text
 ```
 
@@ -58,9 +58,9 @@ Unit store integrity validator. Two modes (combined by default):
 - **integrity**: orphan detection, dangling edges, stale flagging (R·S < 0.05), INDEX-decisions drift, cold-store eligibility
 
 ```bash
-python3 ~/.claude/skills/core/scripts/check-units.py <project>
-python3 ~/.claude/skills/core/scripts/check-units.py <project> --mode schema
-python3 ~/.claude/skills/core/scripts/check-units.py <project> --json
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.py <project>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.py <project> --mode schema
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.py <project> --json
 ```
 
 Exit codes: 0 = all pass, 1 = warnings, 2 = failures. Run at `/finalize` to surface hygiene work. Run `--mode schema` after writing a new unit to catch structural errors immediately.

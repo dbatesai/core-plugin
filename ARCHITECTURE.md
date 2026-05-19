@@ -121,16 +121,12 @@ The full multi-agent machinery — phase structure, briefing format, monitor pat
 
 ## Hooks and visible curation
 
-Five hooks make the work visible.
+Two hooks register through the plugin manifest.
 
 | Hook | What it does |
 |---|---|
-| SessionStart (global) | Forces `/core` invocation; runs `hygiene-watch.sh` to surface overdue hygiene passes |
 | UserPromptSubmit | Injects the plain-voice imperative each turn to counter the coding-assistant baseline |
-| PreToolUse Write/Edit | Skill-product guard — requires `intent: skill-edit` declaration for `~/.claude/skills/core/**` writes |
-| PostToolUse Write/Edit | Logs every `_memories/` and PROJECT.md touch to the autonomous run log |
-| PreCompact | Warns if no handoff has been written since the last PROJECT.md update |
-| SessionEnd | Backstop reminder that hygiene needs to fire next session if /finalize was skipped |
+| PreToolUse Write/Edit | Skill-product guard — surfaces a Pre-Write Declaration reminder when writes target installed skill paths |
 
 Visible curation is a trust signal. The user should always see the agent keeping context fresh — narration as context gets captured, PROJECT.md sections rendering as they change, the autonomous run log appending in real time.
 
@@ -142,7 +138,7 @@ The validation regime tests three things:
 2. Retrieval convergence (right candidates at the right tier).
 3. Priority ranking quality (right ordering on the candidate set).
 
-Test corpus at `<project>/_memories/_validation/tests/test-*.yaml`. Runner at `~/.claude/skills/core/scripts/validate.py`. Thresholds: P,R ≥ 0.8 PASS, ≥ 0.5 INVESTIGATE, < 0.5 FAIL.
+Test corpus at `<project>/_memories/_validation/tests/test-*.yaml`. Runner at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.py`. Thresholds: P,R ≥ 0.8 PASS, ≥ 0.5 INVESTIGATE, < 0.5 FAIL.
 
 Cadence: weekly automatic (via memory hygiene's first /finalize of the week), on-demand, auto-on during retrieval-tuning sessions.
 
@@ -160,7 +156,7 @@ Lifecycle: per-session, 30-day archive, 90-day cold-store.
 
 | Surface | Where it lives |
 |---|---|
-| Skill product (this plugin) | Installed via the marketplace into `~/.claude/plugins/` or `~/.claude/skills/core/` for clone-install. |
+| Skill product (this plugin) | Installed via `/plugin install core@core` into `~/.claude/plugins/cache/<marketplace>/core/<version>/skills/core/`. Legacy direct-install at `~/.claude/skills/core/` is recognized for clone-into-skills users. |
 | User's project context | User-owned. `<user-project>/_memories/` plus the rendered `<user-project>/PROJECT.md`. |
 | Cross-project operational meta | Machine-local at `~/.core/` — DM profile, workspace registry, dream cycles, swarm effectiveness. |
 | Auto-memory | Machine-local at `~/.claude/projects/<hash>/memory/`. Cached, rebuilt each bootstrap. |
