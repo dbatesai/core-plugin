@@ -10,7 +10,7 @@ Read this when you're about to run the validation regime — weekly automatic vi
 
 The regime tests three things: that the substrate is healthy (units findable, frontmatter parsing, edges resolving), that retrieval converges on the right candidates, and that the priority function ranks them right. Failure surfaces as either a quality signal (precision/recall thresholds) or a structural signal (parse errors, missing files).
 
-## § 1 — What the regime tests
+## What the regime tests
 
 The validation corpus is a YAML file per test at `<project>/_memories/_validation/tests/test-*.yaml`. Each test names a query and the units the query should surface. The runner executes the query against the live retrieval ladder (or a simulated Tier 1, for fast smoke tests) and scores precision + recall against the expected list.
 
@@ -21,7 +21,7 @@ Four classes of test:
 - **Convergence tests** — does the retrieval ladder converge before Tier 3 escalation on queries that should hit Tier 1 or Tier 2?
 - **Storage-anomaly tests** — do all units parse? Do edges resolve to existing units? Do inverse edges hold?
 
-## § 2 — Test corpus format
+## Test corpus format
 
 Each test is a YAML file with frontmatter:
 
@@ -44,7 +44,7 @@ Fields:
 - `tier_expected` — integer 1/2/3. Which retrieval tier should resolve the query. Tier 0 (in-context) is the trivial case and isn't tested.
 - `notes` — string. Free-text rationale for the test author.
 
-## § 3 — Runner
+## Runner
 
 The runner is at `~/.claude/skills/core/scripts/validate.py`. Invocation:
 
@@ -56,7 +56,7 @@ The runner walks `<project-path>/_memories/_validation/tests/test-*.yaml`, runs 
 
 The current runner simulates Tier 1 retrieval (OR-of-terms grep). Future versions add Tier 2 edge-walk simulation and Tier 3 Explore-subagent invocation. The thresholds and report shape stay constant across versions.
 
-## § 4 — Thresholds
+## Thresholds
 
 For each test, the verdict:
 
@@ -66,7 +66,7 @@ For each test, the verdict:
 
 Aggregate pass rate is reported alongside individual results.
 
-## § 5 — Output
+## Output
 
 `<project-path>/_outputs/validation/<YYYY-MM-DD>/REPORT.md` contains:
 
@@ -76,13 +76,13 @@ Aggregate pass rate is reported alongside individual results.
 
 The runner also writes a summary line to `~/.core/hygiene-log.jsonl` so hygiene's continuous self-evaluation can spot trends across runs.
 
-## § 6 — Cadence
+## Cadence
 
 - **Weekly automatic** — fires from memory hygiene's comprehensive pass at the first `/finalize` of each calendar week.
 - **On-demand** — user can request a run any time, or the agent can self-trigger when retrieval starts feeling off.
 - **Auto-on for retrieval-tuning sessions** — when you're adjusting priority weights or edge structure, validation runs before and after to measure the delta.
 
-## § 7 — Failure handling
+## Failure handling
 
 When a test fails:
 
@@ -93,11 +93,11 @@ When a test fails:
 
 The autonomous-first contract from the execution plan applies: try autonomous resolution first; surface only when the failure mode is genuinely blocking.
 
-## § 8 — User's subjective read
+## User's subjective read
 
 Quantitative thresholds aren't the whole story. The validation report includes a final field: *"Did retrieval feel right in real use?"* The user's subjective experience is data — if the numbers say 90% pass but conversations felt thin, the regime is missing something. Surface the subjective read in the next hygiene retrospective.
 
-## § 9 — Extending the corpus
+## Extending the corpus
 
 When you notice a retrieval miss in real conversation that the corpus didn't catch, add a test:
 

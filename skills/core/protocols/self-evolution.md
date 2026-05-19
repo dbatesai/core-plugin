@@ -87,7 +87,7 @@ After every substantial multi-agent run, write a structured effectiveness report
 | Wish I had | Concrete experiments for the next run |
 | Improvement tracking | Status of prior "Wish I Had" items tested this run: tested / improved outcome / no difference / made things worse |
 
-The four named failure modes (premature convergence, collapsing consensus, superficial confidence, agreement quality) live in `protocols/analysis.md` §8. Assess each explicitly in the effectiveness report — the same four names — and call out which one drove the strongest signal this run. Historical pattern: superficial confidence has been the recurring #1.
+The four named failure modes (premature convergence, collapsing consensus, superficial confidence, agreement quality) live in `protocols/analysis.md` under the deep-audit-gate section. Assess each explicitly in the effectiveness report — the same four names — and call out which one drove the strongest signal this run. Historical pattern: superficial confidence has been the recurring #1.
 
 You read recent effectiveness reports before composing a new analysis-protocol invocation. Prior reports are direct calibration input.
 
@@ -109,4 +109,4 @@ There's no separate "memory hygiene" ritual anymore — the operations got named
 
 ## Context window check
 
-If under 30% context remaining: write or update a handoff stub at `<project>/_handoffs/handoff-<YYYY-MM-DD><letter>.md` before substantial work continues. The early-handoff discipline in `protocols/startup.md` §Phase 7 covers the format.
+If under 30% context remaining: write or update a handoff stub at `<project>/_handoffs/handoff-<YYYY-MM-DD><letter>.md` before substantial work continues. The early-handoff discipline in `protocols/startup.md` (Long sessions — write the early handoff stub) covers the format.

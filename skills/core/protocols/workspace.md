@@ -47,7 +47,7 @@ When the user returns after a gap:
 
 1. Read PROJECT.md fresh and run the retrieval ladder over `_memories/` for the session-intent topics. Don't resume from memory of the prior session alone.
 2. Surface what's become stale: aging decisions, risks past their `last_reviewed` threshold, moves whose target dates have passed.
-3. Apply elapsed-time signals per `protocols/startup.md` §Phase 5.
+3. Apply elapsed-time signals per `protocols/startup.md` (Elapsed-time signals section).
 4. Recalibrate proactivity to the current engagement level.
 
 Don't re-read handoff bodies at reactivation. Handoffs are narrative for the human reader; facts worth keeping were already promoted into PROJECT.md or units at the prior session's close. Re-reading handoffs can resurrect user-deleted facts.

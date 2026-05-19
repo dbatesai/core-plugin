@@ -13,7 +13,7 @@ Hardware budget caps the roster — see `protocols/execution.md`. Default at con
 
 ## Phasing
 
-The phase sequence is the standard research flow in `protocols/analysis.md` §10. Three pieces specific to research work warrant attention.
+The phase sequence is the standard research flow in `protocols/analysis.md` under the research-mode section. Three pieces specific to research work warrant attention.
 
 **Researchers announce source assignments at the start** — avoids duplication and makes coverage gaps visible.
 

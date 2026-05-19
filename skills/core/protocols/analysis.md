@@ -10,7 +10,7 @@ Read this when you've decided to invoke multi-agent analysis. This protocol owns
 
 You read `protocols/execution.md` first to confirm multi-agent is warranted; you read this when the decision is made and you're composing the swarm.
 
-## § 1 — When to invoke
+## When to invoke
 
 Multi-agent earns its cost on tasks where a single pass would be suspect. The criteria from `protocols/execution.md`:
 
@@ -21,7 +21,7 @@ Multi-agent earns its cost on tasks where a single pass would be suspect. The cr
 
 If the task doesn't meet at least one of these criteria, you're paying the multi-agent cost for a task a single agent would have done well. Reconsider before composing.
 
-## § 2 — Swarm sizing
+## Swarm sizing
 
 | Scope | Roster | When |
 |---|---|---|
@@ -33,7 +33,7 @@ Critic is always present. Anti-anchoring discipline is non-negotiable regardless
 
 Hardware budget caps the upper end. From `protocols/execution.md`: ≥48GB → up to 6–8; ≥24GB → 4–5; <24GB → 2–3.
 
-## § 3 — Anti-anchoring enforcement
+## Anti-anchoring enforcement
 
 The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the empirically observed 84.5% sycophancy flip rate in LLM critics.
 
@@ -46,7 +46,7 @@ Operational pattern:
 
 When you spawn the Critic agent, its prompt must include this discipline explicitly. Don't trust the model to do it on its own — the sycophancy pull is strong.
 
-## § 4 — Execution phases
+## Execution phases
 
 Five phases. Each has a clear transition criterion. Don't advance unless the criterion is met.
 
@@ -56,11 +56,11 @@ Five phases. Each has a clear transition criterion. Don't advance unless the cri
 | **1 Independent framing** | Each agent frames the task in isolation; Critic writes predictions before reading anyone else | ≥80% of agents have broadcast their independent position |
 | **2 Cross-pollination** | Agents share findings; Critic reads Generators; surprise lenses surface | All agents have read and acknowledged others' findings |
 | **3 Adversarial pressure** | Critic challenges Generators with evidence; Generators defend or update; persuasion-log entries land | Diminishing returns for 2+ exchanges, OR convergence-watch trips |
-| **4 Synthesis + deep audit** | DM composes synthesis; deep audit gate runs (see §8); accept or reject | Deep audit passes the four named failure modes |
+| **4 Synthesis + deep audit** | DM composes synthesis; deep audit gate runs (see the deep-audit-gate section below); accept or reject | Deep audit passes the four named failure modes |
 
-Phase transitions are decisions, not timers. If Phase 3 produces flat agreement after one round, that's a convergence-watch trip — see §7.
+Phase transitions are decisions, not timers. If Phase 3 produces flat agreement after one round, that's a convergence-watch trip — see the monitor-pattern section below.
 
-## § 5 — Output shape
+## Output shape
 
 Multi-agent runs land structured output in two places:
 
@@ -71,7 +71,7 @@ Why both: the SYNTHESIS holds the full narrative for the human reader; the unit 
 
 Effectiveness observations land in `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md` per `protocols/self-evolution.md`.
 
-## § 6 — Persuasion log + mind changes
+## Persuasion log + mind changes
 
 Both fields are mandatory in every agent's output, and in the synthesis.
 
@@ -81,7 +81,7 @@ Both fields are mandatory in every agent's output, and in the synthesis.
 
 If the synthesis carries empty Persuasion Log + empty Mind Changes, that's a deep-audit failure. Reject; re-run Phase 3 with more pressure.
 
-## § 7 — Monitor pattern
+## Monitor pattern
 
 A Monitor agent is part of the swarm whenever the stakes are high. Its job is to catch patterns the working agents can't see in themselves — sycophancy, premature convergence, collapsing consensus, scope drift.
 
@@ -94,7 +94,7 @@ Monitor's escalation ladder:
 
 Monitor is a peer in the communication mesh, not a passive observer. It can challenge, request evidence, and demand recalibration.
 
-## § 8 — Deep audit gate
+## Deep audit gate
 
 Before accepting any convergence claim, run the deep audit. Four named failure modes — assess each explicitly:
 
@@ -107,13 +107,13 @@ Each failure mode gets a named call: "Premature convergence: not detected — th
 
 If any failure mode is detected, the result is rejected and the corresponding phase reruns with corrective pressure.
 
-## § 9 — External-audience test
+## External-audience test
 
 Before any claim about a person or group enters the synthesis output, ask: would a reasonable stakeholder — who lacks the original informal context — find this characterization appropriate if they read it in a status report? If not, redact the individual attribution, describe the structural concern without it, or surface as an Unanswered Question.
 
 This is the same test in `agents/base-protocol.md` — restated here because it's the gate between the swarm's internal reasoning and the user-facing output.
 
-## § 10 — Research mode
+## Research mode
 
 When the task is research-primary (investigation, document synthesis, comparative analysis), the swarm composition shifts toward researchers + a critic, and you adopt the research-document discipline.
 
@@ -132,7 +132,7 @@ When the task is research-primary (investigation, document synthesis, comparativ
 
 **The library is self-improving.** When new research supersedes old, write a `supersedes` edge in the new doc's frontmatter and `superseded_by` in the old one's. Nothing is deleted; supersession is the audit trail.
 
-## § 11 — When NOT to invoke
+## When NOT to invoke
 
 Don't reach for multi-agent when:
 
@@ -144,7 +144,7 @@ Don't reach for multi-agent when:
 
 Multi-agent is one tool, not the product. If single-pass works, use single-pass.
 
-## § 12 — Briefing structure
+## Briefing structure
 
 The briefing is what gets injected into each agent's prompt at spawn time. It's the durable artifact the team reads at start and the DM re-reads during monitoring.
 
@@ -168,7 +168,7 @@ Structured packet for moderate/complex tasks — add:
 
 If the task is complex enough that the user might frame the problem wrong, run the framing checkpoint from `protocols/execution.md` before composing — three questions about whether you have the right question, what assumptions could be wrong, and what constraints are hidden.
 
-## § 13 — Re-alignment before accepting
+## Re-alignment before accepting
 
 After the swarm produces its synthesis and you've completed the deep audit, run a final re-alignment check before accepting:
 
@@ -181,7 +181,7 @@ Record the re-alignment briefly in the autonomous run log. Silence here means th
 
 If the synthesis drifts from the user's intent, the answer isn't to ship it anyway — it's to reject and re-spec the swarm with the corrected framing.
 
-## § 14 — After-action
+## After-action
 
 Once accepted:
 

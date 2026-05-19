@@ -14,7 +14,7 @@ Hardware budget caps the upper end — see `protocols/execution.md`. Default at 
 
 ## Phasing
 
-The phase sequence is the standard adversarial flow in `protocols/analysis.md` §4. Two pieces specific to review work warrant attention.
+The phase sequence is the standard adversarial flow in `protocols/analysis.md` under the execution-phases section. Two pieces specific to review work warrant attention.
 
 The **Quality Sentinel starts first** — it reads source material and broadcasts measurable standards (WCAG ratios, schema validation rules, performance benchmarks, whatever the task makes checkable) before generators begin. Every agent gets a shared quality floor to reference.
 
