@@ -23,9 +23,9 @@ CORE will appear in your plugin list. Start a fresh session and type `/core` to 
 | `/core` | The agent. Starts the session, loads your project context, and talks with you. |
 | `/orient` | Quick thread-resume — load project context and print a readiness summary. |
 | `/finalize` | Session close — write a handoff, update project state, run memory hygiene. |
-| `/process-memory` | Background memory-processing pass — graduates observations, regenerates indexes, queues user-gated decisions for `/finalize`. Registered on a 30-minute loop if your harness ships a scheduler skill. |
+| `/process-memory` | User-invoked memory hygiene pass — pulls inbox, graduates observations, validates units, regenerates indexes, compacts PROJECT.md when over the file cap. |
 | `/vibecheck` | Capture the session's emotional truth as ASCII art. |
-| `/file-reorganize` | Clean up version-qualifier chaos and stale content in any folder. |
+| `/organize-files` | Clean up version-qualifier chaos and stale content in any folder. |
 
 ## First session
 
@@ -57,4 +57,4 @@ Your project-level data (`PROJECT.md`, `_memories/`, `_handoffs/` inside each pr
 
 **The agent doesn't introduce itself by name.** It picks a name on first run. If it didn't, ask it to.
 
-**Sub-skill name collisions.** If another plugin claims `/orient`, `/finalize`, `/process-memory`, `/vibecheck`, or `/file-reorganize`, registration may collide. Disable the other one or remove it.
+**Sub-skill name collisions.** If another plugin claims `/orient`, `/finalize`, `/process-memory`, `/vibecheck`, or `/organize-files`, registration may collide. Disable the other one or remove it.

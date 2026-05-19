@@ -1,9 +1,9 @@
 ---
-name: file-reorganize
+name: organize-files
 description: 'Reorganize files in one or more directories to eliminate two kinds of clutter: (1) versioning chaos — multiple copies, -v1/-v2 proliferation, -working/-editable/-draft suffixes, macOS " copy" duplicates; and (2) content-staleness in active paths — clean-named files that misstate current state (old architecture, rejected specs without supersession markers, stale status fields, descriptions of components/approaches the project has retired). Applies two complementary invariants: "No Qualifier = Canonical" (filename-based) and "Active Paths Match Current Truth" (content-based). Determines what is current by inspecting content and the project''s authoritative state (PROJECT.md, current README, latest specs) — never asks the user to pick. Archives superseded files with date- or event-stamped names; history is preserved. Also creates PROJECT.md synthesis when CORE workspace legacy files (raid-log.md, next-session.md, decision-log.md, session-log.md) are present. Invoke this skill when the user says files are a mess, there are too many versions, they can''t find the latest document, asks to clean up, reorganize, or archive old versions, OR asks whether any files in the project misstate current state, contain stale architecture, or describe approaches the project has abandoned. Use proactively when you notice version-qualifier files piling up outside archive/ OR clean-named files in active paths describing components/decisions the project has retired.'
 ---
 
-# /file-reorganize
+# /organize-files
 
 ## What This Skill Does
 
