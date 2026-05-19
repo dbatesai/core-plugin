@@ -28,7 +28,7 @@ List the contradiction explicitly ("Memory A says X, Memory B says Y"), read cur
 
 ### 3b — Archive Reconciliation
 
-Entries get archived to keep PROJECT.md lean — but archived entries can become load-bearing again as new work references them. This phase surfaces re-emergent ones.
+Entries get archived to keep PROJECT.md lean — but archived entries can become relevant again as new work references them. This phase surfaces re-emergent ones.
 
 For each archive file not modified recently, extract decision/risk/assumption IDs and grep the current read surface (PROJECT.md, recent handoffs, protocols, skill references) for references beyond each entry's own stub line. Surface candidates above the match threshold to the user, who decides: promote the stub back to §D&R, reject, or suppress for N cycles.
 
@@ -48,13 +48,13 @@ Auto-MIGRATE runs autonomously per DC-46, but if it's archiving faster than expe
 
 Units get renamed, archived, or deleted; typed edges that pointed at them become danglers that silently fail at retrieval time. Walk `<project>/_memories/*.md` frontmatter, collect all `edges:` entries, verify each target ID exists in the vault. External targets (quoted strings like `"Park et al. 2023"`) are exempt from dangle detection.
 
-The load-bearing rule: for structural edge types (`supersedes`, `depends-on`, `conflicts-with`) on any unit, surface the dangler for user review — never auto-remove. For informational types (`cites`, `references-person`, `references-topic`), auto-remove and log. After any merge or rename, rewrite inverse edges pointing at the old ID. A light wikilink pass promotes `[[wikilink-id]]` body references to typed `cites` frontmatter edges.
+The rule that matters: for structural edge types (`supersedes`, `depends-on`, `conflicts-with`) on any unit, surface the dangler for user review — never auto-remove. For informational types (`cites`, `references-person`, `references-topic`), auto-remove and log. After any merge or rename, rewrite inverse edges pointing at the old ID. A light wikilink pass promotes `[[wikilink-id]]` body references to typed `cites` frontmatter edges.
 
 ### 3e — Session Log Prune
 
 Session logs in `<project>/_sessions/` are ephemeral by design and grow without bound unless pruned. A log is eligible if all three conditions hold: older than 90 days, no unit's `sources:` or `cites:` edge references it, no handoff references it.
 
-The citation check is the load-bearing condition. If a session log got cited by a unit, someone reached back for it — preserve it. Age and handoff-reference checks filter the rest. Log every deletion in the retrospective; clean up empty directories.
+The citation check is what decides. If a session log got cited by a unit, someone reached back for it — preserve it. Age and handoff-reference checks filter the rest. Log every deletion in the retrospective; clean up empty directories.
 
 What this phase never touches: handoffs, outputs, swarm-effectiveness reports, hygiene retrospectives, or any cited session log.
 

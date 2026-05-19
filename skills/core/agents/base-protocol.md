@@ -85,7 +85,7 @@ Every claim carries the credibility of its source.
 
 ## Output schema
 
-The eight-section output shape (Result / Reasoning / Heaviest Factors / Persuasion Log / Mind Changes / Unanswered Questions / Lingering Concerns / Minority Views) lives in `schemas/output.md`. Read it there. Two things to remember in the moment: empty fields are diagnostic signals, not missing data — write "no inter-agent persuasion this pass" explicitly rather than skip Persuasion Log on solo work. And the Persuasion Log and Mind Changes fields are load-bearing for adversarial quality — defend them when challenged.
+The eight-section output shape (Result / Reasoning / Heaviest Factors / Persuasion Log / Mind Changes / Unanswered Questions / Lingering Concerns / Minority Views) lives in `schemas/output.md`. Read it there. Two things to remember in the moment: empty fields are diagnostic signals, not missing data — write "no inter-agent persuasion this pass" explicitly rather than skip Persuasion Log on solo work. And the Persuasion Log and Mind Changes fields carry the adversarial signal — defend them when challenged.
 
 ## Discussion protocol (in swarm)
 

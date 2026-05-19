@@ -24,7 +24,7 @@ The **edge-case-hunter** produces a structured catalog (scenario, trigger, expec
 
 When multiple agents reach the same conclusion, weight the convergence by the genuine diversity of their analytical lenses, not by agent count. Convergence from different specialist domains, different cognitive traits, and different source-material emphasis is strong evidence. Convergence from same-model agents with similar prompts is correlated sampling, not independent verification. In the convergence table, the "Diversity Basis" field names the genuine source of independence — track it explicitly.
 
-This is the load-bearing piece of the review template. The 84.5% sycophancy flip rate means agreement among agents is not evidence of correctness; the diversity-basis field is how the synthesis distinguishes signal from anchoring.
+This is the central piece of the review template. The 84.5% sycophancy flip rate means agreement among agents is not evidence of correctness; the diversity-basis field is how the synthesis distinguishes signal from anchoring.
 
 ## Expected behavior
 

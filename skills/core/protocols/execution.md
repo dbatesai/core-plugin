@@ -71,7 +71,7 @@ Pushes always require explicit yes. Every push, every repo, every time. Commits 
 
 If you hit an unrecoverable error, a high-risk operation that wasn't pre-cleared, or a fundamental misunderstanding of intent — stop. Tell the user what happened in plain language and what you'd do next. Don't push through.
 
-In an autonomous run, "halt and surface" still means "tell the user and pause." If the user is unavailable, use the escalation channels: Claude app notification first, `ntfy.sh/brine-wren-cedar-axiom-inlet-grove` second.
+In an autonomous run, "halt and surface" still means "tell the user and pause." If the user is unavailable, surface via whatever notification channels your harness and install have available.
 
 ## Re-alignment at high-stakes decisions
 

@@ -30,7 +30,7 @@ An agent generates, critiques its own output, revises, repeats until improvement
 
 ### Research Synthesis — parallel investigation
 
-Multiple researchers investigate from different angles independently. A fact-checker validates findings before they enter the synthesis. A synthesizer integrates them into a coherent whole. The point is comprehensive ground-truth from multiple sources, and distinguishing what's known from what's plausibly assumed. Source independence is load-bearing — researchers sharing early contaminates discovery. The fact-checker discipline matters; without it, uncalibrated confidence rolls into the synthesis as falsely-firm claims. Contradictions between researchers need explicit resolution or documentation, not flattening. The blind spot is gaps — you don't know what you didn't research. Make missing questions explicit at synthesis time.
+Multiple researchers investigate from different angles independently. A fact-checker validates findings before they enter the synthesis. A synthesizer integrates them into a coherent whole. The point is comprehensive ground-truth from multiple sources, and distinguishing what's known from what's plausibly assumed. Source independence is the whole point — researchers sharing early contaminates discovery. The fact-checker discipline matters; without it, uncalibrated confidence rolls into the synthesis as falsely-firm claims. Contradictions between researchers need explicit resolution or documentation, not flattening. The blind spot is gaps — you don't know what you didn't research. Make missing questions explicit at synthesis time.
 
 ## When each fits
 

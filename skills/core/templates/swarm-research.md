@@ -17,7 +17,7 @@ The phase sequence is the standard research flow in `protocols/analysis.md` §10
 
 **Researchers announce source assignments at the start** — avoids duplication and makes coverage gaps visible.
 
-**Fact-Checker independence discipline.** The fact-checker did not participate in the research phase. Fresh eyes are the point — the agent checks whether cited sources are real and accessible, whether they say what the researchers claim, whether outdated claims are being presented as current, and whether statistical claims are properly contextualized. This independence is load-bearing — a fact-checker pulled from the same context as the researchers produces correlated verification, not independent verification.
+**Fact-Checker independence discipline.** The fact-checker did not participate in the research phase. Fresh eyes are the point — the agent checks whether cited sources are real and accessible, whether they say what the researchers claim, whether outdated claims are being presented as current, and whether statistical claims are properly contextualized. This independence is the whole point — a fact-checker pulled from the same context as the researchers produces correlated verification, not independent verification.
 
 **Confidence per finding** — High / Medium / Low with explicit rationale tied to source quality, convergence across independent sources, and the fact-check result. Uncalibrated confidence rolls into the synthesis as falsely-firm claims.
 
