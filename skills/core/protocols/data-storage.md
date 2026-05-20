@@ -88,9 +88,9 @@ confidence: 0.90
 sources:
   - _summaries/summary-2026-04-02.md
   - docs/plans/routing-rewrite-plan.md
-references-person:
+people:
   - alex
-references-topic:
+topics:
   - routing
   - auth
   - api-rewrite
@@ -107,24 +107,28 @@ auth boundary. ...
 
 Location: `<project>/_memories/<prefix>-<slug>.md` — flat layout per DC-68, with the type encoded in the filename prefix.
 
+**Field-name distinction between tiers.** Tier 1 observations carry `references-person:` and `references-topic:` — the raw entities mentioned in the capture. Tier 2 units carry curated `people:` and `topics:` arrays — the result of graduation reasoning, which may add, drop, or rename entries from the raw observation lists. `priority.mjs` and `check-units.mjs` read the Tier 2 `topics:` field; the priority function's A signal (Jaccard alignment with session-intent topics) operates on this curated list.
+
 ### The canonical flag
 
 Top-priority units mark `canonical: true` in frontmatter. Canonical units get a priority floor, drive PROJECT.md rendering, and surface most heavily in retrieval. Not a separate tier — a marker on individual units.
 
 ---
 
-## The six edge types
+## The committed edge types
 
-Edges live in unit frontmatter as `{type, target, note?}` triples. Six committed types, no proliferation past these without a new decision unit:
+Edges live in unit frontmatter as `{type, target, note?}` triples. The committed types, no proliferation without a new decision unit:
 
 - `cites` — generic reference. Use this when one unit references another without a stronger relationship.
 - `supersedes` — replacement. The target unit is no longer current truth.
+- `superseded-by` — inverse of `supersedes`. The target is the unit that replaced this one; this unit usually carries `status: superseded`.
 - `depends-on` — dependency. This unit's validity depends on the target.
+- `depended-on-by` — inverse of `depends-on`.
 - `conflicts-with` — contradiction. The two units make incompatible claims; reconciliation owed.
-- `references-person` — a person mentioned in the unit (also surfaces in the top-level `references-person:` list).
-- `references-topic` — a topic mentioned (also surfaces in the top-level `references-topic:` list).
+- `references-person` — a person mentioned in the unit (used on Tier 1 observations).
+- `references-topic` — a topic mentioned (used on Tier 1 observations).
 
-**Eager vs lazy writes.** Three types you write the moment you commit the unit, because retrieval and hygiene depend on them right away: `supersedes`, `depends-on`, `conflicts-with`. Inverse edges (the target gains the reciprocal edge) are eager for these three too.
+**Eager vs lazy writes.** Three types you write the moment you commit the unit, because retrieval and hygiene depend on them right away: `supersedes`, `depends-on`, `conflicts-with`. Inverse edges (`superseded-by`, `depended-on-by`) are eager for these too — written at the same time on the target unit.
 
 The other three — `cites`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
 
