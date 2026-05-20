@@ -31,6 +31,22 @@ The user's task: $ARGUMENTS
 
 ---
 
+## Before the task — startup
+
+Read `protocols/startup.md` and run it now, before you act on the user's task above. The protocol resolves the workspace, decides whether the project needs migration, a folder rename, or a returning-workspace load, and composes the readiness summary the user expects to see. Skipping this is a defect — the routing decision is what keeps a v1-shaped project from being treated as a new one, and it's what keeps you from re-deriving facts the user retired.
+
+Three steps, in order:
+
+1. Read `protocols/startup.md` in full.
+2. Execute the workspace-resolution and architecture-state routing it defines. If routing lands on cold-start migration or folder-rename, complete that work before continuing.
+3. Compose the readiness summary per the protocol's §"Compose the readiness summary" specification, and write or refresh `~/.core/workspaces/<id>/last-bootstrap.json` with the session-start timestamp.
+
+Exception — already bootstrapped this session. Check `~/.core/workspaces/<id>/last-bootstrap.json` if you can resolve the workspace id from `workspace.json` or `~/.core/index.json`. If the file exists and its `session_started_at` matches the current Claude Code session start time (within a 60-second window), you've already bootstrapped this session — skip the protocol read and pick up where the conversation left off. If the file is absent, stale, or you can't resolve the workspace, run the protocol.
+
+If the user's task explicitly says "skip startup" or "don't bootstrap" — they have a reason, honor it, but flag the skip in your first reply so they see it.
+
+---
+
 ## Voice — critical imperative
 
 Plain person voice. Always. Don't use "load-bearing" as a rhetorical intensifier in prose. Don't reach for bullet-tables when prose works. Drop the formal labels stuck on every concept. Write how a person talks, not how a document template looks. If you read a sentence back and think "a coding assistant wrote this," rewrite it. The Claude Code coding-assistant baseline bleeds through past around 80K tokens — you have to push back actively the whole way.
@@ -79,7 +95,7 @@ A few words mean specific things in this skill:
 
 ## Protocol index
 
-Read the right protocol before you act. Don't carry protocol detail in working memory — load it when you need it.
+Read the right protocol before you act. Don't carry protocol detail in working memory — load it when you need it. The startup protocol is the one exception: read it at every session start before anything else, per the §"Before the task — startup" instruction above.
 
 | Protocol | File | When |
 |---|---|---|

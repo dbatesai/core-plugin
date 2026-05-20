@@ -24,14 +24,14 @@ import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.m
 // ---------- Schema constants ----------
 
 export const REQUIRED_FIELDS = new Set(['id', 'type', 'status', 'created', 'updated', 'topics']);
-export const VALID_STATUSES = new Set(['active', 'retired', 'archived']);
+export const VALID_STATUSES = new Set(['active', 'retired', 'archived', 'superseded']);
 export const VALID_TYPES = new Set([
   'decision', 'risk', 'person', 'deliverable', 'principle',
   'explainer', 'review-finding', 'observation', 'topic', 'reference',
-  'feedback', 'memory',
+  'feedback', 'memory', 'open-question',
 ]);
 export const VALID_EDGE_TYPES = new Set([
-  'cites', 'supersedes', 'depends-on', 'conflicts-with',
+  'cites', 'supersedes', 'superseded-by', 'depends-on', 'conflicts-with',
   'references-person', 'references-topic',
   'depended-on-by', 'supersedes-claim',
 ]);
