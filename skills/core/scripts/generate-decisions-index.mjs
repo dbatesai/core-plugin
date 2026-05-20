@@ -101,9 +101,19 @@ export function buildIndex(memoriesDir) {
   return lines.join('\n');
 }
 
+export function resolveMemoriesDir(input) {
+  const candidate = resolve(input);
+  if (candidate.endsWith('/_memories') || candidate.endsWith('\\_memories')) return candidate;
+  try {
+    const stat = readdirSync(join(candidate, '_memories'));
+    if (stat) return join(candidate, '_memories');
+  } catch { /* no _memories subdir — caller passed _memories itself or a wrong path */ }
+  return candidate;
+}
+
 export function main(argv) {
   const memoriesDir = argv[0]
-    ? resolve(argv[0])
+    ? resolveMemoriesDir(argv[0])
     : resolve(process.cwd(), '_memories');
 
   try { readdirSync(memoriesDir); } catch {
