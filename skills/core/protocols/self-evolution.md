@@ -109,4 +109,4 @@ There's no separate "memory hygiene" ritual anymore — the operations got named
 
 ## Context window check
 
-If under 30% context remaining: write or update a handoff stub at `<project>/_handoffs/handoff-<YYYY-MM-DD><letter>.md` before substantial work continues. The early-handoff discipline in `protocols/startup.md` (Long sessions — write the early handoff stub) covers the format.
+If under 30% context remaining: write or update a summary stub at `<project>/_summaries/summary-<YYYY-MM-DD><letter>.md` before substantial work continues. The early-summary discipline in `protocols/startup.md` (Long sessions — write the early summary stub) covers the format.

@@ -68,7 +68,7 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 | Trigger | What runs |
 |---|---|
 | `/finalize` | Comprehensive hygiene pass — archive/retire/cold-store, graduation of borderline observations, index regeneration, file-cap reconciliation, retrospective. The primary scheduled hygiene event each session. |
-| `/process-memory` (user-invoked) | On-demand pass — same hygiene work without the handoff and render steps. Run when you want memory housekeeping mid-session. See `skills/process-memory/SKILL.md`. |
+| `/process-memory` (user-invoked) | On-demand pass — same hygiene work without the session-summary and render steps. Run when you want memory housekeeping mid-session. See `skills/process-memory/SKILL.md`. |
 | On-demand user request | "Run hygiene now," "graduate this," "archive the old decisions about X." |
 | Meaningful PROJECT.md change | User removes fact → retire-trigger fires for the affected units. |
 | Edit-detection hash mismatch | Reconciliation pass runs as a follow-on after edit-detection captures the user's change. |
@@ -185,7 +185,7 @@ Former dream cycle phases mapped to v2 hygiene:
 | Phase 3b: archive reconciliation | Archive / retire / cold-store verbs — verbs are the operational primitives |
 | Phase 3c: volume audit | File-cap monitoring — synthesis files (PROJECT.md, IMPROVEMENT_LOG.md) checked against Read tool cap; over-threshold → compact |
 | Phase 3d: edge integrity sweep | Index regeneration + edge-reconciliation pass — `INDEX-*.md` regenerates, broken edges flagged |
-| Phase 3e: session-log auto-prune | Sessions cleanup — `<project>/_sessions/<date>/` directories older than 90 days, with no unit cite and no handoff reference, get archived |
+| Phase 3e: session-log auto-prune | Sessions cleanup — `<project>/_sessions/<date>/` directories older than 90 days, with no unit cite and no summary reference, get archived |
 | Phase 4: pattern synthesis | Graduation reasoning — same operation, named for what it actually is |
 | Phase 5: agent roster refresh | Lives in `protocols/self-evolution.md` (effectiveness-tracking-driven) |
 

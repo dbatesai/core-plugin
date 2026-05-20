@@ -1,12 +1,12 @@
 ---
 name: finalize
-description: Session closing skill — reconcile state, write handoff, render PROJECT.md from units, run memory hygiene
+description: Session closing skill — reconcile state, write the session summary, render PROJECT.md from units, run memory hygiene
 user-invocable: true
 ---
 
 # `/finalize`
 
-You're closing the session. Project state has been updating continuously — observations get written as the user talks, units get graduated as patterns emerge, PROJECT.md sections re-render when something meaningful changes. Finalize is where you verify everything's coherent, run the hygiene pass, write the human-readable handoff, and leave a clean state for the next bootstrap.
+You're closing the session. Project state has been updating continuously — observations get written as the user talks, units get graduated as patterns emerge, PROJECT.md sections re-render when something meaningful changes. Finalize is where you verify everything's coherent, run the hygiene pass, write the human-readable summary, and leave a clean state for the next bootstrap.
 
 Execute every step in order. Don't skip.
 
@@ -24,7 +24,7 @@ Before writing anything, re-read the session from the top with fresh eyes. Reaso
 - Did anything break or degrade that we didn't fix?
 - Is the project better than we found it?
 
-Write a one-paragraph honest assessment. It goes into the handoff.
+Write a one-paragraph honest assessment. It goes into the summary.
 
 ---
 
@@ -60,12 +60,14 @@ The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in 
 
 ---
 
-## Step 4 — Write the handoff
+## Step 4 — Write the session summary
 
-`<project>/_handoffs/handoff-<YYYY-MM-DD>.md` (with letter suffix if today already has one).
+`<project>/_summaries/summary-<YYYY-MM-DD>.md` (with letter suffix if today already has one).
+
+The summary is a human-readable narrative of the session for the user to review later — what got done, what got decided, what's open. It's not part of how the next session orients itself. Project facts worth keeping across sessions were already promoted into PROJECT.md and `_memories/` during the session; the next bootstrap reads those, not the summary. The summary is a safety net (if the unit store ever gets corrupted, you could reconstruct from summaries) and a record for the user.
 
 ```markdown
-# Session Handoff — <YYYY-MM-DD>
+# Session Summary — <YYYY-MM-DD>
 
 ## Fresh-eyes assessment
 [Your one-paragraph honest read from Step 1.]
@@ -95,17 +97,20 @@ The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in 
 [Specific recommended first action.]
 ```
 
-Handoffs are write-only from your perspective — facts worth keeping are already in PROJECT.md or `_memories/`. The handoff is for the human reader (project review, reconstructed context after a catastrophic loss).
+Summaries are write-only from your perspective — you don't re-read them at bootstrap. The anti-resurrection rule applies: re-reading a summary could resurrect facts the user removed from PROJECT.md after it was written. Future bootstraps load from PROJECT.md and `_memories/`; the summary stays as a human record.
 
 ---
 
-## Step 5 — Update auto-memory
+## Step 5 — Update Claude Code's auto-memory cache
 
-Auto-memory is scratch cache; the bootstrap rebuilds it from current synthesis. Still, capture session-level insights that should accelerate the next session's load:
+Claude Code automatically loads the per-project MEMORY.md at the start of every session (the first 200 lines, before any tool call). CORE writes into that folder so the next session's bootstrap starts warm. Authoritative project facts live in PROJECT.md and `_memories/` — auto-memory just carries pointers, session-level feedback, and summaries that help the next session orient fast.
 
-- New user preferences or feedback → `feedback_*.md`.
-- New project context → `project_*.md`.
-- Changed understanding of the user → `user_profile.md`.
+The file naming is a CORE convention layered on top of the harness folder:
+
+- User preferences and feedback → `feedback_*.md`
+- Project context summaries → `project_*.md`
+- User-profile updates → `user_profile.md`
+- Pointers to external systems → `reference_*.md`
 
 Update the `MEMORY.md` index in the same operation. Don't write project-specific facts as authoritative here — those live in PROJECT.md or `_memories/`. Auto-memory carries pointers and summaries.
 
@@ -128,6 +133,6 @@ The subagent runs background — the user doesn't wait on it. Narrate the dispat
 
 After all steps complete, declare in plain voice. Concrete shape:
 
-> *"Session closed. Handoff at `_handoffs/handoff-<date>.md`. PROJECT.md rendered from current units. Hygiene pass complete — N archives, M retires, no cold-stores this pass."*
+> *"Session closed. Summary at `_summaries/summary-<date>.md`. PROJECT.md rendered from current units. Hygiene pass complete — N archives, M retires, no cold-stores this pass."*
 
 If anything couldn't be completed, name it explicitly. Don't silently skip a step. Surface the blocker plainly and recommend a next move.

@@ -30,13 +30,13 @@ List the contradiction explicitly ("Memory A says X, Memory B says Y"), read cur
 
 Entries get archived to keep PROJECT.md lean — but archived entries can become relevant again as new work references them. This phase surfaces re-emergent ones.
 
-For each archive file not modified recently, extract decision/risk/assumption IDs and grep the current read surface (PROJECT.md, recent handoffs, protocols, skill references) for references beyond each entry's own stub line. Surface candidates above the match threshold to the user, who decides: promote the stub back to §D&R, reject, or suppress for N cycles.
+For each archive file not modified recently, extract decision/risk/assumption IDs and grep the current read surface (PROJECT.md, recent session summaries, protocols, skill references) for references beyond each entry's own stub line. Surface candidates above the match threshold to the user, who decides: promote the stub back to §D&R, reject, or suppress for N cycles.
 
 Suppression state persists at `~/.core/swarm-effectiveness/archive-reconciliation-state.json`. Log all outcomes in the hygiene retrospective.
 
 **Calibration defaults** — starting points to tune after a few cycles, not fixed rules: 14-day recency gate (skip files modified too recently), ≥3 match threshold (below this is noise), top-10 candidates per cycle.
 
-Example: a decision unit archived three months back keeps showing up in protocols and handoffs as new work references it. Sub-protocol 3b surfaces it; the user decides whether to un-archive and surface in §D&R or suppress for a few cycles.
+Example: a decision unit archived three months back keeps showing up in protocols and session summaries as new work references it. Sub-protocol 3b surfaces it; the user decides whether to un-archive and surface in §D&R or suppress for a few cycles.
 
 ### 3c — Compaction Volume
 
@@ -52,11 +52,11 @@ The rule that matters: for structural edge types (`supersedes`, `depends-on`, `c
 
 ### 3e — Session Log Prune
 
-Session logs in `<project>/_sessions/` are ephemeral by design and grow without bound unless pruned. A log is eligible if all three conditions hold: older than 90 days, no unit's `sources:` or `cites:` edge references it, no handoff references it.
+Session logs in `<project>/_sessions/` are ephemeral by design and grow without bound unless pruned. A log is eligible if all three conditions hold: older than 90 days, no unit's `sources:` or `cites:` edge references it, no session summary references it.
 
-The citation check is what decides. If a session log got cited by a unit, someone reached back for it — preserve it. Age and handoff-reference checks filter the rest. Log every deletion in the retrospective; clean up empty directories.
+The citation check is what decides. If a session log got cited by a unit, someone reached back for it — preserve it. Age and summary-reference checks filter the rest. Log every deletion in the retrospective; clean up empty directories.
 
-What this phase never touches: handoffs, outputs, swarm-effectiveness reports, hygiene retrospectives, or any cited session log.
+What this phase never touches: session summaries, outputs, swarm-effectiveness reports, hygiene retrospectives, or any cited session log.
 
 ## Phase 4: Pattern Synthesis
 

@@ -39,8 +39,8 @@ Now route by the project's architecture state. The retrieval-ladder load has an 
 
 - **Migration-in-progress flag present.** If `<project>/_memories/.migration-in-progress` exists, a prior session started cold-start migration and didn't finish (or migration is running in another session). Resume migration — do not route to the returning-workspace load regardless of what else is in `_memories/`. The flag is the authoritative signal.
 - **Unit store populated.** `<project>/_memories/` exists AND contains at least one canonical unit. A canonical unit is any `*.md` file in `_memories/` (recursive) whose name does not start with `_` (e.g., `_validation/`) and does not start with `INDEX`. Existence alone isn't enough — populated is the precondition. If populated AND no unprefixed CORE folders, route to the returning-workspace load.
-- **Unit store populated BUT unprefixed CORE folders exist.** Pre-DC-74 naming on `handoffs/`, `sessions/`, or `outputs/`. Run the folder-rename-only path, then proceed to returning-workspace load.
-- **Unit store empty-or-missing, v1 markers present.** A prior PROJECT.md, `_handoffs/`, `_sessions/`, `_outputs/` (or unprefixed equivalents), `plan.md`, `specs/`, `rebuild/`, or legacy workspace meta at `~/.core/workspaces/<id>/tracking/` or `~/.core/workspaces/<id>/handoffs/` — any of these counts. Cold-start migration before any other load.
+- **Unit store populated BUT unprefixed CORE folders exist.** Pre-DC-74 naming on `handoffs/`, `summaries/`, `sessions/`, or `outputs/`. Run the folder-rename-only path, then proceed to returning-workspace load.
+- **Unit store empty-or-missing, v1 markers present.** A prior PROJECT.md, `_summaries/` (or legacy `_handoffs/`), `_sessions/`, `_outputs/` (or unprefixed equivalents), `plan.md`, `specs/`, `rebuild/`, or legacy workspace meta at `~/.core/workspaces/<id>/tracking/` or `~/.core/workspaces/<id>/handoffs/` — any of these counts. Cold-start migration before any other load.
 - **Unit store empty-or-missing, no v1 markers.** Truly new workspace. Interview and scaffold.
 
 Surface the routing decision to the user in plain voice before proceeding. *"This project has prior content but no v2 unit store yet, so I'm going to run the cold-start migration before doing anything else."* For the rename-only case: *"This project's CORE folders are on the pre-DC-74 names. I'm going to rename them to the underscore convention before loading."* For the resume case: *"A migration-in-progress flag is present from a prior session. Resuming the cold-start migration before loading."*
@@ -62,7 +62,7 @@ The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to
 - Read `~/.core/workspaces/<id>/workspace.json` for cross-session metadata only (last-session date, timestamps). Don't read project facts from here — there aren't any.
 
 **Skip these surfaces at bootstrap:**
-- Handoffs in `<project>/_handoffs/`. They're narrative for the human reader. Facts worth keeping were already in PROJECT.md or the units at session close. Re-reading handoffs re-anchors you on narrative framing and can resurrect user-deleted facts.
+- Session summaries in `<project>/_summaries/` (or legacy `_handoffs/` if the rename hasn't happened yet). They're narrative for the human reader. Facts worth keeping were already in PROJECT.md or the units at session close. Re-reading summaries re-anchors you on narrative framing and can resurrect user-deleted facts.
 - `<project>/PROJECT-ARCHIVE.md`, `<project>/IMPROVEMENT_LOG-ARCHIVE.md`. Single-write archive surfaces.
 - Legacy workspace files (`raid-log.md`, `decision-log.md`, `next-session.md`, `handoffs/`) under `~/.core/workspaces/<id>/` — pre-2026-04-21 structure. If `PROJECT.md` exists, ignore them. If it doesn't, surface the mismatch and offer to migrate.
 
@@ -81,7 +81,7 @@ Create the unit store: `mkdir -p <project>/_memories/observations/<YYYY-MM>/`. P
 
 Create `<project>/inbox.md` if external pulls are expected. Create the project-folder pointer at `<project>/workspace.json` with `workspace_id`, `name`, `created`, `data_path`. Create the workspace meta at `~/.core/workspaces/<workspace-id>/workspace.json` per the workspace schema, and `~/.core/workspaces/<id>/swarm-narrative.md` empty for now. Register the workspace by appending its entry to `~/.core/index.json`.
 
-If the project folder turns out to have pre-existing content that wasn't visible during routing (handoffs in unusual locations, prior PROJECT.md, session logs surfaced during interview), drop into cold-start migration instead. The new-workspace scaffold is for truly empty projects; substantial prior content always routes through migration.
+If the project folder turns out to have pre-existing content that wasn't visible during routing (session summaries or legacy handoffs in unusual locations, prior PROJECT.md, session logs surfaced during interview), drop into cold-start migration instead. The new-workspace scaffold is for truly empty projects; substantial prior content always routes through migration.
 
 ## Load — cold-start migration
 
@@ -89,37 +89,44 @@ The project has substantive prior content but no v2 unit store. Run comprehensiv
 
 **Write the migration-in-progress flag first.** Before any other migration action, create `<project>/_memories/.migration-in-progress` — a single line with the session timestamp and a brief reason is enough (`2026-05-18T11:23:00Z — cold-start migration begun`). This flag guards against re-invocation mid-migration silently routing to the returning-workspace load on a partial store. If the flag is already present from a prior interrupted session, read it, decide whether to resume from the partial state or restart, and rewrite the flag with this session's timestamp either way. The flag is removed at the end as the explicit signal that migration completed cleanly.
 
-**Write the early-handoff stub before starting any substantive migration.** Migration is the canonical long/autonomous/complex session that warrants the early handoff (see below).
+**Write the early summary stub before starting any substantive migration.** Migration is the canonical long/autonomous/complex session that warrants the early summary (see below).
 
 **Check for an existing migration plan.** Look at `~/.core/workspaces/<id>/migration-plan.md`. If present, execute from that durable plan from a prior planning session — don't re-design. If absent, write one to that location before executing.
 
 **Verify the model is appropriate.** Cold-start migration on a large project warrants Opus + ultrathink-level reasoning. Surface the recommendation if the session is on a smaller model.
 
-**Check for prior conversation transcripts.** `~/.claude/projects/<cwd-mapped>/` may contain prior session transcripts; if present, they're substrate worth reading alongside handoffs, plans, and specs.
+**Check for prior conversation transcripts.** `~/.claude/projects/<cwd-mapped>/` may contain prior session transcripts; if present, they're substrate worth reading alongside session summaries, plans, and specs.
 
 **Anti-resurrection is strict.** If a prior PROJECT.md exists, it's the user's curation surface — promote backing units for facts it endorses; capture substrate-only facts as observations but do not auto-promote them. Surface ambiguous cases.
 
 **Preserve disagreement.** Multi-agent perspective outputs and rejected alternatives are gold for the "how we got here" reasoning; don't flatten them when graduating.
 
-**Folder rename (DC-74).** If the project has unprefixed CORE folders (`handoffs/`, `sessions/`, `outputs/`), rename them to the underscore convention as the first concrete action after the early-handoff stub. Use `git mv` when the project is under git so history follows; plain `mv` otherwise. Run a path-citation sweep in `_memories/*.md` after the renames so frontmatter `sources:` pointers stay valid — bare path-strings `handoffs/`, `sessions/`, `outputs/` become `_handoffs/`, `_sessions/`, `_outputs/`. Narrate the renames in plain voice as they happen.
+**Folder rename (DC-74 + summary rename).** If the project has unprefixed CORE folders (`handoffs/`, `summaries/`, `sessions/`, `outputs/`), rename them to the current underscore convention as the first concrete action after the early summary stub. Use `git mv` when the project is under git so history follows; plain `mv` otherwise. Both `handoffs/` (pre-rename) and `summaries/` map to `_summaries/`; `sessions/` → `_sessions/`; `outputs/` → `_outputs/`. Run a path-citation sweep in `_memories/*.md` after the renames so frontmatter `sources:` pointers stay valid. Narrate the renames in plain voice as they happen.
 
 **Remove the flag and re-enter the returning-workspace load.** Once the unit store is populated and verified, delete `<project>/_memories/.migration-in-progress` as the explicit signal migration completed cleanly. Then run the returning-workspace load against the now-populated store. The migration agent's side-effect knowledge of what it wrote is NOT a substitute for a deliberate load — the retrieval ladder is what actually puts unit content into working memory. Without this re-entry, subsequent turns degrade rapidly as working-memory awareness decays.
 
 ## Load — folder rename only
 
-The project is already on v2 but has unprefixed CORE folders. Run only the rename step, then proceed to the returning-workspace load.
+The project is already on v2 but has unprefixed CORE folders, or it's on DC-74-era `_handoffs/` and needs the summary rename. Run only the rename step, then proceed to the returning-workspace load.
 
-Announce the rename in plain voice: *"This project has the pre-DC-74 folder names. Renaming `handoffs/` → `_handoffs/`, `sessions/` → `_sessions/`, `outputs/` → `_outputs/` before loading."*
+Announce the rename in plain voice. Example: *"This project has the pre-DC-74 folder names. Renaming `handoffs/` → `_summaries/`, `sessions/` → `_sessions/`, `outputs/` → `_outputs/` before loading."* Or, for the DC-74-to-summary case: *"This project still has the legacy `_handoffs/` folder. Renaming to `_summaries/` before loading."*
 
-For each unprefixed folder that exists, `git mv handoffs _handoffs` (or plain `mv` if not in a git tree). Skip any that don't exist.
+For each folder that exists, use `git mv` (or plain `mv` if not in a git tree):
+- `handoffs/` → `_summaries/`
+- `summaries/` → `_summaries/`
+- `_handoffs/` (legacy) → `_summaries/`
+- `sessions/` → `_sessions/`
+- `outputs/` → `_outputs/`
 
-Sweep `<project>/_memories/*.md` for path-citations in frontmatter `sources:` and inline body text — update `handoffs/` → `_handoffs/`, `sessions/` → `_sessions/`, `outputs/` → `_outputs/`. Don't touch paths inside historical text that explicitly described prior state (changelog entries describing "before" states, for instance).
+Skip any that don't exist.
 
-Sweep `<project>/PROJECT.md` for forward-looking path references to the same three folders.
+Sweep `<project>/_memories/*.md` for path-citations in frontmatter `sources:` and inline body text — update the bare path-strings to the current `_summaries/`, `_sessions/`, `_outputs/`. Don't touch paths inside historical text that explicitly described prior state (changelog entries describing "before" states, for instance).
 
-Append a one-line entry to `<project>/IMPROVEMENT_LOG.md` recording the DC-74 rename, if a project IMPROVEMENT_LOG exists.
+Sweep `<project>/PROJECT.md` for forward-looking path references to the same folders.
 
-This is routine and idempotent — don't escalate to multi-agent, don't pause for approval. The convention is locked at DC-74.
+Append a one-line entry to `<project>/IMPROVEMENT_LOG.md` recording the rename, if a project IMPROVEMENT_LOG exists.
+
+This is routine and idempotent — don't escalate to multi-agent, don't pause for approval.
 
 ## Session agenda
 
@@ -174,27 +181,27 @@ Target voice:
 
 > *"Picking up on the [project name]. Last session closed Wednesday with the routing rework merged. PROJECT.md says we're mid-migration: Phase 1 done, Phase 2 in progress. Top of §Moves is the auth-rewrite review. One stale risk worth flagging: R-3 last reviewed three weeks ago. Ready."*
 
-What to skip: handoff content (not part of the bootstrap read); auto-memory cited as authoritative (it's scratch cache); session log summaries (per-session artifacts, not state); a full section-by-section recital (the user sees PROJECT.md when they want the full view).
+What to skip: session summary content (not part of the bootstrap read); auto-memory cited as authoritative (it's scratch cache); session log recaps (per-session artifacts, not state); a full section-by-section recital (the user sees PROJECT.md when they want the full view).
 
 After readiness lands, wait for the user's next move. The agenda topics get resolved or explicitly deferred before implementation work begins.
 
-## Long sessions — write the early handoff stub
+## Long sessions — write the early summary stub
 
-Write a handoff stub immediately after readiness — before any substantive work — when:
+Write a summary stub immediately after readiness — before any substantive work — when:
 
 - The session is explicitly autonomous (user unavailable for questions).
 - The session will process multiple large files or spawn complex swarms.
 - The session has many sequential tasks where auto-compaction could interrupt mid-flow.
-- The user explicitly asks for an early handoff.
+- The user explicitly asks for an early summary.
 
-Naming: `_handoffs/handoff-<YYYY-MM-DD><letter>.md` — use the next available letter suffix.
+Naming: `_summaries/summary-<YYYY-MM-DD><letter>.md` — use the next available letter suffix.
 
 The stub structure:
 
 ```
-# Session Handoff — [date] ([letter])
+# Session Summary — [date] ([letter])
 
-> Status: Early handoff stub — written before auto-compact, will be updated at session close.
+> Status: Early summary stub — written before auto-compact, will be updated at session close.
 
 ## What Was Done (at time of writing)
 [Orientation findings, key decisions read, probe results.]
@@ -212,4 +219,4 @@ The stub structure:
 [If the session gets interrupted here, what should happen first next time.]
 ```
 
-Append findings as they emerge. The stub is a living document until `/finalize` upgrades it into the session-close handoff.
+Append findings as they emerge. The stub is a living document until `/finalize` upgrades it into the session-close summary.

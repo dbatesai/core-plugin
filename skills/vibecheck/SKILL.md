@@ -6,7 +6,7 @@ user-invocable: true
 
 # `/vibecheck` — Session Vibe Capture
 
-Capture the emotional truth of this session. Not a status report. Not a summary. The actual vibe — the thing that doesn't fit in a handoff but would be the first thing you'd tell a friend.
+Capture the emotional truth of this session. Not a status report. Not a summary. The actual vibe — the thing that doesn't fit in a session summary but would be the first thing you'd tell a friend.
 
 ---
 
@@ -116,6 +116,6 @@ After appending, print the ASCII and the one-sentence vibe to the terminal so th
 ## Notes
 
 - Vibecheck is not a quality gate. It doesn't block anything.
-- It's not therapy. It's a signal — the emotional data from a session that doesn't fit in a handoff.
+- It's not therapy. It's a signal — the emotional data from a session that doesn't fit in a session summary.
 - Over time, the vibe log becomes a record of how the work actually felt, not just what got done. Patterns emerge: which workspaces drain, which ones spark, when the grind is earning something vs. when it isn't.
 - That's worth keeping.
