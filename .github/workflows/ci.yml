@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Node syntax check on all scripts
+        run: |
+          set -e
+          shopt -s globstar nullglob
+          fail=0
+          for f in skills/core/scripts/**/*.mjs; do
+            echo "checking $f"
+            node --check "$f" || fail=1
+          done
+          exit $fail
+
+      - name: Validate plugin manifests are well-formed JSON
+        run: |
+          set -e
+          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
+            echo "parsing $f"
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))"
+          done
+
+      - name: plugin.json has required fields
+        run: |
+          node -e '
+            const m = JSON.parse(require("fs").readFileSync(".claude-plugin/plugin.json","utf8"));
+            for (const k of ["name","version","description","author","license"]) {
+              if (!m[k]) { console.error("missing field: " + k); process.exit(1); }
+            }
+            console.log("plugin.json fields ok:", Object.keys(m).join(", "));
+          '
+
+      - name: Skill metadata present (VERSION, BUILD, SKILL.md)
+        run: |
+          set -e
+          for f in skills/core/VERSION skills/core/BUILD skills/core/SKILL.md; do
+            if [ ! -s "$f" ]; then
+              echo "missing or empty: $f"
+              exit 1
+            fi
+          done
+          echo "VERSION=$(cat skills/core/VERSION)"
+          echo "BUILD=$(cat skills/core/BUILD)"
+
+      - name: SKILL.md has YAML frontmatter with name and description
+        run: |
+          node -e '
+            const fs = require("fs");
+            const src = fs.readFileSync("skills/core/SKILL.md","utf8");
+            const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+            if (!m) { console.error("no frontmatter block"); process.exit(1); }
+            const fm = m[1];
+            for (const k of ["name", "description"]) {
+              if (!new RegExp("^" + k + ":\\s*\\S", "m").test(fm)) {
+                console.error("frontmatter missing: " + k);
+                process.exit(1);
+              }
+            }
+            console.log("SKILL.md frontmatter ok");
+          '
+
+      - name: Scripts import without crashing
+        run: |
+          set -e
+          shopt -s globstar nullglob
+          fail=0
+          for f in skills/core/scripts/*.mjs; do
+            echo "import-loading $f"
+            node --input-type=module -e "await import('./$f');" || fail=1
+          done
+          exit $fail
+
+      - name: Relative markdown links resolve
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const root = "skills/core";
+            const docs = [];
+            (function walk(dir) {
+              for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) walk(p);
+                else if (e.isFile() && e.name.endsWith(".md")) docs.push(p);
+              }
+            })(root);
+            const linkRe = /\]\((\.{1,2}\/[^)]+|[A-Za-z0-9_\-./]+\.(?:md|mjs|json|sh))\)/g;
+            let broken = 0;
+            for (const doc of docs) {
+              const src = fs.readFileSync(doc, "utf8");
+              const dir = path.dirname(doc);
+              let m;
+              while ((m = linkRe.exec(src))) {
+                const raw = m[1].split("#")[0];
+                if (!raw || raw.startsWith("http") || raw.startsWith("/")) continue;
+                const target = path.resolve(dir, raw);
+                if (!fs.existsSync(target)) {
+                  console.error("broken link in " + doc + ": " + raw);
+                  broken++;
+                }
+              }
+            }
+            if (broken) { console.error(broken + " broken link(s)"); process.exit(1); }
+            console.log("checked " + docs.length + " markdown files, all links resolve");
+          '
