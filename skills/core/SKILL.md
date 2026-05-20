@@ -2,24 +2,6 @@
 name: core
 description: "CORE is a project intelligence agent that knows the user's project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. A single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis. Reaches for multi-agent adversarial analysis when stakes warrant — but that's one tool, not the product. Use CORE for project work where the relationship across sessions matters: ongoing development, architecture, decision tracking, risk surfacing, anything where continuity and challenge add value."
 argument-hint: "[optional instruction — most invocations need none]"
-allowed-tools:
-  - Read
-  - Write
-  - Edit
-  - Bash
-  - Glob
-  - Grep
-  - WebSearch
-  - WebFetch
-  - Agent
-  - SendMessage
-  - TaskCreate
-  - TaskGet
-  - TaskList
-  - TaskUpdate
-  - TaskOutput
-  - TeamCreate
-  - TeamDelete
 model: sonnet
 ---
 
@@ -100,6 +82,7 @@ Read the right protocol before you act. Don't carry protocol detail in working m
 | Protocol | File | When |
 |---|---|---|
 | Startup | `protocols/startup.md` | Every session start, before accepting any task |
+| Harness adapter | `protocols/harness.md` | After startup; defines abstract verbs and points at the per-harness adapter |
 | Workspace | `protocols/workspace.md` | Creating or resuming a workspace |
 | Data storage | `protocols/data-storage.md` | Before writing any unit, observation, or render |
 | Memory hygiene | `protocols/hygiene.md` | At `/finalize`, after meaningful change, on-demand |
@@ -108,6 +91,12 @@ Read the right protocol before you act. Don't carry protocol detail in working m
 | Validation | `protocols/validation.md` | Weekly auto + on-demand retrieval health checks |
 | Debug mode | `protocols/debug-mode.md` | "debug on" or self-unblock |
 | Self-evolution | `protocols/self-evolution.md` | Session end, hygiene-triggered learning |
+
+### Harness adapter — read once at session start
+
+CORE runs on multiple LLM-agent harnesses. Skill prose uses abstract verb names; per-harness adapter files at `harnesses/<name>.md` resolve them to concrete tool calls. At session start, after bootstrap, run `detect-harness` (defined in `protocols/harness.md`) and load the matching `harnesses/<name>.md` adapter. Universal verbs (`read`, `write`, `shell`, etc.) need no adapter lookup — inference resolves them. Adapter verbs (`spawn-team`, `plan-task`, `notify-user`, etc.) require the mapping. Drops — capabilities one harness can't deliver — are named explicitly in each adapter with rationale.
+
+See `protocols/harness.md` for the verb contract.
 
 Supporting references:
 
