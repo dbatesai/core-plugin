@@ -1,6 +1,6 @@
 ---
 name: process-memory
-description: On-demand memory-processing pass. Pulls inbox, walks observations for graduation, validates units, regenerates indexes, compacts PROJECT.md when over the file cap, then surfaces anything that needs human judgment. Use for mid-session housekeeping without running a full /finalize.
+description: On-demand memory-processing pass. Looks back at the current session for missed observations and captures them, pulls inbox, walks observations for graduation, validates units, regenerates indexes, compacts PROJECT.md when over the file cap, then surfaces anything that needs human judgment. Use for mid-session housekeeping without running a full /finalize.
 user-invocable: true
 allowed-tools:
   - Read
@@ -16,6 +16,27 @@ allowed-tools:
 Run the memory housekeeping pass. After this finishes, the project's memory-related files should be in tip-top shape: inbox empty, observations graduated where ready, every unit validated, both indexes current, PROJECT.md under the file cap, anything that needs your judgment surfaced.
 
 Runs synchronously in the current session.
+
+---
+
+## Step 0 — Look back, capture missed observations from this session
+
+Before any other hygiene work, scan the current session for moments that should have become observations and weren't. The in-flow "answer the user" tradeoff regularly suppresses observation writes — this step exists because that failure mode is consistent and named in PROJECT.md §Moves (memory-capture robustness).
+
+For each of these patterns in the recent conversation, write the observation now if it isn't already on disk:
+
+- User named a constraint that affects future sessions ("we always do X" / "don't ever Y" / "the rule for this project is Z")
+- User shared a stakeholder preference, dynamic, or relationship detail
+- User surfaced a research finding, experiment result, or empirical fact worth keeping
+- User corrected the agent's approach (caught a mistake, redirected work, named a missing step)
+- User confirmed a non-obvious approach worked when proposed (validated judgment call)
+- A workflow lesson surfaced that affects how future scheduled agents, hygiene passes, or other automation should be designed
+- A misalignment between a protocol document and observed behavior
+- The agent itself made a judgment-call decision worth recording with rationale
+
+Write to `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md` per the spec at `protocols/data-storage.md §Tier 1`, OR to `<project>/_memories/obs-<descriptive-slug>.md` if the observation has unit-shaped weight (rich edges, durable sources, ongoing relevance).
+
+Then narrate in plain voice: "Captured N observations from this session before processing." If zero, say "Scanned the session; nothing missed." One line is enough — don't burn a paragraph defending the scan.
 
 ---
 
@@ -141,6 +162,7 @@ Create the file if it doesn't exist.
 ## Step 8 — Narrate results
 
 Tell the user what happened across all steps in one tight block:
+- Look-back: count captured from this session, or "nothing missed"
 - Inbox: count processed / surfaced
 - Observations: count graduated / surfaced
 - Validation: before/after counts (PASS/WARN/FAIL) + names of any issues surfaced for user judgment

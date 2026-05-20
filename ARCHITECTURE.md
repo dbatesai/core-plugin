@@ -175,6 +175,19 @@ For downstream wrappers — plugins that mirror upstream skills into their own m
 
 A 2026-05-20 downstream-wrapper migration verified this contract end-to-end. The "verbatim rsync" pattern — `rsync -a --delete --exclude '.git' --exclude '.DS_Store'` per-subtree from `core-plugin/skills/<name>/` into `<wrapper-plugin>/skills/<name>/` — is the supported overlay shape.
 
+### Version vs BUILD — releases vs iterations
+
+The plugin carries two version-shaped identifiers, and they do different work:
+
+- **`version`** — the SemVer string in `plugin.json` + `marketplace.json` + `skills/core/VERSION`. This is the **release tag**. `claude plugins update <plugin>` checks `version` for changes; if `version` hasn't moved, no refresh happens even if the install on disk is materially behind. Bump `version` for every release the user is meant to update to.
+- **`BUILD`** — the date-coded string in `skills/core/BUILD` (e.g. `20260520.1`). This is the **iteration tag** — what changed this session, regardless of whether it's release-worthy yet. The readiness summary echoes it so the user can tell which iteration of a `version` they're running.
+
+Why both: `version` is the user-facing distribution identifier; bumping it forces every installed copy to pull on next `update`. `BUILD` is the dev-side iteration counter for sessions where you ship a fix but the change set doesn't yet warrant a release tag.
+
+**Operational rule:** every PR that lands user-visible behavior changes (script flag changes, protocol changes, hook changes, fixes that resolve user-reported issues) bumps `version` at PR-merge time. Sessions that ship pure-dev-meta fixes (test coverage, comment cleanups, archive-only edits) can bump `BUILD` alone — those changes don't need to reach the user-installed copy.
+
+Discovered 2026-05-20: a stale install at `BUILD 20260518.1` with marketplace `version: 2.0.0` did not refresh under `claude plugins update` even though three sessions of fixes had landed with BUILD bumps but no version bump. Bumped to `2.0.1` to force propagation and documented the distinction.
+
 ## Diagrams
 
 ### The retrieval ladder
