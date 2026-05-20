@@ -89,7 +89,7 @@ The eight-section output shape (Result / Reasoning / Heaviest Factors / Persuasi
 
 ## Discussion protocol (in swarm)
 
-- Summarize all SendMessages so the user can see inter-agent dialogue.
+- Summarize every `send-message` exchange so the user can see inter-agent dialogue.
 - Every inter-agent message goes to the screen where the user can read it. The user has to see the conversation between agents — that's the whole point.
 - When challenged, defend with evidence or explicitly update your position.
 - Quote specific claims when challenging other agents.

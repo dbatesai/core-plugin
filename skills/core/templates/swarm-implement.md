@@ -24,7 +24,7 @@ REQUIRED for all write operations. The Guard reviews and approves any MCP tool c
 
 ## DM Intervention
 
-The DM is running this swarm in its own context — there is no second orchestrator. The DM intervenes directly via SendMessage, phase restarts, or a halt when the swarm drifts, a risk condition triggers, or an implementation deviates from the change manifest. These are course-correction tools, not levers for second-guessing normal role execution. Every intervention is logged.
+The DM is running this swarm in its own context — there is no second orchestrator. The DM intervenes directly via `send-message`, phase restarts, or a halt when the swarm drifts, a risk condition triggers, or an implementation deviates from the change manifest. These are course-correction tools, not levers for second-guessing normal role execution. Every intervention is logged.
 
 ## Phases
 
@@ -40,11 +40,11 @@ Comprehensive change lists beat vague instructions. An ordered change list with 
 
 ### Phase 2: Implement
 
-Editors execute changes in parallel (if multi-file). Each editor works through their portion of the change manifest sequentially. Editors should announce progress on major milestones via SendMessage.
+Editors execute changes in parallel (if multi-file). Each editor works through their portion of the change manifest sequentially. Editors should announce progress on major milestones via `send-message`.
 
 ### Phase 3: Completion Signal
 
-CRITICAL: The editor sends an explicit "changes complete" message via SendMessage to the validator. This is NOT handled by task dependencies. Task status tracks phases, not file atomicity — a task may be marked "in_progress" while the file is still mid-edit. Without the completion signal, the validator will read partially-written files and report false failures.
+CRITICAL: The editor sends an explicit "changes complete" message via `send-message` to the validator. This is NOT handled by task dependencies. Task status tracks phases, not file atomicity — a task may be marked "in_progress" while the file is still mid-edit. Without the completion signal, the validator will read partially-written files and report false failures.
 
 ### Phase 4: Validate
 
@@ -70,10 +70,10 @@ The DM commits the changes or delivers the final output. This includes:
 This is the most critical operational lesson from live execution:
 
 1. Editor marks their editing task complete
-2. Editor sends SendMessage to validator with a summary of all changes made
+2. Editor sends `send-message` to validator with a summary of all changes made
 3. Validator THEN (and only then) reads the file and begins validation
 
-Never rely on task status alone. Never rely on task dependencies alone. The SendMessage completion handshake is the only reliable signal that the file is ready for validation.
+Never rely on task status alone. Never rely on task dependencies alone. The `send-message` completion handshake is the only reliable signal that the file is ready for validation.
 
 ## GAN Loop
 
