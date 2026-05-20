@@ -507,7 +507,8 @@ Three rings, one read at runtime.
 ├── state-cache.json               ← edit-detection hashes
 ├── hygiene-log.jsonl              ← machine-readable hygiene operations
 ├── workspaces/<id>/               ← per-workspace operational meta
-│   └── workspace.json
+│   ├── workspace.json
+│   └── last-bootstrap.json        ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
 └── research/                      ← cross-project knowledge library
 ```
 

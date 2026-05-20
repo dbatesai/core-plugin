@@ -169,6 +169,7 @@ Don't block on it. It's a nudge, not a gate.
 Make workspace identity obvious. Talk like a person.
 
 What to include:
+- A structured one-line routing-decision tag at the start or end of the summary: `Routing: <branch-name>` where branch-name is one of `returning-workspace`, `cold-start-migration`, `folder-rename`, `new-workspace`, `migration-resume`. This makes regression tests robust to prose drift while preserving the conversational readiness summary below.
 - The workspace name in plain language.
 - What `PROJECT.md` currently says in §State — one or two sentences, not a recap of every section.
 - Active risks worth surfacing now (count plus the top one or two by impact).
@@ -182,6 +183,8 @@ Target voice:
 > *"Picking up on the [project name]. Last session closed Wednesday with the routing rework merged. PROJECT.md says we're mid-migration: Phase 1 done, Phase 2 in progress. Top of §Moves is the auth-rewrite review. One stale risk worth flagging: R-3 last reviewed three weeks ago. Ready."*
 
 What to skip: session summary content (not part of the bootstrap read); auto-memory cited as authoritative (it's scratch cache); session log recaps (per-session artifacts, not state); a full section-by-section recital (the user sees PROJECT.md when they want the full view).
+
+**Record the bootstrap.** After readiness lands, write `~/.core/workspaces/<id>/last-bootstrap.json` with two fields: `session_started_at` (the Claude Code session-start timestamp — best available proxy is the timestamp of the first user message this session) and `bootstrap_completed_at` (now). This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
 
 After readiness lands, wait for the user's next move. The agenda topics get resolved or explicitly deferred before implementation work begins.
 
