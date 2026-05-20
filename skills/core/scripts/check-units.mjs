@@ -9,8 +9,11 @@
  *
  * CLI:
  *   node check-units.mjs <project-path>
+ *   node check-units.mjs --store <project-path>
  *   node check-units.mjs <project-path> --mode schema
+ *   node check-units.mjs <project-path> --schema           (shorthand)
  *   node check-units.mjs <project-path> --mode integrity
+ *   node check-units.mjs <project-path> --integrity        (shorthand)
  *   node check-units.mjs <project-path> --json
  *
  * Exit codes: 0 = all pass, 1 = warnings, 2 = failures, 3 = setup error.
@@ -271,6 +274,9 @@ export function main(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--mode') { mode = argv[++i]; }
+    else if (a === '--schema') { mode = 'schema'; }
+    else if (a === '--integrity') { mode = 'integrity'; }
+    else if (a === '--store') { projectArg = argv[++i]; }
     else if (a === '--json') { asJson = true; }
     else if (a === '--today') { todayArg = argv[++i]; }
     else if (!a.startsWith('--')) { projectArg = a; }
@@ -300,6 +306,13 @@ export function main(argv) {
   return exitCode(report);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
+// silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
+const _cliEntryArgv1 = process.argv[1];
+const _cliEntrySelf = fileURLToPath(import.meta.url);
+if (process.env.CORE_DEBUG_CLI_ENTRY) {
+  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
+}
+if (_cliEntryArgv1 === _cliEntrySelf) {
   process.exit(main(process.argv.slice(2)));
 }

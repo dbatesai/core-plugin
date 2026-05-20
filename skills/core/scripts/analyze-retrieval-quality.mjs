@@ -225,7 +225,13 @@ export function main(argv) {
   return 0;
 }
 
-// Entry point when run directly
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
+// silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
+const _cliEntryArgv1 = process.argv[1];
+const _cliEntrySelf = fileURLToPath(import.meta.url);
+if (process.env.CORE_DEBUG_CLI_ENTRY) {
+  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
+}
+if (_cliEntryArgv1 === _cliEntrySelf) {
   process.exit(main(process.argv.slice(2)));
 }

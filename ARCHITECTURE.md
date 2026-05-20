@@ -163,6 +163,18 @@ Lifecycle: per-session, 30-day archive, 90-day cold-store.
 
 The skill product is intentionally minimal — protocols, agents, references, scripts, schemas, templates. Everything else lives in user-owned or machine-local space, by design.
 
+### `${CLAUDE_PLUGIN_ROOT}` is load-bearing
+
+Every protocol that invokes a script does so via `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs`. The environment variable resolves to the absolute path the plugin manager installed the plugin into — `~/.claude/plugins/cache/<marketplace>/core/<version>/` for plugin installs, or the local directory for `marketplace add ~/path/to/plugin`. The indirection lets the scripts move with the plugin install location without protocol edits.
+
+For downstream wrappers — plugins that mirror upstream skills into their own marketplace entry, or any other project that overlays CORE — this constraint is **load-bearing**:
+
+- The wrapper plugin must keep upstream skills at `skills/<skill-name>/` directly under the plugin root — same layout as upstream. Don't nest, don't rename, don't restructure. Wrappers that put the skills at a different relative path (e.g. `wrapped-skills/core/`) silently break every `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/...` invocation in upstream protocols.
+- The wrapper's `${CLAUDE_PLUGIN_ROOT}` resolves to the wrapper's install root, not upstream's. That's correct — the wrapper ships its own copy of the scripts at the same relative path. The contract is "scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs` relative to whichever plugin is loaded."
+- If a wrapper wants to add custom scripts, put them under the wrapper's own skill directory (`skills/<wrapper-skill-name>/scripts/`) and reference via the same `${CLAUDE_PLUGIN_ROOT}` pattern. Don't put custom scripts under `skills/core/` — that's the upstream-mirrored subtree, and the next refresh will overwrite them.
+
+A 2026-05-20 downstream-wrapper migration verified this contract end-to-end. The "verbatim rsync" pattern — `rsync -a --delete --exclude '.git' --exclude '.DS_Store'` per-subtree from `core-plugin/skills/<name>/` into `<wrapper-plugin>/skills/<name>/` — is the supported overlay shape.
+
 ## Diagrams
 
 ### The retrieval ladder
