@@ -2,8 +2,16 @@
  * Unit store integrity checker for CORE memory architecture, per DC-77.
  *
  * Two modes (combined by default):
- *   schema    — required frontmatter fields, valid status/type values, edge target existence
- *   integrity — orphan detection, dangling edges, stale flagging, INDEX-decisions drift
+ *   schema    — frontmatter shape: required fields, valid status/type/edge-type
+ *               values, well-formed edge mappings, id-vs-filename match
+ *   integrity — structural relationships: orphans, dangling edge targets,
+ *               staleness, archived-in-active, INDEX-decisions drift,
+ *               cold-store eligibility
+ *
+ * The two modes are deliberately non-overlapping. Schema validates each unit
+ * in isolation; integrity validates the graph. Edge-target existence is an
+ * integrity concern (dangling-edge); schema only checks the edge mapping is
+ * well-formed and the type is in VALID_EDGE_TYPES.
  *
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  *
@@ -89,8 +97,6 @@ export function iterAllUnitFiles(memoriesDir) {
 // ---------- Schema checks ----------
 
 export function checkSchema(units, memoriesDir, report) {
-  const allFiles = new Set(iterAllUnitFiles(memoriesDir).map(p => basename(p, '.md')));
-
   for (const u of units) {
     const uid = u.fm.id !== undefined ? String(u.fm.id) : u.path ? basename(u.path, '.md') : 'unknown';
     const loadErr = typeof u.body === 'string' && u.body.startsWith('LOAD ERROR:');
@@ -122,11 +128,10 @@ export function checkSchema(units, memoriesDir, report) {
         else if (!VALID_EDGE_TYPES.has(String(eType))) report.push({ level: 'WARN', check: 'edge-unknown-type', unit_id: uid, detail: `Edge [${i}] type '${eType}' not in committed types` });
         if (!eTarget) {
           report.push({ level: 'FAIL', check: 'edge-missing-target', unit_id: uid, detail: `Edge [${i}] (type=${JSON.stringify(eType)}) missing 'target' field` });
-        } else {
-          const stem = String(eTarget).replace(/\.md$/, '');
-          if (!allFiles.has(stem) && !allFiles.has(String(eTarget)))
-            report.push({ level: 'WARN', check: 'edge-target-missing', unit_id: uid, detail: `Edge target '${eTarget}' not found in unit store` });
         }
+        // Edge target existence is an integrity concern, not schema — see
+        // checkIntegrity for dangling-edge. Schema only validates the edge
+        // mapping is well-formed and has a type in VALID_EDGE_TYPES.
       });
     }
 
@@ -141,6 +146,8 @@ export function checkSchema(units, memoriesDir, report) {
 
 // ---------- Integrity checks ----------
 
+export const FRESH_STORE_ORPHAN_RATIO = 0.30;
+
 export function checkIntegrity(units, memoriesDir, today, report) {
   const backlinks = {};
   for (const u of units) backlinks[basename(u.path, '.md')] = new Set();
@@ -151,16 +158,21 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     }
   }
 
+  // Build the all-files set once (was rebuilt per-unit inside the loop).
+  const allFiles = new Set(iterAllUnitFiles(memoriesDir).map(p => basename(p, '.md')));
+  let orphanCount = 0;
+
   for (const u of units) {
     const uid = basename(u.path, '.md');
     const edges = extractEdges(u);
     const hasOut = edges.length > 0;
     const hasIn = (backlinks[uid] || new Set()).size > 0;
 
-    if (!hasOut && !hasIn)
+    if (!hasOut && !hasIn) {
+      orphanCount += 1;
       report.push({ level: 'WARN', check: 'orphan', unit_id: uid, detail: 'Unit has no edges (no outgoing, no backlinks) — consider adding a cites edge or check if it should be retired' });
+    }
 
-    const allFiles = new Set(iterAllUnitFiles(memoriesDir).map(p => basename(p, '.md')));
     for (const e of edges) {
       const target = String(e.target);
       if (target.includes('://') || target.startsWith('http')) continue;
@@ -196,6 +208,13 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     report.push({ level: 'WARN', check: 'index-missing', unit_id: '', detail: 'INDEX-decisions.md not found — run generate-decisions-index.mjs' });
   }
 
+  // Fresh-store hint: if many units are orphans, it's usually a freshly-
+  // migrated store where edges haven't accrued yet, not a real problem.
+  if (units.length > 0 && orphanCount / units.length >= FRESH_STORE_ORPHAN_RATIO) {
+    const pct = Math.round((orphanCount / units.length) * 100);
+    report.push({ level: 'INFO', check: 'fresh-store', unit_id: '', detail: `${orphanCount}/${units.length} units (${pct}%) are orphans — this often means a freshly-migrated store; edges accrue as units cite each other during use.` });
+  }
+
   // Cold-store eligibility
   const archiveDir = join(memoriesDir, 'archive');
   try {
@@ -218,10 +237,18 @@ export function checkIntegrity(units, memoriesDir, today, report) {
 // ---------- Output ----------
 
 export function printReport(report, memoriesDir, mode, today) {
-  const counts = { PASS: 0, WARN: 0, FAIL: 0 };
+  const counts = { PASS: 0, WARN: 0, FAIL: 0, INFO: 0 };
   for (const f of report) counts[f.level] = (counts[f.level] || 0) + 1;
   console.log(`\nUnit store: ${memoriesDir}`);
   console.log(`Mode: ${mode}  |  Date: ${today.toISOString().slice(0, 10)}  |  PASS: ${counts.PASS}  WARN: ${counts.WARN}  FAIL: ${counts.FAIL}\n`);
+
+  const infos = report.filter(f => f.level === 'INFO');
+  if (infos.length) {
+    console.log('── NOTES ──');
+    for (const f of infos) console.log(`  ${f.check}: ${f.detail}`);
+    console.log();
+  }
+
   for (const level of ['FAIL', 'WARN']) {
     const findings = report.filter(f => f.level === level);
     if (!findings.length) continue;
@@ -243,7 +270,7 @@ export function printReport(report, memoriesDir, mode, today) {
 }
 
 export function jsonReport(report, memoriesDir, mode, today) {
-  const counts = { PASS: 0, WARN: 0, FAIL: 0 };
+  const counts = { PASS: 0, WARN: 0, FAIL: 0, INFO: 0 };
   for (const f of report) counts[f.level] = (counts[f.level] || 0) + 1;
   const out = {
     memories_dir: memoriesDir,
