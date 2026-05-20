@@ -116,16 +116,15 @@ Update the `MEMORY.md` index in the same operation. Don't write project-specific
 
 Apply the memory hygiene rules: update stale memories rather than adding duplicates; remove memories that were proven wrong; keep `MEMORY.md` current.
 
-### Refresh the auto-memory index — Haiku subagent
+### Refresh the auto-memory index
 
-After capturing session-specific memories, refresh `MEMORY.md` from the top-priority canonical units. This is a mechanical formatting operation — perfect Haiku territory.
+After capturing session-specific memories, refresh `MEMORY.md` from the top-priority canonical units. This is a mechanical formatting operation.
 
-Dispatch a Haiku subagent with:
-- The output of `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories --top 30` (top 30 priority-ranked units).
-- The current `~/.claude/projects/<mapped-cwd>/memory/MEMORY.md` contents (so user-added entries get preserved).
-- Instructions: format each top unit as a one-line markdown bullet linking to its unit file, followed by an em-dash and a one-line hook (matching the existing entries already in `MEMORY.md`). Preserve user-added entries that are still relevant, drop entries pointing to retired units, keep the file under 200 lines.
+Run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories --top 30` and read the current `~/.claude/projects/<mapped-cwd>/memory/MEMORY.md`. Then rewrite `MEMORY.md` so each top unit is a one-line markdown bullet linking to its unit file, followed by an em-dash and a one-line hook (match the existing entries' shape). Preserve user-added entries that are still relevant, drop entries pointing to retired units, keep the file under 200 lines.
 
-The subagent runs background — the user doesn't wait on it. Narrate the dispatch ("Haiku is refreshing MEMORY.md from top units in the background.") but don't block the closing declaration on it.
+Do this inline in the main agent — don't dispatch a subagent. The previous Haiku-subagent design required `git worktree`, which fails on non-git workspaces (any cloud-sync-backed project, any non-versioned project directory) with *"Cannot create agent worktree: not in a git repository."* Per CORE's harness-agnostic design intent, git is not a precondition for project intelligence. Project intelligence workspaces hold data, not code — versioning isn't the right tool here. The refresh is fast enough inline that blocking on it isn't a real cost.
+
+Narrate the refresh plainly: *"Refreshing MEMORY.md from the top 30 units now."* Then proceed to the closing declaration.
 
 ---
 

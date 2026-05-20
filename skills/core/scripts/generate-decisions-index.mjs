@@ -12,6 +12,8 @@
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs \
  *       <project>/_memories/
+ *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs \
+ *       --store <project>/_memories/
  */
 
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
@@ -111,9 +113,18 @@ export function resolveMemoriesDir(input) {
   return candidate;
 }
 
+export function parseStoreArg(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--store') return argv[i + 1];
+    if (!argv[i].startsWith('--')) return argv[i];
+  }
+  return null;
+}
+
 export function main(argv) {
-  const memoriesDir = argv[0]
-    ? resolveMemoriesDir(argv[0])
+  const storeArg = parseStoreArg(argv);
+  const memoriesDir = storeArg
+    ? resolveMemoriesDir(storeArg)
     : resolve(process.cwd(), '_memories');
 
   try { readdirSync(memoriesDir); } catch {
@@ -128,6 +139,13 @@ export function main(argv) {
   return 0;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
+// silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
+const _cliEntryArgv1 = process.argv[1];
+const _cliEntrySelf = fileURLToPath(import.meta.url);
+if (process.env.CORE_DEBUG_CLI_ENTRY) {
+  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
+}
+if (_cliEntryArgv1 === _cliEntrySelf) {
   process.exit(main(process.argv.slice(2)));
 }
