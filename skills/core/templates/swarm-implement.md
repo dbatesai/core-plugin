@@ -84,4 +84,4 @@ Minimal in implementation swarms. The loop is: implement, validate, approve. If 
 - Code changes applied and validated against the change manifest
 - Validation report (pass/fail per manifest item)
 - Guard approval log (for any write operations)
-- Summary of what changed, for the user and for future session handoff
+- Summary of what changed, for the user and for the future session summary

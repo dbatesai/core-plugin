@@ -38,7 +38,7 @@ Also load:
 - `<project>/inbox.md` if it exists — raw pending items.
 
 **Do NOT read:**
-- Handoffs in `<project>/_handoffs/`. Narrative for the human reader. Facts worth keeping were already promoted to PROJECT.md or `_memories/` at session close. Re-reading handoffs can resurrect user-deleted facts.
+- Session summaries in `<project>/_summaries/` (or the legacy `<project>/_handoffs/` if the rename hasn't happened yet). Narrative for the human reader. Facts worth keeping were already promoted to PROJECT.md or `_memories/` at session close. Re-reading summaries can resurrect user-deleted facts.
 - Archive files (`PROJECT-ARCHIVE.md`, `IMPROVEMENT_LOG-ARCHIVE.md`, `_memories/archive/*`).
 - Session logs in `<project>/_sessions/` unless investigating a specific historical question.
 
@@ -88,7 +88,7 @@ What's in the receipt:
 
 What's NOT in the receipt:
 
-- Handoff content (you didn't read it).
+- Session summary content (you didn't read it — see Step 2).
 - Auto-memory contents (scratch cache, not authoritative).
 - Section-by-section recap.
 - Anything that sounds like a coding assistant compiled it.

@@ -12,7 +12,7 @@ Read this before any Write/Edit on a unit, an observation, a PROJECT.md render, 
 
 Three surfaces, three responsibilities. Don't mix them.
 
-- **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_handoffs/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed per DC-74 so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
+- **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed per DC-74 so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
 - **DM operational meta** — `~/.core/` — your operational layer across projects. `dm-profile.md` is your cross-project home. `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
 
@@ -86,7 +86,7 @@ created: 2026-04-02T18:45:00Z
 updated: 2026-04-02T18:45:00Z
 confidence: 0.90
 sources:
-  - _handoffs/handoff-2026-04-02.md
+  - _summaries/summary-2026-04-02.md
   - docs/plans/routing-rewrite-plan.md
 references-person:
   - alex
@@ -225,7 +225,7 @@ Signals:
 
 - **R (recency)** — `exp(-recency_days / τ)`, τ=60 days.
 - **F (frequency-across-sources)** — distinct surface-types the unit appears in, normalized by 6.
-- **S (source-type weight)** — lookup from the source-type table (PROJECT.md = 1.0, configuration = 0.9, operational meta = 0.7, `_handoffs/`/`_outputs/` = 0.5, session logs = 0.3, raw transcripts = 0.2).
+- **S (source-type weight)** — lookup from the source-type table (PROJECT.md = 1.0, configuration = 0.9, operational meta = 0.7, `_summaries/`/`_outputs/` = 0.5, session logs = 0.3, raw transcripts = 0.2).
 - **A (alignment with current intention)** — Jaccard overlap of unit's topics against session-intent topics.
 - **P (pinning)** — user-only pin levels: `floor` (priority floor 0.7), `true` (floor 0.9, decay bypassed), `always` (priority 1.5, alignment-independent). `pinned: false` or `suppress: true` is an anti-pin (priority × 0.3).
 
@@ -490,7 +490,7 @@ Three rings, one read at runtime.
 │   ├── _validation/tests/         ← validation regime test corpus
 │   └── INDEX-<type>.md            ← auto-generated indexes
 ├── inbox.md                       ← optional: raw external pulls
-├── _handoffs/                     ← narrative session logs (CORE-created)
+├── _summaries/                    ← human-readable session summaries (CORE-created)
 ├── _sessions/                     ← per-session agent logs (CORE-created)
 ├── _outputs/                      ← swarm synthesis, deliverables (CORE-created)
 ├── docs/                          ← architecture, explainers (user surface)

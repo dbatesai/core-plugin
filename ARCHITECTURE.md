@@ -8,7 +8,7 @@ CORE started as a multi-agent adversarial reasoning framework — a `/core` skil
 
 In May 2026 it reframed (DC-64, 2026-05-16d). The reframe: **CORE is project intelligence in chat with a critic baked in, not a multi-agent framework.** A single competent agent that knows the project's context, watches data sources, remembers across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Multi-agent swarms are one tool the agent reaches for. Not the product.
 
-What changed in practice: the swarm machinery moved from being the default execution path to being an internal protocol (`protocols/analysis.md`) the agent invokes when stakes warrant. The memory architecture went from informal "auto-memory + handoffs + DECISIONS.md" to a structured unit store with typed edges and a four-tier retrieval ladder. PROJECT.md went from hand-edited synthesis to render-from-units with edit-detection and propagation back. Plain voice became the rule the project enforces in several places — SKILL.md's opening, per-protocol headers, the per-turn voice-reminder hook, and the agent's own continuous self-evaluation.
+What changed in practice: the swarm machinery moved from being the default execution path to being an internal protocol (`protocols/analysis.md`) the agent invokes when stakes warrant. The memory architecture went from informal "auto-memory + session summaries + DECISIONS.md" to a structured unit store with typed edges and a four-tier retrieval ladder. PROJECT.md went from hand-edited synthesis to render-from-units with edit-detection and propagation back. Plain voice became the rule the project enforces in several places — SKILL.md's opening, per-protocol headers, the per-turn voice-reminder hook, and the agent's own continuous self-evaluation.
 
 The reframe doesn't drop the adversarial discipline. The anti-anchoring rule (Critic frames before reading Generator), the persuasion log, the four named failure modes, the external-audience test — they apply to all reasoning, solo or swarm. The discipline didn't change; the staffing did.
 
@@ -60,7 +60,7 @@ priority(unit, t) = w_R · R(unit, t)
 
 - **R (recency)** = `exp(-recency_days / τ)`, τ=60 days.
 - **F (frequency-across-sources)** = distinct surface-types the unit appears in, normalized by 6.
-- **S (source-type weight)** = lookup (PROJECT.md=1.0, configuration=0.9, ops meta=0.7, _handoffs/_outputs=0.5, session logs=0.3, raw transcripts=0.2).
+- **S (source-type weight)** = lookup (PROJECT.md=1.0, configuration=0.9, ops meta=0.7, _summaries/_outputs=0.5, session logs=0.3, raw transcripts=0.2).
 - **A (alignment)** = Jaccard overlap of unit's topics against session-intent topics.
 - **P (pinning)** = user-only pin levels (floor=0.7 floor, true=0.9 floor & decay bypassed, always=1.5 alignment-independent).
 

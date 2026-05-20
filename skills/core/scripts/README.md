@@ -93,7 +93,7 @@ A `PostCompact` hook that re-injects critical workspace context into a fresh con
 1. Look for `workspace.json` in the current working directory. If not found, output a minimal JSON message saying no workspace is available and exit 0 — never fail in a way that blocks the session.
 2. Read `workspace_id`, `name`, and `data_path` from the pointer.
 3. Read `PROJECT.md` at the project root. Extract: §State (one or two current-status sentences), §Moves (top ~5 unchecked priorities), §Decisions & Risks (open-risk count, flag any high-impact or stale-`last-reviewed` items).
-4. Identify the most recently modified file in `<project>/_handoffs/` and include its filename only — don't read the body. Handoffs are narrative, not authoritative state.
+4. Identify the most recently modified file in `<project>/_summaries/` (falling back to legacy `<project>/_handoffs/` if present) and include its filename only — don't read the body. Session summaries are narrative, not authoritative state.
 5. Assemble the `additionalContext` string. Output the JSON. Exit 0.
 
 If `workspace.json` is absent, exit 0 with a graceful message.

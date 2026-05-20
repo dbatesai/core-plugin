@@ -22,7 +22,7 @@ CORE will appear in your plugin list. Start a fresh session and type `/core` to 
 |---|---|
 | `/core` | The agent. Starts the session, loads your project context, and talks with you. |
 | `/orient` | Quick thread-resume — load project context and print a readiness summary. |
-| `/finalize` | Session close — write a handoff, update project state, run memory hygiene. |
+| `/finalize` | Session close — write a session summary, update project state, run memory hygiene. |
 | `/process-memory` | User-invoked memory hygiene pass — pulls inbox, graduates observations, validates units, regenerates indexes, compacts PROJECT.md when over the file cap. |
 | `/vibecheck` | Capture the session's emotional truth as ASCII art. |
 | `/organize-files` | Clean up version-qualifier chaos and stale content in any folder. |
@@ -49,7 +49,7 @@ After that, `/plugin update core` gets you the latest version whenever one ships
 
 Customize → Personal plugins → CORE → remove.
 
-Your project-level data (`PROJECT.md`, `_memories/`, `_handoffs/` inside each project folder) stays. So does the agent's cross-project memory at `~/.core/`. If you want those gone too, delete them manually.
+Your project-level data (`PROJECT.md`, `_memories/`, `_summaries/` inside each project folder) stays. So does the agent's cross-project memory at `~/.core/`. If you want those gone too, delete them manually.
 
 ## Troubleshooting
 

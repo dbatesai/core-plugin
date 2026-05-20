@@ -78,12 +78,12 @@ Examples from a real CORE session (concrete to illustrate the shape):
 
 The redaction list is project-specific; the *technique* is universal.
 
-**3. Scan active paths for redaction-list hits.** Exclude operational-history directories — `archive/`, `sessions/`, `handoffs/`, anything explicitly named as historical record. Those directories are *supposed* to preserve old state. The goal is to surface hits in *active* paths: top-level docs, current spec folders, presentation assets, root-level files.
+**3. Scan active paths for redaction-list hits.** Exclude operational-history directories — `archive/`, `sessions/`, `summaries/`, `handoffs/` (legacy name), anything explicitly named as historical record. Those directories are *supposed* to preserve old state. The goal is to surface hits in *active* paths: top-level docs, current spec folders, presentation assets, root-level files.
 
 The basic shape:
 ```bash
 grep -r -l "<pattern>" <project-root> \
-  --exclude-dir=archive --exclude-dir=sessions --exclude-dir=handoffs
+  --exclude-dir=archive --exclude-dir=sessions --exclude-dir=summaries --exclude-dir=handoffs
 ```
 
 **4. Look for cross-path duplicates with overlapping scope.** A file at `docs/architecture.md` and one at `<product-folder>/ARCHITECTURE.md` covering the same conceptual ground is a red flag. The one not at the canonical product location is usually the older or speculative copy. Verify by content inspection (Step 2), then archive the loser.

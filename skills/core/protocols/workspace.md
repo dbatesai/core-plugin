@@ -50,7 +50,7 @@ When the user returns after a gap:
 3. Apply elapsed-time signals per `protocols/startup.md` (Elapsed-time signals section).
 4. Recalibrate proactivity to the current engagement level.
 
-Don't re-read handoff bodies at reactivation. Handoffs are narrative for the human reader; facts worth keeping were already promoted into PROJECT.md or units at the prior session's close. Re-reading handoffs can resurrect user-deleted facts.
+Don't re-read session summary bodies at reactivation. Summaries are narrative for the human reader; facts worth keeping were already promoted into PROJECT.md or units at the prior session's close. Re-reading summaries can resurrect user-deleted facts.
 
 ## Cross-workspace awareness
 
