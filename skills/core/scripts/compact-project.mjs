@@ -13,6 +13,10 @@
  *
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs <project>
+ *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs --check <project>
+ *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs <project> --check
+ *
+ * --check reports whether PROJECT.md is over the size cap; it does not write.
  */
 
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
@@ -21,6 +25,19 @@ import { fileURLToPath } from 'node:url';
 
 export const DECISIONS_HEADER = '**Decisions (dated, append-only):**';
 export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
+// 80% of the Read-tool 25000-token cap, char-to-token factor 0.30:
+// 0.8 * 25000 / 0.30 ≈ 67000 bytes. Matches protocols/startup.md's cap heuristic.
+export const PROJECT_MD_CAP_BYTES = 67000;
+
+export function parseArgv(argv) {
+  const flags = new Set();
+  let positional = null;
+  for (const a of argv) {
+    if (a.startsWith('--')) flags.add(a.slice(2));
+    else if (positional === null) positional = a;
+  }
+  return { positional, flags };
+}
 
 export function parseFrontmatter(text) {
   if (!text.startsWith('---\n')) return [{}, text];
@@ -179,9 +196,8 @@ export function compactDecisions(text, units) {
 }
 
 export function main(argv) {
-  const projectDir = argv[0]
-    ? resolve(argv[0])
-    : resolve(process.cwd());
+  const { positional, flags } = parseArgv(argv);
+  const projectDir = positional ? resolve(positional) : resolve(process.cwd());
   const projectMd = join(projectDir, 'PROJECT.md');
   const memoriesDir = join(projectDir, '_memories');
 
@@ -190,6 +206,14 @@ export function main(argv) {
     process.stderr.write(`error: ${projectMd} not readable\n`);
     return 2;
   }
+
+  if (flags.has('check')) {
+    const size = Buffer.byteLength(text, 'utf8');
+    const status = size > PROJECT_MD_CAP_BYTES ? 'OVER cap' : 'under cap';
+    console.log(`PROJECT.md: ${size} bytes (${status}; cap ${PROJECT_MD_CAP_BYTES} bytes).`);
+    return 0;
+  }
+
   let units;
   try { units = loadUnits(memoriesDir); } catch {
     process.stderr.write(`error: ${memoriesDir} not readable\n`);
