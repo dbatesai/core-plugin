@@ -20,6 +20,22 @@ Three surfaces, three responsibilities. Don't mix them.
 
 The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's DM meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
 
+There's a fourth surface that isn't CORE's to own but that CORE reads from: **harness-local recall** — Claude Code's `~/.claude/projects/*/memory/MEMORY.md`, Codex's `~/.codex/memories/`, equivalents in future harnesses. CORE treats this as scratch cache, never authoritative. See `dc-86-harness-local-memory-recall` for the principle and `protocols/codex-memory-save.md` for the Codex-specific explicit-save trigger.
+
+---
+
+## Authority ordering
+
+When sources conflict, this is the order CORE resolves:
+
+1. **Direct user instruction in the current session** — overrides everything else.
+2. **User-edited `<project>/PROJECT.md`** — the user's curation surface; anti-resurrection rule applies.
+3. **Canonical units in `<project>/_memories/`** — project facts of record.
+4. **CORE operational meta in `~/.core/`** — runtime state only; not project fact authority.
+5. **Harness-local recall** — Claude Code `MEMORY.md`, Codex memories at `~/.codex/memories/`, and equivalents in future harnesses. Hints only; must verify against the unit store before acting.
+
+See `dc-86-harness-local-memory-recall` for the principle behind levels 4 and 5 — the four-surface model that makes the divergence between Claude's autonomous-write and Codex's explicit-save-only memory models safe.
+
 ---
 
 ## Two tiers — observations and units

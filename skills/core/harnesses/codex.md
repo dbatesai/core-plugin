@@ -72,7 +72,7 @@ Codex does not have a Claude-style per-project `MEMORY.md` auto-memory cache.
 
 Startup context comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat those as instruction surfaces, not project memory. They may contain stable rules and pointers, but project facts still live in `<project>/PROJECT.md` and `<project>/_memories/`.
 
-Codex assistant memory under `~/.codex/memories/` is harness-local recall. Treat it like scratch cache: useful for hints, never authoritative. Verify project-specific claims against the CORE unit store before acting.
+Codex assistant memory under `~/.codex/memories/` is harness-local recall. Treat it like scratch cache: useful for hints, never authoritative. Verify project-specific claims against the CORE unit store before acting. Per `dc-86-harness-local-memory-recall`, this is surface 4 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`.
 
 Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Only write Codex memory when the user explicitly asks to save a recall note; then follow `protocols/codex-memory-save.md` — that protocol is the trigger-driven micro-protocol covering the "save this" / "remember this" patterns.
 
