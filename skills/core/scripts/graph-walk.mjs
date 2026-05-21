@@ -19,7 +19,7 @@
  *                       [--format json|text]
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -39,6 +39,42 @@ function resolveTarget(target, memoriesDir) {
   return null;
 }
 
+// Build an inverse edge index: target-stem -> [{sourcePath, sourceId, edgeType}]
+// so walk() can surface inbound neighbors per Codex probe Round 2 finding.
+// Scans top-level *.md files in memoriesDir (skips _prefixed and INDEX*).
+export function buildInverseEdgeIndex(memoriesDir) {
+  const inverse = new Map();
+  let files;
+  try { files = readdirSync(memoriesDir); } catch { return inverse; }
+  for (const fname of files) {
+    if (!fname.endsWith('.md')) continue;
+    if (fname.startsWith('_') || fname.startsWith('INDEX')) continue;
+    const filePath = join(memoriesDir, fname);
+    let unit;
+    try { unit = loadUnit(filePath); } catch { continue; }
+    for (const e of extractEdges(unit)) {
+      const stem = String(e.target).trim().replace(/\.md$/, '');
+      if (!inverse.has(stem)) inverse.set(stem, []);
+      inverse.get(stem).push({
+        sourcePath: filePath,
+        sourceId: unit.id,
+        edgeType: e.type,
+      });
+    }
+  }
+  return inverse;
+}
+
+function inverseLookup(inverse, unitId, unitPath) {
+  // Match by id first, then by filename stem (so units with no `id:` frontmatter
+  // or with id-vs-filename mismatch still resolve).
+  const out = [];
+  if (unitId && inverse.has(unitId)) out.push(...inverse.get(unitId));
+  const stem = basename(String(unitPath)).replace(/\.md$/, '');
+  if (stem && stem !== unitId && inverse.has(stem)) out.push(...inverse.get(stem));
+  return out;
+}
+
 export function walk(seedPath, {
   memoriesDir = '_memories',
   hops = 2,
@@ -52,21 +88,27 @@ export function walk(seedPath, {
   const mDir = resolve(memoriesDir);
   const seed = loadUnit(seedPath);
   const seedResolved = resolve(String(seedPath));
+  const inverse = buildInverseEdgeIndex(mDir);
 
   const visited = new Set([seedResolved]);
-  const queue = []; // [hop, path, edgeType, sourceId]
+  const queue = []; // [hop, path, edgeType, sourceId, direction]
 
   for (const e of extractEdges(seed)) {
     const tp = resolveTarget(e.target, mDir);
     if (tp && !visited.has(resolve(tp))) {
-      queue.push([1, tp, e.type, seed.id]);
+      queue.push([1, tp, e.type, seed.id, 'outbound']);
+    }
+  }
+  for (const src of inverseLookup(inverse, seed.id, seedResolved)) {
+    if (!visited.has(resolve(src.sourcePath))) {
+      queue.push([1, src.sourcePath, src.edgeType, seed.id, 'inbound']);
     }
   }
 
   const results = [];
 
   while (queue.length && results.length < budget) {
-    const [hop, path, edgeType, sourceId] = queue.shift();
+    const [hop, path, edgeType, sourceId, direction] = queue.shift();
     const resolved = resolve(path);
     if (visited.has(resolved)) continue;
     visited.add(resolved);
@@ -77,13 +119,26 @@ export function walk(seedPath, {
     const rs = scoreProxyRS(unit, t);
     if (rs < pruneThreshold) continue;
 
-    results.push({ unit_id: unit.id, path, hop, rs_score: rs, via_edge_type: edgeType, via_source: sourceId });
+    results.push({
+      unit_id: unit.id,
+      path,
+      hop,
+      rs_score: rs,
+      via_edge_type: edgeType,
+      via_source: sourceId,
+      edge_direction: direction,
+    });
 
     if (hop < hops) {
       for (const e of extractEdges(unit)) {
         const tp = resolveTarget(e.target, mDir);
         if (tp && !visited.has(resolve(tp))) {
-          queue.push([hop + 1, tp, e.type, unit.id]);
+          queue.push([hop + 1, tp, e.type, unit.id, 'outbound']);
+        }
+      }
+      for (const src of inverseLookup(inverse, unit.id, resolved)) {
+        if (!visited.has(resolve(src.sourcePath))) {
+          queue.push([hop + 1, src.sourcePath, src.edgeType, unit.id, 'inbound']);
         }
       }
     }
