@@ -31,9 +31,9 @@ Resolve deterministically when you can; ask the user only when it's genuinely am
 
 Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; you'll route to new-workspace setup below unless the project has v1-era content that needs migrating.
 
-**Auto-fork copied workspaces.** When a local `workspace.json` exists in the current directory, cross-reference its `workspace_id` against `~/.core/index.json`:
+**Auto-fork copied workspaces.** When a local `workspace.json` exists in the current directory, cross-reference its `workspace_id` against `~/.core/index.json`. Before checking the id match, check whether any entry in `index.json` has a `path` equal to the current cwd — if yes, use that entry as the resolution regardless of what the local `workspace.json` says (idempotency on re-orient after a prior fork). Then:
 
-- Index has an entry with that `workspace_id` AND its registered `path` matches the current cwd → returning workspace; proceed normally.
+- Index has an entry with the local `workspace.json`'s `workspace_id` AND its registered `path` matches the current cwd → returning workspace; proceed normally.
 - Index has an entry with that `workspace_id` BUT its registered `path` differs from the current cwd → the workspace.json was copied from another project. Treat the copy as a brand new workspace and auto-fork:
   1. Generate a new workspace_id by slugifying the current directory name (lowercase, replace non-alphanumeric with `-`, collapse repeats, strip leading/trailing `-`). If the slug collides with an existing id in `index.json`, append `-2`, `-3`, etc. until unique.
   2. Rewrite the local `workspace.json` with the new `workspace_id` and `data_path` pointing at the new location. Preserve `name` (or append `" (copy)"` if explicit signaling helps); preserve `created` if present, otherwise set to now.
