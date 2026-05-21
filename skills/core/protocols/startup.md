@@ -31,7 +31,20 @@ Resolve deterministically when you can; ask the user only when it's genuinely am
 
 Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; you'll route to new-workspace setup below unless the project has v1-era content that needs migrating.
 
-After resolution, update `last_active` in `~/.core/index.json`.
+**Auto-fork copied workspaces.** When a local `workspace.json` exists in the current directory, cross-reference its `workspace_id` against `~/.core/index.json`:
+
+- Index has an entry with that `workspace_id` AND its registered `path` matches the current cwd → returning workspace; proceed normally.
+- Index has an entry with that `workspace_id` BUT its registered `path` differs from the current cwd → the workspace.json was copied from another project. Treat the copy as a brand new workspace and auto-fork:
+  1. Generate a new workspace_id by slugifying the current directory name (lowercase, replace non-alphanumeric with `-`, collapse repeats, strip leading/trailing `-`). If the slug collides with an existing id in `index.json`, append `-2`, `-3`, etc. until unique.
+  2. Rewrite the local `workspace.json` with the new `workspace_id` and `data_path` pointing at the new location. Preserve `name` (or append `" (copy)"` if explicit signaling helps); preserve `created` if present, otherwise set to now.
+  3. Register the new entry in `~/.core/index.json` with the current cwd as `path` and a fresh `last_active`.
+  4. Create new workspace meta at `~/.core/workspaces/<new-id>/workspace.json` per the workspace schema; do NOT copy from the original — this is a new workspace, not a forked one.
+  5. Surface the fork to the user in the readiness summary: *"Detected this `workspace.json` was copied from `<original-id>`; treating as a new workspace registered as `<new-id>`."*
+- Index has no entry for that `workspace_id` → unregistered; route per existing rules below.
+
+The check is about workspace identity stability across registrations, not about content. The copy may have full v2 content already (PROJECT.md, `_memories/`, etc.) — that's fine; the fork doesn't touch project data, it just rewrites the registration. The check is idempotent — once the fork has happened, a re-orient in the same directory finds the id already matches and the check is a no-op.
+
+After resolution (including any fork), update `last_active` in `~/.core/index.json` for the resolved workspace id.
 
 **Layer separation reminder.** Project synthesis lives in `<project>/PROJECT.md`. The unit store lives in `<project>/_memories/`. Workspace operational meta lives at `~/.core/workspaces/<id>/`. The `workspace.json` in the project folder is just a pointer; the full manifest lives in `~/.core/workspaces/<id>/workspace.json`.
 
