@@ -291,6 +291,8 @@ PROJECT.md is rendered from canonical units. Three triggers:
 
 Section-level writes, not full-file. You read the current section state, preserve user edits, propagate them back into the source-of-truth units.
 
+When you invoke `priority.mjs` during an in-session render (trigger 3 above) and want an audit trail, pass `--log <project>/_sessions/<date>/priority-log.jsonl --log-label render-on-change`. The log captures the timestamp, intent topics, top-K rankings, and label per invocation — useful for reconstructing why a particular re-render happened after the fact. Optional; not required for the render to happen.
+
 ### The anti-resurrection rule
 
 When the user removes a fact from PROJECT.md, that fact is gone. You don't re-derive it from the same source observations on the next render. The corresponding unit's `status` becomes `retired` (frontmatter change, body preserved for forensic value), and hygiene's retire verb fires.

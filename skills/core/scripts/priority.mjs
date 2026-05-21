@@ -20,9 +20,14 @@
  * CLI:
  *   node priority.mjs <project>/_memories/ [--top N] [--intent t1,t2,...]
  *                     [--today YYYY-MM-DD] [--sections] [--top-per-section N]
+ *                     [--log <path>] [--log-label <string>]
+ *
+ * --log appends one JSONL audit entry per invocation to <path>. Useful for
+ * render-on-change observability — protocols/data-storage.md §PROJECT.md ↔ units
+ * rendering names the suggested log location.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, appendFileSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -354,6 +359,10 @@ function _cliSections(ranked, topK) {
   return 0;
 }
 
+export function writeAuditEntry(logPath, entry) {
+  appendFileSync(logPath, JSON.stringify(entry) + '\n');
+}
+
 export function main(argv) {
   let memoriesDirArg = '_memories';
   let topN = 10;
@@ -361,6 +370,8 @@ export function main(argv) {
   let todayArg = null;
   let sections = false;
   let topPerSection = 5;
+  let logPath = null;
+  let logLabel = null;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -369,6 +380,8 @@ export function main(argv) {
     else if (a === '--today') { todayArg = argv[++i]; }
     else if (a === '--sections') { sections = true; }
     else if (a === '--top-per-section') { topPerSection = parseInt(argv[++i], 10); }
+    else if (a === '--log') { logPath = argv[++i]; }
+    else if (a === '--log-label') { logLabel = argv[++i]; }
     else if (!a.startsWith('--')) { memoriesDirArg = a; }
   }
 
@@ -383,6 +396,25 @@ export function main(argv) {
 
   const ranked = iterUnits(memoriesDir).map(u => [score(u, intent, today), u]);
   ranked.sort((a, b) => b[0] - a[0]);
+
+  if (logPath) {
+    const rankings = ranked.slice(0, topN).map(([s, u]) => ({
+      unit_id: u.id,
+      score: Math.round(s * 10000) / 10000,
+      topics: u.fm.topics || [],
+    }));
+    const entry = {
+      timestamp: new Date().toISOString(),
+      cwd: process.cwd(),
+      memories_dir: memoriesDir,
+      top_n: topN,
+      intent,
+      sections,
+      rankings,
+    };
+    if (logLabel) entry.label = logLabel;
+    writeAuditEntry(logPath, entry);
+  }
 
   if (sections) return _cliSections(ranked, topPerSection);
 
