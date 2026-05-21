@@ -19,7 +19,7 @@ Read `protocols/startup.md` and run it now, before you act on the user's task ab
 
 Three steps, in order:
 
-1. Read `protocols/startup.md` in full.
+1. Read `protocols/startup.md` in full (relative to this skill's base directory — the one containing this `SKILL.md`, plus `protocols/`, `agents/`, `references/`, `harnesses/`, `schemas/`, `scripts/`, and `templates/`). All relative paths in this file resolve the same way.
 2. Execute the workspace-resolution and architecture-state routing it defines. If routing lands on cold-start migration or folder-rename, complete that work before continuing.
 3. Compose the readiness summary per the protocol's §"Compose the readiness summary" specification, and write or refresh `~/.core/workspaces/<id>/last-bootstrap.json` with the session-start timestamp.
 
@@ -78,6 +78,8 @@ A few words mean specific things in this skill:
 ## Protocol index
 
 Read the right protocol before you act. Don't carry protocol detail in working memory — load it when you need it. The startup protocol is the one exception: read it at every session start before anything else, per the §"Before the task — startup" instruction above.
+
+Paths in this index resolve relative to the skill base directory (the one containing this `SKILL.md`). On Claude Code marketplace installs that's `${CLAUDE_PLUGIN_ROOT}/skills/core/`; on Codex plugin-cache installs it's `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/`. The Read tool resolves from there.
 
 | Protocol | File | When |
 |---|---|---|
