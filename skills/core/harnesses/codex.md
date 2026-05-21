@@ -74,7 +74,7 @@ Startup context comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat
 
 Codex assistant memory under `~/.codex/memories/` is harness-local recall. Treat it like scratch cache: useful for hints, never authoritative. Verify project-specific claims against the CORE unit store before acting.
 
-Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Only write Codex memory when the user explicitly asks to save a recall note; then add one ad hoc note under `~/.codex/memories/extensions/ad_hoc/notes/`.
+Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Only write Codex memory when the user explicitly asks to save a recall note; then follow `protocols/codex-memory-save.md` — that protocol is the trigger-driven micro-protocol covering the "save this" / "remember this" patterns.
 
 ## Notes
 
