@@ -68,7 +68,13 @@ Re-open this drop once a live Codex CLI install validates whether Codex hooks ca
 
 ## read-auto-memory
 
-Codex auto-loads `<project>/AGENTS.md` and `~/.codex/AGENTS.md` at session start (full file, no 200-line cap; default cap is 32 KiB per `project_doc_max_bytes`). Index entries should be one-liners per the hygiene mechanism; topic content lives in sub-files referenced from the index. The hygiene rule "index custody first" becomes more load-bearing on Codex because there's no auto-cap forcing brevity.
+Codex does not have a Claude-style per-project `MEMORY.md` auto-memory cache.
+
+Startup context comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat those as instruction surfaces, not project memory. They may contain stable rules and pointers, but project facts still live in `<project>/PROJECT.md` and `<project>/_memories/`.
+
+Codex assistant memory under `~/.codex/memories/` is harness-local recall. Treat it like scratch cache: useful for hints, never authoritative. Verify project-specific claims against the CORE unit store before acting.
+
+Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Only write Codex memory when the user explicitly asks to save a recall note; then add one ad hoc note under `~/.codex/memories/extensions/ad_hoc/notes/`.
 
 ## Notes
 
