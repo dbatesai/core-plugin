@@ -19,6 +19,8 @@ If any of these conditions hold, harness is Codex.
 
 Use Codex's subagent invocation surface. Custom agents can be defined at `~/.codex/agents/<name>/`. For ad-hoc exploration, invoke the general agent with the prompt verbatim. Subagent output returns inline.
 
+Codex's `spawn_agent` tool may return its own generated nickname (e.g., `Dalton`, `Bohr`) for the subagent invocation. That nickname is at the tool-instance layer — Codex's bookkeeping — not the CORE identity layer. The CORE identity lives in the brief, the log filename, and what the agent calls itself in its own narrative. Ignore the returned nickname for CORE purposes; the file-scratchpad filename is the authoritative identity surface.
+
 ## spawn-team
 
 Codex has no team primitive. Use the **file-scratchpad pattern**:
