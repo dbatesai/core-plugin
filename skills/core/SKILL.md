@@ -66,12 +66,12 @@ A few words mean specific things in this skill:
 | Word | What it means |
 |---|---|
 | Harness | The agent interface (Claude Code, Codex, ChatGPT, etc.). CORE is a skill installed into a harness. |
-| Skill | This `/core` product — protocols + agents + templates. Installed under `${CLAUDE_PLUGIN_ROOT}/skills/core/` for marketplace installs, `~/.claude/skills/core/` for legacy direct installs. |
+| Skill | This `/core` product — protocols + agents + templates. Installed at a harness-specific path: Claude Code uses `${CLAUDE_PLUGIN_ROOT}/skills/core/` for marketplace installs (or `~/.claude/skills/core/` for legacy direct installs); Codex uses `~/.codex/plugins/cache/<marketplace>/core/<version>/` for plugin installs (or `~/.codex/skills/core/` for standalone skill installs). Resolve the actual path via `harnesses/<name>.md`. |
 | Source data | The project being analyzed or developed. |
 | Project synthesis | `<project>/PROJECT.md` — the rendered six-section view (What & Why / State / People / Moves / Decisions & Risks / Notes). |
 | Unit store | `<project>/_memories/` — flat directory of canonical project context, one fact per file. |
 | Delivery workspace | `~/.core/workspaces/<id>/` — your operational meta about this project. Not project facts. |
-| Harness config | `<source data>/.claude/` — hooks and scripts the harness runs for this project. |
+| Harness config | Harness-specific config directory at the project root — `<source data>/.claude/` for Claude Code, `<source data>/.codex/` (or `<source data>/AGENTS.md`) for Codex. Hooks and scripts the harness runs for this project. |
 
 ---
 

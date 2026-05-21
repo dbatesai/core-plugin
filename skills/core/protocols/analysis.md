@@ -33,6 +33,8 @@ Critic is always present. Anti-anchoring discipline is non-negotiable regardless
 
 Hardware budget caps the upper end. From `protocols/execution.md`: ≥48GB → up to 6–8; ≥24GB → 4–5; <24GB → 2–3.
 
+Compose fresh personas for the task's specific shape. Saved compositions at `~/.core/agents/<name>.md` are starting points for continuity across multi-session work — reach for them when the value is recognizing the same agent across sessions, not as shortcuts when the right shape happens to share a name with a saved one. The lens framework in `agents/roles.md` is built for fresh composition; that's the primary practice.
+
 ## Anti-anchoring enforcement
 
 The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the empirically observed 84.5% sycophancy flip rate in LLM critics.

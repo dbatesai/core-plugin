@@ -10,7 +10,7 @@ description: Concrete tool mapping for each abstract adapter verb when CORE runs
 Detect by:
 - `~/.codex/` config directory present, OR
 - `$CODEX_HOME` env var set, OR
-- Skill discovered under `~/.agents/skills/` (Codex's user-scope skill path), OR
+- Skill discovered under a Codex user-scope skill path (`~/.codex/skills/`, `~/.agents/skills/`, or a plugin cache under `~/.codex/plugins/cache/`), OR
 - Absence of Claude-Code-specific tools (`TaskCreate`, `SendMessage`, `TeamCreate`).
 
 If any of these conditions hold, harness is Codex.
@@ -41,7 +41,7 @@ Poll the scratchpad. The completion signal is the presence of `<scratchpad>/<fro
 
 ## plan-task
 
-Codex's `update_plan` takes a list of step objects with `{description, status}`. Map `plan-task` to a single `update_plan` call seeding all steps with status `"pending"`. Subsequent `complete-task` calls update specific steps.
+Codex's `update_plan` takes a list of step objects keyed by a step identifier with a `status` field (current shape: `{step, status}` — verify against the installed Codex CLI's tool schema, since this surface has churned across May 2026 GA). Map `plan-task` to a single `update_plan` call seeding all steps with status `"pending"`. Subsequent `complete-task` calls update specific steps. If the schema doesn't match, inspect the Codex tool definition and adapt — the verb-level intent (seed all steps as pending, mutate one to completed on each tick) is stable; only the field names move.
 
 ## complete-task
 
@@ -73,5 +73,5 @@ Codex auto-loads `<project>/AGENTS.md` and `~/.codex/AGENTS.md` at session start
 ## Notes
 
 - Universal verbs (`read`, `write`, `edit`, `glob`, `grep`, `shell`, `web-fetch`, `web-search`) resolve via inference to Codex's `read`, `write`, `apply_patch`, `shell` + `find`, `shell` + `rg`, `shell`, MCP-server or `shell` + `curl`, MCP-server (Brave / Firecrawl) respectively. No explicit mapping needed.
-- The plugin manifest ships in Claude Code format (`plugin.json`). Codex install uses the skill content directly under `~/.agents/skills/core/`; the dual-manifest story is a follow-up.
+- The plugin ships dual manifests (`.claude-plugin/plugin.json` for Claude Code, `.codex-plugin/plugin.json` for Codex) in the same repo; Codex installs the bundle into `~/.codex/plugins/cache/<marketplace>/core/<version>/` via `codex plugin marketplace add` + `codex plugin add`. Skill content under `skills/core/` is shared between both harnesses.
 - Voice baseline catalog ships empty initially. Build empirically if usage warrants.
