@@ -1,10 +1,10 @@
 {
   "name": "core",
-  "version": "2.0.1-dev.20260521.3",
-  "build": "20260521.3",
-  "created_at": "2026-05-22T02:00:00Z",
+  "version": "2.0.1-dev.20260521.4",
+  "build": "20260521.4",
+  "created_at": "2026-05-22T15:00:00Z",
   "targets": ["claude-code", "codex"],
-  "source_commit": "9abde5d3271d811df8bedc7b5ce3f13786e50022",
+  "source_commit": "b41ac0085da08cd481c8252ca6a2ecd8a52cd726",
   "source_repo": "https://github.com/dbatesai/core-plugin",
   "manifests": {
     "claude-code": ".claude-plugin/plugin.json",
@@ -22,5 +22,5 @@
     "vibecheck",
     "organize-files"
   ],
-  "notes": "Pass 4 build. Closes Round-3 re-probe defects: workspace-fork-check.mjs ships as deterministic script per DC-77; graph-walk.mjs --format json now emits edge_direction on every result. 374/374 tests passing."
+  "notes": "Pass 5 build. Closes Round-4 PARTIAL defects: D1 (sibling-skill path-derivation rule in orient + finalize wrappers), D3 (schema_version: v2 in new-workspace creation), D5 (verbatim fork-check stdout echo), D6 (nested codex-exec discipline + ${CLAUDE_PLUGIN_ROOT} hardening in finalize + process-memory). D4 reframed as probe error (--label vs --log-label)."
 }
