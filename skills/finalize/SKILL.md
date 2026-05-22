@@ -103,7 +103,7 @@ Summaries are write-only from your perspective — you don't re-read them at boo
 
 ## Step 5 — Refresh harness-local recall
 
-Use the `detect-harness` adapter verb (see `protocols/harness.md`) to branch by harness. Authority ordering puts harness-local recall at the bottom of the stack — see DC-86 for the principle.
+Use the `detect-harness` adapter verb to branch by harness. The verb is defined in the sibling core skill's harness protocol — take the absolute path you loaded this `SKILL.md` from, replace `/skills/finalize/SKILL.md` with `/skills/core/protocols/harness.md`, and read that. (Claude Code: `${CLAUDE_PLUGIN_ROOT}/skills/core/protocols/harness.md`. Codex: `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/protocols/harness.md`.) Authority ordering puts harness-local recall at the bottom of the stack — see DC-86 for the principle.
 
 ### If harness is Claude Code
 
