@@ -10,6 +10,8 @@ You're closing the session. Project state has been updating continuously — obs
 
 Execute every step in order. Don't skip.
 
+**Script path resolution.** This file references scripts via `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<script>.mjs`. That env var is set on Claude Code marketplace installs but not on Codex. On Codex, derive the path mechanically: take the absolute path you loaded this `SKILL.md` from, replace `/skills/finalize/SKILL.md` with `/skills/core/scripts/<script>.mjs`. Concretely: `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/finalize/SKILL.md` → `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/scripts/<script>.mjs`. Do not construct paths against a guessed plugin base; the loaded path carries the resolution.
+
 ---
 
 ## Step 1 — Fresh-eyes review

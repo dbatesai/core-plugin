@@ -88,5 +88,23 @@ Codex memory writes are not part of normal CORE project curation. Write project 
 
 - **File existence test:** `rtk test -f <path>` collides with the shell `test` builtin and produces noisy usage output. Use `rtk sh -c '[ -f <path> ]'` instead.
 - **Grep with directory exclusion:** `rtk grep --exclude-dir=...` is not supported. Use `rg -g '!<dir>/**'` (or `rtk sh -c 'rg -g ...'`) instead.
+- **`rtk find` flag passthrough is incomplete.** Standard `find` flags like `-print` and other GNU-find extensions don't always pass through cleanly. When you need specific find behavior, fall back to `rtk sh -c 'find ...'` so the find binary sees its flags directly.
 
 These are RTK-specific, not Codex-specific — but they're worth listing here because Codex sessions tend to use shell more heavily than Claude Code sessions and hit these patterns more often.
+
+### Nested `codex exec` and AGENTS.md discipline
+
+When a Codex slash command spawns nested `codex exec` calls inside its own shell flow (CORE's `/finalize` and `/process-memory` do this when running scripts), the nested call inherits the caller's environment but may not always surface the project's `AGENTS.md` instructions to the inner agent — including project-level RTK guidance. The Round-4 probe surfaced this: outer probe runs honored RTK; CORE-on-Codex shell calls inside the same session did not consistently.
+
+If you're authoring a slash-command flow that spawns nested `codex exec`, do not assume the inner invocation has inherited the project's command discipline. Pass project conventions explicitly into the nested prompt — name the RTK requirement, name any project-specific shell rules — rather than relying on AGENTS.md inheritance.
+
+### `${CLAUDE_PLUGIN_ROOT}` is not set on Codex
+
+Codex doesn't set `${CLAUDE_PLUGIN_ROOT}`. Companion skills that need to invoke scripts in the sibling core skill (`/finalize`, `/process-memory`) must derive the path from the loaded SKILL.md location rather than relying on the env var.
+
+The mechanical rule mirrors the protocol-resolution rule used in `skills/orient/SKILL.md` and `skills/finalize/SKILL.md`: take the absolute path you loaded SKILL.md from, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`, and invoke that. Concretely:
+
+- Claude Code marketplace install: `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<script>.mjs` works because the env var is set.
+- Codex plugin-cache install: derive the path from the loaded `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/<wrapper>/SKILL.md`, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`.
+
+Don't construct paths against a guessed plugin base. The loaded path carries the resolution.
