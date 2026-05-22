@@ -189,6 +189,7 @@ export function main(argv) {
       rs_score: Math.round(c.rs_score * 10000) / 10000,
       via_edge_type: c.via_edge_type,
       via_source: c.via_source,
+      edge_direction: c.edge_direction,
     }));
     console.log(JSON.stringify(out, null, 2));
   } else {

@@ -31,18 +31,19 @@ Resolve deterministically when you can; ask the user only when it's genuinely am
 
 Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; you'll route to new-workspace setup below unless the project has v1-era content that needs migrating.
 
-**Auto-fork copied workspaces.** When a local `workspace.json` exists in the current directory, cross-reference its `workspace_id` against `~/.core/index.json`. Before checking the id match, check whether any entry in `index.json` has a `path` equal to the current cwd — if yes, use that entry as the resolution regardless of what the local `workspace.json` says (idempotency on re-orient after a prior fork). Then:
+**Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution:
 
-- Index has an entry with the local `workspace.json`'s `workspace_id` AND its registered `path` matches the current cwd → returning workspace; proceed normally.
-- Index has an entry with that `workspace_id` BUT its registered `path` differs from the current cwd → the workspace.json was copied from another project. Treat the copy as a brand new workspace and auto-fork:
-  1. Generate a new workspace_id by slugifying the current directory name (lowercase, replace non-alphanumeric with `-`, collapse repeats, strip leading/trailing `-`). If the slug collides with an existing id in `index.json`, append `-2`, `-3`, etc. until unique.
-  2. Rewrite the local `workspace.json` with the new `workspace_id` and `data_path` pointing at the new location. Preserve `name` (or append `" (copy)"` if explicit signaling helps); preserve `created` if present, otherwise set to now.
-  3. Register the new entry in `~/.core/index.json` with the current cwd as `path` and a fresh `last_active`.
-  4. Create new workspace meta at `~/.core/workspaces/<new-id>/workspace.json` per the workspace schema; do NOT copy from the original — this is a new workspace, not a forked one.
-  5. Surface the fork to the user in the readiness summary: *"Detected this `workspace.json` was copied from `<original-id>`; treating as a new workspace registered as `<new-id>`."*
-- Index has no entry for that `workspace_id` → unregistered; route per existing rules below.
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs
+```
 
-The check is about workspace identity stability across registrations, not about content. The copy may have full v2 content already (PROJECT.md, `_memories/`, etc.) — that's fine; the fork doesn't touch project data, it just rewrites the registration. The check is idempotent — once the fork has happened, a re-orient in the same directory finds the id already matches and the check is a no-op.
+The script reads `<cwd>/workspace.json` and `~/.core/index.json`, detects whether the local pointer was copied from another project (its `workspace_id` resolves to an index entry whose registered `path` is somewhere else), and if so performs the fork: slugifies the cwd basename into a new id (collision-resolved with `-2`, `-3`, etc.), rewrites the local pointer, appends an entry to `index.json`, and creates a fresh manifest at `~/.core/workspaces/<new-id>/workspace.json`. If there's nothing to do — no pointer, no index, path already registered, or `workspace_id` not in index — it prints `(no fork needed)` and exits 0. The check is idempotent: re-running after a fork finds the id already matches the cwd and is a no-op.
+
+Echo the script's stdout to the readiness summary. If it printed `forked <original> -> <new>; registered at <path>`, name the fork in plain voice: *"Detected this `workspace.json` was copied from `<original>`; treating as a new workspace registered as `<new>`."* If it printed `(no fork needed)`, no narration required.
+
+Why a script and not prose: per DC-77, workspace identity stability is a critical surface inference can't be trusted on. The Round-3 Codex re-probe (2026-05-21) showed the agent reading equivalent prose, narrating the mismatch, and still operating under the source identity. The fork is a multi-file mutation; inference reading the steps can fail at any one of them. Ship the deterministic script, drop the agent's job to "run script, echo output."
+
+After the fork check returns, continue with normal resolution: the post-fork local pointer's `workspace_id` is now in `index.json`, so the standard lookup below will find it. The fork doesn't touch project data — `PROJECT.md`, `_memories/`, and the rest stay verbatim; only the registration changes.
 
 After resolution (including any fork), update `last_active` in `~/.core/index.json` for the resolved workspace id.
 

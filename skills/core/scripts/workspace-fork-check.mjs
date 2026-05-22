@@ -1,0 +1,155 @@
+/**
+ * Workspace-fork check — detect copied workspaces and auto-fork.
+ *
+ * Per DC-77, workspace identity stability is a critical surface inference
+ * can't be trusted on alone. The Round-3 Codex re-probe (2026-05-21) showed
+ * the agent reading the prose, narrating the mismatch, and still operating
+ * under the source identity. This script ships the fork as deterministic code;
+ * the agent's job drops to "run this script, echo its output."
+ *
+ * Behavior:
+ *   1. Read <cwd>/workspace.json — if missing, no-op.
+ *   2. Read <core-dir>/index.json — if missing, no-op.
+ *   3. Path-match first: any entry with path === cwd → no fork needed
+ *      (idempotent on re-orient after a prior fork).
+ *   4. ID-mismatch: workspace_id resolves to an entry whose path !== cwd
+ *      → perform fork (slugify cwd basename, collision-resolve, rewrite local
+ *      workspace.json, register in index, create new meta dir).
+ *   5. Print exactly one line to stdout.
+ *
+ *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs
+ *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs --cwd <dir>
+ *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs --cwd <dir> --core-dir <dir>
+ */
+
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { resolve, join, basename } from 'node:path';
+import { homedir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+export function slugify(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export function resolveCollision(slug, existingIds) {
+  if (!existingIds.has(slug)) return slug;
+  let n = 2;
+  while (existingIds.has(`${slug}-${n}`)) n++;
+  return `${slug}-${n}`;
+}
+
+export function parseArgv(argv) {
+  let cwd = null;
+  let coreDir = null;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--cwd') cwd = argv[++i];
+    else if (argv[i] === '--core-dir') coreDir = argv[++i];
+  }
+  return { cwd, coreDir };
+}
+
+export function checkFork({ cwd, coreDir, now = new Date() }) {
+  const localPointer = join(cwd, 'workspace.json');
+  if (!existsSync(localPointer)) return { action: 'no-fork', reason: 'no-pointer' };
+
+  const indexPath = join(coreDir, 'index.json');
+  if (!existsSync(indexPath)) return { action: 'no-fork', reason: 'no-index' };
+
+  let pointer, index;
+  try { pointer = JSON.parse(readFileSync(localPointer, 'utf8')); }
+  catch (e) { return { action: 'error', error: `pointer-parse: ${e.message}` }; }
+  try { index = JSON.parse(readFileSync(indexPath, 'utf8')); }
+  catch (e) { return { action: 'error', error: `index-parse: ${e.message}` }; }
+  if (!Array.isArray(index)) return { action: 'error', error: 'index-not-array' };
+
+  const cwdResolved = resolve(cwd);
+  const pathMatch = index.find(e => e.path && resolve(e.path) === cwdResolved);
+  if (pathMatch) return { action: 'no-fork', reason: 'path-match', workspace_id: pathMatch.workspace_id };
+
+  const localId = pointer.workspace_id;
+  if (!localId) return { action: 'no-fork', reason: 'pointer-missing-id' };
+
+  const idMatch = index.find(e => e.workspace_id === localId);
+  if (!idMatch) return { action: 'no-fork', reason: 'unregistered-id' };
+
+  const registeredPath = idMatch.path ? resolve(idMatch.path) : null;
+  if (registeredPath === cwdResolved) return { action: 'no-fork', reason: 'path-match', workspace_id: localId };
+
+  const baseSlug = slugify(basename(cwdResolved));
+  const existingIds = new Set(index.map(e => e.workspace_id).filter(Boolean));
+  const newId = resolveCollision(baseSlug, existingIds);
+
+  const nowIso = now.toISOString();
+  const newDataPath = `~/.core/workspaces/${newId}/`;
+
+  const newPointer = {
+    ...pointer,
+    workspace_id: newId,
+    data_path: newDataPath,
+    created: pointer.created || nowIso,
+  };
+  writeFileSync(localPointer, JSON.stringify(newPointer, null, 2) + '\n');
+
+  index.push({
+    name: pointer.name || newId,
+    path: cwdResolved,
+    workspace_id: newId,
+    last_active: nowIso,
+  });
+  writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n');
+
+  const newMetaDir = join(coreDir, 'workspaces', newId);
+  mkdirSync(newMetaDir, { recursive: true });
+  const newManifest = {
+    workspace_id: newId,
+    name: pointer.name || newId,
+    project_path: cwdResolved,
+    created: nowIso,
+    last_active: nowIso,
+    dm_notes: `Auto-forked from ${localId} on ${nowIso} — copied workspace detected at ${cwdResolved}.`,
+  };
+  writeFileSync(join(newMetaDir, 'workspace.json'), JSON.stringify(newManifest, null, 2) + '\n');
+
+  return {
+    action: 'forked',
+    original_id: localId,
+    new_id: newId,
+    new_meta_dir: newMetaDir,
+  };
+}
+
+export function main(argv) {
+  const { cwd: cwdArg, coreDir: coreDirArg } = parseArgv(argv);
+  const cwd = cwdArg ? resolve(cwdArg) : process.cwd();
+  const coreDir = coreDirArg ? resolve(coreDirArg) : join(homedir(), '.core');
+
+  let result;
+  try { result = checkFork({ cwd, coreDir }); }
+  catch (e) {
+    process.stderr.write(`error: ${e.message}\n`);
+    return 2;
+  }
+
+  if (result.action === 'error') {
+    process.stderr.write(`error: ${result.error}\n`);
+    return 2;
+  }
+  if (result.action === 'forked') {
+    console.log(`forked ${result.original_id} -> ${result.new_id}; registered at ${result.new_meta_dir}/`);
+    return 0;
+  }
+  console.log('(no fork needed)');
+  return 0;
+}
+
+const _cliEntryArgv1 = process.argv[1];
+const _cliEntrySelf = fileURLToPath(import.meta.url);
+if (process.env.CORE_DEBUG_CLI_ENTRY) {
+  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
+}
+if (_cliEntryArgv1 === _cliEntrySelf) {
+  process.exit(main(process.argv.slice(2)));
+}
