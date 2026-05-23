@@ -28,7 +28,7 @@
  * Missing log for a real workspace exits 0 with a "no events" report.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -271,11 +271,14 @@ export async function main(argv) {
   return 0;
 }
 
-// CLI entry guard — DC-77 pattern, CORE_DEBUG_CLI_ENTRY=1 surfaces argv[1]/import.meta.url match
+// CLI entry guard — DC-77 pattern. realpathSync resolves symlinks on both sides so the
+// comparison works for symlinked installs (marketplace cache, OneDrive sync, manual symlinks).
+// CORE_DEBUG_CLI_ENTRY=1 surfaces argv[1]/import.meta.url match.
 const __isCliEntry = (() => {
   try {
-    const self = fileURLToPath(import.meta.url);
-    const argv1 = process.argv[1];
+    const canonical = (p) => { try { return realpathSync(p); } catch { return p; } };
+    const self = canonical(fileURLToPath(import.meta.url));
+    const argv1 = canonical(process.argv[1]);
     if (process.env.CORE_DEBUG_CLI_ENTRY) {
       console.error(`[cli-entry] argv[1]=${argv1} self=${self} match=${argv1 === self}`);
     }

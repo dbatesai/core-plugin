@@ -22,7 +22,7 @@
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs --cwd <dir> --core-dir <dir>
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -146,8 +146,9 @@ export function main(argv) {
   return 0;
 }
 
-const _cliEntryArgv1 = process.argv[1];
-const _cliEntrySelf = fileURLToPath(import.meta.url);
+const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
+const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
+const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
 if (process.env.CORE_DEBUG_CLI_ENTRY) {
   process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
 }
