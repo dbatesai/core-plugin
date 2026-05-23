@@ -61,7 +61,17 @@ extractor-pointer: <installation-specific path or identifier for the extractor i
 - `cadence` — when/how often this source should be pulled. `always-on` = swept at every refresh. `session-pull` = pulled on demand during a session. `user-flagged` = pulled only when the user explicitly says to. `event-driven` = pulled when an external trigger fires (webhook, notification, scheduled job).
 - `confidence-default` — the default confidence-level for facts extracted from this source absent specific signal. Per-fact overrides happen via `confidence-overrides` (optional, below) or extractor judgment on content signals.
 - `relevance-contract` — prose declaration of how the extractor decides whether a given datum from this source is project-relevant. Examples: *"items mentioning project keywords or assigned to project participants"*; *"messages in chats whose members include any of the project participants"*; *"events whose subject includes a project keyword or whose attendees include any project stakeholder."*
-- `extractor-pointer` — installation-specific path to the extractor implementation. CORE doesn't dictate format — could be a script path, a skill name, a MCP tool reference. The installation knows what its extractor looks like.
+- `extractor-pointer` — installation-specific path to the extractor implementation. CORE doesn't dictate format — could be a script path, a skill name, a tool reference. The installation knows what its extractor looks like.
+
+  When `cadence: always-on`, the extractor-pointer may name two separate extractor references — a lightweight sweep path used at `/orient` and a full extraction path used during a full refresh:
+
+  ```yaml
+  extractor-pointer:
+    sweep: <pointer for the always-on lightweight check>
+    full: <pointer for the full extraction pass>
+  ```
+
+  Single-value form (`extractor-pointer: <pointer>`) uses the same extractor for both paths and is the common case. The two-value form is forward-compatibility for installations that have meaningfully different sweep and full paths.
 
 ### Optional fields
 
@@ -72,12 +82,16 @@ confidence-overrides:
 stability-defaults:
   - pattern: "<structural signal>"
     proposed-class: durably-correct | durably-suspect
+body-construction-policy: <prose guidance for the extractor on body construction>
 archive-policy-overrides: <prose declaration if standard graduation doesn't fit>
+authority-unit-id: <id of the source-of-authority unit in _memories/>
 ```
 
 - `confidence-overrides` — rules that change the default for specific content patterns. Example: a free-text source might default to `inferred` but override to `sourced` when the content is a verbatim quote. Each rule is a `when` (structural signal in the source data) + a `confidence` value.
 - `stability-defaults` — patterns that warrant the extractor proposing a stability-class. Example: a structured source might propose `durably-suspect` when an automation actor set a field and no human edit followed. Patterns are structural signals (provenance markers, edit history), not age-based.
+- `body-construction-policy` — prose guidance for the extractor on how to construct the observation body from this source's raw content. Distinct from archive-policy-overrides: body-construction-policy governs *write-time* body construction (what makes it into the body and how it's structured); archive-policy-overrides governs *downstream lifecycle* (retention, pruning). Examples: *"trim to key decision passages only; verbatim capture in ## Verbatim subsection per claim; do not ingest full source content into any single observation body"*; *"extract each commitment as a separate observation; do not summarize multiple commitments into one body."*
 - `archive-policy-overrides` — when standard graduation rules don't fit. Rare. Use only when the source's data has a fundamentally different lifecycle than typical observations.
+- `authority-unit-id` — id of the `source-of-authority` unit that the intake protocol created for this source. Written by the intake protocol at registration time. Provides the explicit round-trip: registration ↔ authority unit. Without this pointer, re-intake (when authority changes) has to find the prior unit by convention rather than by explicit link. On re-intake, the protocol creates a new authority unit superseding the prior, updates this field to the new unit's id, and updates the `authority` prose to match.
 
 ### What CORE does NOT ship
 

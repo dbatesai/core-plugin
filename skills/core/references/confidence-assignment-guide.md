@@ -218,7 +218,15 @@ The good version lets a future reader (or synthesis pass) evaluate the chain. Th
 
 ## Maintenance
 
-Patterns get added when extractors repeatedly hit findings that don't fit any pattern. The gap is the signal. Pattern proposals come through `_outputs/` or as proposed-edge additions to this guide.
+Patterns get added when extractors repeatedly hit findings that don't fit any pattern. The gap is the signal.
+
+The proposal flow:
+
+1. When an extractor encounters a finding it can't map cleanly to any pattern, it writes the observation with confidence-level set to its best judgment plus a `pattern-gap:` annotation in the body naming the gap.
+2. `/process-memory` collects pattern-gap annotations during its observation-graduation pass and surfaces them as a structured list in the synthesis output.
+3. When pattern gaps accumulate (same gap recurring; multiple distinct gaps in one window), the user runs a deliberate revision pass on this guide. Proposals are evaluated together; the guide grows in tracked revisions rather than per-incident.
+
+Free-form pattern accumulation in scratch directories isn't structured enough to be reliable. The `pattern-gap:` annotation is the structured signal that catches gaps where the work is happening.
 
 The guide is part of the framework spec at `source-registration-framework.md` §5. Changes here may require corresponding changes there.
 
