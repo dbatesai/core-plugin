@@ -48,17 +48,18 @@ jobs:
             console.log("plugin.json fields ok:", Object.keys(m).join(", "));
           '
 
-      - name: Skill metadata present (VERSION, BUILD, SKILL.md)
+      - name: Skill metadata present (BUILD, SKILL.md)
         run: |
           set -e
-          for f in skills/core/VERSION skills/core/BUILD skills/core/SKILL.md; do
+          # VERSION file removed in v2.1.0 — version is now read from plugin.json
+          for f in skills/core/BUILD skills/core/SKILL.md; do
             if [ ! -s "$f" ]; then
               echo "missing or empty: $f"
               exit 1
             fi
           done
-          echo "VERSION=$(cat skills/core/VERSION)"
           echo "BUILD=$(cat skills/core/BUILD)"
+          echo "plugin.json version=$(jq -r .version .claude-plugin/plugin.json)"
 
       - name: SKILL.md has YAML frontmatter with name and description
         run: |
