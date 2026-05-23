@@ -3,8 +3,11 @@
   "version": "2.0.1-dev.20260521.5",
   "build": "20260521.5",
   "created_at": "2026-05-23T02:30:00Z",
-  "targets": ["claude-code", "codex"],
-  "source_commit": "PENDING",
+  "targets": [
+    "claude-code",
+    "codex"
+  ],
+  "source_commit": "57ec834",
   "source_repo": "https://github.com/dbatesai/core-plugin",
   "manifests": {
     "claude-code": ".claude-plugin/plugin.json",
