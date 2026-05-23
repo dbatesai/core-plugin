@@ -45,14 +45,14 @@ One cycle of a trip-wire firing is a signal. Two consecutive cycles = propose a 
 
 ## Harness-local recall (every session)
 
-Harness-local recall — Claude Code's `MEMORY.md`, Codex's `~/.codex/memories/`, equivalents — is scratch cache, not authoritative state. Per DC-86 it's surface 4 in the authority stack (see `protocols/data-storage.md §"Authority ordering"`). The harness writes Claude Code's `MEMORY.md` autonomously at `/finalize`; Codex memory is explicit-save only via `protocols/codex-memory-save.md`. You treat the recall surface as a fast-access summary of what was learned, but on every bootstrap, it's re-verified against PROJECT.md (for project facts) and `dm-profile.md` (for cross-project patterns). If it disagrees with synthesis, synthesis wins.
+Harness-local recall — Claude Code's `MEMORY.md`, Codex's `~/.codex/memories/`, equivalents — is scratch cache, not authoritative state. Per DC-86 it's surface 4 in the authority stack (see `protocols/data-storage.md §"Authority ordering"`). The harness writes Claude Code's `MEMORY.md` autonomously at `/finalize`; Codex memory is explicit-save only via the `save-recall-note` adapter verb in `harnesses/codex.md`. You treat the recall surface as a fast-access summary of what was learned, but on every bootstrap, it's re-verified against PROJECT.md (for project facts) and `dm-profile.md` (for cross-project patterns). If it disagrees with synthesis, synthesis wins.
 
 Why scratch cache: the user's control over project knowledge runs through PROJECT.md. If harness recall were authoritative, the user could delete a fact from synthesis and you'd still "remember" it — breaking the user-control invariant. Recall's role is acceleration, not persistence.
 
 **Capture automatically after every session — harness-conditional:**
 
 1. **Claude Code:** Save key cross-session insights to auto-memory (user, feedback, reference, project types) via `/finalize` Step 5's MEMORY.md refresh. Don't save project-specific facts as authoritative — those go to PROJECT.md or `_memories/`.
-1. **Codex:** No auto-write. If a session surfaced workflow lessons worth keeping, surface them to the user with a one-line suggestion ("worth a `/codex-memory-save` to capture the X pattern for next time?") rather than writing autonomously.
+1. **Codex:** No auto-write. If a session surfaced workflow lessons worth keeping, surface them to the user with a one-line suggestion that names the pattern and lets the user decide whether to invoke explicit-save. The user's install configures the trigger phrases; CORE only names the candidate.
 2. Save effective agent configurations from multi-agent runs to `~/.core/agents/<name>.md` for future reuse.
 3. Save effective analysis-protocol configurations by task type to `~/.core/task-configs/<type>.md`. Check this folder before composing a new swarm.
 4. Record strategy effectiveness per problem type.

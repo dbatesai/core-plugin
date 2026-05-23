@@ -20,7 +20,7 @@ Three surfaces, three responsibilities. Don't mix them.
 
 The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's DM meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
 
-There's a fourth surface that isn't CORE's to own but that CORE reads from: **harness-local recall** — Claude Code's `~/.claude/projects/*/memory/MEMORY.md`, Codex's `~/.codex/memories/`, equivalents in future harnesses. CORE treats this as scratch cache, never authoritative. See `dc-86-harness-local-memory-recall` for the principle and `protocols/codex-memory-save.md` for the Codex-specific explicit-save trigger.
+There's a fourth surface that isn't CORE's to own but that CORE reads from: **harness-local recall** — Claude Code's `~/.claude/projects/*/memory/MEMORY.md`, Codex's `~/.codex/memories/`, equivalents in future harnesses. CORE treats this as scratch cache, never authoritative. See `dc-86-harness-local-memory-recall` for the principle and the `save-recall-note` adapter verb (resolved per `harnesses/<name>.md`) for the explicit-save mechanism. The trigger for invoking explicit-save — what user phrases mean "save this" to a given user — is install-level configuration in the user's `AGENTS.md`, not CORE prose.
 
 ---
 
@@ -429,7 +429,7 @@ Harness-local recall is its own store at a harness-specific path — Claude Code
 - Loaded at session start by the harness when it has an auto-load surface (Claude Code does, Codex doesn't auto-load memory).
 - Holds cross-session workflow lessons — user preferences, patterns, references, harness-specific empirical findings.
 - Retrieval queries BOTH `_memories/` and harness-local recall — no separate path.
-- Graduation can promote a harness recall entry into `_memories/` when it reveals cross-project implications worth a durable unit. The reverse — auto-write into harness recall from project facts — happens per harness: Claude Code refreshes `MEMORY.md` from top-priority units at `/finalize` Step 5; Codex never auto-writes (explicit-save only, via `protocols/codex-memory-save.md`).
+- Graduation can promote a harness recall entry into `_memories/` when it reveals cross-project implications worth a durable unit. The reverse — auto-write into harness recall from project facts — happens per harness: Claude Code refreshes `MEMORY.md` from top-priority units at `/finalize` Step 5; Codex never auto-writes (explicit-save only, via the `save-recall-note` verb mapped in `harnesses/codex.md`).
 - Hygiene reads harness recall and reconciles with `_memories/` — no duplication. On Codex, reconciliation surfaces divergences rather than silently rewriting.
 - The harness recall index, when one exists (Claude Code's `MEMORY.md`), is maintained by the same agent that maintains `_memories/` indexes.
 
@@ -482,7 +482,7 @@ You don't have to narrate placement when the path is fully determined without a 
 - Your own session log (`<project>/_sessions/<YYYY-MM-DD>/agent-log.md`).
 - The autonomous run log (`<project>/autonomous-run-log.md`).
 - `inbox.md` raw external pulls.
-- Harness-local recall writes (path resolved per `read-auto-memory` adapter — Claude Code's `~/.claude/projects/<hash>/memory/`, Codex's `~/.codex/memories/extensions/ad_hoc/notes/` via `protocols/codex-memory-save.md`).
+- Harness-local recall writes (path resolved per the `save-recall-note` adapter verb in `harnesses/<name>.md` — Claude Code's `~/.claude/projects/<hash>/memory/`, Codex's `~/.codex/memories/extensions/ad_hoc/notes/`).
 - Edits to a file the user explicitly named in the same turn.
 - State cache writes (`~/.core/state-cache.json`).
 - Hygiene log entries (`~/.core/hygiene-log.jsonl`).

@@ -63,6 +63,10 @@ Install a harness hook for pre- or post-action events. The handler runs at the s
 
 Read the harness's auto-injected memory index. Source-of-truth for project-scoped memory the harness loads at session start.
 
+### save-recall-note(content)
+
+Persist `content` to the harness's local recall surface as a workflow hint for future sessions. Harness-local recall is surface 4 in the authority ordering at `protocols/data-storage.md` — scratch cache, never authoritative. The verb describes the mechanism only. When to invoke it (which user phrases trigger it, what counts as "save-worthy") is install-level configuration; CORE encodes no triggers. If the content is also project-canonical, the agent writes a CORE observation to `<project>/_memories/observations/` independently — that's the autonomous-curation path documented in `protocols/data-storage.md`, not part of this verb.
+
 ### detect-harness()
 
 Identify which harness the current session is running in. Returns one of: `claude-code`, `codex`, or future harness names. Called at session start before any adapter-verb resolution.
