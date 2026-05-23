@@ -42,7 +42,8 @@ Don't read everything. Use the ladder.
 Also load:
 - `~/.core/dm-profile.md` — cross-project identity.
 - `~/.core/topics.md` — controlled vocabulary.
-- `<project>/inbox.md` if it exists — raw pending items.
+- `<project>/inbox.md` if it exists — raw pending items. When entries carry `mode: B` or `mode: C` frontmatter, they're pending review per the source-registration framework. Count them; the readiness receipt surfaces the count.
+- `<project>/_sources/*.yaml` if the directory exists — the registered external sources for this project. Note the names and count for the readiness receipt.
 
 **Do NOT read:**
 - Session summaries in `<project>/_summaries/` (or the legacy `<project>/_handoffs/` if the rename hasn't happened yet). Narrative for the human reader. Facts worth keeping were already promoted to PROJECT.md or `_memories/` at session close. Re-reading summaries can resurrect user-deleted facts.
@@ -91,6 +92,7 @@ What's in the receipt:
 - Top 3 §Moves priorities as the agenda.
 - Anything edit-detection caught (entries, not counts).
 - The auto-compaction line if startup's hygiene check moved anything (entries, not counts).
+- Source-registration signals when they're worth mentioning: pending Mode B/C blocks in inbox.md (count plus a one-line nudge — *"three pending observations in the inbox waiting on review"*), or observations citing a `source:` not in `<project>/_sources/` (drift signal — name the source). Skip silently when the inbox is empty and no drift surfaced.
 - One-line readiness statement.
 
 What's NOT in the receipt:

@@ -44,12 +44,19 @@ Then narrate in plain voice: "Captured N observations from this session before p
 
 ## Step 1 — Pull inbox
 
-If `<project>/inbox.md` is non-empty, classify each entry:
+If `<project>/inbox.md` is non-empty, walk the entries. Two shapes can appear:
+
+**Mode-tagged observation blocks** carry full frontmatter (id, type, status, source, source-instance, extracted-at, references-person, confidence-level, body) plus two framework fields: `mode: B | C` and, when Mode C, `judgment-needed: <prose>`. These come from extractors implementing the source-registration framework (see `references/external-sources/source-registration-framework.md §4`). The mode tells you the routing without re-deriving it from criteria. The two framework fields (`mode`, `judgment-needed`) are inbox-only annotations — strip them from the frontmatter before writing the graduated unit.
+
+- **Mode B blocks** — read the body and the proposed frontmatter back to the user in plain voice and ask for confirmation. On confirmation, write the block to `<project>/_memories/observations/<YYYY-MM>/obs-<id>.md` with `status: active` and the two inbox-only fields removed. Apply any user-supplied adjustments before the write. On rejection, discard with a one-line note.
+- **Mode C blocks** — surface the `judgment-needed` question to the user verbatim. Wait for an explicit answer. Don't graduate on routine confirmation — Mode C means the judgment is the user's call. Acceptable resolutions: (a) the user resolves the question and the block graduates to `<project>/_memories/observations/<YYYY-MM>/obs-<id>.md` with the judgment recorded as a `## Resolution` body subsection, `status: active`, and the two inbox-only fields stripped; (b) the user defers and the block stays in `inbox.md` until next pass; (c) the user rejects and the block is discarded with a one-line note. Don't auto-resolve a deferred Mode C block on a subsequent pass — wait for explicit input each time.
+
+**Untagged entries** (free-form text, observations dropped in without frontmatter) follow the legacy classify path:
 - Clear-cut observations → write to `_memories/observations/<YYYY-MM>/`
 - Items needing user review → surface inline
 - Noise → discard with a one-line note
 
-Truncate `inbox.md` when done.
+Truncate processed entries when done. Mode C blocks the user deferred stay in place. Mode B blocks the user adjusted but didn't reject also truncate after the graduated unit lands.
 
 ---
 
