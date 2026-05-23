@@ -90,7 +90,6 @@ Paths in this index resolve relative to the skill base directory (the one contai
 | Memory hygiene | `protocols/hygiene.md` | At `/finalize`, after meaningful change, on-demand |
 | Execution | `protocols/execution.md` | Before any non-trivial task |
 | Multi-agent analysis | `protocols/analysis.md` | When you decide a single pass isn't enough |
-| Codex memory-save | `protocols/codex-memory-save.md` | User asks to save a recall note on Codex |
 | Validation | `protocols/validation.md` | Weekly auto + on-demand retrieval health checks |
 | Debug mode | `protocols/debug-mode.md` | "debug on" or self-unblock |
 | Self-evolution | `protocols/self-evolution.md` | Session end, hygiene-triggered learning |

@@ -59,6 +59,17 @@ Read `~/.claude/projects/<encoded-cwd>/memory/MEMORY.md` (first 200 lines auto-i
 
 Per `dc-86-harness-local-memory-recall`, this is harness-local recall — surface 4 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`. Treat as scratch cache: useful for warm-start hints, never authoritative. Verify project-specific claims against `<project>/_memories/` before acting.
 
+## save-recall-note
+
+Claude Code's auto-memory is rebuilt from synthesis on each bootstrap rather than written-to directly, so explicit "save a recall note for next session" has a different shape than Codex's ad-hoc-notes surface. Two options on Claude Code, depending on what the content actually is:
+
+- **Workflow hint / cross-session preference** → append to `~/.claude/memory/<topic>.md` (cross-project) or `~/.claude/projects/<encoded-cwd>/memory/<file>.md` (project-scoped). These survive bootstrap because the auto-memory loader reads them directly.
+- **Project-canonical observation** → write to `<project>/_memories/observations/<YYYY-MM>/` via the autonomous-curation path in `protocols/data-storage.md`. That's where project facts of record live; auto-memory rebuilds from synthesis to reference them.
+
+If the content is both (a workflow hint AND a project fact), do both writes — they aren't duplicates, they serve different surfaces. See `harnesses/codex.md §save-recall-note` for the same dual-write discipline.
+
+What belongs on the recall surface vs. the project store mirrors DC-86: workflow lessons, harness/install preferences, warm-start hints → recall; decisions, risks, project state → project store.
+
 ## Notes
 
 - Universal verbs (`read`, `write`, `edit`, `glob`, `grep`, `shell`, `web-fetch`, `web-search`) resolve via inference to Claude Code's `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`, `WebFetch`, `WebSearch` respectively. No explicit mapping needed.

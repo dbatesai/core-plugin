@@ -76,7 +76,36 @@ Startup context comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat
 
 Codex assistant memory under `~/.codex/memories/` is harness-local recall. Treat it like scratch cache: useful for hints, never authoritative. Verify project-specific claims against the CORE unit store before acting. Per `dc-86-harness-local-memory-recall`, this is surface 4 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`.
 
-Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Only write Codex memory when the user explicitly asks to save a recall note; then follow `protocols/codex-memory-save.md` — that protocol is the trigger-driven micro-protocol covering the "save this" / "remember this" patterns.
+Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Codex memory is the explicit-save surface; mechanics live in `save-recall-note` below. CORE does not encode trigger phrases for when to invoke it — that's install-level configuration in the user's `AGENTS.md`.
+
+## save-recall-note
+
+Write the provided content as one ad hoc note to:
+
+```
+~/.codex/memories/extensions/ad_hoc/notes/<timestamp>-<slug>.md
+```
+
+- `<timestamp>` is UTC ISO-8601 compact form, e.g. `20260521T173801Z`
+- `<slug>` is a short kebab-case description, e.g. `core-codex-probe-observations`
+
+Do not edit any existing Codex memory file or index. Codex's own memory system manages those.
+
+The verb writes only to the Codex recall surface. If the content is also project-canonical (a real observation about the project, not a workflow hint), write a CORE observation to `<project>/_memories/observations/<YYYY-MM>/` separately as part of normal autonomous curation per `protocols/data-storage.md`. The two writes are not duplicates — the Codex note is recall-shaped (workflow hint), the CORE observation is project-shaped (graduates into units under hygiene).
+
+After writing, acknowledge the save to the user in plain voice — name the path.
+
+What belongs on this surface (per DC-86):
+- Cross-session workflow lessons
+- User preferences for assistant behavior
+- Harness-specific empirical findings
+- Pointers to canonical project artifacts
+- Short summaries of prior session outcomes useful as warm-start hints
+
+What does NOT (also per DC-86):
+- Project facts of record (those go to `PROJECT.md` and `_memories/`)
+- Decision units, risk units, person units
+- Anything the agent infers should be retired (anti-resurrection applies to recall too)
 
 ## Notes
 

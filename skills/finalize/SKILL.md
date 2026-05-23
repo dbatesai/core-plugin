@@ -130,11 +130,11 @@ Narrate the refresh plainly: *"Refreshing MEMORY.md from the top 30 units now."*
 
 ### If harness is Codex
 
-Do not auto-write to `~/.codex/memories/`. Codex memory is explicit-save only — see `harnesses/codex.md §read-auto-memory` for the rule and `protocols/codex-memory-save.md` for the trigger-driven micro-protocol that handles user-requested saves.
+Do not auto-write to `~/.codex/memories/`. Codex memory is explicit-save only — see `harnesses/codex.md §read-auto-memory` for the rule and `harnesses/codex.md §save-recall-note` for the mechanics of explicit recall writes. Trigger phrases (when a user request counts as "save this") live in the user's install-level config, not in CORE.
 
 Confirm project facts are captured in `<project>/_memories/` and the session summary written in Step 4. If harness-level observations surfaced during the session (workflow lessons, tooling collisions, Codex-specific patterns), include them in the session summary so the next session reads about them.
 
-If the user explicitly asked to save observations earlier in the session via the codex-memory-save micro-protocol, that ran separately at trigger time — don't duplicate-write here.
+If the user explicitly asked to save observations earlier in the session via `save-recall-note`, that ran at the trigger moment — don't duplicate-write here.
 
 Narrate plainly: *"On Codex — project facts already captured in `_memories/`. No harness-memory writes."*
 
