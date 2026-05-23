@@ -172,20 +172,21 @@ When the extractor produces an observation, the observation lands in one of thre
 
 **Mode A — autonomous.** Observation lands directly in `<project>/_memories/` as an active unit. `status: active`. No user review required.
 
-Criteria for Mode A:
+Criteria for Mode A (all must hold):
 - `confidence-level: sourced`
-- No `proposed-stability-class` (or proposal is structurally unambiguous)
-- No contradicting unit in existing memory
-- Promotion target is unambiguous (observation stays as observation; no observation-to-decision promotion needed)
+- No contradicting unit in existing memory (runtime check at write time)
 - Source-of-authority is settled for this source
+
+A `sourced` observation may carry `proposed-stability-class` and still go Mode A. The stability proposal sits unratified in the active unit; `/process-memory` ratifies it on the next review pass. Blocking Mode A on unratified stability proposals would force every structured-field finding from automation-provenance sources through inbox.md, which is exactly where Mode A's review-burden reduction matters most.
+
+Promotion-to-decision/risk is graduation's job, not the write-time mode decision. Mode A writes the observation as active; if it later warrants promotion, `/process-memory` handles it. "This observation could conceivably become a decision later" is not a Mode B trigger.
 
 **Mode B — confirmed.** Observation lands in `<project>/inbox.md` as a pending item with full proposed frontmatter inline. Next `/process-memory` or `/finalize` pass surfaces the item; user confirms or adjusts at the review.
 
 Criteria for Mode B (any of):
 - `confidence-level: inferred`
-- `proposed-stability-class` is set and ratification is needed
-- Observation could promote to decision/risk/etc. (judgment call needed)
-- Observation extends an existing unit and the extension is non-trivial
+- `proposed-stability-class: durably-suspect` specifically — this is a flag about potential incorrectness and warrants explicit review (proposed `durably-correct` does not gate Mode B; it can ride along on a Mode A observation)
+- Observation extends or updates an existing unit non-trivially
 
 **Mode C — explicit.** Observation lands in `inbox.md` flagged as requiring explicit user judgment. The flag carries the reason for explicit-mode classification. Synthesis/render passes don't pull this observation until it's resolved.
 
@@ -199,7 +200,16 @@ Criteria for Mode C (any of):
 
 Mode B and Mode C observations land in `inbox.md` as standalone blocks with full frontmatter and body inline (so the full observation is reviewable without leaving the file). The graduation pass at `/process-memory` reads these blocks, presents them for review, and on confirmation moves them into `_memories/` as active units (with `status: active`).
 
-Open: whether `inbox.md` needs internal sections (by source / by confidence / by mode) is a structural question for installations to resolve based on their volume. Framework doesn't mandate sectioning; recommends free-form with chronological ordering by default.
+Each inbox block carries two additional frontmatter fields beyond the observation schema:
+
+```yaml
+mode: B | C
+judgment-needed: <prose, required when mode is C — names what judgment is required>
+```
+
+`mode` lets graduation distinguish Mode B (routine confirmation) from Mode C (explicit user judgment) without re-deriving the mode from criteria. `judgment-needed` is required for Mode C and carries the specific question the user must answer (e.g., *"contradicts dc-42 on the BGL date — confirm which is authoritative"*; *"reconstruction from three chat threads; verify the inferred decision is correct"*).
+
+Blocks land in chronological order, no source/confidence/mode sectioning required. Mode-labeled blocks in chronological order are scannable at typical volumes (under a hundred items per inbox). Installations may add structure if their volume warrants; the framework doesn't mandate it.
 
 ### The graduation pass
 

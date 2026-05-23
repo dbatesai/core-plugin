@@ -82,6 +82,8 @@ The values are about **epistemic strength**, not about whether the fact is "true
 
 **Why not `sourced`:** the source records what *did* happen, not what didn't. The agent's expectation (X should have happened) plus the source's silence (it didn't) is the chain. The chain is short — `inferred`, not `reconstructed` — but the inference is the load-bearing part of the observation, not the source data.
 
+**Field-level absence:** a structured field with fewer or different values than the project context implies it should have (a meeting attendee list missing an expected stakeholder; a status that's never moved off "New" after weeks) is also `inferred`. The field value itself is `sourced` (the source says what it says); the expectation that the field should have different values is the agent's inference from project context. Write as `inferred` and name the expectation in the body.
+
 ---
 
 ### Pattern 6 — Cross-source pattern reconstruction
@@ -144,6 +146,30 @@ The values are about **epistemic strength**, not about whether the fact is "true
 
 ---
 
+### Pattern 11 — Derived metric from sourced fields
+
+**When:** the observation derives a metric (spread, count, duration, inconsistency) by comparing sourced field values across one or more sources. The underlying fields are sourced; the derived metric is the load-bearing claim.
+
+**Confidence:** `inferred`. The fields are sourced, but the metric is an inference about what the comparison means for the project.
+
+**Example body framing:** *"Comparison: across [fields/sources], values are [X, Y, Z]. Derived metric: [spread/inconsistency/duration]. Inferred meaning: [what the metric implies for the project]."*
+
+**Discipline:** name the comparison explicitly in the body. A derived-metric observation without the comparison chain is malformed — synthesis can't evaluate whether the metric is load-bearing without seeing what was compared.
+
+---
+
+### Pattern 12 — Degraded source fidelity
+
+**When:** the source is structurally a verbatim/sourced source (transcript, document) but has materially degraded fidelity — marked inaudible sections in a transcript, OCR errors in a scanned document, partial capture, transcription errors above noise threshold.
+
+**Confidence:** **downgrade one level** from what the pattern would otherwise assign. Sourced becomes `inferred`; `inferred` becomes `reconstructed`.
+
+**Example body framing:** *"From [source] (degradation note: [what's degraded]): [claim]. Confidence downgraded from [original] to [downgraded] due to [degradation pattern]."*
+
+**Threshold guidance:** "material degradation" means the degradation touches the section the claim is extracted from, not just the source overall. A transcript with `[inaudible]` markers throughout but a clean section containing the claim → no downgrade. A transcript where the claim's section has fragmented sentences → downgrade.
+
+---
+
 ## Edge cases and tiebreakers
 
 **Ambiguous between `sourced` and `inferred`:** when the captured datum is partly direct and partly interpretive (a structured field whose value is "Yes" but only the agent's reading of context tells you what "Yes" applies to), default to `inferred` and name the interpretive piece in the body. `sourced` is the higher-trust label; conservatism toward `inferred` is the right bias.
@@ -151,6 +177,14 @@ The values are about **epistemic strength**, not about whether the fact is "true
 **Ambiguous between `inferred` and `reconstructed`:** the discriminator is chain length and chain naming. If the chain is one or two structurally supported steps and doesn't need explicit naming for the reader to evaluate, it's `inferred`. If the chain is three or more steps, crosses contexts, or requires the chain to be named for the reader to evaluate the claim, it's `reconstructed`.
 
 **Same observation could fit multiple patterns:** use the highest-confidence pattern that genuinely applies, but be honest. If the observation's load-bearing claim is a reconstruction, don't dress it up as `sourced` because one of its inputs was direct.
+
+**One datum, two patterns at different facets → split into two observations.** When a single source datum produces findings under different patterns (e.g., a verbatim quote that's both Pattern 2 sourced for the words AND Pattern 4 inferred for the binding commitment in those words), write separate observations rather than one observation with blended confidence. Each observation carries the confidence appropriate to its own claim. They can reference each other via `cites` edges. This applies generally — the same source datum often yields a "what was said/recorded" sourced finding plus an "what it means for the project" inferred finding, and conflating them loses signal.
+
+**Sourced anchor with inference caveat — single observation, sourced.** Distinct from the split-into-two case: when an observation has a single load-bearing claim that's sourced but warrants a brief inference caveat (a task is marked Complete, but the deliverable's actual delivery is unclear; a field shows a value, but the value's currency is suspect), keep it as one `sourced` observation. Write the sourced anchor first, then a labeled caveat — e.g., *"Task X marked Complete on date D. **Caveat (inferred):** the deliverable's actual shipment is not confirmed; completion may be administrative."* The caveat doesn't change the observation's confidence label; it preserves the sourced fact while making the inference visible for synthesis. If the caveat is the load-bearing claim, write a separate inferred observation instead.
+
+**Social signals do not upgrade confidence.** Reactions (👍, ❤️), read receipts, thread presence, view counts, and similar weak-confirmation signals do not upgrade a Pattern 4 `inferred` finding to `sourced`. They're too ambiguous — a reaction may mean "I agree," "I saw this," "this is funny," or be reflexive. Explicit verbal confirmation in the same source (someone says "yes" or "confirmed" or explicitly acknowledges the proposed agreement) is the minimum bar for upgrading `inferred` to `sourced`.
+
+**Context (formality, channel type) does not modulate confidence.** A commitment extracted from free-text content is `inferred` regardless of whether it was said in a formal meeting or a casual DM. The pattern governs, not the channel's perceived seriousness. The reasoning chain from text to commitment is the same chain in either setting; the formality of the venue doesn't shorten the chain.
 
 **The source's `confidence-default` and the pattern conflict:** the pattern wins. The default is a starting point; the pattern is the structurally-grounded judgment. The override mechanism (`confidence-overrides` in the source registration) is for when a source has structural signals the pattern catalog doesn't yet cover — capture as an override, surface for catalog expansion.
 
