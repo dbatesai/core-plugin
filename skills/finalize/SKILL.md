@@ -50,6 +50,7 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 Walk the unit store and run the hygiene operations from `protocols/hygiene.md`:
 
+- **Cloud-sync ghost cleanup** — macOS sync engines (iCloud, OneDrive, Dropbox) leave `<filename> 2.md` duplicates when they detect concurrent-write conflicts. Most settle as exact duplicates with identical content but pollute validator output. Walk `<project>/_memories/` for any `* 2.md` file, verify it's identical to its un-suffixed original via `diff -q`, and delete the ghost if so. Surface to the user if any ghost differs from its original (rare; means a real divergence the sync engine preserved). Narrate "Cleaned N ghost duplicates" only if N > 0.
 - **Archive proposals** — surface low-priority candidates (R·S < 0.05, no recent reference) for `y / N / per-unit` approval. User-authored units always gate here.
 - **Retire confirmations** — any unit whose claim disappeared from PROJECT.md this session gets `status: retired`.
 - **Cold-store proposals** — surface any archived-and-retired-and-365d+ units.
