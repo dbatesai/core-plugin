@@ -198,7 +198,7 @@ Don't block on it. It's a nudge, not a gate.
 Make workspace identity obvious. Talk like a person.
 
 What to include:
-- A structured one-line routing-decision tag at the start or end of the summary: `Routing: <branch-name>` where branch-name is one of `returning-workspace`, `cold-start-migration`, `folder-rename`, `new-workspace`, `migration-resume`. This makes regression tests robust to prose drift while preserving the conversational readiness summary below.
+- A structured one-line routing-decision tag at the start or end of the summary, rendered as the literal characters `Routing: <branch-name>` — no backticks, no Markdown code formatting around the branch-name value. The exact rendered form is `Routing: new-workspace` (not `` `Routing: \`new-workspace\` ``). Branch-name is one of `returning-workspace`, `cold-start-migration`, `folder-rename`, `new-workspace`, `migration-resume`. This makes regression tests robust to prose drift while preserving the conversational readiness summary below.
 - The workspace name in plain language.
 - What `PROJECT.md` currently says in §State — one or two sentences, not a recap of every section.
 - Active risks worth surfacing now (count plus the top one or two by impact).

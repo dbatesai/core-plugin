@@ -104,6 +104,7 @@ export function checkFork({ cwd, coreDir, now = new Date() }) {
   const newMetaDir = join(coreDir, 'workspaces', newId);
   mkdirSync(newMetaDir, { recursive: true });
   const newManifest = {
+    schema_version: 'v2',
     workspace_id: newId,
     name: pointer.name || newId,
     project_path: cwdResolved,

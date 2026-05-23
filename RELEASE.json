@@ -1,10 +1,10 @@
 {
   "name": "core",
-  "version": "2.0.1-dev.20260521.4",
-  "build": "20260521.4",
-  "created_at": "2026-05-22T15:00:00Z",
+  "version": "2.0.1-dev.20260521.5",
+  "build": "20260521.5",
+  "created_at": "2026-05-23T02:30:00Z",
   "targets": ["claude-code", "codex"],
-  "source_commit": "b41ac0085da08cd481c8252ca6a2ecd8a52cd726",
+  "source_commit": "PENDING",
   "source_repo": "https://github.com/dbatesai/core-plugin",
   "manifests": {
     "claude-code": ".claude-plugin/plugin.json",
@@ -22,5 +22,5 @@
     "vibecheck",
     "organize-files"
   ],
-  "notes": "Pass 5 build. Closes Round-4 PARTIAL defects: D1 (sibling-skill path-derivation rule in orient + finalize wrappers), D3 (schema_version: v2 in new-workspace creation), D5 (verbatim fork-check stdout echo), D6 (nested codex-exec discipline + ${CLAUDE_PLUGIN_ROOT} hardening in finalize + process-memory). D4 reframed as probe error (--label vs --log-label)."
+  "notes": "Pass 6 build. Closes Round-5 PARTIALs: D7 (routing tag rendered with literal characters, no Markdown backtick formatting around branch-name) and D8 (workspace-fork-check.mjs adds schema_version: v2 to fork manifest). Round-5 confirmed D1/D3-new-workspace/D5/D6 closed; Pass 6 cleans the two contract-edge misses surfaced by the more rigorous Round-5 spec."
 }
