@@ -1,0 +1,53 @@
+name: version-check
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
+      - name: Check version files in lockstep
+        run: |
+          PLUGIN_VERSION=$(jq -r .version .claude-plugin/plugin.json)
+          MARKETPLACE_VERSION=$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)
+          METADATA_VERSION=$(jq -r '.metadata.version' .claude-plugin/marketplace.json)
+
+          FAILED=0
+
+          if [ "$PLUGIN_VERSION" != "$MARKETPLACE_VERSION" ]; then
+            echo "::error::Version drift: plugin.json=$PLUGIN_VERSION vs marketplace.json plugins[0].version=$MARKETPLACE_VERSION"
+            FAILED=1
+          fi
+
+          if [ "$PLUGIN_VERSION" != "$METADATA_VERSION" ]; then
+            echo "::error::Version drift: plugin.json=$PLUGIN_VERSION vs marketplace.json metadata.version=$METADATA_VERSION"
+            FAILED=1
+          fi
+
+          if [ "$FAILED" = "1" ]; then
+            exit 1
+          fi
+
+          echo "Lockstep OK: all version fields at $PLUGIN_VERSION"
+
+      - name: Check version bumped from base branch
+        run: |
+          PR_VERSION=$(jq -r .version .claude-plugin/plugin.json)
+          git fetch origin main
+          BASE_VERSION=$(git show origin/main:.claude-plugin/plugin.json | jq -r .version)
+
+          if [ "$PR_VERSION" = "$BASE_VERSION" ]; then
+            echo "::error::Version not bumped: still at $BASE_VERSION. Run /cut-release on the next branch to bump before opening this PR."
+            exit 1
+          fi
+
+          echo "Version bumped: $BASE_VERSION → $PR_VERSION"
