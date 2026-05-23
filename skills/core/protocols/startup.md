@@ -31,10 +31,30 @@ Resolve deterministically when you can; ask the user only when it's genuinely am
 
 Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; you'll route to new-workspace setup below unless the project has v1-era content that needs migrating.
 
-**Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution:
+**Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is set by the harness in hook script environments, but is NOT injected into agent Bash tool calls. Resolve once at the start of workspace resolution and use the result for every subsequent `node …` invocation:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs
+# Preference order: CLAUDE_PLUGIN_ROOT env → installed_plugins.json → not found
+CORE_ROOT="${CLAUDE_PLUGIN_ROOT}"
+if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-check.mjs" ]; then
+  CORE_ROOT=$(node -e "
+    try {
+      const d = JSON.parse(require('fs').readFileSync(
+        require('os').homedir() + '/.claude/plugins/installed_plugins.json', 'utf8'));
+      process.stdout.write(d.plugins?.['core@core']?.installPath || '');
+    } catch(e) {}
+  " 2>/dev/null)
+fi
+# Validate — warn and skip scripts if still not resolved or scripts dir absent
+[ -d "$CORE_ROOT/skills/core/scripts" ] || echo "(warn: CORE plugin root not resolved; fork-check and Step-8 scripts will be skipped)"
+```
+
+If the resolved install is stale (an older build that predates `workspace-fork-check.mjs`), the missing-scripts directory check above catches it and prints the warning. In that case, skip the fork-check and the Step-8 readiness commands, note the skip in the readiness summary, and advise the user to run `claude plugins update core@core`.
+
+**Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution (only if `$CORE_ROOT` resolved above):
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/workspace-fork-check.mjs"
 ```
 
 The script reads `<cwd>/workspace.json` and `~/.core/index.json`, detects whether the local pointer was copied from another project (its `workspace_id` resolves to an index entry whose registered `path` is somewhere else), and if so performs the fork: slugifies the cwd basename into a new id (collision-resolved with `-2`, `-3`, etc.), rewrites the local pointer, appends an entry to `index.json`, and creates a fresh manifest at `~/.core/workspaces/<new-id>/workspace.json`. If there's nothing to do — no pointer, no index, path already registered, or `workspace_id` not in index — it prints `(no fork needed)` and exits 0. The check is idempotent: re-running after a fork finds the id already matches the cwd and is a no-op.
@@ -123,12 +143,12 @@ This step is load-bearing. The advisor-caught addition — enumerate the invento
 
 | # | Command | Pass criteria |
 |---|---|---|
-| a | `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs --store <project> --schema` | Exit 0 — no frontmatter mismatches, no invalid status/type enums, no dangling edges at the schema level |
-| b | `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs --store <project> --integrity` | Exit 0 — no orphans (or expected-orphan pattern named in plan), no broken edge targets, no stale-flagged units |
-| c | `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs --store <project>` | Writes `INDEX-decisions.md` with the expected decision count |
-| d | `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-risks-index.mjs --store <project>` | Writes `INDEX-risks.md` with the expected risk count |
-| e | `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories --top 10` | Ranks successfully; foundational decisions and high-severity risks surface at top; topics field populated |
-| f | `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs --check <project>` | Reports PROJECT.md under cap |
+| a | `node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" --store <project> --schema` | Exit 0 — no frontmatter mismatches, no invalid status/type enums, no dangling edges at the schema level |
+| b | `node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" --store <project> --integrity` | Exit 0 — no orphans (or expected-orphan pattern named in plan), no broken edge targets, no stale-flagged units |
+| c | `node "${CORE_ROOT}/skills/core/scripts/generate-decisions-index.mjs" --store <project>` | Writes `INDEX-decisions.md` with the expected decision count |
+| d | `node "${CORE_ROOT}/skills/core/scripts/generate-risks-index.mjs" --store <project>` | Writes `INDEX-risks.md` with the expected risk count |
+| e | `node "${CORE_ROOT}/skills/core/scripts/priority.mjs" <project>/_memories --top 10` | Ranks successfully; foundational decisions and high-severity risks surface at top; topics field populated |
+| f | `node "${CORE_ROOT}/skills/core/scripts/compact-project.mjs" --check <project>` | Reports PROJECT.md under cap |
 
 If any command silently no-ops with no stdout and no file written, set `CORE_DEBUG_CLI_ENTRY=1` and rerun — that surfaces the `process.argv[1]` vs `import.meta.url` mismatch the CLI entry guard depends on (path-normalization, symlinks, OneDrive virtualization on the invoking cwd).
 
