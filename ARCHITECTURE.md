@@ -179,7 +179,7 @@ A 2026-05-20 downstream-wrapper migration verified this contract end-to-end. The
 
 The plugin carries two version-shaped identifiers, and they do different work:
 
-- **`version`** — the SemVer string in `plugin.json` + `marketplace.json` + `skills/core/VERSION`. This is the **release tag**. `claude plugins update <plugin>` checks `version` for changes; if `version` hasn't moved, no refresh happens even if the install on disk is materially behind. Bump `version` for every release the user is meant to update to.
+- **`version`** — the SemVer string in `plugin.json` + `marketplace.json`. This is the **release tag**. `claude plugins update <plugin>` checks `version` for changes; if `version` hasn't moved, no refresh happens even if the install on disk is materially behind. Bump `version` for every release the user is meant to update to. (The former `skills/core/VERSION` file was removed in v2.1.0 — `plugin.json` is now the single source of truth.)
 - **`BUILD`** — the date-coded string in `skills/core/BUILD` (e.g. `20260520.1`). This is the **iteration tag** — what changed this session, regardless of whether it's release-worthy yet. The readiness summary echoes it so the user can tell which iteration of a `version` they're running.
 
 Why both: `version` is the user-facing distribution identifier; bumping it forces every installed copy to pull on next `update`. `BUILD` is the dev-side iteration counter for sessions where you ship a fix but the change set doesn't yet warrant a release tag.

@@ -227,7 +227,7 @@ What to include:
 - Any elapsed-time signals that escalated.
 - The top 3 §Moves priorities as the agenda.
 - Anything auto-compacted during first-time setup, named explicitly (entries, not counts).
-- Plugin version: read `VERSION` and `BUILD` from the skill base directory (the directory containing `protocols/`, `SKILL.md`, etc.). Echo as "Plugin v<VERSION> build <BUILD>". If either file is missing, echo whatever exists; if both missing, omit the line entirely.
+- Plugin version: read `version` from `../../.claude-plugin/plugin.json` relative to the skill base directory (which resolves to the plugin root's `plugin.json`). Read `BUILD` from `BUILD` in the skill base directory. Echo as "Plugin v<version> build <BUILD>". If plugin.json is unreadable, omit the version portion; if both are missing, omit the line entirely.
 
 Target voice:
 
