@@ -22,7 +22,7 @@ Then check the project's synthesis files for size overflow. `<project>/PROJECT.m
 ## Identity load
 
 - Read `~/.core/dm-profile.md` in full. Cross-project personality and patterns; no project facts. You're now yourself — same agent as last session.
-- Read auto-memory at `~/.claude/projects/*/memory/MEMORY.md` as scratch cache; verify any project-specific reference against the unit store before acting on it.
+- Use the `read-auto-memory` adapter verb (resolved per `harnesses/<harness>.md`) to load any harness-local recall available. Treat as scratch cache; verify any project-specific reference against the unit store before acting on it. Claude Code surfaces this from `~/.claude/projects/*/memory/MEMORY.md`; Codex has no equivalent auto-memory and the verb is a no-op there (see `harnesses/codex.md §read-auto-memory`).
 - Read `~/.core/topics.md` so the controlled vocabulary is loaded for retrieval and observation auto-tagging.
 
 ## Workspace resolution and routing
@@ -31,7 +31,21 @@ Resolve deterministically when you can; ask the user only when it's genuinely am
 
 Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; you'll route to new-workspace setup below unless the project has v1-era content that needs migrating.
 
-After resolution, update `last_active` in `~/.core/index.json`.
+**Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs
+```
+
+The script reads `<cwd>/workspace.json` and `~/.core/index.json`, detects whether the local pointer was copied from another project (its `workspace_id` resolves to an index entry whose registered `path` is somewhere else), and if so performs the fork: slugifies the cwd basename into a new id (collision-resolved with `-2`, `-3`, etc.), rewrites the local pointer, appends an entry to `index.json`, and creates a fresh manifest at `~/.core/workspaces/<new-id>/workspace.json`. If there's nothing to do — no pointer, no index, path already registered, or `workspace_id` not in index — it prints `(no fork needed)` and exits 0. The check is idempotent: re-running after a fork finds the id already matches the cwd and is a no-op.
+
+Echo the script's stdout verbatim into the readiness summary as a quoted line — exact characters, no paraphrase, no rewording. If it printed `forked <original-id> -> <new-id>; registered at ~/.core/workspaces/<new-id>/`, the readiness must contain that exact string with the actual id values from stdout. After the verbatim echo, you may add a plain-voice gloss in a separate sentence (e.g., *"That means this `workspace.json` was copied from `<original-id>`; we're treating it as a new workspace."*) — but the gloss is supplemental, never a replacement. If the script printed `(no fork needed)`, no narration required.
+
+Why a script and not prose: per DC-77, workspace identity stability is a critical surface inference can't be trusted on. The Round-3 Codex re-probe (2026-05-21) showed the agent reading equivalent prose, narrating the mismatch, and still operating under the source identity. The fork is a multi-file mutation; inference reading the steps can fail at any one of them. Ship the deterministic script, drop the agent's job to "run script, echo output."
+
+After the fork check returns, continue with normal resolution: the post-fork local pointer's `workspace_id` is now in `index.json`, so the standard lookup below will find it. The fork doesn't touch project data — `PROJECT.md`, `_memories/`, and the rest stay verbatim; only the registration changes.
+
+After resolution (including any fork), update `last_active` in `~/.core/index.json` for the resolved workspace id.
 
 **Layer separation reminder.** Project synthesis lives in `<project>/PROJECT.md`. The unit store lives in `<project>/_memories/`. Workspace operational meta lives at `~/.core/workspaces/<id>/`. The `workspace.json` in the project folder is just a pointer; the full manifest lives in `~/.core/workspaces/<id>/workspace.json`.
 
@@ -79,7 +93,7 @@ Then scaffold the synthesis: create `<project>/PROJECT.md` with the six sections
 
 Create the unit store: `mkdir -p <project>/_memories/observations/<YYYY-MM>/`. Project folders hold only data; the priority function and other executable units ship with the plugin (see DC-77).
 
-Create `<project>/inbox.md` if external pulls are expected. Create the project-folder pointer at `<project>/workspace.json` with `workspace_id`, `name`, `created`, `data_path`. Create the workspace meta at `~/.core/workspaces/<workspace-id>/workspace.json` per the workspace schema, and `~/.core/workspaces/<id>/swarm-narrative.md` empty for now. Register the workspace by appending its entry to `~/.core/index.json`.
+Create `<project>/inbox.md` if external pulls are expected. Create the project-folder pointer at `<project>/workspace.json` with `schema_version: v2`, `workspace_id`, `name`, `created`, `data_path`. Create the workspace meta at `~/.core/workspaces/<workspace-id>/workspace.json` with `schema_version: v2` plus the workspace schema fields, and `~/.core/workspaces/<id>/swarm-narrative.md` empty for now. Register the workspace by appending its entry to `~/.core/index.json` (with `schema_version: v2` if not already set at the index level).
 
 If the project folder turns out to have pre-existing content that wasn't visible during routing (session summaries or legacy handoffs in unusual locations, prior PROJECT.md, session logs surfaced during interview), drop into cold-start migration instead. The new-workspace scaffold is for truly empty projects; substantial prior content always routes through migration.
 
@@ -99,7 +113,7 @@ This step is load-bearing. The advisor-caught addition — enumerate the invento
 
 **Step 4 — Folder rename (DC-74 + summary rename).** If the project has unprefixed CORE folders (`handoffs/`, `summaries/`, `sessions/`, `outputs/`), rename them to the current underscore convention. For each folder being renamed, check `git ls-files <folder>` first — if any files are tracked, use `git mv` so history follows; otherwise plain `mv`. A project can live inside a git tree (a home-directory git repo is a common case) without its project subfolders being tracked, in which case `git mv` fails with a misleading "source directory is empty" error. The per-folder tracked check avoids that. On cloud-sync-virtualized paths (OneDrive, Dropbox, iCloud Drive), `mv` can corrupt the sync state — use `cp -r <src> <dst>` then `rm -rf <src>` after verifying counts match. Both `handoffs/` (pre-rename) and `summaries/` map to `_summaries/`; `sessions/` → `_sessions/`; `outputs/` → `_outputs/`. Run a path-citation sweep in `_memories/*.md` after the renames so frontmatter `sources:` pointers stay valid. Narrate the renames in plain voice as they happen.
 
-**Step 5 — Read substrate.** Check `~/.claude/projects/<cwd-mapped>/` for prior session transcripts — substrate worth reading alongside session summaries, plans, and specs. Anti-resurrection is strict: if a prior PROJECT.md exists, it's the user's curation surface — promote backing units for facts it endorses; capture substrate-only facts as observations but do not auto-promote them. Surface ambiguous cases. Preserve disagreement: multi-agent perspective outputs and rejected alternatives are gold for the "how we got here" reasoning; don't flatten them when graduating.
+**Step 5 — Read substrate.** On Claude Code, check `~/.claude/projects/<cwd-mapped>/` for prior session transcripts — substrate worth reading alongside session summaries, plans, and specs. On Codex there is no equivalent transcript surface; rely on `<project>/_summaries/` and any project-local plans or specs instead. Either way, anti-resurrection is strict: if a prior PROJECT.md exists, it's the user's curation surface — promote backing units for facts it endorses; capture substrate-only facts as observations but do not auto-promote them. Surface ambiguous cases. Preserve disagreement: multi-agent perspective outputs and rejected alternatives are gold for the "how we got here" reasoning; don't flatten them when graduating.
 
 **Step 6 — Execute graduation per the plan from Step 1.** Walk the enumerated inventory and graduate units in the order the plan specifies (typically: people first, foundational decisions second, remaining decisions, risks, open-questions, observations last). Cite the plan as you go.
 
@@ -184,7 +198,7 @@ Don't block on it. It's a nudge, not a gate.
 Make workspace identity obvious. Talk like a person.
 
 What to include:
-- A structured one-line routing-decision tag at the start or end of the summary: `Routing: <branch-name>` where branch-name is one of `returning-workspace`, `cold-start-migration`, `folder-rename`, `new-workspace`, `migration-resume`. This makes regression tests robust to prose drift while preserving the conversational readiness summary below.
+- A structured one-line routing-decision tag at the start or end of the summary, rendered as the literal characters `Routing: <branch-name>` — no backticks, no Markdown code formatting around the branch-name value. The exact rendered form is `Routing: new-workspace` (not `` `Routing: \`new-workspace\` ``). Branch-name is one of `returning-workspace`, `cold-start-migration`, `folder-rename`, `new-workspace`, `migration-resume`. This makes regression tests robust to prose drift while preserving the conversational readiness summary below.
 - The workspace name in plain language.
 - What `PROJECT.md` currently says in §State — one or two sentences, not a recap of every section.
 - Active risks worth surfacing now (count plus the top one or two by impact).

@@ -10,6 +10,8 @@ You're closing the session. Project state has been updating continuously — obs
 
 Execute every step in order. Don't skip.
 
+**Script path resolution.** This file references scripts via `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<script>.mjs`. That env var is set on Claude Code marketplace installs but not on Codex. On Codex, derive the path mechanically: take the absolute path you loaded this `SKILL.md` from, replace `/skills/finalize/SKILL.md` with `/skills/core/scripts/<script>.mjs`. Concretely: `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/finalize/SKILL.md` → `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/scripts/<script>.mjs`. Do not construct paths against a guessed plugin base; the loaded path carries the resolution.
+
 ---
 
 ## Step 1 — Fresh-eyes review
@@ -101,7 +103,11 @@ Summaries are write-only from your perspective — you don't re-read them at boo
 
 ---
 
-## Step 5 — Update Claude Code's auto-memory cache
+## Step 5 — Refresh harness-local recall
+
+Use the `detect-harness` adapter verb to branch by harness. The verb is defined in the sibling core skill's harness protocol — take the absolute path you loaded this `SKILL.md` from, replace `/skills/finalize/SKILL.md` with `/skills/core/protocols/harness.md`, and read that. (Claude Code: `${CLAUDE_PLUGIN_ROOT}/skills/core/protocols/harness.md`. Codex: `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/protocols/harness.md`.) Authority ordering puts harness-local recall at the bottom of the stack — see DC-86 for the principle.
+
+### If harness is Claude Code
 
 Claude Code automatically loads the per-project MEMORY.md at the start of every session (the first 200 lines, before any tool call). CORE writes into that folder so the next session's bootstrap starts warm. Authoritative project facts live in PROJECT.md and `_memories/` — auto-memory just carries pointers, session-level feedback, and summaries that help the next session orient fast.
 
@@ -116,15 +122,21 @@ Update the `MEMORY.md` index in the same operation. Don't write project-specific
 
 Apply the memory hygiene rules: update stale memories rather than adding duplicates; remove memories that were proven wrong; keep `MEMORY.md` current.
 
-### Refresh the auto-memory index
-
-After capturing session-specific memories, refresh `MEMORY.md` from the top-priority canonical units. This is a mechanical formatting operation.
-
-Run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories --top 30` and read the current `~/.claude/projects/<mapped-cwd>/memory/MEMORY.md`. Then rewrite `MEMORY.md` so each top unit is a one-line markdown bullet linking to its unit file, followed by an em-dash and a one-line hook (match the existing entries' shape). Preserve user-added entries that are still relevant, drop entries pointing to retired units, keep the file under 200 lines.
+Then refresh the auto-memory index. Run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories --top 30` and read the current `~/.claude/projects/<mapped-cwd>/memory/MEMORY.md`. Rewrite `MEMORY.md` so each top unit is a one-line markdown bullet linking to its unit file, followed by an em-dash and a one-line hook (match the existing entries' shape). Preserve user-added entries that are still relevant, drop entries pointing to retired units, keep the file under 200 lines.
 
 Do this inline in the main agent — don't dispatch a subagent. The previous Haiku-subagent design required `git worktree`, which fails on non-git workspaces (any cloud-sync-backed project, any non-versioned project directory) with *"Cannot create agent worktree: not in a git repository."* Per CORE's harness-agnostic design intent, git is not a precondition for project intelligence. Project intelligence workspaces hold data, not code — versioning isn't the right tool here. The refresh is fast enough inline that blocking on it isn't a real cost.
 
-Narrate the refresh plainly: *"Refreshing MEMORY.md from the top 30 units now."* Then proceed to the closing declaration.
+Narrate the refresh plainly: *"Refreshing MEMORY.md from the top 30 units now."*
+
+### If harness is Codex
+
+Do not auto-write to `~/.codex/memories/`. Codex memory is explicit-save only — see `harnesses/codex.md §read-auto-memory` for the rule and `protocols/codex-memory-save.md` for the trigger-driven micro-protocol that handles user-requested saves.
+
+Confirm project facts are captured in `<project>/_memories/` and the session summary written in Step 4. If harness-level observations surfaced during the session (workflow lessons, tooling collisions, Codex-specific patterns), include them in the session summary so the next session reads about them.
+
+If the user explicitly asked to save observations earlier in the session via the codex-memory-save micro-protocol, that ran separately at trigger time — don't duplicate-write here.
+
+Narrate plainly: *"On Codex — project facts already captured in `_memories/`. No harness-memory writes."*
 
 ---
 

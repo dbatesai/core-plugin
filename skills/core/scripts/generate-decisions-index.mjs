@@ -16,11 +16,12 @@
  *       --store <project>/_memories/
  */
 
-import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const DC_PATTERN = /^dc-(\d+)-.+\.md$/;
+export const DC_NUMERIC = /^dc-(\d+)-.+\.md$/;
+export const DC_NAMED = /^dc-([a-z][a-z0-9-]*)\.md$/;
 export const SUMMARY_MAX = 100;
 
 export function parseFrontmatter(text) {
@@ -67,22 +68,27 @@ export function truncate(text, maxLen = SUMMARY_MAX) {
 }
 
 export function buildIndex(memoriesDir) {
-  const rows = [];
+  const numeric = [];
+  const named = [];
   for (const fname of readdirSync(memoriesDir).sort()) {
-    const m = fname.match(DC_PATTERN);
-    if (!m) continue;
+    const mNum = fname.match(DC_NUMERIC);
+    const mName = fname.match(DC_NAMED);
+    if (!mNum && !mName) continue;
     let text;
     try { text = readFileSync(join(memoriesDir, fname), 'utf8'); } catch { continue; }
     const [fm, body] = parseFrontmatter(text);
-    rows.push({
-      sortKey: parseInt(m[1], 10),
+    const row = {
       id: fm.id || fname.replace(/\.md$/, ''),
       date: bestDate(fm),
       status: fm.status || 'unknown',
       summary: truncate(extractSummary(body)),
-    });
+    };
+    if (mNum) numeric.push({ ...row, sortKey: parseInt(mNum[1], 10) });
+    else named.push(row);
   }
-  rows.sort((a, b) => a.sortKey - b.sortKey);
+  numeric.sort((a, b) => a.sortKey - b.sortKey);
+  named.sort((a, b) => a.id.localeCompare(b.id));
+  const rows = [...numeric, ...named];
 
   const lines = [
     '# Decisions Index',
@@ -141,8 +147,9 @@ export function main(argv) {
 
 // CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
 // silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
-const _cliEntryArgv1 = process.argv[1];
-const _cliEntrySelf = fileURLToPath(import.meta.url);
+const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
+const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
+const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
 if (process.env.CORE_DEBUG_CLI_ENTRY) {
   process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
 }

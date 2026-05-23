@@ -20,6 +20,22 @@ Three surfaces, three responsibilities. Don't mix them.
 
 The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's DM meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
 
+There's a fourth surface that isn't CORE's to own but that CORE reads from: **harness-local recall** — Claude Code's `~/.claude/projects/*/memory/MEMORY.md`, Codex's `~/.codex/memories/`, equivalents in future harnesses. CORE treats this as scratch cache, never authoritative. See `dc-86-harness-local-memory-recall` for the principle and `protocols/codex-memory-save.md` for the Codex-specific explicit-save trigger.
+
+---
+
+## Authority ordering
+
+When sources conflict, this is the order CORE resolves:
+
+1. **Direct user instruction in the current session** — overrides everything else.
+2. **User-edited `<project>/PROJECT.md`** — the user's curation surface; anti-resurrection rule applies.
+3. **Canonical units in `<project>/_memories/`** — project facts of record.
+4. **CORE operational meta in `~/.core/`** — runtime state only; not project fact authority.
+5. **Harness-local recall** — Claude Code `MEMORY.md`, Codex memories at `~/.codex/memories/`, and equivalents in future harnesses. Hints only; must verify against the unit store before acting.
+
+See `dc-86-harness-local-memory-recall` for the principle behind levels 4 and 5 — the four-surface model that makes the divergence between Claude's autonomous-write and Codex's explicit-save-only memory models safe.
+
 ---
 
 ## Two tiers — observations and units
@@ -199,7 +215,7 @@ Tier 2: Graph walk via typed-edge frontmatter (relational)
 Tier 3: Semantic via Explore subagent (LLM reasoning over the vault)
 ```
 
-Auto-memory at `~/.claude/projects/*/memory/` is queried alongside `_memories/` at every tier — it's a complementary resource, not a competing store.
+Harness-local recall (via the `read-auto-memory` adapter verb — Claude Code's `MEMORY.md`, Codex memories, equivalents) is queried alongside `_memories/` at every tier as scratch context. Useful for hints; never authoritative — verify against the unit store before acting. See §"Authority ordering" above for where it sits in the stack.
 
 **Default retrieval excludes observations.** Only graduated units surface by default. Observations are queryable on demand ("show me observations about X").
 
@@ -274,6 +290,8 @@ PROJECT.md is rendered from canonical units. Three triggers:
 3. **In-session, autonomously** — section-level re-render after each meaningful update affecting a section. New decision → re-render Decisions & Risks. New risk → re-render Decisions & Risks. Status-shifting event → re-render State.
 
 Section-level writes, not full-file. You read the current section state, preserve user edits, propagate them back into the source-of-truth units.
+
+When you invoke `priority.mjs` during an in-session render (trigger 3 above) and want an audit trail, pass `--log <project>/_sessions/<date>/priority-log.jsonl --log-label render-on-change`. The log captures the timestamp, intent topics, top-K rankings, and label per invocation — useful for reconstructing why a particular re-render happened after the fact. Optional; not required for the render to happen.
 
 ### The anti-resurrection rule
 
@@ -374,9 +392,9 @@ Stubs graduate to full units when subsequent observations add substance. Hygiene
 
 The memory architecture creates several seams where data can disagree. Handle each consistently.
 
-### Auto-memory says X, unit store says not-X
+### Harness-local recall says X, unit store says not-X
 
-The unit store wins. Auto-memory is scratch cache rebuilt from synthesis at bootstrap. If they diverge mid-session, write or update the unit and let hygiene reconcile auto-memory at the next reconciliation pass.
+The unit store wins (per §"Authority ordering" above). Harness-local recall is scratch cache — Claude Code rebuilds `MEMORY.md` from synthesis at bootstrap; Codex memory is user-curated and never rebuilt. If they diverge mid-session, write or update the unit and let hygiene reconcile the harness recall surface at the next reconciliation pass (Claude Code) or surface the divergence to the user (Codex — explicit-save only, so the agent shouldn't silently rewrite).
 
 ### Your render of a section disagrees with the user's most recent edit
 
@@ -404,16 +422,16 @@ When the user goes quiet mid-conversation and you've staged a Mode B proposal: a
 
 ---
 
-## Auto-memory integration
+## Harness-local recall integration
 
-Auto-memory at `~/.claude/projects/<cwd>/memory/` stays as its own store. It's a complementary resource in the overall memory architecture:
+Harness-local recall is its own store at a harness-specific path — Claude Code uses `~/.claude/projects/<cwd>/memory/`, Codex uses `~/.codex/memories/`, future harnesses bring their own. The `read-auto-memory` adapter verb resolves the path per harness (see `harnesses/<name>.md`). Per DC-86 it's surface 4 in the authority stack — recall, never authoritative.
 
-- Loaded at session start (200-line cap stays).
-- Holds cross-session feedback memories — user preferences, patterns, references.
-- Retrieval queries BOTH `_memories/` and auto-memory — no separate path.
-- Graduation can promote auto-memory entries to `_memories/` when they reveal cross-project implications worth a durable unit.
-- Hygiene reads auto-memory and reconciles with `_memories/` — no duplication, no conflict.
-- Auto-memory's `MEMORY.md` index is maintained by the same agent that maintains `_memories/` indexes.
+- Loaded at session start by the harness when it has an auto-load surface (Claude Code does, Codex doesn't auto-load memory).
+- Holds cross-session workflow lessons — user preferences, patterns, references, harness-specific empirical findings.
+- Retrieval queries BOTH `_memories/` and harness-local recall — no separate path.
+- Graduation can promote a harness recall entry into `_memories/` when it reveals cross-project implications worth a durable unit. The reverse — auto-write into harness recall from project facts — happens per harness: Claude Code refreshes `MEMORY.md` from top-priority units at `/finalize` Step 5; Codex never auto-writes (explicit-save only, via `protocols/codex-memory-save.md`).
+- Hygiene reads harness recall and reconciles with `_memories/` — no duplication. On Codex, reconciliation surfaces divergences rather than silently rewriting.
+- The harness recall index, when one exists (Claude Code's `MEMORY.md`), is maintained by the same agent that maintains `_memories/` indexes.
 
 ---
 
@@ -464,7 +482,7 @@ You don't have to narrate placement when the path is fully determined without a 
 - Your own session log (`<project>/_sessions/<YYYY-MM-DD>/agent-log.md`).
 - The autonomous run log (`<project>/autonomous-run-log.md`).
 - `inbox.md` raw external pulls.
-- Auto-memory cache writes (`~/.claude/projects/<hash>/memory/`).
+- Harness-local recall writes (path resolved per `read-auto-memory` adapter — Claude Code's `~/.claude/projects/<hash>/memory/`, Codex's `~/.codex/memories/extensions/ad_hoc/notes/` via `protocols/codex-memory-save.md`).
 - Edits to a file the user explicitly named in the same turn.
 - State cache writes (`~/.core/state-cache.json`).
 - Hygiene log entries (`~/.core/hygiene-log.jsonl`).

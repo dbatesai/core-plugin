@@ -3,7 +3,7 @@
 ## What you need
 
 - The Claude desktop app.
-- The `core-plugin-2.0.0.zip` file (you've already got it if you're reading this).
+- The the CORE plugin zip file (you've already got it if you're reading this).
 
 ## Install
 
@@ -11,7 +11,7 @@
 2. Click **Customize** in the top bar.
 3. In the sidebar, click **Personal plugins**.
 4. Click the **+** button → **Create plugin** → **Upload plugin**.
-5. Drag `core-plugin-2.0.0.zip` into the drop zone (or click **Browse files** and pick it).
+5. Drag the CORE plugin zip into the drop zone (or click **Browse files** and pick it).
 6. Click **Upload**.
 
 CORE will appear in your plugin list. Start a fresh session and type `/core` to use it.
@@ -44,6 +44,38 @@ After that, just talk. The agent captures what matters as you go.
 3. Then: `/plugin install core`
 
 After that, `/plugin update core` gets you the latest version whenever one ships.
+
+## Install on Codex
+
+CORE ships a Codex-shaped plugin alongside the Claude Code plugin. The skill content is the same; the manifest at `plugins/core/.codex-plugin/plugin.json` and the marketplace at `.agents/plugins/marketplace.json` make the bundle self-installable on Codex CLI.
+
+The Codex zip is marketplace-shaped: the bundle root is the marketplace, and the plugin lives at `plugins/core/` inside it.
+
+From a zip:
+
+1. Unzip the bundle to a stable path (e.g. `~/Plugins/core-marketplace/`).
+2. Register the local marketplace and install the plugin:
+
+   ```
+   codex plugin marketplace add ~/Plugins/core-marketplace
+   codex plugin add core@core
+   codex plugin list
+   ```
+
+3. The list should show `core@core (installed, enabled)`.
+
+Verify the install:
+
+```
+test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
+test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
+```
+
+The plugin lands in Codex's plugin cache at `~/.codex/plugins/cache/core/core/<version>/`. Codex auto-discovers the bundled skills (`core`, `orient`, `finalize`, `process-memory`, `vibecheck`, `organize-files`) via the manifest's `skills:` pointer. Standalone skills you already have at `~/.codex/skills/` are not touched by the plugin install.
+
+To update from a new zip: replace the unzipped bundle, bump the version inside `plugins/core/.codex-plugin/plugin.json` (or use a dev tag like `2.0.1-dev.YYYYMMDD`) for cache differentiation, and rerun `codex plugin add core@core`.
+
+If a prior install used a different marketplace name (e.g. `local-core` from a hand-crafted shim), remove it first: `codex plugin remove core@local-core` then `codex plugin marketplace remove local-core`.
 
 ## Uninstall
 

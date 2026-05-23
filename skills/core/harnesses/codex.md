@@ -10,7 +10,7 @@ description: Concrete tool mapping for each abstract adapter verb when CORE runs
 Detect by:
 - `~/.codex/` config directory present, OR
 - `$CODEX_HOME` env var set, OR
-- Skill discovered under `~/.agents/skills/` (Codex's user-scope skill path), OR
+- Skill discovered under a Codex user-scope skill path (`~/.codex/skills/`, `~/.agents/skills/`, or a plugin cache under `~/.codex/plugins/cache/`), OR
 - Absence of Claude-Code-specific tools (`TaskCreate`, `SendMessage`, `TeamCreate`).
 
 If any of these conditions hold, harness is Codex.
@@ -18,6 +18,8 @@ If any of these conditions hold, harness is Codex.
 ## spawn-subagent
 
 Use Codex's subagent invocation surface. Custom agents can be defined at `~/.codex/agents/<name>/`. For ad-hoc exploration, invoke the general agent with the prompt verbatim. Subagent output returns inline.
+
+Codex's `spawn_agent` tool may return its own generated nickname (e.g., `Dalton`, `Bohr`) for the subagent invocation. That nickname is at the tool-instance layer — Codex's bookkeeping — not the CORE identity layer. The CORE identity lives in the brief, the log filename, and what the agent calls itself in its own narrative. Ignore the returned nickname for CORE purposes; the file-scratchpad filename is the authoritative identity surface.
 
 ## spawn-team
 
@@ -41,7 +43,7 @@ Poll the scratchpad. The completion signal is the presence of `<scratchpad>/<fro
 
 ## plan-task
 
-Codex's `update_plan` takes a list of step objects with `{description, status}`. Map `plan-task` to a single `update_plan` call seeding all steps with status `"pending"`. Subsequent `complete-task` calls update specific steps.
+Codex's `update_plan` takes a list of step objects keyed by a step identifier with a `status` field (current shape: `{step, status}` — verify against the installed Codex CLI's tool schema, since this surface has churned across May 2026 GA). Map `plan-task` to a single `update_plan` call seeding all steps with status `"pending"`. Subsequent `complete-task` calls update specific steps. If the schema doesn't match, inspect the Codex tool definition and adapt — the verb-level intent (seed all steps as pending, mutate one to completed on each tick) is stable; only the field names move.
 
 ## complete-task
 
@@ -68,10 +70,41 @@ Re-open this drop once a live Codex CLI install validates whether Codex hooks ca
 
 ## read-auto-memory
 
-Codex auto-loads `<project>/AGENTS.md` and `~/.codex/AGENTS.md` at session start (full file, no 200-line cap; default cap is 32 KiB per `project_doc_max_bytes`). Index entries should be one-liners per the hygiene mechanism; topic content lives in sub-files referenced from the index. The hygiene rule "index custody first" becomes more load-bearing on Codex because there's no auto-cap forcing brevity.
+Codex does not have a Claude-style per-project `MEMORY.md` auto-memory cache.
+
+Startup context comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat those as instruction surfaces, not project memory. They may contain stable rules and pointers, but project facts still live in `<project>/PROJECT.md` and `<project>/_memories/`.
+
+Codex assistant memory under `~/.codex/memories/` is harness-local recall. Treat it like scratch cache: useful for hints, never authoritative. Verify project-specific claims against the CORE unit store before acting. Per `dc-86-harness-local-memory-recall`, this is surface 4 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`.
+
+Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Only write Codex memory when the user explicitly asks to save a recall note; then follow `protocols/codex-memory-save.md` — that protocol is the trigger-driven micro-protocol covering the "save this" / "remember this" patterns.
 
 ## Notes
 
 - Universal verbs (`read`, `write`, `edit`, `glob`, `grep`, `shell`, `web-fetch`, `web-search`) resolve via inference to Codex's `read`, `write`, `apply_patch`, `shell` + `find`, `shell` + `rg`, `shell`, MCP-server or `shell` + `curl`, MCP-server (Brave / Firecrawl) respectively. No explicit mapping needed.
-- The plugin manifest ships in Claude Code format (`plugin.json`). Codex install uses the skill content directly under `~/.agents/skills/core/`; the dual-manifest story is a follow-up.
+- The plugin ships dual manifests (`.claude-plugin/plugin.json` for Claude Code, `.codex-plugin/plugin.json` for Codex) in the same repo; Codex installs the bundle into `~/.codex/plugins/cache/<marketplace>/core/<version>/` via `codex plugin marketplace add` + `codex plugin add`. Skill content under `skills/core/` is shared between both harnesses.
 - Voice baseline catalog ships empty initially. Build empirically if usage warrants.
+
+### Known RTK collisions on Codex
+
+- **File existence test:** `rtk test -f <path>` collides with the shell `test` builtin and produces noisy usage output. Use `rtk sh -c '[ -f <path> ]'` instead.
+- **Grep with directory exclusion:** `rtk grep --exclude-dir=...` is not supported. Use `rg -g '!<dir>/**'` (or `rtk sh -c 'rg -g ...'`) instead.
+- **`rtk find` flag passthrough is incomplete.** Standard `find` flags like `-print` and other GNU-find extensions don't always pass through cleanly. When you need specific find behavior, fall back to `rtk sh -c 'find ...'` so the find binary sees its flags directly.
+
+These are RTK-specific, not Codex-specific — but they're worth listing here because Codex sessions tend to use shell more heavily than Claude Code sessions and hit these patterns more often.
+
+### Nested `codex exec` and AGENTS.md discipline
+
+When a Codex slash command spawns nested `codex exec` calls inside its own shell flow (CORE's `/finalize` and `/process-memory` do this when running scripts), the nested call inherits the caller's environment but may not always surface the project's `AGENTS.md` instructions to the inner agent — including project-level RTK guidance. The Round-4 probe surfaced this: outer probe runs honored RTK; CORE-on-Codex shell calls inside the same session did not consistently.
+
+If you're authoring a slash-command flow that spawns nested `codex exec`, do not assume the inner invocation has inherited the project's command discipline. Pass project conventions explicitly into the nested prompt — name the RTK requirement, name any project-specific shell rules — rather than relying on AGENTS.md inheritance.
+
+### `${CLAUDE_PLUGIN_ROOT}` is not set on Codex
+
+Codex doesn't set `${CLAUDE_PLUGIN_ROOT}`. Companion skills that need to invoke scripts in the sibling core skill (`/finalize`, `/process-memory`) must derive the path from the loaded SKILL.md location rather than relying on the env var.
+
+The mechanical rule mirrors the protocol-resolution rule used in `skills/orient/SKILL.md` and `skills/finalize/SKILL.md`: take the absolute path you loaded SKILL.md from, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`, and invoke that. Concretely:
+
+- Claude Code marketplace install: `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<script>.mjs` works because the env var is set.
+- Codex plugin-cache install: derive the path from the loaded `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/<wrapper>/SKILL.md`, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`.
+
+Don't construct paths against a guessed plugin base. The loaded path carries the resolution.

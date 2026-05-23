@@ -57,6 +57,8 @@ Edit `~/.claude/settings.json` (global) or `<project>/.claude/settings.json` (pr
 
 Read `~/.claude/projects/<encoded-cwd>/memory/MEMORY.md` (first 200 lines auto-injected at session start; rest available on-demand). Cross-project index at `~/.claude/memory/memory.md`.
 
+Per `dc-86-harness-local-memory-recall`, this is harness-local recall — surface 4 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`. Treat as scratch cache: useful for warm-start hints, never authoritative. Verify project-specific claims against `<project>/_memories/` before acting.
+
 ## Notes
 
 - Universal verbs (`read`, `write`, `edit`, `glob`, `grep`, `shell`, `web-fetch`, `web-search`) resolve via inference to Claude Code's `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`, `WebFetch`, `WebSearch` respectively. No explicit mapping needed.

@@ -8,7 +8,14 @@ user-invocable: true
 
 You're orienting to an existing project. A resumed session should feel continuous, not like a cold start. Read what exists, reconstruct the context, surface the state in plain voice. Don't ask the user to catch you up until you've exhausted the durable artifacts.
 
-This skill is a thin shell over `protocols/startup.md`. The full bootstrap flow is documented there — what to read, what NOT to read, the retrieval ladder, edit-detection. This skill calls out the user-invocable wrapper around that flow.
+This skill is a thin shell over the startup protocol in the sibling core skill. The full bootstrap flow is documented there — what to read, what NOT to read, the retrieval ladder, edit-detection. This skill calls out the user-invocable wrapper around that flow.
+
+**Resolve the startup protocol from the path of this wrapper.** Take the absolute path you loaded this `SKILL.md` from, replace `/skills/orient/SKILL.md` with `/skills/core/protocols/startup.md`, and read that. Concretely:
+
+- Loaded from `${CLAUDE_PLUGIN_ROOT}/skills/orient/SKILL.md` → read `${CLAUDE_PLUGIN_ROOT}/skills/core/protocols/startup.md`.
+- Loaded from `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/orient/SKILL.md` → read `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/protocols/startup.md`.
+
+Don't construct the path against a guessed plugin base. The path you just loaded carries the resolution; perform the literal string replacement.
 
 ---
 
@@ -19,7 +26,7 @@ Determine what you're orienting to:
 1. Is there a `workspace.json` in the current directory? Read it.
 2. Does `~/.core/index.json` have a workspace whose path matches the current directory? Use it.
 3. Has `/core` already been invoked this session? You're already oriented — surface the current state and stop.
-4. None of the above? Treat as a new workspace and run Phase 3B from `protocols/startup.md`.
+4. None of the above? Treat as a new workspace and run Phase 3B from the startup protocol (resolved per the path-replacement rule at the top of this file).
 
 ---
 

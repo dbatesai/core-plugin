@@ -19,7 +19,7 @@ Read `protocols/startup.md` and run it now, before you act on the user's task ab
 
 Three steps, in order:
 
-1. Read `protocols/startup.md` in full.
+1. Read `protocols/startup.md` in full (relative to this skill's base directory — the one containing this `SKILL.md`, plus `protocols/`, `agents/`, `references/`, `harnesses/`, `schemas/`, `scripts/`, and `templates/`). All relative paths in this file resolve the same way.
 2. Execute the workspace-resolution and architecture-state routing it defines. If routing lands on cold-start migration or folder-rename, complete that work before continuing.
 3. Compose the readiness summary per the protocol's §"Compose the readiness summary" specification, and write or refresh `~/.core/workspaces/<id>/last-bootstrap.json` with the session-start timestamp.
 
@@ -66,18 +66,20 @@ A few words mean specific things in this skill:
 | Word | What it means |
 |---|---|
 | Harness | The agent interface (Claude Code, Codex, ChatGPT, etc.). CORE is a skill installed into a harness. |
-| Skill | This `/core` product — protocols + agents + templates. Installed under `${CLAUDE_PLUGIN_ROOT}/skills/core/` for marketplace installs, `~/.claude/skills/core/` for legacy direct installs. |
+| Skill | This `/core` product — protocols + agents + templates. Installed at a harness-specific path: Claude Code uses `${CLAUDE_PLUGIN_ROOT}/skills/core/` for marketplace installs (or `~/.claude/skills/core/` for legacy direct installs); Codex uses `~/.codex/plugins/cache/<marketplace>/core/<version>/` for plugin installs (or `~/.codex/skills/core/` for standalone skill installs). Resolve the actual path via `harnesses/<name>.md`. |
 | Source data | The project being analyzed or developed. |
 | Project synthesis | `<project>/PROJECT.md` — the rendered six-section view (What & Why / State / People / Moves / Decisions & Risks / Notes). |
 | Unit store | `<project>/_memories/` — flat directory of canonical project context, one fact per file. |
 | Delivery workspace | `~/.core/workspaces/<id>/` — your operational meta about this project. Not project facts. |
-| Harness config | `<source data>/.claude/` — hooks and scripts the harness runs for this project. |
+| Harness config | Harness-specific config directory at the project root — `<source data>/.claude/` for Claude Code, `<source data>/.codex/` (or `<source data>/AGENTS.md`) for Codex. Hooks and scripts the harness runs for this project. |
 
 ---
 
 ## Protocol index
 
 Read the right protocol before you act. Don't carry protocol detail in working memory — load it when you need it. The startup protocol is the one exception: read it at every session start before anything else, per the §"Before the task — startup" instruction above.
+
+Paths in this index resolve relative to the skill base directory (the one containing this `SKILL.md`). On Claude Code marketplace installs that's `${CLAUDE_PLUGIN_ROOT}/skills/core/`; on Codex plugin-cache installs it's `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/`. The Read tool resolves from there.
 
 | Protocol | File | When |
 |---|---|---|
@@ -88,6 +90,7 @@ Read the right protocol before you act. Don't carry protocol detail in working m
 | Memory hygiene | `protocols/hygiene.md` | At `/finalize`, after meaningful change, on-demand |
 | Execution | `protocols/execution.md` | Before any non-trivial task |
 | Multi-agent analysis | `protocols/analysis.md` | When you decide a single pass isn't enough |
+| Codex memory-save | `protocols/codex-memory-save.md` | User asks to save a recall note on Codex |
 | Validation | `protocols/validation.md` | Weekly auto + on-demand retrieval health checks |
 | Debug mode | `protocols/debug-mode.md` | "debug on" or self-unblock |
 | Self-evolution | `protocols/self-evolution.md` | Session end, hygiene-triggered learning |

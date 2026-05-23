@@ -20,7 +20,7 @@
  *                                       [--today YYYY-MM-DD] [--json]
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -227,8 +227,9 @@ export function main(argv) {
 
 // CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
 // silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
-const _cliEntryArgv1 = process.argv[1];
-const _cliEntrySelf = fileURLToPath(import.meta.url);
+const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
+const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
+const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
 if (process.env.CORE_DEBUG_CLI_ENTRY) {
   process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
 }
