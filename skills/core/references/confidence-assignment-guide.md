@@ -1,7 +1,5 @@
 # Confidence-Assignment Guide
 
-> **Status:** First draft, 2026-05-22. Pending pressure-test in source-data-memory-pipeline loop Fire 4.
-
 Pattern catalog for assigning `confidence-level` to observations during extraction. Source-category-agnostic — the patterns describe structural signals any source might exhibit, not categories of sources (no "for task-trackers, X" or "for chat, Y" framing here).
 
 Used by extractors (per `source-registration-framework.md`) when writing observations. The extractor maps the source datum onto one or more patterns; the patterns prescribe the confidence-level.
@@ -192,4 +190,4 @@ The guide is part of the framework spec at `source-registration-framework.md` §
 
 ---
 
-*First draft 2026-05-22 by Home-Keel during source-data-memory-pipeline loop Fire 3. Pending pressure-test in Fire 4. Companion: `source-registration-framework.md`.*
+Companion: `source-registration-framework.md`.

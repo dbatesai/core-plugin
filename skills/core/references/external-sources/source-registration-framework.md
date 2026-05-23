@@ -1,8 +1,6 @@
 # Source-Registration Framework
 
-> **Status:** First draft, 2026-05-22. Pending validation in source-data-memory-pipeline loop Fires 4-10.
-
-CORE's contract for how an external data source becomes part of a project's intelligence. CORE provides the framework; installations (wrappers like BBLens, or any future per-organization implementation) provide the source-specific implementation.
+CORE's contract for how an external data source becomes part of a project's intelligence. CORE provides the framework; installations (per-organization wrappers, per-user configurations, or any layer above CORE) provide the source-specific implementation.
 
 This document is source-agnostic throughout. It does not name Asana, Confluence, Teams, OneDrive, or any specific tool. Every concept here makes sense regardless of which sources an installation happens to support.
 
@@ -249,7 +247,7 @@ Every observation's `source` field points to a registered source. The `source-of
 
 ## 6. Orchestration-skill contract
 
-CORE does not ship an orchestration skill. Installations do (BBLens has `/refresh-project-context`; a hypothetical future wrapper has its own equivalent). CORE describes what an orchestration skill must do at the contract level.
+CORE does not ship an orchestration skill. Installations do — naming and shape are installation-level choices. CORE describes what an orchestration skill must do at the contract level.
 
 ### Required behaviors
 
@@ -353,4 +351,4 @@ That's the contract. Everything else is installation-level choice.
 
 ---
 
-*First draft 2026-05-22 by Home-Keel as part of source-data-memory-pipeline loop Fire 3. Pending validation in Fires 4-10. Companion: `confidence-assignment-guide.md`.*
+Companion: `confidence-assignment-guide.md`.
