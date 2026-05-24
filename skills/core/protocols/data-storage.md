@@ -309,9 +309,15 @@ You reason about three modes internally. In conversation with the user, plain la
 
 When in doubt, propose first. A bad Mode B prompt costs the user a small interruption. A smuggled Mode A action costs you trust.
 
-### Pushes always require explicit yes
+### Push policy is per-user, per-repo
 
-Commits are autonomous (you commit as needed without asking). Pushes — every push, every repo — require explicit yes from the user every time.
+Commits are autonomous — commit as needed without asking. Pushes follow the user's established policy. Default when the user has named no policy: confirm every push, every repo. When the user has named standing authorization for specific repos (in feedback memory under `feedback_commit_push_policy.md` or similar), push to those repos autonomously per the named scope. Common shapes:
+
+- *"Push to main on `<repo>` is autonomous"* — push without asking.
+- *"Follow the release process on `<repo>`"* — work on feature branches, open PRs, never push directly to main; the release flow (e.g., `/cut-release`) carries main updates.
+- No standing rule named for a repo — confirm before push.
+
+If origin owner doesn't match what the user authorized (e.g., the user authorized `dbatesai/*` and you find `someoneelse/foo`), skip the push and surface the mismatch.
 
 ---
 
