@@ -137,6 +137,25 @@ Graduation — observation becoming unit — is the highest-value reasoning move
 
 ---
 
+## On-demand project setup — governance-hierarchy capture (DC-85 §8)
+
+The new-workspace path in `protocols/startup.md` asks about source-authority hierarchy at intake. Returning workspaces that predate DC-85 won't have the unit yet. When a returning project would benefit from one (multi-document governance, recurring authority contradictions surfaced by synthesis-pass behavior #5, user mentions "what does the spec say vs. what we agreed in chat"), capture it on demand:
+
+- **Ask the user the same question the startup intake asks** — *"When this project's documents disagree, which one wins? PRD > HLSD > RTM > chat, or some other ordering, or single-source?"*
+- **Single-source / trivially-ordered projects: skip.** No unit needed; the question doesn't bind anything.
+- **Multi-document projects: write the decision unit.** Name `dc-NN-source-authority-hierarchy.md` (singular, per project), `type: decision`, `topics: [source-authority, governance]`, body holds the ordered list with one-line rationale per ranked source.
+- **When governance changes:** supersede the existing unit with a new one carrying a `supersedes` edge to the prior. Synthesis-pass behavior #5 (spec §5) always reads the current authoritative version.
+
+Triggering moments worth pulling this in:
+
+- The user surfaces a contradiction across two sources and asks "which one's right?" — that's a synthesis-pass behavior #5 fire and the absence of a governance-hierarchy unit becomes visible.
+- A new project artifact lands (PRD update, governance doc supersession) that changes the ordering.
+- During `/process-memory` if observations citing different sources are accumulating without authority disambiguation.
+
+This intake is distinct from DC-87's per-source authority capture (`source-of-authority-<source-name>.md` per registered external source). Both shapes can coexist; they answer different questions. The DC-87 units capture *what authority a single source claims*. The DC-85 §8 unit captures *which source wins across the project's hierarchy of artifacts*.
+
+---
+
 ## Continuous self-evaluation
 
 Storage and retrieval aren't frozen — they evolve based on observed performance.

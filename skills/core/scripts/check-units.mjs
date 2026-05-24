@@ -140,6 +140,17 @@ export function checkSchema(units, memoriesDir, report) {
     if (declaredId && stem && declaredId !== stem)
       report.push({ level: 'WARN', check: 'id-mismatch', unit_id: uid, detail: `Declared id '${declaredId}' doesn't match filename stem '${stem}'` });
 
+    // by-when validation — optional field for open-question units (DC-85 §2).
+    // Schema only validates well-formedness; staleness signaling lives in /orient.
+    const byWhen = u.fm['by-when'];
+    if (byWhen !== undefined && byWhen !== null && byWhen !== '') {
+      if (typ && typ !== 'open-question')
+        report.push({ level: 'WARN', check: 'by-when-on-wrong-type', unit_id: uid, detail: `Field 'by-when' is only meaningful on type:open-question, found on type:${typ}` });
+      const byWhenStr = byWhen instanceof Date ? byWhen.toISOString().slice(0, 10) : String(byWhen).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(byWhenStr))
+        report.push({ level: 'WARN', check: 'by-when-format', unit_id: uid, detail: `Field 'by-when' must be ISO date (YYYY-MM-DD), found '${byWhenStr}'` });
+    }
+
     report.push({ level: 'PASS', check: 'schema', unit_id: uid, detail: '' });
   }
 }

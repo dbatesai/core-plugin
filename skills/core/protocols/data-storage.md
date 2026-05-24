@@ -129,6 +129,40 @@ Location: `<project>/_memories/<prefix>-<slug>.md` — flat layout per DC-68, wi
 
 Top-priority units mark `canonical: true` in frontmatter. Canonical units get a priority floor, drive PROJECT.md rendering, and surface most heavily in retrieval. Not a separate tier — a marker on individual units.
 
+### Open-question units and the `by-when` field (DC-85 §2)
+
+`open-question` is a Tier 2 unit type for unresolved questions whose answers shape the project: pending stakeholder decisions, awaited approvals, deliverables expected by a date, asks that need a response. Distinct from observation (a fact captured) and decision (a settled choice) — an open question is a known-unknown the project is waiting on.
+
+Frontmatter shape — same six required fields as other Tier 2 units (`id`, `type`, `status`, `created`, `updated`, `topics`), plus one optional field specific to open questions:
+
+```yaml
+---
+id: oq-michelle-design-review
+type: open-question
+status: active
+created: 2026-05-15T18:00:00Z
+updated: 2026-05-15T18:00:00Z
+by-when: 2026-05-22
+topics:
+  - design-review
+  - stakeholder-feedback
+people:
+  - michelle
+edges:
+  - {type: depends-on, target: dc-12-design-spec-v2}
+---
+The design review feedback Michelle owes us by Friday 5/22 — needed
+before we can lock the spec.
+```
+
+The `by-when` field is an optional ISO date (YYYY-MM-DD). When set on an `active` (unresolved) open-question and the date is in the past, the question is **stale**. Staleness is a retrieval signal, not a status — the unit stays `active` until resolved.
+
+Status lifecycle: `active` → `archived` (resolved with the answer captured elsewhere — usually a decision unit citing this one as `supersedes`-equivalent context) or `active` → `retired` (no longer relevant; the question stopped mattering).
+
+**Resolution by supersession.** When an open-question is answered, the answer typically lands as an observation or decision unit citing the open-question. The open-question itself moves to `status: archived` rather than being deleted — the question and its eventual answer both stay queryable.
+
+**Staleness at `/orient`.** The startup protocol's elapsed-time signals (per `protocols/startup.md` §"Elapsed-time signals") include a sweep over active open-question units. Any unit with a past `by-when` surfaces in the readiness summary. This is the absence-detection primitive — the architecture knows the question is past due even when nobody has explicitly noted it. Mechanism for the Michelle probe (spec §10).
+
 ---
 
 ## The committed edge types

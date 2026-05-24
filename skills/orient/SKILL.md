@@ -65,15 +65,40 @@ If you find an edit, surface it in the readiness receipt before the agenda.
 
 ## Step 4 — Apply elapsed-time signals
 
-Per `protocols/startup.md` §Phase 5:
+Per `protocols/startup.md` §"Elapsed-time signals":
 
 - Time since last session — over a week, re-confirm priorities; over a month, treat as near-new.
 - Time until next deadline — under two sessions of runway, escalate.
 - Risks past `last_reviewed` thresholds — flag as stale.
 - Assumptions past `last_validated` thresholds — flag for revalidation.
 - External-source-derived claims past their staleness threshold — disclose and consider re-fetch.
+- **Open-question past `by-when` (DC-85 §2).** Walk active open-question units. Surface ones where `type: open-question`, `status: active`, and the `by-when` ISO date is in the past. Plain voice: *"One open question past its by-when: oq-michelle-design-review expected 5/22 — six days ago."* The absence is the signal; surface it before the user has to ask.
 
 If any of these escalate, lead with the escalation in readiness.
+
+---
+
+## Step 4.5 — Hot-section synthesis pass (DC-85 Phase 1a)
+
+The hot section is the 5-7 line surface atop PROJECT.md that names what matters right now. Refresh it conditionally — only when candidate ranking has shifted meaningfully since last synthesis, or when this session's intent diverges from what the existing hot section addresses.
+
+**When to refresh** (any one suffices):
+
+- Existing hot section is missing (project predates DC-85 Phase 1a, or it was cleared).
+- Existing hot section is older than 24 hours (the candidates underneath have likely shifted).
+- Session-intent topics don't overlap with the topics the existing hot section addresses (priority ranking will shift under the new intent).
+- Elapsed-time signals (Step 4) escalated something the existing hot section doesn't mention.
+
+**When to skip:** the existing hot section is fresh, the session intent matches its framing, and nothing escalated. Skip silently — don't refresh just to refresh.
+
+**How to refresh:**
+
+1. Call `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/hot-section.mjs candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>...` with the session-intent topics from Step 2. Read the candidate list.
+2. Compose 5-7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Spec §1.1 cap: usually 1-3 items, no bold-lead-in paragraphs unless the items genuinely need scannable headers.
+3. Call `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/hot-section.mjs apply <project> --text "<composed prose>"` to land the section atop PROJECT.md.
+4. Narrate the refresh in one sentence as part of readiness — *"Refreshed the hot section: Phase 1a is mid-flight and DC-88 just reconciled."*
+
+The 500-token enforcement is Phase 1b; for Phase 1a, the agent self-disciplines on length.
 
 ---
 
