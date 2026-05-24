@@ -44,6 +44,14 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 5. **Render-and-accept.** Present the draft (or the preserved-existing PROJECT.md per the skip rule above). User accepts (Mode A continues) or edits (Mode B-ish — edits become ground truth, propagate back to units, anti-resurrection fires for removals). Commit the accepted version.
 
+6. **Refresh the hot section (DC-85 Phase 1a).** After the accepted PROJECT.md lands, refresh the hot tier atop it. This captures the new state the user just left — the session's actual outcome, not the state at session start. Steps:
+   - Call `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/hot-section.mjs candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>...` with the session-intent topics from this session.
+   - Compose 5-7 lines of plain prose blending priority candidates (stable structural heft) and session-level awareness (what closed, what's still open, what's next). Usually 1-3 items per spec §1.1; no bold-lead-in paragraphs unless they earn their weight.
+   - Call `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/hot-section.mjs apply <project> --text "<composed prose>"` to land it.
+   - Narrate the refresh in one sentence as part of the closing.
+   - Skip when the session was trivial (no substantive work, no state changes) and the existing hot section still describes current truth. Don't refresh just to refresh.
+   - Phase 1b enforces the 500-token cap programmatically; for Phase 1a, the agent self-disciplines on length.
+
 ---
 
 ## Step 3 — Memory hygiene pass
