@@ -261,6 +261,15 @@ Detail in `references/retrieval.md`.
 
 Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`. This is base operational telemetry — not debug-mode-gated. The writer is the agent inline at the retrieval site; there is no hook. Schema and reading patterns in `references/retrieval.md`.
 
+**PROJECT.md management events (DC-85 Phase 1b).** PROJECT.md is agent-managed; effectiveness is measured via structured event emission, not user review. Two logs carry the signal — both written by `scripts/log-event.mjs` (shared helper):
+
+| File | Event kinds | Written by |
+|---|---|---|
+| `_sessions/<date>/retrieval-log.jsonl` | `hot-section-synthesis`, `hot-section-over-budget`, `synthesis-pass-behavior` (Phase 3) | `hot-section.mjs` |
+| `_sessions/<date>/hygiene-log.jsonl` | `demote-moves`, `demote-moves-large-batch`, `compact-project`, `project-md-over-cap` | `demote-moves.mjs`, `compact-project.mjs` |
+
+`/orient` Step 4 surfaces load-bearing signals from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
+
 ---
 
 ## Priority function

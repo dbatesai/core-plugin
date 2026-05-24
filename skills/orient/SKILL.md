@@ -73,6 +73,10 @@ Per `protocols/startup.md` §"Elapsed-time signals":
 - Assumptions past `last_validated` thresholds — flag for revalidation.
 - External-source-derived claims past their staleness threshold — disclose and consider re-fetch.
 - **Open-question past `by-when` (DC-85 §2).** Walk active open-question units. Surface ones where `type: open-question`, `status: active`, and the `by-when` ISO date is in the past. Plain voice: *"One open question past its by-when: oq-michelle-design-review expected 5/22 — six days ago."* The absence is the signal; surface it before the user has to ask.
+- **Recent hygiene-log signals (DC-85 Phase 1b).** Read `<project>/_sessions/<most-recent-date>/hygiene-log.jsonl` if present. Surface anything load-bearing in plain voice without piling on:
+  - `demote-moves-large-batch` from the last 1-2 sessions → narrate "Last `demote-moves` ran on N candidates (threshold M); criteria may be tightening / loosening — worth a glance next /process-memory."
+  - `project-md-over-cap` events that persist across sessions → narrate "PROJECT.md is stuck over the 70KB hard cap; §State / §Notes are the dominant sections — Phase 1c handles that."
+  - Skip when the log is absent (common on fresh workspaces) or shows clean steady-state.
 
 If any of these escalate, lead with the escalation in readiness.
 

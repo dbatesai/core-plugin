@@ -129,21 +129,19 @@ Both write to `_memories/INDEX-*.md`. Top-level units only — archived ones in 
 
 ---
 
-## Step 5 — Compact PROJECT.md if over the cap
+## Step 5 — PROJECT.md tier discipline (DC-85 Phase 1b)
+
+Run two scripts in order — demote-moves first, then compact-project. Both auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs).
 
 ```bash
-wc -c "<project>/PROJECT.md"
-```
-
-If over ~66KB (~67000 bytes), run the compaction:
-
-```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/demote-moves.mjs" "<project>"
 node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs" "<project>"
 ```
 
-The script replaces full-text `§Decisions` entries with one-line stubs pointing to their canonical units in `_memories/`, matching the DC-48 stub-every-archived-decision pattern. Auto-MIGRATE is authorized for this shape per DC-46. The script is idempotent — entries already in stub form are left alone.
+- `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` when the most-recent backing-unit `updated:` date is >30 days old AND all cited units are in terminal status. Conservative defaults: no backing-unit citation → keep; any missing/active cited unit → keep. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. First runs on §Moves-heavy projects can demote 20+ items in one pass — narrate the magnitude.
+- `compact-project.mjs` collapses `§Decisions` paragraphs to one-line stubs pointing at units (DC-48 pattern). Auto-MIGRATE per DC-46; idempotent. Now also emits `kind: compact-project` with section-size breakdown and `kind: project-md-over-cap` when the file remains >70KB after compaction. Use `--section-sizes` to inspect the breakdown without writing.
 
-Report the before/after size and the per-entry stats the script prints.
+Report the demoted count and the before/after sizes the scripts print. Over-cap warnings name the §State / §Notes overflow that Phase 1c will handle.
 
 ---
 
