@@ -134,11 +134,15 @@ Update the `MEMORY.md` index in the same operation. Don't write project-specific
 
 Apply the memory hygiene rules: update stale memories rather than adding duplicates; remove memories that were proven wrong; keep `MEMORY.md` current.
 
-Then refresh the auto-memory index. Run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories --top 30` and read the current `~/.claude/projects/<mapped-cwd>/memory/MEMORY.md`. Rewrite `MEMORY.md` so each top unit is a one-line markdown bullet linking to its unit file, followed by an em-dash and a one-line hook (match the existing entries' shape). Preserve user-added entries that are still relevant, drop entries pointing to retired units, keep the file under 200 lines.
+Then refresh the auto-memory index. Two parts:
 
-Do this inline in the main agent — don't dispatch a subagent. The previous Haiku-subagent design required `git worktree`, which fails on non-git workspaces (any cloud-sync-backed project, any non-versioned project directory) with *"Cannot create agent worktree: not in a git repository."* Per CORE's harness-agnostic design intent, git is not a precondition for project intelligence. Project intelligence workspaces hold data, not code — versioning isn't the right tool here. The refresh is fast enough inline that blocking on it isn't a real cost.
+**Priority block (mechanical).** Run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-memory-index.mjs <project>/_memories --memory-md ~/.claude/projects/<mapped-cwd>/memory/MEMORY.md --top 30`. The script regenerates only the "## Top project units" section in place: it preserves existing one-line descriptions for units that remain in top-N (so prior curation isn't lost), falls back to the unit's H1 for newly-promoted units, and removes entries for units that dropped out of top-N. Idempotent — re-runs with no underlying change are no-ops.
 
-Narrate the refresh plainly: *"Refreshing MEMORY.md from the top 30 units now."*
+**Curation pass (inline, judgment).** Update the "Recent activity" section with this session's one-line entry. Sweep the "Feedback + project pointers" section: drop pointers to retired memories; add pointers for any `feedback_*.md` / `project_*.md` / `reference_*.md` you wrote this session. For any unit the script flagged with an H1-fallback description, refine if the H1 reads thin. Keep `MEMORY.md` under 200 lines.
+
+Do this inline in the main agent — don't dispatch a subagent. The previous Haiku-subagent design required `git worktree`, which fails on non-git workspaces (any cloud-sync-backed project, any non-versioned project directory) with *"Cannot create agent worktree: not in a git repository."* Per CORE's harness-agnostic design intent, git is not a precondition for project intelligence. Project intelligence workspaces hold data, not code — versioning isn't the right tool here. The script does the heavy lifting; the curation pass stays in the main agent.
+
+Narrate the refresh plainly: *"Refreshing MEMORY.md priority block from the top 30 units now."*
 
 ### If harness is Codex
 
