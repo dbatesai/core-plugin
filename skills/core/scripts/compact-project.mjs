@@ -22,12 +22,19 @@
 import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { logEvent } from './log-event.mjs';
 
 export const DECISIONS_HEADER = '**Decisions (dated, append-only):**';
 export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
 // 80% of the Read-tool 25000-token cap, char-to-token factor 0.30:
 // 0.8 * 25000 / 0.30 ≈ 67000 bytes. Matches protocols/startup.md's cap heuristic.
 export const PROJECT_MD_CAP_BYTES = 67000;
+// Phase 1b — DC-85 R1 hard cap. 70KB ≈ 21K tokens at the 0.30 factor.
+// compact-project doesn't refuse to write at this threshold; it emits a
+// structured project-md-over-cap event so the Phase 5 monitoring loop can
+// react. demote-moves handles §Moves growth; §State narrative compaction
+// is Phase 1c.
+export const HARD_CAP_BYTES = 70000;
 
 export function parseArgv(argv) {
   const flags = new Set();
@@ -195,6 +202,35 @@ export function compactDecisions(text, units) {
   return { text: joined, stats: { compacted, skipped, missing } };
 }
 
+export function sectionSizes(text) {
+  if (!text) return {};
+  const lines = text.split('\n');
+  const sizes = {};
+  let currentName = null;
+  let currentBytes = 0;
+  for (const line of lines) {
+    const m = line.match(/^##\s+(.+?)\s*$/);
+    if (m) {
+      if (currentName !== null) {
+        sizes[currentName] = (sizes[currentName] || 0) + currentBytes;
+      }
+      currentName = m[1];
+      currentBytes = 0;
+    } else if (currentName !== null) {
+      currentBytes += Buffer.byteLength(line + '\n', 'utf8');
+    }
+  }
+  if (currentName !== null) {
+    sizes[currentName] = (sizes[currentName] || 0) + currentBytes;
+  }
+  return sizes;
+}
+
+function formatSectionSizes(sizes) {
+  const entries = Object.entries(sizes).sort((a, b) => b[1] - a[1]);
+  return entries.map(([name, bytes]) => `  ${name.padEnd(24)} ${bytes.toString().padStart(8)} bytes`).join('\n');
+}
+
 export function main(argv) {
   const { positional, flags } = parseArgv(argv);
   const projectDir = positional ? resolve(positional) : resolve(process.cwd());
@@ -214,6 +250,14 @@ export function main(argv) {
     return 0;
   }
 
+  if (flags.has('section-sizes')) {
+    const sizes = sectionSizes(text);
+    const total = Buffer.byteLength(text, 'utf8');
+    console.log(`PROJECT.md: ${total} bytes total. Section breakdown:`);
+    console.log(formatSectionSizes(sizes));
+    return 0;
+  }
+
   let units;
   try { units = loadUnits(memoriesDir); } catch {
     process.stderr.write(`error: ${memoriesDir} not readable\n`);
@@ -223,13 +267,40 @@ export function main(argv) {
   const before = Buffer.byteLength(text, 'utf8');
   const { text: newText, stats } = compactDecisions(text, units);
   const after = Buffer.byteLength(newText, 'utf8');
+  const wrote = newText !== text;
+  if (wrote) writeFileSync(projectMd, newText);
 
-  if (newText === text) {
+  const sizes = sectionSizes(newText);
+  logEvent(projectDir, 'hygiene-log.jsonl', {
+    kind: 'compact-project',
+    before_bytes: before,
+    after_bytes: after,
+    delta_bytes: before - after,
+    compacted: stats.compacted,
+    skipped: stats.skipped,
+    missing: stats.missing,
+    section_sizes: sizes,
+  });
+
+  if (after > HARD_CAP_BYTES) {
+    logEvent(projectDir, 'hygiene-log.jsonl', {
+      kind: 'project-md-over-cap',
+      bytes: after,
+      hard_cap: HARD_CAP_BYTES,
+      section_sizes: sizes,
+    });
+    process.stderr.write(
+      `warn: PROJECT.md is ${after} bytes (over hard cap ${HARD_CAP_BYTES}). ` +
+      `§Decisions compaction left ${after} bytes; demote-moves and §State narrative ` +
+      `compaction (Phase 1c) handle the remaining sections.\n`
+    );
+  }
+
+  if (!wrote) {
     console.log(`No changes — §Decisions already compact (${after} bytes).`);
     return 0;
   }
 
-  writeFileSync(projectMd, newText);
   const delta = before - after;
   const pct = (delta / before * 100).toFixed(1);
   console.log(`PROJECT.md: ${before} → ${after} bytes (${delta > 0 ? '-' : '+'}${Math.abs(delta)} = ${pct}%)`);

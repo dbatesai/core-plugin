@@ -29,11 +29,23 @@ import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
+import { logEvent } from './log-event.mjs';
 
 export const HOT_BEGIN = '<!-- HOT-SECTION:BEGIN -->';
 export const HOT_END = '<!-- HOT-SECTION:END -->';
 export const HOT_HEADING = '## Right now';
 export const DEFAULT_CANDIDATE_COUNT = 12;
+
+// Phase 1b — token budget enforcement.
+// DC-85 R1 caps the hot tier at 500 tokens. Char-to-token factor 0.30 matches
+// the convention shared with compact-project.mjs's PROJECT_MD_CAP_BYTES math.
+export const HOT_SECTION_TOKEN_BUDGET = 500;
+export const TOKENS_PER_BYTE = 0.30;
+
+export function estimateTokens(text) {
+  if (!text) return 0;
+  return Math.ceil(Buffer.byteLength(String(text), 'utf8') * TOKENS_PER_BYTE);
+}
 
 // ---------- File plumbing ----------
 
@@ -67,7 +79,24 @@ function nowIso() {
 
 // ---------- Public API ----------
 
-export function applyHotSection(projectDir, text, { now } = {}) {
+export function applyHotSection(projectDir, text, { now, allowOverBudget = false } = {}) {
+  const tokens = estimateTokens(text);
+  if (tokens > HOT_SECTION_TOKEN_BUDGET && !allowOverBudget) {
+    logEvent(projectDir, 'retrieval-log.jsonl', {
+      kind: 'hot-section-over-budget',
+      tokens,
+      budget: HOT_SECTION_TOKEN_BUDGET,
+    });
+    const err = new Error(
+      `Hot section over budget: ${tokens} tokens > ${HOT_SECTION_TOKEN_BUDGET}. ` +
+      `Recompose with fewer/shorter paragraphs, or pass { allowOverBudget: true } as an escape hatch.`
+    );
+    err.code = 'HOT_SECTION_OVER_BUDGET';
+    err.tokens = tokens;
+    err.budget = HOT_SECTION_TOKEN_BUDGET;
+    throw err;
+  }
+
   const { path, text: original } = readProjectMd(projectDir);
   const block = renderBlock(text, now || nowIso());
   const existing = findExistingBlock(original);
@@ -85,6 +114,13 @@ export function applyHotSection(projectDir, text, { now } = {}) {
     }
   }
   if (updated !== original) writeFileSync(path, updated);
+  logEvent(projectDir, 'retrieval-log.jsonl', {
+    kind: 'hot-section-synthesis',
+    tokens,
+    budget: HOT_SECTION_TOKEN_BUDGET,
+    over_budget: tokens > HOT_SECTION_TOKEN_BUDGET,
+    applied: updated !== original,
+  });
   return updated;
 }
 
