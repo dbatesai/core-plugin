@@ -1,6 +1,6 @@
 {
   "name": "core",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis; reaches for multi-agent adversarial analysis when stakes warrant. Ships with five companion utilities — `/orient` (thread resumption), `/finalize` (session close), `/process-memory` (user-invoked memory hygiene pass), `/vibecheck` (session vibe), and `/organize-files` (cleanup) — that CORE invokes internally and that you can also call directly.",
   "author": {
     "name": "David Bates",

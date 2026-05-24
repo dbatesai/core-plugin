@@ -4,8 +4,15 @@
  *
  * Rewrites the "## Top project units" section of MEMORY.md from priority.mjs
  * ranking output. Preserves all other sections verbatim. Preserves existing
- * one-line descriptions for units that remain in top-N; falls back to the
- * first H1 of the unit body for newly-promoted units.
+ * one-line descriptions for units that remain in top-N; otherwise cascades
+ * through frontmatter `description:`, first H1 of the body, and first non-blank
+ * body line before giving up with `(description pending)`.
+ *
+ * Paths are emitted relative to the project root (the parent of `_memories/`),
+ * not relative to MEMORY.md's directory. Claude Code resolves these against
+ * the session CWD (the project root); shorter project-root-relative paths are
+ * portable across the harness's MEMORY.md location, which may sit outside the
+ * project tree (e.g. `~/.claude/projects/<encoded>/memory/`).
  *
  * Usage:
  *   node generate-memory-index.mjs <project>/_memories \
@@ -43,6 +50,31 @@ export function extractH1(unitText) {
   return FALLBACK_DESCRIPTION;
 }
 
+export function extractFirstBodyLine(unitText) {
+  let body = unitText;
+  if (unitText.startsWith('---\n')) {
+    const end = unitText.indexOf('\n---\n', 4);
+    if (end > 0) body = unitText.slice(end + 5);
+  }
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const stripped = trimmed.replace(/^[#>*\-]+\s*/, '').trim();
+    if (stripped) return stripped;
+  }
+  return FALLBACK_DESCRIPTION;
+}
+
+// Description resolution cascade: existing curated → fm.description → H1 → first body line → fallback.
+// `existing` is a string or undefined (caller resolves preserved curation).
+export function resolveDescription(existing, fm, unitText) {
+  if (existing) return existing;
+  if (fm && fm.description) return String(fm.description).trim();
+  const h1 = extractH1(unitText);
+  if (h1 !== FALLBACK_DESCRIPTION) return h1;
+  return extractFirstBodyLine(unitText);
+}
+
 function todayFromArg(arg) {
   if (arg) {
     const [y, m, d] = arg.split('-').map(Number);
@@ -52,24 +84,24 @@ function todayFromArg(arg) {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 }
 
-export function renderPriorityBlock({ memoriesDir, memoryMdPath, topN, today, existingDescriptions }) {
+export function renderPriorityBlock({ memoriesDir, topN, today, existingDescriptions }) {
   const ranked = iterUnits(memoriesDir).map(u => [score(u, [], today), u]);
   ranked.sort((a, b) => b[0] - a[0]);
   const top = ranked.slice(0, topN);
 
-  const memoryDir = dirname(memoryMdPath);
+  const projectRoot = dirname(memoriesDir);
   const dateStr = today.toISOString().slice(0, 10);
 
   const lines = [`## Top project units (refreshed from priority.mjs --top ${topN}, ${dateStr})`, ''];
   for (const [, u] of top) {
-    const relPath = relative(memoryDir, String(u.path));
-    let desc = existingDescriptions.get(u.id);
-    if (!desc) {
-      try {
-        desc = extractH1(readFileSync(u.path, 'utf8'));
-      } catch {
-        desc = FALLBACK_DESCRIPTION;
-      }
+    const relPath = relative(projectRoot, String(u.path));
+    const existing = existingDescriptions.get(u.id);
+    let desc;
+    try {
+      const unitText = readFileSync(u.path, 'utf8');
+      desc = resolveDescription(existing, u.fm, unitText);
+    } catch {
+      desc = existing || FALLBACK_DESCRIPTION;
     }
     lines.push(`- [${u.id}](${relPath}) — ${desc}`);
   }
@@ -127,7 +159,7 @@ export function main(argv) {
   const oldText = readFileSync(memoryMdPath, 'utf8');
   const existingDescriptions = parseExistingDescriptions(oldText);
   const newSection = renderPriorityBlock({
-    memoriesDir, memoryMdPath, topN, today, existingDescriptions,
+    memoriesDir, topN, today, existingDescriptions,
   });
   const newText = spliceSection(oldText, newSection);
 
