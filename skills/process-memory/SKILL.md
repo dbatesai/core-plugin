@@ -35,6 +35,7 @@ For each of these patterns in the recent conversation, write the observation now
 - A workflow lesson surfaced that affects how future scheduled agents, hygiene passes, or other automation should be designed
 - A misalignment between a protocol document and observed behavior
 - The agent itself made a judgment-call decision worth recording with rationale
+- **Source-pull deferral pattern:** Did any external-source sweep this session find sentinel content references (event-detail blocks, file/message IDs, recording metadata) but defer fetching the actual content? "Queued for later," "added to backlog," "fetch next time" framings usually mean the deferral fired and the content never lands. Write an observation flagging the missed pulls and surface to the user for follow-up. Step 0 is the backstop when in-loop discipline slips.
 
 Write to `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md` per the spec at `protocols/data-storage.md §Tier 1`, OR to `<project>/_memories/obs-<descriptive-slug>.md` if the observation has unit-shaped weight (rich edges, durable sources, ongoing relevance).
 
