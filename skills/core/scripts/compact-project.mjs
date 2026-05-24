@@ -29,12 +29,17 @@ export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
 // 80% of the Read-tool 25000-token cap, char-to-token factor 0.30:
 // 0.8 * 25000 / 0.30 ≈ 67000 bytes. Matches protocols/startup.md's cap heuristic.
 export const PROJECT_MD_CAP_BYTES = 67000;
-// Phase 1b — DC-85 R1 hard cap. 70KB ≈ 21K tokens at the 0.30 factor.
-// compact-project doesn't refuse to write at this threshold; it emits a
-// structured project-md-over-cap event so the Phase 5 monitoring loop can
-// react. demote-moves handles §Moves growth; §State narrative compaction
-// is Phase 1c.
-export const HARD_CAP_BYTES = 70000;
+// Phase 1b — DC-85 R1 soft target. 70KB ≈ 21K tokens at the 0.30 factor.
+// compact-project never refuses to write; this is advisory. When PROJECT.md
+// exceeds the target, a structured project-md-over-cap event emits so the
+// Phase 5 monitoring loop can react. demote-moves handles §Moves growth;
+// §State narrative compaction is Phase 1c. Renamed from HARD_CAP_BYTES on
+// 2026-05-24 (session 34) — the old name implied enforcement the script
+// never had.
+export const SOFT_TARGET_BYTES = 70000;
+// Back-compat export for any consumer still on the old name. Remove when no
+// callers reference it. Tracked via the project-md-over-cap event payload.
+export const HARD_CAP_BYTES = SOFT_TARGET_BYTES;
 
 export function parseArgv(argv) {
   const flags = new Set();
@@ -282,17 +287,18 @@ export function main(argv) {
     section_sizes: sizes,
   });
 
-  if (after > HARD_CAP_BYTES) {
+  if (after > SOFT_TARGET_BYTES) {
     logEvent(projectDir, 'hygiene-log.jsonl', {
       kind: 'project-md-over-cap',
       bytes: after,
-      hard_cap: HARD_CAP_BYTES,
+      soft_target: SOFT_TARGET_BYTES,
+      hard_cap: SOFT_TARGET_BYTES,  // back-compat field name
       section_sizes: sizes,
     });
     process.stderr.write(
-      `warn: PROJECT.md is ${after} bytes (over hard cap ${HARD_CAP_BYTES}). ` +
+      `note: PROJECT.md is ${after} bytes (over soft target ${SOFT_TARGET_BYTES}). ` +
       `§Decisions compaction left ${after} bytes; demote-moves and §State narrative ` +
-      `compaction (Phase 1c) handle the remaining sections.\n`
+      `compaction (Phase 1c) handle the remaining sections. Advisory only — the script never refuses to write.\n`
     );
   }
 
