@@ -70,13 +70,11 @@ Re-open this drop once a live Codex CLI install validates whether Codex hooks ca
 
 ## read-auto-memory
 
-Codex does not have a Claude-style per-project `MEMORY.md` auto-memory cache.
+Codex can inject memory-like context at session start when `features.memories = true` (experimental). When it does, the context is gated by `no_memories_if_mcp_or_web_search = true` and may be suppressed depending on session configuration. Treat any injected memory as harness-local recall — scratch cache, not project truth. Verify project-specific claims against the CORE unit store before acting. Run a startup probe to confirm whether injection occurred before relying on it for bootstrap behavior.
 
-Startup context comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat those as instruction surfaces, not project memory. They may contain stable rules and pointers, but project facts still live in `<project>/PROJECT.md` and `<project>/_memories/`.
+Startup context also comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat those as instruction surfaces, not project memory. Project facts live in `<project>/PROJECT.md` and `<project>/_memories/`.
 
-Codex assistant memory under `~/.codex/memories/` is harness-local recall. Treat it like scratch cache: useful for hints, never authoritative. Verify project-specific claims against the CORE unit store before acting. Per `dc-86-harness-local-memory-recall`, this is surface 4 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`.
-
-Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Codex memory is the explicit-save surface; mechanics live in `save-recall-note` below. CORE does not encode trigger phrases for when to invoke it — that's install-level configuration in the user's `AGENTS.md`.
+Codex assistant memory under `~/.codex/memories/` is harness-local recall, surface 4 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`. Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Codex memory is the explicit-save surface; mechanics live in `save-recall-note` below. CORE does not encode trigger phrases for when to invoke it — that's install-level configuration in the user's `AGENTS.md`.
 
 ## save-recall-note
 

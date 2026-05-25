@@ -33,7 +33,13 @@ jobs:
       - name: Validate plugin manifests are well-formed JSON
         run: |
           set -e
-          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
+          for f in \
+            .claude-plugin/plugin.json \
+            .claude-plugin/marketplace.json \
+            .codex-plugin/plugin.json \
+            .gemini-plugin/plugin.json \
+            .agents/plugins/marketplace.json \
+            hooks/hooks.json; do
             echo "parsing $f"
             node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))"
           done
@@ -51,7 +57,6 @@ jobs:
       - name: Skill metadata present (BUILD, SKILL.md)
         run: |
           set -e
-          # VERSION file removed in v2.1.0 — version is now read from plugin.json
           for f in skills/core/BUILD skills/core/SKILL.md; do
             if [ ! -s "$f" ]; then
               echo "missing or empty: $f"
@@ -59,7 +64,26 @@ jobs:
             fi
           done
           echo "BUILD=$(cat skills/core/BUILD)"
-          echo "plugin.json version=$(jq -r .version .claude-plugin/plugin.json)"
+
+      - name: All harness manifests report same version
+        run: |
+          node -e '
+            const fs = require("fs");
+            const claude = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json","utf8")).version;
+            const codex  = JSON.parse(fs.readFileSync(".codex-plugin/plugin.json","utf8")).version;
+            const gemini = JSON.parse(fs.readFileSync(".gemini-plugin/plugin.json","utf8")).version;
+            let failed = 0;
+            if (claude !== codex) {
+              console.error("Version drift: .claude-plugin=" + claude + " vs .codex-plugin=" + codex);
+              failed = 1;
+            }
+            if (claude !== gemini) {
+              console.error("Version drift: .claude-plugin=" + claude + " vs .gemini-plugin=" + gemini);
+              failed = 1;
+            }
+            if (failed) process.exit(1);
+            console.log("Harness manifest lockstep OK:", claude);
+          '
 
       - name: SKILL.md has YAML frontmatter with name and description
         run: |

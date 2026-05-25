@@ -43,7 +43,7 @@ if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-
         require('os').homedir() + '/.claude/plugins/installed_plugins.json', 'utf8'));
       const entries = d.plugins?.['core@core'] || [];
       const entry = entries.find(e => e.scope === 'user') || entries[0];
-      process.stdout.write(entry?.installPath || '');
+      process.stdout.write((entry?.installPath || '').replace(/\\/g, '/'));
     } catch(e) {}
   " 2>/dev/null)
 fi

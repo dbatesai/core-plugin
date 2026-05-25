@@ -20,6 +20,8 @@ jobs:
           PLUGIN_VERSION=$(jq -r .version .claude-plugin/plugin.json)
           MARKETPLACE_VERSION=$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)
           METADATA_VERSION=$(jq -r '.metadata.version' .claude-plugin/marketplace.json)
+          CODEX_VERSION=$(jq -r .version .codex-plugin/plugin.json)
+          GEMINI_VERSION=$(jq -r .version .gemini-plugin/plugin.json)
 
           FAILED=0
 
@@ -30,6 +32,16 @@ jobs:
 
           if [ "$PLUGIN_VERSION" != "$METADATA_VERSION" ]; then
             echo "::error::Version drift: plugin.json=$PLUGIN_VERSION vs marketplace.json metadata.version=$METADATA_VERSION"
+            FAILED=1
+          fi
+
+          if [ "$PLUGIN_VERSION" != "$CODEX_VERSION" ]; then
+            echo "::error::Version drift: .claude-plugin/plugin.json=$PLUGIN_VERSION vs .codex-plugin/plugin.json=$CODEX_VERSION"
+            FAILED=1
+          fi
+
+          if [ "$PLUGIN_VERSION" != "$GEMINI_VERSION" ]; then
+            echo "::error::Version drift: .claude-plugin/plugin.json=$PLUGIN_VERSION vs .gemini-plugin/plugin.json=$GEMINI_VERSION"
             FAILED=1
           fi
 

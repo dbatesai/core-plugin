@@ -10,7 +10,7 @@ Add or modify external data sources for this project. The intake protocol that r
 
 This skill implements the intake protocol defined in `references/external-sources/source-registration-framework.md §3`. Read that document for the full schema, the field semantics, and the rationale. This skill is the orchestration; the framework is the contract.
 
-**Script path resolution.** No scripts are invoked here directly — the skill writes registration YAML and unit files via the standard write tools. The framework reference lives at `${CLAUDE_PLUGIN_ROOT}/skills/core/references/external-sources/source-registration-framework.md` on Claude Code marketplace installs. On Codex, derive the path mechanically: take the absolute path you loaded this `SKILL.md` from, replace `/skills/register-sources/SKILL.md` with `/skills/core/references/external-sources/source-registration-framework.md`. Don't construct paths against a guessed plugin base.
+**Script path resolution.** No scripts are invoked here directly — the skill writes registration YAML and unit files via the standard write tools. The framework reference lives at `${CLAUDE_PLUGIN_ROOT}/skills/core/references/external-sources/source-registration-framework.md` on Claude Code marketplace installs. On Codex and Gemini, derive the path mechanically: take the absolute path you loaded this `SKILL.md` from, replace `/skills/register-sources/SKILL.md` with `/skills/core/references/external-sources/source-registration-framework.md`. Don't construct paths against a guessed plugin base.
 
 ---
 

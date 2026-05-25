@@ -1,17 +1,19 @@
 {
   "name": "core",
-  "version": "2.0.1-dev.20260521.5",
-  "build": "20260521.5",
-  "created_at": "2026-05-23T02:30:00Z",
+  "version": "2.4.0",
+  "build": "20260525.1",
+  "created_at": "2026-05-25T00:00:00Z",
   "targets": [
     "claude-code",
-    "codex"
+    "codex",
+    "gemini"
   ],
-  "source_commit": "57ec834",
+  "source_commit": "HEAD",
   "source_repo": "https://github.com/dbatesai/core-plugin",
   "manifests": {
     "claude-code": ".claude-plugin/plugin.json",
-    "codex": ".codex-plugin/plugin.json"
+    "codex": ".codex-plugin/plugin.json",
+    "gemini": ".gemini-plugin/plugin.json"
   },
   "marketplaces": {
     "claude-code": ".claude-plugin/marketplace.json",
@@ -25,5 +27,5 @@
     "vibecheck",
     "organize-files"
   ],
-  "notes": "Pass 6 build. Closes Round-5 PARTIALs: D7 (routing tag rendered with literal characters, no Markdown backtick formatting around branch-name) and D8 (workspace-fork-check.mjs adds schema_version: v2 to fork manifest). Round-5 confirmed D1/D3-new-workspace/D5/D6 closed; Pass 6 cleans the two contract-edge misses surfaced by the more rigorous Round-5 spec."
+  "notes": "v2.4.0: Gemini (Antigravity SDK) harness adapter (draft — unverified, Phase 2 probes pending). Codex manifest lockstep fix — .codex-plugin/plugin.json was stale at 2.0.1-dev while Claude-side was at 2.3.3; all three manifests now locked at 2.4.0 with CI enforcement. CI extended to parse Codex, Gemini, and agents marketplace manifests on every PR. Codex read-auto-memory corrected to reflect experimental memory injection. Windows path-separator fixes: startup.md CORE_ROOT resolver (bug 3.3) and generate-memory-index.mjs path.relative forward-slash conversion (bug 3.4). Companion skill path derivation updated for Codex and Gemini (finalize, process-memory, register-sources, orient)."
 }

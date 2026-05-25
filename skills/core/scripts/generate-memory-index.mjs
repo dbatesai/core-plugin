@@ -94,7 +94,7 @@ export function renderPriorityBlock({ memoriesDir, topN, today, existingDescript
 
   const lines = [`## Top project units (refreshed from priority.mjs --top ${topN}, ${dateStr})`, ''];
   for (const [, u] of top) {
-    const relPath = relative(projectRoot, String(u.path));
+    const relPath = relative(projectRoot, String(u.path)).replace(/\\/g, '/');
     const existing = existingDescriptions.get(u.id);
     let desc;
     try {
@@ -115,7 +115,13 @@ export function spliceSection(memoryMdText, newSection) {
     if (SECTION_HEADER_RE.test(lines[i])) { startIdx = i; break; }
   }
   if (startIdx === -1) {
-    throw new Error('Could not find "## Top project units" section in MEMORY.md');
+    // Section absent — append it so the script is idempotent on first run against
+    // a MEMORY.md that predates this section (local-llm-build, early BBLens, etc.).
+    process.stderr.write("Created '## Top project units' section in MEMORY.md\n");
+    const newLines = newSection.split('\n');
+    while (newLines.length && newLines[newLines.length - 1] === '') newLines.pop();
+    const trimmed = memoryMdText.trimEnd();
+    return trimmed + '\n\n' + newLines.join('\n') + '\n';
   }
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i++) {
