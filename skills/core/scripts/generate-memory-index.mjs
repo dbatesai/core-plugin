@@ -94,7 +94,7 @@ export function renderPriorityBlock({ memoriesDir, topN, today, existingDescript
 
   const lines = [`## Top project units (refreshed from priority.mjs --top ${topN}, ${dateStr})`, ''];
   for (const [, u] of top) {
-    const relPath = relative(projectRoot, String(u.path));
+    const relPath = relative(projectRoot, String(u.path)).replace(/\\/g, '/');
     const existing = existingDescriptions.get(u.id);
     let desc;
     try {

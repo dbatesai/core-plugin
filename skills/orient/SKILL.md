@@ -14,6 +14,7 @@ This skill is a thin shell over the startup protocol in the sibling core skill. 
 
 - Loaded from `${CLAUDE_PLUGIN_ROOT}/skills/orient/SKILL.md` → read `${CLAUDE_PLUGIN_ROOT}/skills/core/protocols/startup.md`.
 - Loaded from `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/orient/SKILL.md` → read `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/protocols/startup.md`.
+- Loaded from `<appDataDir>/plugins/core/<version>/skills/orient/SKILL.md` (Gemini) → read `<appDataDir>/plugins/core/<version>/skills/core/protocols/startup.md`.
 
 Don't construct the path against a guessed plugin base. The path you just loaded carries the resolution; perform the literal string replacement.
 
