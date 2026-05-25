@@ -140,10 +140,15 @@ export function computeTierDistribution(events) {
 // ---------- Report assembly ----------
 
 export function buildReport(events) {
-  const sessions = new Set();
-  for (const ev of events) {
-    if (ev && ev.session) sessions.add(String(ev.session));
-  }
+  // Count distinct calendar dates from event timestamps — more reliable than
+  // counting unique ev.session IDs, which are absent in events written without
+  // a session context (producing a misleading "Sessions: 0" when events exist).
+  const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
+  const sessions = new Set(
+    events
+      .map(ev => (ev && ev.ts ? String(ev.ts).slice(0, 10) : ''))
+      .filter(d => DATE_RE.test(d))
+  );
   return {
     sessions: sessions.size,
     total_events: events.length,
@@ -160,7 +165,7 @@ export function formatReport(report) {
   const td = report.tier_distribution;
   const pct = v => `${Math.round(v * 100)}%`;
   const lines = [];
-  lines.push(`Sessions analyzed: ${report.sessions} | Total retrieval events: ${report.total_events}`);
+  lines.push(`Session dates in window: ${report.sessions} | Total retrieval events: ${report.total_events}`);
   lines.push(`Tier distribution: T1=${pct(td.t1.pct)}, T2=${pct(td.t2.pct)}, T3=${pct(td.t3.pct)}`);
   lines.push('');
 
