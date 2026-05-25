@@ -226,6 +226,8 @@ Don't block on it. It's a nudge, not a gate.
 
 ## Compose the readiness summary
 
+**Before composing — view memory.** Re-check the auto-memory loaded in Identity load (the harness injects this into context, typically as `MEMORY.md`), especially the cross-project feedback memories. Recognition-failure looks like having memory loaded but not reaching for it; an explicit re-check at this point closes the gap. Mirrors Anthropic's memory-tool system prompt — *always view your memory directory before doing anything else.*
+
 Make workspace identity obvious. Talk like a person.
 
 What to include:
