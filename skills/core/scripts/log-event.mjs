@@ -10,8 +10,18 @@
  * Per DC-77 the script ships with the plugin (not per-project).
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  *
+ * Phase 2 (2026-05-26, T1 of metrics & observability v1): adds OTel-format
+ * dual-write to `<project>/_metrics/traces/<session-id>.jsonl`. Per spec
+ * §17.7 the transition is six-week dual-write; existing analyzers continue
+ * reading the legacy `_sessions/<date>/<filename>.jsonl` files until the
+ * OTel substrate is proven, then `analyze-retrieval-quality.mjs` gets a
+ * one-shot rewrite.
+ *
+ * Dual-write overhead: +26 µs per event per Probe 3 (2026-05-26 metrics probes).
+ * Negligible at any realistic event rate.
+ *
  * Library usage:
- *   import { logEvent, eventLogPath } from './log-event.mjs';
+ *   import { logEvent, eventLogPath, traceLogPath } from './log-event.mjs';
  *   logEvent('<project>', 'hygiene-log.jsonl', { kind: 'demote-moves', ... });
  *
  * Failure mode discipline: silent skip when projectDir doesn't exist. Hosts
@@ -19,8 +29,37 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
+
+const SCHEMA_VERSION = '1.0.0';
+
+/**
+ * Resolve where the metrics storage lives — honors what `metrics-init.mjs`
+ * pinned at scaffold time per matrix (+g.5) + (+m).
+ *
+ * Reads `~/.core/workspaces/<workspaceId>/metrics/storage-path.txt` if the
+ * workspace has been scaffolded. Falls back to `<projectDir>/_metrics/` if
+ * the pin file is absent (scaffold not run yet, or workspace id unknown).
+ *
+ * Per RM Turn 16 (evt-cc56): without this, dual-write hardcodes project-local
+ * and bypasses (g.5)'s AppData redirect on Windows+OneDrive.
+ */
+export function resolveStoragePath(projectDir, { workspaceId } = {}) {
+  if (workspaceId) {
+    const pinFile = join(homedir(), '.core', 'workspaces', workspaceId, 'metrics', 'storage-path.txt');
+    if (existsSync(pinFile)) {
+      try {
+        const pinned = readFileSync(pinFile, 'utf8').trim();
+        if (pinned) return pinned;
+      } catch {
+        // Fall through to default
+      }
+    }
+  }
+  return join(projectDir, '_metrics');
+}
 
 export function todayUTC() {
   return new Date().toISOString().slice(0, 10);
@@ -31,7 +70,47 @@ export function eventLogPath(projectDir, filename, { today } = {}) {
   return join(projectDir, '_sessions', date, filename);
 }
 
-export function logEvent(projectDir, filename, event, { today, now } = {}) {
+/**
+ * Path for the per-session OTel trace JSONL. Session id comes from the
+ * harness's session env var; if absent we use a sentinel so Layer 2 can
+ * still attribute the data to a synthetic bucket.
+ *
+ * Storage base honors the scaffold-time pin per `resolveStoragePath`.
+ */
+export function traceLogPath(projectDir, { sessionId, workspaceId } = {}) {
+  const sid = sessionId || process.env.CLAUDE_CODE_SESSION_ID || 'no-session-context';
+  const base = resolveStoragePath(projectDir, { workspaceId });
+  return join(base, 'traces', `${sid}.jsonl`);
+}
+
+/**
+ * Convert a legacy event record into an OTel-format span line.
+ *
+ * The `kind` field becomes the span name (`core.<kind>`); all other event
+ * fields land under the `core.*` attribute namespace per matrix AS-12
+ * (CORE-specific extensions only; native LLM/resource attrs come from
+ * Claude Code's own emission).
+ */
+export function eventToOtelSpan(event, { ts, sessionId } = {}) {
+  const nowNs = BigInt(Date.parse(ts) || Date.now()) * 1000000n;
+  const kind = event.kind || 'event';
+  const attributes = { 'core.event_kind': kind };
+  if (sessionId) attributes['session.id'] = sessionId;
+  for (const [k, v] of Object.entries(event)) {
+    if (k === 'kind') continue;
+    attributes[`core.${k}`] = v;
+  }
+  return {
+    schema_version: SCHEMA_VERSION,
+    span_name: `core.${kind}`,
+    start_time_unix_nano: nowNs.toString(),
+    end_time_unix_nano: nowNs.toString(),
+    attributes,
+    events: [],
+  };
+}
+
+export function logEvent(projectDir, filename, event, { today, now, sessionId, workspaceId } = {}) {
   if (!existsSync(projectDir)) return;
   const date = today || todayUTC();
   const sessionDir = join(projectDir, '_sessions', date);
@@ -40,9 +119,27 @@ export function logEvent(projectDir, filename, event, { today, now } = {}) {
   } catch { return; }
   const ts = now || new Date().toISOString();
   const record = { ts, ...event };
+
+  // 1. Legacy write (unchanged — existing analyzers depend on this exact shape).
   try {
     appendFileSync(join(sessionDir, filename), JSON.stringify(record) + '\n');
   } catch {
     // Don't crash hosts on disk errors — emit is best-effort by design.
+  }
+
+  // 2. OTel-format dual-write per spec §17.7 transition path.
+  //    Storage path resolves via resolveStoragePath() — honors the (g.5)
+  //    AppData redirect that metrics-init.mjs pinned at scaffold time.
+  //    Best-effort, never blocks or throws. Failure here doesn't affect
+  //    the legacy write above (already succeeded).
+  try {
+    const sid = sessionId || process.env.CLAUDE_CODE_SESSION_ID || 'no-session-context';
+    const storageBase = resolveStoragePath(projectDir, { workspaceId });
+    const tracesDir = join(storageBase, 'traces');
+    mkdirSync(tracesDir, { recursive: true });
+    const span = eventToOtelSpan(event, { ts, sessionId: sid });
+    appendFileSync(join(tracesDir, `${sid}.jsonl`), JSON.stringify(span) + '\n');
+  } catch {
+    // Silent — dual-write is opt-in transition substrate; legacy path is authoritative.
   }
 }
