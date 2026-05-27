@@ -78,9 +78,30 @@ export function eventLogPath(projectDir, filename, { today } = {}) {
  * Storage base honors the scaffold-time pin per `resolveStoragePath`.
  */
 export function traceLogPath(projectDir, { sessionId, workspaceId } = {}) {
-  const sid = sessionId || process.env.CLAUDE_CODE_SESSION_ID || 'no-session-context';
+  const sid = resolveSessionId({ explicit: sessionId });
   const base = resolveStoragePath(projectDir, { workspaceId });
   return join(base, 'traces', `${sid}.jsonl`);
+}
+
+/**
+ * Resolve the session id for trace bucketing.
+ *
+ * Chain per RC Turn evt-c97d empirical confirmation:
+ *   1. explicit option
+ *   2. CLAUDE_CODE_SESSION_ID (Claude Code's native env var per Probe 2)
+ *   3. CODEX_THREAD_ID (Codex Desktop on Windows; observed `019e6287-...` shape — RC Turn c97d)
+ *   4. sentinel `no-session-context`
+ *
+ * Codex's THREAD_ID is per-thread/per-conversation, good enough for trace
+ * grouping and cross-event correlation. Not semantically identical to Claude
+ * Code's session.id — name it as `codex-thread-id-fallback` in tests so the
+ * provenance stays visible.
+ */
+export function resolveSessionId({ explicit } = {}) {
+  if (explicit) return explicit;
+  if (process.env.CLAUDE_CODE_SESSION_ID) return process.env.CLAUDE_CODE_SESSION_ID;
+  if (process.env.CODEX_THREAD_ID) return process.env.CODEX_THREAD_ID;
+  return 'no-session-context';
 }
 
 /**
@@ -130,10 +151,12 @@ export function logEvent(projectDir, filename, event, { today, now, sessionId, w
   // 2. OTel-format dual-write per spec §17.7 transition path.
   //    Storage path resolves via resolveStoragePath() — honors the (g.5)
   //    AppData redirect that metrics-init.mjs pinned at scaffold time.
+  //    Session id resolves via resolveSessionId() — Claude Code, then Codex,
+  //    then sentinel (RC Turn evt-c97d).
   //    Best-effort, never blocks or throws. Failure here doesn't affect
   //    the legacy write above (already succeeded).
   try {
-    const sid = sessionId || process.env.CLAUDE_CODE_SESSION_ID || 'no-session-context';
+    const sid = resolveSessionId({ explicit: sessionId });
     const storageBase = resolveStoragePath(projectDir, { workspaceId });
     const tracesDir = join(storageBase, 'traces');
     mkdirSync(tracesDir, { recursive: true });
