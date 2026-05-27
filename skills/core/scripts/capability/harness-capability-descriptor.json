@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.0.0",
+  "_doc": "Per-harness capability descriptor. capability-probe.mjs reads this to determine which capabilities each harness should probe and which per-harness probe script implements each row. Schema lives at sibling row-schema.md per DC-98 (schema-consumer coupling). Per-harness probe scripts are responsible for emitting full capability rows matching the schema.",
+  "harnesses": {
+    "claude-code": {
+      "probe_script": "claude-code-capability-probe.mjs",
+      "_doc": "Partly empirical — anti-anchoring claim still trust-based (R-17 DEGRADED-by-mechanism per session 48). v2.8.0 physical staging closes R-17.",
+      "capabilities": [
+        {
+          "capability_id": "plugin-root-resolution",
+          "capability_kind": "identity",
+          "delegate": "resolve-plugin-root.mjs",
+          "required_for_actions": ["collab-files-mutating", "project-memory-write"]
+        }
+      ]
+    },
+    "codex": {
+      "probe_script": "codex-capability-probe.mjs",
+      "_doc": "Empirical — Codex side is the canonical anti-anchoring target. Probe must produce real evidence rows, not trust-claims.",
+      "capabilities": [
+        {
+          "capability_id": "plugin-root-resolution",
+          "capability_kind": "identity",
+          "delegate": "resolve-plugin-root.mjs",
+          "required_for_actions": ["collab-files-mutating", "project-memory-write"]
+        }
+      ]
+    },
+    "gemini": {
+      "probe_script": null,
+      "_doc": "Scaffolding-only — no empirical Codex/Claude-equivalent probes yet. Descriptor entry reserves the slot for v2.7.0+ work.",
+      "capabilities": []
+    }
+  },
+  "consumer_actions": {
+    "_doc": "Named pre-action gates. Each lists the capability_ids it requires in PASS state before the action proceeds.",
+    "collab-files-mutating": {
+      "requires_pass": ["plugin-root-resolution"],
+      "description": "Event-write to ~/Documents/Projects/files/collabs/ via collab-plugin's gitCommitPush()"
+    },
+    "project-memory-write": {
+      "requires_pass": ["plugin-root-resolution"],
+      "description": "Autonomous write to <project>/_memories/ or PROJECT.md outside the user's session turn"
+    }
+  }
+}
