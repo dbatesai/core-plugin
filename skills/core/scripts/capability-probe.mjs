@@ -66,17 +66,20 @@ export function detectConsumingHarness(env = process.env) {
 async function invokeProbe(capability, opts = {}) {
   if (capability.delegate === 'resolve-plugin-root.mjs') {
     const row = resolvePluginRoot(opts);
-    // Override capability_id from the descriptor so the row matches what the
-    // consumer declared (e.g., the descriptor row could be "plugin-root-resolution"
-    // even though the delegate's own emitted id matches).
-    return {
-      ...row,
-      capability_id: capability.capability_id,
-      capability_kind: capability.capability_kind,
-    };
+    return { ...row, capability_id: capability.capability_id, capability_kind: capability.capability_kind };
   }
-  // Per-harness probe scripts (codex-capability-probe.mjs, etc.) ship in v2.6.0-γ.
-  // For now, return a NOT-YET row with evidence naming the missing implementation.
+  // Sub-directory delegates — capability/*.mjs scripts (e.g. target-surface probes)
+  if (capability.delegate && capability.delegate.startsWith('capability/')) {
+    const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
+    const delegatePath = join(SCRIPTS_DIR, capability.delegate);
+    try {
+      const mod = await import(delegatePath);
+      const row = await mod.probe(opts);
+      return { ...row, capability_id: capability.capability_id, capability_kind: capability.capability_kind };
+    } catch (e) {
+      return makeNotYetRow(capability, `delegate import failed: ${e.message}`);
+    }
+  }
   return makeNotYetRow(capability);
 }
 

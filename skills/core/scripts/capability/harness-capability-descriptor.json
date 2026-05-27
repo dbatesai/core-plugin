@@ -1,6 +1,11 @@
 {
   "schema_version": "1.0.0",
   "_doc": "Per-harness capability descriptor. capability-probe.mjs reads this to determine which capabilities each harness should probe and which per-harness probe script implements each row. Schema lives at sibling row-schema.md per DC-98 (schema-consumer coupling). Per-harness probe scripts are responsible for emitting full capability rows matching the schema.",
+  "surfaces": {
+    "collab_files_repo": "~/Documents/Projects/files",
+    "collab_files_expected_remote": "git@github.com:dbatesai/files.git",
+    "_doc": "Target-surface config consumed by target-surface-collab-files-probe.mjs. Option A per completion plan §1.2: config lives in the descriptor (per-harness contract surface) rather than env vars or collab-plugin config. Each harness may legitimately differ in its files-repo path."
+  },
   "harnesses": {
     "claude-code": {
       "probe_script": "claude-code-capability-probe.mjs",
@@ -11,6 +16,12 @@
           "capability_kind": "identity",
           "delegate": "resolve-plugin-root.mjs",
           "required_for_actions": ["collab-files-mutating", "project-memory-write"]
+        },
+        {
+          "capability_id": "target-surface-collab-files",
+          "capability_kind": "mutation",
+          "delegate": "capability/target-surface-collab-files-probe.mjs",
+          "required_for_actions": ["collab-files-mutating"]
         }
       ]
     },
@@ -23,6 +34,12 @@
           "capability_kind": "identity",
           "delegate": "resolve-plugin-root.mjs",
           "required_for_actions": ["collab-files-mutating", "project-memory-write"]
+        },
+        {
+          "capability_id": "target-surface-collab-files",
+          "capability_kind": "mutation",
+          "delegate": "capability/target-surface-collab-files-probe.mjs",
+          "required_for_actions": ["collab-files-mutating"]
         }
       ]
     },
@@ -35,7 +52,7 @@
   "consumer_actions": {
     "_doc": "Named pre-action gates. Each lists the capability_ids it requires in PASS state, plus operation-scoped gates the runner enforces per HC critique evt-202605271310 (identity PASS alone is NOT a mutation permit). Stable enum codes for mutation_block_reason: 'authority_not_allowed' when allowed_authorities check fails; 'harness_mismatch' when consuming_harness is not in allowed_harnesses; 'consuming_harness_unknown' when consuming_harness is unknown but the action requires a known harness; 'consuming_harness_signal_weak' when the row's signal_weight is weak but the action requires strong; 'identity-{degraded|not-yet|unknown}' when identity itself doesn't reach PASS.",
     "collab-files-mutating": {
-      "requires_pass": ["plugin-root-resolution"],
+      "requires_pass": ["plugin-root-resolution", "target-surface-collab-files"],
       "allowed_authorities": ["canonical-source", "installed-cache"],
       "allowed_harnesses": ["claude-code", "codex", "gemini"],
       "allowed_signal_weight": "strong",
