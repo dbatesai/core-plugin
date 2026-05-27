@@ -130,19 +130,21 @@ Both write to `_memories/INDEX-*.md`. Top-level units only — archived ones in 
 
 ---
 
-## Step 5 — PROJECT.md tier discipline (DC-85 Phase 1b)
+## Step 5 — PROJECT.md tier discipline (DC-85 Phase 1b + 1c)
 
-Run two scripts in order — demote-moves first, then compact-project. Both auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs).
+Run three scripts in order — demote-moves first, then compact-project, then demote-state-narrative. The first two auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs). The third is dry-run-default in v1 per DC-93 — only `--apply` writes.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/demote-moves.mjs" "<project>"
 node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs" "<project>"
+node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/demote-state-narrative.mjs" "<project>"
 ```
 
 - `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` when the most-recent backing-unit `updated:` date is >30 days old AND all cited units are in terminal status. Conservative defaults: no backing-unit citation → keep; any missing/active cited unit → keep. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. First runs on §Moves-heavy projects can demote 20+ items in one pass — narrate the magnitude.
 - `compact-project.mjs` collapses `§Decisions` paragraphs to one-line stubs pointing at units (DC-48 pattern). Auto-MIGRATE per DC-46; idempotent. Now also emits `kind: compact-project` with section-size breakdown and `kind: project-md-over-cap` when the file remains >70KB after compaction. Use `--section-sizes` to inspect the breakdown without writing.
+- `demote-state-narrative.mjs` walks §State and surfaces demotion candidates when the bullet carries a strict `*Backed by ...*` footer, ALL cited units are in terminal status (mirrors `demote-moves` set for cross-script symmetry), AND the most-recent backing-unit `updated:` date is >60 days old. **Default is dry-run in v1** per DC-93 — emits a candidate list and a `kind: demote-state` event to hygiene-log without writing. Pass `--apply` only when a §State-heavy non-CORE corpus has been exercised and produces clean candidate lists for multiple sessions; flip the default in a tracked decision then. Narrate "would demote N items" only if N > 0.
 
-Report the demoted count and the before/after sizes the scripts print. Over-cap warnings name the §State / §Notes overflow that Phase 1c will handle.
+Report the demoted count and the before/after sizes the scripts print. Over-cap warnings after all three scripts have run name what's left — §Notes overflow or the §Moves citation-discipline gap captured at [[obs-demote-moves-first-fire-2026-05-24]].
 
 ---
 

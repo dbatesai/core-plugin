@@ -1,8 +1,8 @@
 {
   "name": "core",
-  "version": "2.4.1",
-  "build": "20260525.1",
-  "created_at": "2026-05-25T00:00:00Z",
+  "version": "2.5.0",
+  "build": "20260527.1",
+  "created_at": "2026-05-27T00:00:00Z",
   "targets": [
     "claude-code",
     "codex",
@@ -27,5 +27,5 @@
     "vibecheck",
     "organize-files"
   ],
-  "notes": "v2.4.0: Gemini (Antigravity SDK) harness adapter (draft — unverified, Phase 2 probes pending). Codex manifest lockstep fix — .codex-plugin/plugin.json was stale at 2.0.1-dev while Claude-side was at 2.3.3; all three manifests now locked at 2.4.0 with CI enforcement. CI extended to parse Codex, Gemini, and agents marketplace manifests on every PR. Codex read-auto-memory corrected to reflect experimental memory injection. Windows path-separator fixes: startup.md CORE_ROOT resolver (bug 3.3) and generate-memory-index.mjs path.relative forward-slash conversion (bug 3.4). Companion skill path derivation updated for Codex and Gemini (finalize, process-memory, register-sources, orient)."
+  "notes": "v2.5.0: T1 Phase 1+2 of the metrics & observability v1 work (metrics-init.mjs storage scaffold + log-event.mjs OTel-format dual-write with four-step session-id resolution chain Claude Code → Codex → sentinel), and DC-85 Phase 1c memory architecture work (demote-state-narrative.mjs §State demotion script, dry-run-default in v1, wired into /finalize Step 3). Cross-environment empirical validation: Mac + Windows R11; 41 metrics tests + 36 Phase 1c tests; full suite green (Phase 1c-side). Phase 1c first-fire dry-run on CORE PROJECT.md confirmed expected `0 demoted, 15 kept` shape — criteria-vs-corpus mismatch finding captured at `obs-20260527-demote-terminal-status-corpus-mismatch` for follow-up alignment of both demote-* scripts."
 }
