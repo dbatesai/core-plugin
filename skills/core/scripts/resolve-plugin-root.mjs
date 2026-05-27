@@ -123,13 +123,43 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
 // "Downstream scripts should not infer the active harness from whichever manifest
 // anchor won the root walk." The consuming harness lives in env signals; absence
 // of evidence is itself a state (UNKNOWN), not a guess.
+//
+// v2.6.0-delta: collect-all-signals first, then classify as unanimous/conflict/absent.
+// First-match-wins is unsafe when multiple signals are present — a Codex run that also
+// inherits CLAUDE_PLUGIN_ROOT from the parent env would have silently resolved to
+// claude-code. Conflict → consuming_harness: unknown, source: conflict, identity DEGRADES.
+// Signal weight distinguishes *_PLUGIN_ROOT (strong, explicit plugin context) from
+// CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID (weak, env presence only).
 export function detectConsumingHarnessSignal(env = process.env) {
-  if (env.CLAUDE_PLUGIN_ROOT) return { harness: 'claude-code', source: 'env' };
-  if (env.CODEX_PLUGIN_ROOT) return { harness: 'codex', source: 'env' };
-  if (env.GEMINI_PLUGIN_ROOT) return { harness: 'gemini', source: 'env' };
-  if (env.CLAUDE_CODE_SESSION_ID) return { harness: 'claude-code', source: 'env' };
-  if (env.CODEX_THREAD_ID) return { harness: 'codex', source: 'env' };
-  return { harness: 'unknown', source: 'not_exposed' };
+  const signals = [];
+
+  // Strong signals — *_PLUGIN_ROOT env vars mean the harness explicitly set plugin context
+  if (env.CLAUDE_PLUGIN_ROOT) signals.push({ var: 'CLAUDE_PLUGIN_ROOT', harness: 'claude-code', weight: 'strong' });
+  if (env.CODEX_PLUGIN_ROOT)  signals.push({ var: 'CODEX_PLUGIN_ROOT',  harness: 'codex',       weight: 'strong' });
+  if (env.GEMINI_PLUGIN_ROOT) signals.push({ var: 'GEMINI_PLUGIN_ROOT', harness: 'gemini',      weight: 'strong' });
+
+  // Weak signals — session/thread vars indicate harness presence, not plugin context
+  if (env.CLAUDE_CODE_SESSION_ID) signals.push({ var: 'CLAUDE_CODE_SESSION_ID', harness: 'claude-code', weight: 'weak' });
+  if (env.CODEX_THREAD_ID)        signals.push({ var: 'CODEX_THREAD_ID',        harness: 'codex',       weight: 'weak' });
+
+  if (signals.length === 0) {
+    return { harness: 'unknown', source: 'not_exposed', signal_weight: null, signals: [] };
+  }
+
+  const uniqueHarnesses = [...new Set(signals.map(s => s.harness))];
+  if (uniqueHarnesses.length === 1) {
+    // All signals agree. Presence of any strong signal → strong overall weight.
+    const hasStrong = signals.some(s => s.weight === 'strong');
+    return {
+      harness: uniqueHarnesses[0],
+      source: 'env',
+      signal_weight: hasStrong ? 'strong' : 'weak',
+      signals,
+    };
+  }
+
+  // Multiple harnesses detected — conflict. Identity MUST degrade downstream.
+  return { harness: 'unknown', source: 'conflict', signal_weight: null, signals };
 }
 
 export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd(), home = homedir() } = {}) {
@@ -174,6 +204,7 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
       observed_at, env_signals, cwd, effective_script_root, evidence,
       consuming_harness: consuming.harness,
       consuming_harness_source: consuming.source,
+      consuming_harness_signal_weight: consuming.signal_weight || null,
     });
   }
   evidence.push({
@@ -199,6 +230,7 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
       manifest_harness: found.harness,
       consuming_harness: consuming.harness,
       consuming_harness_source: consuming.source,
+      consuming_harness_signal_weight: consuming.signal_weight || null,
       manifest_path: found.manifest_path,
       evidence,
     });
@@ -259,12 +291,21 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
     weight: 'corroborating',
   });
 
-  // Step 6.5: split-brain check (HC critique evt-202605271310) — if the
-  // consuming harness was detected from env AND it disagrees with the
-  // manifest-walk winner, that's CONFLICTING evidence. This is the
-  // multi-harness same-root case where downstream consumers must NOT
-  // infer the active harness from the manifest winner.
-  if (consuming.harness !== 'unknown' && consuming.harness !== found.harness) {
+  // Step 6.5: consuming-harness cross-check. Three cases:
+  //   (a) conflict in the env signals themselves → DEGRADE regardless of manifest
+  //   (b) unanimous env says a different harness than manifest → split-brain DEGRADE
+  //   (c) unanimous env agrees with manifest, or absent → corroborating/neutral
+  if (consuming.source === 'conflict') {
+    // Multiple harnesses detected in env — we cannot identify the consuming harness.
+    // The conflict itself is the evidence; downstream mutation gates must refuse.
+    evidence.push({
+      source: 'consuming-harness-conflict',
+      value: { signals: consuming.signals },
+      agrees_with_others: false,
+      weight: 'conflicting',
+    });
+  } else if (consuming.harness !== 'unknown' && consuming.harness !== found.harness) {
+    // Unanimous env signal disagrees with manifest harness (split-brain).
     evidence.push({
       source: 'harness-split-brain',
       value: { manifest_harness: found.harness, consuming_harness: consuming.harness, consuming_harness_source: consuming.source },
@@ -276,14 +317,14 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
     // record as a corroborating gap so downstream consumers can read it.
     evidence.push({
       source: 'consuming-harness-detection',
-      value: { harness: 'unknown', source: 'not_exposed' },
+      value: { harness: 'unknown', source: consuming.source },
       agrees_with_others: true,
       weight: 'corroborating',
     });
   } else {
     evidence.push({
       source: 'consuming-harness-detection',
-      value: { harness: consuming.harness, source: consuming.source },
+      value: { harness: consuming.harness, source: consuming.source, signal_weight: consuming.signal_weight },
       agrees_with_others: true,
       weight: 'corroborating',
     });
@@ -305,6 +346,7 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
     manifest_harness: found.harness,
     consuming_harness: consuming.harness,
     consuming_harness_source: consuming.source,
+    consuming_harness_signal_weight: consuming.signal_weight || null,
     manifest_path: found.manifest_path,
     plugin_id: manifest.plugin_id,
     plugin_version: manifest.plugin_version,
@@ -332,6 +374,7 @@ function buildRow(f) {
     manifest_harness: f.manifest_harness || 'unknown',
     consuming_harness: f.consuming_harness || 'unknown',
     consuming_harness_source: f.consuming_harness_source || 'not_exposed',
+    consuming_harness_signal_weight: f.consuming_harness_signal_weight || null,
     workspace_id: null,
     cwd: f.cwd,
     env_signals: f.env_signals,

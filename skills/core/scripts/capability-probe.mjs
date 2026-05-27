@@ -211,6 +211,7 @@ export async function runPreAction(actionName, opts = {}) {
   // mutation_block_reason code.
   const allowedAuthorities = action.allowed_authorities ? new Set(action.allowed_authorities) : null;
   const allowedHarnesses = action.allowed_harnesses ? new Set(action.allowed_harnesses) : null;
+  const requiredSignalWeight = action.allowed_signal_weight || null;  // 'strong' | null
 
   for (const row of rows) {
     // Identity must be PASS for any mutation to proceed
@@ -219,15 +220,15 @@ export async function runPreAction(actionName, opts = {}) {
       row.mutation_block_reason = `identity-${String(row.identity_status).toLowerCase()}`;
       continue;
     }
-    // Authority gate (stable enum code per HC: "authority_not_allowed")
+    // Authority gate (stable enum code: 'authority_not_allowed')
     if (allowedAuthorities && !allowedAuthorities.has(row.authority)) {
       row.mutation_permitted = false;
       row.mutation_block_reason = 'authority_not_allowed';
       continue;
     }
-    // Consuming-harness gate (stable enum code: "harness_mismatch" or "consuming_harness_unknown")
+    // Consuming-harness gate ('harness_mismatch' or 'consuming_harness_unknown')
     if (allowedHarnesses) {
-      const consumingHarness = row.consuming_harness || row.harness;  // back-compat for any row without the split
+      const consumingHarness = row.consuming_harness || row.harness;  // back-compat
       if (consumingHarness === 'unknown') {
         row.mutation_permitted = false;
         row.mutation_block_reason = 'consuming_harness_unknown';
@@ -238,6 +239,14 @@ export async function runPreAction(actionName, opts = {}) {
         row.mutation_block_reason = 'harness_mismatch';
         continue;
       }
+    }
+    // Signal-weight gate — when action requires 'strong', a weak-only signal is
+    // insufficient for mutation. Weak signal (e.g. only CODEX_THREAD_ID) is
+    // diagnostic but not authoritative enough for writes to shared surfaces.
+    if (requiredSignalWeight === 'strong' && row.consuming_harness_signal_weight === 'weak') {
+      row.mutation_permitted = false;
+      row.mutation_block_reason = 'consuming_harness_signal_weak';
+      continue;
     }
     // All gates passed for this row
     row.mutation_permitted = true;

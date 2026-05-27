@@ -33,20 +33,34 @@
     }
   },
   "consumer_actions": {
-    "_doc": "Named pre-action gates. Each lists the capability_ids it requires in PASS state, plus operation-scoped gates (allowed_authorities, allowed_harnesses) the runner enforces per HC critique evt-202605271310 (identity PASS alone is NOT a mutation permit). Stable enum codes for mutation_block_reason: 'authority_not_allowed' when allowed_authorities check fails; 'harness_mismatch' when consuming_harness is not in allowed_harnesses; 'consuming_harness_unknown' when consuming_harness is unknown but the action requires a known harness; 'identity-{degraded|not-yet|unknown}' when identity itself doesn't reach PASS.",
+    "_doc": "Named pre-action gates. Each lists the capability_ids it requires in PASS state, plus operation-scoped gates the runner enforces per HC critique evt-202605271310 (identity PASS alone is NOT a mutation permit). Stable enum codes for mutation_block_reason: 'authority_not_allowed' when allowed_authorities check fails; 'harness_mismatch' when consuming_harness is not in allowed_harnesses; 'consuming_harness_unknown' when consuming_harness is unknown but the action requires a known harness; 'consuming_harness_signal_weak' when the row's signal_weight is weak but the action requires strong; 'identity-{degraded|not-yet|unknown}' when identity itself doesn't reach PASS.",
     "collab-files-mutating": {
       "requires_pass": ["plugin-root-resolution"],
       "allowed_authorities": ["canonical-source", "installed-cache"],
       "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "allowed_signal_weight": "strong",
       "target_surface": "~/Documents/Projects/files/collabs/",
-      "description": "Event-write to ~/Documents/Projects/files/collabs/ via collab-plugin's gitCommitPush(). Allowed from dev-mode source repo AND production installed cache (David uses both). Blocked from harness-workspace and unknown authority — those mean we don't actually know we're a CORE-managed plugin run."
+      "description": "Event-write to ~/Documents/Projects/files/collabs/ via collab-plugin's gitCommitPush(). Requires strong signal (not just CODEX_THREAD_ID alone) because it writes to the shared files transport."
     },
     "project-memory-write": {
       "requires_pass": ["plugin-root-resolution"],
       "allowed_authorities": ["canonical-source", "installed-cache"],
       "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "allowed_signal_weight": "strong",
       "target_surface": "<project>/_memories/ + <project>/PROJECT.md",
-      "description": "Autonomous write to <project>/_memories/ or PROJECT.md outside the user's session turn. Same authority/harness gates as collab-files-mutating."
+      "description": "Autonomous write to <project>/_memories/ or PROJECT.md outside the user's session turn. Requires strong signal for the same reason as collab-files-mutating."
+    },
+    "installed-runtime-write": {
+      "requires_pass": ["plugin-root-resolution"],
+      "allowed_authorities": ["installed-cache"],
+      "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "description": "Production install runtime writes (cache-resident operations). Source-mode runs blocked because they should not fire production install pathways."
+    },
+    "source-maintenance-write": {
+      "requires_pass": ["plugin-root-resolution"],
+      "allowed_authorities": ["canonical-source"],
+      "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "description": "Source-tree maintenance writes (CHANGELOG, manifests, etc.). Production install blocked — only the dev tree should touch source files."
     }
   }
 }
