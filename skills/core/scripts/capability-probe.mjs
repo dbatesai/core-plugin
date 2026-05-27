@@ -26,7 +26,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resolvePluginRoot } from './resolve-plugin-root.mjs';
+import { resolvePluginRoot, detectConsumingHarnessSignal } from './resolve-plugin-root.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const DESCRIPTOR_PATH = join(dirname(fileURLToPath(import.meta.url)), 'capability', 'harness-capability-descriptor.json');
@@ -47,22 +47,14 @@ export function loadDescriptor(path = DESCRIPTOR_PATH) {
 
 // ---------- Harness detection ----------
 
-// Detection is intentionally narrow: looks at which *_PLUGIN_ROOT env var is set.
-// If multiple are set (unusual; multi-harness shell session), prefer the order
-// CLAUDE_PLUGIN_ROOT > CODEX_PLUGIN_ROOT > GEMINI_PLUGIN_ROOT because that's
-// the order new harnesses tend to ship in. Returns 'unknown' when no signals
-// are present; capability-probe handles 'unknown' by returning UNKNOWN rows.
+// Delegates to detectConsumingHarnessSignal in resolve-plugin-root.mjs to keep
+// one canonical detection chain. That signal looks at *_PLUGIN_ROOT env vars
+// first, then session-id env vars (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID),
+// and returns 'unknown' / 'not_exposed' when nothing is set. Order in resolve-
+// plugin-root.mjs: CLAUDE_PLUGIN_ROOT > CODEX_PLUGIN_ROOT > GEMINI_PLUGIN_ROOT
+// > CLAUDE_CODE_SESSION_ID > CODEX_THREAD_ID > unknown.
 export function detectConsumingHarness(env = process.env) {
-  if (env.CLAUDE_PLUGIN_ROOT) return 'claude-code';
-  if (env.CODEX_PLUGIN_ROOT) return 'codex';
-  if (env.GEMINI_PLUGIN_ROOT) return 'gemini';
-  // Fallback: walk resolve-plugin-root to see which manifest the running
-  // script is actually under. Same precedence applies on tie.
-  try {
-    const row = resolvePluginRoot();
-    if (row.harness && row.harness !== 'unknown') return row.harness;
-  } catch {}
-  return 'unknown';
+  return detectConsumingHarnessSignal(env).harness;
 }
 
 // ---------- Probe invocation ----------
@@ -198,8 +190,8 @@ export async function runPreAction(actionName, opts = {}) {
         capability_name: reqId,
         capability_kind: 'unknown',
         identity_status: 'NOT-YET',
-        mutation_permitted: false,
-        mutation_block_reason: 'identity-not-yet',
+        mutation_permitted: null,
+        mutation_block_reason: null,
         observed_at: new Date().toISOString(),
         harness,
         evidence: [{
@@ -212,15 +204,55 @@ export async function runPreAction(actionName, opts = {}) {
     }
   }
 
-  const allPass = rows.length > 0 && rows.every(r => r.identity_status === 'PASS' && r.mutation_permitted);
-  const blocking = rows.find(r => !r.mutation_permitted);
+  // Operation-scoped mutation gate per HC critique evt-202605271310. Identity
+  // PASS alone is NOT a mutation permit. Apply the action profile's
+  // allowed_authorities, allowed_harnesses, and target_surface against each
+  // identity row, producing a per-row mutation decision with a stable
+  // mutation_block_reason code.
+  const allowedAuthorities = action.allowed_authorities ? new Set(action.allowed_authorities) : null;
+  const allowedHarnesses = action.allowed_harnesses ? new Set(action.allowed_harnesses) : null;
+
+  for (const row of rows) {
+    // Identity must be PASS for any mutation to proceed
+    if (row.identity_status !== 'PASS') {
+      row.mutation_permitted = false;
+      row.mutation_block_reason = `identity-${String(row.identity_status).toLowerCase()}`;
+      continue;
+    }
+    // Authority gate (stable enum code per HC: "authority_not_allowed")
+    if (allowedAuthorities && !allowedAuthorities.has(row.authority)) {
+      row.mutation_permitted = false;
+      row.mutation_block_reason = 'authority_not_allowed';
+      continue;
+    }
+    // Consuming-harness gate (stable enum code: "harness_mismatch" or "consuming_harness_unknown")
+    if (allowedHarnesses) {
+      const consumingHarness = row.consuming_harness || row.harness;  // back-compat for any row without the split
+      if (consumingHarness === 'unknown') {
+        row.mutation_permitted = false;
+        row.mutation_block_reason = 'consuming_harness_unknown';
+        continue;
+      }
+      if (!allowedHarnesses.has(consumingHarness)) {
+        row.mutation_permitted = false;
+        row.mutation_block_reason = 'harness_mismatch';
+        continue;
+      }
+    }
+    // All gates passed for this row
+    row.mutation_permitted = true;
+    row.mutation_block_reason = null;
+  }
+
+  const allPermitted = rows.length > 0 && rows.every(r => r.mutation_permitted === true);
+  const blocking = rows.find(r => r.mutation_permitted !== true);
 
   return {
     harness,
     mode: 'pre-action',
     action: actionName,
-    permitted: allPass,
-    block_reason: allPass ? null : (blocking?.mutation_block_reason || 'no-rows'),
+    permitted: allPermitted,
+    block_reason: allPermitted ? null : (blocking?.mutation_block_reason || 'no-rows'),
     rows,
     summary: summarize(rows),
   };
@@ -273,7 +305,12 @@ export async function main(argv) {
     process.stdout.write(`capability-probe (mode=${mode}, harness=${harness})\n`);
     process.stdout.write(`  rows: ${summary.total} (PASS=${summary.pass} DEGRADED=${summary.degraded} NOT-YET=${summary.not_yet} UNKNOWN=${summary.unknown})\n`);
     for (const row of rows) {
-      const gate = row.mutation_permitted ? 'allow' : `block (${row.mutation_block_reason})`;
+      // Three states: true (gated allow), false (gated block), null (identity-only,
+      // runner hasn't applied gating — that's the startup-mode shape).
+      let gate;
+      if (row.mutation_permitted === true) gate = 'allow';
+      else if (row.mutation_permitted === false) gate = `block (${row.mutation_block_reason})`;
+      else gate = 'identity-only (no mutation gate applied)';
       process.stdout.write(`  - ${row.capability_id}: ${row.identity_status} → ${gate}\n`);
     }
     if (mode === 'pre-action') {

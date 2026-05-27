@@ -118,6 +118,20 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
 
 // ---------- Public API ----------
 
+// Detect the harness consuming this invocation — distinct from manifest_harness
+// (which the realpath walk found). Per HC critique evt-202605271310:
+// "Downstream scripts should not infer the active harness from whichever manifest
+// anchor won the root walk." The consuming harness lives in env signals; absence
+// of evidence is itself a state (UNKNOWN), not a guess.
+export function detectConsumingHarnessSignal(env = process.env) {
+  if (env.CLAUDE_PLUGIN_ROOT) return { harness: 'claude-code', source: 'env' };
+  if (env.CODEX_PLUGIN_ROOT) return { harness: 'codex', source: 'env' };
+  if (env.GEMINI_PLUGIN_ROOT) return { harness: 'gemini', source: 'env' };
+  if (env.CLAUDE_CODE_SESSION_ID) return { harness: 'claude-code', source: 'env' };
+  if (env.CODEX_THREAD_ID) return { harness: 'codex', source: 'env' };
+  return { harness: 'unknown', source: 'not_exposed' };
+}
+
 export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd(), home = homedir() } = {}) {
   const observed_at = new Date().toISOString();
   const env_signals = {
@@ -128,6 +142,11 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
     CODEX_THREAD_ID: env.CODEX_THREAD_ID || null,
   };
   const evidence = [];
+
+  // Consuming-harness detection lives apart from manifest-walk (HC critique
+  // evt-202605271310). Detect first; surface as separate fields. UNKNOWN
+  // consuming-harness with PASS identity is a valid state.
+  const consuming = detectConsumingHarnessSignal(env);
 
   // Step 1: starting path (HC invariant #3 — module-relative, never cwd)
   const startingPath = from || fileURLToPath(import.meta.url);
@@ -152,8 +171,9 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
     });
     return buildRow({
       identity_status: 'UNKNOWN',
-      mutation_block_reason: 'identity-unknown',
       observed_at, env_signals, cwd, effective_script_root, evidence,
+      consuming_harness: consuming.harness,
+      consuming_harness_source: consuming.source,
     });
   }
   evidence.push({
@@ -174,10 +194,11 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
     });
     return buildRow({
       identity_status: 'DEGRADED',
-      mutation_block_reason: 'identity-degraded',
       observed_at, env_signals, cwd,
       effective_script_root,
-      harness: found.harness,
+      manifest_harness: found.harness,
+      consuming_harness: consuming.harness,
+      consuming_harness_source: consuming.source,
       manifest_path: found.manifest_path,
       evidence,
     });
@@ -238,17 +259,52 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
     weight: 'corroborating',
   });
 
-  // Step 7: identity status reconciliation
+  // Step 6.5: split-brain check (HC critique evt-202605271310) — if the
+  // consuming harness was detected from env AND it disagrees with the
+  // manifest-walk winner, that's CONFLICTING evidence. This is the
+  // multi-harness same-root case where downstream consumers must NOT
+  // infer the active harness from the manifest winner.
+  if (consuming.harness !== 'unknown' && consuming.harness !== found.harness) {
+    evidence.push({
+      source: 'harness-split-brain',
+      value: { manifest_harness: found.harness, consuming_harness: consuming.harness, consuming_harness_source: consuming.source },
+      agrees_with_others: false,
+      weight: 'conflicting',
+    });
+  } else if (consuming.harness === 'unknown') {
+    // Absence of evidence is a state, not a guess. Don't flag as conflicting;
+    // record as a corroborating gap so downstream consumers can read it.
+    evidence.push({
+      source: 'consuming-harness-detection',
+      value: { harness: 'unknown', source: 'not_exposed' },
+      agrees_with_others: true,
+      weight: 'corroborating',
+    });
+  } else {
+    evidence.push({
+      source: 'consuming-harness-detection',
+      value: { harness: consuming.harness, source: consuming.source },
+      agrees_with_others: true,
+      weight: 'corroborating',
+    });
+  }
+
+  // Step 7: identity status reconciliation. NOTE: identity_status is diagnostic
+  // truth about WHERE we are. mutation_permitted is the operational contract
+  // that runners apply via per-action profiles (allowed_authorities,
+  // allowed_harnesses, target_surface). This delegate never sets mutation_permitted
+  // to true on its own — that's a v2.6.0-β bug HC critique evt-202605271310
+  // surfaced. Runner gates; delegate reports.
   const conflictingCount = evidence.filter(e => e.weight === 'conflicting').length;
   const identity_status = conflictingCount === 0 ? 'PASS' : 'DEGRADED';
-  const mutation_block_reason = identity_status === 'PASS' ? null : 'identity-degraded';
 
   return buildRow({
     identity_status,
-    mutation_block_reason,
     observed_at, env_signals, cwd,
     effective_script_root,
-    harness: found.harness,
+    manifest_harness: found.harness,
+    consuming_harness: consuming.harness,
+    consuming_harness_source: consuming.source,
     manifest_path: found.manifest_path,
     plugin_id: manifest.plugin_id,
     plugin_version: manifest.plugin_version,
@@ -267,7 +323,15 @@ function buildRow(f) {
     freshness: 'session-stable',
     refresh_policy: 'per-session',
     observed_at: f.observed_at,
-    harness: f.harness || 'unknown',
+    // manifest_harness = what the realpath walk found at the plugin-root anchor
+    // consuming_harness = which harness is actually running (from env signals)
+    // These are distinct dimensions per HC critique evt-202605271310. A
+    // multi-harness plugin root can have manifest_harness=codex while the
+    // consuming_harness is claude-code; downstream consumers that need to
+    // know which harness is running must read consuming_harness, not manifest_harness.
+    manifest_harness: f.manifest_harness || 'unknown',
+    consuming_harness: f.consuming_harness || 'unknown',
+    consuming_harness_source: f.consuming_harness_source || 'not_exposed',
     workspace_id: null,
     cwd: f.cwd,
     env_signals: f.env_signals,
@@ -278,8 +342,12 @@ function buildRow(f) {
     cache_path: f.cache_path || null,
     authority: f.authority || 'unknown',
     identity_status: f.identity_status,
-    mutation_permitted: f.identity_status === 'PASS',
-    mutation_block_reason: f.mutation_block_reason || null,
+    // Identity-only row. mutation_permitted stays null until a runner applies
+    // operation-scoped gating via the descriptor's action profile (allowed_authorities,
+    // allowed_harnesses, target_surface). A row with mutation_permitted: null is
+    // not "unknown action permission" — it's "identity only; ask the runner."
+    mutation_permitted: null,
+    mutation_block_reason: null,
     evidence: f.evidence,
   };
 }
@@ -297,11 +365,12 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(row, null, 2) + '\n');
   } else {
     const lines = [
-      `plugin-root-resolution: ${row.identity_status} (harness=${row.harness}, authority=${row.authority})`,
+      `plugin-root-resolution: ${row.identity_status} (authority=${row.authority})`,
+      `  manifest_harness:  ${row.manifest_harness}`,
+      `  consuming_harness: ${row.consuming_harness} (source=${row.consuming_harness_source})`,
       `  manifest: ${row.manifest_path || '(none)'}`,
       `  plugin: ${row.plugin_id || '(unknown)'} @ ${row.plugin_version || '(unknown)'}`,
-      `  mutation_permitted: ${row.mutation_permitted}` +
-        (row.mutation_block_reason ? ` (${row.mutation_block_reason})` : ''),
+      `  mutation_permitted: identity-only (runner applies operation-scoped gating)`,
       `  evidence: ${row.evidence.length} item(s)`,
     ];
     process.stdout.write(lines.join('\n') + '\n');
