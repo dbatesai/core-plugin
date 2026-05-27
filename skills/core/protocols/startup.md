@@ -226,6 +226,21 @@ Don't block on it. It's a nudge, not a gate.
 
 ## Compose the readiness summary
 
+**Before composing — run capability probe (fail-open).** If `$CORE_ROOT` was resolved, run:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/capability-probe.mjs" --startup --json 2>/dev/null \
+  > ~/.core/workspaces/<id>/capability-state.json || true
+```
+
+Read the output. When **any row is non-PASS**, narrate in plain voice:
+
+> *"Continuing with degraded capability evidence. plugin-root-resolution: DEGRADED (harness split-brain). Identity is best-effort this session."*
+
+Use **"continuing with degraded capability evidence"** verbatim per HC — not "ready," not "certified." When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
+
+If `$CORE_ROOT` was not resolved (script unavailable), skip this step silently — capability probe is best-effort at startup, never a blocker.
+
 **Before composing — view memory.** Re-check the auto-memory loaded in Identity load (the harness injects this into context, typically as `MEMORY.md`), especially the cross-project feedback memories. Recognition-failure looks like having memory loaded but not reaching for it; an explicit re-check at this point closes the gap. Mirrors Anthropic's memory-tool system prompt — *always view your memory directory before doing anything else.*
 
 Make workspace identity obvious. Talk like a person.
