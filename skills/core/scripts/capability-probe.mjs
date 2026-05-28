@@ -1,7 +1,7 @@
 /**
  * capability-probe.mjs — v2.6.0 capability probe runner.
  *
- * Reads `capability/harness-capability-descriptor.json` to determine which
+ * Reads `../schemas/harness-capability-descriptor.json` to determine which
  * capabilities the current harness should probe, invokes the per-harness
  * probe script (or directly delegates to a sibling script if `delegate` is
  * declared), and returns a rows array matching `capability/row-schema.md`.
@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { resolvePluginRoot, detectConsumingHarnessSignal } from './resolve-plugin-root.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
-const DESCRIPTOR_PATH = join(dirname(fileURLToPath(import.meta.url)), 'capability', 'harness-capability-descriptor.json');
+const DESCRIPTOR_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'schemas', 'harness-capability-descriptor.json');
 
 // ---------- Descriptor loading ----------
 
