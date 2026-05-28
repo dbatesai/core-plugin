@@ -62,12 +62,12 @@ Each item in the `evidence` array records one observation that fed the identity 
 
 ```yaml
 - source: env-var-CODEX_PLUGIN_ROOT
-  value: "/Users/dbates/.codex/plugins/cache/dbatesai-core/2.6.0"
+  value: "<HOME>/.codex/plugins/cache/<marketplace>-core/<version>"
   agrees_with_others: true
   weight: corroborating               # corroborating | primary | conflicting
 
 - source: realpath-walk
-  value: "/Users/dbates/.codex/plugins/cache/dbatesai-core/2.6.0/skills/core/scripts/resolve-plugin-root.mjs"
+  value: "<HOME>/.codex/plugins/cache/<marketplace>-core/<version>/skills/core/scripts/resolve-plugin-root.mjs"
   agrees_with_others: true
   weight: primary
 
