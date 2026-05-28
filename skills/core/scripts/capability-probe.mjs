@@ -120,6 +120,8 @@ function makeNotYetRow(capability, reason = 'per-harness probe script not yet im
 
 export async function runStartup(opts = {}) {
   const descriptor = opts.descriptor || loadDescriptor();
+  // Thread descriptor through opts so delegates that need surfaces/config see it.
+  const probeOpts = { ...opts, descriptor };
   const harness = opts.harness || detectConsumingHarness();
   const harnessEntry = descriptor.harnesses[harness];
 
@@ -141,7 +143,7 @@ export async function runStartup(opts = {}) {
 
   const rows = [];
   for (const cap of harnessEntry.capabilities) {
-    rows.push(await invokeProbe(cap, opts));
+    rows.push(await invokeProbe(cap, probeOpts));
   }
   return {
     harness,
@@ -153,6 +155,8 @@ export async function runStartup(opts = {}) {
 
 export async function runPreAction(actionName, opts = {}) {
   const descriptor = opts.descriptor || loadDescriptor();
+  // Thread descriptor through opts so delegates that need surfaces/config see it.
+  const probeOpts = { ...opts, descriptor };
   const harness = opts.harness || detectConsumingHarness();
   const action = descriptor.consumer_actions?.[actionName];
 
@@ -180,7 +184,7 @@ export async function runPreAction(actionName, opts = {}) {
   const relevantCaps = harnessEntry.capabilities.filter(c => requiredIds.has(c.capability_id));
   const rows = [];
   for (const cap of relevantCaps) {
-    rows.push(await invokeProbe(cap, opts));
+    rows.push(await invokeProbe(cap, probeOpts));
   }
 
   // Identify any required-but-undeclared capability
