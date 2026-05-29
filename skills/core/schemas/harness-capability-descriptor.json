@@ -28,6 +28,12 @@
           "capability_kind": "observation",
           "delegate": "capability/auto-memory-injection-probe.mjs",
           "required_for_actions": []
+        },
+        {
+          "capability_id": "anti-anchoring-mechanism",
+          "capability_kind": "runtime",
+          "delegate": "capability/anti-anchoring-mechanism-probe.mjs",
+          "required_for_actions": []
         }
       ]
     },
