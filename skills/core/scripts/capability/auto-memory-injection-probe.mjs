@@ -20,6 +20,13 @@
  *   DEGRADED — MEMORY.md exists but the canary marker is absent (structure drift)
  *   NOT-YET  — MEMORY.md does not exist for this mapped cwd
  *   UNKNOWN  — could not resolve the mapped path (no HOME, etc.)
+ *
+ * Row shape mirrors capability/row-schema.md: capability_kind 'observation'
+ * (reports whether an observation surface is reachable), evidence weights drawn
+ * from {primary, corroborating, conflicting}, and the observation-only row never
+ * permits a mutation (mutation_block_reason: 'read-only-context').
+ *
+ * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
@@ -44,6 +51,8 @@ export function mappedMemoryPath(cwd, home = homedir()) {
 /**
  * Pure classifier — given file-existence and content, return status + evidence.
  * Separated from IO so it's unit-testable without touching the filesystem.
+ * Evidence weights follow row-schema.md: PASS carries a 'primary' entry,
+ * DEGRADED carries a 'conflicting' entry. No 'supporting' (not a schema weight).
  */
 export function classifyMemoryState({ pathResolved, fileExists, content }) {
   if (!pathResolved) {
@@ -55,7 +64,7 @@ export function classifyMemoryState({ pathResolved, fileExists, content }) {
   if (!fileExists) {
     return {
       identity_status: 'NOT-YET',
-      evidence: [{ source: 'file-presence', value: 'MEMORY.md not found for mapped cwd', agrees_with_others: true, weight: 'supporting' }],
+      evidence: [{ source: 'file-presence', value: 'MEMORY.md not found for mapped cwd', agrees_with_others: true, weight: 'corroborating' }],
     };
   }
   const hasCanary = typeof content === 'string' && content.includes(CANARY);
@@ -63,7 +72,7 @@ export function classifyMemoryState({ pathResolved, fileExists, content }) {
     return {
       identity_status: 'DEGRADED',
       evidence: [
-        { source: 'file-presence', value: 'MEMORY.md exists', agrees_with_others: true, weight: 'supporting' },
+        { source: 'file-presence', value: 'MEMORY.md exists', agrees_with_others: true, weight: 'corroborating' },
         { source: 'canary', value: `canary "${CANARY}" absent — structure drift`, agrees_with_others: false, weight: 'conflicting' },
       ],
     };
@@ -71,8 +80,8 @@ export function classifyMemoryState({ pathResolved, fileExists, content }) {
   return {
     identity_status: 'PASS',
     evidence: [
-      { source: 'file-presence', value: 'MEMORY.md exists', agrees_with_others: true, weight: 'supporting' },
-      { source: 'canary', value: `canary "${CANARY}" present`, agrees_with_others: true, weight: 'supporting' },
+      { source: 'file-presence', value: 'MEMORY.md exists', agrees_with_others: true, weight: 'primary' },
+      { source: 'canary', value: `canary "${CANARY}" present`, agrees_with_others: true, weight: 'corroborating' },
     ],
   };
 }
@@ -84,6 +93,7 @@ export async function probe(opts = {}) {
   let memPath = null;
   try {
     memPath = mappedMemoryPath(cwd, home);
+    if (!memPath) pathResolved = false;
   } catch {
     pathResolved = false;
   }
@@ -103,18 +113,16 @@ function buildRow({ identity_status, evidence, cwd, memPath, observed_at }) {
     schema_version: SCHEMA_VERSION,
     capability_id: CAPABILITY_ID,
     capability_name: 'Auto-memory injection (MEMORY.md presence + canary)',
-    capability_kind: 'content',
-    freshness: 'content-volatile',     // changes whenever the user edits memory
+    capability_kind: 'observation',
+    freshness: 'session-stable',       // determined at session start; stable for the session
     refresh_policy: 'per-session',
     observed_at,
     harness: 'claude-code',
-    workspace_id: null,
     cwd,
-    env_signals: {},
     memory_path: memPath,
     identity_status,
     mutation_permitted: false,
-    mutation_block_reason: 'observation-only-capability',
+    mutation_block_reason: 'read-only-context',
     evidence,
   };
 }

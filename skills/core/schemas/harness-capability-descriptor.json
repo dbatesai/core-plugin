@@ -22,6 +22,12 @@
           "capability_kind": "mutation",
           "delegate": "capability/target-surface-collab-files-probe.mjs",
           "required_for_actions": ["collab-files-mutating"]
+        },
+        {
+          "capability_id": "auto-memory-injection",
+          "capability_kind": "observation",
+          "delegate": "capability/auto-memory-injection-probe.mjs",
+          "required_for_actions": []
         }
       ]
     },
