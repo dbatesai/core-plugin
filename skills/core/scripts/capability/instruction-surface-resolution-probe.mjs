@@ -1,15 +1,19 @@
 /**
  * instruction-surface-resolution-probe.mjs — v2.7.0 §5 Claude-Code observability.
  *
- * Reports which CLAUDE.md instruction files Claude Code would load for the current
- * cwd, and in what precedence order. This is the instruction-surface analogue of
- * the auto-memory probe: it OBSERVES the surface (which files load); it does not
- * generate or normalize it — that's v3.0's instruction-surface adapter.
+ * A PARTIAL filesystem heuristic over the documented Claude Code memory surfaces
+ * for the current cwd — user/project/.claude/local CLAUDE.md files — reported in
+ * precedence order. It OBSERVES a partial surface; it does NOT resolve @imports,
+ * managed-policy memory, excludes, or .claude/rules, and it does not generate or
+ * normalize instructions (that's v3.0's instruction-surface adapter). The row
+ * carries documented_surfaces_not_probed so it never overclaims full "resolution"
+ * (HC_614 #2). Docs: https://docs.anthropic.com/en/docs/claude-code/memory
  *
- * Precedence chain (this probe's model of Claude Code's load order):
+ * Precedence chain (partial, filesystem-only):
  *   1. user-global  ~/.claude/CLAUDE.md
- *   2. project      every CLAUDE.md from filesystem root down to cwd
- *      (root first, nearest-cwd last = highest precedence)
+ *   2. project      CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md at every dir
+ *                   from filesystem root down to cwd (nearest-cwd = highest precedence)
+ *   NOT probed: managed-policy memory, @imports + max-depth, excludes, .claude/rules
  *
  * Identity_status (honest):
  *   PASS     — chain resolved; ≥1 readable, non-empty instruction file
@@ -47,8 +51,12 @@ export function buildPrecedenceChain(cwd, home) {
     if (parent === dir) break;
     dir = parent;
   }
-  ancestors.reverse();
-  for (const d of ancestors) chain.push({ path: join(d, 'CLAUDE.md'), scope: 'project' });
+  ancestors.reverse(); // root → cwd (nearest-cwd last = highest precedence)
+  for (const d of ancestors) {
+    chain.push({ path: join(d, 'CLAUDE.md'), scope: 'project' });
+    chain.push({ path: join(d, '.claude', 'CLAUDE.md'), scope: 'project-claude-dir' });
+    chain.push({ path: join(d, 'CLAUDE.local.md'), scope: 'local' });
+  }
   return chain;
 }
 
@@ -121,14 +129,17 @@ function buildRow({ identity_status, evidence, cwd, instruction_chain, observed_
   return {
     schema_version: SCHEMA_VERSION,
     capability_id: CAPABILITY_ID,
-    capability_name: 'Instruction surface resolution (CLAUDE.md precedence chain)',
+    capability_name: 'Instruction surface — partial CLAUDE.md filesystem heuristic (user/project/.claude/local; not imports, managed-policy, or .claude/rules)',
     capability_kind: 'observation',
     freshness: 'session-stable',
     refresh_policy: 'per-session',
     observed_at,
     harness: 'claude-code',
     cwd,
-    instruction_chain,           // ordered resolved files, precedence order
+    instruction_chain,           // ordered resolved files, precedence order (partial)
+    // Honest residual (HC_614 #2): documented Claude Code memory surfaces this
+    // filesystem heuristic does NOT probe — so the row never reads as full resolution.
+    documented_surfaces_not_probed: ['managed-policy-memory', '@imports', 'excludes', '.claude/rules'],
     identity_status,
     mutation_permitted: false,
     mutation_block_reason: 'read-only-context',

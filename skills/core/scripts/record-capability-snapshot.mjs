@@ -19,16 +19,33 @@
 
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import { runStartup, SCHEMA_VERSION } from './capability-probe.mjs';
 import { appendRows } from './capability-history.mjs';
+
+/**
+ * Resolve a NON-NULL session id so per-session history buckets never collapse
+ * (HC_614 blocker 1). Order: explicit id → harness session env var → a
+ * per-invocation fallback (timestamp + random) that is distinct across sessions.
+ * A null session id would land every session in one bucket and break
+ * regression detection, which delimits sessions by session_id.
+ */
+export function resolveSessionId(opts = {}) {
+  if (opts.sessionId) return opts.sessionId;
+  const env = opts.env || process.env;
+  if (env.CLAUDE_CODE_SESSION_ID) return env.CLAUDE_CODE_SESSION_ID;
+  if (env.CODEX_THREAD_ID) return env.CODEX_THREAD_ID;
+  return `session-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
+}
 
 /**
  * Probe the current session's capabilities and append them to the workspace
  * history. Returns a small summary. opts.home is a test seam (defaults to $HOME).
  */
 export async function recordSnapshot(opts = {}) {
-  const { workspaceId, harness, cwd, sessionId } = opts;
+  const { workspaceId, harness, cwd } = opts;
   if (!workspaceId) throw new Error('record-capability-snapshot: workspaceId is required');
+  const sessionId = resolveSessionId(opts);
 
   const startup = await runStartup({ harness, cwd });
   const rows = startup.rows || [];
@@ -40,13 +57,14 @@ export async function recordSnapshot(opts = {}) {
   appendRows(
     workspaceId,
     rows,
-    { schema_version: SCHEMA_VERSION, runner_version: SCHEMA_VERSION, session_id: sessionId ?? null },
+    { schema_version: SCHEMA_VERSION, runner_version: SCHEMA_VERSION, session_id: sessionId },
     appendOpts,
   );
 
   return {
     workspace_id: workspaceId,
     harness: startup.harness,
+    session_id: sessionId,
     appended: rows.length,
     summary: startup.summary,
   };

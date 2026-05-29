@@ -11,15 +11,15 @@ const VALID_WEIGHTS = new Set(['primary', 'corroborating', 'conflicting']);
 
 // --- buildPrecedenceChain (pure) ---
 
-test('buildPrecedenceChain: user-global first, project root→cwd (nearest-cwd last)', () => {
+test('buildPrecedenceChain: user-global first; project + .claude + local at each dir, root→cwd', () => {
   const chain = buildPrecedenceChain('/a/b/c', '/home');
   assert.equal(chain[0].scope, 'user-global');
   assert.equal(chain[0].path, '/home/.claude/CLAUDE.md');
-  const last = chain[chain.length - 1];
-  assert.equal(last.scope, 'project');
-  assert.equal(last.path, '/a/b/c/CLAUDE.md', 'cwd CLAUDE.md is highest-precedence (last)');
-  // chain is bounded and reaches the root
-  assert.ok(chain.some(c => c.path === '/CLAUDE.md'));
+  // broadened documented surfaces (HC_614 #2)
+  assert.ok(chain.some(c => c.path === '/a/b/c/CLAUDE.md' && c.scope === 'project'));
+  assert.ok(chain.some(c => c.path === '/a/b/c/.claude/CLAUDE.md' && c.scope === 'project-claude-dir'), 'includes ./.claude/CLAUDE.md');
+  assert.ok(chain.some(c => c.path === '/a/b/c/CLAUDE.local.md' && c.scope === 'local'), 'includes CLAUDE.local.md');
+  assert.ok(chain.some(c => c.path === '/CLAUDE.md'), 'reaches root');
 });
 
 // --- classifyInstructionSurface (pure) ---
@@ -118,4 +118,20 @@ test('e2e: instruction-surface-resolution row flows through runStartup', async (
   const row = res.rows.find(r => r.capability_id === 'instruction-surface-resolution');
   assert.ok(row, 'runner emits the instruction-surface-resolution row for claude-code');
   assert.ok(['PASS', 'DEGRADED', 'NOT-YET', 'UNKNOWN'].includes(row.identity_status));
+});
+
+test('probe: detects ./.claude/CLAUDE.md and is honest about residual (HC_614 #2)', async () => {
+  await withTemp(async (root) => {
+    const home = join(root, 'home');
+    const cwd = join(root, 'proj');
+    mkdirSync(join(cwd, '.claude'), { recursive: true });
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(join(cwd, '.claude', 'CLAUDE.md'), '# project .claude instructions');
+    const row = await probe({ home, cwd });
+    assert.equal(row.identity_status, 'PASS');
+    assert.ok(row.instruction_chain.some(c => c.scope === 'project-claude-dir'), 'detects ./.claude/CLAUDE.md');
+    assert.ok(Array.isArray(row.documented_surfaces_not_probed), 'names unprobed documented surfaces');
+    assert.ok(row.documented_surfaces_not_probed.includes('.claude/rules'));
+    assert.match(row.capability_name, /partial/i, 'capability_name signals partial coverage, not full resolution');
+  });
 });

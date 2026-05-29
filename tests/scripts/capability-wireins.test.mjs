@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recordSnapshot } from '../../skills/core/scripts/record-capability-snapshot.mjs';
+import { recordSnapshot, resolveSessionId } from '../../skills/core/scripts/record-capability-snapshot.mjs';
 import { readHistory } from '../../skills/core/scripts/capability-history.mjs';
 import { detectDrift, detectRegression } from '../../skills/core/scripts/analyze-capability-drift.mjs';
 
@@ -43,4 +43,29 @@ test('wire-in: drift analysis CONSUMES the appended history across two sessions'
     assert.equal(regs.length, 0, 'same capabilities both sessions → no regression');
     assert.equal(drift.length, 0, 'stable statuses → no degrading drift');
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('wire-in: default session id is non-null and distinct per session (HC_614 #1)', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'capwire-'));
+  try {
+    const wid = 'ws-session';
+    // No --session-id and no session env → must still derive distinct non-null ids,
+    // otherwise every session collapses into one null bucket and regression can't fire.
+    const r1 = await recordSnapshot({ workspaceId: wid, harness: 'claude-code', cwd: '/work/Proj', home, env: {} });
+    const r2 = await recordSnapshot({ workspaceId: wid, harness: 'claude-code', cwd: '/work/Proj', home, env: {} });
+    assert.ok(r1.session_id && r2.session_id, 'session id must be non-null on the default path');
+    assert.notEqual(r1.session_id, r2.session_id, 'two default-path sessions get distinct ids');
+    const hist = readHistory(wid, { home });
+    const sessions = new Set(hist.map(h => h.session_id));
+    assert.ok(sessions.size >= 2, 'history has distinct session buckets, not one collapsed bucket');
+    assert.ok(!sessions.has(null), 'no null session bucket');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('resolveSessionId: explicit → env → fallback, never null (HC_614 #1)', () => {
+  assert.equal(resolveSessionId({ sessionId: 'explicit' }), 'explicit');
+  assert.equal(resolveSessionId({ env: { CLAUDE_CODE_SESSION_ID: 'cc-sess' } }), 'cc-sess');
+  assert.equal(resolveSessionId({ env: { CODEX_THREAD_ID: 'cdx' } }), 'cdx');
+  const fb = resolveSessionId({ env: {} });
+  assert.ok(typeof fb === 'string' && fb.startsWith('session-') && fb.length > 10, 'fallback is a non-null distinct id');
 });
