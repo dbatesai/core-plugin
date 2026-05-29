@@ -90,6 +90,11 @@
       "allowed_authorities": ["canonical-source"],
       "allowed_harnesses": ["claude-code", "codex", "gemini"],
       "description": "Source-tree maintenance writes (CHANGELOG, manifests, etc.). Production install blocked — only the dev tree should touch source files."
+    },
+    "multi-agent-adversarial-run": {
+      "requires_pass": ["anti-anchoring-mechanism"],
+      "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "description": "Fail-CLOSED gate for an adversarial multi-agent run whose output is the AUTHORITY for a canonical mutation (graduating a decision/risk unit, rendering PROJECT.md, approving a release gate, merging/publishing, writing canonical plan state). Requires anti-anchoring-mechanism PASS. While anti-anchoring is DEGRADED (trust-based, R-17) it blocks with identity-degraded; the consumer must obtain a PASS-grade mechanism (v2.8.0 staging), an explicit human/owner override, or degrade to advisory-only. Advisory review-generation does NOT use this gate (fail-OPEN, watermarked DEGRADED) — see adversarial-run-gate.mjs classifyAdversarialRun and v2.7 plan §6. Per HC policy evt HC_539/HC_552."
     }
   }
 }
