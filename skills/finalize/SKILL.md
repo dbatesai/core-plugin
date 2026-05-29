@@ -146,6 +146,14 @@ Do this inline in the main agent — don't dispatch a subagent. The previous Hai
 
 Narrate the refresh plainly: *"Refreshing MEMORY.md priority block from the top 30 units now."*
 
+**Write the visibility canary (v3.0 memory-visible-in-agent-context).** After the MEMORY.md refresh above, write a fresh per-session canary so the *next* session can prove memory was actually injected into context — not merely present on disk:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/write-visibility-canary.mjs" --workspace-id <id> 2>/dev/null || true
+```
+
+This idempotently replaces a single tagged `CORE-VISIBILITY-CANARY` line at the top of MEMORY.md (inside the injection window) and records the expected token to `~/.core/workspaces/<id>/visibility-canary.json`. Next session's startup echoes the token and `capability/memory-visible-probe.mjs` verifies the echo preceded any read of the canary surfaces. Fail-open — never block close on it.
+
 ### If harness is Codex
 
 Do not auto-write to `~/.codex/memories/`. Codex memory is explicit-save only — see `harnesses/codex.md §read-auto-memory` for the rule and `harnesses/codex.md §save-recall-note` for the mechanics of explicit recall writes. Trigger phrases (when a user request counts as "save this") live in the user's install-level config, not in CORE.
