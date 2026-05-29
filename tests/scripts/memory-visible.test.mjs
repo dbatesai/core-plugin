@@ -63,6 +63,18 @@ test('classify DEGRADED (blocker 1): echo but token absent from memory file → 
   assert.equal(classify({ ...OK, memoryHasToken: false, events }).identity_status, 'DEGRADED');
 });
 
+test('classify DEGRADED (blocker 1b): line-count exceeds injection window → truncation-detected, never PASS', () => {
+  const events = [{ idx: 1, kind: 'echo' }, { idx: 2, kind: 'tool', name: 'Bash' }];
+  const r = classify({ ...OK, events, memoryLineCount: 250, injectionLineWindow: 200 });
+  assert.equal(r.identity_status, 'DEGRADED');
+  assert.match(r.reason, /truncation-detected/);
+});
+
+test('classify PASS: line-count within injection window does not false-degrade', () => {
+  const events = [{ idx: 1, kind: 'echo' }];
+  assert.equal(classify({ ...OK, events, memoryLineCount: 150, injectionLineWindow: 200 }).identity_status, 'PASS');
+});
+
 test('classify DEGRADED: transcript unavailable', () => {
   assert.equal(classify({ ...OK, transcriptAvailable: false, events: [] }).identity_status, 'DEGRADED');
 });

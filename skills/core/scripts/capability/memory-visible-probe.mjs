@@ -38,6 +38,7 @@ import { createHash } from 'node:crypto';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-visible-in-agent-context';
+export const DEFAULT_INJECTION_LINE_WINDOW = 200;
 
 // Tools that cannot read the canary surfaces, so they're safe before the echo.
 // Deliberately tiny (HC_623 #2): everything else degrades PASS conservatively.
@@ -98,12 +99,18 @@ export function scanTranscript(lines, token) {
 }
 
 /** Pure classifier (HC_623-hardened bar). */
-export function classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events }) {
+export function classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW }) {
   if (!token) return { identity_status: 'NOT-YET', reason: 'no canary recorded — write step has not run' };
   // Blocker 1: an echo only proves injection if the canary actually landed in the
   // injected memory window. Without that, PASS would prove transcript echo, not memory.
   if (!memoryWritten || !memoryHasToken) {
     return { identity_status: 'DEGRADED', reason: 'canary not present in the MEMORY.md injection window — an echo cannot prove injection' };
+  }
+  // Blocker 1b: a line-1 canary proves visibility, not load-completeness. If the
+  // memory file exceeds the known injection window, the tail can drop silently while
+  // the canary still echoes. That is DEGRADED, never PASS.
+  if (Number.isFinite(memoryLineCount) && Number.isFinite(injectionLineWindow) && memoryLineCount > injectionLineWindow) {
+    return { identity_status: 'DEGRADED', reason: `truncation-detected: MEMORY.md line_count=${memoryLineCount} exceeds injection window=${injectionLineWindow}` };
   }
   if (!transcriptAvailable) {
     return { identity_status: 'DEGRADED', reason: 'transcript unavailable/unparseable — ordering relies on protocol, not mechanically verified' };
@@ -140,10 +147,18 @@ export async function probe(opts = {}) {
   }
 
   // Blocker 1: verify the token is actually in the MEMORY.md injection window now.
-  let memoryHasToken = false;
+  let memoryHasToken = false, memoryLineCount = null;
   if (token && memoryWritten && memoryPath && existsSync(memoryPath)) {
-    try { memoryHasToken = readFileSync(memoryPath, 'utf8').includes(token); } catch { memoryHasToken = false; }
+    try {
+      const memoryContent = readFileSync(memoryPath, 'utf8');
+      memoryHasToken = memoryContent.includes(token);
+      memoryLineCount = countLines(memoryContent);
+    } catch {
+      memoryHasToken = false;
+      memoryLineCount = null;
+    }
   }
+  const injectionLineWindow = opts.injectionLineWindow || DEFAULT_INJECTION_LINE_WINDOW;
 
   const transcriptPath = resolveTranscript(cwd, home, opts.transcriptPath);
   let transcriptAvailable = false, events = [];
@@ -151,14 +166,21 @@ export async function probe(opts = {}) {
     try { events = scanTranscript(readFileSync(transcriptPath, 'utf8').split('\n'), token); transcriptAvailable = true; } catch { transcriptAvailable = false; }
   }
 
-  const { identity_status, reason } = classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events });
-  return buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, transcriptAvailable, events, cwd, observed_at });
+  const { identity_status, reason } = classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow });
+  return buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, transcriptAvailable, events, cwd, observed_at });
 }
 
-function buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, transcriptAvailable, events, cwd, observed_at }) {
+function countLines(content) {
+  if (!content) return 0;
+  return content.split(/\r?\n/).length;
+}
+
+function buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, transcriptAvailable, events, cwd, observed_at }) {
+  const loadComplete = !(Number.isFinite(memoryLineCount) && Number.isFinite(injectionLineWindow) && memoryLineCount > injectionLineWindow);
   const evidence = [
     { source: 'canary-token', value: { recorded: !!token, redacted: redactToken(token) }, agrees_with_others: !!token, weight: token ? 'primary' : 'conflicting' },
     { source: 'memory-injection', value: { memory_written: memoryWritten, token_in_memory_file: memoryHasToken }, agrees_with_others: memoryWritten && memoryHasToken, weight: (memoryWritten && memoryHasToken) ? 'corroborating' : 'conflicting' },
+    { source: 'memory-load-completeness', value: { line_count: memoryLineCount, injection_line_window: injectionLineWindow, status: loadComplete ? 'within-window-or-unmeasured' : 'truncation-detected' }, agrees_with_others: loadComplete, weight: loadComplete ? 'corroborating' : 'conflicting' },
     { source: 'transcript', value: { available: transcriptAvailable, echo: events.some((e) => e.kind === 'echo') }, agrees_with_others: identity_status === 'PASS', weight: identity_status === 'PASS' ? 'corroborating' : 'conflicting' },
     { source: 'classification', value: reason, agrees_with_others: identity_status === 'PASS', weight: identity_status === 'PASS' ? 'corroborating' : 'conflicting' },
   ];
