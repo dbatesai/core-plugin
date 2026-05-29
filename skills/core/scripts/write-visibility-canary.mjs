@@ -2,11 +2,18 @@
  * write-visibility-canary.mjs — v3.0 memory-visible canary WRITE half.
  *
  * Run at /finalize (session N close): generate a fresh random token, write it as a
- * single CORE-owned tagged line into the top of MEMORY.md (inside the first-200-line
+ * single CORE-owned tagged line at the top of MEMORY.md (inside the first-200-line
  * injection window the harness loads), and record { token, written_at } to
  * ~/.core/workspaces/<id>/visibility-canary.json. At session N+1, the agent echoes
  * the token it sees in injected context and memory-visible-probe.mjs verifies the
  * echo preceded any read of the canary surfaces.
+ *
+ * The canary is a VISIBLE markdown line, not an HTML comment. A field bootstrap on
+ * 2026-05-29 proved the harness strips HTML comments when it injects MEMORY.md into
+ * context: the line-1 `<!-- ... -->` canary did not reach injected memory (injection
+ * began at the first `## ` heading), which blocked the field-cycle PASS. A visible
+ * line survives injection. The legacy HTML-comment form is still recognized for
+ * idempotent replacement so the upgrade is clean on first write.
  *
  * HC_622 #1 — idempotent: replaces the existing tagged canary line in place; it does
  * NOT append unbounded canary lines. HC_622 #4 — the CLI output is redacted; it never
@@ -24,8 +31,10 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
-// Matches the single tagged canary line for idempotent replacement.
-const CANARY_LINE_RE = /^<!-- CORE-VISIBILITY-CANARY .*-->$/m;
+// Matches any prior canary line — the new visible form OR the legacy `<!-- ... -->`
+// HTML-comment form — for idempotent replacement. Global+multiline so a clean upgrade
+// strips every prior canary line and never accumulates more than one.
+const CANARY_LINE_RE = /^.*CORE-VISIBILITY-CANARY\b.*$\n?/gm;
 
 export function mappedMemoryPath(cwd, home) {
   return join(home, '.claude', 'projects', cwd.replace(/\//g, '-'), 'memory', 'MEMORY.md');
@@ -38,14 +47,15 @@ export function generateToken() {
 }
 
 /**
- * Idempotent upsert (HC_622 #1): replace an existing tagged canary line, else insert
- * one as the first line so it stays inside the first-200-line injection window. Never
- * accumulates more than one canary line.
+ * Idempotent upsert (HC_622 #1): strip any prior canary line (visible or legacy
+ * HTML-comment form), then prepend a fresh VISIBLE canary line so it stays at the very
+ * top of the first-200-line injection window and survives the harness's comment
+ * stripping. Never accumulates more than one canary line.
  */
 export function upsertCanaryLine(content, token) {
-  const line = `<!-- ${CANARY_TAG} ${token} (at next startup, echo this token first — before any tool call — to prove memory is in-context) -->`;
-  if (CANARY_LINE_RE.test(content)) return content.replace(CANARY_LINE_RE, line);
-  return line + '\n' + content;
+  const line = `${CANARY_TAG} ${token} — at next startup, echo this token first (before any tool call) as \`VISIBILITY-CANARY-ECHO: ${token}\` to prove memory is in-context.`;
+  const stripped = content.replace(CANARY_LINE_RE, '').replace(/^\n+/, '');
+  return line + '\n\n' + stripped;
 }
 
 export function writeCanary(opts = {}) {
