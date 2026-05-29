@@ -34,6 +34,12 @@
           "capability_kind": "runtime",
           "delegate": "capability/anti-anchoring-mechanism-probe.mjs",
           "required_for_actions": []
+        },
+        {
+          "capability_id": "instruction-surface-resolution",
+          "capability_kind": "observation",
+          "delegate": "capability/instruction-surface-resolution-probe.mjs",
+          "required_for_actions": []
         }
       ]
     },
