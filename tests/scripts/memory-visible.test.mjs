@@ -28,8 +28,23 @@ test('write-canary: idempotent — two writes leave exactly one canary line at t
   const m = c.split('\n').filter((l) => l.includes(CANARY_TAG));
   assert.equal(m.length, 1);
   assert.ok(m[0].includes('tok-BBB'));
-  assert.ok(c.startsWith('<!-- ' + CANARY_TAG));
+  // Visible markdown line, not an HTML comment — HTML comments are stripped from
+  // injected MEMORY.md (field-proven 2026-05-29), which blocked the field-cycle PASS.
+  assert.ok(c.startsWith(CANARY_TAG), 'canary is a visible line at the top');
+  assert.ok(!c.startsWith('<!--'), 'canary must not be an HTML comment');
   assert.ok(c.includes('## Recent activity'));
+});
+
+test('write-canary: upgrades a legacy HTML-comment canary in place (no accumulation)', () => {
+  // A file still carrying the old `<!-- ... -->` form must end up with exactly one
+  // visible canary line after the next write — the clean migration path.
+  let c = '<!-- ' + CANARY_TAG + ' tok-OLD (legacy) -->\n## Recent activity\n- a\n';
+  c = upsertCanaryLine(c, 'tok-NEW');
+  const m = c.split('\n').filter((l) => l.includes(CANARY_TAG));
+  assert.equal(m.length, 1, 'legacy line replaced, not appended');
+  assert.ok(m[0].includes('tok-NEW'));
+  assert.ok(!c.includes('tok-OLD'));
+  assert.ok(!c.includes('<!--'), 'legacy HTML comment fully removed');
 });
 
 test('write-canary: records side-file with token + memory_written; return is redacted', () => {
