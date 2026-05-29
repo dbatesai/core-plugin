@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-05-27
+
+### Added
+- `skills/core/scripts/resolve-plugin-root.mjs` — v2.6.0-δ: conflict-not-priority refactor of `detectConsumingHarnessSignal()`. Collects all env signals then classifies as unanimous/conflict/absent instead of first-match-wins. New `consuming_harness_signal_weight` field (`strong`|`weak`|`null`) threads through to row schema. `consuming-harness-conflict` evidence entry emitted when multiple harnesses detected. Block code `consuming_harness_signal_weak` for action profiles that require strong signals.
+- `skills/core/scripts/capability/target-surface-collab-files-probe.mjs` — New target-surface capability. Five proofs: (1) files repo path exists, (2) git root matches configured path, (3) working tree state parseable, (4) remote URL matches expected, (5) write/push verified or marked unproven. Config source: descriptor's `surfaces.collab_files_repo` + `surfaces.collab_files_expected_remote` (Option A). Identity_status PASS only when all proofs agree; DEGRADED on root/remote mismatch; UNKNOWN on git failure.
+- `skills/core/schemas/harness-capability-descriptor.json` — Two new action profiles: `installed-runtime-write` (installed-cache only) and `source-maintenance-write` (canonical-source only). `allowed_signal_weight: 'strong'` on `collab-files-mutating` and `project-memory-write`. `surfaces` block with `collab_files_repo` + `collab_files_expected_remote` config. `target-surface-collab-files` added to each harness's capabilities + `collab-files-mutating` requires_pass. **Note**: relocated from `scripts/capability/` to `schemas/` during v2.6.0 review (HC v2.6 invariant objection) — descriptor is contract content, not script content; schemas/ is the correct home per Doctrine 2.
+- `skills/core/references/architecture-doctrines.md` — Five doctrines with named first consumers: probe-before-propose, documentation-as-contract-reference, schema-consumer-coupling, fail-open-observation/fail-closed-mutation, doctrine-consumer-coupling.
+- `protocols/startup.md` — Capability probe wire-in before readiness composition. Runs `capability-probe.mjs --startup`; writes `capability-state.json` to workspace; surfaces non-PASS rows with "continuing with degraded capability evidence" verbatim. All-PASS: silent per `feedback_readiness_only_escalations`.
+
+### Changed
+- `skills/core/scripts/capability-probe.mjs` — Extended `invokeProbe()` to handle `capability/`-prefixed delegate paths via dynamic import. Added `allowed_signal_weight` gate to `runPreAction()` with `consuming_harness_signal_weak` block code. Updated `detectConsumingHarness` comment to reflect conflict-not-priority behavior.
+
+### Decision units
+- DC-95: capability-probe-distribution — probe approach per harness vs universal
+- DC-96: effective-script-root-as-identity-gate — script root as the hard identity signal
+- DC-97: fail-open-startup-fail-closed-mutation — mode separation doctrine
+- DC-98: schema-and-doctrine-consumer-coupling — consumer-cited schema lifecycle
+- DC-99: harness-docs-as-contract-reference — docs-as-contract doctrine
+- DC-100: harness-memory-authority-boundary — memory authority per harness
+- R-17: trust-based-anti-anchoring-claude-code — DEGRADED-by-mechanism; closes in v2.8.0
+
 ## [2.5.0] — 2026-05-27
 
 ### Added

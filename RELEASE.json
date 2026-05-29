@@ -1,8 +1,8 @@
 {
   "name": "core",
-  "version": "2.5.0",
-  "build": "20260527.1",
-  "created_at": "2026-05-27T00:00:00Z",
+  "version": "2.6.0",
+  "build": "20260527.2",
+  "created_at": "2026-05-27T22:00:00Z",
   "targets": [
     "claude-code",
     "codex",
