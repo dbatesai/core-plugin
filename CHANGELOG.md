@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] — 2026-05-29
+
+This release folds in the v2.7 work that was never tagged — capability history, drift detection, the adversarial-run gate, and several new probes — and adds the v2.8 memory-visibility runtime plus the foundation scaffolding that v2.9 will wire up. There is no `v2.7.0` tag; its content ships here under 2.8.0.
+
+### Added
+- `skills/core/scripts/capability-history.mjs` — per-session capability snapshots in a JSONL store with an advisory file lock, so drift and regression analysis at `/finalize` and `/process-memory` read a real history instead of a single point.
+- `skills/core/scripts/analyze-capability-drift.mjs` — reads that history and reports drift and regressions (a row that was PASS last session and is DEGRADED now, for instance).
+- `skills/core/scripts/record-capability-snapshot.mjs` — appends the current session's snapshot to the history; runs at startup after the capability probe.
+- `skills/core/scripts/capability/memory-visible-probe.mjs` — proves the auto-loaded memory was actually in the agent's context, not just present on disk, via a startup canary echo. Includes load-completeness detection: when injected memory is truncated, the row DEGRADES instead of reporting PASS. Wired and exercised.
+- `skills/core/scripts/write-visibility-canary.mjs` — writes the canary token the next session echoes.
+- `skills/core/scripts/capability/auto-memory-injection-probe.mjs` — checks whether the harness injected project memory at all.
+- `skills/core/scripts/capability/instruction-surface-resolution-probe.mjs` — checks that CLAUDE.md / AGENTS.md instruction-surface precedence resolves the way the skill expects.
+- `skills/core/scripts/capability/anti-anchoring-mechanism-probe.mjs` — surfaces R-17 as a DEGRADED-by-mechanism row rather than claiming a guarantee the harness can't enforce.
+- `skills/core/scripts/instruction-surface-adapter.mjs` — dry-run core (inventory + patch plan, no writes) for the v3.0 instruction-surface adapter. Foundation only.
+- `skills/core/scripts/read-transcript.mjs` — adapter verb that parses session transcripts (Claude Code + Codex message parsers; Gemini returns null; Codex tool-call extraction still pending). Built and unit-tested in isolation, **not yet wired to a consumer** — foundation for v2.9.
+- `skills/core/scripts/capability/memory-accessed-probe.mjs` — store-selection tier that consumes read-transcript to tell "memory present" from "memory actually reached." Built and unit-tested, **not yet wired** — foundation for v2.9.
+
+### Changed
+- `skills/core/scripts/adversarial-run-gate.mjs` — consumer gate that enforces the anti-anchoring discipline, with a machine-readable decision enum.
+- `skills/core/scripts/capability-probe.mjs` — probe-itself validation: a probe that crashes reports UNKNOWN with a probe-error reason instead of failing silently.
+- `protocols/startup.md`, `skills/finalize/SKILL.md`, `skills/process-memory/SKILL.md` — wire capability history and drift snapshots into startup, finalize, and process-memory.
+
+### Risks
+- R-17 (trust-based anti-anchoring on Claude Code) is demoted to an honest anti-anchoring-mechanism row that reports DEGRADED-by-mechanism. The earlier 2.6.0 note said this "closes in v2.8.0" — what actually shipped is the honest demotion, not hard enforcement. The mechanism stays trust-based on Claude Code.
+
+### Status notes
+- `read-transcript` and `memory-accessed` are foundation: tested in isolation, not wired to any consumer, and do nothing at runtime yet. v2.9 wires them.
+- The memory-visibility field-cycle PASS is a cross-session check — it confirms on a future bootstrap, not within this release.
+- Every new script ships with unit tests under `tests/scripts/`; the script suite passes at cut.
+
 ## [2.6.0] — 2026-05-27
 
 ### Added

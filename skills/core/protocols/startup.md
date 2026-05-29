@@ -233,6 +233,12 @@ node "${CORE_ROOT}/skills/core/scripts/capability-probe.mjs" --startup --json 2>
   > ~/.core/workspaces/<id>/capability-state.json || true
 ```
 
+Then append this session's snapshot to the capability history — the per-session record that drift and regression analysis read at `/finalize` and `/process-memory`:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --workspace-id <id> 2>/dev/null || true
+```
+
 Read the output. When **any row is non-PASS**, narrate in plain voice:
 
 > *"Continuing with degraded capability evidence. plugin-root-resolution: DEGRADED (harness split-brain). Identity is best-effort this session."*

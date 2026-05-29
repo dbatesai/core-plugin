@@ -13,6 +13,14 @@ The user's task: $ARGUMENTS
 
 ---
 
+## First — visibility-canary echo (v3.0 memory-visible)
+
+If your injected memory (the auto-loaded `MEMORY.md`) contains a line tagged `CORE-VISIBILITY-CANARY <token>`, your **first output this session** must echo that token on its own line — `VISIBILITY-CANARY-ECHO: <token>` — *before* you read any file, run the capability probe, or run any Bash/Grep/Glob. Echo it from what you already see in injected context; do **not** read `MEMORY.md` or the canary side-file to find it — reading a canary surface first defeats the proof. Loading this skill via the Skill tool is allowlisted and fine; a file read or shell command before the echo is not. If there is no canary line in your injected memory, skip this silently.
+
+This is the runtime half of `capability/memory-visible-probe.mjs`: the next-session transcript shows the echo before any non-allowlisted tool, which is how the probe verifies memory was actually *in context*, not merely present on disk. (It proves visibility, not use — see the probe's `capability_name`.)
+
+---
+
 ## Before the task — startup
 
 Read `protocols/startup.md` and run it now, before you act on the user's task above. The protocol resolves the workspace, decides whether the project needs migration, a folder rename, or a returning-workspace load, and composes the readiness summary the user expects to see. Skipping this is a defect — the routing decision is what keeps a v1-shaped project from being treated as a new one, and it's what keeps you from re-deriving facts the user retired.

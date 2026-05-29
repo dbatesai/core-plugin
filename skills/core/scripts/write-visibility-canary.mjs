@@ -1,0 +1,92 @@
+/**
+ * write-visibility-canary.mjs — v3.0 memory-visible canary WRITE half.
+ *
+ * Run at /finalize (session N close): generate a fresh random token, write it as a
+ * single CORE-owned tagged line into the top of MEMORY.md (inside the first-200-line
+ * injection window the harness loads), and record { token, written_at } to
+ * ~/.core/workspaces/<id>/visibility-canary.json. At session N+1, the agent echoes
+ * the token it sees in injected context and memory-visible-probe.mjs verifies the
+ * echo preceded any read of the canary surfaces.
+ *
+ * HC_622 #1 — idempotent: replaces the existing tagged canary line in place; it does
+ * NOT append unbounded canary lines. HC_622 #4 — the CLI output is redacted; it never
+ * prints the raw token to stdout (which would land in the transcript).
+ *
+ * CLI: node write-visibility-canary.mjs --workspace-id <id> [--cwd <path>]
+ *
+ * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ */
+
+import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
+
+export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
+// Matches the single tagged canary line for idempotent replacement.
+const CANARY_LINE_RE = /^<!-- CORE-VISIBILITY-CANARY .*-->$/m;
+
+export function mappedMemoryPath(cwd, home) {
+  return join(home, '.claude', 'projects', cwd.replace(/\//g, '-'), 'memory', 'MEMORY.md');
+}
+export function canaryFilePath(workspaceId, home) {
+  return join(home, '.core', 'workspaces', workspaceId, 'visibility-canary.json');
+}
+export function generateToken() {
+  return 'vcan-' + randomBytes(8).toString('hex');
+}
+
+/**
+ * Idempotent upsert (HC_622 #1): replace an existing tagged canary line, else insert
+ * one as the first line so it stays inside the first-200-line injection window. Never
+ * accumulates more than one canary line.
+ */
+export function upsertCanaryLine(content, token) {
+  const line = `<!-- ${CANARY_TAG} ${token} (at next startup, echo this token first — before any tool call — to prove memory is in-context) -->`;
+  if (CANARY_LINE_RE.test(content)) return content.replace(CANARY_LINE_RE, line);
+  return line + '\n' + content;
+}
+
+export function writeCanary(opts = {}) {
+  const home = opts.home || homedir();
+  const cwd = opts.cwd || process.cwd();
+  const workspaceId = opts.workspaceId || 'unknown';
+  const token = opts.token || generateToken();
+  const written_at = opts.now || new Date().toISOString();
+
+  const memPath = opts.memoryPath || mappedMemoryPath(cwd, home);
+  let memory_written = false;
+  if (existsSync(memPath)) {
+    writeFileSync(memPath, upsertCanaryLine(readFileSync(memPath, 'utf8'), token));
+    memory_written = true;
+  }
+
+  const side = canaryFilePath(workspaceId, home);
+  mkdirSync(dirname(side), { recursive: true });
+  writeFileSync(side, JSON.stringify({ token, written_at, cwd, memory_path: memPath, memory_written }, null, 2));
+
+  // Redacted return only (HC_622 #4) — never the raw token.
+  return { token_len: token.length, side_file: side, memory_written, memory_path: memPath };
+}
+
+export async function main(argv) {
+  let workspaceId = null, cwd = null;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--workspace-id') workspaceId = argv[++i];
+    else if (argv[i] === '--cwd') cwd = argv[++i];
+  }
+  if (!workspaceId) {
+    process.stderr.write('usage: write-visibility-canary.mjs --workspace-id <id> [--cwd <path>]\n');
+    return 2;
+  }
+  const r = writeCanary({ workspaceId, cwd });
+  // Redacted — do NOT print the token.
+  console.log(JSON.stringify({ ok: true, memory_written: r.memory_written, side_file: r.side_file }));
+  return 0;
+}
+
+const _c = (p) => { try { return realpathSync(p); } catch { return p; } };
+if (_c(process.argv[1]) === _c(fileURLToPath(import.meta.url))) {
+  main(process.argv.slice(2)).then((code) => process.exit(code ?? 0));
+}

@@ -69,6 +69,7 @@ Walk the unit store and run the hygiene operations from `protocols/hygiene.md`:
 - **File-cap check** — if any synthesis file is over the Read-tool threshold, follow the graduation pattern in `protocols/hygiene.md`.
 - **Continuous self-evaluation** — review session-level signals (under-recall, over-recall, voice drift, smuggled architecture); write the retrospective at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`.
 - **Retrieval-quality surfacing** — run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project>` and narrate top anomalies in plain voice. Same shape `/process-memory` uses. If the project has no `_sessions/*/retrieval-log.jsonl` yet, say so in one sentence; don't pretend the corpus exists.
+- **Capability drift surfacing (v2.7)** — run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-capability-drift.mjs <project>`. It reads the per-session `~/.core/workspaces/<id>/capability-history.jsonl` (appended each session at startup by `record-capability-snapshot.mjs`), renders `<project>/_memories/capability-drift-log.md`, and reports degrading drift + regressions. Narrate only what's actionable in plain voice — a capability that slipped PASS→DEGRADED, or one that stopped reporting between sessions. If there's no history yet (fresh workspace), say so in one sentence; don't invent drift. Healing-direction changes are informational — don't lead with them.
 - **Source-pull monitoring** — when `<project>/_sources/` exists, run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-source-pull-log.mjs --workspace <id>` against the workspace id from `workspace.json` (not the project path). The analyzer reads `~/.core/workspaces/<id>/source-pull-log.jsonl` and aggregates the last 14 days. Surface only the signals worth acting on, in plain voice: a registered source with no pulls in window (the orchestration skill stopped firing for it), a source whose error count climbed this session, or a source showing Mode-C distribution above ~30% (the extractor is producing more judgment-needed observations than usual). If the log file doesn't exist yet ("No source-pull events in window"), say so in one sentence — common on a fresh workspace before the installation's orchestration skill has run. Skip the whole bullet when `<project>/_sources/` is absent.
 
 The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in `references/hygiene-strategies.md`.
@@ -144,6 +145,14 @@ Then refresh the auto-memory index. Two parts:
 Do this inline in the main agent — don't dispatch a subagent. The previous Haiku-subagent design required `git worktree`, which fails on non-git workspaces (any cloud-sync-backed project, any non-versioned project directory) with *"Cannot create agent worktree: not in a git repository."* Per CORE's harness-agnostic design intent, git is not a precondition for project intelligence. Project intelligence workspaces hold data, not code — versioning isn't the right tool here. The script does the heavy lifting; the curation pass stays in the main agent.
 
 Narrate the refresh plainly: *"Refreshing MEMORY.md priority block from the top 30 units now."*
+
+**Write the visibility canary (v3.0 memory-visible-in-agent-context).** After the MEMORY.md refresh above, write a fresh per-session canary so the *next* session can prove memory was actually injected into context — not merely present on disk:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/write-visibility-canary.mjs" --workspace-id <id> 2>/dev/null || true
+```
+
+This idempotently replaces a single tagged `CORE-VISIBILITY-CANARY` line at the top of MEMORY.md (inside the injection window) and records the expected token to `~/.core/workspaces/<id>/visibility-canary.json`. Next session's startup echoes the token and `capability/memory-visible-probe.mjs` verifies the echo preceded any read of the canary surfaces. Fail-open — never block close on it.
 
 ### If harness is Codex
 
