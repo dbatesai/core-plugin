@@ -27,6 +27,11 @@ export const ADVERSARIAL_ACTION = 'multi-agent-adversarial-run';
 export const ADVISORY_WATERMARK =
   'DEGRADED/trust-based (R-17): advisory only — independent agent/human acceptance required before any canonical mutation';
 
+// Machine-readable decision enum (HC_555 hardening): a consumer branches on the
+// single `decision` string instead of re-deriving intent from the booleans +
+// watermark, which is too easy to misread (ADVISORY must never look like AUTHORIZED).
+export const ADVERSARIAL_DECISIONS = Object.freeze(['AUTHORIZED', 'ADVISORY', 'BLOCKED']);
+
 /**
  * Read the anti-anchoring-mechanism row out of a runPreAction result and return
  * a typed decision. Pure function over the result shape — easy to test, and it
@@ -44,6 +49,7 @@ export function classifyAdversarialRun(preActionResult) {
   // context either. Surface it as a setup anomaly.
   if (!row) {
     return {
+      decision: 'BLOCKED',
       authority_for_mutation: false,
       advisory_allowed: false,
       watermark: 'anti-anchoring-mechanism row absent — cannot authorize or advise; check the descriptor',
@@ -54,6 +60,7 @@ export function classifyAdversarialRun(preActionResult) {
 
   if (row.identity_status === 'PASS') {
     return {
+      decision: 'AUTHORIZED',
       authority_for_mutation: true,
       advisory_allowed: true,
       watermark: null,
@@ -65,6 +72,7 @@ export function classifyAdversarialRun(preActionResult) {
   // DEGRADED / UNKNOWN / NOT-YET — advisory runs are fail-open (allowed, watermarked);
   // mutation authority is fail-closed (blocked). UNKNOWN explicitly does NOT grant authority.
   return {
+    decision: 'ADVISORY',
     authority_for_mutation: false,
     advisory_allowed: true,
     watermark: ADVISORY_WATERMARK,

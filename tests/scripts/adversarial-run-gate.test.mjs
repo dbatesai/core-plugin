@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runPreAction } from '../../skills/core/scripts/capability-probe.mjs';
 import {
-  classifyAdversarialRun, evaluateAdversarialRun, ADVERSARIAL_ACTION, ADVISORY_WATERMARK,
+  classifyAdversarialRun, evaluateAdversarialRun, ADVERSARIAL_ACTION, ADVISORY_WATERMARK, ADVERSARIAL_DECISIONS,
 } from '../../skills/core/scripts/adversarial-run-gate.mjs';
 
 // --- Integration: real descriptor, anti-anchoring is deterministically DEGRADED ---
@@ -54,4 +54,17 @@ test('NOT-YET anti-anchoring blocks authority but allows watermarked advisory', 
   assert.equal(d.authority_for_mutation, false);
   assert.equal(d.advisory_allowed, true);
   assert.equal(d.watermark, ADVISORY_WATERMARK);
+});
+
+test('decision enum is machine-readable: AUTHORIZED / ADVISORY / BLOCKED (HC_555 hardening)', () => {
+  assert.equal(classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'PASS' }] }).decision, 'AUTHORIZED');
+  assert.equal(classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'DEGRADED' }] }).decision, 'ADVISORY');
+  assert.equal(classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'UNKNOWN' }] }).decision, 'ADVISORY');
+  assert.equal(classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'NOT-YET' }] }).decision, 'ADVISORY');
+  assert.equal(classifyAdversarialRun({ rows: [] }).decision, 'BLOCKED');
+  // every decision is in the published enum — ADVISORY can never be confused for AUTHORIZED
+  for (const s of ['PASS', 'DEGRADED', 'UNKNOWN', 'NOT-YET']) {
+    const d = classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: s }] });
+    assert.ok(ADVERSARIAL_DECISIONS.includes(d.decision));
+  }
 });
