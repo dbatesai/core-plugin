@@ -12,7 +12,8 @@
  *   - inventory: user-global + per-dir CLAUDE.md / .claude/CLAUDE.md / CLAUDE.local.md
  *     (root→cwd), plus managed-policy memory marked external/not-writable.
  *   - plan: per-surface { target_path, scope, precedence, exists, current_hash,
- *     writable, supported, proposed_content (null this slice), mutation_risk, residuals }.
+ *     writable, supported, proposed_block/proposed_patch when caller supplies a
+ *     CORE block body, mutation_risk, residuals }.
  *   - provenance: CORE-owned block markers + idempotent upsert so a future --apply
  *     updates a CORE block rather than rewriting human content.
  *
@@ -67,20 +68,45 @@ export function inventorySurfaces({ cwd, home } = {}) {
   return surfaces;
 }
 
-/** Build a structured dry-run plan. proposed_content is null — content generation is a residual. */
-export function buildPlan(inventory) {
-  const surfaces = inventory.map((s, i) => ({
-    target_path: s.target_path,
-    scope: s.scope,
-    precedence: i, // chain order; nearest-cwd later = higher precedence
-    exists: s.exists,
-    current_hash: s.current_hash,
-    writable: s.writable,
-    supported: s.supported,
-    proposed_content: null, // content generation not implemented this slice
-    mutation_risk: s.scope === 'managed-policy' ? 'forbidden-external'
-      : (s.writable ? 'core-owned-block-only' : 'read-only'),
-  }));
+/** Build a structured dry-run plan. Writes nothing. */
+export function buildPlan(inventory, opts = {}) {
+  const coreBlock = opts.coreBlock;
+  const surfaces = inventory.map((s, i) => {
+    const entry = {
+      target_path: s.target_path,
+      scope: s.scope,
+      precedence: i, // chain order; nearest-cwd later = higher precedence
+      exists: s.exists,
+      current_hash: s.current_hash,
+      writable: s.writable,
+      supported: s.supported,
+      proposed_block: null,
+      proposed_patch: null,
+      mutation_risk: s.scope === 'managed-policy' ? 'forbidden-external'
+        : (s.writable ? 'core-owned-block-only' : 'read-only'),
+    };
+
+    if (coreBlock && s.writable && s.supported && s.scope !== 'managed-policy') {
+      let current = '';
+      if (s.exists) {
+        try { current = readFileSync(s.target_path, 'utf8'); }
+        catch {
+          entry.proposed_patch = { status: 'BLOCKED', reason: 'target-unreadable' };
+          return entry;
+        }
+      }
+      const proposed = upsertCoreBlock(current, coreBlock);
+      entry.proposed_block = `${CORE_BLOCK_START}\n${coreBlock}\n${CORE_BLOCK_END}`;
+      entry.proposed_patch = {
+        status: 'STAGED',
+        operation: s.exists ? 'upsert-core-block' : 'create-core-block',
+        current_hash: s.current_hash,
+        proposed_hash: sha(proposed),
+        writes: 0,
+      };
+    }
+    return entry;
+  });
   return { mode: 'dry-run', writes: 0, surface_count: surfaces.length, surfaces, residuals: [...RESIDUALS] };
 }
 
@@ -111,10 +137,13 @@ export function main(argv) {
   const apply = argv.includes('--apply');
   const md = argv.includes('--md');
   let cwd = null, home = null, target = null;
+  let coreBlock = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--cwd') cwd = argv[++i];
     else if (argv[i] === '--home') home = argv[++i];
     else if (argv[i] === '--target') target = argv[++i];
+    else if (argv[i] === '--core-block') coreBlock = argv[++i];
+    else if (argv[i] === '--core-block-file') coreBlock = readFileSync(argv[++i], 'utf8');
   }
   const inv = inventorySurfaces({ cwd: cwd || process.cwd(), home: home || homedir() });
 
@@ -131,7 +160,7 @@ export function main(argv) {
   }
 
   // Default: dry-run. Write nothing; emit the plan only.
-  const plan = buildPlan(inv);
+  const plan = buildPlan(inv, { coreBlock });
   process.stdout.write(md ? renderMd(plan) + '\n' : JSON.stringify(plan, null, 2) + '\n');
   return 0;
 }

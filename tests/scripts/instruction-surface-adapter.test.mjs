@@ -50,14 +50,31 @@ test('inventory: includes user/project/.claude/local surfaces and managed-policy
   assert.ok(mp && mp.writable === false, 'managed-policy is present and not writable');
 });
 
-test('buildPlan: dry-run, writes 0, proposed_content null, residuals name the NOT-YETs', () => {
+test('buildPlan: dry-run, writes 0, no staged patch by default, residuals name the NOT-YETs', () => {
   const plan = buildPlan(inventorySurfaces({ cwd: '/a/b', home: '/home' }));
   assert.equal(plan.mode, 'dry-run');
   assert.equal(plan.writes, 0);
-  assert.ok(plan.surfaces.every((s) => s.proposed_content === null));
+  assert.ok(plan.surfaces.every((s) => s.proposed_block === null));
+  assert.ok(plan.surfaces.every((s) => s.proposed_patch === null));
   for (const r of ['content-generation-not-implemented', '@imports-not-resolved', 'excludes-not-resolved', '.claude/rules-not-resolved']) {
     assert.ok(plan.residuals.includes(r), `residual ${r} named`);
   }
+});
+
+test('buildPlan: supplied CORE block yields staged patch without changing fixture bytes (HC_631)', () => {
+  withFixture(({ home, cwd, restore }) => {
+    const before = snapshot(home);
+    const plan = buildPlan(inventorySurfaces({ cwd, home }), { coreBlock: 'core block v1' });
+    const after = snapshot(home);
+    restore();
+    assert.deepEqual(after, before, 'planning a staged block must not write files');
+    const project = plan.surfaces.find((s) => s.target_path === join(cwd, 'CLAUDE.md'));
+    assert.ok(project.proposed_block.includes(CORE_BLOCK_START));
+    assert.ok(project.proposed_block.includes('core block v1'));
+    assert.equal(project.proposed_patch.status, 'STAGED');
+    assert.equal(project.proposed_patch.operation, 'upsert-core-block');
+    assert.equal(project.proposed_patch.writes, 0);
+  });
 });
 
 test('dry-run default writes NOTHING — fixture home is byte-for-byte stable (HC_632)', () => {
