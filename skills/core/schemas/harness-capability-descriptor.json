@@ -40,6 +40,12 @@
           "capability_kind": "observation",
           "delegate": "capability/instruction-surface-resolution-probe.mjs",
           "required_for_actions": []
+        },
+        {
+          "capability_id": "memory-visible-in-agent-context",
+          "capability_kind": "observation",
+          "delegate": "capability/memory-visible-probe.mjs",
+          "required_for_actions": []
         }
       ]
     },
