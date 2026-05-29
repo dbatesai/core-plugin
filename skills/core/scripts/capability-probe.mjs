@@ -72,12 +72,23 @@ async function invokeProbe(capability, opts = {}) {
   if (capability.delegate && capability.delegate.startsWith('capability/')) {
     const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
     const delegatePath = join(SCRIPTS_DIR, capability.delegate);
+    // opts._importer is a test seam (defaults to dynamic import) so the crash
+    // and import-failure branches can be exercised without a shipping fixture.
+    const importer = opts._importer || ((p) => import(p));
+    let mod;
     try {
-      const mod = await import(delegatePath);
+      mod = await importer(delegatePath);
+    } catch (e) {
+      // Delegate didn't load (file missing / not implemented yet) — NOT-YET, not a crash.
+      return makeNotYetRow(capability, `delegate import failed: ${e.message}`);
+    }
+    try {
       const row = await mod.probe(opts);
       return { ...row, capability_id: capability.capability_id, capability_kind: capability.capability_kind };
     } catch (e) {
-      return makeNotYetRow(capability, `delegate import failed: ${e.message}`);
+      // §7 probe-itself validation: a probe that threw mid-execution is UNKNOWN, not a
+      // missing row. Surface the crash so it can never pass silently as absent.
+      return makeUnknownRow(capability, e.message);
     }
   }
   return makeNotYetRow(capability);
@@ -111,6 +122,44 @@ function makeNotYetRow(capability, reason = 'per-harness probe script not yet im
         value: { reason, capability_id: capability.capability_id },
         agrees_with_others: false,
         weight: 'conflicting',
+      },
+    ],
+  };
+}
+
+// §7 probe-itself validation: a delegate that threw during probe() execution.
+// Distinct from NOT-YET (not implemented): the probe exists and ran but crashed,
+// so we report UNKNOWN with an explicit probe_failed evidence entry rather than
+// letting a silent crash read as a missing or passing row.
+function makeUnknownRow(capability, errorMessage) {
+  return {
+    schema_version: SCHEMA_VERSION,
+    capability_id: capability.capability_id,
+    capability_name: capability.capability_id,
+    capability_kind: capability.capability_kind,
+    freshness: 'session-stable',
+    refresh_policy: 'per-session',
+    observed_at: new Date().toISOString(),
+    harness: 'unknown',
+    workspace_id: null,
+    cwd: process.cwd(),
+    env_signals: {},
+    effective_script_root: null,
+    manifest_path: null,
+    plugin_id: null,
+    plugin_version: null,
+    cache_path: null,
+    authority: 'unknown',
+    identity_status: 'UNKNOWN',
+    mutation_permitted: false,
+    mutation_block_reason: 'identity-unknown',
+    evidence: [
+      {
+        source: 'probe-execution',
+        value: { error: String(errorMessage).slice(0, 300), capability_id: capability.capability_id },
+        agrees_with_others: false,
+        weight: 'conflicting',
+        probe_failed: true,
       },
     ],
   };
