@@ -170,9 +170,17 @@ export async function probe(opts = {}) {
   return buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, transcriptAvailable, events, cwd, observed_at });
 }
 
-function countLines(content) {
+// Count REAL lines. A trailing newline produces a final empty split element that is
+// NOT a real line — so a file of exactly N lines ending in `\n` must count as N, not
+// N+1, or it falsely trips truncation at an N-line injection window (HC blocker #3,
+// evt-202605291319). Live relevance: MEMORY.md sits near the 200-line window after the
+// v2.8.1 compaction, so the off-by-one was one compaction away from a false DEGRADED.
+// Exported for direct boundary testing.
+export function countLines(content) {
   if (!content) return 0;
-  return content.split(/\r?\n/).length;
+  const lines = content.split(/\r?\n/);
+  if (lines[lines.length - 1] === '') lines.pop();
+  return lines.length;
 }
 
 function buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, transcriptAvailable, events, cwd, observed_at }) {

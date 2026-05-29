@@ -169,9 +169,14 @@ function makeUnknownRow(capability, errorMessage) {
 
 export async function runStartup(opts = {}) {
   const descriptor = opts.descriptor || loadDescriptor();
-  // Thread descriptor through opts so delegates that need surfaces/config see it.
-  const probeOpts = { ...opts, descriptor };
   const harness = opts.harness || detectConsumingHarness();
+  // Thread descriptor AND the resolved harness through opts. Resolving harness BEFORE
+  // building probeOpts is load-bearing: a delegated probe like memory-accessed reads
+  // opts.harness to pick the transcript parser and to label its row. Building probeOpts
+  // without it let the probe fall back to its 'claude-code' default and mislabel a Codex
+  // session (HC blocker #1, evt-202605291319). The harness key is harmless to delegates
+  // that ignore it (resolve-plugin-root, target-surface).
+  const probeOpts = { ...opts, descriptor, harness };
   const harnessEntry = descriptor.harnesses[harness];
 
   // Unknown harness or no probes declared → return one informational row
@@ -204,9 +209,9 @@ export async function runStartup(opts = {}) {
 
 export async function runPreAction(actionName, opts = {}) {
   const descriptor = opts.descriptor || loadDescriptor();
-  // Thread descriptor through opts so delegates that need surfaces/config see it.
-  const probeOpts = { ...opts, descriptor };
   const harness = opts.harness || detectConsumingHarness();
+  // Resolve harness before probeOpts and thread it through (see runStartup — HC blocker #1).
+  const probeOpts = { ...opts, descriptor, harness };
   const action = descriptor.consumer_actions?.[actionName];
 
   if (!action || actionName.startsWith('_')) {
