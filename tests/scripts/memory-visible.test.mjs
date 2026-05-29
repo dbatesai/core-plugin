@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const SKILL_MD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills', 'core', 'SKILL.md');
 import {
   writeCanary, upsertCanaryLine, CANARY_TAG, canaryFilePath as writeSideFilePath,
 } from '../../skills/core/scripts/write-visibility-canary.mjs';
@@ -138,5 +141,39 @@ test('probe NOT-YET when no canary side-file', async () => {
   await withHome(async (home) => {
     const row = await probe({ workspaceId: 'none', home, cwd: '/work/Proj', transcriptPath: '/no/such' });
     assert.equal(row.identity_status, 'NOT-YET');
+  });
+});
+
+// --- startup echo-ordering wire-in (HC_627): the doc represents the order, and the
+//     documented order satisfies the verifier ---
+
+test('SKILL.md documents the canary echo-first startup order (HC_627)', () => {
+  const md = readFileSync(SKILL_MD, 'utf8');
+  assert.match(md, /CORE-VISIBILITY-CANARY/, 'names the canary tag');
+  assert.match(md, /VISIBILITY-CANARY-ECHO/, 'names the echo line format');
+  assert.match(md, /first output this session/i, 'echo is the first output');
+  assert.match(md, /before .*(read|capability probe|Bash)/i, 'echo precedes any reading tool');
+  assert.match(md, /Skill tool is allowlisted/i, 'names the Skill allowlist exception');
+  // the section is placed before the "Read protocols/startup.md" startup step
+  assert.ok(md.indexOf('VISIBILITY-CANARY-ECHO') < md.indexOf('Before the task — startup'), 'echo instruction precedes the startup-protocol read step');
+});
+
+test('probe PASS for the documented startup order: Skill → echo → Read startup.md → Bash probe', async () => {
+  await withHome(async (home) => {
+    const cwd = '/work/Proj';
+    const mem = join(home, 'MEMORY.md'); writeFileSync(mem, '# idx\n## Recent activity\n');
+    writeCanary({ workspaceId: 'ws', home, cwd, memoryPath: mem });
+    const token = JSON.parse(readFileSync(writeSideFilePath('ws', home), 'utf8')).token;
+    const tdir = join(home, '.claude', 'projects', cwd.replace(/\//g, '-')); mkdirSync(tdir, { recursive: true });
+    const tpath = join(tdir, 'sess.jsonl');
+    // exactly the documented order: allowlisted Skill load, then the echo, then reads.
+    writeFileSync(tpath, [
+      tool('Skill', { skill: 'core' }),
+      txt(`VISIBILITY-CANARY-ECHO: ${token}`),
+      tool('Read', { file_path: '/somewhere/protocols/startup.md' }),
+      tool('Bash', { command: 'node capability-probe.mjs --startup' }),
+    ].join('\n'));
+    const row = await probe({ workspaceId: 'ws', home, cwd, transcriptPath: tpath });
+    assert.equal(row.identity_status, 'PASS', 'the documented Skill→echo→Read→Bash order verifies as PASS');
   });
 });
