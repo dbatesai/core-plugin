@@ -25,7 +25,7 @@
  * Per DC-77 ships as a script; per DC-80 .mjs only.
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readTranscript } from '../read-transcript.mjs';
@@ -34,11 +34,14 @@ export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-accessed';
 
 // CORE store surfaces (the retrieval ladder's targets) vs harness-native scratch memory.
-// Boundaries are liberal on the PRECEDING char (space/quote/slash/start) because tool
-// inputs embed paths in prose, JSON, and shell args — a leading-slash requirement misses
-// `grep foo _memories/`, `"path":"_memories/"`, and `Read PROJECT.md`.
-const CORE_SURFACE_RE = /(_memories[/\\]|(?:^|[\s/\\"'])PROJECT\.md\b)/;
-const NATIVE_SURFACE_RE = /(\.codex[/\\]memories|(?:^|[\s/\\"'])MEMORY\.md\b)/;
+// A PRECEDING-char boundary (space/quote/slash/start) keeps real path embeds — `grep foo
+// _memories/`, `"path":"_memories/"`, `Read PROJECT.md` — while rejecting word-internal
+// look-alikes like `my_memories/`. A TRAILING guard `(?![.\w])` rejects extension look-
+// alikes — `PROJECT.md.bak`, `MEMORY.md.bak`, `PROJECT.markdown` — which `\b` let through
+// (HC blocker #2, evt-202605291319). `_memories[/\\]` already excludes `_memories-old/` /
+// `_memories_archive/` (no slash immediately after `_memories`).
+const CORE_SURFACE_RE = /(?:^|[\s/\\"'])(?:_memories[/\\]|PROJECT\.md(?![.\w]))/;
+const NATIVE_SURFACE_RE = /(?:\.codex[/\\]memories|(?:^|[\s/\\"'])MEMORY\.md(?![.\w]))/;
 
 /** Pure classifier over normalized transcript events. */
 export function classifyAccess({ harness, transcriptAvailable, toolExtractionPending, events, coreStorePresent }) {
@@ -72,9 +75,28 @@ function coreStorePresentAt(cwd) {
   return existsSync(join(cwd, '_memories')) || existsSync(join(cwd, 'PROJECT.md'));
 }
 
+// row-schema.md §"Producer expectations" #2: observed_at, harness, cwd, env_signals are
+// unconditional; workspace_id is part of the evidence-field contract. memory-accessed
+// omitted env_signals + workspace_id (HC blocker #4, evt-202605291319) — added here so
+// every row this probe emits satisfies the producer contract that drift/regression read.
+const ENV_SIGNAL_KEYS = ['CLAUDE_PLUGIN_ROOT', 'CODEX_PLUGIN_ROOT', 'GEMINI_PLUGIN_ROOT', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'];
+
+function gatherEnvSignals(env = {}) {
+  const out = {};
+  for (const k of ENV_SIGNAL_KEYS) out[k] = env[k] ?? null;
+  return out;
+}
+
+function readWorkspaceId(cwd) {
+  try {
+    return JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8')).workspace_id ?? null;
+  } catch { return null; }
+}
+
 export async function probe(opts = {}) {
   const home = opts.home || homedir();
   const cwd = opts.cwd || process.cwd();
+  const env = opts.env || process.env;
   const harness = opts.harness || 'claude-code';
   const observed_at = new Date().toISOString();
 
@@ -85,10 +107,13 @@ export async function probe(opts = {}) {
   const r = classifyAccess({
     harness, transcriptAvailable: t.available, toolExtractionPending, events: t.events, coreStorePresent,
   });
-  return buildRow({ ...r, harness, transcriptAvailable: t.available, coreStorePresent, cwd, observed_at });
+  return buildRow({
+    ...r, harness, transcriptAvailable: t.available, coreStorePresent, cwd, observed_at,
+    workspace_id: readWorkspaceId(cwd), env_signals: gatherEnvSignals(env),
+  });
 }
 
-function buildRow({ identity_status, reason, core = null, native = null, harness, transcriptAvailable, coreStorePresent, cwd, observed_at }) {
+function buildRow({ identity_status, reason, core = null, native = null, harness, transcriptAvailable, coreStorePresent, cwd, observed_at, workspace_id = null, env_signals = {} }) {
   return {
     schema_version: SCHEMA_VERSION,
     capability_id: CAPABILITY_ID,
@@ -98,7 +123,9 @@ function buildRow({ identity_status, reason, core = null, native = null, harness
     refresh_policy: 'per-session',
     observed_at,
     harness,
+    workspace_id,
     cwd,
+    env_signals,
     mutation_permitted: false,
     mutation_block_reason: 'read-only-context',
     identity_status,

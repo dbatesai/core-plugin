@@ -46,6 +46,12 @@
           "capability_kind": "observation",
           "delegate": "capability/memory-visible-probe.mjs",
           "required_for_actions": []
+        },
+        {
+          "capability_id": "memory-accessed",
+          "capability_kind": "observation",
+          "delegate": "capability/memory-accessed-probe.mjs",
+          "required_for_actions": []
         }
       ]
     },
@@ -64,6 +70,13 @@
           "capability_kind": "mutation",
           "delegate": "capability/target-surface-collab-files-probe.mjs",
           "required_for_actions": ["collab-files-mutating"]
+        },
+        {
+          "capability_id": "memory-accessed",
+          "capability_kind": "observation",
+          "delegate": "capability/memory-accessed-probe.mjs",
+          "_doc": "Returns UNKNOWN on Codex until tool/shell extraction lands in read-transcript (codex_tool_extraction: pending-hc-spec) — declared (not omitted) so the row is honestly labeled NOT a false negative. HC blocker #6.",
+          "required_for_actions": []
         }
       ]
     },

@@ -10,7 +10,7 @@ import {
   writeCanary, upsertCanaryLine, CANARY_TAG, canaryFilePath as writeSideFilePath,
 } from '../../skills/core/scripts/write-visibility-canary.mjs';
 import {
-  probe, classify, scanTranscript, redactToken,
+  probe, classify, scanTranscript, redactToken, countLines,
 } from '../../skills/core/scripts/capability/memory-visible-probe.mjs';
 
 function line(obj) { return JSON.stringify(obj); }
@@ -92,6 +92,32 @@ test('classify PASS: line-count within injection window does not false-degrade',
 
 test('classify DEGRADED: transcript unavailable', () => {
   assert.equal(classify({ ...OK, transcriptAvailable: false, events: [] }).identity_status, 'DEGRADED');
+});
+
+// --- countLines trailing-newline boundary (HC blocker #3) ---
+
+test('countLines: N real lines + trailing newline counts as N, not N+1', () => {
+  const content = Array.from({ length: 200 }, (_, i) => `line${i + 1}`).join('\n') + '\n';
+  assert.equal(countLines(content), 200);
+});
+
+test('countLines: no-trailing-newline and empty cases', () => {
+  assert.equal(countLines('a\nb\nc'), 3);
+  assert.equal(countLines(''), 0);
+  assert.equal(countLines('only'), 1);
+});
+
+test('blocker #3: exactly window-size memory (200 lines + \\n) does NOT trip truncation at a 200-window', () => {
+  const content = Array.from({ length: 200 }, (_, i) => `l${i}`).join('\n') + '\n';
+  const r = classify({ ...OK, events: [{ idx: 1, kind: 'echo' }], memoryLineCount: countLines(content), injectionLineWindow: 200 });
+  assert.equal(r.identity_status, 'PASS', '200 real lines at a 200-line window is complete, not truncated');
+});
+
+test('blocker #3: 201 real lines DOES trip truncation at a 200-window', () => {
+  const content = Array.from({ length: 201 }, (_, i) => `l${i}`).join('\n') + '\n';
+  const r = classify({ ...OK, events: [{ idx: 1, kind: 'echo' }], memoryLineCount: countLines(content), injectionLineWindow: 200 });
+  assert.equal(r.identity_status, 'DEGRADED');
+  assert.match(r.reason, /truncation-detected/);
 });
 
 test('classify DEGRADED: no echo', () => {
