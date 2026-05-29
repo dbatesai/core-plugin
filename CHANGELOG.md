@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] — 2026-05-29
+
+A patch fixing the visibility canary, which shipped broken in v2.8.0.
+
+### Fixed
+- `write-visibility-canary.mjs` now writes the canary as a **visible markdown line** instead of an HTML comment. A field bootstrap on 2026-05-29 proved Claude Code strips HTML comments when it injects `MEMORY.md` into context — the line-1 `<!-- CORE-VISIBILITY-CANARY -->` did not reach injected memory (injection began at the first `## ` heading) — and separately byte-truncates the injected copy at ~24.4KB. Both kept the canary out of context and blocked the memory-visible field-cycle PASS. The replacement regex now matches both the legacy HTML-comment form and the new visible form, so the upgrade is a clean in-place replacement with no accumulation. Tests cover the visible-not-comment invariant and the legacy-comment migration.
+
+### Notes
+- HC adversarial review is still outstanding at release time (the review thread is open). David authorized cutting the release with that flagged — a v2.8.2 is cheap if HC finds something.
+- The memory-visible field-cycle PASS is observable at the next bootstrap from the canary already written to `MEMORY.md`, but it is not yet demonstrated. This release's role is durability: it makes the installed plugin emit the visible canary going forward, so `/finalize` stops reverting it to an HTML comment.
+
 ## [2.8.0] — 2026-05-29
 
 This release folds in the v2.7 work that was never tagged — capability history, drift detection, the adversarial-run gate, and several new probes — and adds the v2.8 memory-visibility runtime plus the foundation scaffolding that v2.9 will wire up. There is no `v2.7.0` tag; its content ships here under 2.8.0.
