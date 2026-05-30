@@ -129,6 +129,9 @@ export function scorePrecisionRecall(retrieved, expected, forbidden) {
   if (!expSet.size) {
     return [fp > 0 ? 0.0 : 1.0, 1.0];
   }
+  if (fp > 0) {
+    return [0.0, Math.round((tp / Math.max(expSet.size, 1)) * 100) / 100];
+  }
   const precision = tp / Math.max(cleanRet.size, 1);
   const recall = tp / Math.max(expSet.size, 1);
   return [Math.round(precision * 100) / 100, Math.round(recall * 100) / 100];
@@ -155,11 +158,14 @@ export function main(argv) {
     let forbidden = t.forbidden_memories || [];
     if (typeof expected === 'string') expected = expected ? [expected] : [];
     if (typeof forbidden === 'string') forbidden = forbidden ? [forbidden] : [];
-    const topK = Math.max(1, expected.length);
-    const retrieved = simulateRetrievalTier1(query, projectPath, topK);
+    const scoreK = Math.max(1, expected.length);
+    const candidateK = Math.max(5, scoreK);
+    const candidates = simulateRetrievalTier1(query, projectPath, candidateK);
+    const retrieved = candidates.slice(0, scoreK);
+    const forbiddenHits = candidates.filter(x => forbidden.includes(x));
     const [p, r] = scorePrecisionRecall(retrieved, expected, forbidden);
-    const status = (p >= 0.8 && r >= 0.8) ? 'PASS' : (p < 0.5 || r < 0.5) ? 'FAIL' : 'INVESTIGATE';
-    results.push({ query, precision: p, recall: r, status, retrieved: retrieved.slice(0, 5), expected });
+    const status = forbiddenHits.length ? 'FAIL' : (p >= 0.8 && r >= 0.8) ? 'PASS' : (p < 0.5 || r < 0.5) ? 'FAIL' : 'INVESTIGATE';
+    results.push({ query, precision: p, recall: r, status, retrieved: candidates.slice(0, 5), expected, forbiddenHits });
     const icon = status === 'PASS' ? 'PASS' : status === 'FAIL' ? 'FAIL' : 'INV';
     console.log(`[${icon}] P=${p} R=${r} -- ${query.slice(0, 60)}`);
   }
@@ -182,7 +188,7 @@ export function main(argv) {
   }
   reportLines.push('\n## Detail\n\n');
   for (const r of results) {
-    reportLines.push(`**${r.query}**  \nExpected: ${JSON.stringify(r.expected)}  \nRetrieved (top 5): ${JSON.stringify(r.retrieved)}\n\n`);
+    reportLines.push(`**${r.query}**  \nExpected: ${JSON.stringify(r.expected)}  \nRetrieved (top 5): ${JSON.stringify(r.retrieved)}  \nForbidden hits: ${JSON.stringify(r.forbiddenHits)}\n\n`);
   }
 
   const reportPath = join(reportDir, 'REPORT.md');
