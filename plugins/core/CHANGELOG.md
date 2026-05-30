@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] — (pending merge)
+
+This release ships the instruction-surface generator system (CONTRACT.md → harness instruction files). It also includes the full v2.9 evidence-layer hardening, native Codex marketplace support for both repos, and a retrieval-quality analyzer fix that makes metrics fail honest when retrieval-shaped rows are absent. End-to-end retrieval-effectiveness proof remains open until startup/orient/refresh emit retrieval-shaped rows and expected/forbidden-memory scenarios pass. The MAJOR bump reflects the maintenance-model change: generating CLAUDE.md/AGENTS.md/GEMINI.md from a single CONTRACT.md changes how projects maintain instruction surfaces.
+
+### Added (v3.0 — instruction-surface generator system)
+- `skills/core/scripts/contract-format.mjs` — parses the canonical CONTRACT.md source format
+- `skills/core/scripts/generate-claude-md.mjs`, `generate-agents-md.mjs`, `generate-gemini-md.mjs` — generate harness instruction files from CONTRACT.md
+- `skills/core/scripts/migrate-to-contract.mjs` — bootstraps a draft CONTRACT.md from existing files; non-destructive
+- Fail-closed release gate: `last_revised: unknown` or non-canonical `canonical_for` → exit 1
+- `skills/core/scripts/audit-memory-boundary.mjs` — read-only sampled audit surfacing native-only memory entries as graduation candidates
+- `skills/core/scripts/validate-adversarial-artifacts.mjs` — validates adversarial protocol artifacts (initial-frame, persuasion-log, mind-changes)
+- `schemas/adversarial-artifacts.md` — schema spec for adversarial output artifacts
+- Golden tests for all three generators + contract parser
+
+### Added (v2.9 — evidence layer)
+- `skills/core/scripts/analyze-retrieval-skip.mjs` — transcript-based scan for the recognition-failure signature; candidates not verdicts
+- Byte-cap truncation detection in `capability/memory-visible-probe.mjs` — line-count check replaced with byte check (~24.4KB injection cap)
+- Codex `function_call`/`custom_tool_call` extraction in `read-transcript.mjs` — flips `memory-accessed` from always-UNKNOWN on Codex to classifying
+- `harnesses/claude-code.md` adapter modernization: Workflow/Teams, subagent_type catalog, ScheduleWakeup cadence default; doc-regression tests
+
+### Added (Codex marketplace support)
+- `plugins/core/` — self-contained Codex marketplace plugin directory; enables native `codex plugin marketplace add dbatesai/core-plugin --ref main && codex plugin add core@core`
+- `scripts/sync-codex-plugin.sh` — sync helper for keeping plugins/core/ current
+- CI gate verifying marketplace.json source.path integrity
+
+### Open verification gates
+- End-to-end retrieval-effectiveness proof remains `NOT-YET`: startup/orient/refresh still need to emit retrieval-shaped rows with selected unit IDs, tier path, suppression counts, context-pack size, and outcome/usefulness fields, then pass expected-memory and forbidden-memory scenario tests.
+
+### Fixed
+- `analyze-retrieval-quality.mjs` — gated on `isRetrievalShapedEvent()`; stops counting telemetry rows as retrieval proof; surfaces the split plainly
+- `check-units.mjs` — render-only exemption narrowed to generated `capability-drift-log.md` only; real units mentioning the phrase still validate
+- `protocols/startup.md` — removed stale "Codex has no equivalent auto-memory" text; aligned with `harnesses/codex.md §read-auto-memory`
+- Anti-anchoring probe: `CLOSURE_TARGET` corrected from `v2.8.0` (never closed) to `v2.9+`
+- `skills/finalize/SKILL.md` — added Step 3.5 ROADMAP.md regen (documented in ROADMAP header but missing from the skill)
+
 ## [2.8.1] — 2026-05-29
 
 A patch fixing the visibility canary, which shipped broken in v2.8.0.
