@@ -100,27 +100,44 @@ This feeds the priority function's recency (R) and frequency (F) signals for nex
 
 Every Tier 1+ retrieval event writes one JSONL record to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`. The log is operational telemetry, not diagnostic scaffolding — debug mode augments these entries with verbose diagnostic fields but does not replace the base log. The corpus is what makes retrieval-quality analysis possible across sessions.
 
-The writer is the agent inline. There is no harness hook that intercepts retrieval and writes the log; when you run a retrieval, you write the entry. Per-event schema:
+The writer is the agent inline through the producer helper. There is no harness hook that intercepts retrieval and writes the log; when you run a retrieval, you write the entry:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/record-retrieval-event.mjs <project> --event-json '<json>'
+```
+
+Substitute the harness-resolved plugin root (`CORE_ROOT`, `CODEX_PLUGIN_ROOT`, or `GEMINI_PLUGIN_ROOT`) when `CLAUDE_PLUGIN_ROOT` is not the active install root. The helper validates the row before write and reuses `log-event.mjs`, so the same call writes both the legacy JSONL row and the OTel `core.retrieval` span. Per-event schema:
 
 ```jsonl
 {
-  "ts": "2026-05-19T14:32:00Z",
-  "session": "<session-id-or-date-slug>",
-  "trigger": "session-start | mid-conversation | subagent",
+  "kind": "retrieval",
+  "trigger": "session-start | mid-conversation | subagent | refresh-context",
   "intent_topics": ["topic-1", "topic-2"],
   "tier_reached": 2,
+  "escalation_path": [1, 2],
   "units_retrieved": [
     {"id": "dc-12-routing-rewrite", "score": 0.87, "tier": 1},
     {"id": "dc-09-router-design-review", "score": 0.72, "tier": 2}
   ],
   "dip_back_count": 1,
-  "escalation_path": [1, 2]
+  "candidate_count": 8,
+  "selected_count": 2,
+  "edge_count": 3,
+  "retired_suppressed_count": 1,
+  "stale_suppressed_count": 0,
+  "native_memory_suppressed_count": 0,
+  "context_pack_token_estimate": 620,
+  "usefulness_outcome": "useful"
 }
 ```
 
 - `tier_reached`: highest tier that fired in this event.
 - `escalation_path`: the sequence of tiers attempted, in order.
 - `dip_back_count`: how many additional retrieval calls happened *after* this one in the same response turn. Implicit usefulness signal — if you retrieved a unit and immediately needed to dip back for more context, that unit was less useful than the score predicted.
+- `candidate_count` / `selected_count`: how much candidate material surfaced vs. entered the context pack.
+- `retired_suppressed_count`, `stale_suppressed_count`, `native_memory_suppressed_count`: suppression signals that prove irrelevant or wrong-surface memory did not enter the pack.
+- `context_pack_token_estimate`: estimated payload size after selection and suppression.
+- `usefulness_outcome`: later judgment (`useful`, `partial`, `noisy`, `miss`, or similarly plain label) after the answer path is known.
 
 For Tier 2 walks, log the seed unit and the result set together as one event (one JSONL line). For Tier 3 misses (Explore returned no relevant answer), set `units_retrieved: []`, `tier_reached: 3`, and add `"result": "miss"`. The DC-67 trip-wire — repeated Tier 3 misses on similar queries — now runs per-project against this log via `scripts/analyze-retrieval-quality.mjs`.
 

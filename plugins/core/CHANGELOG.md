@@ -19,6 +19,7 @@ This release ships the instruction-surface generator system (CONTRACT.md → har
 - `skills/core/scripts/audit-memory-boundary.mjs` — read-only sampled audit surfacing native-only memory entries as graduation candidates
 - `skills/core/scripts/validate-adversarial-artifacts.mjs` — validates adversarial protocol artifacts (initial-frame, persuasion-log, mind-changes)
 - `schemas/adversarial-artifacts.md` — schema spec for adversarial output artifacts
+- `skills/core/scripts/record-retrieval-event.mjs` — validated retrieval-evidence producer that writes analyzer-visible rows and OTel `core.retrieval` spans
 - Golden tests for all three generators + contract parser
 
 ### Added (v2.9 — evidence layer)
@@ -33,7 +34,7 @@ This release ships the instruction-surface generator system (CONTRACT.md → har
 - CI gate verifying marketplace.json source.path integrity
 
 ### Open verification gates
-- End-to-end retrieval-effectiveness proof remains `NOT-YET`: startup/orient/refresh still need to emit retrieval-shaped rows with selected unit IDs, tier path, suppression counts, context-pack size, and outcome/usefulness fields, then pass expected-memory and forbidden-memory scenario tests.
+- End-to-end retrieval-effectiveness proof remains `NOT-YET`: live startup/orient/refresh runs still need to use the producer to emit retrieval-shaped rows with selected unit IDs, tier path, suppression counts, context-pack size, and outcome/usefulness fields, then pass expected-memory and forbidden-memory scenario tests.
 
 ### Fixed
 - `analyze-retrieval-quality.mjs` — gated on `isRetrievalShapedEvent()`; stops counting telemetry rows as retrieval proof; surfaces the split plainly
