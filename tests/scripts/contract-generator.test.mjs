@@ -139,6 +139,35 @@ test('HARNESS_OUTPUT maps harnesses to canonical filenames', () => {
   assert.equal(HARNESS_OUTPUT['gemini'], 'GEMINI.md');
 });
 
+// --- Hale review fixes (generator warnings + override hash fidelity) ---
+
+test('generate: warns when target harness is not in canonical_for', async () => {
+  const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex", "gemini"]', 'canonical_for: ["codex"]'));
+  try {
+    const r = await generate({ contractPath: p, mode: 'dry-run' }); // generate-claude-md, but contract is codex-only
+    assert.ok(r.warnings.some((w) => /not in canonical_for/.test(w)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('generate: warns when last_revised is missing (determinism dependency)', async () => {
+  const { dir, p } = tmpContract(FIXTURE.replace('last_revised: 2026-04-01\n', ''));
+  try {
+    const r = await generate({ contractPath: p, mode: 'dry-run' });
+    assert.ok(r.warnings.some((w) => /last_revised/.test(w)));
+    assert.ok(r.wouldWrite.includes('generated_at: unknown'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('parseOverrides: hash is over RAW bytes — a whitespace-only edit changes the hash', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ov-'));
+  try {
+    const a = join(dir, 'a.override'); const b = join(dir, 'b.override');
+    writeFileSync(a, 'note');
+    writeFileSync(b, 'note\n\n  '); // same trimmed content, different raw bytes
+    assert.notEqual(parseOverrides(a).hash, parseOverrides(b).hash, 'raw-byte hash distinguishes whitespace edits');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('all three generators: each emits its own harness-only section, excludes the others', async () => {
   const { generate: genClaude } = await import('../../skills/core/scripts/generate-claude-md.mjs');
   const { generate: genAgents } = await import('../../skills/core/scripts/generate-agents-md.mjs');

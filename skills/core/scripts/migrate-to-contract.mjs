@@ -35,8 +35,25 @@ function meaningfulLines(text) {
   return stripProvenance(text).split('\n').map((l) => l.trimEnd()).filter((l) => l.trim() !== '');
 }
 
+// Frontmatter scalars are interpolated into YAML — reject values that could inject extra
+// lines/keys (Hale security review: `contract_id: "demo\nmalicious: true"`).
+function safeScalar(name, value, pattern) {
+  const v = String(value ?? '');
+  if (!pattern.test(v)) throw new Error(`migrate: invalid ${name} '${v}' — must match ${pattern} (frontmatter-injection guard)`);
+  return v;
+}
+
 export function migrateToContract({ files = {}, contractId, lastRevised }) {
-  const harnesses = Object.keys(files).filter((h) => KNOWN_HARNESSES.includes(h) && files[h] != null);
+  // Validate before interpolating into YAML frontmatter.
+  contractId = safeScalar('contract_id', contractId, /^[A-Za-z0-9._-]+$/);
+  lastRevised = safeScalar('last_revised', lastRevised, /^(\d{4}-\d{2}-\d{2}|unknown)$/);
+
+  const allKeys = Object.keys(files).filter((h) => files[h] != null);
+  const harnesses = allKeys.filter((h) => KNOWN_HARNESSES.includes(h));
+  const inputWarnings = allKeys.filter((h) => !KNOWN_HARNESSES.includes(h)).map((h) => `ignoring unknown harness key '${h}' (known: ${KNOWN_HARNESSES.join(', ')})`);
+  if (harnesses.length === 0) {
+    throw new Error(`migrate: no known harness files provided (got [${allKeys.join(', ')}]; need one of ${KNOWN_HARNESSES.join(', ')})`);
+  }
   // Count each normalized line across harnesses, preserving first-seen order.
   const counts = new Map();   // line → Set(harness)
   const order = [];
@@ -75,6 +92,7 @@ export function migrateToContract({ files = {}, contractId, lastRevised }) {
   return {
     draft: out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n',
     stats: { shared: shared.length, perHarness: Object.fromEntries(harnesses.map((h) => [h, perHarnessUnique[h].length])) },
+    warnings: inputWarnings,
   };
 }
 
@@ -91,8 +109,18 @@ if (isMain()) {
     if (p && existsSync(p)) files[h] = readFileSync(p, 'utf8');
   }
   if (Object.keys(files).length === 0) { process.stderr.write('no harness files found (pass --claude/--codex/--gemini)\n'); process.exit(1); }
-  const r = migrateToContract({ files, contractId: opt('id') || 'project', lastRevised: opt('last-revised') || 'unknown' });
+  let r;
+  try { r = migrateToContract({ files, contractId: opt('id') || 'project', lastRevised: opt('last-revised') || 'unknown' }); }
+  catch (e) { process.stderr.write(`${e.message}\n`); process.exit(1); }
+  (r.warnings || []).forEach((w) => process.stderr.write(`(warn) ${w}\n`));
   const writeTo = opt('write');
-  if (writeTo) { writeFileSync(writeTo, r.draft); process.stdout.write(`wrote DRAFT ${writeTo} (${r.stats.shared} shared lines) — review before adopting\n`); }
-  else process.stdout.write(r.draft);
+  if (writeTo) {
+    // Never silently clobber an existing contract (Hale: draft-for-review, not overwrite).
+    if (existsSync(writeTo) && !args.includes('--force')) {
+      process.stderr.write(`refusing to overwrite existing ${writeTo} without --force (this is a DRAFT for review; protect the adopted contract)\n`);
+      process.exit(1);
+    }
+    writeFileSync(writeTo, r.draft);
+    process.stdout.write(`wrote DRAFT ${writeTo} (${r.stats.shared} shared lines) — review before adopting\n`);
+  } else process.stdout.write(r.draft);
 }

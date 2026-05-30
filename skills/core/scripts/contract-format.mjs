@@ -107,8 +107,10 @@ export function parseContract(contractPath) {
 
 export function parseOverrides(overridePath) {
   if (!overridePath || !existsSync(overridePath)) return { present: false, content: '', hash: 'none' };
-  const content = readFileSync(overridePath, 'utf8').trim();
-  return { present: true, content, hash: sha256(content) };
+  const raw = readFileSync(overridePath, 'utf8');
+  // Hash the RAW bytes (Hale review) — a whitespace-only edit still changes the file and
+  // must change override_block_hash. content is trimmed only for clean appending.
+  return { present: true, content: raw.trim(), hash: sha256(raw) };
 }
 
 // Render the harness-facing markdown body (sans provenance header).
@@ -166,18 +168,29 @@ export function withProvenance(body, provenance) {
 export async function generateForHarness({ harness, contractPath, outputPath, overridePath = null, mode = 'dry-run' }) {
   const contract = parseContract(contractPath);
   const overrides = parseOverrides(overridePath);
+  const warnings = [...contract.warnings];
+  // Hale review: generating for a harness the contract doesn't declare canonical_for is
+  // almost always a mistake — surface it rather than silently emit.
+  if (!contract.canonicalFor.includes(harness)) {
+    warnings.push(`generating for '${harness}' which is not in canonical_for [${contract.canonicalFor.join(', ')}] — output may not be intended`);
+  }
+  // Hale review: determinism depends on last_revised; without it generated_at is 'unknown'
+  // and --check drift is unreliable. Warn loudly.
+  if (!contract.frontmatter.last_revised) {
+    warnings.push("contract has no 'last_revised' — generated_at falls back to 'unknown'; set last_revised so output is deterministic and --check is reliable");
+  }
   const body = renderForHarness(contract, harness, overrides);
   const provenance = computeProvenance({ contract, overrides });
   const full = withProvenance(body, provenance);
 
   if (mode === 'check') {
     const existing = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : null;
-    return { drift: existing !== full, warnings: contract.warnings };
+    return { drift: existing !== full, warnings };
   }
   if (mode === 'write') {
     const { writeFileSync } = await import('node:fs');
     writeFileSync(outputPath, full);
-    return { written: outputPath, warnings: contract.warnings };
+    return { written: outputPath, warnings };
   }
-  return { wouldWrite: full, warnings: contract.warnings };
+  return { wouldWrite: full, warnings };
 }

@@ -57,3 +57,31 @@ test('migrate: output is marked DRAFT for user review (dry-run default)', () => 
   const r = migrateToContract({ contractId: 'p', lastRevised: '2026-04-01', files: { 'claude-code': 'x', codex: 'x' } });
   assert.ok(/DRAFT/i.test(r.draft), 'draft contract flagged for review, not auto-adopted');
 });
+
+// --- Hale review fixes (security + input validation) ---
+
+test('migrate: YAML-injection contract_id throws (frontmatter-injection guard)', () => {
+  assert.throws(
+    () => migrateToContract({ contractId: 'demo\nmalicious: true', lastRevised: '2026-04-01', files: { 'claude-code': 'x', codex: 'x' } }),
+    /contract_id/,
+  );
+});
+
+test('migrate: malformed last_revised throws', () => {
+  assert.throws(
+    () => migrateToContract({ contractId: 'demo', lastRevised: 'whenever\nx: y', files: { 'claude-code': 'x' } }),
+    /last_revised/,
+  );
+});
+
+test('migrate: no known harness throws (not a silent empty canonical_for)', () => {
+  assert.throws(
+    () => migrateToContract({ contractId: 'demo', lastRevised: '2026-04-01', files: { borg: 'x' } }),
+    /no known harness/,
+  );
+});
+
+test('migrate: unknown harness key warns (ignored, not silently dropped)', () => {
+  const r = migrateToContract({ contractId: 'demo', lastRevised: '2026-04-01', files: { 'claude-code': 'x', borg: 'y' } });
+  assert.ok(r.warnings.some((w) => /borg/.test(w)));
+});
