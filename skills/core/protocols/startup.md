@@ -31,20 +31,30 @@ Resolve deterministically when you can; ask the user only when it's genuinely am
 
 Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; you'll route to new-workspace setup below unless the project has v1-era content that needs migrating.
 
-**Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is set by the harness in hook script environments, but is NOT injected into agent Bash tool calls. Resolve once at the start of workspace resolution and use the result for every subsequent `node …` invocation:
+**Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is NOT injected into agent Bash tool calls, and `installed_plugins.json` has no usable entry for a local/source/dev install (`core-dev`) — both are unreliable as the *primary* source, and relying on them is what produced the field failure where CORE_ROOT resolved empty and every script was skipped. The one source always available is **this skill's base directory**: the harness shows it in the SKILL.md header as `<plugin-root>/skills/core`. Make that primary — strip the trailing `/skills/core` and substitute the concrete path for `<PLUGIN_ROOT>` below. The env var and `installed_plugins.json` are fallbacks only. Resolve once and reuse for every `node …` invocation:
 
 ```bash
-# Preference order: CLAUDE_PLUGIN_ROOT env → installed_plugins.json → not found
-CORE_ROOT="${CLAUDE_PLUGIN_ROOT}"
+# Preference order: skill base directory (always injected) → CLAUDE_PLUGIN_ROOT env →
+# installed_plugins.json. Substitute <PLUGIN_ROOT> with this skill's base directory minus
+# the trailing "/skills/core" (read it from the SKILL.md header). If you cannot substitute
+# it, the line no-ops and the fallbacks run — never worse than the old behavior.
+CORE_ROOT="<PLUGIN_ROOT>"
+if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-check.mjs" ]; then
+  CORE_ROOT="${CLAUDE_PLUGIN_ROOT}"
+fi
 if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-check.mjs" ]; then
   CORE_ROOT=$(node -e "
     try {
-      const d = JSON.parse(require('fs').readFileSync(
-        require('os').homedir() + '/.claude/plugins/installed_plugins.json', 'utf8'));
-      const entries = d.plugins?.['core@core'] || [];
+      const fs = require('fs'), os = require('os');
+      const d = JSON.parse(fs.readFileSync(os.homedir() + '/.claude/plugins/installed_plugins.json', 'utf8'));
+      const plugins = d.plugins || {};
+      // core@core first, then any 'core@<marketplace>' key — the marketplace name may differ.
+      let entries = plugins['core@core'];
+      if (!entries) { const k = Object.keys(plugins).find(k => /^core@/.test(k)); entries = k ? plugins[k] : []; }
+      entries = entries || [];
       const entry = entries.find(e => e.scope === 'user') || entries[0];
       process.stdout.write((entry?.installPath || '').replace(/\\/g, '/'));
-    } catch(e) {}
+    } catch (e) {}
   " 2>/dev/null)
 fi
 # Validate — warn and skip scripts if still not resolved or scripts dir absent
