@@ -40,7 +40,9 @@ export const CAPABILITY_ID = 'memory-accessed';
 // alikes — `PROJECT.md.bak`, `MEMORY.md.bak`, `PROJECT.markdown` — which `\b` let through
 // (HC blocker #2, evt-202605291319). `_memories[/\\]` already excludes `_memories-old/` /
 // `_memories_archive/` (no slash immediately after `_memories`).
-const CORE_SURFACE_RE = /(?:^|[\s/\\"'])(?:_memories[/\\]|PROJECT\.md(?![.\w]))/;
+// Exported as the single source of truth for "a tool touched a CORE store surface" —
+// reused by analyze-retrieval-skip.mjs (v2.9 Slice B) so the two consumers can't drift.
+export const CORE_SURFACE_RE = /(?:^|[\s/\\"'])(?:_memories[/\\]|PROJECT\.md(?![.\w]))/;
 const NATIVE_SURFACE_RE = /(?:\.codex[/\\]memories|(?:^|[\s/\\"'])MEMORY\.md(?![.\w]))/;
 
 /** Pure classifier over normalized transcript events. */
