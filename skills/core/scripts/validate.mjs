@@ -84,11 +84,34 @@ export const STOPWORDS = new Set([
   'dont','isnt','wont','cant','doesnt','wouldnt','couldnt',
 ]);
 
+export function extractQueryFeatures(query) {
+  const rawTerms = query.split(/\s+/).map(t => t.toLowerCase().replace(/[.,?!()\[\]"']/g, '')).filter(Boolean);
+  const terms = [];
+  const negatedTerms = [];
+  for (let i = 0; i < rawTerms.length; i += 1) {
+    const term = rawTerms[i];
+    const next = rawTerms[i + 1];
+    if (term === 'no' && next && next.length >= 3 && !STOPWORDS.has(next)) {
+      negatedTerms.push(next);
+      i += 1;
+      continue;
+    }
+    if (term.length >= 3 && !STOPWORDS.has(term)) terms.push(term);
+  }
+  return {
+    terms: [...new Set(terms)],
+    negatedTerms: [...new Set(negatedTerms)],
+  };
+}
+
+function hasNegatedTerm(content, term) {
+  return content.includes(`no ${term}`);
+}
+
 export function simulateRetrievalTier1(query, projectPath, topK = 3) {
   const unitsDir = join(projectPath, '_memories');
-  const rawTerms = query.split(/\s+/).map(t => t.toLowerCase().replace(/[.,?!()\[\]"']/g, ''));
-  const terms = rawTerms.filter(t => t.length >= 3 && !STOPWORDS.has(t));
-  if (!terms.length) return [];
+  const { terms, negatedTerms } = extractQueryFeatures(query);
+  if (!terms.length && !negatedTerms.length) return [];
 
   const scored = [];
   function walkDir(dir) {
@@ -108,7 +131,12 @@ export function simulateRetrievalTier1(query, projectPath, topK = 3) {
         const slug = entry.name.replace(/\.md$/, '').toLowerCase();
         const bodyHits = terms.reduce((n, t) => n + (content.includes(t) ? 1 : 0), 0);
         const slugHits = terms.reduce((n, t) => n + (slug.includes(t) ? 1 : 0), 0);
-        const s = bodyHits + 2 * slugHits;
+        const negatedHits = negatedTerms.reduce((n, t) => n + (hasNegatedTerm(content, t) ? 1 : 0), 0);
+        const contradictedNegations = negatedTerms.reduce((n, t) => {
+          if (!content.includes(t) && !slug.includes(t)) return n;
+          return hasNegatedTerm(content, t) ? n : n + 1;
+        }, 0);
+        const s = bodyHits + 2 * slugHits + negatedHits - 10 * contradictedNegations;
         if (s > 0) scored.push([s, entry.name.replace(/\.md$/, '')]);
       } catch {}
     }
