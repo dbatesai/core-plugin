@@ -64,6 +64,19 @@ test('appendRows: first write creates file with one entry', () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test('appendRows/readHistory: project-local store supports sandboxed capability history', () => {
+  const project = mkdtempSync(join(tmpdir(), 'caphist-project-'));
+  try {
+    const res = appendRows('ws-project', [sampleRow()], { session_id: 's1' }, { project });
+    assert.match(res.path, /_metrics\/capability-history\/ws-project\.jsonl$/);
+    assert.ok(existsSync(res.path), 'project-local history file created');
+    const hist = readHistory('ws-project', { project });
+    assert.equal(hist.length, 1);
+    assert.equal(hist[0].workspace_id, 'ws-project');
+    assert.equal(hist[0].session_id, 's1');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
 test('appendRows: second write appends without overwriting', () => {
   const home = tmpHome();
   try {

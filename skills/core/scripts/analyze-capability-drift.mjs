@@ -186,6 +186,16 @@ export function renderDriftLog(drift, healing, regressions, now) {
   return lines.join('\n');
 }
 
+export function loadCapabilityHistory(workspaceId, project = null, opts = {}) {
+  const histories = [];
+  try { histories.push(...readHistory(workspaceId, { home: opts.home })); } catch { /* unavailable home history */ }
+  if (project) {
+    try { histories.push(...readHistory(workspaceId, { project })); } catch { /* unavailable project history */ }
+  }
+  return histories.sort((a, b) =>
+    String(a.observed_at ?? '').localeCompare(String(b.observed_at ?? '')));
+}
+
 export function main(argv) {
   let project = null, workspaceId = null;
   for (let i = 0; i < argv.length; i++) {
@@ -205,7 +215,7 @@ export function main(argv) {
   }
   if (!workspaceId) { process.stderr.write('could not resolve workspace id (pass --workspace-id)\n'); return 2; }
 
-  const history = readHistory(workspaceId);
+  const history = loadCapabilityHistory(workspaceId, project);
   const { drift, healing } = detectDrift(history);
   const regressions = detectRegression(history);
   const now = new Date().toISOString();

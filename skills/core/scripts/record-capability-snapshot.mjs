@@ -12,14 +12,15 @@
  * accumulated history in /finalize and /process-memory.
  *
  * CLI: node record-capability-snapshot.mjs --workspace-id <id>
- *      [--harness <h>] [--cwd <path>] [--session-id <sid>]
+ *      [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>]
  *
  * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
  */
 
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 import { runStartup, SCHEMA_VERSION } from './capability-probe.mjs';
 import { appendRows } from './capability-history.mjs';
 
@@ -38,6 +39,20 @@ export function resolveSessionId(opts = {}) {
   return `session-${Date.now().toString(36)}-${randomBytes(3).toString('hex')}`;
 }
 
+function isStoreUnavailable(err) {
+  return ['EPERM', 'EACCES', 'EROFS', 'ENOTDIR'].includes(err?.code);
+}
+
+function resolveFallbackProject(opts = {}) {
+  const candidates = [opts.project, opts.cwd, process.cwd()].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(join(candidate, 'workspace.json'))) return candidate;
+    } catch { /* ignore invalid candidate */ }
+  }
+  return null;
+}
+
 /**
  * Probe the current session's capabilities and append them to the workspace
  * history. Returns a small summary. opts.home is a test seam (defaults to $HOME).
@@ -54,36 +69,56 @@ export async function recordSnapshot(opts = {}) {
   if (opts.home) appendOpts.home = opts.home;
   if (opts.lockOpts) appendOpts.lockOpts = opts.lockOpts;
 
-  appendRows(
-    workspaceId,
-    rows,
-    { schema_version: SCHEMA_VERSION, runner_version: SCHEMA_VERSION, session_id: sessionId },
-    appendOpts,
-  );
+  let appendResult;
+  let storage = 'home';
+  let primaryError = null;
+  try {
+    appendResult = appendRows(
+      workspaceId,
+      rows,
+      { schema_version: SCHEMA_VERSION, runner_version: SCHEMA_VERSION, session_id: sessionId },
+      appendOpts,
+    );
+  } catch (err) {
+    const project = resolveFallbackProject(opts);
+    if (!project || !isStoreUnavailable(err)) throw err;
+    primaryError = err.message;
+    storage = 'project-fallback';
+    appendResult = appendRows(
+      workspaceId,
+      rows,
+      { schema_version: SCHEMA_VERSION, runner_version: SCHEMA_VERSION, session_id: sessionId },
+      { ...appendOpts, project },
+    );
+  }
 
   return {
     workspace_id: workspaceId,
     harness: startup.harness,
     session_id: sessionId,
     appended: rows.length,
+    path: appendResult.path,
+    storage,
+    ...(primaryError ? { primary_error: primaryError } : {}),
     summary: startup.summary,
   };
 }
 
 export async function main(argv) {
-  let workspaceId = null, harness = null, cwd = null, sessionId = null;
+  let workspaceId = null, harness = null, cwd = null, sessionId = null, project = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--workspace-id') workspaceId = argv[++i];
     else if (argv[i] === '--harness') harness = argv[++i];
     else if (argv[i] === '--cwd') cwd = argv[++i];
     else if (argv[i] === '--session-id') sessionId = argv[++i];
+    else if (argv[i] === '--project') project = argv[++i];
   }
   if (!workspaceId) {
-    process.stderr.write('usage: record-capability-snapshot.mjs --workspace-id <id> [--harness <h>] [--cwd <path>] [--session-id <sid>]\n');
+    process.stderr.write('usage: record-capability-snapshot.mjs --workspace-id <id> [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>]\n');
     return 2;
   }
   try {
-    const r = await recordSnapshot({ workspaceId, harness, cwd, sessionId });
+    const r = await recordSnapshot({ workspaceId, harness, cwd, sessionId, project });
     console.log(JSON.stringify(r));
     return 0;
   } catch (e) {
