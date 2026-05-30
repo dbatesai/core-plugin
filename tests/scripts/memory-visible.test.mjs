@@ -90,6 +90,30 @@ test('classify PASS: line-count within injection window does not false-degrade',
   assert.equal(classify({ ...OK, events, memoryLineCount: 150, injectionLineWindow: 200 }).identity_status, 'PASS');
 });
 
+// --- Slice A: byte-window truncation (the live class line-count alone misses) ---
+// Field evidence (session 56, 2026-05-30): MEMORY.md was 196 lines / 25,684 bytes —
+// UNDER the 200-line window but OVER the ~24,400-byte injection cap. The tail dropped
+// silently ("only part of it was loaded") while a line-only probe would falsely PASS.
+// Defense-in-depth (Hale's call): keep the line window AND add the byte window.
+test('classify DEGRADED (byte cap): byte-count over window with line-count UNDER window → truncation-detected', () => {
+  const events = [{ idx: 1, kind: 'echo' }, { idx: 2, kind: 'tool', name: 'Bash' }];
+  const r = classify({ ...OK, events, memoryLineCount: 196, injectionLineWindow: 200, memoryByteCount: 25684, injectionByteWindow: 24400 });
+  assert.equal(r.identity_status, 'DEGRADED', '196 lines / 25.7KB is byte-truncated even though under the line window');
+  assert.match(r.reason, /truncation-detected/);
+});
+
+test('classify PASS: under BOTH line and byte windows does not false-degrade', () => {
+  const events = [{ idx: 1, kind: 'echo' }];
+  assert.equal(classify({ ...OK, events, memoryLineCount: 150, injectionLineWindow: 200, memoryByteCount: 18000, injectionByteWindow: 24400 }).identity_status, 'PASS');
+});
+
+test('classify DEGRADED (byte cap): byte truncation reported when line-count is unmeasured (null)', () => {
+  const events = [{ idx: 1, kind: 'echo' }];
+  const r = classify({ ...OK, events, memoryLineCount: null, memoryByteCount: 30000, injectionByteWindow: 24400 });
+  assert.equal(r.identity_status, 'DEGRADED');
+  assert.match(r.reason, /truncation-detected/);
+});
+
 test('classify DEGRADED: transcript unavailable', () => {
   assert.equal(classify({ ...OK, transcriptAvailable: false, events: [] }).identity_status, 'DEGRADED');
 });

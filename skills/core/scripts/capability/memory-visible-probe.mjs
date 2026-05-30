@@ -39,6 +39,12 @@ import { createHash } from 'node:crypto';
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-visible-in-agent-context';
 export const DEFAULT_INJECTION_LINE_WINDOW = 200;
+// Byte cap on the injected MEMORY.md window. Field-observed (session 56, 2026-05-30):
+// Claude Code's startup warning displays "limit: 24.4KB" and renders a 25,684-byte file
+// as "25.7KB" — decimal KB (÷1000), so the cap is 24,400 bytes, NOT 24.4×1024. A file can
+// sit UNDER the 200-line window yet OVER this byte cap (196 lines / 25.7KB that session),
+// truncating silently while a line-only probe falsely PASSes. Byte + line = defense-in-depth.
+export const DEFAULT_INJECTION_BYTE_WINDOW = 24400;
 
 // Tools that cannot read the canary surfaces, so they're safe before the echo.
 // Deliberately tiny (HC_623 #2): everything else degrades PASS conservatively.
@@ -99,7 +105,7 @@ export function scanTranscript(lines, token) {
 }
 
 /** Pure classifier (HC_623-hardened bar). */
-export function classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW }) {
+export function classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW }) {
   if (!token) return { identity_status: 'NOT-YET', reason: 'no canary recorded — write step has not run' };
   // Blocker 1: an echo only proves injection if the canary actually landed in the
   // injected memory window. Without that, PASS would prove transcript echo, not memory.
@@ -108,9 +114,14 @@ export function classify({ token, memoryWritten, memoryHasToken, transcriptAvail
   }
   // Blocker 1b: a line-1 canary proves visibility, not load-completeness. If the
   // memory file exceeds the known injection window, the tail can drop silently while
-  // the canary still echoes. That is DEGRADED, never PASS.
+  // the canary still echoes. That is DEGRADED, never PASS. The window is enforced on
+  // BOTH axes — Claude Code truncates on whichever limit it hits first, and a file can
+  // be under the line window yet over the byte cap (field-observed session 56).
   if (Number.isFinite(memoryLineCount) && Number.isFinite(injectionLineWindow) && memoryLineCount > injectionLineWindow) {
     return { identity_status: 'DEGRADED', reason: `truncation-detected: MEMORY.md line_count=${memoryLineCount} exceeds injection window=${injectionLineWindow}` };
+  }
+  if (Number.isFinite(memoryByteCount) && Number.isFinite(injectionByteWindow) && memoryByteCount > injectionByteWindow) {
+    return { identity_status: 'DEGRADED', reason: `truncation-detected: MEMORY.md byte_count=${memoryByteCount} exceeds injection byte window=${injectionByteWindow}` };
   }
   if (!transcriptAvailable) {
     return { identity_status: 'DEGRADED', reason: 'transcript unavailable/unparseable — ordering relies on protocol, not mechanically verified' };
@@ -147,18 +158,21 @@ export async function probe(opts = {}) {
   }
 
   // Blocker 1: verify the token is actually in the MEMORY.md injection window now.
-  let memoryHasToken = false, memoryLineCount = null;
+  let memoryHasToken = false, memoryLineCount = null, memoryByteCount = null;
   if (token && memoryWritten && memoryPath && existsSync(memoryPath)) {
     try {
       const memoryContent = readFileSync(memoryPath, 'utf8');
       memoryHasToken = memoryContent.includes(token);
       memoryLineCount = countLines(memoryContent);
+      memoryByteCount = Buffer.byteLength(memoryContent, 'utf8');
     } catch {
       memoryHasToken = false;
       memoryLineCount = null;
+      memoryByteCount = null;
     }
   }
   const injectionLineWindow = opts.injectionLineWindow || DEFAULT_INJECTION_LINE_WINDOW;
+  const injectionByteWindow = opts.injectionByteWindow || DEFAULT_INJECTION_BYTE_WINDOW;
 
   const transcriptPath = resolveTranscript(cwd, home, opts.transcriptPath);
   let transcriptAvailable = false, events = [];
@@ -166,8 +180,8 @@ export async function probe(opts = {}) {
     try { events = scanTranscript(readFileSync(transcriptPath, 'utf8').split('\n'), token); transcriptAvailable = true; } catch { transcriptAvailable = false; }
   }
 
-  const { identity_status, reason } = classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow });
-  return buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, transcriptAvailable, events, cwd, observed_at });
+  const { identity_status, reason } = classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow });
+  return buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, transcriptAvailable, events, cwd, observed_at });
 }
 
 // Count REAL lines. A trailing newline produces a final empty split element that is
@@ -183,12 +197,14 @@ export function countLines(content) {
   return lines.length;
 }
 
-function buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, transcriptAvailable, events, cwd, observed_at }) {
-  const loadComplete = !(Number.isFinite(memoryLineCount) && Number.isFinite(injectionLineWindow) && memoryLineCount > injectionLineWindow);
+function buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, transcriptAvailable, events, cwd, observed_at }) {
+  const lineOver = Number.isFinite(memoryLineCount) && Number.isFinite(injectionLineWindow) && memoryLineCount > injectionLineWindow;
+  const byteOver = Number.isFinite(memoryByteCount) && Number.isFinite(injectionByteWindow) && memoryByteCount > injectionByteWindow;
+  const loadComplete = !(lineOver || byteOver);
   const evidence = [
     { source: 'canary-token', value: { recorded: !!token, redacted: redactToken(token) }, agrees_with_others: !!token, weight: token ? 'primary' : 'conflicting' },
     { source: 'memory-injection', value: { memory_written: memoryWritten, token_in_memory_file: memoryHasToken }, agrees_with_others: memoryWritten && memoryHasToken, weight: (memoryWritten && memoryHasToken) ? 'corroborating' : 'conflicting' },
-    { source: 'memory-load-completeness', value: { line_count: memoryLineCount, injection_line_window: injectionLineWindow, status: loadComplete ? 'within-window-or-unmeasured' : 'truncation-detected' }, agrees_with_others: loadComplete, weight: loadComplete ? 'corroborating' : 'conflicting' },
+    { source: 'memory-load-completeness', value: { line_count: memoryLineCount, injection_line_window: injectionLineWindow, byte_count: memoryByteCount, injection_byte_window: injectionByteWindow, truncation_axis: lineOver ? 'line' : (byteOver ? 'byte' : null), status: loadComplete ? 'within-window-or-unmeasured' : 'truncation-detected' }, agrees_with_others: loadComplete, weight: loadComplete ? 'corroborating' : 'conflicting' },
     { source: 'transcript', value: { available: transcriptAvailable, echo: events.some((e) => e.kind === 'echo') }, agrees_with_others: identity_status === 'PASS', weight: identity_status === 'PASS' ? 'corroborating' : 'conflicting' },
     { source: 'classification', value: reason, agrees_with_others: identity_status === 'PASS', weight: identity_status === 'PASS' ? 'corroborating' : 'conflicting' },
   ];
