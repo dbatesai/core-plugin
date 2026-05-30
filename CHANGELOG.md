@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.0.0] — (pending merge)
 
-This release ships the instruction-surface generator system (CONTRACT.md → harness instruction files), completing the v3.0 goal. It also includes the full v2.9 evidence-layer hardening, native Codex marketplace support for both repos, and a retrieval-quality fix that makes metrics honest about whether real retrieval events exist. The MAJOR bump reflects the maintenance-model change: generating CLAUDE.md/AGENTS.md/GEMINI.md from a single CONTRACT.md changes how projects maintain instruction surfaces.
+This release ships the instruction-surface generator system (CONTRACT.md → harness instruction files). It also includes the full v2.9 evidence-layer hardening, native Codex marketplace support for both repos, and a retrieval-quality analyzer fix that makes metrics fail honest when retrieval-shaped rows are absent. End-to-end retrieval-effectiveness proof remains open until startup/orient/refresh emit retrieval-shaped rows and expected/forbidden-memory scenarios pass. The MAJOR bump reflects the maintenance-model change: generating CLAUDE.md/AGENTS.md/GEMINI.md from a single CONTRACT.md changes how projects maintain instruction surfaces.
 
 ### Added (v3.0 — instruction-surface generator system)
 - `skills/core/scripts/contract-format.mjs` — parses the canonical CONTRACT.md source format
@@ -31,6 +31,9 @@ This release ships the instruction-surface generator system (CONTRACT.md → har
 - `plugins/core/` — self-contained Codex marketplace plugin directory; enables native `codex plugin marketplace add dbatesai/core-plugin --ref main && codex plugin add core@core`
 - `scripts/sync-codex-plugin.sh` — sync helper for keeping plugins/core/ current
 - CI gate verifying marketplace.json source.path integrity
+
+### Open verification gates
+- End-to-end retrieval-effectiveness proof remains `NOT-YET`: startup/orient/refresh still need to emit retrieval-shaped rows with selected unit IDs, tier path, suppression counts, context-pack size, and outcome/usefulness fields, then pass expected-memory and forbidden-memory scenario tests.
 
 ### Fixed
 - `analyze-retrieval-quality.mjs` — gated on `isRetrievalShapedEvent()`; stops counting telemetry rows as retrieval proof; surfaces the split plainly
