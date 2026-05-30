@@ -107,7 +107,13 @@ The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to
 - Read `<project>/inbox.md` if it exists. Raw pending items — promote worthwhile facts into the right units on the user's next review.
 - Read `~/.core/workspaces/<id>/workspace.json` for cross-session metadata only (last-session date, timestamps). Don't read project facts from here — there aren't any.
 
-After any Tier 1+ retrieval during startup, write one retrieval-shaped row with `node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '<json>'`. Use `trigger: "session-start"`, include the session-intent topics, the highest tier reached, the escalation path, selected unit IDs with their tiers, suppression counts when known, a context-pack token estimate when practical, and `dip_back_count` (usually `0` during initial load). Tier 0 in-context reuse does not need a retrieval row.
+After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them.
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["orient","memory"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"dc-memory-index","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200,"usefulness_outcome":"useful"}'
+```
+
+Tier 0 in-context reuse does not need a retrieval row.
 
 **Skip these surfaces at bootstrap:**
 - Session summaries in `<project>/_summaries/` (or legacy `_handoffs/` if the rename hasn't happened yet). They're narrative for the human reader. Facts worth keeping were already in PROJECT.md or the units at session close. Re-reading summaries re-anchors you on narrative framing and can resurrect user-deleted facts.
