@@ -17,10 +17,12 @@
  *
  * Consumes the read-transcript adapter verb (skills/core/scripts/read-transcript.mjs)
  * so harness-specific transcript paths/schemas stay in the adapter layer, not here
- * (DC-75). Claude Code: VERIFIED — tool events carry path/command text. Codex: the
- * tool/shell extraction is NOT-YET (read-transcript flags codex_tool_extraction
- * pending-hc-spec), so on Codex this probe returns UNKNOWN rather than a false
- * negative — never claims "not accessed" when it simply cannot see Codex tool calls.
+ * (DC-75). Claude Code: VERIFIED — tool events carry path/command text. Codex: now also
+ * VERIFIED (v2.9 Slice F) — read-transcript extracts function_call/custom_tool_call, so
+ * this probe classifies on Codex too (PASS on CORE reach, DEGRADED on store-selection).
+ * UNKNOWN is now reserved for the genuine cases: no transcript available, or a future
+ * Codex build whose tool schema drifts (extraction fails open to no tool events). It
+ * never claims "not accessed" when it cannot see tool calls.
  *
  * Per DC-77 ships as a script; per DC-80 .mjs only.
  */

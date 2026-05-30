@@ -17,12 +17,15 @@
  *       encrypted (skipped); 'event_msg' carries agent_message/user_message/etc.
  *   - gemini: ~/.gemini/tmp/<hash>/chats/ — NOT YET verified; resolver returns null.
  *
- * Honest residual (HC's lane — Codex expert): Codex TOOL / shell-call extraction
- * (function_call / local_shell_call) is NOT yet parsed — only message text + role.
- * memory-accessed (v2.9) needs that file-access signal; it waits on HC's Codex-side
- * spec. This script returns `tool` events for claude-code only until then, and flags
- * `codex_tool_extraction: 'pending-hc-spec'` in the result meta so no consumer
- * silently assumes Codex tool coverage it does not have.
+ * Codex tool/shell extraction (v2.9 Slice F — IMPLEMENTED): function_call (exec_command
+ * etc.; `arguments` is a JSON string with cmd + paths) and custom_tool_call (apply_patch
+ * etc.; `input` is a string with the patch/paths) are surfaced as `tool` events with
+ * name + input text — the file-access signal memory-accessed needs. Schema derived from a
+ * real `rollout-*.jsonl` (meta `codex_tool_extraction: 'implemented'`). *_output return
+ * values and encrypted reasoning are skipped (access-intent lives in the call, not the
+ * return). Residual: the evidence rollout is one Codex build; HC verifies the schema
+ * still matches current core-codex transcripts — if a Codex version drifts the field
+ * names, fix-forward (the parser fails open to no-tool-events, never throws).
  *
  * Per DC-77 the deterministic parse ships as a script; per DC-80 the plugin ships .mjs.
  */
@@ -99,9 +102,9 @@ export function parseClaudeCode(lines) {
 }
 
 /**
- * Parse Codex rollout lines into ordered events (message text only — see residual).
- * Codex tool/shell extraction is pending HC's spec; only response_item:message and
- * event_msg agent/user messages are surfaced as text events.
+ * Parse Codex rollout lines into ordered events. Surfaces response_item message text,
+ * function_call + custom_tool_call as `tool` events (name + input/arguments text), and
+ * event_msg agent/user messages. *_output return values + encrypted reasoning skipped.
  */
 export function parseCodex(lines) {
   const events = [];
@@ -113,11 +116,17 @@ export function parseCodex(lines) {
     if (e.type === 'response_item' && p.type === 'message' && Array.isArray(p.content)) {
       const text = p.content.filter((c) => typeof c?.text === 'string').map((c) => c.text).join('\n');
       if (text) events.push({ idx, kind: 'text', role: p.role, text });
+    } else if (e.type === 'response_item' && p.type === 'function_call') {
+      // exec_command / shell etc. arguments is a JSON string carrying cmd + paths.
+      events.push({ idx, kind: 'tool', role: 'assistant', name: p.name, text: stringifyInput(p.arguments) });
+    } else if (e.type === 'response_item' && p.type === 'custom_tool_call') {
+      // apply_patch etc. input is a string carrying the patch / file paths.
+      events.push({ idx, kind: 'tool', role: 'assistant', name: p.name, text: stringifyInput(p.input) });
     } else if (e.type === 'event_msg' && (p.type === 'agent_message' || p.type === 'user_message')) {
       const text = typeof p.message === 'string' ? p.message : (typeof p.text === 'string' ? p.text : '');
       if (text) events.push({ idx, kind: 'text', role: p.type === 'user_message' ? 'user' : 'assistant', text });
     }
-    // reasoning (encrypted) + tool/shell calls: not surfaced (residual).
+    // reasoning (encrypted) + *_output (return values, not access-intent) not surfaced.
   });
   return events;
 }
@@ -140,7 +149,7 @@ export function readTranscript({ harness, cwd = process.cwd(), home = homedir(),
     schema_version: SCHEMA_VERSION,
     harness,
     supported: SUPPORTED_HARNESSES.has(harness),
-    codex_tool_extraction: harness === 'codex' ? 'pending-hc-spec' : 'n/a',
+    codex_tool_extraction: harness === 'codex' ? 'implemented' : 'n/a',
   };
   if (!SUPPORTED_HARNESSES.has(harness)) return { harness, path: null, available: false, events: [], meta };
   const path = resolveTranscriptPath(harness, { cwd, home, override });

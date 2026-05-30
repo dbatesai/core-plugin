@@ -54,6 +54,45 @@ test('parseCodex: event_msg agent/user messages surfaced', () => {
   assert.equal(ev[1].role, 'user');
 });
 
+// --- Codex tool/shell extraction (Slice F — schema from a real rollout-*.jsonl) ---
+// Verified shapes: function_call {name, arguments(JSON string), call_id};
+// custom_tool_call {name, input(string), call_id}. The arguments/input carry the shell
+// command / patch path, which is what CORE_SURFACE_RE matches for memory-accessed.
+test('parseCodex: function_call surfaced as a tool event with name + arguments text', () => {
+  const lines = [
+    JSON.stringify({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd: 'rtk grep IGM _memories/', workdir: '/p' }), call_id: 'c1' } }),
+  ];
+  const ev = parseCodex(lines);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].kind, 'tool');
+  assert.equal(ev[0].name, 'exec_command');
+  assert.ok(ev[0].text.includes('_memories/'), 'arguments text carries the path/command for access detection');
+});
+
+test('parseCodex: custom_tool_call surfaced as a tool event with name + input text', () => {
+  const lines = [
+    JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call', name: 'apply_patch', input: '*** Add File: /p/_memories/note.md\n+x', call_id: 'c2' } }),
+  ];
+  const ev = parseCodex(lines);
+  assert.equal(ev.length, 1);
+  assert.equal(ev[0].kind, 'tool');
+  assert.equal(ev[0].name, 'apply_patch');
+  assert.ok(ev[0].text.includes('_memories/'));
+});
+
+test('parseCodex: message text + tool calls coexist in order; outputs/reasoning skipped', () => {
+  const lines = [
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'about IGM?' }] } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{"cmd":"grep IGM _memories/"}', call_id: 'c3' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'c3', output: 'noise' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'reasoning', encrypted_content: 'zzz' } }),
+  ];
+  const ev = parseCodex(lines);
+  assert.equal(ev.length, 2, 'one text + one tool; output + reasoning skipped');
+  assert.equal(ev[0].kind, 'text');
+  assert.equal(ev[1].kind, 'tool');
+});
+
 // --- dispatch + path resolution + fail-open ---
 
 test('parseTranscript dispatches by harness; unknown → []', () => {
@@ -85,9 +124,9 @@ test('readTranscript: fail-open on missing transcript (available:false, no throw
   assert.deepEqual(r.events, []);
 });
 
-test('readTranscript: codex meta flags the honest tool-extraction residual', () => {
+test('readTranscript: codex meta reports tool extraction implemented (Slice F)', () => {
   const r = readTranscript({ harness: 'codex', home: '/tmp/none' });
-  assert.equal(r.meta.codex_tool_extraction, 'pending-hc-spec');
+  assert.equal(r.meta.codex_tool_extraction, 'implemented');
 });
 
 test('readTranscript: unsupported harness → unsupported meta, not available', () => {

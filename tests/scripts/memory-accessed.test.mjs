@@ -67,13 +67,24 @@ test('probe: CC transcript showing _memories grep → PASS', async () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('probe: Codex harness → UNKNOWN (tool extraction pending, honest)', async () => {
+test('probe: Codex harness now CLASSIFIES via tool extraction (Slice F) — PASS on _memories/ access', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     const tpath = join(dir, 'rollout.jsonl');
-    writeFileSync(tpath, JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'hi' }] } }));
+    // A real-shape Codex function_call whose arguments reach the CORE store.
+    writeFileSync(tpath, JSON.stringify({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd: 'grep IGM _memories/' }), call_id: 'c1' } }));
     const row = await probe({ harness: 'codex', cwd: dir, transcriptPath: tpath, coreStorePresent: true });
-    assert.equal(row.identity_status, 'UNKNOWN');
+    assert.equal(row.identity_status, 'PASS', 'Codex tool extraction now observes CORE-store reach');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('probe: Codex harness → DEGRADED when extraction works but no CORE access seen (honest, not UNKNOWN)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ma-'));
+  try {
+    const tpath = join(dir, 'rollout.jsonl');
+    writeFileSync(tpath, JSON.stringify({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: JSON.stringify({ cmd: 'ls /tmp' }), call_id: 'c1' } }));
+    const row = await probe({ harness: 'codex', cwd: dir, transcriptPath: tpath, coreStorePresent: true });
+    assert.equal(row.identity_status, 'DEGRADED', 'store present, tools observed, none reached CORE → store-selection signal');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -160,8 +171,9 @@ test('runStartup({harness:codex}) labels memory-accessed codex + honest UNKNOWN 
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     writeFileSync(join(dir, 'PROJECT.md'), '# proj');
-    // codex tool extraction pending → UNKNOWN regardless of transcript; the load-bearing
-    // assertion is that the row is labeled codex, not the claude-code default (the bug).
+    // transcript unavailable (nonexistent path) → UNKNOWN; the load-bearing assertion is
+    // that the row is labeled codex, not the claude-code default (the bug). (Post Slice F,
+    // UNKNOWN here is the transcript-unavailable case, not the old extraction-pending one.)
     const res = await runStartup({ harness: 'codex', cwd: dir, transcriptPath: '/nonexistent-rollout.jsonl' });
     const row = res.rows.find((r) => r.capability_id === 'memory-accessed');
     assert.ok(row, 'memory-accessed declared for codex (not omitted — honest row)');
