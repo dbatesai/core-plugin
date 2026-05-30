@@ -125,7 +125,13 @@ export function validateAdversarialArtifacts({ initialFrames = [], persuasionLog
     if (mode === 'authority') { emptyPersuasionFails = true; crossErrors.push('authority mode: empty persuasion log after adversarial phases — blocked (claims Phase-3 pressure but recorded none)'); }
     else warnings.push('process-suspect: empty persuasion log — adversarial phases produced no recorded persuasion (legitimate only if the run was genuinely uncontested)');
   }
-  if (frameResults.length === 0) warnings.push('no initial-frame.json provided — cannot confirm Phase-1 framing happened');
+  // Hale: authority mode must HARD-FAIL zero initial frames — a run fed to a release/
+  // authority gate with no Phase-1 frames cannot prove framing happened OR cross-check
+  // participants. Advisory mode keeps it a warning.
+  if (frameResults.length === 0) {
+    if (mode === 'authority') crossErrors.push('authority mode: no initial-frame.json — cannot prove Phase-1 framing or cross-check participants; blocked for authority/release use');
+    else warnings.push('no initial-frame.json provided — cannot confirm Phase-1 framing happened');
+  }
 
   const valid = frameResults.every((r) => r.valid) && persuasion.valid && mind.valid && crossErrors.length === 0;
   return { valid, mode, warnings, crossErrors, initialFrames: frameResults, persuasionLog: persuasion, mindChanges: mind, emptyPersuasionFails };

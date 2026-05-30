@@ -96,6 +96,21 @@ test('aggregate: empty persuasion-log → HARD FAIL in authority mode (Hale)', (
   assert.equal(r.valid, false, 'authority mode blocks an empty persuasion log');
 });
 
+test('aggregate: authority mode HARD-FAILS zero initial frames even with logs (Hale edge)', () => {
+  // logs present but no Phase-1 frames → cannot prove framing or cross-check participants
+  const persuasion = JSON.stringify(pLine({ shifted: true, from_position: 'a', to_position: 'b' }));
+  const mind = JSON.stringify(mLine({}));
+  const r = validateAdversarialArtifacts({ initialFrames: [], persuasionLog: persuasion, mindChanges: mind, mode: 'authority' });
+  assert.equal(r.valid, false, 'authority + zero frames is blocked');
+  assert.ok(r.crossErrors.some((e) => /no initial-frame/.test(e)));
+});
+
+test('aggregate: advisory mode keeps zero initial frames a warning, not a fail', () => {
+  const persuasion = JSON.stringify(pLine({}));
+  const r = validateAdversarialArtifacts({ initialFrames: [], persuasionLog: persuasion, mindChanges: '', mode: 'advisory' });
+  assert.ok(r.warnings.some((w) => /no initial-frame/.test(w)));
+});
+
 test('aggregate: a malformed initial frame makes the set invalid', () => {
   const r = validateAdversarialArtifacts({ initialFrames: [{ ...goodFrame, peer_exposure: true }], persuasionLog: '', mindChanges: '' });
   assert.equal(r.valid, false);
