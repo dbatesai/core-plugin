@@ -186,6 +186,16 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-skip.mjs" "<pr
 
 Read the output honestly — these are **candidates, not verdicts** (term presence is a heuristic for memory-dependence). If `SKIPS-FOUND`, surface the flagged term(s) in plain voice as a self-audit prompt ("I answered about IGM without grepping `_memories/` first — that's the retrieval-skip pattern; worth checking I had it right."). `CLEAN` → one sentence or silence. `UNKNOWN` on Codex is expected until tool extraction lands — say so briefly, don't treat it as clean. This is the behavioral consumer of the `read-transcript` adapter verb; it surfaces the lapse so the user doesn't have to catch it.
 
+## Step 6.5c — Memory-boundary audit (v3.0)
+
+Surface where native harness memory (MEMORY.md / `~/.codex/memories`) holds project-relevant facts the CORE store doesn't — read-only, sampled:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<project>"
+```
+
+**Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection (DC-83) says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is deferred (design Q3).
+
 ---
 
 ## Step 6.6 — Capability drift scan (v2.7)
