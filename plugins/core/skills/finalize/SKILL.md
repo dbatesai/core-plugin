@@ -78,6 +78,27 @@ The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in 
 
 ---
 
+## Step 3.5 — Regenerate ROADMAP.md
+
+ROADMAP.md is a render. It should reflect the current release state after every session, not the state at the last time someone remembered to regenerate it. Run this after memory hygiene so the unit store and PROJECT.md §Moves are settled.
+
+Rebuild from source:
+- Read PROJECT.md §Moves (the session-current task list with release assignments)
+- Read the relevant decision units for each release (the `dc-*.md` units in `<project>/_memories/`)
+- Read `docs/playbooks/roadmap-playbook.md` for the eight-section per-release convention (What ships / Why this matters / Things to consider / Dependencies / Decisions / Current status)
+- Write `<project>/ROADMAP.md` with: the standard header preamble (what it is, how it's maintained, last-updated date), the big-picture prose, the "what the plugin does today" inventory anchored to the current released version (main branch), a "what ships next" section anchored to the next branch state, and per-release entries for the upcoming ladder
+
+Key honesty anchors:
+- "What the plugin does today" = what's on main (the shipped release), not next
+- "What ships next" = what's staged on next (unreleased, awaiting PR merge)
+- R-17 and any open risks surface explicitly in the applicable release entry rather than being buried
+
+Update the preamble `Last updated:` date to today.
+
+**Skip when** the session was trivial (no state changes, no new releases, no moved §Moves items) and the existing ROADMAP.md accurately reflects current state. When you skip, say so in one sentence.
+
+---
+
 ## Step 4 — Write the session summary
 
 `<project>/_summaries/summary-<YYYY-MM-DD>.md` (with letter suffix if today already has one).
