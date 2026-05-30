@@ -34,7 +34,7 @@ This release ships the instruction-surface generator system (CONTRACT.md → har
 - CI gate verifying marketplace.json source.path integrity
 
 ### Open verification gates
-- End-to-end retrieval-effectiveness proof remains `NOT-YET`: live startup/orient/refresh runs still need to use the producer to emit retrieval-shaped rows with selected unit IDs, tier path, suppression counts, context-pack size, and outcome/usefulness fields, then pass expected-memory and forbidden-memory scenario tests.
+- End-to-end retrieval-effectiveness proof remains `NOT-YET`: live startup/orient/refresh runs still need to use the producer to emit retrieval-shaped rows with selected unit IDs, tier path, suppression counts, context-pack size, and outcome/usefulness fields. **Forbidden-memory scenario gate is now wired** (PR #38 ships the validation gate that catches forbidden-unit hits in the top-5 candidate set); expected-memory precision/recall scoring was already in place. The remaining gap is live startup/orient/refresh actually CALLING the producer on each retrieval operation.
 
 ### Fixed
 - `analyze-retrieval-quality.mjs` — gated on `isRetrievalShapedEvent()`; stops counting telemetry rows as retrieval proof; surfaces the split plainly
