@@ -10,7 +10,7 @@ description: Concrete tool mapping for each abstract adapter verb when CORE runs
 Detect by:
 - `~/.claude/` config directory present, OR
 - `${CLAUDE_PLUGIN_ROOT}` env var present, OR
-- Availability of Claude-Code-specific tools (`TaskCreate`, `SendMessage`, `TeamCreate`, `CronCreate`).
+- Availability of Claude-Code-specific tools — the orchestration surface (`TaskCreate`, `SendMessage`, `TeamCreate`, `Monitor`), the scheduling surface (`ScheduleWakeup`, `CronCreate`), and dynamic multi-agent (`Workflow`). Any one is a positive signal; several may be deferred behind `ToolSearch` rather than top-level, so absence of a single tool is not disqualifying.
 
 If any of these conditions hold, harness is Claude Code.
 
