@@ -28,6 +28,17 @@ export const DEFAULT_SINCE_DAYS = 30;
 export const TOP_DIP_BACK = 10;
 export const TOP_ESCALATION = 10;
 
+export function isRetrievalShapedEvent(ev) {
+  if (!ev || typeof ev !== 'object') return false;
+  return (
+    Object.hasOwn(ev, 'tier_reached')
+    || Object.hasOwn(ev, 'units_retrieved')
+    || Object.hasOwn(ev, 'intent_topics')
+    || Object.hasOwn(ev, 'escalation_path')
+    || Object.hasOwn(ev, 'dip_back_count')
+  );
+}
+
 // ---------- Date helpers ----------
 
 function _todayUTC() {
@@ -71,6 +82,7 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
 // ---------- Aggregations ----------
 
 export function computeDipBackRates(events) {
+  events = events.filter(isRetrievalShapedEvent);
   const byUnit = new Map();
   for (const ev of events) {
     const units = Array.isArray(ev.units_retrieved) ? ev.units_retrieved : null;
@@ -93,6 +105,7 @@ export function computeDipBackRates(events) {
 }
 
 export function computeTierEscalation(events) {
+  events = events.filter(isRetrievalShapedEvent);
   const byTopic = new Map();
   for (const ev of events) {
     const topics = Array.isArray(ev.intent_topics) ? ev.intent_topics : null;
@@ -120,6 +133,7 @@ export function computeTierEscalation(events) {
 }
 
 export function computeTierDistribution(events) {
+  events = events.filter(isRetrievalShapedEvent);
   const counts = { t1: 0, t2: 0, t3: 0 };
   for (const ev of events) {
     const t = Number(ev.tier_reached) || 1;
@@ -140,6 +154,7 @@ export function computeTierDistribution(events) {
 // ---------- Report assembly ----------
 
 export function buildReport(events) {
+  const retrievalEvents = events.filter(isRetrievalShapedEvent);
   // Count distinct calendar dates from event timestamps — more reliable than
   // counting unique ev.session IDs, which are absent in events written without
   // a session context (producing a misleading "Sessions: 0" when events exist).
@@ -152,9 +167,11 @@ export function buildReport(events) {
   return {
     sessions: sessions.size,
     total_events: events.length,
-    tier_distribution: computeTierDistribution(events),
-    dip_back_rates: computeDipBackRates(events).slice(0, TOP_DIP_BACK),
-    tier_escalation: computeTierEscalation(events).slice(0, TOP_ESCALATION),
+    retrieval_events: retrievalEvents.length,
+    telemetry_only_events: events.length - retrievalEvents.length,
+    tier_distribution: computeTierDistribution(retrievalEvents),
+    dip_back_rates: computeDipBackRates(retrievalEvents).slice(0, TOP_DIP_BACK),
+    tier_escalation: computeTierEscalation(retrievalEvents).slice(0, TOP_ESCALATION),
   };
 }
 
@@ -165,7 +182,16 @@ export function formatReport(report) {
   const td = report.tier_distribution;
   const pct = v => `${Math.round(v * 100)}%`;
   const lines = [];
-  lines.push(`Session dates in window: ${report.sessions} | Total retrieval events: ${report.total_events}`);
+  const retrievalEvents = report.retrieval_events ?? report.total_events;
+  const telemetryOnlyEvents = report.telemetry_only_events ?? 0;
+  lines.push(`Session dates in window: ${report.sessions} | Total events: ${report.total_events}`);
+  lines.push(`Retrieval-shaped events: ${retrievalEvents} | telemetry-only rows: ${telemetryOnlyEvents}`);
+  if (telemetryOnlyEvents > 0) {
+    lines.push('Telemetry-only rows are not retrieval proof.');
+  }
+  if (retrievalEvents === 0) {
+    return lines.join('\n');
+  }
   lines.push(`Tier distribution: T1=${pct(td.t1.pct)}, T2=${pct(td.t2.pct)}, T3=${pct(td.t3.pct)}`);
   lines.push('');
 
