@@ -169,28 +169,30 @@ export async function generateForHarness({ harness, contractPath, outputPath, ov
   const contract = parseContract(contractPath);
   const overrides = parseOverrides(overridePath);
   const warnings = [...contract.warnings];
-  // Hale review: generating for a harness the contract doesn't declare canonical_for is
-  // almost always a mistake — surface it rather than silently emit.
+  // FATAL provenance issues — release-gate blockers (Hale item 2: the gate must FAIL
+  // CLOSED on these, not just warn). They make check mode fail and are surfaced as
+  // warnings in write/dry-run so local iteration still sees them.
+  const fatal = [];
   if (!contract.canonicalFor.includes(harness)) {
-    warnings.push(`generating for '${harness}' which is not in canonical_for [${contract.canonicalFor.join(', ')}] — output may not be intended`);
+    fatal.push(`harness '${harness}' is not in canonical_for [${contract.canonicalFor.join(', ')}] — generating an unintended surface`);
   }
-  // Hale review: determinism depends on last_revised; without it generated_at is 'unknown'
-  // and --check drift is unreliable. Warn loudly.
   if (!contract.frontmatter.last_revised) {
-    warnings.push("contract has no 'last_revised' — generated_at falls back to 'unknown'; set last_revised so output is deterministic and --check is reliable");
+    fatal.push("contract has no 'last_revised' — generated_at falls back to 'unknown', so output is non-deterministic and --check drift is unreliable");
   }
+  warnings.push(...fatal);
   const body = renderForHarness(contract, harness, overrides);
   const provenance = computeProvenance({ contract, overrides });
   const full = withProvenance(body, provenance);
 
   if (mode === 'check') {
     const existing = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : null;
-    return { drift: existing !== full, warnings };
+    // Fail closed: drift OR a fatal provenance issue blocks the release gate.
+    return { drift: existing !== full, fatal: fatal.length > 0, fatalErrors: fatal, warnings };
   }
   if (mode === 'write') {
     const { writeFileSync } = await import('node:fs');
     writeFileSync(outputPath, full);
-    return { written: outputPath, warnings };
+    return { written: outputPath, fatal: fatal.length > 0, fatalErrors: fatal, warnings };
   }
-  return { wouldWrite: full, warnings };
+  return { wouldWrite: full, fatal: fatal.length > 0, fatalErrors: fatal, warnings };
 }

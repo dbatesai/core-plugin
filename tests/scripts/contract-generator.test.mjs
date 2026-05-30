@@ -158,6 +158,39 @@ test('generate: warns when last_revised is missing (determinism dependency)', as
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// --- Hale item 2: check mode FAILS CLOSED on fatal provenance issues ---
+
+test('generate check: missing last_revised is FATAL (gate fails closed, not just warns)', async () => {
+  const { dir, p } = tmpContract(FIXTURE.replace('last_revised: 2026-04-01\n', ''));
+  try {
+    const outPath = join(dir, 'CLAUDE.md');
+    await generate({ contractPath: p, outputPath: outPath, mode: 'write' });
+    const r = await generate({ contractPath: p, outputPath: outPath, mode: 'check' });
+    assert.equal(r.fatal, true, 'missing last_revised makes the check fatal');
+    assert.ok(r.fatalErrors.some((e) => /last_revised/.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('generate check: target harness not in canonical_for is FATAL', async () => {
+  const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex", "gemini"]', 'canonical_for: ["codex"]'));
+  try {
+    const r = await generate({ contractPath: p, outputPath: join(dir, 'CLAUDE.md'), mode: 'check' });
+    assert.equal(r.fatal, true);
+    assert.ok(r.fatalErrors.some((e) => /canonical_for/.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('generate check: a clean contract is not fatal', async () => {
+  const { dir, p } = tmpContract();
+  try {
+    const outPath = join(dir, 'CLAUDE.md');
+    await generate({ contractPath: p, outputPath: outPath, mode: 'write' });
+    const r = await generate({ contractPath: p, outputPath: outPath, mode: 'check' });
+    assert.equal(r.fatal, false);
+    assert.equal(r.drift, false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('parseOverrides: hash is over RAW bytes — a whitespace-only edit changes the hash', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ov-'));
   try {

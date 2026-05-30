@@ -27,7 +27,7 @@ if (isMain()) {
   const opt = (name) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : null; };
   const r = await generate({ contractPath: opt('contract') || 'CONTRACT.md', outputPath: opt('out'), overridePath: opt('override'), mode: opt('mode') || 'dry-run' });
   (r.warnings || []).forEach((w) => process.stderr.write(`(warn) ${w}\n`));
-  if ((opt('mode') || 'dry-run') === 'check') { process.stdout.write(r.drift ? 'DRIFT: AGENTS.md diverged from CONTRACT.md\n' : 'OK: AGENTS.md matches CONTRACT.md\n'); process.exit(r.drift ? 1 : 0); }
+  if ((opt('mode') || 'dry-run') === 'check') { (r.fatalErrors || []).forEach((e) => process.stderr.write(`(fatal) ${e}\n`)); process.stdout.write(r.fatal ? 'FAIL: CONTRACT.md has a fatal provenance issue\n' : (r.drift ? 'DRIFT: AGENTS.md diverged from CONTRACT.md\n' : 'OK: AGENTS.md matches CONTRACT.md\n')); process.exit((r.drift || r.fatal) ? 1 : 0); }
   else if ((opt('mode')) === 'write') process.stdout.write(`wrote ${r.written}\n`);
   else process.stdout.write(r.wouldWrite);
 }

@@ -41,8 +41,10 @@ if (isMain()) {
   const r = await generate({ contractPath, outputPath, overridePath, mode });
   (r.warnings || []).forEach((w) => process.stderr.write(`(warn) ${w}\n`));
   if (mode === 'check') {
-    process.stdout.write(r.drift ? 'DRIFT: CLAUDE.md diverged from CONTRACT.md\n' : 'OK: CLAUDE.md matches CONTRACT.md\n');
-    process.exit(r.drift ? 1 : 0);
+    (r.fatalErrors || []).forEach((e) => process.stderr.write(`(fatal) ${e}\n`));
+    if (r.fatal) process.stdout.write('FAIL: CONTRACT.md has a fatal provenance issue (see above)\n');
+    else process.stdout.write(r.drift ? 'DRIFT: CLAUDE.md diverged from CONTRACT.md\n' : 'OK: CLAUDE.md matches CONTRACT.md\n');
+    process.exit((r.drift || r.fatal) ? 1 : 0);
   } else if (mode === 'write') {
     process.stdout.write(`wrote ${r.written}\n`);
   } else {
