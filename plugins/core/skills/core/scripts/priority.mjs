@@ -1,0 +1,441 @@
+/**
+ * Priority function for CORE memory units, per DC-69.
+ *
+ * priority(unit, t) = w_R · R + w_F · F + w_S · S + w_A · A + P
+ *
+ * R = exp(-recency_days / τ), τ=60 days.
+ * F = distinct surface-types the unit appears in, normalized by 6.
+ * S = source-type weight (PROJECT.md=1.0 … transcript=0.2).
+ * A = Jaccard overlap of unit topics with session-intent topics.
+ * P = pin contribution (floor 0.7 / floor 0.9 / override 1.5 / multiply 0.3).
+ *
+ * Per DC-77 the script lives in the plugin, not per-project.
+ * Per DC-80 the plugin ships Node.js (.mjs) only.
+ *
+ * Library usage:
+ *   import { scoreUnitFile, scoreProxyRS } from './priority.mjs';
+ *   const s = scoreUnitFile('_memories/dc-67-no-mcp.md',
+ *                           { sessionTopics: ['memory-architecture'] });
+ *
+ * CLI:
+ *   node priority.mjs <project>/_memories/ [--top N] [--intent t1,t2,...]
+ *                     [--today YYYY-MM-DD] [--sections] [--top-per-section N]
+ *                     [--log <path>] [--log-label <string>]
+ *
+ * --log appends one JSONL audit entry per invocation to <path>. Useful for
+ * render-on-change observability — protocols/data-storage.md §PROJECT.md ↔ units
+ * rendering names the suggested log location.
+ */
+
+import { readFileSync, readdirSync, appendFileSync, realpathSync } from 'node:fs';
+import { resolve, join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// ---------- DC-69 constants ----------
+
+export const W_R = 0.30;
+export const W_F = 0.15;
+export const W_S = 0.20;
+export const W_A = 0.35;
+export const TAU_DAYS = 60.0;
+export const SCORE_PRUNE_THRESHOLD = 0.3;
+
+const SOURCE_TYPE_WEIGHTS = {
+  'PROJECT.md': 1.0,
+  configuration: 0.9,
+  operational: 0.7,
+  summary: 0.5,
+  output: 0.5,
+  session_log: 0.3,
+  transcript: 0.2,
+};
+
+const PIN_CONTRIBUTION = {
+  floor: ['floor', 0.7],
+  true: ['floor', 0.9],
+  always: ['override', 1.5],
+  false: ['multiply', 0.3],
+};
+
+// ---------- Frontmatter parsing ----------
+
+function _coerce(value) {
+  const v = value.trim().replace(/^["']|["']$/g, '');
+  const lo = v.toLowerCase();
+  if (lo === 'true') return true;
+  if (lo === 'false') return false;
+  const i = Number(v);
+  if (!isNaN(i) && v !== '') return i;
+  return v;
+}
+
+function _parseInlineMap(text) {
+  const result = {};
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    while (i < n && (text[i] === ' ' || text[i] === ',')) i++;
+    if (i >= n) break;
+    const colon = text.indexOf(':', i);
+    if (colon === -1) break;
+    const key = text.slice(i, colon).trim();
+    i = colon + 1;
+    while (i < n && text[i] === ' ') i++;
+    let val;
+    if (i < n && text[i] === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (text[j] === '\\' && j + 1 < n) { j += 2; continue; }
+        if (text[j] === '"') break;
+        j++;
+      }
+      val = text.slice(i + 1, j);
+      i = j + 1;
+    } else {
+      let j = i;
+      while (j < n && text[j] !== ',') j++;
+      val = text.slice(i, j).trim();
+      i = j;
+    }
+    if (key) result[key] = val;
+  }
+  return result;
+}
+
+export function parseFrontmatter(text) {
+  if (!text.startsWith('---\n')) return [{}, text];
+  const end = text.indexOf('\n---', 4);
+  if (end === -1) return [{}, text];
+  const rawFm = text.slice(4, end);
+  const body = text.slice(end + 4).replace(/^\n+/, '');
+  const fm = {};
+  let currentKey = null;
+  let currentList = null;
+  let currentDict = null;
+
+  for (const line of rawFm.split('\n')) {
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    const indent = line.length - line.trimStart().length;
+    const stripped = line.trim();
+    if (indent === 0) {
+      currentDict = null;
+      if (!stripped.includes(':')) continue;
+      const colonIdx = stripped.indexOf(':');
+      const k = stripped.slice(0, colonIdx).trim();
+      const v = stripped.slice(colonIdx + 1).trim();
+      if (v === '') {
+        currentKey = k;
+        currentList = [];
+        fm[k] = currentList;
+      } else {
+        fm[k] = _coerce(v);
+        currentKey = null;
+        currentList = null;
+      }
+    } else if (stripped.startsWith('- ')) {
+      const item = stripped.slice(2).trim();
+      if (item.startsWith('{') && item.endsWith('}')) {
+        currentDict = _parseInlineMap(item.slice(1, -1));
+        if (currentList !== null) currentList.push(currentDict);
+      } else if (item.includes(':') && !item.startsWith('http')) {
+        const colonIdx = item.indexOf(':');
+        const k = item.slice(0, colonIdx).trim();
+        const v = item.slice(colonIdx + 1).trim();
+        currentDict = { [k]: _coerce(v) };
+        if (currentList !== null) currentList.push(currentDict);
+      } else {
+        if (currentList !== null) currentList.push(_coerce(item));
+        currentDict = null;
+      }
+    } else if (currentDict !== null && stripped.includes(':')) {
+      const colonIdx = stripped.indexOf(':');
+      const k = stripped.slice(0, colonIdx).trim();
+      const v = stripped.slice(colonIdx + 1).trim();
+      currentDict[k] = _coerce(v);
+    }
+  }
+  return [fm, body];
+}
+
+export function loadUnit(path) {
+  const text = readFileSync(path, 'utf8');
+  const [fm, body] = parseFrontmatter(text);
+  const id = fm.id !== undefined ? String(fm.id) : basename(path, '.md');
+  return { path, fm, body, id };
+}
+
+// ---------- Signal computations ----------
+
+export function parseIsoDate(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+}
+
+function _todayUTC() {
+  const n = new Date();
+  return new Date(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()));
+}
+
+export function recencyDays(unit, today) {
+  const candidates = [
+    parseIsoDate(unit.fm.last_accessed),
+    parseIsoDate(unit.fm.updated),
+    parseIsoDate(unit.fm.created),
+  ].filter(Boolean);
+  if (!candidates.length) return 365.0;
+  const freshest = new Date(Math.max(...candidates.map(d => d.getTime())));
+  return Math.max(0, (today.getTime() - freshest.getTime()) / 86_400_000);
+}
+
+export function signalR(unit, today) {
+  return Math.exp(-recencyDays(unit, today) / TAU_DAYS);
+}
+
+export function signalF(unit) {
+  const sources = Array.isArray(unit.fm.sources) ? unit.fm.sources : [];
+  const surfacesSeen = new Set();
+  for (const src of sources) {
+    if (typeof src !== 'string') continue;
+    const s = src.toLowerCase();
+    if (s.includes('project.md')) surfacesSeen.add('PROJECT.md');
+    else if (s.includes('dm-profile')) surfacesSeen.add('dm-profile');
+    else if (s.includes('summary') || s.includes('handoff')) surfacesSeen.add('summaries');
+    else if (s.includes('session')) surfacesSeen.add('sessions');
+    else if (s.includes('output') || s.startsWith('outputs/')) surfacesSeen.add('outputs');
+    else if (s.includes('inbox')) surfacesSeen.add('inbox');
+  }
+  return surfacesSeen.size / 6.0;
+}
+
+export function signalS(unit) {
+  const sources = Array.isArray(unit.fm.sources) ? unit.fm.sources : [];
+  let best = 0.0;
+  for (const src of sources) {
+    if (typeof src !== 'string') continue;
+    const s = src.toLowerCase();
+    if (s.includes('project.md')) best = Math.max(best, SOURCE_TYPE_WEIGHTS['PROJECT.md']);
+    else if (s.includes('dm-profile') || s.includes('settings') || s.includes('config')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.configuration);
+    else if (s.includes('swarm-effectiveness') || s.includes('dream-cycle')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.operational);
+    else if (s.includes('summary') || s.includes('handoff') || s.includes('output') || s.startsWith('outputs/')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.summary);
+    else if (s.includes('session')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.session_log);
+  }
+  return best > 0 ? best : 0.5;
+}
+
+export function signalA(unit, sessionTopics) {
+  const unitTopics = new Set(Array.isArray(unit.fm.topics) ? unit.fm.topics : []);
+  const session = new Set(sessionTopics);
+  if (!unitTopics.size || !session.size) return 0.0;
+  let intersection = 0;
+  for (const t of unitTopics) { if (session.has(t)) intersection++; }
+  const union = new Set([...unitTopics, ...session]).size;
+  return intersection / union;
+}
+
+export function pinContribution(unit) {
+  const pin = unit.fm.pinned;
+  if (pin === null || pin === undefined || pin === false) return ['none', 0.0];
+  const key = String(pin).toLowerCase();
+  return PIN_CONTRIBUTION[key] || ['none', 0.0];
+}
+
+// ---------- Main scoring function ----------
+
+export function score(unit, sessionTopics = [], today = null) {
+  const t = today || _todayUTC();
+  const R = signalR(unit, t);
+  const F = signalF(unit);
+  const S = signalS(unit);
+  const A = signalA(unit, sessionTopics);
+  const [pinMode, pinVal] = pinContribution(unit);
+
+  const base = W_R * R + W_F * F + W_S * S + W_A * A;
+
+  if (pinMode === 'override') return pinVal;
+  if (pinMode === 'floor') return Math.max(base, pinVal);
+  if (pinMode === 'multiply') return base * pinVal;
+  return base;
+}
+
+export function scoreUnitFile(path, { sessionTopics = [], today = null } = {}) {
+  return score(loadUnit(path), sessionTopics, today);
+}
+
+export function scoreProxyRS(unit, today = null) {
+  const t = today || _todayUTC();
+  return signalR(unit, t) * signalS(unit);
+}
+
+export function extractEdges(unit) {
+  const edgesRaw = unit.fm.edges;
+  if (!Array.isArray(edgesRaw)) return [];
+  const result = [];
+  for (const item of edgesRaw) {
+    if (!item || typeof item !== 'object') continue;
+    if (item.type && item.target) {
+      result.push({ type: String(item.type), target: String(item.target), note: String(item.note || '') });
+    }
+  }
+  return result;
+}
+
+// ---------- Section mapping for PROJECT.md render ----------
+
+const TYPE_TO_SECTION = {
+  decision: 'Decisions & Risks',
+  risk: 'Decisions & Risks',
+  person: 'People',
+  deliverable: 'Moves',
+  principle: 'Notes',
+  explainer: 'Notes',
+  'review-finding': 'Notes',
+  observation: 'Notes',
+  topic: 'Notes',
+  reference: 'Notes',
+  feedback: 'Notes',
+  memory: 'Notes',
+};
+
+const PREFIX_TO_SECTION = [
+  ['dc-', 'Decisions & Risks'],
+  ['risk-', 'Decisions & Risks'],
+  ['who-', 'People'],
+  ['del-', 'Moves'],
+  ['rf-', 'Notes'],
+  ['exp-', 'Notes'],
+  ['pr-', 'Notes'],
+  ['obs-', 'Notes'],
+  ['topic-', 'Notes'],
+];
+
+export function unitSection(unit) {
+  const typ = String(unit.fm.type || '').toLowerCase();
+  if (TYPE_TO_SECTION[typ]) return TYPE_TO_SECTION[typ];
+  const stem = basename(String(unit.path), '.md').toLowerCase();
+  for (const [prefix, section] of PREFIX_TO_SECTION) {
+    if (stem.startsWith(prefix)) return section;
+  }
+  return 'Notes';
+}
+
+// ---------- Unit iteration ----------
+
+export function iterUnits(memoriesDir) {
+  const units = [];
+  for (const fname of readdirSync(memoriesDir).sort()) {
+    if (!fname.endsWith('.md')) continue;
+    if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
+    try { units.push(loadUnit(join(memoriesDir, fname))); } catch {}
+  }
+  return units;
+}
+
+// ---------- CLI ----------
+
+function _todayFromArg(arg) {
+  return arg ? parseIsoDate(arg) : _todayUTC();
+}
+
+function _cliSections(ranked, topK) {
+  const sections = {
+    'What & Why': [],
+    State: [],
+    People: [],
+    Moves: [],
+    'Decisions & Risks': [],
+    Notes: [],
+  };
+  for (const [s, u] of ranked) {
+    const sec = unitSection(u);
+    const bucket = sections[sec] || sections.Notes;
+    if (bucket.length < topK) {
+      bucket.push({ unit_id: u.id, path: String(u.path), priority: Math.round(s * 10000) / 10000, type: u.fm.type || '', topics: u.fm.topics || [] });
+    }
+  }
+  console.log(JSON.stringify(sections, null, 2));
+  return 0;
+}
+
+export function writeAuditEntry(logPath, entry) {
+  appendFileSync(logPath, JSON.stringify(entry) + '\n');
+}
+
+export function main(argv) {
+  let memoriesDirArg = '_memories';
+  let topN = 10;
+  let intentStr = '';
+  let todayArg = null;
+  let sections = false;
+  let topPerSection = 5;
+  let logPath = null;
+  let logLabel = null;
+
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--top') { topN = parseInt(argv[++i], 10); }
+    else if (a === '--intent') { intentStr = argv[++i]; }
+    else if (a === '--today') { todayArg = argv[++i]; }
+    else if (a === '--sections') { sections = true; }
+    else if (a === '--top-per-section') { topPerSection = parseInt(argv[++i], 10); }
+    else if (a === '--log') { logPath = argv[++i]; }
+    else if (a === '--log-label') { logLabel = argv[++i]; }
+    else if (!a.startsWith('--')) { memoriesDirArg = a; }
+  }
+
+  const memoriesDir = resolve(memoriesDirArg);
+  try { readdirSync(memoriesDir); } catch {
+    process.stderr.write(`error: ${memoriesDir} is not a directory\n`);
+    return 2;
+  }
+
+  const intent = intentStr ? intentStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const today = _todayFromArg(todayArg);
+
+  const ranked = iterUnits(memoriesDir).map(u => [score(u, intent, today), u]);
+  ranked.sort((a, b) => b[0] - a[0]);
+
+  if (logPath) {
+    const rankings = ranked.slice(0, topN).map(([s, u]) => ({
+      unit_id: u.id,
+      score: Math.round(s * 10000) / 10000,
+      topics: u.fm.topics || [],
+    }));
+    const entry = {
+      timestamp: new Date().toISOString(),
+      cwd: process.cwd(),
+      memories_dir: memoriesDir,
+      top_n: topN,
+      intent,
+      sections,
+      rankings,
+    };
+    if (logLabel) entry.label = logLabel;
+    writeAuditEntry(logPath, entry);
+  }
+
+  if (sections) return _cliSections(ranked, topPerSection);
+
+  console.log(`Ranking ${ranked.length} units in ${memoriesDir}`);
+  console.log(`Date: ${today.toISOString().slice(0, 10)}, intent topics: ${intent.length ? intent.join(',') : '(none)'}`);
+  console.log('-'.repeat(64));
+  for (const [s, u] of ranked.slice(0, topN)) {
+    const topics = u.fm.topics || [];
+    console.log(`  ${s.toFixed(3)}  ${u.id.padEnd(42)}  topics=${JSON.stringify(topics)}`);
+  }
+  return 0;
+}
+
+// CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
+// silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
+const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
+const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
+const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
+if (process.env.CORE_DEBUG_CLI_ENTRY) {
+  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
+}
+if (_cliEntryArgv1 === _cliEntrySelf) {
+  process.exit(main(process.argv.slice(2)));
+}

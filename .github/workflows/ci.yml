@@ -85,6 +85,43 @@ jobs:
             console.log("Harness manifest lockstep OK:", claude);
           '
 
+      - name: Codex marketplace path integrity
+        run: |
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const market = JSON.parse(fs.readFileSync(".agents/plugins/marketplace.json","utf8"));
+            const rootVersion = JSON.parse(fs.readFileSync(".codex-plugin/plugin.json","utf8")).version;
+            let failed = 0;
+            for (const p of market.plugins || []) {
+              if (!p.source || p.source.source !== "local") continue;
+              const pluginDir = path.resolve(p.source.path);
+              if (!fs.existsSync(pluginDir)) {
+                console.error("marketplace plugin dir missing: " + p.source.path + " (resolved: " + pluginDir + ")");
+                failed = 1; continue;
+              }
+              const pluginJson = path.join(pluginDir, ".codex-plugin", "plugin.json");
+              if (!fs.existsSync(pluginJson)) {
+                console.error("missing " + pluginJson); failed = 1; continue;
+              }
+              const pj = JSON.parse(fs.readFileSync(pluginJson,"utf8"));
+              if (pj.name !== p.name) {
+                console.error("plugin name mismatch: marketplace=" + p.name + " vs plugin.json=" + pj.name);
+                failed = 1;
+              }
+              if (pj.version !== rootVersion) {
+                console.error("plugin version drift: root=" + rootVersion + " plugins/" + p.name + "=" + pj.version);
+                failed = 1;
+              }
+              const skillsDir = path.join(pluginDir, "skills");
+              if (!fs.existsSync(skillsDir)) {
+                console.error("skills dir missing inside plugin dir: " + skillsDir); failed = 1;
+              }
+              console.log("plugin " + p.name + " at " + p.source.path + ": OK (v" + pj.version + ")");
+            }
+            if (failed) process.exit(1);
+          '
+
       - name: SKILL.md has YAML frontmatter with name and description
         run: |
           node -e '
