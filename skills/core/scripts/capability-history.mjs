@@ -42,6 +42,25 @@ function lockPath(workspaceId, home = homedir()) {
   return join(home, '.core', 'workspaces', workspaceId, 'capability-history.lock');
 }
 
+function projectHistoryPath(project, workspaceId) {
+  return join(project, '_metrics', 'capability-history', `${workspaceId}.jsonl`);
+}
+
+function projectLockPath(project, workspaceId) {
+  return join(project, '_metrics', 'capability-history', `${workspaceId}.lock`);
+}
+
+function resolveStorePaths(workspaceId, opts = {}) {
+  if (opts.project) {
+    return {
+      file: projectHistoryPath(opts.project, workspaceId),
+      lock: projectLockPath(opts.project, workspaceId),
+    };
+  }
+  const home = opts.home || homedir();
+  return { file: historyPath(workspaceId, home), lock: lockPath(workspaceId, home) };
+}
+
 /**
  * Canonical JSON for hashing: sorted keys, no whitespace, evidence sorted by
  * source. `observed_at` is excluded so the same row in two sessions hashes equal.
@@ -139,10 +158,8 @@ export function applyRetention(lines, { byteCap = BYTE_CAP, perCapability = RETE
  * @returns {{ appended: number, truncated: number, path: string }}
  */
 export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
-  const home = opts.home || homedir();
   const now = opts.now || (() => new Date().toISOString());
-  const file = historyPath(workspaceId, home);
-  const lock = lockPath(workspaceId, home);
+  const { file, lock } = resolveStorePaths(workspaceId, opts);
   const dir = dirname(file);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
@@ -179,8 +196,7 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
  * Read all history entries for a workspace (parsed). Returns [] if absent.
  */
 export function readHistory(workspaceId, opts = {}) {
-  const home = opts.home || homedir();
-  const file = historyPath(workspaceId, home);
+  const { file } = resolveStorePaths(workspaceId, opts);
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8')
     .split('\n')
@@ -189,4 +205,4 @@ export function readHistory(workspaceId, opts = {}) {
     .filter(Boolean);
 }
 
-export { historyPath, lockPath };
+export { historyPath, lockPath, projectHistoryPath, projectLockPath };

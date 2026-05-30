@@ -1,8 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-  groupByCapability, detectDrift, detectRegression, attributeDrift, renderDriftLog,
+  groupByCapability, detectDrift, detectRegression, attributeDrift, renderDriftLog, loadCapabilityHistory,
 } from '../../skills/core/scripts/analyze-capability-drift.mjs';
+import { appendRows } from '../../skills/core/scripts/capability-history.mjs';
 
 // History entry shape: { observed_at, session_id, row_content_hash, row: { capability_id, identity_status, evidence } }
 function entry(capId, status, observedAt, session, evidence = []) {
@@ -156,4 +160,22 @@ test('renderDriftLog: regression section renders', () => {
   const md = renderDriftLog([], [], regs, '2026-01-03');
   assert.match(md, /Regression/);
   assert.match(md, /target-surface no longer reports/);
+});
+
+test('loadCapabilityHistory: includes project-local fallback rows', () => {
+  const home = mkdtempSync(join(tmpdir(), 'capdrift-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'capdrift-project-'));
+  try {
+    appendRows('ws-fallback', [
+      { capability_id: 'plugin-root-resolution', identity_status: 'PASS', evidence: [] },
+    ], { session_id: 's1' }, { project });
+    const history = loadCapabilityHistory('ws-fallback', project, { home });
+    assert.equal(history.length, 1);
+    assert.equal(history[0].workspace_id, 'ws-fallback');
+    assert.equal(history[0].session_id, 's1');
+    assert.equal(history[0].row.capability_id, 'plugin-root-resolution');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { recordSnapshot, resolveSessionId } from '../../skills/core/scripts/record-capability-snapshot.mjs';
@@ -23,6 +23,27 @@ test('wire-in: record-capability-snapshot appends real probe rows to capability-
     // the anti-anchoring row (DEGRADED) is among the recorded rows — proves real probe output
     assert.ok(hist.some(h => h.row.capability_id === 'anti-anchoring-mechanism'), 'real probe rows, not a stub');
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('wire-in: record-capability-snapshot falls back to project-local history when home store is unavailable', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'capwire-home-blocked-'));
+  const project = mkdtempSync(join(tmpdir(), 'capwire-project-'));
+  try {
+    writeFileSync(join(home, '.core'), 'not a directory');
+    writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'ws-sandbox' }));
+    const r = await recordSnapshot({
+      workspaceId: 'ws-sandbox',
+      harness: 'codex',
+      cwd: project,
+      sessionId: 's-sandbox',
+      home,
+    });
+    assert.equal(r.storage, 'project-fallback');
+    assert.match(r.primary_error, /ENOTDIR|EPERM|EACCES|EROFS/);
+    const hist = readHistory('ws-sandbox', { project });
+    assert.ok(hist.length >= 1, 'fallback history file should contain probe rows');
+    assert.ok(hist.every(h => h.session_id === 's-sandbox'));
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
 });
 
 test('wire-in: drift analysis CONSUMES the appended history across two sessions', async () => {
