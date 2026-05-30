@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { recordRetrievalEvent } from '../../skills/core/scripts/record-retrieval-event.mjs';
 import { buildReport, loadEvents } from '../../skills/core/scripts/analyze-retrieval-quality.mjs';
+
+const PLUGIN_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
+const RECORD_RETRIEVAL_EVENT_SCRIPT = join(PLUGIN_ROOT, 'skills', 'core', 'scripts', 'record-retrieval-event.mjs');
 
 function validEvent(overrides = {}) {
   return {
@@ -118,13 +122,13 @@ test('record-retrieval-event CLI writes an analyzer-visible row', () => withTemp
     dip_back_count: 0,
   }));
   const result = spawnSync(process.execPath, [
-    'skills/core/scripts/record-retrieval-event.mjs',
+    RECORD_RETRIEVAL_EVENT_SCRIPT,
     root,
     '--event-json', event,
     '--today', '2026-05-30',
     '--now', '2026-05-30T16:45:00.000Z',
     '--session-id', 'cli-session',
-  ], { cwd: process.cwd(), encoding: 'utf8' });
+  ], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(buildReport(loadEvents(root, { allTime: true })).retrieval_events, 1);
 }));
