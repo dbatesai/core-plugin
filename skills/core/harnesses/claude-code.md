@@ -16,11 +16,22 @@ If any of these conditions hold, harness is Claude Code.
 
 ## spawn-subagent
 
-Use the `Agent` tool. Pick `subagent_type="Explore"` for semantic reasoning over the unit store, `subagent_type="general-purpose"` for open-ended investigation, or a specialized agent name (e.g., `feature-dev:code-explorer`) when one matches. Pass the prompt verbatim. Subagent output returns as a tool result.
+Use the `Agent` tool. Pick `subagent_type` by task:
+- `Explore` — semantic reasoning / broad fan-out search over the unit store (Tier 3 retrieval).
+- `Plan` — implementation-plan design without writing code.
+- `general-purpose` — open-ended multi-step investigation.
+- A specialized agent when one matches: `feature-dev:code-explorer` (trace a feature), `feature-dev:code-architect` (design a feature), `feature-dev:code-reviewer` / `pr-review-toolkit:*` (review), `code-simplifier`.
+
+Pass the prompt verbatim (include `agents/base-protocol.md` + any role definition). Subagent output returns as a tool result. For an agent that mutates files in parallel with others, add `isolation: "worktree"` so it works in its own git worktree and parallel edits don't collide (it's auto-cleaned if unchanged) — expensive, so only when there's real write contention.
 
 ## spawn-team
 
-`TeamCreate` with `team_name=<name>` and one entry per agent in `agents`. Each entry carries its prompt (including `agents/base-protocol.md` + the role definition). Per CORE's anti-anchoring discipline, each agent's prompt explicitly says "write your initial frame before reading other agents' output." TeamCreate returns when all agents complete.
+Two native substrates; pick by which adversarial phase you're running. The anti-convergence discipline itself stays in core prose (`protocols/analysis.md`) — neither substrate enforces it, so this adapter only maps the *execution*, never the reasoning rules.
+
+- **Isolated fan-out (Phase 1 independent framing + Phase 2 cross-pollination):** the `Workflow` tool. `agent(prompt, {schema})` is one-shot (prompt→validated result); `parallel(thunks)` / `pipeline(...)` run genuinely fresh-context agents concurrently. Fresh context is isolation-*positive* but not a guarantee — a script author can still leak Generator output into a Critic prompt — so **Critic-frames-first stays doctrine in `analysis.md`, not something Workflow gives you for free.** Workflow is **user-gated** (the user must opt in), so treat it as an opportunistic optimization, never CORE's assumed substrate; fall back to `TeamCreate` or the file-scratchpad pattern when it's unavailable.
+- **Multi-round adversarial pressure (Phase 3 persuasion-log + mind-changes accumulation):** `TeamCreate` with `team_name=<name>` and one entry per agent in `agents`, each carrying its prompt (`agents/base-protocol.md` + role). `Workflow.agent()` *cannot* do this — it's one-shot with no inter-agent turns — so Phase 3 needs Teams + `SendMessage` + `Monitor`. Each agent's prompt explicitly says "write your initial frame before reading other agents' output." `TeamCreate` returns when all agents complete.
+
+For parallel file-mutating team agents, the same `isolation: "worktree"` guidance as spawn-subagent applies (Workflow exposes it via `isolation: 'worktree'` per-`agent()`).
 
 ## send-message
 
@@ -46,8 +57,9 @@ Implicit — agents poll their inbox via `SendMessage` listings each turn. The V
 
 ## schedule
 
-- **Recurring:** `CronCreate` with a 5-field cron expression in UTC. Minimum 1-hour interval per the Claude Code platform constraint.
-- **One-shot delayed self-invocation:** `ScheduleWakeup` with delay in seconds.
+- **Dynamic-cadence self-re-entry (the default for collab loops and any backing-off poll):** `ScheduleWakeup` with `delaySeconds`. Prefer this over `/loop` for anything with a *variable* cadence — `/loop` is fixed-interval and flattens a dynamic ladder (e.g. collab's fast→slow back-off), so it wastes turns when idle and reacts late when busy. **Wire the wake to an idempotent command, never a one-shot side-effecting one:** a wake re-fires the *full* command, so it must be safe to run repeatedly (e.g. the collab tick script, which is idempotent by design — re-running recomputes state). Pass the same continuation prompt back each fire; stop scheduling when the loop's exit condition is met.
+- **Fixed-interval recurring:** `/loop <interval> <command>` when the cadence genuinely is fixed and the command is idempotent. Use `CronCreate` (5-field UTC cron, ≥1-hour interval per the platform constraint) only for cross-session recurring schedules that must survive the session ending.
+- **Parity note (DC-75):** `schedule` is a *drop* on Codex (no native scheduler) — Codex uses supervised re-entry at the computed cadence, and collab's portable cadence-compute + supervised re-entry is the cross-harness baseline. ScheduleWakeup is a Claude-Code optimization layered on that portable policy, not a replacement for it.
 
 ## hook-register
 
