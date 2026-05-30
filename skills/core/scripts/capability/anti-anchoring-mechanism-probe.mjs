@@ -27,9 +27,14 @@
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'anti-anchoring-mechanism';
-export const CLOSURE_TARGET = 'v2.8.0';
+// Closure version is intentionally NOT a false exact promise (HC/Hale-ratified
+// 2026-05-29): v2.8.0/v2.8.1 shipped WITHOUT closing R-17, so the old 'v2.8.0' was
+// already false. Use 'v2.9+' and let CLOSURE_REQUIREMENT carry the real bar.
+export const CLOSURE_TARGET = 'v2.9+';
+export const CLOSURE_REQUIREMENT =
+  'not-before-v2.9.0; requires physical anti-anchoring validation/consumer enforcement before closure';
 export const CLOSURE_MECHANISM_PLANNED =
-  'per-agent working directories with file-scratchpad initial-frame staging';
+  'per-agent working-directory isolation (native Workflow/Agent isolation:"worktree" is a candidate primitive — local-llm-build uses it) + initial-frame-before-peer-exposure staging';
 // The risk unit this row points at (must stay in sync with <project>/_memories/).
 export const RISK_UNIT = 'risk-17-trust-based-anti-anchoring-claude-code';
 
@@ -54,6 +59,7 @@ function buildRow({ observed_at, cwd }) {
     mutation_permitted: false,
     mutation_block_reason: 'identity-degraded',
     closure_target: CLOSURE_TARGET,
+    closure_requirement: CLOSURE_REQUIREMENT,
     closure_mechanism_planned: CLOSURE_MECHANISM_PLANNED,
     evidence: [
       {
