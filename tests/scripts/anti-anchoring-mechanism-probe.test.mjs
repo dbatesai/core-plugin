@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  probe, SCHEMA_VERSION, CAPABILITY_ID, RISK_UNIT, CLOSURE_TARGET,
+  probe, SCHEMA_VERSION, CAPABILITY_ID, RISK_UNIT, CLOSURE_TARGET, CLOSURE_REQUIREMENT,
 } from '../../skills/core/scripts/capability/anti-anchoring-mechanism-probe.mjs';
 
 const VALID_WEIGHTS = new Set(['primary', 'corroborating', 'conflicting']);
@@ -35,10 +35,14 @@ test('probe: evidence points at the R-17 risk unit', async () => {
   assert.match(RISK_UNIT, /^risk-17-/);
 });
 
-test('probe: declares closure target v2.8.0 and a planned mechanism', async () => {
+test('probe: declares an honest closure target (not a false exact promise) + requirement + mechanism', async () => {
   const row = await probe();
   assert.equal(row.closure_target, CLOSURE_TARGET);
-  assert.equal(CLOSURE_TARGET, 'v2.8.0');
+  // Hale-ratified 2026-05-29: v2.8.x shipped WITHOUT closing R-17, so 'v2.8.0' was already false.
+  // Use 'v2.9+' and carry the real bar in closure_requirement.
+  assert.equal(CLOSURE_TARGET, 'v2.9+');
+  assert.match(CLOSURE_REQUIREMENT, /not-before-v2\.9\.0; requires physical anti-anchoring validation/);
+  assert.equal(row.closure_requirement, CLOSURE_REQUIREMENT);
   assert.ok(typeof row.closure_mechanism_planned === 'string' && row.closure_mechanism_planned.length > 0);
 });
 
