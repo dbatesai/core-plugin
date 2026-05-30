@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.0.0] — (pending merge)
+## [3.0.0] — 2026-05-30
 
 This release ships the instruction-surface generator system (CONTRACT.md → harness instruction files). It also includes the full v2.9 evidence-layer hardening, native Codex marketplace support for both repos, and a retrieval-quality analyzer fix that makes metrics fail honest when retrieval-shaped rows are absent. End-to-end retrieval-effectiveness proof remains open until startup/orient/refresh emit retrieval-shaped rows and expected/forbidden-memory scenarios pass. The MAJOR bump reflects the maintenance-model change: generating CLAUDE.md/AGENTS.md/GEMINI.md from a single CONTRACT.md changes how projects maintain instruction surfaces.
 
