@@ -113,6 +113,7 @@ Supporting references:
 - `references/retrieval.md` — four-tier retrieval ladder (Tier 0 in-context → Tier 1 Grep → Tier 2 typed-edge walk → Tier 3 Explore subagent).
 - `references/model-assignments.md` — model tier per pipeline stage; consult before dispatching graduation, render, external pulls.
 - `references/hygiene-strategies.md` — deeper hygiene sub-protocols (graduation reasoning, archive integrity, edge reconciliation).
+- `references/instruction-surface-contract.md` — (v3.0) the contract→generator system: one `CONTRACT.md` generates `CLAUDE.md`/`AGENTS.md`/`GEMINI.md`. Read when adopting the contract system, editing a contract, or handling a contract-drift release gate.
 - `agents/base-protocol.md` — included in every spawned agent prompt; carries the reasoning discipline that applies whether you're solo or in a swarm.
 - `schemas/output.md` — output schema for multi-agent runs.
 - `schemas/workspace.md` — workspace manifest structure.
