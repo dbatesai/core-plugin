@@ -51,6 +51,10 @@ export function migrateToContract({ files = {}, contractId, lastRevised }) {
   const allKeys = Object.keys(files).filter((h) => files[h] != null);
   const harnesses = allKeys.filter((h) => KNOWN_HARNESSES.includes(h));
   const inputWarnings = allKeys.filter((h) => !KNOWN_HARNESSES.includes(h)).map((h) => `ignoring unknown harness key '${h}' (known: ${KNOWN_HARNESSES.join(', ')})`);
+  // Hale: WARN on weak provenance at migrate-time (don't hard-reject a draft) — but make
+  // it explicit that the artifact is non-releaseable until a real last_revised is supplied
+  // (the generator gate fails closed on 'unknown').
+  if (lastRevised === 'unknown') inputWarnings.push("weak provenance: last_revised 'unknown' — this DRAFT is non-releaseable until a real date is supplied (generate --check fails closed on it)");
   if (harnesses.length === 0) {
     throw new Error(`migrate: no known harness files provided (got [${allKeys.join(', ')}]; need one of ${KNOWN_HARNESSES.join(', ')})`);
   }

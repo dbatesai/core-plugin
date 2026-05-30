@@ -171,6 +171,17 @@ test('generate check: missing last_revised is FATAL (gate fails closed, not just
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('generate check: last_revised:"unknown" is FATAL (separate from missing — Hale)', async () => {
+  const { dir, p } = tmpContract(FIXTURE.replace('last_revised: 2026-04-01', 'last_revised: unknown'));
+  try {
+    const outPath = join(dir, 'CLAUDE.md');
+    await generate({ contractPath: p, outputPath: outPath, mode: 'write' });
+    const r = await generate({ contractPath: p, outputPath: outPath, mode: 'check' });
+    assert.equal(r.fatal, true, "'unknown' last_revised fails closed like missing");
+    assert.ok(r.fatalErrors.some((e) => /unknown/.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('generate check: target harness not in canonical_for is FATAL', async () => {
   const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex", "gemini"]', 'canonical_for: ["codex"]'));
   try {

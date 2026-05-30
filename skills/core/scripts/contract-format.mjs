@@ -176,8 +176,10 @@ export async function generateForHarness({ harness, contractPath, outputPath, ov
   if (!contract.canonicalFor.includes(harness)) {
     fatal.push(`harness '${harness}' is not in canonical_for [${contract.canonicalFor.join(', ')}] — generating an unintended surface`);
   }
-  if (!contract.frontmatter.last_revised) {
-    fatal.push("contract has no 'last_revised' — generated_at falls back to 'unknown', so output is non-deterministic and --check drift is unreliable");
+  // Missing AND the literal 'unknown' are separate cases (Hale) — both make generated_at
+  // non-deterministic and must fail the gate closed.
+  if (!contract.frontmatter.last_revised || contract.frontmatter.last_revised === 'unknown') {
+    fatal.push(`contract last_revised is ${contract.frontmatter.last_revised ? "'unknown'" : 'missing'} — generated_at is non-deterministic, so --check drift is unreliable; supply a real date before release`);
   }
   warnings.push(...fatal);
   const body = renderForHarness(contract, harness, overrides);

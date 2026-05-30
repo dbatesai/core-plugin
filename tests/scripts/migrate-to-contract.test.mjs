@@ -85,3 +85,8 @@ test('migrate: unknown harness key warns (ignored, not silently dropped)', () =>
   const r = migrateToContract({ contractId: 'demo', lastRevised: '2026-04-01', files: { 'claude-code': 'x', borg: 'y' } });
   assert.ok(r.warnings.some((w) => /borg/.test(w)));
 });
+
+test('migrate: last_revised "unknown" warns weak-provenance / non-releaseable (Hale)', () => {
+  const r = migrateToContract({ contractId: 'demo', lastRevised: 'unknown', files: { 'claude-code': 'x', codex: 'x' } });
+  assert.ok(r.warnings.some((w) => /weak provenance|non-releaseable/i.test(w)));
+});
