@@ -42,6 +42,7 @@ This release ships the instruction-surface generator system (CONTRACT.md → har
 - `protocols/startup.md` — removed stale "Codex has no equivalent auto-memory" text; aligned with `harnesses/codex.md §read-auto-memory`
 - Anti-anchoring probe: `CLOSURE_TARGET` corrected from `v2.8.0` (never closed) to `v2.9+`
 - `skills/finalize/SKILL.md` — added Step 3.5 ROADMAP.md regen (documented in ROADMAP header but missing from the skill)
+- `validate.mjs` — forbidden-candidate gate: validation now scans the top-5 candidate set for units that should NOT appear; a forbidden hit now fails the run rather than silently passing. Live validation against core-codex surfaced a previously-hidden forbidden-memory miss (4/5 pass, 1 fail). This closes the "expected-memory and forbidden-memory scenario tests" open verification gate.
 - `record-retrieval-event.test.mjs` CLI regression now resolves the script from the test file's own location rather than the working directory — test passes when run from external project roots and installed plugin caches (Codex `/orient` probe caught this)
 - `record-capability-snapshot.mjs` — adds project-local capability history fallback at `<project>/_metrics/capability-history/<workspace-id>.jsonl` for Codex sandbox environments where the primary `~/.core/workspaces/<id>/capability-history.jsonl` is outside the writable sandbox (EPERM/EACCES/EROFS/ENOTDIR errors). `analyze-capability-drift.mjs` reads both stores.
 
