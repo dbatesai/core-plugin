@@ -139,6 +139,34 @@ export function spliceSection(memoryMdText, newSection) {
   ].join('\n');
 }
 
+// Cross-project contamination guard.
+//
+// The writer computes the priority block from <source>/_memories and writes it
+// into the --memory-md target. Nothing structural stops you from pairing one
+// project's _memories with another project's MEMORY.md — and when that happens
+// the target's units are silently overwritten with the source's (a real,
+// destructive cross-project contamination that bit us in session 60).
+//
+// Claude Code maps a project cwd to ~/.claude/projects/<mapped-cwd>/memory/MEMORY.md
+// where <mapped-cwd> is the absolute cwd with path separators turned into dashes.
+// So the target's project identity is recoverable from its path, and we can
+// assert it matches the source project (the parent of _memories) before writing.
+//
+// Returns null when same-project (or when the target isn't a standard Claude Code
+// memory path — test fixtures, custom targets — where we can't assert and don't
+// block). Returns a mismatch descriptor otherwise. Fail-safe: on any doubt about
+// a STANDARD path we refuse, because a false refusal is recoverable and a silent
+// contamination is data loss.
+export function projectIdentityMismatch(memoriesDir, memoryMdPath) {
+  const m = String(memoryMdPath).match(/[/\\]projects[/\\]([^/\\]+)[/\\]memory[/\\]MEMORY\.md$/);
+  if (!m) return null; // non-standard target — cannot assert identity, don't block
+  const actualMapped = m[1];
+  const projectRoot = dirname(memoriesDir);
+  const expectedMapped = projectRoot.replace(/\//g, '-');
+  if (actualMapped === expectedMapped) return null;
+  return { projectRoot, expectedMapped, actualMapped };
+}
+
 export function main(argv) {
   let memoriesDirArg = null;
   let memoryMdPath = null;
@@ -160,6 +188,19 @@ export function main(argv) {
 
   const memoriesDir = resolve(memoriesDirArg);
   memoryMdPath = resolve(memoryMdPath);
+
+  const mismatch = projectIdentityMismatch(memoriesDir, memoryMdPath);
+  if (mismatch) {
+    process.stderr.write(
+      'cross-project guard: REFUSING to write — source and target are different projects.\n' +
+      `  _memories source project: ${mismatch.expectedMapped} (from ${mismatch.projectRoot})\n` +
+      `  --memory-md target project: ${mismatch.actualMapped}\n` +
+      'Writing would overwrite one project\'s MEMORY.md priority block with another\'s units.\n' +
+      'Pass a --memory-md path that belongs to the same project as the _memories source.\n'
+    );
+    return 3;
+  }
+
   const today = todayFromArg(todayArg);
 
   const oldText = readFileSync(memoryMdPath, 'utf8');
