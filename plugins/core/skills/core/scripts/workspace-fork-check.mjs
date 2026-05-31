@@ -34,6 +34,18 @@ export function slugify(name) {
     .replace(/^-+|-+$/g, '');
 }
 
+// An index entry's registered project path. The schema (schemas/workspace.md)
+// specifies `project_path`; the live index and both readers (this script +
+// startup.md's prose path-match) historically used `path`. Read both so a
+// schema-compliant `project_path` entry isn't invisible to the path-match —
+// when it was, this script could never recognize its own registered workspace
+// and re-forked it on every startup (Meridian, R11, 2026-05-31:
+// local-llm-build-r11 -> -2 -> -3 ...). Standardizing the field across schema +
+// startup prose is a separate cleanup; this read tolerates both conventions.
+export function entryPath(entry) {
+  return entry.project_path || entry.path || null;
+}
+
 export function resolveCollision(slug, existingIds) {
   if (!existingIds.has(slug)) return slug;
   let n = 2;
@@ -66,7 +78,7 @@ export function checkFork({ cwd, coreDir, now = new Date() }) {
   if (!Array.isArray(index)) return { action: 'error', error: 'index-not-array' };
 
   const cwdResolved = resolve(cwd);
-  const pathMatch = index.find(e => e.path && resolve(e.path) === cwdResolved);
+  const pathMatch = index.find(e => entryPath(e) && resolve(entryPath(e)) === cwdResolved);
   if (pathMatch) return { action: 'no-fork', reason: 'path-match', workspace_id: pathMatch.workspace_id };
 
   const localId = pointer.workspace_id;
@@ -75,7 +87,8 @@ export function checkFork({ cwd, coreDir, now = new Date() }) {
   const idMatch = index.find(e => e.workspace_id === localId);
   if (!idMatch) return { action: 'no-fork', reason: 'unregistered-id' };
 
-  const registeredPath = idMatch.path ? resolve(idMatch.path) : null;
+  const idMatchPath = entryPath(idMatch);
+  const registeredPath = idMatchPath ? resolve(idMatchPath) : null;
   if (registeredPath === cwdResolved) return { action: 'no-fork', reason: 'path-match', workspace_id: localId };
 
   const baseSlug = slugify(basename(cwdResolved));
