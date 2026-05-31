@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] — 2026-05-31
+
+A structural release. `plugins/core/` becomes the single canonical tree (the dual-tree mirror is gone), and `/orient` now records retrieval events so retrieval-quality analysis measures real data. Transparent to users — `claude plugins update core@core` re-pulls from the new source.
+
+### Added
+- **`/orient` records retrieval events.** A resumption bootstrap now emits one retrieval-shaped row per load (`session-start` trigger), so `analyze-retrieval-quality` measures real retrievals instead of empty telemetry. The most common retrieval path was previously invisible to the corpus.
+
+### Changed
+- **Structural collapse — `plugins/core/` is the single canonical skill tree.** The top-level `skills/`/`hooks/` trees and the rsync mirror are removed; the Claude marketplace `source` is now `./plugins/core`, matching where Codex already read. Tests live at the repo root and no longer ship in the install bundle (install drops from ~2.4 MB to ~1.2 MB). One tree, both harnesses.
+- Version source canonicalized on the `plugins/core` manifests; the repo root keeps only the marketplace listing.
+
 ## [3.1.1] — 2026-05-31
 
 A patch release fixing two plugin-root resolver defects surfaced by on-box Windows validation (#45), both confirmed live on the shipped v3.1.0.
