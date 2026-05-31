@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] — 2026-05-31
+
+A patch release fixing two plugin-root resolver defects surfaced by on-box Windows validation (#45), both confirmed live on the shipped v3.1.0.
+
+### Fixed
+- **Windows authority classification.** `classifyAuthority` compared the resolved plugin root against forward-slash path literals while `homedir()` returns a backslash path on Windows, so every Windows install classified as `unknown` and its mutation gates failed closed. Both sides are now normalized to forward slashes before comparison (safe on POSIX, where backslashes can't appear in a path). (#45)
+- **Identity DEGRADED on co-located manifests.** When the install root co-locates the Claude and Codex manifests (the shipped layout), the codex-first anchor walk always reported `manifest_harness: codex`, tripping the split-brain check and degrading identity on every Claude resolution. The resolver now re-points to the consuming harness's own manifest when it's co-located in the resolved root — before env reconciliation — and still flags genuine wrong-plugin cases where only the foreign manifest is present. (#45)
+
+### Changed
+- CI hardens the script-import glob guards and adds a Codex mirror parity gate.
+- Dropped a redundant `RENDER_ONLY_ARTIFACTS` validator guard now subsumed by the `_`-prefix convention.
+
 ## [3.1.0] — 2026-05-31
 
 A reliability release on top of v3.0.0: it hardens the startup `CORE_ROOT` resolver against a silent wrong-drive failure, adds a guard against cross-project memory contamination, and removes the Gemini harness (which never had a working callable-skill surface). MINOR rather than patch because it removes a harness and adds a register-sources capability note.
