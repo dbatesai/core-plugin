@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- Gemini harness support — the `.gemini-plugin` manifest, the `harnesses/gemini.md` adapter, the `generate-gemini-md` generator, and all Gemini detection/capability rows. Gemini CLI has no callable-skill surface, so CORE-on-Gemini relied entirely on the agent inferring the protocol — it didn't work in practice. The contract system now generates CLAUDE.md + AGENTS.md only.
+
 ## [3.0.0] — 2026-05-30
 
 This release ships the instruction-surface generator system (CONTRACT.md → harness instruction files). It also includes the full v2.9 evidence-layer hardening, native Codex marketplace support for both repos, and a retrieval-quality analyzer fix that makes metrics fail honest when retrieval-shaped rows are absent. End-to-end retrieval-effectiveness proof remains open until startup/orient/refresh emit retrieval-shaped rows and expected/forbidden-memory scenarios pass. The MAJOR bump reflects the maintenance-model change: generating CLAUDE.md/AGENTS.md/GEMINI.md from a single CONTRACT.md changes how projects maintain instruction surfaces.

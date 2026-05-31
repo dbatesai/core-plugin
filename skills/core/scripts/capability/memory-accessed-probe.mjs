@@ -83,7 +83,7 @@ function coreStorePresentAt(cwd) {
 // unconditional; workspace_id is part of the evidence-field contract. memory-accessed
 // omitted env_signals + workspace_id (HC blocker #4, evt-202605291319) — added here so
 // every row this probe emits satisfies the producer contract that drift/regression read.
-const ENV_SIGNAL_KEYS = ['CLAUDE_PLUGIN_ROOT', 'CODEX_PLUGIN_ROOT', 'GEMINI_PLUGIN_ROOT', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'];
+const ENV_SIGNAL_KEYS = ['CLAUDE_PLUGIN_ROOT', 'CODEX_PLUGIN_ROOT', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'];
 
 function gatherEnvSignals(env = {}) {
   const out = {};

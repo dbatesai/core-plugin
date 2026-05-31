@@ -5,15 +5,13 @@
   "created_at": "2026-05-30T22:00:00Z",
   "targets": [
     "claude-code",
-    "codex",
-    "gemini"
+    "codex"
   ],
   "source_commit": "HEAD",
   "source_repo": "https://github.com/dbatesai/core-plugin",
   "manifests": {
     "claude-code": ".claude-plugin/plugin.json",
-    "codex": ".codex-plugin/plugin.json",
-    "gemini": ".gemini-plugin/plugin.json"
+    "codex": ".codex-plugin/plugin.json"
   },
   "marketplaces": {
     "claude-code": ".claude-plugin/marketplace.json",
@@ -27,5 +25,5 @@
     "vibecheck",
     "organize-files"
   ],
-  "notes": "v3.0.0: instruction-surface generator system (one CONTRACT.md generates CLAUDE.md / AGENTS.md / GEMINI.md, with migrator, override, and a fail-closed contract-drift release gate), the full v2.9 evidence layer (byte-cap truncation fix, retrieval-skip consumer, claude-code adapter modernization, Codex tool-call extraction), native Codex marketplace support (plugins/core bundle + .agents/plugins/marketplace.json), and a retrieval-event producer (record-retrieval-event.mjs). Shipped via PR #41 across a 10-PR adversarial hardening pass. Known gap carried into the release: the retrieval-event producer is not yet wired into the retrieval ladder, so the OTel retrieval-effectiveness metrics measure nothing yet."
+  "notes": "v3.0.0: instruction-surface generator system (one CONTRACT.md generates CLAUDE.md / AGENTS.md, with migrator, override, and a fail-closed contract-drift release gate), the full v2.9 evidence layer (byte-cap truncation fix, retrieval-skip consumer, claude-code adapter modernization, Codex tool-call extraction), native Codex marketplace support (plugins/core bundle + .agents/plugins/marketplace.json), and a retrieval-event producer (record-retrieval-event.mjs). Shipped via PR #41 across a 10-PR adversarial hardening pass. Known gap carried into the release: the retrieval-event producer is not yet wired into the retrieval ladder, so the OTel retrieval-effectiveness metrics measure nothing yet."
 }

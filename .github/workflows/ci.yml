@@ -37,7 +37,6 @@ jobs:
             .claude-plugin/plugin.json \
             .claude-plugin/marketplace.json \
             .codex-plugin/plugin.json \
-            .gemini-plugin/plugin.json \
             .agents/plugins/marketplace.json \
             hooks/hooks.json; do
             echo "parsing $f"
@@ -71,14 +70,9 @@ jobs:
             const fs = require("fs");
             const claude = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json","utf8")).version;
             const codex  = JSON.parse(fs.readFileSync(".codex-plugin/plugin.json","utf8")).version;
-            const gemini = JSON.parse(fs.readFileSync(".gemini-plugin/plugin.json","utf8")).version;
             let failed = 0;
             if (claude !== codex) {
               console.error("Version drift: .claude-plugin=" + claude + " vs .codex-plugin=" + codex);
-              failed = 1;
-            }
-            if (claude !== gemini) {
-              console.error("Version drift: .claude-plugin=" + claude + " vs .gemini-plugin=" + gemini);
               failed = 1;
             }
             if (failed) process.exit(1);

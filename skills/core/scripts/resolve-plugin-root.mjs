@@ -34,13 +34,11 @@ export const SCHEMA_VERSION = '1.0.0';
 export const PLUGIN_ROOT_ANCHORS = [
   { file: '.codex-plugin/plugin.json',  harness: 'codex' },
   { file: '.claude-plugin/plugin.json', harness: 'claude-code' },
-  { file: '.gemini-plugin/plugin.json', harness: 'gemini' },
 ];
 
 export const ENV_VAR_BY_HARNESS = {
   'claude-code': 'CLAUDE_PLUGIN_ROOT',
   'codex': 'CODEX_PLUGIN_ROOT',
-  'gemini': 'GEMINI_PLUGIN_ROOT',
 };
 
 // ---------- Pure helpers (testable in isolation) ----------
@@ -97,7 +95,6 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
   // installed-cache paths
   if (pluginRoot.includes(`${home}/.claude/plugins/`)) return 'installed-cache';
   if (pluginRoot.includes(`${home}/.codex/plugins/`)) return 'installed-cache';
-  if (pluginRoot.includes(`${home}/.gemini/plugins/`)) return 'installed-cache';
 
   // harness workspace paths (rare; means a plugin is being executed from
   // inside a per-workspace cache rather than the user-scope cache)
@@ -136,7 +133,6 @@ export function detectConsumingHarnessSignal(env = process.env) {
   // Strong signals — *_PLUGIN_ROOT env vars mean the harness explicitly set plugin context
   if (env.CLAUDE_PLUGIN_ROOT) signals.push({ var: 'CLAUDE_PLUGIN_ROOT', harness: 'claude-code', weight: 'strong' });
   if (env.CODEX_PLUGIN_ROOT)  signals.push({ var: 'CODEX_PLUGIN_ROOT',  harness: 'codex',       weight: 'strong' });
-  if (env.GEMINI_PLUGIN_ROOT) signals.push({ var: 'GEMINI_PLUGIN_ROOT', harness: 'gemini',      weight: 'strong' });
 
   // Weak signals — session/thread vars indicate harness presence, not plugin context
   if (env.CLAUDE_CODE_SESSION_ID) signals.push({ var: 'CLAUDE_CODE_SESSION_ID', harness: 'claude-code', weight: 'weak' });
@@ -167,7 +163,6 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
   const env_signals = {
     CLAUDE_PLUGIN_ROOT: env.CLAUDE_PLUGIN_ROOT || null,
     CODEX_PLUGIN_ROOT: env.CODEX_PLUGIN_ROOT || null,
-    GEMINI_PLUGIN_ROOT: env.GEMINI_PLUGIN_ROOT || null,
     CLAUDE_CODE_SESSION_ID: env.CLAUDE_CODE_SESSION_ID || null,
     CODEX_THREAD_ID: env.CODEX_THREAD_ID || null,
   };

@@ -39,12 +39,12 @@ The receipt trail. Every identity classification carries the observations that l
 
 ```yaml
 observed_at:            # ISO 8601 timestamp (e.g. "2026-05-27T13:00:00Z")
-harness:                # claude-code | codex | gemini | unknown
+harness:                # claude-code | codex | unknown
 workspace_id:           # string from <cwd>/workspace.json, or null
 cwd:                    # process.cwd() at probe time
 env_signals:            # object: env var name → resolved value (or null if unset)
                         #   Include at minimum: CLAUDE_PLUGIN_ROOT, CODEX_PLUGIN_ROOT,
-                        #   GEMINI_PLUGIN_ROOT, CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID
+                        #   CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID
 effective_script_root:  # realpath of the executing module's plugin-root anchor
 manifest_path:          # absolute path to the resolved plugin manifest, or null
 plugin_id:              # plugin name from manifest, or null

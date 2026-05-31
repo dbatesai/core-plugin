@@ -2,7 +2,7 @@
  * generate-claude-md.mjs — v3.0 generator for Claude Code's CLAUDE.md from CONTRACT.md.
  *
  * Thin wrapper over contract-format.mjs (all logic + determinism live there). The agents-md
- * and gemini-md generators are the same wrapper with a different harness name — the only
+ * generator is the same wrapper with a different harness name — the only
  * per-harness facts are the name and the output filename (HARNESS_OUTPUT).
  *
  * Modes: write | check | dry-run. `--check` exits 1 on drift (a hand edit), so /cut-release

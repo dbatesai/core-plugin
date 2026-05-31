@@ -15,7 +15,6 @@ function descriptorWith(delegate) {
         ],
       },
       codex: { probe_script: null, capabilities: [] },
-      gemini: { probe_script: null, capabilities: [] },
     },
     consumer_actions: {},
   };

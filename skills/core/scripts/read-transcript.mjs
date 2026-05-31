@@ -15,7 +15,6 @@
  *       lines are {timestamp, type, payload}; type 'response_item' + payload.type
  *       'message' carry {role, content:[{type, text}]}; payload.type 'reasoning' is
  *       encrypted (skipped); 'event_msg' carries agent_message/user_message/etc.
- *   - gemini: ~/.gemini/tmp/<hash>/chats/ — NOT YET verified; resolver returns null.
  *
  * Codex tool/shell extraction (v2.9 Slice F — IMPLEMENTED): function_call (exec_command
  * etc.; `arguments` is a JSON string with cmd + paths) and custom_tool_call (apply_patch
@@ -35,7 +34,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 export const SCHEMA_VERSION = '1.0.0';
-export const SUPPORTED_HARNESSES = new Set(['claude-code', 'codex', 'gemini']);
+export const SUPPORTED_HARNESSES = new Set(['claude-code', 'codex']);
 
 /** Resolve the latest transcript file for a harness, or null if none / unsupported. */
 export function resolveTranscriptPath(harness, { cwd = process.cwd(), home = homedir(), override = null } = {}) {
@@ -48,7 +47,7 @@ export function resolveTranscriptPath(harness, { cwd = process.cwd(), home = hom
     // rollout-*.jsonl nested under YYYY/MM/DD — walk the sessions tree.
     return latestFileRecursive(join(home, '.codex', 'sessions'), (f) => f.startsWith('rollout-') && f.endsWith('.jsonl'));
   }
-  // gemini path shape unverified — do not guess; return null (resolver drop).
+  // unknown harness — return null (resolver drop).
   return null;
 }
 
@@ -131,7 +130,7 @@ export function parseCodex(lines) {
   return events;
 }
 
-/** Dispatch parse by harness. Unknown/gemini → []. */
+/** Dispatch parse by harness. Unknown → []. */
 export function parseTranscript(content, harness) {
   const lines = String(content || '').split('\n');
   if (harness === 'claude-code') return parseClaudeCode(lines);
