@@ -96,12 +96,12 @@ test('parseCodex: message text + tool calls coexist in order; outputs/reasoning 
 // --- dispatch + path resolution + fail-open ---
 
 test('parseTranscript dispatches by harness; unknown → []', () => {
-  assert.equal(parseTranscript('{}', 'gemini').length, 0);
+  assert.equal(parseTranscript('{}', 'nope').length, 0);
   assert.equal(parseTranscript('bogus', 'nope').length, 0);
 });
 
-test('resolveTranscriptPath: gemini returns null (unverified — no guess)', () => {
-  assert.equal(resolveTranscriptPath('gemini', { home: '/tmp/nope' }), null);
+test('resolveTranscriptPath: unsupported harness returns null (no guess)', () => {
+  assert.equal(resolveTranscriptPath('nope', { home: '/tmp/nope' }), null);
 });
 
 test('resolveTranscriptPath: claude-code picks latest .jsonl by mtime', () => {
@@ -135,6 +135,6 @@ test('readTranscript: unsupported harness → unsupported meta, not available', 
   assert.equal(r.available, false);
 });
 
-test('SUPPORTED_HARNESSES covers the three target harnesses', () => {
-  ['claude-code', 'codex', 'gemini'].forEach((h) => assert.ok(SUPPORTED_HARNESSES.has(h)));
+test('SUPPORTED_HARNESSES covers the two target harnesses', () => {
+  ['claude-code', 'codex'].forEach((h) => assert.ok(SUPPORTED_HARNESSES.has(h)));
 });

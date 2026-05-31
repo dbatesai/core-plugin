@@ -106,7 +106,7 @@ The writer is the agent inline through the producer helper. There is no harness 
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/record-retrieval-event.mjs <project> --event-json '<json>'
 ```
 
-Substitute the harness-resolved plugin root (`CORE_ROOT`, `CODEX_PLUGIN_ROOT`, or `GEMINI_PLUGIN_ROOT`) when `CLAUDE_PLUGIN_ROOT` is not the active install root. The helper validates the row before write and reuses `log-event.mjs`, so the same call writes both the legacy JSONL row and the OTel `core.retrieval` span. Per-event schema:
+Substitute the harness-resolved plugin root (`CORE_ROOT` or `CODEX_PLUGIN_ROOT`) when `CLAUDE_PLUGIN_ROOT` is not the active install root. The helper validates the row before write and reuses `log-event.mjs`, so the same call writes both the legacy JSONL row and the OTel `core.retrieval` span. Per-event schema:
 
 ```jsonl
 {

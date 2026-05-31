@@ -51,7 +51,7 @@ export function loadDescriptor(path = DESCRIPTOR_PATH) {
 // one canonical detection chain. That signal looks at *_PLUGIN_ROOT env vars
 // first, then session-id env vars (CLAUDE_CODE_SESSION_ID, CODEX_THREAD_ID),
 // and returns 'unknown' / 'not_exposed' when nothing is set. Order in resolve-
-// plugin-root.mjs: CLAUDE_PLUGIN_ROOT > CODEX_PLUGIN_ROOT > GEMINI_PLUGIN_ROOT
+// plugin-root.mjs: CLAUDE_PLUGIN_ROOT > CODEX_PLUGIN_ROOT
 // > CLAUDE_CODE_SESSION_ID > CODEX_THREAD_ID > unknown.
 export function detectConsumingHarness(env = process.env) {
   return detectConsumingHarnessSignal(env).harness;

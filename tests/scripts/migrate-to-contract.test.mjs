@@ -12,16 +12,14 @@ test('migrate: shared lines → canonical; unique lines → harness-only', () =>
     files: {
       'claude-code': 'Plain voice always.\nQuality over speed.\nUse the Agent tool.',
       codex: 'Plain voice always.\nQuality over speed.\nUse AGENTS.md conventions.',
-      gemini: 'Plain voice always.\nUse activate_skill.',
     },
   });
-  // "Plain voice always." is in all 3 → canonical; "Quality over speed." in 2 → canonical
+  // "Plain voice always." and "Quality over speed." are in both → canonical
   assert.ok(/Plain voice always\./.test(r.draft));
   assert.ok(/Quality over speed\./.test(r.draft));
   // harness-only lines land in their sections
   assert.ok(/claude-code-only[\s\S]*Use the Agent tool/.test(r.draft));
   assert.ok(/codex-only[\s\S]*AGENTS\.md conventions/.test(r.draft));
-  assert.ok(/gemini-only[\s\S]*activate_skill/.test(r.draft));
 });
 
 test('migrate: draft is a parseable contract with correct canonical_for', () => {

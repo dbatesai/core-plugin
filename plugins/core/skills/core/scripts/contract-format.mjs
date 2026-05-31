@@ -2,10 +2,10 @@
  * contract-format.mjs — v3.0 Instruction-Surface Adapter System: the shared core.
  *
  * One canonical `<project>/CONTRACT.md` is the authoritative source of agent
- * instructions; per-harness CLAUDE.md / AGENTS.md / GEMINI.md are GENERATED from it.
+ * instructions; per-harness CLAUDE.md / AGENTS.md are GENERATED from it.
  * This module holds what all three generators share — the parser, the schema check, the
  * harness render, and the deterministic provenance header — so generate-claude-md /
- * agents-md / gemini-md stay thin (DC-75: harness specifics are just the name + filename).
+ * agents-md stay thin (DC-75: harness specifics are just the name + filename).
  *
  * The load-bearing property is DETERMINISM: the provenance `generated_at` is the
  * contract's `last_revised` (NOT wall-clock), and `contract_hash` is the sha256 of the
@@ -21,10 +21,10 @@ import { createHash } from 'node:crypto';
 export const SCHEMA_VERSION = '1.0';
 export const GENERATOR_VERSION = 'v3.0.0';
 export const ADAPTER_VERSION = 'v3.0.0';
-export const KNOWN_HARNESSES = ['claude-code', 'codex', 'gemini'];
-export const HARNESS_OUTPUT = { 'claude-code': 'CLAUDE.md', codex: 'AGENTS.md', gemini: 'GEMINI.md' };
+export const KNOWN_HARNESSES = ['claude-code', 'codex'];
+export const HARNESS_OUTPUT = { 'claude-code': 'CLAUDE.md', codex: 'AGENTS.md' };
 // The ## section per harness inside "## Harness-Specific Sections".
-const HARNESS_ONLY_SUBSECTION = { 'claude-code': 'claude-code-only', codex: 'codex-only', gemini: 'gemini-only' };
+const HARNESS_ONLY_SUBSECTION = { 'claude-code': 'claude-code-only', codex: 'codex-only' };
 const REQUIRED_FIELDS = ['schema_version', 'contract_id', 'canonical_for'];
 const HARNESS_SPECIFIC_HEADING = 'Harness-Specific Sections';
 const OVERRIDE_HOOKS_HEADING = 'Override Hooks';

@@ -79,11 +79,6 @@
           "required_for_actions": []
         }
       ]
-    },
-    "gemini": {
-      "probe_script": null,
-      "_doc": "Scaffolding-only — no empirical Codex/Claude-equivalent probes yet. Descriptor entry reserves the slot for v2.7.0+ work.",
-      "capabilities": []
     }
   },
   "consumer_actions": {
@@ -91,7 +86,7 @@
     "collab-files-mutating": {
       "requires_pass": ["plugin-root-resolution", "target-surface-collab-files"],
       "allowed_authorities": ["canonical-source", "installed-cache"],
-      "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "allowed_harnesses": ["claude-code", "codex"],
       "allowed_signal_weight": "strong",
       "target_surface": "~/Documents/Projects/files/collabs/",
       "description": "Event-write to ~/Documents/Projects/files/collabs/ via collab-plugin's gitCommitPush(). Requires strong signal (not just CODEX_THREAD_ID alone) because it writes to the shared files transport."
@@ -99,7 +94,7 @@
     "project-memory-write": {
       "requires_pass": ["plugin-root-resolution"],
       "allowed_authorities": ["canonical-source", "installed-cache"],
-      "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "allowed_harnesses": ["claude-code", "codex"],
       "allowed_signal_weight": "strong",
       "target_surface": "<project>/_memories/ + <project>/PROJECT.md",
       "description": "Autonomous write to <project>/_memories/ or PROJECT.md outside the user's session turn. Requires strong signal for the same reason as collab-files-mutating."
@@ -107,18 +102,18 @@
     "installed-runtime-write": {
       "requires_pass": ["plugin-root-resolution"],
       "allowed_authorities": ["installed-cache"],
-      "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "allowed_harnesses": ["claude-code", "codex"],
       "description": "Production install runtime writes (cache-resident operations). Source-mode runs blocked because they should not fire production install pathways."
     },
     "source-maintenance-write": {
       "requires_pass": ["plugin-root-resolution"],
       "allowed_authorities": ["canonical-source"],
-      "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "allowed_harnesses": ["claude-code", "codex"],
       "description": "Source-tree maintenance writes (CHANGELOG, manifests, etc.). Production install blocked — only the dev tree should touch source files."
     },
     "multi-agent-adversarial-run": {
       "requires_pass": ["anti-anchoring-mechanism"],
-      "allowed_harnesses": ["claude-code", "codex", "gemini"],
+      "allowed_harnesses": ["claude-code", "codex"],
       "description": "Fail-CLOSED gate for an adversarial multi-agent run whose output is the AUTHORITY for a canonical mutation (graduating a decision/risk unit, rendering PROJECT.md, approving a release gate, merging/publishing, writing canonical plan state). Requires anti-anchoring-mechanism PASS. While anti-anchoring is DEGRADED (trust-based, R-17) it blocks with identity-degraded; the consumer must obtain a PASS-grade mechanism (physical anti-anchoring validation/consumer enforcement, not-before-v2.9.0), an explicit human/owner override, or degrade to advisory-only. Advisory review-generation does NOT use this gate (fail-OPEN, watermarked DEGRADED) — see adversarial-run-gate.mjs classifyAdversarialRun and v2.7 plan §6. Per HC policy evt HC_539/HC_552."
     }
   }

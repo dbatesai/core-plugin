@@ -11,7 +11,7 @@ import { generate } from '../../skills/core/scripts/generate-claude-md.mjs';
 const FIXTURE = `---
 schema_version: 1.0
 contract_id: demo-project
-canonical_for: ["claude-code", "codex", "gemini"]
+canonical_for: ["claude-code", "codex"]
 maintained_by: David
 last_revised: 2026-04-01
 ---
@@ -30,9 +30,6 @@ Use the Agent tool for subagents.
 
 ### codex-only
 Use AGENTS.md conventions.
-
-### gemini-only
-Use activate_skill.
 `;
 
 function tmpContract(body = FIXTURE) {
@@ -50,7 +47,7 @@ test('parseContract: reads frontmatter + sections', () => {
     const c = parseContract(p);
     assert.equal(c.frontmatter.schema_version, '1.0');
     assert.equal(c.frontmatter.contract_id, 'demo-project');
-    assert.deepEqual(c.frontmatter.canonical_for, ['claude-code', 'codex', 'gemini']);
+    assert.deepEqual(c.frontmatter.canonical_for, ['claude-code', 'codex']);
     assert.ok(c.sections['Identity & Voice'].includes('Plain person voice'));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -70,7 +67,7 @@ test('parseContract: missing required field → throws', () => {
 });
 
 test('parseContract: unknown harness in canonical_for → warning, not throw', () => {
-  const { dir, p } = tmpContract(FIXTURE.replace('"gemini"]', '"gemini", "borg"]'));
+  const { dir, p } = tmpContract(FIXTURE.replace('"codex"]', '"codex", "borg"]'));
   try {
     const c = parseContract(p);
     assert.ok(c.warnings.some((w) => /borg/.test(w)));
@@ -79,7 +76,7 @@ test('parseContract: unknown harness in canonical_for → warning, not throw', (
 
 // --- render: harness-specific inclusion/exclusion ---
 
-test('renderForHarness: claude-code gets canonical + claude-only, NOT codex/gemini-only', () => {
+test('renderForHarness: claude-code gets canonical + claude-only, NOT codex-only', () => {
   const { dir, p } = tmpContract();
   try {
     const c = parseContract(p);
@@ -88,7 +85,6 @@ test('renderForHarness: claude-code gets canonical + claude-only, NOT codex/gemi
     assert.ok(out.includes('Quality over speed'), 'canonical Project-Specific Rules');
     assert.ok(out.includes('Use the Agent tool'), 'claude-code-only section included');
     assert.ok(!out.includes('Use AGENTS.md conventions'), 'codex-only excluded');
-    assert.ok(!out.includes('Use activate_skill'), 'gemini-only excluded');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -136,13 +132,12 @@ test('generate: override file appended with separator + reflected in override_bl
 test('HARNESS_OUTPUT maps harnesses to canonical filenames', () => {
   assert.equal(HARNESS_OUTPUT['claude-code'], 'CLAUDE.md');
   assert.equal(HARNESS_OUTPUT['codex'], 'AGENTS.md');
-  assert.equal(HARNESS_OUTPUT['gemini'], 'GEMINI.md');
 });
 
 // --- Hale review fixes (generator warnings + override hash fidelity) ---
 
 test('generate: warns when target harness is not in canonical_for', async () => {
-  const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex", "gemini"]', 'canonical_for: ["codex"]'));
+  const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex"]', 'canonical_for: ["codex"]'));
   try {
     const r = await generate({ contractPath: p, mode: 'dry-run' }); // generate-claude-md, but contract is codex-only
     assert.ok(r.warnings.some((w) => /not in canonical_for/.test(w)));
@@ -183,7 +178,7 @@ test('generate check: last_revised:"unknown" is FATAL (separate from missing —
 });
 
 test('generate check: target harness not in canonical_for is FATAL', async () => {
-  const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex", "gemini"]', 'canonical_for: ["codex"]'));
+  const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex"]', 'canonical_for: ["codex"]'));
   try {
     const r = await generate({ contractPath: p, outputPath: join(dir, 'CLAUDE.md'), mode: 'check' });
     assert.equal(r.fatal, true);
@@ -212,19 +207,16 @@ test('parseOverrides: hash is over RAW bytes — a whitespace-only edit changes 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('all three generators: each emits its own harness-only section, excludes the others', async () => {
+test('both generators: each emits its own harness-only section, excludes the other', async () => {
   const { generate: genClaude } = await import('../../skills/core/scripts/generate-claude-md.mjs');
   const { generate: genAgents } = await import('../../skills/core/scripts/generate-agents-md.mjs');
-  const { generate: genGemini } = await import('../../skills/core/scripts/generate-gemini-md.mjs');
   const { dir, p } = tmpContract();
   try {
     const c = await genClaude({ contractPath: p, mode: 'dry-run' });
     const a = await genAgents({ contractPath: p, mode: 'dry-run' });
-    const g = await genGemini({ contractPath: p, mode: 'dry-run' });
-    assert.ok(c.wouldWrite.includes('Use the Agent tool') && !c.wouldWrite.includes('AGENTS.md conventions') && !c.wouldWrite.includes('activate_skill'));
-    assert.ok(a.wouldWrite.includes('AGENTS.md conventions') && !a.wouldWrite.includes('Use the Agent tool') && !a.wouldWrite.includes('activate_skill'));
-    assert.ok(g.wouldWrite.includes('activate_skill') && !g.wouldWrite.includes('Use the Agent tool') && !g.wouldWrite.includes('AGENTS.md conventions'));
-    // all three share the canonical sections
-    for (const r of [c, a, g]) assert.ok(r.wouldWrite.includes('Plain person voice') && r.wouldWrite.includes('Quality over speed'));
+    assert.ok(c.wouldWrite.includes('Use the Agent tool') && !c.wouldWrite.includes('AGENTS.md conventions'));
+    assert.ok(a.wouldWrite.includes('AGENTS.md conventions') && !a.wouldWrite.includes('Use the Agent tool'));
+    // both share the canonical sections
+    for (const r of [c, a]) assert.ok(r.wouldWrite.includes('Plain person voice') && r.wouldWrite.includes('Quality over speed'));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

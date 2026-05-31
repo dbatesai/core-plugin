@@ -1,19 +1,17 @@
 {
   "name": "core",
-  "version": "3.0.0",
-  "build": "20260527.2",
-  "created_at": "2026-05-27T22:00:00Z",
+  "version": "3.1.0",
+  "build": "20260531.1",
+  "created_at": "2026-05-31T00:00:00Z",
   "targets": [
     "claude-code",
-    "codex",
-    "gemini"
+    "codex"
   ],
   "source_commit": "HEAD",
   "source_repo": "https://github.com/dbatesai/core-plugin",
   "manifests": {
     "claude-code": ".claude-plugin/plugin.json",
-    "codex": ".codex-plugin/plugin.json",
-    "gemini": ".gemini-plugin/plugin.json"
+    "codex": ".codex-plugin/plugin.json"
   },
   "marketplaces": {
     "claude-code": ".claude-plugin/marketplace.json",
@@ -24,8 +22,9 @@
     "orient",
     "finalize",
     "process-memory",
+    "register-sources",
     "vibecheck",
     "organize-files"
   ],
-  "notes": "v2.5.0: T1 Phase 1+2 of the metrics & observability v1 work (metrics-init.mjs storage scaffold + log-event.mjs OTel-format dual-write with four-step session-id resolution chain Claude Code → Codex → sentinel), and DC-85 Phase 1c memory architecture work (demote-state-narrative.mjs §State demotion script, dry-run-default in v1, wired into /finalize Step 3). Cross-environment empirical validation: Mac + Windows R11; 41 metrics tests + 36 Phase 1c tests; full suite green (Phase 1c-side). Phase 1c first-fire dry-run on CORE PROJECT.md confirmed expected `0 demoted, 15 kept` shape — criteria-vs-corpus mismatch finding captured at `obs-20260527-demote-terminal-status-corpus-mismatch` for follow-up alignment of both demote-* scripts."
+  "notes": "v3.1.0: reliability release on top of v3.0.0. Hardens the startup CORE_ROOT resolver against a silent wrong-drive failure (Windows Git-Bash MSYS-root crash; the tier-3 node -e backslash regex SyntaxErrored on every shell, now gated + surfaced loudly). Adds a cross-project contamination guard to generate-memory-index (refuses when the _memories source and --memory-md target are different projects). Removes the Gemini harness (no callable-skill surface; CORE-on-Gemini never worked). Plus a register-sources platform-credentials advisory note, the capability-drift-log validator fix, and a corrected six-skill count. Carried gap from v3.0.0 unchanged: the retrieval-event producer is still not wired into the retrieval ladder, so retrieval-effectiveness metrics measure nothing yet. Two open verification bars on the resolver fix at release time: Hale's adversarial consensus and Meridian's Windows on-box smoke."
 }

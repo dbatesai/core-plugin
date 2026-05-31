@@ -69,7 +69,7 @@ Persist `content` to the harness's local recall surface as a workflow hint for f
 
 ### detect-harness()
 
-Identify which harness the current session is running in. Returns one of: `claude-code`, `codex`, `gemini`, or future harness names. Called at session start before any adapter-verb resolution.
+Identify which harness the current session is running in. Returns one of: `claude-code`, `codex`, or future harness names. Called at session start before any adapter-verb resolution.
 
 ## How to use this contract
 

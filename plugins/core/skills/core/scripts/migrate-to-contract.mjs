@@ -1,6 +1,6 @@
 /**
  * migrate-to-contract.mjs — v3.0 §5: bootstrap a CONTRACT.md from existing per-harness
- * instruction files (CLAUDE.md / AGENTS.md / GEMINI.md).
+ * instruction files (CLAUDE.md / AGENTS.md).
  *
  * For projects already maintaining harness files by hand, this drafts the canonical
  * contract so they can switch to generate-from-contract. Strategy (line-level):
@@ -16,14 +16,14 @@
  *
  * CLI:
  *   node migrate-to-contract.mjs --id <contract-id> [--claude CLAUDE.md] [--codex AGENTS.md]
- *        [--gemini GEMINI.md] [--last-revised YYYY-MM-DD] [--write CONTRACT.md]
+ *        [--last-revised YYYY-MM-DD] [--write CONTRACT.md]
  */
 
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { HARNESS_OUTPUT, KNOWN_HARNESSES } from './contract-format.mjs';
 
-const HARNESS_ONLY = { 'claude-code': 'claude-code-only', codex: 'codex-only', gemini: 'gemini-only' };
+const HARNESS_ONLY = { 'claude-code': 'claude-code-only', codex: 'codex-only' };
 
 // Drop a leading <!-- GENERATED FROM CONTRACT ... --> block so a previously-generated
 // file doesn't carry its provenance header into the new contract.
@@ -108,11 +108,11 @@ if (isMain()) {
   const args = process.argv.slice(2);
   const opt = (n) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : null; };
   const files = {};
-  for (const [flag, h] of [['claude', 'claude-code'], ['codex', 'codex'], ['gemini', 'gemini']]) {
+  for (const [flag, h] of [['claude', 'claude-code'], ['codex', 'codex']]) {
     const p = opt(flag) || (existsSync(HARNESS_OUTPUT[h]) ? HARNESS_OUTPUT[h] : null);
     if (p && existsSync(p)) files[h] = readFileSync(p, 'utf8');
   }
-  if (Object.keys(files).length === 0) { process.stderr.write('no harness files found (pass --claude/--codex/--gemini)\n'); process.exit(1); }
+  if (Object.keys(files).length === 0) { process.stderr.write('no harness files found (pass --claude/--codex)\n'); process.exit(1); }
   let r;
   try { r = migrateToContract({ files, contractId: opt('id') || 'project', lastRevised: opt('last-revised') || 'unknown' }); }
   catch (e) { process.stderr.write(`${e.message}\n`); process.exit(1); }
