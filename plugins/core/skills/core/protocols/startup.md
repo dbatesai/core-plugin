@@ -43,6 +43,13 @@ if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-
   CORE_ROOT="${CLAUDE_PLUGIN_ROOT}"
 fi
 if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-check.mjs" ]; then
+  # Last resort: read the install path from installed_plugins.json. The node
+  # payload prints installPath RAW — no regex, no backslash literal — because a
+  # backslash inside a double-quoted `node -e` collapses in the shell (\\ becomes
+  # \) and yields a compile-time SyntaxError that try/catch cannot catch. That was
+  # the silent failure: empty CORE_ROOT then resolved `node "/skills/..."` against
+  # the Git-Bash MSYS root on Windows. Separator normalization happens in bash
+  # below, where no backslash has to survive node's parser.
   CORE_ROOT=$(node -e "
     try {
       const fs = require('fs'), os = require('os');
@@ -53,20 +60,32 @@ if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-
       if (!entries) { const k = Object.keys(plugins).find(k => /^core@/.test(k)); entries = k ? plugins[k] : []; }
       entries = entries || [];
       const entry = entries.find(e => e.scope === 'user') || entries[0];
-      process.stdout.write((entry?.installPath || '').replace(/\\/g, '/'));
+      process.stdout.write(entry?.installPath || '');
     } catch (e) {}
-  " 2>/dev/null)
+  ")
+  # Normalize Windows backslashes to forward slashes in the shell (no-op on POSIX paths).
+  CORE_ROOT="${CORE_ROOT//\\//}"
 fi
-# Validate — warn and skip scripts if still not resolved or scripts dir absent
-[ -d "$CORE_ROOT/skills/core/scripts" ] || echo "(warn: CORE plugin root not resolved; fork-check and Step-8 scripts will be skipped)"
+# Resolve to a definite state. On success, echo the root so it carries forward;
+# on failure, BLANK it and emit a structured marker. Every downstream `node` call
+# is guarded on the scripts dir, so a blank root skips-and-surfaces instead of
+# running against the wrong drive (the Windows MSYS-root failure Meridian hit).
+if [ -d "$CORE_ROOT/skills/core/scripts" ]; then
+  echo "CORE_ROOT=$CORE_ROOT"
+else
+  CORE_ROOT=""
+  echo "CORE-ROOT-UNRESOLVED: startup scripts will be skipped this session. Surface this in the readiness receipt and advise the user to run 'claude plugins update core@core'."
+fi
 ```
 
-If the resolved install is stale (an older build that predates `workspace-fork-check.mjs`), the missing-scripts directory check above catches it and prints the warning. In that case, skip the fork-check and the Step-8 readiness commands, note the skip in the readiness summary, and advise the user to run `claude plugins update core@core`.
+If the resolved install is stale (an older build that predates `workspace-fork-check.mjs`), the missing-scripts directory check above catches it: `CORE_ROOT` is blanked and the block prints `CORE-ROOT-UNRESOLVED`. In that case the fork-check and Step-8 commands skip via their own guards, and the readiness receipt surfaces the skip (see "Compose the readiness summary") with the advice to run `claude plugins update core@core`.
 
-**Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution (only if `$CORE_ROOT` resolved above):
+**Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution. The guard is mechanical, not advisory — if `CORE_ROOT` is blank or its scripts dir is absent, the call skips with a marker instead of running `node` against an empty/wrong path:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/workspace-fork-check.mjs"
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] \
+  && node "${CORE_ROOT}/skills/core/scripts/workspace-fork-check.mjs" \
+  || echo "CORE-ROOT-UNRESOLVED: skipping workspace-fork-check"
 ```
 
 The script reads `<cwd>/workspace.json` and `~/.core/index.json`, detects whether the local pointer was copied from another project (its `workspace_id` resolves to an index entry whose registered `path` is somewhere else), and if so performs the fork: slugifies the cwd basename into a new id (collision-resolved with `-2`, `-3`, etc.), rewrites the local pointer, appends an entry to `index.json`, and creates a fresh manifest at `~/.core/workspaces/<new-id>/workspace.json`. If there's nothing to do — no pointer, no index, path already registered, or `workspace_id` not in index — it prints `(no fork needed)` and exits 0. The check is idempotent: re-running after a fork finds the id already matches the cwd and is a no-op.
@@ -110,6 +129,7 @@ The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to
 After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them.
 
 ```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
 node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["orient","memory"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"dc-memory-index","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200,"usefulness_outcome":"useful"}'
 ```
 
@@ -168,6 +188,8 @@ This step is load-bearing. The advisor-caught addition — enumerate the invento
 **Step 7 — Re-render PROJECT.md and update workspace meta.** Compose the six-section view (What & Why / State / People / Moves / Decisions & Risks / Notes) from the freshly-graduated units. Update `~/.core/index.json` with `schema_version: v2` and `migrated_at`. Update `~/.core/workspaces/<id>/workspace.json` to v2 schema, preserving prior milestones and adding the migration milestone. Create `~/.core/workspaces/<id>/swarm-narrative.md` (empty) for future swarm runs.
 
 **Step 8 — Six-command readiness check (numbered, not text).** Run these six commands explicitly. Do not demote this step into §Moves — a real-world migration retrospective surfaced exactly this trap: an agent silently moved "readiness check" into §Moves item #1 mid-migration, advisor caught the demotion, the check then revealed substantive issues that would have shipped uncaught. Naming it as a numbered step prevents the demotion.
+
+**Gate first.** If `CORE_ROOT` did not resolve (blank, or no scripts dir — the resolver block printed `CORE-ROOT-UNRESOLVED`), skip this entire step and carry the unresolved state into the readiness receipt. Do not run a bare `node "${CORE_ROOT}/..."` — an empty root resolves against the wrong drive on Windows Git-Bash and dies silently. When `CORE_ROOT` is resolved, each command runs as-is; the `[ -d "$CORE_ROOT/skills/core/scripts" ] && node ... ` guard form is the mechanical version if you run them defensively in one block.
 
 | # | Command | Pass criteria |
 |---|---|---|
@@ -263,7 +285,9 @@ Read the output. When **any row is non-PASS**, narrate in plain voice:
 
 Use **"continuing with degraded capability evidence"** verbatim per HC — not "ready," not "certified." When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
 
-If `$CORE_ROOT` was not resolved (script unavailable), skip this step silently — capability probe is best-effort at startup, never a blocker.
+If `$CORE_ROOT` was not resolved (script unavailable), skip the capability probe silently — the probe itself is best-effort at startup, never a blocker.
+
+**But surface the unresolved root itself — loudly, once.** An unresolved `CORE_ROOT` is not a silent best-effort skip: it means the fork-check and all six Step-8 readiness commands were skipped this session, so the workspace was loaded without index regeneration, priority ranking, or the compaction check. Include a visible line in the readiness receipt — *"Heads up: I couldn't resolve the CORE plugin root this session, so the startup scripts (fork-check, index regen, priority, compaction check) were skipped. Run `claude plugins update core@core` and I'll have them next session."* This turns the wrong-drive silent failure into a visible degraded state the user can act on.
 
 **Before composing — view memory.** Re-check the auto-memory loaded in Identity load (the harness injects this into context, typically as `MEMORY.md`), especially the cross-project feedback memories. Recognition-failure looks like having memory loaded but not reaching for it; an explicit re-check at this point closes the gap. Mirrors Anthropic's memory-tool system prompt — *always view your memory directory before doing anything else.*
 
