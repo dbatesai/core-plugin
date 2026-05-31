@@ -50,6 +50,15 @@ Also load:
 - Archive files (`PROJECT-ARCHIVE.md`, `IMPROVEMENT_LOG-ARCHIVE.md`, `_memories/archive/*`).
 - Session logs in `<project>/_sessions/` unless investigating a specific historical question.
 
+**After any Tier 1+ retrieval, record the event.** Retrieval logging is always-on (see `core/references/retrieval.md` §Logging) — when you run the ladder, you write the row. `/orient` is a resumption bootstrap, so the trigger is `session-start`. Emit one row capturing the highest tier you reached this load, using the exact producer schema — do not invent aliases like `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them. Tier 0 in-context-only resumption needs no row.
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["orient","memory"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"dc-memory-index","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200,"usefulness_outcome":"useful"}'
+```
+
+Substitute the harness-resolved plugin root (`CODEX_PLUGIN_ROOT` on Codex) when `CORE_ROOT` is not the active install root. This is what makes `analyze-retrieval-quality` measure real retrievals rather than empty telemetry — an unwired `/orient` leaves the corpus blind to the most common retrieval path.
+
 ---
 
 ## Step 3 — Edit-detection sweep
