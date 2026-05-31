@@ -133,6 +133,20 @@ test('claude-only manifest + Codex env -> DEGRADED (genuine wrong-plugin)', () =
   });
 });
 
+test('co-located + WEAK Claude signal (session id only) -> PASS — mirrors Windows-bash', () => {
+  // Meridian's on-box Windows harness injects only CLAUDE_CODE_SESSION_ID, not
+  // the strong CLAUDE_PLUGIN_ROOT — the weak signal is still enough to set
+  // consuming_harness=claude-code and trip the pre-fix split-brain. This pins
+  // the exact scenario she re-runs.
+  withFixture(['codex', 'claude'], ({ from }) => {
+    const r = resolvePluginRoot({ from, env: { CLAUDE_CODE_SESSION_ID: 's' }, home: '/Users/dbates' });
+    assert.equal(r.identity_status, 'PASS');
+    assert.equal(r.manifest_harness, 'claude-code');
+    assert.equal(r.consuming_harness, 'claude-code');
+    assert.ok(r.evidence.some(e => e.source === 'co-located-manifest-repoint'));
+  });
+});
+
 test('re-point makes Step 4 corroborate the consuming harness env var', () => {
   // The core reason to re-point (not just silence 6.5b): manifest_harness=codex
   // would send Step 4 looking for CODEX_PLUGIN_ROOT, find null, and skip — so the
