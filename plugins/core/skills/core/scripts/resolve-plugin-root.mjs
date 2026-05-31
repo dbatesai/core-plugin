@@ -92,23 +92,33 @@ export function safeReadManifest(path) {
 
 // Authority classification. Takes a `home` parameter so tests can mock it.
 export function classifyAuthority(pluginRoot, home = homedir()) {
+  // Normalize separators before comparing. On Windows homedir() returns a
+  // backslash path (C:\Users\david) while the bucket literals below use
+  // forward slashes, so the interpolated comparison string is mixed-separator
+  // and matches nothing — every Windows path fell through to 'unknown', closing
+  // all mutation gates for Windows users (Meridian, 2026-05-31, issue #45).
+  // Backslashes can't appear in a legitimate POSIX path, so normalizing to
+  // forward slashes is safe on Mac/Linux and needs no platform fork.
+  const r = pluginRoot.replace(/\\/g, '/');
+  const h = home.replace(/\\/g, '/');
+
   // installed-cache paths
-  if (pluginRoot.includes(`${home}/.claude/plugins/`)) return 'installed-cache';
-  if (pluginRoot.includes(`${home}/.codex/plugins/`)) return 'installed-cache';
+  if (r.includes(`${h}/.claude/plugins/`)) return 'installed-cache';
+  if (r.includes(`${h}/.codex/plugins/`)) return 'installed-cache';
 
   // harness workspace paths (rare; means a plugin is being executed from
   // inside a per-workspace cache rather than the user-scope cache)
-  if (pluginRoot.includes(`${home}/.claude/workspaces/`)) return 'harness-workspace';
-  if (pluginRoot.includes(`${home}/.codex/workspaces/`)) return 'harness-workspace';
+  if (r.includes(`${h}/.claude/workspaces/`)) return 'harness-workspace';
+  if (r.includes(`${h}/.codex/workspaces/`)) return 'harness-workspace';
 
   // canonical source — common dev locations. Conservative: only classify as
   // canonical-source when we recognize the location; otherwise return
   // 'unknown' so mutation gates fail closed rather than open.
-  if (pluginRoot.includes(`${home}/Documents/Projects/`)) return 'canonical-source';
-  if (pluginRoot.includes(`${home}/dev/`)) return 'canonical-source';
-  if (pluginRoot.includes(`${home}/code/`)) return 'canonical-source';
-  if (pluginRoot.includes(`${home}/src/`)) return 'canonical-source';
-  if (pluginRoot.includes(`${home}/work/`)) return 'canonical-source';
+  if (r.includes(`${h}/Documents/Projects/`)) return 'canonical-source';
+  if (r.includes(`${h}/dev/`)) return 'canonical-source';
+  if (r.includes(`${h}/code/`)) return 'canonical-source';
+  if (r.includes(`${h}/src/`)) return 'canonical-source';
+  if (r.includes(`${h}/work/`)) return 'canonical-source';
 
   return 'unknown';
 }
@@ -202,6 +212,38 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
       consuming_harness_signal_weight: consuming.signal_weight || null,
     });
   }
+
+  // Step 2.5: co-located multi-harness re-point.
+  // findPluginRootAnchor is first-match-wins over a fixed (codex-first) anchor
+  // order. When a plugin root co-locates manifests for more than one harness —
+  // the expected shape for a cross-harness plugin, and the whole point of the
+  // collapsed plugins/core/ layout — the walk can return a manifest_harness
+  // that disagrees with the consuming harness purely because of anchor order,
+  // not because we walked to the wrong plugin. If the consuming harness's OWN
+  // manifest is present in the resolved root, re-point to it: that makes
+  // manifest_harness accurate, lets Step 4 corroborate the consuming harness's
+  // env var (rather than skipping on a null var for the other harness), and
+  // keeps identity from false-degrading at Step 6.5(b) on co-location.
+  // We deliberately do NOT re-point when the consuming harness's manifest is
+  // ABSENT from the resolved root — that's a genuine wrong-plugin split-brain
+  // (we walked to a plugin that doesn't serve the running harness) and it must
+  // still DEGRADE. (Meridian Finding 2, 2026-05-31, issue #45.)
+  if (consuming.harness !== 'unknown' && consuming.harness !== found.harness) {
+    const consumingAnchor = PLUGIN_ROOT_ANCHORS.find(a => a.harness === consuming.harness);
+    const consumingManifest = consumingAnchor && join(found.plugin_root, consumingAnchor.file);
+    if (consumingManifest && existsSync(consumingManifest)) {
+      const fromHarness = found.harness;
+      found.harness = consuming.harness;
+      found.manifest_path = consumingManifest;
+      evidence.push({
+        source: 'co-located-manifest-repoint',
+        value: { from_manifest_harness: fromHarness, repointed_to: consuming.harness, manifest_path: consumingManifest },
+        agrees_with_others: true,
+        weight: 'corroborating',
+      });
+    }
+  }
+
   evidence.push({
     source: 'manifest-walk',
     value: found.manifest_path,
