@@ -5,11 +5,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { recordRetrievalEvent } from '../../skills/core/scripts/record-retrieval-event.mjs';
-import { buildReport, loadEvents } from '../../skills/core/scripts/analyze-retrieval-quality.mjs';
+import { recordRetrievalEvent } from '../../plugins/core/skills/core/scripts/record-retrieval-event.mjs';
+import { buildReport, loadEvents } from '../../plugins/core/skills/core/scripts/analyze-retrieval-quality.mjs';
 
 const PLUGIN_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
-const RECORD_RETRIEVAL_EVENT_SCRIPT = join(PLUGIN_ROOT, 'skills', 'core', 'scripts', 'record-retrieval-event.mjs');
+const RECORD_RETRIEVAL_EVENT_SCRIPT = join(PLUGIN_ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', 'record-retrieval-event.mjs');
 
 function validEvent(overrides = {}) {
   return {

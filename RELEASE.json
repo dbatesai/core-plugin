@@ -1,6 +1,6 @@
 {
   "name": "core",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "build": "20260531.1",
   "created_at": "2026-05-31T00:00:00Z",
   "targets": [
@@ -10,8 +10,8 @@
   "source_commit": "HEAD",
   "source_repo": "https://github.com/dbatesai/core-plugin",
   "manifests": {
-    "claude-code": ".claude-plugin/plugin.json",
-    "codex": ".codex-plugin/plugin.json"
+    "claude-code": "plugins/core/.claude-plugin/plugin.json",
+    "codex": "plugins/core/.codex-plugin/plugin.json"
   },
   "marketplaces": {
     "claude-code": ".claude-plugin/marketplace.json",

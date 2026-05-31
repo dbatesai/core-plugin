@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   validateInitialFrame, validatePersuasionLogLine, validateMindChangeLine,
   validateJsonl, validateAdversarialArtifacts,
-} from '../../skills/core/scripts/validate-adversarial-artifacts.mjs';
+} from '../../plugins/core/skills/core/scripts/validate-adversarial-artifacts.mjs';
 
 // --- initial-frame.json ---
 

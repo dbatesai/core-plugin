@@ -17,10 +17,10 @@ jobs:
 
       - name: Check version files in lockstep
         run: |
-          PLUGIN_VERSION=$(jq -r .version .claude-plugin/plugin.json)
+          PLUGIN_VERSION=$(jq -r .version plugins/core/.claude-plugin/plugin.json)
           MARKETPLACE_VERSION=$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)
           METADATA_VERSION=$(jq -r '.metadata.version' .claude-plugin/marketplace.json)
-          CODEX_VERSION=$(jq -r .version .codex-plugin/plugin.json)
+          CODEX_VERSION=$(jq -r .version plugins/core/.codex-plugin/plugin.json)
 
           FAILED=0
 
@@ -35,7 +35,7 @@ jobs:
           fi
 
           if [ "$PLUGIN_VERSION" != "$CODEX_VERSION" ]; then
-            echo "::error::Version drift: .claude-plugin/plugin.json=$PLUGIN_VERSION vs .codex-plugin/plugin.json=$CODEX_VERSION"
+            echo "::error::Version drift: plugins/core/.claude-plugin/plugin.json=$PLUGIN_VERSION vs plugins/core/.codex-plugin/plugin.json=$CODEX_VERSION"
             FAILED=1
           fi
 
@@ -47,9 +47,9 @@ jobs:
 
       - name: Check version bumped from base branch
         run: |
-          PR_VERSION=$(jq -r .version .claude-plugin/plugin.json)
+          PR_VERSION=$(jq -r .version plugins/core/.claude-plugin/plugin.json)
           git fetch origin main
-          BASE_VERSION=$(git show origin/main:.claude-plugin/plugin.json | jq -r .version)
+          BASE_VERSION=$( (git show origin/main:plugins/core/.claude-plugin/plugin.json 2>/dev/null || git show origin/main:.claude-plugin/plugin.json) | jq -r .version)
 
           if [ "$PR_VERSION" = "$BASE_VERSION" ]; then
             echo "::error::Version not bumped: still at $BASE_VERSION. Run /cut-release on the next branch to bump before opening this PR."

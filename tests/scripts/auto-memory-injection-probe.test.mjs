@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   mappedMemoryPath, classifyMemoryState, probe, CANARY, SCHEMA_VERSION, CAPABILITY_ID,
-} from '../../skills/core/scripts/capability/auto-memory-injection-probe.mjs';
+} from '../../plugins/core/skills/core/scripts/capability/auto-memory-injection-probe.mjs';
 
 // Valid evidence weights per capability/row-schema.md. 'supporting' is NOT valid.
 const VALID_WEIGHTS = new Set(['primary', 'corroborating', 'conflicting']);

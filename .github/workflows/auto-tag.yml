@@ -21,7 +21,7 @@ jobs:
       - name: Read version from plugin.json
         id: version
         run: |
-          VERSION=$(jq -r .version .claude-plugin/plugin.json)
+          VERSION=$(jq -r .version plugins/core/.claude-plugin/plugin.json)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected version: $VERSION"
 

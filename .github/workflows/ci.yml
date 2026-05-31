@@ -23,7 +23,7 @@ jobs:
         run: |
           set -e
           shopt -s globstar nullglob
-          SCRIPTS=(skills/core/scripts/**/*.mjs)
+          SCRIPTS=(plugins/core/skills/core/scripts/**/*.mjs)
           if [ ${#SCRIPTS[@]} -eq 0 ]; then echo "FAIL: script glob matched zero files — path moved?"; exit 1; fi
           fail=0
           for f in "${SCRIPTS[@]}"; do
@@ -36,11 +36,11 @@ jobs:
         run: |
           set -e
           for f in \
-            .claude-plugin/plugin.json \
+            plugins/core/.claude-plugin/plugin.json \
             .claude-plugin/marketplace.json \
-            .codex-plugin/plugin.json \
+            plugins/core/.codex-plugin/plugin.json \
             .agents/plugins/marketplace.json \
-            hooks/hooks.json; do
+            plugins/core/hooks/hooks.json; do
             echo "parsing $f"
             node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))"
           done
@@ -48,7 +48,7 @@ jobs:
       - name: plugin.json has required fields
         run: |
           node -e '
-            const m = JSON.parse(require("fs").readFileSync(".claude-plugin/plugin.json","utf8"));
+            const m = JSON.parse(require("fs").readFileSync("plugins/core/.claude-plugin/plugin.json","utf8"));
             for (const k of ["name","version","description","author","license"]) {
               if (!m[k]) { console.error("missing field: " + k); process.exit(1); }
             }
@@ -58,20 +58,20 @@ jobs:
       - name: Skill metadata present (BUILD, SKILL.md)
         run: |
           set -e
-          for f in skills/core/BUILD skills/core/SKILL.md; do
+          for f in plugins/core/skills/core/BUILD plugins/core/skills/core/SKILL.md; do
             if [ ! -s "$f" ]; then
               echo "missing or empty: $f"
               exit 1
             fi
           done
-          echo "BUILD=$(cat skills/core/BUILD)"
+          echo "BUILD=$(cat plugins/core/skills/core/BUILD)"
 
       - name: All harness manifests report same version
         run: |
           node -e '
             const fs = require("fs");
-            const claude = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json","utf8")).version;
-            const codex  = JSON.parse(fs.readFileSync(".codex-plugin/plugin.json","utf8")).version;
+            const claude = JSON.parse(fs.readFileSync("plugins/core/.claude-plugin/plugin.json","utf8")).version;
+            const codex  = JSON.parse(fs.readFileSync("plugins/core/.codex-plugin/plugin.json","utf8")).version;
             let failed = 0;
             if (claude !== codex) {
               console.error("Version drift: .claude-plugin=" + claude + " vs .codex-plugin=" + codex);
@@ -87,7 +87,7 @@ jobs:
             const fs = require("fs");
             const path = require("path");
             const market = JSON.parse(fs.readFileSync(".agents/plugins/marketplace.json","utf8"));
-            const rootVersion = JSON.parse(fs.readFileSync(".codex-plugin/plugin.json","utf8")).version;
+            const rootVersion = JSON.parse(fs.readFileSync("plugins/core/.codex-plugin/plugin.json","utf8")).version;
             let failed = 0;
             for (const p of market.plugins || []) {
               if (!p.source || p.source.source !== "local") continue;
@@ -118,18 +118,12 @@ jobs:
             if (failed) process.exit(1);
           '
 
-      - name: plugins/core mirror is in sync (REMOVE when the collapse deletes the mirror)
-        run: |
-          bash scripts/sync-codex-plugin.sh
-          git diff --exit-code plugins/core/ || { echo "FAIL: plugins/core drifted from source — run scripts/sync-codex-plugin.sh"; exit 1; }
-
-      # NOTE: after the Phase 3 collapse, the skills path becomes plugins/core/skills — update readdirSync("skills") below.
-      - name: RELEASE.json included_skills matches skills/ dirs
+      - name: RELEASE.json included_skills matches plugins/core/skills dirs
         run: |
           node -e '
             const fs=require("fs");
             const declared=new Set(JSON.parse(fs.readFileSync("RELEASE.json","utf8")).included_skills);
-            const actual=new Set(fs.readdirSync("skills",{withFileTypes:true}).filter(d=>d.isDirectory()).map(d=>d.name));
+            const actual=new Set(fs.readdirSync("plugins/core/skills",{withFileTypes:true}).filter(d=>d.isDirectory()).map(d=>d.name));
             const missing=[...actual].filter(s=>!declared.has(s));
             const extra=[...declared].filter(s=>!actual.has(s));
             if(missing.length||extra.length){console.error("included_skills drift — missing:",missing,"extra:",extra);process.exit(1);}
@@ -140,7 +134,7 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-            const src = fs.readFileSync("skills/core/SKILL.md","utf8");
+            const src = fs.readFileSync("plugins/core/skills/core/SKILL.md","utf8");
             const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---/);
             if (!m) { console.error("no frontmatter block"); process.exit(1); }
             const fm = m[1];
@@ -157,7 +151,7 @@ jobs:
         run: |
           set -e
           shopt -s globstar nullglob
-          SCRIPTS=(skills/core/scripts/*.mjs)
+          SCRIPTS=(plugins/core/skills/core/scripts/*.mjs)
           if [ ${#SCRIPTS[@]} -eq 0 ]; then echo "FAIL: script glob matched zero files — path moved?"; exit 1; fi
           fail=0
           for f in "${SCRIPTS[@]}"; do
@@ -171,7 +165,7 @@ jobs:
           node -e '
             const fs = require("fs");
             const path = require("path");
-            const root = "skills/core";
+            const root = "plugins/core/skills/core";
             const docs = [];
             (function walk(dir) {
               for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

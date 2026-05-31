@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   parseContract, parseOverrides, renderForHarness, withProvenance, computeProvenance, HARNESS_OUTPUT,
-} from '../../skills/core/scripts/contract-format.mjs';
-import { generate } from '../../skills/core/scripts/generate-claude-md.mjs';
+} from '../../plugins/core/skills/core/scripts/contract-format.mjs';
+import { generate } from '../../plugins/core/skills/core/scripts/generate-claude-md.mjs';
 
 const FIXTURE = `---
 schema_version: 1.0
@@ -208,8 +208,8 @@ test('parseOverrides: hash is over RAW bytes — a whitespace-only edit changes 
 });
 
 test('both generators: each emits its own harness-only section, excludes the other', async () => {
-  const { generate: genClaude } = await import('../../skills/core/scripts/generate-claude-md.mjs');
-  const { generate: genAgents } = await import('../../skills/core/scripts/generate-agents-md.mjs');
+  const { generate: genClaude } = await import('../../plugins/core/skills/core/scripts/generate-claude-md.mjs');
+  const { generate: genAgents } = await import('../../plugins/core/skills/core/scripts/generate-agents-md.mjs');
   const { dir, p } = tmpContract();
   try {
     const c = await genClaude({ contractPath: p, mode: 'dry-run' });

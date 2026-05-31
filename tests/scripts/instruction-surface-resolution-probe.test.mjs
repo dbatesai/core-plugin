@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   buildPrecedenceChain, classifyInstructionSurface, probe, SCHEMA_VERSION, CAPABILITY_ID,
-} from '../../skills/core/scripts/capability/instruction-surface-resolution-probe.mjs';
+} from '../../plugins/core/skills/core/scripts/capability/instruction-surface-resolution-probe.mjs';
 
 const VALID_WEIGHTS = new Set(['primary', 'corroborating', 'conflicting']);
 
@@ -113,7 +113,7 @@ test('probe: DEGRADED when a chain file exists but is empty', async () => {
 });
 
 test('e2e: instruction-surface-resolution row flows through runStartup', async () => {
-  const { runStartup } = await import('../../skills/core/scripts/capability-probe.mjs');
+  const { runStartup } = await import('../../plugins/core/skills/core/scripts/capability-probe.mjs');
   const res = await runStartup({ harness: 'claude-code', cwd: '/work/Any' });
   const row = res.rows.find(r => r.capability_id === 'instruction-surface-resolution');
   assert.ok(row, 'runner emits the instruction-surface-resolution row for claude-code');

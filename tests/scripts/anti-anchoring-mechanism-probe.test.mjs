@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   probe, SCHEMA_VERSION, CAPABILITY_ID, RISK_UNIT, CLOSURE_TARGET, CLOSURE_REQUIREMENT,
-} from '../../skills/core/scripts/capability/anti-anchoring-mechanism-probe.mjs';
+} from '../../plugins/core/skills/core/scripts/capability/anti-anchoring-mechanism-probe.mjs';
 
 const VALID_WEIGHTS = new Set(['primary', 'corroborating', 'conflicting']);
 const VALID_KINDS = new Set(['identity', 'runtime', 'mutation', 'observation']);
@@ -62,7 +62,7 @@ test('probe: carries required schema fields', async () => {
 // --- e2e through the runner ---
 
 test('e2e: anti-anchoring-mechanism row flows through capability-probe runStartup as DEGRADED', async () => {
-  const { runStartup } = await import('../../skills/core/scripts/capability-probe.mjs');
+  const { runStartup } = await import('../../plugins/core/skills/core/scripts/capability-probe.mjs');
   const res = await runStartup({ harness: 'claude-code', cwd: '/work/Any' });
   const row = res.rows.find(r => r.capability_id === 'anti-anchoring-mechanism');
   assert.ok(row, 'runner should emit the anti-anchoring-mechanism row for claude-code');

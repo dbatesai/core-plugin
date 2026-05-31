@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { classifyAccess, probe } from '../../skills/core/scripts/capability/memory-accessed-probe.mjs';
-import { runStartup } from '../../skills/core/scripts/capability-probe.mjs';
+import { classifyAccess, probe } from '../../plugins/core/skills/core/scripts/capability/memory-accessed-probe.mjs';
+import { runStartup } from '../../plugins/core/skills/core/scripts/capability-probe.mjs';
 
 const toolEv = (text) => ({ idx: 0, kind: 'tool', name: 'Bash', text });
 

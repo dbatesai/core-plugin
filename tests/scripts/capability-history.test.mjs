@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   appendRows, readHistory, canonicalRowHash, applyRetention, acquireLock,
   historyPath, lockPath, RETENTION_PER_CAPABILITY,
-} from '../../skills/core/scripts/capability-history.mjs';
+} from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 
 function tmpHome() {
   return mkdtempSync(join(tmpdir(), 'caphist-'));
