@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] — 2026-05-31
+
+A reliability release on top of v3.0.0: it hardens the startup `CORE_ROOT` resolver against a silent wrong-drive failure, adds a guard against cross-project memory contamination, and removes the Gemini harness (which never had a working callable-skill surface). MINOR rather than patch because it removes a harness and adds a register-sources capability note.
+
+### Fixed
+- **`CORE_ROOT` resolver hardened against silent wrong-drive failure.** The tier-3 fallback's inline `node -e` used a backslash regex that collapses in a shell's double-quotes into a compile-time SyntaxError `try/catch` can't catch — which left `CORE_ROOT` empty and resolved `node "/skills/..."` against the Git-Bash MSYS root on Windows, dying silently. Every `node "${CORE_ROOT}/..."` call site is now mechanically gated on the scripts dir, an unresolved root blanks `CORE_ROOT` and surfaces loudly in the readiness receipt instead of crashing, and the separator normalization moved to the shell. The SyntaxError was actually universal (verified on macOS); only the catastrophic empty-path consequence was Windows-specific.
+- **`generate-memory-index` refuses cross-project writes.** The script took its `_memories` source and `--memory-md` target as independent path args and never checked they belonged to the same project; pairing one project's units with another's MEMORY.md silently overwrote the target. It now recovers the target's project identity from the Claude Code path mapping and refuses on mismatch.
+- `capability-drift-log` render no longer trips the unit validator (underscore-prefixed so `check-units` skips it).
+- Corrected the shipped-skill count to six (adds `register-sources`).
+
+### Added
+- `register-sources`: an advisory `platform_credentials` note — CORE flags the concept; the overlay owns the value.
+
 ### Removed
 - Gemini harness support — the `.gemini-plugin` manifest, the `harnesses/gemini.md` adapter, the `generate-gemini-md` generator, and all Gemini detection/capability rows. Gemini CLI has no callable-skill surface, so CORE-on-Gemini relied entirely on the agent inferring the protocol — it didn't work in practice. The contract system now generates CLAUDE.md + AGENTS.md only.
 
