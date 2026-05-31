@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   auditMemoryBoundary, extractNativeEntries, formatReport,
-} from '../../skills/core/scripts/audit-memory-boundary.mjs';
+} from '../../plugins/core/skills/core/scripts/audit-memory-boundary.mjs';
 
 // --- extractNativeEntries: native surface → sampled entries with terms ---
 

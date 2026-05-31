@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   checkIntegrity, iterActiveUnits, iterAllUnitFiles,
-} from '../../skills/core/scripts/check-units.mjs';
+} from '../../plugins/core/skills/core/scripts/check-units.mjs';
 
 function withStore(fn) {
   const root = mkdtempSync(join(tmpdir(), 'check-units-'));

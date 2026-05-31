@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runPreAction } from '../../skills/core/scripts/capability-probe.mjs';
+import { runPreAction } from '../../plugins/core/skills/core/scripts/capability-probe.mjs';
 import {
   classifyAdversarialRun, evaluateAdversarialRun, ADVERSARIAL_ACTION, ADVISORY_WATERMARK, ADVERSARIAL_DECISIONS,
-} from '../../skills/core/scripts/adversarial-run-gate.mjs';
+} from '../../plugins/core/skills/core/scripts/adversarial-run-gate.mjs';
 
 // --- Integration: real descriptor, anti-anchoring is deterministically DEGRADED ---
 

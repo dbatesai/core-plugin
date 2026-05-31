@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   groupByCapability, detectDrift, detectRegression, attributeDrift, renderDriftLog, loadCapabilityHistory,
-} from '../../skills/core/scripts/analyze-capability-drift.mjs';
-import { appendRows } from '../../skills/core/scripts/capability-history.mjs';
+} from '../../plugins/core/skills/core/scripts/analyze-capability-drift.mjs';
+import { appendRows } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 
 // History entry shape: { observed_at, session_id, row_content_hash, row: { capability_id, identity_status, evidence } }
 function entry(capId, status, observedAt, session, evidence = []) {

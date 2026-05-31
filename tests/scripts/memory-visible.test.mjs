@@ -5,13 +5,13 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SKILL_MD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills', 'core', 'SKILL.md');
+const SKILL_MD = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'SKILL.md');
 import {
   writeCanary, upsertCanaryLine, CANARY_TAG, canaryFilePath as writeSideFilePath,
-} from '../../skills/core/scripts/write-visibility-canary.mjs';
+} from '../../plugins/core/skills/core/scripts/write-visibility-canary.mjs';
 import {
   probe, classify, scanTranscript, redactToken, countLines,
-} from '../../skills/core/scripts/capability/memory-visible-probe.mjs';
+} from '../../plugins/core/skills/core/scripts/capability/memory-visible-probe.mjs';
 
 function line(obj) { return JSON.stringify(obj); }
 function txt(text) { return line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }); }

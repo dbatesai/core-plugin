@@ -22,7 +22,7 @@ import { execFileSync } from 'node:child_process';
 
 const STARTUP = join(
   dirname(fileURLToPath(import.meta.url)),
-  '..', '..', 'skills', 'core', 'protocols', 'startup.md',
+  '..', '..', 'plugins', 'core', 'skills', 'core', 'protocols', 'startup.md',
 );
 const md = readFileSync(STARTUP, 'utf8');
 

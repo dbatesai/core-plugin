@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const SCRIPT = fileURLToPath(new URL('../../skills/core/scripts/validate.mjs', import.meta.url));
+const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/validate.mjs', import.meta.url));
 
 function writeFixtureProject() {
   const project = mkdtempSync(join(tmpdir(), 'core-validate-'));

@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recordSnapshot, resolveSessionId } from '../../skills/core/scripts/record-capability-snapshot.mjs';
-import { readHistory } from '../../skills/core/scripts/capability-history.mjs';
-import { detectDrift, detectRegression } from '../../skills/core/scripts/analyze-capability-drift.mjs';
+import { recordSnapshot, resolveSessionId } from '../../plugins/core/skills/core/scripts/record-capability-snapshot.mjs';
+import { readHistory } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
+import { detectDrift, detectRegression } from '../../plugins/core/skills/core/scripts/analyze-capability-drift.mjs';
 
 // HC_603 bar: the wire-in must actually APPEND and actually be CONSUMED, not just
 // be mentioned in prose. These fixtures exercise the real append + read path.

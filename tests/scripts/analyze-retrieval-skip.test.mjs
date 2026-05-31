@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   classifyRetrievalSkips, buildProjectTerms, formatReport,
-} from '../../skills/core/scripts/analyze-retrieval-skip.mjs';
+} from '../../plugins/core/skills/core/scripts/analyze-retrieval-skip.mjs';
 
 // Transcript events use the read-transcript shape: { idx, kind:'text'|'tool', role, name?, text }.
 const userT = (idx, text) => ({ idx, kind: 'text', role: 'user', text });

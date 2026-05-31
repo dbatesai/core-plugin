@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const startupMd = readFileSync(join(ROOT, 'skills', 'core', 'protocols', 'startup.md'), 'utf8');
+const startupMd = readFileSync(join(ROOT, 'plugins', 'core', 'skills', 'core', 'protocols', 'startup.md'), 'utf8');
 
 test('startup protocol gives agents the exact retrieval producer schema', () => {
   assert.match(startupMd, /record-retrieval-event\.mjs/, 'startup names the producer helper');

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 // regression here is silent. These guards assert the load-bearing mappings stay present
 // — they catch an accidental revert of the Workflow/Teams split, the ScheduleWakeup
 // dynamic-cadence answer, or the Codex schedule drop (the DC-75 parity boundary).
-const HARNESSES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills', 'core', 'harnesses');
+const HARNESSES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'harnesses');
 const claudeMd = readFileSync(join(HARNESSES, 'claude-code.md'), 'utf8');
 const codexMd = readFileSync(join(HARNESSES, 'codex.md'), 'utf8');
 

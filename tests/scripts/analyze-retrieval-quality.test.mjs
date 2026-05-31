@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildReport, formatReport } from '../../skills/core/scripts/analyze-retrieval-quality.mjs';
+import { buildReport, formatReport } from '../../plugins/core/skills/core/scripts/analyze-retrieval-quality.mjs';
 
 test('telemetry-only rows do not count as retrieval proof', () => {
   const report = buildReport([

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   parseClaudeCode, parseCodex, parseTranscript, resolveTranscriptPath, readTranscript, SUPPORTED_HARNESSES,
-} from '../../skills/core/scripts/read-transcript.mjs';
+} from '../../plugins/core/skills/core/scripts/read-transcript.mjs';
 
 // --- Claude Code parser (verified schema: message.content[]) ---
 

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
   inventorySurfaces, buildPlan, upsertCoreBlock, main, RESIDUALS, CORE_BLOCK_START, CORE_BLOCK_END,
-} from '../../skills/core/scripts/instruction-surface-adapter.mjs';
+} from '../../plugins/core/skills/core/scripts/instruction-surface-adapter.mjs';
 
 // Recursive byte-snapshot of a directory tree (path -> sha256) for no-write proof.
 function snapshot(dir) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runStartup } from '../../skills/core/scripts/capability-probe.mjs';
+import { runStartup } from '../../plugins/core/skills/core/scripts/capability-probe.mjs';
 
 // In-memory descriptor with one claude-code capability that uses a capability/ delegate.
 // The _importer seam (passed via opts) decides what that delegate resolves to.

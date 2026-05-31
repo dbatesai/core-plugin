@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { migrateToContract } from '../../skills/core/scripts/migrate-to-contract.mjs';
-import { parseContract } from '../../skills/core/scripts/contract-format.mjs';
+import { migrateToContract } from '../../plugins/core/skills/core/scripts/migrate-to-contract.mjs';
+import { parseContract } from '../../plugins/core/skills/core/scripts/contract-format.mjs';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
