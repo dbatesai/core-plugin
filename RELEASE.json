@@ -10,8 +10,8 @@
   "source_commit": "HEAD",
   "source_repo": "https://github.com/dbatesai/core-plugin",
   "manifests": {
-    "claude-code": ".claude-plugin/plugin.json",
-    "codex": ".codex-plugin/plugin.json"
+    "claude-code": "plugins/core/.claude-plugin/plugin.json",
+    "codex": "plugins/core/.codex-plugin/plugin.json"
   },
   "marketplaces": {
     "claude-code": ".claude-plugin/marketplace.json",
