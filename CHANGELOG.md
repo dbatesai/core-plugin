@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] — 2026-05-31
+
+A patch fixing a workspace-registration bug surfaced by on-box Windows use (Meridian, R11).
+
+### Fixed
+- **Workspace fork-check no longer spuriously re-forks every startup.** It matched index entries on `path`, but the workspace schema specifies `project_path` — so a schema-compliant entry was invisible to the path-match and the check kept forking the workspace (`-2`, `-3`, …) on each fresh session. It now reads `project_path || path` at both match points, recognizing both conventions. Distinct from the v3.1.x resolver fixes (those were plugin identity/authority; this is workspace registration).
+
 ## [3.2.0] — 2026-05-31
 
 A structural release. `plugins/core/` becomes the single canonical tree (the dual-tree mirror is gone), and `/orient` now records retrieval events so retrieval-quality analysis measures real data. Transparent to users — `claude plugins update core@core` re-pulls from the new source.
