@@ -9,7 +9,7 @@
  *   - REGRESSION: a capability that reported in an earlier session is absent in the latest
  *     session's row set (the descriptor changed / capability disappeared).
  *
- * Output: <project>/_memories/capability-drift-log.md — a render-only file the agent reads
+ * Output: <project>/_memories/_capability-drift-log.md — a render-only file the agent reads
  * on demand. NOT a unit. Per v2.7 plan §3-4.
  *
  * Attribution is HYPOTHESIS, never asserted fact (HC bar): every likely-cause line is
@@ -221,7 +221,7 @@ export function main(argv) {
   const now = new Date().toISOString();
   const md = renderDriftLog(drift, healing, regressions, now);
 
-  const outPath = join(project, '_memories', 'capability-drift-log.md');
+  const outPath = join(project, '_memories', '_capability-drift-log.md');
   if (!existsSync(dirname(outPath))) mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, md);
   console.log(JSON.stringify({
