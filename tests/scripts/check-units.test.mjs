@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  checkIntegrity, iterActiveUnits, iterAllUnitFiles,
+  checkIntegrity, checkSchema, exitCode, iterActiveUnits, iterAllUnitFiles,
 } from '../../plugins/core/skills/core/scripts/check-units.mjs';
 
 function withStore(fn) {
@@ -96,3 +96,53 @@ test('checkIntegrity: edge targets resolve for ordinary real units', () => withS
 
   assert.equal(report.some(r => r.check === 'dangling-edge'), false);
 }));
+
+// --- Track A: validator fixes (Codex co-existence workstream, 2026-06-01) ---
+
+test('A1: flow-style YAML topics array does NOT trigger topics-format warning', () => withStore((memories) => {
+  // Inline array form — valid YAML, was being parsed as a scalar string.
+  writeFileSync(join(memories, 'flow.md'), [
+    '---', 'id: flow', 'type: decision', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30',
+    'topics: [source-authority, launch-readiness, execution]',
+    '---', '', '# flow', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  const topicsWarn = report.filter(f => f.check === 'topics-format');
+  assert.equal(topicsWarn.length, 0, 'flow-style array must parse as a list');
+}));
+
+test('A2: references-topic edge to vocabulary is NOT a dangling-edge', () => withStore((memories) => {
+  writeFileSync(join(memories, 'has-topic-edge.md'), unit({
+    id: 'has-topic-edge',
+    edges: 'edges:\n  - {type: references-topic, target: memory-boundary}\n  - {type: cites, target: real-target}',
+  }));
+  writeFileSync(join(memories, 'real-target.md'), unit({ id: 'real-target' }));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date('2026-05-30'), report);
+
+  const danglers = report.filter(f => f.check === 'dangling-edge');
+  assert.ok(!danglers.some(f => f.detail.includes('memory-boundary')),
+    'references-topic target is controlled vocab, not a unit — must not dangle');
+}));
+
+test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail (2)', () => {
+  // Orphan/stale only → pass-with-warnings → 0 (must not block startup).
+  assert.equal(exitCode([
+    { level: 'WARN', check: 'orphan' },
+    { level: 'WARN', check: 'stale' },
+  ]), 0);
+  // A non-benign warning is degraded → 1.
+  assert.equal(exitCode([{ level: 'WARN', check: 'dangling-edge' }]), 1);
+  // Any hard failure → 2.
+  assert.equal(exitCode([
+    { level: 'FAIL', check: 'required-field' },
+    { level: 'WARN', check: 'orphan' },
+  ]), 2);
+  // Clean → 0.
+  assert.equal(exitCode([]), 0);
+});

@@ -23,6 +23,7 @@
 import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { iterUnits, score } from './priority.mjs';
+import { mapProjectPathToSlug } from './project-slug.mjs';
 
 const SECTION_HEADER_RE = /^## Top project units/;
 const EXISTING_LINE_RE = /^- \[([^\]]+)\]\(([^)]+)\) — (.+)$/;
@@ -162,7 +163,7 @@ export function projectIdentityMismatch(memoriesDir, memoryMdPath) {
   if (!m) return null; // non-standard target — cannot assert identity, don't block
   const actualMapped = m[1];
   const projectRoot = dirname(memoriesDir);
-  const expectedMapped = projectRoot.replace(/\//g, '-');
+  const expectedMapped = mapProjectPathToSlug(projectRoot);
   if (actualMapped === expectedMapped) return null;
   return { projectRoot, expectedMapped, actualMapped };
 }
