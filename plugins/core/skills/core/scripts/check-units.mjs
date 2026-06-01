@@ -192,6 +192,11 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     for (const e of edges) {
       const target = String(e.target);
       if (target.includes('://') || target.startsWith('http')) continue;
+      // references-topic edges target the controlled vocabulary (~/.core/topics.md),
+      // not unit IDs. Validating them against the unit store produced false
+      // dangling-edge warnings; a correctly-typed references-topic edge is an
+      // external vocab reference and is always valid here.
+      if (e.type === 'references-topic') continue;
       const targetStem = target.replace(/\.md$/, '');
       if (!allFiles.has(targetStem) && !allFiles.has(target))
         report.push({ level: 'WARN', check: 'dangling-edge', unit_id: uid, detail: `Edge target '${target}' (type=${JSON.stringify(e.type)}) not found in unit store — external ref or missing unit?` });
@@ -298,11 +303,26 @@ export function jsonReport(report, memoriesDir, mode, today) {
   console.log(JSON.stringify(out, null, 2));
 }
 
+// Warnings that are normal/expected and must NOT block startup or automation —
+// especially on a fresh or freshly-migrated store, where a high orphan count is
+// expected (edges accrue as units cite each other). topics-format is benign too
+// (and largely eliminated by flow-style array parsing). These return exit 0.
+export const BENIGN_WARN_CHECKS = new Set([
+  'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
+]);
+
+// Exit-code contract: 0 = pass (including pass-with-benign-warnings),
+// 1 = degraded (non-benign warnings worth surfacing, still non-blocking),
+// 2 = hard fail (schema/enum/required-field/broken edge). A healthy store with
+// only orphan/stale warnings exits 0 so it can't block a startup gate.
 export function exitCode(report) {
-  const counts = { FAIL: 0, WARN: 0 };
-  for (const f of report) if (f.level === 'FAIL' || f.level === 'WARN') counts[f.level]++;
-  if (counts.FAIL) return 2;
-  if (counts.WARN) return 1;
+  let hasFail = false, hasDegradedWarn = false;
+  for (const f of report) {
+    if (f.level === 'FAIL') hasFail = true;
+    else if (f.level === 'WARN' && !BENIGN_WARN_CHECKS.has(f.check)) hasDegradedWarn = true;
+  }
+  if (hasFail) return 2;
+  if (hasDegradedWarn) return 1;
   return 0;
 }
 
