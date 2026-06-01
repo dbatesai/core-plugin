@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   groupByCapability, detectDrift, detectRegression, attributeDrift, renderDriftLog, loadCapabilityHistory,
+  removeLegacyDriftLog,
 } from '../../plugins/core/skills/core/scripts/analyze-capability-drift.mjs';
 import { appendRows } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 
@@ -177,5 +178,30 @@ test('loadCapabilityHistory: includes project-local fallback rows', () => {
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
+  }
+});
+
+// v3.2.2 migration cleanup — see removeLegacyDriftLog
+test('removeLegacyDriftLog: deletes the legacy non-prefixed file, idempotent, surgical', () => {
+  const root = mkdtempSync(join(tmpdir(), 'drift-legacy-'));
+  try {
+    const mem = join(root, '_memories');
+    mkdirSync(mem, { recursive: true });
+    const legacy = join(mem, 'capability-drift-log.md');
+    const current = join(mem, '_capability-drift-log.md');
+    const realUnit = join(mem, 'dc-1-real.md');
+    writeFileSync(legacy, 'stale render artifact, no frontmatter');
+    writeFileSync(current, '# current drift log');
+    writeFileSync(realUnit, '---\nid: dc-1-real\n---\n# real');
+
+    assert.equal(removeLegacyDriftLog(root), true, 'removed the legacy file');
+    assert.equal(existsSync(legacy), false, 'legacy file gone');
+    assert.equal(existsSync(current), true, 'current _-prefixed file untouched');
+    assert.equal(existsSync(realUnit), true, 'real units untouched');
+
+    // Idempotent — nothing left to remove.
+    assert.equal(removeLegacyDriftLog(root), false, 'no-op when legacy absent');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

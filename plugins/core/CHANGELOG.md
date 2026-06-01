@@ -16,6 +16,7 @@ A patch fixing a slug-encoding bug that broke MEMORY.md auto-refresh and the vis
 - **`check-units` rejected valid flow-style YAML arrays.** Inline `topics: [a, b, c]` was parsed as a scalar string, producing false `topics-format` warnings. The shared frontmatter parser (`priority.mjs` `_coerce`) now parses flow-style arrays as lists.
 - **`check-units` false `dangling-edge` on `references-topic`.** Those edges target the controlled vocabulary (`topics.md`), not unit IDs; they're now exempt from the unit-existence check.
 - **`check-units` exit code blocked startup on benign warnings.** A healthy store with orphan/stale warnings exited non-zero. New exit contract: `0` pass (incl. pass-with-benign-warnings), `1` degraded (non-benign warnings, still non-blocking), `2` hard fail (schema/enum/required-field/broken edge).
+- **Legacy `capability-drift-log.md` left behind on upgrade.** Before v3.1.0 the drift log was written without the `_` prefix; the rename to `_capability-drift-log.md` left the old file in already-migrated projects, where `check-units` treats it as a malformed unit (6 schema FAILs). `analyze-capability-drift` now removes the legacy non-prefixed file when it writes the current one, so upgraders self-heal.
 
 ## [3.2.1] — 2026-05-31
 

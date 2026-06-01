@@ -16,7 +16,7 @@
  * qualified with confidence low|med|high.
  */
 
-import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { readHistory } from './capability-history.mjs';
@@ -196,6 +196,17 @@ export function loadCapabilityHistory(workspaceId, project = null, opts = {}) {
     String(a.observed_at ?? '').localeCompare(String(b.observed_at ?? '')));
 }
 
+// Migration cleanup: the drift log was renamed to the `_`-prefixed form in v3.1.0
+// so check-units skips it. A non-prefixed `capability-drift-log.md` left over from
+// an older version is treated as a real unit and fails schema (missing required
+// fields). Remove it when we write the current file so upgraders self-heal. Only
+// ever touches that exact legacy filename.
+export function removeLegacyDriftLog(project) {
+  const legacy = join(project, '_memories', 'capability-drift-log.md');
+  if (existsSync(legacy)) { unlinkSync(legacy); return true; }
+  return false;
+}
+
 export function main(argv) {
   let project = null, workspaceId = null;
   for (let i = 0; i < argv.length; i++) {
@@ -224,6 +235,7 @@ export function main(argv) {
   const outPath = join(project, '_memories', '_capability-drift-log.md');
   if (!existsSync(dirname(outPath))) mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, md);
+  removeLegacyDriftLog(project);
   console.log(JSON.stringify({
     drift: drift.length, healing: healing.length, regressions: regressions.length,
     history_entries: history.length, out: outPath,
