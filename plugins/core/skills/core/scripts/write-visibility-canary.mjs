@@ -29,6 +29,7 @@ import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { mapProjectPathToSlug } from './project-slug.mjs';
 
 export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
 // Matches any prior canary line — the new visible form OR the legacy `<!-- ... -->`
@@ -37,7 +38,7 @@ export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
 const CANARY_LINE_RE = /^.*CORE-VISIBILITY-CANARY\b.*$\n?/gm;
 
 export function mappedMemoryPath(cwd, home) {
-  return join(home, '.claude', 'projects', cwd.replace(/\//g, '-'), 'memory', 'MEMORY.md');
+  return join(home, '.claude', 'projects', mapProjectPathToSlug(cwd), 'memory', 'MEMORY.md');
 }
 export function canaryFilePath(workspaceId, home) {
   return join(home, '.core', 'workspaces', workspaceId, 'visibility-canary.json');

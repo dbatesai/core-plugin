@@ -60,7 +60,16 @@ const PIN_CONTRIBUTION = {
 // ---------- Frontmatter parsing ----------
 
 function _coerce(value) {
-  const v = value.trim().replace(/^["']|["']$/g, '');
+  const t = value.trim();
+  // Flow-style YAML array: `[a, b, c]` → ['a','b','c']. Without this the bracketed
+  // form is kept as a scalar string, and downstream list checks (e.g. check-units
+  // topics-format) false-warn on perfectly valid inline arrays.
+  if (t.startsWith('[') && t.endsWith(']')) {
+    const inner = t.slice(1, -1).trim();
+    if (inner === '') return [];
+    return inner.split(',').map((s) => _coerce(s)).filter((s) => s !== '');
+  }
+  const v = t.replace(/^["']|["']$/g, '');
   const lo = v.toLowerCase();
   if (lo === 'true') return true;
   if (lo === 'false') return false;
