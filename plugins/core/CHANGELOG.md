@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.2] — 2026-06-01
+
+A patch fixing a slug-encoding bug that broke MEMORY.md auto-refresh and the visibility canary on dotted usernames, plus three `check-units` validator false-positives. Track A of the Codex co-existence workstream — folder-independent fixes from Crest's multi-source report, converged + ratified with Hale.
+
+### Fixed
+- **Slug-encoding bug broke `generate-memory-index` and `write-visibility-canary` on dotted usernames.** The project-path→slug encoding replaced `/` but not `.`, so a username like `David.Bates28` produced a slug (`-Users-David.Bates28-…`) that never matched Claude Code's real projects folder (`-Users-David-Bates28-…`). Two confirmed failures: `generate-memory-index`'s cross-project guard false-refused (MEMORY.md priority block couldn't auto-refresh — manual fix every finalize), and `write-visibility-canary` couldn't locate the right MEMORY.md and returned `memory_written: false`. Fixed with a single canonical `mapProjectPathToSlug()` helper (`/`, `\`, `.` → `-`) used at both sites; legitimate cross-project refusal is preserved (a genuinely different path still mismatches).
+- **`check-units` rejected valid flow-style YAML arrays.** Inline `topics: [a, b, c]` was parsed as a scalar string, producing false `topics-format` warnings. The shared frontmatter parser (`priority.mjs` `_coerce`) now parses flow-style arrays as lists.
+- **`check-units` false `dangling-edge` on `references-topic`.** Those edges target the controlled vocabulary (`topics.md`), not unit IDs; they're now exempt from the unit-existence check.
+- **`check-units` exit code blocked startup on benign warnings.** A healthy store with orphan/stale warnings exited non-zero. New exit contract: `0` pass (incl. pass-with-benign-warnings), `1` degraded (non-benign warnings, still non-blocking), `2` hard fail (schema/enum/required-field/broken edge).
+
 ## [3.2.1] — 2026-05-31
 
 A patch fixing a workspace-registration bug surfaced by on-box Windows use (Meridian, R11).
