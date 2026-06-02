@@ -65,6 +65,29 @@ export function todayUTC() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Resolve the workspace id for a project from its <project>/workspace.json
+ * pointer. Falls back to the project basename slug when the pointer is absent.
+ * Layer-2/3 metrics derivatives (classified, detectors, rollups) live under the
+ * operational-meta dir keyed by this id (spec §17.6).
+ */
+export function resolveWorkspaceId(projectDir) {
+  try {
+    const p = JSON.parse(readFileSync(join(projectDir, 'workspace.json'), 'utf8'));
+    if (p && p.workspace_id) return p.workspace_id;
+  } catch { /* fall through */ }
+  return (projectDir.split(/[\\/]/).pop() || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+/**
+ * Operational-meta metrics dir for a workspace (spec §17.6): the derived,
+ * regeneratable side of the split — classified/, detectors/, rollups/, etc.
+ * Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
+ */
+export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
+  return join(home, '.core', 'workspaces', workspaceId, 'metrics');
+}
+
 export function eventLogPath(projectDir, filename, { today } = {}) {
   const date = today || todayUTC();
   return join(projectDir, '_sessions', date, filename);
