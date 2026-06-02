@@ -177,12 +177,24 @@ export function main(argv) {
   let topN = 30;
   let todayArg = null;
 
+  let topRaw = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--memory-md') memoryMdPath = argv[++i];
-    else if (a === '--top') topN = parseInt(argv[++i], 10);
+    else if (a === '--top') topRaw = argv[++i];
     else if (a === '--today') todayArg = argv[++i];
     else if (!a.startsWith('--')) memoriesDirArg = a;
+  }
+
+  // M13: an unvalidated parseInt('--top garbage') yields NaN, and ranked.slice(0, NaN) is
+  // EMPTY — which then OVERWRITES the curated MEMORY.md top-units block with nothing (silent
+  // data-thinning, not an error). Validate: --top must be a positive integer or we refuse.
+  if (topRaw != null) {
+    if (!/^\d+$/.test(String(topRaw).trim()) || parseInt(topRaw, 10) < 1) {
+      process.stderr.write(`error: --top must be a positive integer (got ${JSON.stringify(topRaw)}); refusing to thin MEMORY.md.\n`);
+      return 2;
+    }
+    topN = parseInt(topRaw, 10);
   }
 
   if (!memoriesDirArg || !memoryMdPath) {
