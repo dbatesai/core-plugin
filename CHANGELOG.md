@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] — 2026-06-02
+
+A scripts-hardening release — the full open set from an internal review of all 48 shipped scripts, closed as one pass. Nothing about how you use `/core` changes; the deterministic spine under it gets safer. Highlights: writes to your project's irreplaceable files (PROJECT.md, the archive, the workspace pointer) are now atomic, so an interrupted write can never leave a half-written or truncated file. The capability gates that protect destructive actions now fail closed honestly — a mutation surface that can't prove it's writable, or an adversarial run whose anti-anchoring gate is denied, no longer reads as "all clear." And the self-measurement instruments (the recognition classifier, its calibration gate) got more honest about what they can and can't claim. The test suite grew 445 → 482.
+
+### Changed
+- **Fail-closed mutation, enforced.** The adversarial-run gate no longer reports AUTHORIZED when the operation-scoped mutation gate was actually denied, and the collab-files target-surface probe degrades when it can't prove write access instead of silently passing. Both align with the fail-open-observation / fail-closed-mutation doctrine. (A configured collab-files repo that's offline will now show DEGRADED at startup rather than a false PASS — honest signal, not a failure.)
+- **The recognition classifier is more honest.** Its in-context check now matches on word boundaries (a short term that was merely a substring of your large PROJECT.md no longer counts as "recognized"), it no longer treats ordinary hyphenated English like "opt-in" as a project term, and the previously-dead mechanics-failure discriminator is wired. Still PROVISIONAL until calibration clears.
+- **Calibration gate requires coverage.** The classifier's 0.7-precision gate can no longer clear while whole recognition states sit unmeasured — every state present in the labels must be measured.
+
+### Fixed
+- Atomic writes for PROJECT.md / PROJECT-ARCHIVE.md / the workspace pointer (temp-file + rename) across all four hygiene mutators and the workspace fork-check — an interrupted write can no longer truncate them, and the fork-check writes the irreplaceable pointer last.
+- The memory-visible canary probe now requires the *agent* to echo the token (injected memory text no longer false-passes it).
+- Capability rows always carry the unconditional schema fields (`observed_at`/`harness`/`cwd`/`env_signals`) — the runner backfills any a probe omitted.
+- Pipes in a decision/risk title no longer corrupt the generated index tables; the canary strip no longer deletes documentation prose that mentions the canary tag; `generate-memory-index --top <non-integer>` (or a missing target file) now refuses cleanly instead of silently thinning or crashing MEMORY.md; capability-drift no longer fabricates regressions from session-less rows or double-counts across stores; the retrieval-validation report no longer shows contradictory `FAIL | 1 | 1` rows.
+
 ## [3.4.0] — 2026-06-02
 
 The instrumented-memory system (Phases 0–4) and the validity dimension. CORE now measures its own recognition — a per-turn classifier, a daily rollup, and an `/orient` signal — all privacy-gated and default-off, with the classifier honestly marked PROVISIONAL until a human-labeled calibration set clears a 0.7-precision gate. Units gain an optional world-time validity dimension (`t_valid`/`t_invalid`) that retrieval honors by suppressing invalidated facts. The whole thing is additive — a project that opts into nothing behaves exactly as on 3.3.0.

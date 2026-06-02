@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "CORE — project intelligence in chat with a critic baked in. The `/core` agent plus seven companion utilities.",
-    "version": "3.4.0"
+    "version": "3.5.0"
   },
   "plugins": [
     {
       "name": "core",
       "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Ships with seven companion utilities — `/orient`, `/finalize`, `/process-memory`, `/register-sources`, `/vibecheck`, `/organize-files`, `/configure-project` — that CORE invokes internally and that you can also call directly.",
-      "version": "3.4.0",
+      "version": "3.5.0",
       "source": "./plugins/core",
       "category": "productivity",
       "author": {
