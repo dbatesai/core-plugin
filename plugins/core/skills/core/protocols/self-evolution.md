@@ -102,11 +102,11 @@ You read recent effectiveness reports before composing a new analysis-protocol i
 
 When in doubt, escalate. Changes that affect how CORE processes all future tasks — or changes to the self-improvement mechanism itself — are High risk by default.
 
-## Memory hygiene (was: memory hygiene)
+## Memory hygiene
 
 Every meaningful change, every `/finalize`, and on-demand: memory hygiene runs. Read `protocols/hygiene.md` for the canonical mechanism. The deeper sub-protocols (edge-integrity sweep, session-log auto-prune, etc.) live in `references/hygiene-strategies.md`.
 
-There's no separate "memory hygiene" ritual anymore — the operations got named for what they actually do, and they fire on the natural triggers (size, signals, edits) rather than on a fixed cadence.
+There's no separate dream-cycle ritual anymore — the operations got named for what they actually do, and they fire on the natural triggers (size, signals, edits) rather than on a fixed cadence.
 
 ## Context window check
 

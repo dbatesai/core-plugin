@@ -33,7 +33,7 @@ Invoked by the memory hygiene protocol's "regenerate canonical indexes" step.
 
 ### `validate.mjs`
 
-The CORE retrieval validation runner. Reads `<project>/_memories/_validation/tests/test-*.yaml`, simulates Tier 1 retrieval (grep), scores precision and recall against expected/forbidden unit lists, and writes a report to `<project>/outputs/validation/<date>/REPORT.md`.
+The CORE retrieval validation runner. Reads `<project>/_memories/_validation/tests/test-*.yaml`, simulates Tier 1 retrieval (grep), scores precision and recall against expected/forbidden unit lists, and writes a report to `<project>/_outputs/validation/<date>/REPORT.md`.
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.mjs <project-path>

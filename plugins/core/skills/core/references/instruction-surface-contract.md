@@ -52,4 +52,4 @@ The only per-harness facts in the generators are the harness name and the output
 
 ## Not yet (v3.0 remaining)
 
-`audit-memory-boundary.mjs` (memory-authority audit, sampled-first) and the public README/ARCHITECTURE rewrite describing the maintenance-model shift are still open. Don't claim those as done.
+The public README/ARCHITECTURE rewrite describing the maintenance-model shift is still open — don't claim it as done. `audit-memory-boundary.mjs` shipped (memory-authority audit, sampled, read-only) and runs in `/finalize` and `/process-memory`; its conflict-detection scope is deliberately deferred, so describe it as shipped-with-conflict-detection-deferred, not complete.

@@ -91,7 +91,7 @@ When the agent is mid-render on a PROJECT.md section and hygiene fires on a unit
 - **Render in flight + hygiene trigger on unrelated section → proceed in parallel.** No conflict; they operate on different unit subsets.
 - **User edits PROJECT.md while agent is rendering it → render aborts.** The user's edit becomes ground truth; the agent reads the user's version, propagates edits back to source units, and only then resumes the render against the updated source.
 
-Add to the failure-modes table below: render-vs-hygiene collision on the same section is the seam where this matters; the rule above is the resolution.
+Render-vs-hygiene collision on the same section is the seam where this matters; the failure-modes table below carries the resolution as a row.
 
 ---
 
@@ -223,5 +223,5 @@ DECISIONS.md grew to ~99K characters / 40K tokens in v1, over the Read tool cap.
 
 The same pattern applies to any future Read-cap wound — large append-only synthesis files get unit-graduation rather than special-case compaction.
 
-Full migration steps are in Phase 4 of the v2 execution plan.
+Full migration steps live in the cold-start-migration path in `protocols/startup.md`.
 
