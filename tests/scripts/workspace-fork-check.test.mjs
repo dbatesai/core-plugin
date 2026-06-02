@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -88,6 +88,13 @@ test('copied workspace (id resolves to a project_path elsewhere) -> fork', () =>
       const idx = JSON.parse(readFileSync(join(coreDir, 'index.json'), 'utf8'));
       const forked = idx.find(e => e.workspace_id === r.new_id);
       assert.ok(forked && entryPath(forked), 'forked entry carries a resolvable path');
+
+      // H3: the local pointer is written atomically (no leftover temp file in cwd) and the
+      // pointer now names the new id (the multi-file fork completed consistently).
+      const cwdLeftovers = readdirSync(cwd).filter(n => n.includes('.tmp-'));
+      assert.deepEqual(cwdLeftovers, [], 'atomic pointer write must leave no temp file in the project dir');
+      const ptr = JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8'));
+      assert.equal(ptr.workspace_id, r.new_id, 'local pointer (written last) carries the forked id');
 
       // idempotent: re-running finds the fresh path-keyed entry -> no second fork
       const r2 = checkFork({ cwd, coreDir, now: NOW });

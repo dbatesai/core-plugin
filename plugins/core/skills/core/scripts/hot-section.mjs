@@ -30,6 +30,7 @@ import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
 import { logEvent } from './log-event.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const HOT_BEGIN = '<!-- HOT-SECTION:BEGIN -->';
 export const HOT_END = '<!-- HOT-SECTION:END -->';
@@ -113,7 +114,7 @@ export function applyHotSection(projectDir, text, { now, allowOverBudget = false
       updated = original.slice(0, insertAt) + block + original.slice(insertAt);
     }
   }
-  if (updated !== original) writeFileSync(path, updated);
+  if (updated !== original) atomicWriteFileSync(path, updated);
   logEvent(projectDir, 'retrieval-log.jsonl', {
     kind: 'hot-section-synthesis',
     tokens,
@@ -142,7 +143,7 @@ export function clearHotSection(projectDir) {
   const existing = findExistingBlock(original);
   if (!existing) return original;
   const updated = original.slice(0, existing.start) + original.slice(existing.end);
-  if (updated !== original) writeFileSync(path, updated);
+  if (updated !== original) atomicWriteFileSync(path, updated);
   return updated;
 }
 

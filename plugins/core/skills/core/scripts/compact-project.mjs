@@ -23,6 +23,7 @@ import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs'
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent } from './log-event.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const DECISIONS_HEADER = '**Decisions (dated, append-only):**';
 export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
@@ -274,7 +275,7 @@ export function main(argv) {
   const { text: newText, stats } = compactDecisions(text, units);
   const after = Buffer.byteLength(newText, 'utf8');
   const wrote = newText !== text;
-  if (wrote) writeFileSync(projectMd, newText);
+  if (wrote) atomicWriteFileSync(projectMd, newText);
 
   const sizes = sectionSizes(newText);
   logEvent(projectDir, 'hygiene-log.jsonl', {

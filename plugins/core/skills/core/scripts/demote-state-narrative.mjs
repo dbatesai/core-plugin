@@ -31,6 +31,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
@@ -231,7 +232,7 @@ function ensureArchiveFile(projectDir) {
   const path = join(projectDir, ARCHIVE_FILE);
   if (!existsSync(path)) {
     const header = `# CORE PROJECT.md Archive\n\n> **Single-WRITE archive of entries migrated from \`PROJECT.md\`.**\n> Never read at bootstrap. Provides DELETE granularity for the user.\n\n> Newest first.\n\n---\n\n`;
-    writeFileSync(path, header);
+    atomicWriteFileSync(path, header);
   }
   return path;
 }
@@ -247,7 +248,7 @@ function appendToArchiveState(archivePath, block) {
     const insertAt = lineEnd === -1 ? text.length : lineEnd + 1;
     text = text.slice(0, insertAt) + '\n' + block + '\n' + text.slice(insertAt);
   }
-  writeFileSync(archivePath, text);
+  atomicWriteFileSync(archivePath, text);
 }
 
 function rewriteStateWithStubs(originalState, bullets, demotions, today) {
@@ -352,7 +353,8 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
   const beforeState = text.indexOf(state);
   const afterState = beforeState + state.length;
   const newText = text.slice(0, beforeState) + newState + text.slice(afterState);
-  writeFileSync(projectMdPath, newText);
+  // M4: PROJECT.md written last + atomically — see the matching note in demote-moves.mjs.
+  atomicWriteFileSync(projectMdPath, newText);
 
   return stats;
 }
