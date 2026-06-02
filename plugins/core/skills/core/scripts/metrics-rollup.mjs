@@ -26,6 +26,13 @@ import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } f
 
 const HEADLINE = 'rec-fail-tier-0';
 
+/** Read calibration state without importing the full calibration module. */
+function readCalibrationState(metaDir) {
+  const f = join(metaDir, 'calibration-state.json');
+  if (!existsSync(f)) return { is_calibrated: false, provisional: true };
+  try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return { is_calibrated: false, provisional: true }; }
+}
+
 function readClassified(dir, date) {
   const file = join(dir, `${date}.jsonl`);
   if (!existsSync(file)) return [];
@@ -74,36 +81,41 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
   const headline = rate(todayRecs, HEADLINE);
   const avg = trailingAvg(classifiedDir, date, HEADLINE);
 
-  const provisional = todayRecs.length === 0 || todayRecs.every((r) => r.provisional);
+  // Phase 3: read calibration state to determine whether to drop PROVISIONAL tag.
+  const calState = readCalibrationState(metaDir);
+  const provisional = !calState.is_calibrated;
+  const provisionalTag = provisional ? ' [PROVISIONAL — classifier uncalibrated]' : '';
 
   let signal;
   if (!todayRecs.length) {
-    signal = `metrics: no classified turns for ${date} yet [PROVISIONAL]`;
+    signal = `metrics: no classified turns for ${date} yet${provisionalTag || ' [PROVISIONAL]'}`;
   } else {
     const todayPct = Math.round(headline.pct * 100);
     const avgStr = avg == null ? 'n/a (no prior 7d)' : `${Math.round(avg * 100)}%`;
     const arrow = avg == null ? '' : headline.pct > avg + 0.02 ? ' ↑' : headline.pct < avg - 0.02 ? ' ↓' : ' ≈';
-    signal = `${HEADLINE}: ${headline.n}/${headline.total} turns today (${todayPct}%) vs 7-day avg ${avgStr}${arrow} [PROVISIONAL — classifier uncalibrated]`;
+    signal = `${HEADLINE}: ${headline.n}/${headline.total} turns today (${todayPct}%) vs 7-day avg ${avgStr}${arrow}${provisionalTag}`;
   }
 
-  return { date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg, provisional, signal, metaDir };
+  return { date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg, provisional, calibrated: calState.is_calibrated, signal, metaDir };
 }
 
 export function writeRollup(r) {
   if (r.disabled) return r; // privacy-gated: write no metrics artifacts
   try {
     mkdirSync(join(r.metaDir, 'rollups', 'daily'), { recursive: true });
+    const headerTag = r.provisional ? '  [PROVISIONAL — classifier uncalibrated]' : '  [calibrated]';
+    const footer = r.provisional
+      ? ['', '> Provisional: these heuristics are not yet calibrated to >0.7 precision (Phase 3).', '> Capture (the transcript) is ground truth; this interpretation is replayable.']
+      : ['', '> Calibrated: precision cleared 0.7 bar. Capture is ground truth; interpretation remains replayable.'];
     const lines = [
-      `# Metrics rollup — ${r.date}  [PROVISIONAL — classifier uncalibrated]`,
+      `# Metrics rollup — ${r.date}${headerTag}`,
       '',
       `Headline ${HEADLINE} rate: ${r.headline ? `${r.headline.n}/${r.headline.total} (${Math.round(r.headline.pct * 100)}%)` : 'n/a'}`,
       `Trailing 7-day avg: ${r.trailing_avg == null ? 'n/a' : `${Math.round(r.trailing_avg * 100)}%`}`,
       '',
       '## State distribution (today)',
       ...Object.entries(r.distribution).sort((a, b) => b[1] - a[1]).map(([s, n]) => `- ${s}: ${n}`),
-      '',
-      '> Provisional: these heuristics are not yet calibrated to >0.7 precision (Phase 3).',
-      '> Capture (the transcript) is ground truth; this interpretation is replayable.',
+      ...footer,
     ];
     writeFileSync(join(r.metaDir, 'rollups', 'daily', `${r.date}.md`), lines.join('\n') + '\n');
     // The one-line signal /orient reads.
