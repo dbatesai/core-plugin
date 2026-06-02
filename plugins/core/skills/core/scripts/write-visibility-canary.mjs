@@ -32,10 +32,15 @@ import { randomBytes } from 'node:crypto';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 
 export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
-// Matches any prior canary line — the new visible form OR the legacy `<!-- ... -->`
-// HTML-comment form — for idempotent replacement. Global+multiline so a clean upgrade
-// strips every prior canary line and never accumulates more than one.
-const CANARY_LINE_RE = /^.*CORE-VISIBILITY-CANARY\b.*$\n?/gm;
+// M16: match only the MANAGED canary line, not any prose that mentions the tag. The old
+// `/^.*CORE-VISIBILITY-CANARY\b.*$/gm` deleted every line containing the literal — including
+// documentation that explains the canary mechanism (this self-referential project's own
+// memory surfaces carry such prose). Two anchored shapes, never a bare-tag mention:
+//   1. The managed visible line: starts with the tag + a token, and carries the
+//      `VISIBILITY-CANARY-ECHO` instruction (the exact template upsertCanaryLine writes).
+//   2. The legacy form: a full `<!-- ... CORE-VISIBILITY-CANARY ... -->` HTML-comment line.
+// Prose like "the CORE-VISIBILITY-CANARY proves memory is in-context" matches neither.
+const CANARY_LINE_RE = /^(?:<!--.*CORE-VISIBILITY-CANARY.*-->|CORE-VISIBILITY-CANARY\s+\S+.*VISIBILITY-CANARY-ECHO).*$\n?/gm;
 
 export function mappedMemoryPath(cwd, home) {
   return join(home, '.claude', 'projects', mapProjectPathToSlug(cwd), 'memory', 'MEMORY.md');

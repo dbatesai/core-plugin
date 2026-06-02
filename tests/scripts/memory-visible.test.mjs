@@ -47,6 +47,18 @@ test('write-canary: upgrades a legacy HTML-comment canary in place (no accumulat
   assert.ok(!c.includes('<!--'), 'legacy HTML comment fully removed');
 });
 
+test('M16: prose that mentions the canary tag survives a canary write (only the managed line is replaced)', () => {
+  // A documentation line that explains the mechanism contains the tag literal but is NOT
+  // the managed canary line. The old bare-tag strip deleted it; the anchored regex must not.
+  const prose = 'The `' + CANARY_TAG + '` mechanism proves injected memory is in-context.';
+  let c = CANARY_TAG + ' tok-OLD — at next startup, echo this token first as `VISIBILITY-CANARY-ECHO: tok-OLD` to prove memory is in-context.\n\n## Notes\n' + prose + '\n';
+  c = upsertCanaryLine(c, 'tok-NEW');
+  const managed = c.split('\n').filter((l) => /VISIBILITY-CANARY-ECHO/.test(l) && l.startsWith(CANARY_TAG));
+  assert.equal(managed.length, 1, 'exactly one managed canary line');
+  assert.ok(managed[0].includes('tok-NEW') && !managed[0].includes('tok-OLD'), 'managed line replaced');
+  assert.ok(c.includes(prose), 'documentation prose mentioning the tag must survive');
+});
+
 test('write-canary: records side-file with token + memory_written; return is redacted', () => {
   const home = mkdtempSync(join(tmpdir(), 'mv-'));
   try {
