@@ -46,6 +46,20 @@ export function entryPath(entry) {
   return entry.path || entry.project_path || null;
 }
 
+// Canonicalize a path for identity comparison. The CLI entry guard already uses
+// realpathSync (see _cliEntryCanonical below); the fork decision must match it.
+// resolve() alone is NOT equivalent: under a symlinked project root (macOS
+// /tmp -> /private/tmp, OneDrive/Dropbox sync roots, a symlinked ~/Projects) the
+// live cwd and the registered index path can be the symlink form vs the real
+// form, resolve() returns them unequal, and an already-registered workspace
+// re-forks on every startup. realpathSync collapses both to the real path. Falls
+// back to resolve() when the path doesn't exist on disk (stale index entry, a
+// different machine's path) — those legitimately can't be realpath'd and a plain
+// resolve-compare is the right behavior there.
+export function canonicalPath(p) {
+  try { return realpathSync(p); } catch { return resolve(p); }
+}
+
 export function resolveCollision(slug, existingIds) {
   if (!existingIds.has(slug)) return slug;
   let n = 2;
@@ -63,7 +77,7 @@ export function parseArgv(argv) {
   return { cwd, coreDir };
 }
 
-export function checkFork({ cwd, coreDir, now = new Date() }) {
+export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
   const localPointer = join(cwd, 'workspace.json');
   if (!existsSync(localPointer)) return { action: 'no-fork', reason: 'no-pointer' };
 
@@ -77,8 +91,8 @@ export function checkFork({ cwd, coreDir, now = new Date() }) {
   catch (e) { return { action: 'error', error: `index-parse: ${e.message}` }; }
   if (!Array.isArray(index)) return { action: 'error', error: 'index-not-array' };
 
-  const cwdResolved = resolve(cwd);
-  const pathMatch = index.find(e => entryPath(e) && resolve(entryPath(e)) === cwdResolved);
+  const cwdResolved = canonicalPath(cwd);
+  const pathMatch = index.find(e => entryPath(e) && canonicalPath(entryPath(e)) === cwdResolved);
   if (pathMatch) return { action: 'no-fork', reason: 'path-match', workspace_id: pathMatch.workspace_id };
 
   const localId = pointer.workspace_id;
@@ -88,12 +102,19 @@ export function checkFork({ cwd, coreDir, now = new Date() }) {
   if (!idMatch) return { action: 'no-fork', reason: 'unregistered-id' };
 
   const idMatchPath = entryPath(idMatch);
-  const registeredPath = idMatchPath ? resolve(idMatchPath) : null;
+  const registeredPath = idMatchPath ? canonicalPath(idMatchPath) : null;
   if (registeredPath === cwdResolved) return { action: 'no-fork', reason: 'path-match', workspace_id: localId };
 
   const baseSlug = slugify(basename(cwdResolved));
   const existingIds = new Set(index.map(e => e.workspace_id).filter(Boolean));
   const newId = resolveCollision(baseSlug, existingIds);
+
+  // Non-mutating detection path: configure-project --dry-run needs the fork
+  // decision without performing the multi-file mutation. Return the plan; write
+  // nothing.
+  if (dryRun) {
+    return { action: 'would-fork', original_id: localId, new_id: newId };
+  }
 
   const nowIso = now.toISOString();
   const newDataPath = `~/.core/workspaces/${newId}/`;

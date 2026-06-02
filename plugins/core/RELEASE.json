@@ -24,7 +24,8 @@
     "process-memory",
     "register-sources",
     "vibecheck",
-    "organize-files"
+    "organize-files",
+    "configure-project"
   ],
   "notes": "v3.1.0: reliability release on top of v3.0.0. Hardens the startup CORE_ROOT resolver against a silent wrong-drive failure (Windows Git-Bash MSYS-root crash; the tier-3 node -e backslash regex SyntaxErrored on every shell, now gated + surfaced loudly). Adds a cross-project contamination guard to generate-memory-index (refuses when the _memories source and --memory-md target are different projects). Removes the Gemini harness (no callable-skill surface; CORE-on-Gemini never worked). Plus a register-sources platform-credentials advisory note, the capability-drift-log validator fix, and a corrected six-skill count. Carried gap from v3.0.0 unchanged: the retrieval-event producer is still not wired into the retrieval ladder, so retrieval-effectiveness metrics measure nothing yet. Two open verification bars on the resolver fix at release time: Hale's adversarial consensus and Meridian's Windows on-box smoke."
 }
