@@ -175,6 +175,21 @@ test('scanTranscript records the echo and every tool by name', () => {
   assert.deepEqual(ev.filter((e) => e.kind === 'tool').map((e) => e.name), ['Skill', 'Bash']);
 });
 
+test('H2: a user-role text block carrying the token is NOT an echo (only the agent echoes)', () => {
+  const userTxt = (text) => line({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
+  // The injected MEMORY.md surfaces as a user-role block; it carries the token but is not
+  // an agent echo. Before the role filter this falsely satisfied the probe.
+  const ev = scanTranscript([userTxt('here is your memory: tok-x'), txt('tok-x')], 'tok-x');
+  assert.equal(ev.filter((e) => e.kind === 'echo').length, 1, 'only the assistant text block counts as an echo');
+  assert.equal(ev.find((e) => e.kind === 'echo').idx, 1, 'the echo is the assistant line, not the user line');
+});
+
+test('H2: a user-only transcript with the token produces no echo at all', () => {
+  const userTxt = (text) => line({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
+  const ev = scanTranscript([userTxt('tok-x in injected context')], 'tok-x');
+  assert.equal(ev.filter((e) => e.kind === 'echo').length, 0);
+});
+
 test('redactToken never emits the raw token', () => {
   const r = redactToken('supersecret-vcan-123');
   assert.ok(!r.includes('supersecret-vcan-123'));
