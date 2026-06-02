@@ -103,6 +103,7 @@ const STABLE_STATUSES = new Set(['final', 'stable', 'foundational', 'closed', 'a
 
 /** Parse the minimal frontmatter we need from a unit file. */
 export function parseFrontmatter(content) {
+  content = content.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
   const m = content.match(/^---\n([\s\S]*?)\n---/);
   if (!m) return {};
   const fm = {};

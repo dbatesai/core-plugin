@@ -111,7 +111,14 @@ function _parseInlineMap(text) {
   return result;
 }
 
-export function parseFrontmatter(text) {
+/** Normalize CRLF (and lone CR) to LF so frontmatter delimiter detection and
+ *  line splitting work on Windows/OneDrive-authored units (review M1). */
+export function normalizeNewlines(text) {
+  return typeof text === 'string' ? text.replace(/\r\n?/g, '\n') : text;
+}
+
+export function parseFrontmatter(rawText) {
+  const text = normalizeNewlines(rawText);
   if (!text.startsWith('---\n')) return [{}, text];
   const end = text.indexOf('\n---', 4);
   if (end === -1) return [{}, text];

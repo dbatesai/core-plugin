@@ -40,6 +40,7 @@ export function parseExistingDescriptions(memoryMdText) {
 }
 
 export function extractH1(unitText) {
+  unitText = unitText.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
   let body = unitText;
   if (unitText.startsWith('---\n')) {
     const end = unitText.indexOf('\n---\n', 4);
@@ -53,6 +54,7 @@ export function extractH1(unitText) {
 }
 
 export function extractFirstBodyLine(unitText) {
+  unitText = unitText.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
   let body = unitText;
   if (unitText.startsWith('---\n')) {
     const end = unitText.indexOf('\n---\n', 4);

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 // would mean the consolidation regressed (predicates moved back out, or never landed).
 import {
   effectiveValidity, validAt, isInvalidated, parseIsoDate,
+  parseFrontmatter, normalizeNewlines,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
 // bitemporal.mjs must re-export the same functions so its CLI + existing importers keep working.
 import {
@@ -52,4 +53,24 @@ test('isInvalidated: true once t_invalid is at/before today, false while open', 
   assert.equal(isInvalidated(u({ t_invalid: '2026-05-01' }), today), true);
   assert.equal(isInvalidated(u({ t_invalid: '2026-07-01' }), today), false);
   assert.equal(isInvalidated(u({ created: '2026-01-01' }), today), false);
+});
+
+// ---------- CRLF tolerance (review M1) ----------
+
+test('parseFrontmatter parses a CRLF unit the same as an LF unit', () => {
+  const lf = '---\nid: x\ntype: decision\ncreated: 2026-01-01\n---\n\nbody line';
+  const crlf = lf.replace(/\n/g, '\r\n');
+  const [fmLf] = parseFrontmatter(lf);
+  const [fmCrlf, bodyCrlf] = parseFrontmatter(crlf);
+  // The CRLF delimiter must still be detected and values must not carry a trailing \r.
+  assert.equal(fmCrlf.id, 'x');
+  assert.equal(fmCrlf.type, 'decision');
+  assert.equal(fmCrlf.created, '2026-01-01', 'value has no trailing \\r');
+  assert.deepEqual(fmCrlf, fmLf);
+  assert.ok(!bodyCrlf.includes('\r'), 'body normalized to LF');
+});
+
+test('normalizeNewlines collapses CRLF and lone CR to LF; passes non-strings through', () => {
+  assert.equal(normalizeNewlines('a\r\nb\rc\nd'), 'a\nb\nc\nd');
+  assert.equal(normalizeNewlines(null), null);
 });

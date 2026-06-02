@@ -85,7 +85,7 @@ function parseSections(body) {
 }
 
 export function parseContract(contractPath) {
-  const raw = readFileSync(contractPath, 'utf8');
+  const raw = readFileSync(contractPath, 'utf8').replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!fmMatch) throw new Error(`CONTRACT parse error: no YAML frontmatter in ${contractPath}`);
   const frontmatter = parseFrontmatter(fmMatch[1]);

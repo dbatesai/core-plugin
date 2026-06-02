@@ -52,6 +52,7 @@ export function parseArgv(argv) {
 }
 
 export function parseFrontmatter(text) {
+  text = text.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
   if (!text.startsWith('---\n')) return [{}, text];
   const end = text.indexOf('\n---', 4);
   if (end === -1) return [{}, text];
