@@ -50,6 +50,46 @@ test('effectiveValidity uses explicit t_valid over created (world-time divergenc
 });
 
 // ============================================================
+// M5: the stamp-writer honors the t_valid <= t_invalid invariant
+// (the validator in check-units enforces it; the writer must not create it)
+// ============================================================
+
+test('planSupersessionStamps refuses a t_invalid earlier than the target t_valid (M5)', () => {
+  // Target A is terminal with an explicit world-time t_valid LATER than the
+  // superseder B's t_valid. Stamping A.t_invalid = B.t_valid would make
+  // A.t_invalid < A.t_valid — valid-nowhere — so the writer must refuse.
+  const a = unit({ id: 'dc-a', status: 'retired', created: '2026-03-01', t_valid: '2026-03-01' });
+  const b = unit({ id: 'dc-b', created: '2026-01-01', edges: [{ type: 'supersedes', target: 'dc-a' }] });
+  assert.deepEqual(planSupersessionStamps([a, b]), [], 'no invariant-violating stamp planned');
+});
+
+test('classifySupersessions surfaces the invariant-violating supersession as a conflict, not a silent confirm (M5)', () => {
+  const a = unit({ id: 'dc-a', status: 'retired', created: '2026-03-01', t_valid: '2026-03-01' });
+  const b = unit({ id: 'dc-b', created: '2026-01-01', edges: [{ type: 'supersedes', target: 'dc-a' }] });
+  const { confirmed, conflicts } = classifySupersessions([a, b]);
+  assert.equal(confirmed.length, 0, 'not confirmed');
+  assert.ok(Array.isArray(conflicts) && conflicts.some((c) => c.target === 'dc-a'),
+    'invariant-violating supersession surfaced as a conflict');
+});
+
+test('planSupersessionStamps still stamps a legitimate supersession (superseder at/after target t_valid)', () => {
+  // Regression guard: the invariant fix must not block normal stamping.
+  const a = unit({ id: 'dc-a', status: 'retired', created: '2026-01-01', t_valid: '2026-01-01' });
+  const b = unit({ id: 'dc-b', created: '2026-02-01', edges: [{ type: 'supersedes', target: 'dc-a' }] });
+  const stamps = planSupersessionStamps([a, b]);
+  assert.equal(stamps.length, 1);
+  assert.equal(stamps[0].target, 'dc-a');
+  assert.equal(stamps[0].t_invalid, '2026-02-01');
+});
+
+test('storageMetrics surfaces validity conflicts (the invariant-violating supersession is visible, not dropped)', () => {
+  const a = unit({ id: 'dc-a', status: 'retired', created: '2026-03-01', t_valid: '2026-03-01' });
+  const b = unit({ id: 'dc-b', created: '2026-01-01', edges: [{ type: 'supersedes', target: 'dc-a' }] });
+  const m = storageMetrics([a, b], new Date('2026-12-01'));
+  assert.equal(m.validity_conflicts, 1, 'conflict counted in storage-health metrics');
+});
+
+// ============================================================
 // validAt / isInvalidated
 // ============================================================
 

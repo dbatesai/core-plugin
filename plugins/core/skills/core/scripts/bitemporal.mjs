@@ -129,7 +129,26 @@ export function classifySupersessions(units) {
       }
     }
   }
-  return { confirmed: [...confirmedByTarget.values()], loose };
+
+  // Invariant guard: a stamped t_invalid must not predate the target's own
+  // effective t_valid — that would make the unit valid-nowhere (validAt false
+  // for every date) and silently drop it from the valid set. check-units
+  // enforces t_valid <= t_invalid on the stored field; the writer must not
+  // create the violation in the first place. The offending supersession (an
+  // explicit world-time t_valid that postdates its earliest superseder) is a
+  // real conflict — surfaced for the user, never auto-stamped.
+  const confirmed = [];
+  const conflicts = [];
+  for (const c of confirmedByTarget.values()) {
+    const a = byId.get(c.target);
+    const aValid = a ? effectiveValidity(a).t_valid : null;
+    if (aValid && c.t_invalid < aValid) {
+      conflicts.push({ target: c.target, superseded_by: c.superseders.join(', '), t_invalid_candidate: c.t_invalid, t_valid: aValid });
+    } else {
+      confirmed.push(c);
+    }
+  }
+  return { confirmed, loose, conflicts };
 }
 
 // ---------- writer: supersession stamps t_invalid ----------
@@ -208,10 +227,11 @@ export function storageMetrics(units, today) {
     }
   }
 
-  // Consistency signal: supersedes edges whose target is still active — either a
-  // mis-typed edge or a status-hygiene gap. This is the usable storage-health
-  // signal the conservative writer surfaces instead of silently corrupting.
-  const looseEdges = classifySupersessions(units).loose;
+  // Consistency signals the conservative writer surfaces instead of silently
+  // corrupting: loose edges (supersedes → still-active target — a mis-typed edge
+  // or status-hygiene gap) and validity conflicts (a supersession whose stamp
+  // would predate the target's own t_valid — surfaced, never stamped).
+  const { loose: looseEdges, conflicts } = classifySupersessions(units);
 
   const total = units.length;
   const validNow = total - invalidated;
@@ -227,6 +247,8 @@ export function storageMetrics(units, today) {
     explicit_t_valid: withExplicitValid,             // overlay/world-time-divergent facts
     loose_supersession_edges: looseEdges.length,     // supersedes → still-active target (hygiene signal)
     loose_edges: looseEdges,
+    validity_conflicts: conflicts.length,            // supersession stamp would predate target t_valid (surfaced, never stamped)
+    conflicts,
     churn_rate: total ? Math.round((invalidated / total) * 1000) / 1000 : 0,
     closed_interval_days: { count: intervals.length, mean, median, min: intervals[0] ?? null, max: intervals[intervals.length - 1] ?? null },
   };
@@ -247,6 +269,11 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
   if (argv.includes('--stamp')) {
     const stamps = planSupersessionStamps(units);
     const apply = argv.includes('--apply');
+    const { conflicts } = classifySupersessions(units);
+    if (conflicts.length) {
+      process.stdout.write(`bitemporal: ⚠ ${conflicts.length} validity conflict(s) — supersession would stamp t_invalid before the target's t_valid; surfaced, NOT stamped:\n`);
+      for (const c of conflicts) process.stdout.write(`      ${c.superseded_by} supersedes ${c.target}: candidate t_invalid ${c.t_invalid_candidate} < t_valid ${c.t_valid}\n`);
+    }
     if (!stamps.length) { process.stdout.write('bitemporal: no supersession stamps needed (no superseding units, or all already stamped)\n'); process.exit(0); }
     process.stdout.write(`bitemporal: ${stamps.length} supersession stamp(s)${apply ? ' — APPLYING' : ' — DRY RUN (pass --apply to write)'}:\n`);
     for (const s of stamps) process.stdout.write(`  ${s.target}.t_invalid = ${s.t_invalid}  (superseded by ${s.superseded_by})\n`);
