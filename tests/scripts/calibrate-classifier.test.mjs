@@ -9,6 +9,47 @@ import {
   PRECISION_THRESHOLD, MIN_LABELED,
 } from '../../plugins/core/skills/core/scripts/calibrate-classifier.mjs';
 
+// --- M7: per-class coverage gate ---
+
+test('M7: computePrecision flags a gold state the heuristic never predicted as unmeasured', () => {
+  const turns = [
+    { heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' },
+    { heuristic_state: 'tier-0-win', gold_state: 'capture-miss' }, // capture-miss in gold, never predicted
+  ];
+  const p = computePrecision(turns);
+  assert.equal(p.coverage_complete, false, 'a never-predicted gold state leaves coverage incomplete');
+  assert.deepEqual(p.unmeasured_gold_states, ['capture-miss']);
+});
+
+test('M7: computePrecision reports complete coverage when every gold state is predicted', () => {
+  const turns = [
+    { heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' },
+    { heuristic_state: 'capture-miss', gold_state: 'capture-miss' },
+  ];
+  const p = computePrecision(turns);
+  assert.equal(p.coverage_complete, true);
+  assert.deepEqual(p.unmeasured_gold_states, []);
+});
+
+test('M7: the gate does NOT clear at high precision while a gold state sits unmeasured', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'calib-cov-'));
+  try {
+    // 100 labeled turns: 95 correct tier-0-win (precision 0.95) + 5 where gold=capture-miss
+    // but the heuristic always said tier-0-win. capture-miss is a gold state never predicted.
+    const rows = [];
+    for (let i = 0; i < 95; i++) rows.push({ heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' });
+    for (let i = 0; i < 5; i++) rows.push({ heuristic_state: 'tier-0-win', gold_state: 'capture-miss' });
+    const wf = join(dir, 'worksheet.jsonl');
+    writeFileSync(wf, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const res = importLabels({ worksheetFile: wf, metaDir: dir });
+    assert.equal(res.labeled_count, 100, 'enough labels');
+    assert.ok(res.overall_precision >= PRECISION_THRESHOLD, 'precision clears the bar on predicted classes');
+    assert.equal(res.is_calibrated, false, 'gate must hold while capture-miss is unmeasured');
+    assert.ok(res.unmeasured_gold_states.includes('capture-miss'));
+    assert.match(res.notes, /unmeasured/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // ---------------------------------------------------------------- helpers ---
 
 function withTmp(fn) {
