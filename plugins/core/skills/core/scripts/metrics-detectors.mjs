@@ -145,9 +145,13 @@ export function extractReadUnitFilenames(events) {
 }
 
 /**
- * For each unit the agent read this session, check if it's stale:
- *   updated > thresholdDays ago AND status is not final/stable.
- * Returns [{filename, updated, days_stale, status, stability_class}].
+ * For each unit the agent read this session, check if it's stale. Two signals:
+ *   - superseded (HIGH): the unit's bi-temporal t_invalid is in the past — the
+ *     fact stopped being true, yet the agent read it this session. This is the
+ *     sharp signal (Phase 4 layer 1 feeding Phase 2): reading a fact known to be
+ *     superseded is a stronger miss than mere age.
+ *   - aged (MEDIUM): updated > thresholdDays ago AND status not final/stable.
+ * Returns [{filename, reason, days_stale, status, t_invalid?}].
  */
 export function runStaleContextTripwire(events, memoriesDir, today, thresholdDays = STALE_THRESHOLD_DAYS) {
   const filenames = extractReadUnitFilenames(events);
@@ -158,6 +162,20 @@ export function runStaleContextTripwire(events, memoriesDir, today, thresholdDay
     let content;
     try { content = readFileSync(join(memoriesDir, relpath), 'utf8'); } catch { continue; }
     const fm = parseFrontmatter(content);
+
+    // Superseded signal first (bi-temporal): t_invalid in the past, regardless of age.
+    const tInvalid = fm.t_invalid ? String(fm.t_invalid).trim() : null;
+    if (tInvalid && /^\d{4}-\d{2}-\d{2}$/.test(tInvalid) && tInvalid <= today) {
+      stale.push({
+        filename: relpath,
+        reason: 'superseded',
+        t_invalid: tInvalid,
+        days_stale: Math.round(daysBetween(tInvalid, today)),
+        status: fm.status || '?',
+      });
+      continue; // superseded subsumes aged — don't double-report
+    }
+
     if (isStableUnit(fm)) continue;
     const updated = fm.updated || fm.created;
     if (!updated) continue;
@@ -165,6 +183,7 @@ export function runStaleContextTripwire(events, memoriesDir, today, thresholdDay
     if (days > thresholdDays) {
       stale.push({
         filename: relpath,
+        reason: 'aged',
         updated,
         days_stale: Math.round(days),
         status: fm.status || '?',
@@ -303,16 +322,43 @@ export function runAnticipationGap(events, memoriesDir) {
 }
 
 // ============================================================
+// Absence-with-deadline detector (Phase 4 layer 4, concrete half)
+// ============================================================
+
+/**
+ * Walk active open-question units with a `by-when` in the past. The startup
+ * protocol already surfaces these at /orient; promoting it to a Layer-2 detector
+ * makes the lapse a captured, escalatable event rather than a read-time-only
+ * glance. The register-trigger half of the layer stays gated on DC-103.
+ *
+ * Returns [{filename, by_when, days_overdue}].
+ */
+export function runAbsenceWithDeadline(memoriesDir, today) {
+  const out = [];
+  walkMd(memoriesDir, (name, full) => {
+    let content;
+    try { content = readFileSync(full, 'utf8'); } catch { return; }
+    const fm = parseFrontmatter(content);
+    if ((fm.type || '').toLowerCase() !== 'open-question') return;
+    if ((fm.status || 'active').toLowerCase() !== 'active') return;
+    const byWhen = fm['by-when'] ? String(fm['by-when']).trim() : null;
+    if (!byWhen || !/^\d{4}-\d{2}-\d{2}$/.test(byWhen)) return;
+    if (byWhen < today) out.push({ filename: name, by_when: byWhen, days_overdue: Math.round(daysBetween(byWhen, today)) });
+  }, 0, true);
+  return out;
+}
+
+// ============================================================
 // Shared helpers
 // ============================================================
 
-function walkMd(dir, cb, depth = 0) {
+function walkMd(dir, cb, depth = 0, withPath = false) {
   if (depth > 5) return;
   let entries;
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const e of entries) {
-    if (e.isDirectory()) walkMd(join(dir, e.name), cb, depth + 1);
-    else if (e.name.endsWith('.md') && !e.name.startsWith('INDEX')) cb(e.name);
+    if (e.isDirectory()) walkMd(join(dir, e.name), cb, depth + 1, withPath);
+    else if (e.name.endsWith('.md') && !e.name.startsWith('INDEX')) cb(e.name, join(dir, e.name));
   }
 }
 
@@ -336,6 +382,7 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
   const brokenCitations = runCitationResolver(t.events, index);
   const staleUnits = runStaleContextTripwire(t.events, memoriesDir, date);
   const anticipationGaps = runAnticipationGap(t.events, memoriesDir);
+  const lapsedDeadlines = runAbsenceWithDeadline(memoriesDir, date);
 
   const records = [
     ...brokenCitations.map((c) => ({
@@ -353,12 +400,14 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
       detector: 'stale-context',
       detector_version: DETECTOR_VERSION,
       session_id: sid,
-      severity: 'medium',
+      severity: s.reason === 'superseded' ? 'high' : 'medium',
+      reason: s.reason,
       filename: s.filename,
-      updated: s.updated,
+      updated: s.updated || null,
+      t_invalid: s.t_invalid || null,
       days_stale: s.days_stale,
       status: s.status,
-      stability_class: s.stability_class,
+      stability_class: s.stability_class || null,
     })),
     ...anticipationGaps.map((g) => ({
       schema_version: '1.0.0',
@@ -369,6 +418,16 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
       provisional: true, // heuristic — filename-token match, not calibrated; never surface as graded
       turn_idx: g.turnIdx,
       terms: g.terms,
+    })),
+    ...lapsedDeadlines.map((d) => ({
+      schema_version: '1.0.0',
+      detector: 'absence-with-deadline',
+      detector_version: DETECTOR_VERSION,
+      session_id: sid,
+      severity: 'high', // an open question past its committed date
+      filename: d.filename,
+      by_when: d.by_when,
+      days_overdue: d.days_overdue,
     })),
   ];
 
@@ -384,6 +443,7 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
     broken_citations: brokenCitations.length,
     stale_units: staleUnits.length,
     anticipation_gaps: anticipationGaps.length,
+    lapsed_deadlines: lapsedDeadlines.length,
     records,
     unit_count: index.ids.size,
   };
@@ -407,11 +467,21 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
     if (r.stale_units === 0) process.stdout.write(`stale-context: clean\n`);
     else {
       process.stdout.write(`stale-context: ${r.stale_units} stale unit(s) read this session:\n`);
-      for (const s of r.records.filter((x) => x.detector === 'stale-context'))
-        process.stdout.write(`  ⚠ ${s.filename} (${s.days_stale}d, status: ${s.status})\n`);
+      for (const s of r.records.filter((x) => x.detector === 'stale-context')) {
+        const tag = s.reason === 'superseded'
+          ? `SUPERSEDED ${s.t_invalid} (${s.days_stale}d ago)`
+          : `aged ${s.days_stale}d, status: ${s.status}`;
+        process.stdout.write(`  ⚠ ${s.filename} — ${tag}\n`);
+      }
     }
     if (r.anticipation_gaps === 0) process.stdout.write(`anticipation-gap: clean\n`);
     else process.stdout.write(`anticipation-gap [PROVISIONAL — heuristic, uncalibrated]: ${r.anticipation_gaps} turn(s) where user introduced a distinctive project term first\n`);
+    if (r.lapsed_deadlines === 0) process.stdout.write(`absence-with-deadline: clean\n`);
+    else {
+      process.stdout.write(`absence-with-deadline: ${r.lapsed_deadlines} open question(s) past their by-when:\n`);
+      for (const d of r.records.filter((x) => x.detector === 'absence-with-deadline'))
+        process.stdout.write(`  ⚠ ${d.filename} — due ${d.by_when} (${d.days_overdue}d overdue)\n`);
+    }
   }
   process.exit(0);
 }

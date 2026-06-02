@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import {
   extractCitations, buildUnitIndex, resolveCitation, runCitationResolver,
   parseFrontmatter, extractReadUnitFilenames, runStaleContextTripwire,
-  buildVocabulary, runAnticipationGap, isCommandInjection,
+  buildVocabulary, runAnticipationGap, isCommandInjection, runAbsenceWithDeadline,
 } from '../../plugins/core/skills/core/scripts/metrics-detectors.mjs';
 
 // ---------------------------------------------------------------- helpers ---
@@ -128,6 +128,36 @@ test('runStaleContextTripwire does not flag recently-updated units', () => {
       const events = [{ kind: 'tool', text: `_memories/dc-64-fresh.md` }];
       const stale = runStaleContextTripwire(events, mem, '2026-06-02', 30);
       assert.equal(stale.length, 0, 'unit updated yesterday should not fire');
+    },
+  );
+});
+
+test('runStaleContextTripwire flags a superseded (t_invalid past) unit as HIGH, regardless of age', () => {
+  withStore(
+    { 'dc-superseded.md': `---\nid: dc-superseded\ntype: decision\nstatus: retired\nupdated: 2026-06-01\nt_invalid: 2026-05-01\n---\n# x\n` },
+    (mem) => {
+      const events = [{ kind: 'tool', text: '_memories/dc-superseded.md' }];
+      const stale = runStaleContextTripwire(events, mem, '2026-06-02', 30);
+      assert.equal(stale.length, 1);
+      assert.equal(stale[0].reason, 'superseded', 'recently-updated but superseded → flagged via t_invalid, not age');
+      assert.equal(stale[0].t_invalid, '2026-05-01');
+    },
+  );
+});
+
+test('runAbsenceWithDeadline flags active open-questions past their by-when', () => {
+  withStore(
+    {
+      'oq-overdue.md': `---\nid: oq-overdue\ntype: open-question\nstatus: active\nupdated: 2026-01-01\nby-when: 2026-05-01\n---\n# q\n`,
+      'oq-future.md': `---\nid: oq-future\ntype: open-question\nstatus: active\nupdated: 2026-01-01\nby-when: 2026-12-01\n---\n# q\n`,
+      'oq-resolved.md': `---\nid: oq-resolved\ntype: open-question\nstatus: archived\nupdated: 2026-01-01\nby-when: 2026-05-01\n---\n# q\n`,
+      'dc-notq.md': `---\nid: dc-notq\ntype: decision\nstatus: active\nupdated: 2026-01-01\n---\n# d\n`,
+    },
+    (mem) => {
+      const lapsed = runAbsenceWithDeadline(mem, '2026-06-02');
+      assert.equal(lapsed.length, 1, 'only the active, past-due open-question fires');
+      assert.equal(lapsed[0].filename, 'oq-overdue.md');
+      assert.equal(lapsed[0].days_overdue, 32);
     },
   );
 });
