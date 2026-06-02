@@ -22,7 +22,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, realpa
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { todayUTC, resolveWorkspaceId, operationalMetricsDir } from './log-event.mjs';
+import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
 
@@ -59,7 +59,10 @@ function trailingAvg(classifiedDir, today, state, days = 7) {
   return rates.reduce((a, b) => a + b, 0) / rates.length;
 }
 
-export function buildRollup({ project, today, home = homedir(), workspaceId }) {
+export function buildRollup({ project, today, home = homedir(), workspaceId, env }) {
+  if (!metricsEnabled({ project, env })) {
+    return { date: today || todayUTC(), disabled: true, distribution: {}, headline: null, trailing_avg: null, provisional: true, signal: 'metrics disabled (opt-in not set)' };
+  }
   const date = today || todayUTC();
   const wid = workspaceId || resolveWorkspaceId(project);
   const metaDir = operationalMetricsDir(wid, { home });
@@ -87,6 +90,7 @@ export function buildRollup({ project, today, home = homedir(), workspaceId }) {
 }
 
 export function writeRollup(r) {
+  if (r.disabled) return r; // privacy-gated: write no metrics artifacts
   try {
     mkdirSync(join(r.metaDir, 'rollups', 'daily'), { recursive: true });
     const lines = [

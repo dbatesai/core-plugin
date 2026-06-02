@@ -31,7 +31,7 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
-import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir } from './log-event.mjs';
+import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 
 export const CLASSIFIER_VERSION = '0.1.0';
 
@@ -161,7 +161,12 @@ function walkNames(dir, out, depth = 0) {
 
 function safeRead(p) { try { return readFileSync(p, 'utf8'); } catch { return ''; } }
 
-export function runClassification({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, workspaceId }) {
+export function runClassification({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, workspaceId, env }) {
+  // Privacy gate (spec §18): default-off; opt-in per workspace. Captures nothing
+  // — reads no transcript content, writes no records — unless explicitly enabled.
+  if (!metricsEnabled({ project, env })) {
+    return { status: 'DISABLED', reason: 'metrics opt-in not set (CORE_METRICS_ENABLED env or workspace.json metrics_enabled)', provisional: true };
+  }
   const t = readTranscript({ harness, cwd: cwd || project, home });
   if (!t.available) {
     return { status: 'UNAVAILABLE', reason: 'transcript unavailable', provisional: true };
