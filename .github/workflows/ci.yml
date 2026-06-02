@@ -55,16 +55,26 @@ jobs:
             console.log("plugin.json fields ok:", Object.keys(m).join(", "));
           '
 
-      - name: Skill metadata present (BUILD, SKILL.md)
+      - name: Skill metadata present (version + build in plugin.json, SKILL.md)
         run: |
           set -e
-          for f in plugins/core/skills/core/BUILD plugins/core/skills/core/SKILL.md; do
-            if [ ! -s "$f" ]; then
-              echo "missing or empty: $f"
-              exit 1
-            fi
-          done
-          echo "BUILD=$(cat plugins/core/skills/core/BUILD)"
+          if [ ! -s plugins/core/skills/core/SKILL.md ]; then
+            echo "missing or empty: plugins/core/skills/core/SKILL.md"
+            exit 1
+          fi
+          # version + build are single-sourced in the Claude plugin manifest.
+          node -e '
+            const m = require("./plugins/core/.claude-plugin/plugin.json");
+            for (const k of ["version", "build"]) {
+              if (!m[k] || typeof m[k] !== "string") {
+                console.error(`plugin.json missing or non-string "${k}"`); process.exit(1);
+              }
+            }
+            if (!/^\d{8}\.\d+$/.test(m.build)) {
+              console.error(`plugin.json build "${m.build}" is not YYYYMMDD.N`); process.exit(1);
+            }
+            console.log(`version=${m.version} build=${m.build}`);
+          '
 
       - name: All harness manifests report same version
         run: |

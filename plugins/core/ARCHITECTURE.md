@@ -179,10 +179,12 @@ A 2026-05-20 downstream-wrapper migration verified this contract end-to-end. The
 
 The plugin carries two version-shaped identifiers, and they do different work:
 
-- **`version`** — the SemVer string in `plugin.json` + `marketplace.json`. This is the **release tag**. `claude plugins update <plugin>` checks `version` for changes; if `version` hasn't moved, no refresh happens even if the install on disk is materially behind. Bump `version` for every release the user is meant to update to. (The former `skills/core/VERSION` file was removed in v2.1.0 — `plugin.json` is now the single source of truth.)
-- **`BUILD`** — the date-coded string in `skills/core/BUILD` (e.g. `20260520.1`). This is the **iteration tag** — what changed this session, regardless of whether it's release-worthy yet. The readiness summary echoes it so the user can tell which iteration of a `version` they're running.
+Both live in **one file** — `plugins/core/.claude-plugin/plugin.json` is the single source of truth for `version` *and* `build`. The standalone `skills/core/BUILD` file (and the former `skills/core/VERSION`) were folded in; the bump script writes both fields and CI reads them from there.
 
-Why both: `version` is the user-facing distribution identifier; bumping it forces every installed copy to pull on next `update`. `BUILD` is the dev-side iteration counter for sessions where you ship a fix but the change set doesn't yet warrant a release tag.
+- **`version`** — the SemVer string in `plugin.json` (mirrored into `marketplace.json` + the Codex manifest in lockstep, CI-enforced). This is the **release tag**. `claude plugins update <plugin>` checks `version` for changes; if `version` hasn't moved, no refresh happens even if the install on disk is materially behind. Bump `version` for every release the user is meant to update to.
+- **`build`** — the date-coded string in `plugin.json` (e.g. `20260601.1`). This is the **iteration tag** — which build of a `version` is installed. The bump script sets it automatically (today's date, `.N` incrementing within a day) whenever `version` is bumped, so it moves with the version and can't drift. The readiness summary reads both from `plugin.json` and echoes "Plugin v\<version\> build \<build\>".
+
+Why both: `version` is the user-facing distribution identifier; bumping it forces every installed copy to pull on next `update`. `build` distinguishes iterations of a single `version`. Keeping them in one file means there is exactly one place to update and nothing to keep in sync.
 
 **Operational rule:** every PR that lands user-visible behavior changes (script flag changes, protocol changes, hook changes, fixes that resolve user-reported issues) bumps `version` at PR-merge time. Sessions that ship pure-dev-meta fixes (test coverage, comment cleanups, archive-only edits) can bump `BUILD` alone — those changes don't need to reach the user-installed copy.
 
