@@ -111,9 +111,15 @@ export function attributeDrift(prevRow, curRow) {
  */
 export function detectRegression(history) {
   // Group entries by session, preserving session order by earliest observed_at.
+  // M14: entries with no session_id can't be session-delimited. The old code merged them
+  // ALL into one `__no-session__` pseudo-session — which then collides with the last-2-session
+  // comparison below and produces spurious or masked regressions (a capability present in some
+  // untagged rows but not others reads as a session-to-session change it never was). Skip them
+  // from regression detection; the count is surfaced by countUntaggedSessions() so it's not silent.
   const bySession = new Map();
   for (const entry of history) {
-    const sid = entry.session_id ?? '__no-session__';
+    const sid = entry.session_id;
+    if (sid == null || sid === '') continue;
     if (!bySession.has(sid)) bySession.set(sid, []);
     bySession.get(sid).push(entry);
   }
@@ -186,13 +192,29 @@ export function renderDriftLog(drift, healing, regressions, now) {
   return lines.join('\n');
 }
 
+/** Count entries with no resolvable session_id — surfaced so the regression skip isn't silent. */
+export function countUntaggedSessions(history) {
+  return history.filter(e => e.session_id == null || e.session_id === '').length;
+}
+
 export function loadCapabilityHistory(workspaceId, project = null, opts = {}) {
   const histories = [];
   try { histories.push(...readHistory(workspaceId, { home: opts.home })); } catch { /* unavailable home history */ }
   if (project) {
     try { histories.push(...readHistory(workspaceId, { project })); } catch { /* unavailable project history */ }
   }
-  return histories.sort((a, b) =>
+  // M14: the same observation can exist in BOTH the home and project store. Concatenating
+  // double-counts it, inflating drift transitions and regression comparisons. Dedup on the
+  // fields that identify one observation — session, timestamp, capability, content hash.
+  const seen = new Set();
+  const deduped = [];
+  for (const e of histories) {
+    const key = [e.session_id ?? '', e.observed_at ?? '', e.row?.capability_id ?? '', e.row_content_hash ?? ''].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(e);
+  }
+  return deduped.sort((a, b) =>
     String(a.observed_at ?? '').localeCompare(String(b.observed_at ?? '')));
 }
 
@@ -238,7 +260,7 @@ export function main(argv) {
   removeLegacyDriftLog(project);
   console.log(JSON.stringify({
     drift: drift.length, healing: healing.length, regressions: regressions.length,
-    history_entries: history.length, out: outPath,
+    history_entries: history.length, untagged_skipped: countUntaggedSessions(history), out: outPath,
   }));
   return 0;
 }

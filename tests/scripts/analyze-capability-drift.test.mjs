@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   groupByCapability, detectDrift, detectRegression, attributeDrift, renderDriftLog, loadCapabilityHistory,
-  removeLegacyDriftLog,
+  removeLegacyDriftLog, countUntaggedSessions,
 } from '../../plugins/core/skills/core/scripts/analyze-capability-drift.mjs';
 import { appendRows } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 
@@ -133,6 +133,28 @@ test('detectRegression: single session → no regression possible', () => {
   assert.equal(detectRegression(history).length, 0);
 });
 
+test('M14: untagged rows do not form a pseudo-session that fabricates a regression', () => {
+  const history = [
+    entry('a', 'PASS', '2026-01-01T00:00:00Z', 's1'),
+    entry('b', 'PASS', '2026-01-01T00:00:01Z', 's1'),
+    entry('a', 'PASS', '2026-01-02T00:00:00Z', 's2'),
+    entry('b', 'PASS', '2026-01-02T00:00:01Z', 's2'),
+    // An untagged row observed AFTER s2 — the old code merged it into `__no-session__`,
+    // made that the "latest session" (caps {a}), and flagged b as a spurious regression.
+    entry('a', 'PASS', '2026-01-03T00:00:00Z', null),
+  ];
+  assert.equal(detectRegression(history).length, 0, 'untagged rows must not delimit a session');
+});
+
+test('M14: countUntaggedSessions surfaces how many rows were skipped (no silent drop)', () => {
+  const history = [
+    entry('a', 'PASS', '2026-01-01T00:00:00Z', 's1'),
+    entry('a', 'PASS', '2026-01-02T00:00:00Z', null),
+    entry('a', 'PASS', '2026-01-03T00:00:00Z', ''),
+  ];
+  assert.equal(countUntaggedSessions(history), 2);
+});
+
 // --- renderDriftLog ---
 
 test('renderDriftLog: clean state renders no-drift message', () => {
@@ -174,6 +196,27 @@ test('loadCapabilityHistory: includes project-local fallback rows', () => {
     assert.equal(history.length, 1);
     assert.equal(history[0].workspace_id, 'ws-fallback');
     assert.equal(history[0].session_id, 's1');
+    assert.equal(history[0].row.capability_id, 'plugin-root-resolution');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('M14: loadCapabilityHistory dedups the same observation present in both stores', () => {
+  const home = mkdtempSync(join(tmpdir(), 'capdrift-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'capdrift-project-'));
+  try {
+    // Same observation (same session + pinned timestamp + capability + content) written to
+    // BOTH the home store and the project store. Pre-fix, loadCapabilityHistory concatenated
+    // them and double-counted; it must now collapse to one.
+    const meta = { session_id: 's1' };
+    const fixedNow = () => '2026-01-01T00:00:00Z';
+    const row = { capability_id: 'plugin-root-resolution', identity_status: 'PASS', evidence: [] };
+    appendRows('ws-dup', [row], meta, { home, now: fixedNow });
+    appendRows('ws-dup', [row], meta, { project, now: fixedNow });
+    const history = loadCapabilityHistory('ws-dup', project, { home });
+    assert.equal(history.length, 1, 'the duplicated observation collapses to a single entry');
     assert.equal(history[0].row.capability_id, 'plugin-root-resolution');
   } finally {
     rmSync(home, { recursive: true, force: true });
