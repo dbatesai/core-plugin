@@ -55,3 +55,12 @@ for (const bad of ['garbage', '0', '-5', '3.5', '']) {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 }
+
+test('a missing --memory-md target exits 2 cleanly (no uncaught ENOENT crash)', () => {
+  const { dir } = scratchMemoryMd();
+  try {
+    const missing = join(dir, 'does-not-exist', 'MEMORY.md');
+    const code = quietStderr(() => main([join(dir, '_memories'), '--memory-md', missing]));
+    assert.equal(code, 2, 'a missing target refuses with exit 2 instead of throwing');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

@@ -20,7 +20,7 @@
  *        [--top N] [--today YYYY-MM-DD]
  */
 
-import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync, existsSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
@@ -219,6 +219,12 @@ export function main(argv) {
 
   const today = todayFromArg(todayArg);
 
+  // A missing target MEMORY.md is an operator/setup error, not a crash: readFileSync would
+  // throw an uncaught ENOENT (exit 1, ugly stack). Refuse cleanly with exit 2 instead.
+  if (!existsSync(memoryMdPath)) {
+    process.stderr.write(`error: --memory-md target does not exist: ${memoryMdPath}\n`);
+    return 2;
+  }
   const oldText = readFileSync(memoryMdPath, 'utf8');
   const existingDescriptions = parseExistingDescriptions(oldText);
   const newSection = renderPriorityBlock({
