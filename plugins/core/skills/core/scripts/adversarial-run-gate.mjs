@@ -61,6 +61,25 @@ export function classifyAdversarialRun(preActionResult) {
   }
 
   if (row.identity_status === 'PASS') {
+    // M9 / Doctrine 4 (fail-closed mutation): identity PASS alone is NOT authority.
+    // runPreAction applies operation-scoped gates (authority, harness, signal-weight)
+    // and sets row.mutation_permitted=false with a stable mutation_block_reason when an
+    // otherwise-PASS row is denied for THIS action — e.g. the adversarial action declares
+    // allowed_harnesses, so an unknown/mismatched consuming harness blocks mutation even on
+    // a PASS identity. A consumer is mandated (HC_555) to branch on `decision`, so the
+    // operation-scoped denial has to be folded INTO `decision` or it's invisible: AUTHORIZED
+    // would mutate on a gate the runner already closed. Only an explicit `false` blocks —
+    // an undefined field (identity-only row, e.g. startup mode) keeps the AUTHORIZED path.
+    if (row.mutation_permitted === false) {
+      return {
+        decision: 'ADVISORY',
+        authority_for_mutation: false,
+        advisory_allowed: true,
+        watermark: ADVISORY_WATERMARK,
+        blocked_reason: row.mutation_block_reason || 'mutation-gate-denied',
+        anti_anchoring_status: 'PASS',
+      };
+    }
     return {
       decision: 'AUTHORIZED',
       authority_for_mutation: true,

@@ -185,17 +185,24 @@ export async function probe(opts = {}) {
       weight: 'corroborating',
     });
   } else {
-    // Not a hard failure — mark as unproven with stable code
+    // M11 / Doctrine 4 (fail-closed mutation): this is a `mutation`-kind surface, and the
+    // runner's ONLY mutation lever is identity_status (runPreAction gates mutation on
+    // identity PASS). "Unproven ≠ conflicting" is the right epistemics for an *observation*,
+    // but on a mutation surface an unproven write must not yield a PASS that authorizes a
+    // write — a read-only collab repo would clear a mutating-action gate. So a failed
+    // write-proof is conflicting → DEGRADED → the pre-action gate blocks. The value still
+    // documents this as unproven (not proven-broken); the startup path (fail-open) still
+    // reports the row, just degraded.
     evidence.push({
       source: 'git-push-dry-run',
       value: {
         ok: false,
         unproven_code: 'target_surface_write_unproven',
-        note: 'push dry-run failed; write capability unverified',
+        note: 'push dry-run failed; write capability unverified — mutation-kind surface degrades fail-closed',
         error: pushResult.error?.slice(0, 200),
       },
-      agrees_with_others: true,  // unproven ≠ conflicting; absence of proof ≠ proof of absence
-      weight: 'corroborating',
+      agrees_with_others: false,
+      weight: 'conflicting',
     });
   }
 
