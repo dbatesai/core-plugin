@@ -3,15 +3,19 @@
  *
  * Standard observability is "X happened, log it." Silent-failure detection is
  * "X should have happened given Y — did it?" This module runs the process-failure
- * detectors that have a crisp ground truth (spec §8, §17.12). v1 ships the
- * gold-standard one Anvil named first:
+ * detectors that have a crisp ground truth (spec §8, §17.12). Three gold detectors:
  *
- *   citation-resolver — every DC-XX / R-XX / [[name]] the agent asserted is
- *   resolved against the unit store. A broken reference inside a confident
- *   assertion is a silent-citation-failure: the agent cited authority that
- *   doesn't exist.
+ *   citation-resolver    — every DC-XX / R-XX / [[name]] the agent asserted is
+ *                          resolved against the unit store. A broken reference inside
+ *                          a confident assertion is a silent-citation-failure.
  *
- * Future slices (tracked in the roadmap): stale-context tripwire, anticipation-gap.
+ *   stale-context        — every unit the agent read (via tool calls) that hasn't been
+ *                          updated in > STALE_THRESHOLD_DAYS AND whose status is not
+ *                          final/stable. Flags stale material presented as current.
+ *
+ *   anticipation-gap     — project-vocabulary terms the user had to introduce because
+ *                          the agent hadn't surfaced them first. Heuristic proxy for
+ *                          "the agent should have raised this unprompted."
  *
  * Privacy-gated (spec §18) and fail-open. Per DC-77 ships with the plugin;
  * per DC-80 .mjs only.
@@ -26,7 +30,11 @@ import { fileURLToPath } from 'node:url';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 
-export const DETECTOR_VERSION = '0.1.0';
+export const DETECTOR_VERSION = '0.2.0';
+
+// ============================================================
+// Citation resolver
+// ============================================================
 
 const CITATION_RE = /\bDC-(\d+)\b|\bR-(\d+)\b|\[\[([^\]]+)\]\]/g;
 
@@ -61,21 +69,10 @@ export function buildUnitIndex(memoriesDir) {
   return { ids, claimKeys };
 }
 
-function walkMd(dir, cb, depth = 0) {
-  if (depth > 5) return;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const e of entries) {
-    if (e.isDirectory()) walkMd(join(dir, e.name), cb, depth + 1);
-    else if (e.name.endsWith('.md') && !e.name.startsWith('INDEX')) cb(e.name);
-  }
-}
-
 /** Does a citation resolve to a real unit? */
 export function resolveCitation(citation, index) {
   if (citation.kind === 'wikilink') {
     if (index.ids.has(citation.key)) return true;
-    // tolerate a wikilink that names a prefix of a longer id
     for (const id of index.ids) if (id.startsWith(citation.key)) return true;
     return false;
   }
@@ -96,6 +93,198 @@ export function runCitationResolver(events, index) {
   return broken;
 }
 
+// ============================================================
+// Stale-context tripwire
+// ============================================================
+
+export const STALE_THRESHOLD_DAYS = 30;
+
+const STABLE_STATUSES = new Set(['final', 'stable', 'foundational', 'closed', 'archived', 'superseded']);
+
+/** Parse the minimal frontmatter we need from a unit file. */
+export function parseFrontmatter(content) {
+  const m = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return {};
+  const fm = {};
+  for (const line of m[1].split('\n')) {
+    const kv = line.match(/^(\w[\w-]*)\s*:\s*(.+)/);
+    if (kv) fm[kv[1]] = kv[2].trim().replace(/^['"]|['"]$/g, '');
+  }
+  return fm;
+}
+
+function daysBetween(dateStr, today) {
+  try {
+    const then = new Date(dateStr + 'T00:00:00Z');
+    const now = new Date(today + 'T00:00:00Z');
+    if (isNaN(then.getTime()) || isNaN(now.getTime())) return 0;
+    return (now - then) / (1000 * 60 * 60 * 24);
+  } catch { return 0; }
+}
+
+function isStableUnit(fm) {
+  return STABLE_STATUSES.has((fm.status || '').toLowerCase()) ||
+    STABLE_STATUSES.has((fm['stability-class'] || '').toLowerCase());
+}
+
+/**
+ * Extract relative paths inside `_memories/` from tool-event text.
+ * Matches  _memories/foo.md  and  _memories/subdir/foo.md  (forward or back slash).
+ */
+export function extractReadUnitFilenames(events) {
+  const names = new Set();
+  const RE = /_memories[/\\]([^\s"',)<>]+\.md)/gi;
+  for (const ev of events || []) {
+    if (ev.kind !== 'tool') continue;
+    const text = ev.text || '';
+    let m;
+    RE.lastIndex = 0;
+    while ((m = RE.exec(text))) names.add(m[1].replace(/\\/g, '/'));
+  }
+  return [...names];
+}
+
+/**
+ * For each unit the agent read this session, check if it's stale:
+ *   updated > thresholdDays ago AND status is not final/stable.
+ * Returns [{filename, updated, days_stale, status, stability_class}].
+ */
+export function runStaleContextTripwire(events, memoriesDir, today, thresholdDays = STALE_THRESHOLD_DAYS) {
+  const filenames = extractReadUnitFilenames(events);
+  if (!filenames.length) return [];
+
+  const stale = [];
+  for (const relpath of filenames) {
+    let content;
+    try { content = readFileSync(join(memoriesDir, relpath), 'utf8'); } catch { continue; }
+    const fm = parseFrontmatter(content);
+    if (isStableUnit(fm)) continue;
+    const updated = fm.updated || fm.created;
+    if (!updated) continue;
+    const days = daysBetween(updated, today);
+    if (days > thresholdDays) {
+      stale.push({
+        filename: relpath,
+        updated,
+        days_stale: Math.round(days),
+        status: fm.status || '?',
+        stability_class: fm['stability-class'] || null,
+      });
+    }
+  }
+  return stale;
+}
+
+// ============================================================
+// Anticipation-gap detector
+// ============================================================
+
+// Short/common tokens unlikely to be meaningful project vocabulary.
+const GAP_STOPWORDS = new Set([
+  'this', 'that', 'have', 'with', 'from', 'been', 'were', 'into',
+  'when', 'then', 'than', 'they', 'them', 'some', 'more', 'also',
+  'each', 'will', 'your', 'what', 'over', 'make', 'like', 'back',
+  'only', 'just', 'both', 'same', 'high', 'open', 'next', 'last',
+]);
+
+/**
+ * Build vocabulary from unit filenames: strip type prefix + number, split on
+ * hyphens, filter short/stopword tokens. Returns a Set<string>.
+ */
+export function buildVocabulary(memoriesDir) {
+  const vocab = new Set();
+  try {
+    walkMd(memoriesDir, (name) => {
+      const base = name.replace(/\.md$/, '');
+      // Strip leading type prefix and number: dc-64-, risk-5-, obs-20260602-, rf-, etc.
+      const stripped = base.replace(/^(dc|risk|r|obs|rf)-[\d-]*/, '');
+      for (const token of stripped.split('-')) {
+        const t = token.toLowerCase();
+        if (t.length >= 4 && !GAP_STOPWORDS.has(t)) vocab.add(t);
+      }
+    });
+  } catch { /* ignore — fail open */ }
+  return vocab;
+}
+
+function tokenizeText(text) {
+  return (text || '').toLowerCase().split(/\W+/).filter((t) => t.length >= 4);
+}
+
+/** Pair events into turns: {userText, assistantText}. */
+function pairTurnsLocal(events) {
+  const turns = [];
+  let cur = null;
+  for (const ev of events || []) {
+    if (ev.role === 'user' && ev.kind === 'text') {
+      if (cur) turns.push(cur);
+      cur = { userText: ev.text || '', assistantText: '' };
+    } else if (ev.role === 'assistant' && ev.kind === 'text') {
+      if (cur) {
+        cur.assistantText += '\n' + (ev.text || '');
+      } else {
+        // Leading assistant turn (e.g. bootstrap), track its mentions.
+        turns.push({ userText: '', assistantText: ev.text || '' });
+      }
+    }
+  }
+  if (cur) turns.push(cur);
+  return turns;
+}
+
+/**
+ * Detect turns where the user introduced project-vocabulary terms the agent
+ * hadn't surfaced in prior turns. Returns [{turnIdx, terms}].
+ *
+ * Heuristic: term is in the vocabulary (unit filenames), appears in user
+ * text this turn, and the agent hasn't mentioned it in any prior turn.
+ */
+export function runAnticipationGap(events, memoriesDir) {
+  const vocab = buildVocabulary(memoriesDir);
+  if (!vocab.size) return [];
+
+  const turns = pairTurnsLocal(events);
+  const gaps = [];
+  const agentMentioned = new Set();
+
+  for (let i = 0; i < turns.length; i++) {
+    const { userText, assistantText } = turns[i];
+
+    if (userText) {
+      const missed = [];
+      for (const word of tokenizeText(userText)) {
+        if (vocab.has(word) && !agentMentioned.has(word)) missed.push(word);
+      }
+      if (missed.length) gaps.push({ turnIdx: i, terms: [...new Set(missed)] });
+    }
+
+    // Accumulate what the agent mentions in this turn's response.
+    for (const word of tokenizeText(assistantText)) {
+      if (vocab.has(word)) agentMentioned.add(word);
+    }
+  }
+
+  return gaps;
+}
+
+// ============================================================
+// Shared helpers
+// ============================================================
+
+function walkMd(dir, cb, depth = 0) {
+  if (depth > 5) return;
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  for (const e of entries) {
+    if (e.isDirectory()) walkMd(join(dir, e.name), cb, depth + 1);
+    else if (e.name.endsWith('.md') && !e.name.startsWith('INDEX')) cb(e.name);
+  }
+}
+
+// ============================================================
+// Unified runner
+// ============================================================
+
 export function runDetectors({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, workspaceId, env }) {
   if (!metricsEnabled({ project, env })) {
     return { status: 'DISABLED', reason: 'metrics opt-in not set' };
@@ -103,29 +292,65 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
   const t = readTranscript({ harness, cwd: cwd || project, home });
   if (!t.available) return { status: 'UNAVAILABLE', reason: 'transcript unavailable' };
 
-  const index = buildUnitIndex(join(project, '_memories'));
-  const broken = runCitationResolver(t.events, index);
-
+  const memoriesDir = join(project, '_memories');
+  const index = buildUnitIndex(memoriesDir);
   const sid = resolveSessionId({ explicit: sessionId });
   const date = today || todayUTC();
   const wid = workspaceId || resolveWorkspaceId(project);
-  const records = broken.map((c) => ({
-    schema_version: '1.0.0',
-    detector: 'citation-resolver',
-    detector_version: DETECTOR_VERSION,
-    session_id: sid,
-    severity: 'high', // a cited authority that doesn't exist
-    raw: c.raw,
-    kind: c.kind,
-    key: c.key,
-  }));
+
+  const brokenCitations = runCitationResolver(t.events, index);
+  const staleUnits = runStaleContextTripwire(t.events, memoriesDir, date);
+  const anticipationGaps = runAnticipationGap(t.events, memoriesDir);
+
+  const records = [
+    ...brokenCitations.map((c) => ({
+      schema_version: '1.0.0',
+      detector: 'citation-resolver',
+      detector_version: DETECTOR_VERSION,
+      session_id: sid,
+      severity: 'high',
+      raw: c.raw,
+      kind: c.kind,
+      key: c.key,
+    })),
+    ...staleUnits.map((s) => ({
+      schema_version: '1.0.0',
+      detector: 'stale-context',
+      detector_version: DETECTOR_VERSION,
+      session_id: sid,
+      severity: 'medium',
+      filename: s.filename,
+      updated: s.updated,
+      days_stale: s.days_stale,
+      status: s.status,
+      stability_class: s.stability_class,
+    })),
+    ...anticipationGaps.map((g) => ({
+      schema_version: '1.0.0',
+      detector: 'anticipation-gap',
+      detector_version: DETECTOR_VERSION,
+      session_id: sid,
+      severity: 'low',
+      turn_idx: g.turnIdx,
+      terms: g.terms,
+    })),
+  ];
+
   try {
     const dir = join(operationalMetricsDir(wid, { home }), 'detectors');
     mkdirSync(dir, { recursive: true });
     for (const r of records) appendFileSync(join(dir, `${date}.jsonl`), JSON.stringify(r) + '\n');
   } catch { /* best-effort */ }
 
-  return { status: 'OK', workspace_id: wid, broken_citations: broken.length, records, unit_count: index.ids.size };
+  return {
+    status: 'OK',
+    workspace_id: wid,
+    broken_citations: brokenCitations.length,
+    stale_units: staleUnits.length,
+    anticipation_gaps: anticipationGaps.length,
+    records,
+    unit_count: index.ids.size,
+  };
 }
 
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
@@ -136,10 +361,21 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
   const r = runDetectors({ project, harness: opt('harness') || 'claude-code' });
   if (argv.includes('--json')) process.stdout.write(JSON.stringify(r, null, 2) + '\n');
   else if (r.status !== 'OK') process.stdout.write(`metrics-detectors: ${r.status} (${r.reason})\n`);
-  else if (r.broken_citations === 0) process.stdout.write(`citation-resolver: clean (${r.unit_count} units indexed)\n`);
   else {
-    process.stdout.write(`citation-resolver: ${r.broken_citations} broken reference(s) — cited authority that doesn't resolve:\n`);
-    for (const c of r.records) process.stdout.write(`  ✖ ${c.raw}\n`);
+    if (r.broken_citations === 0) process.stdout.write(`citation-resolver: clean (${r.unit_count} units indexed)\n`);
+    else {
+      process.stdout.write(`citation-resolver: ${r.broken_citations} broken reference(s):\n`);
+      for (const c of r.records.filter((x) => x.detector === 'citation-resolver'))
+        process.stdout.write(`  ✖ ${c.raw}\n`);
+    }
+    if (r.stale_units === 0) process.stdout.write(`stale-context: clean\n`);
+    else {
+      process.stdout.write(`stale-context: ${r.stale_units} stale unit(s) read this session:\n`);
+      for (const s of r.records.filter((x) => x.detector === 'stale-context'))
+        process.stdout.write(`  ⚠ ${s.filename} (${s.days_stale}d, status: ${s.status})\n`);
+    }
+    if (r.anticipation_gaps === 0) process.stdout.write(`anticipation-gap: clean\n`);
+    else process.stdout.write(`anticipation-gap: ${r.anticipation_gaps} turn(s) where user introduced material first\n`);
   }
   process.exit(0);
 }
