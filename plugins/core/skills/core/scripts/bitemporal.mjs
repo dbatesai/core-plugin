@@ -1,8 +1,19 @@
 /**
- * bitemporal.mjs — Phase 4 layer 1: the world-time validity axis.
+ * bitemporal.mjs — the validity dimension's hygiene + query operations.
+ *
+ * Validity (t_valid/t_invalid) is a dimension on units, not a separate subsystem.
+ * Its read predicates (effectiveValidity / validAt / isInvalidated) live in
+ * priority.mjs — the canonical unit module — and its field-validation lives in
+ * check-units.mjs, beside every other frontmatter field. What remains here is the
+ * dimension's WRITE and READOUT operations, which are genuinely their own acts:
+ *   --stamp    a hygiene write (set t_invalid on supersession; finalize/process-memory)
+ *   --as-of    a point-in-time query mode over the shared predicates
+ *   --metrics  a storage-health readout (the storage half of the metrics loop)
+ * No second store-walk, no parallel "bi-temporal layer" — just these ops over the
+ * predicates priority.mjs owns (re-exported below for back-compat).
  *
  * CORE units already carry record-time (`created`/`updated` — when CORE wrote the
- * fact). Bi-temporal adds a *world-time* validity interval alongside it:
+ * fact). The validity dimension adds a *world-time* interval alongside it:
  *
  *   t_valid    when the fact became true in the world.   Defaults to `created`
  *              (computed at read-time, NOT stored) — for a fact born from a

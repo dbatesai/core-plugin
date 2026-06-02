@@ -145,7 +145,8 @@ export function checkSchema(units, memoriesDir, report) {
     if (declaredId && stem && declaredId !== stem)
       report.push({ level: 'WARN', check: 'id-mismatch', unit_id: uid, detail: `Declared id '${declaredId}' doesn't match filename stem '${stem}'` });
 
-    // Bi-temporal validity fields (Phase 4 layer 1) — optional on any unit.
+    // Validity-dimension fields (t_valid/t_invalid) — optional on any unit,
+    // validated here beside every other frontmatter field.
     // Schema only validates well-formedness: ISO dates, and t_valid <= t_invalid.
     // Semantics + population live in bitemporal.mjs; the created-default is
     // computed at read-time, so absence is normal and never flagged.
