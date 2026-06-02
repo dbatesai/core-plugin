@@ -1,8 +1,7 @@
 {
   "name": "core",
-  "version": "3.2.2",
-  "build": "20260531.1",
-  "created_at": "2026-05-31T00:00:00Z",
+  "version": "3.3.0",
+  "created_at": "2026-06-01T00:00:00Z",
   "targets": [
     "claude-code",
     "codex"
@@ -24,7 +23,8 @@
     "process-memory",
     "register-sources",
     "vibecheck",
-    "organize-files"
+    "organize-files",
+    "configure-project"
   ],
-  "notes": "v3.1.0: reliability release on top of v3.0.0. Hardens the startup CORE_ROOT resolver against a silent wrong-drive failure (Windows Git-Bash MSYS-root crash; the tier-3 node -e backslash regex SyntaxErrored on every shell, now gated + surfaced loudly). Adds a cross-project contamination guard to generate-memory-index (refuses when the _memories source and --memory-md target are different projects). Removes the Gemini harness (no callable-skill surface; CORE-on-Gemini never worked). Plus a register-sources platform-credentials advisory note, the capability-drift-log validator fix, and a corrected six-skill count. Carried gap from v3.0.0 unchanged: the retrieval-event producer is still not wired into the retrieval ladder, so retrieval-effectiveness metrics measure nothing yet. Two open verification bars on the resolver fix at release time: Hale's adversarial consensus and Meridian's Windows on-box smoke."
+  "notes": "v3.3.0: Track B of the Codex co-existence workstream (DC-104) — the structural half. Adds /configure-project, a new companion skill (CORE now ships seven) that bootstraps and health-checks a project for the current harness — the Codex-side counterpart to Claude Code's startup mandate: confirms install + manifests, validates the memory store, resolves workspace identity (detect-only), reports connector capability in two honest tiers (configured-on-disk vs session-live — never asserts a capability it can't verify), runs the capability probe, and generates AGENTS.md from CONTRACT.md when one exists. Idempotent; report-only unless --apply. Fixes a real shipped fork-check bug: checkFork compared paths with resolve() while the CLI canonicalizes with realpathSync, so a symlinked project root (macOS /tmp->/private/tmp, OneDrive) re-forked an already-registered workspace every startup. Hardens generate-agents-md against an uncaught ENOENT on a missing CONTRACT.md. Also rolls up the already-on-next workspace-identity field standardization (on `path`) and the R-17 adversarial-run-gate wiring into protocols/analysis.md (ADVISORY watermarking — enforced, not closed). Honest scope: built + validated from a Claude session; the Codex branch is fixture-tested, live two-harness validation (Crest, ai-gw-placement) is the remaining external step. Cleanup note for a follow-up: plugins/core/RELEASE.json is a pre-collapse stale duplicate (read by nothing; CI + bump use this root file) and should be removed."
 }

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] — 2026-06-01
+
+Track B of the Codex co-existence workstream (DC-104) — the structural half: a project bootstrap/health-check for either harness, a real fork-check bug fix, and the supporting contract. Plus the workspace-identity field standardization and the R-17 adversarial-run-gate wiring that were already on `next`. Track B's pre-build `/core` review reshaped it: CORE ships no connector name-map (it ships the contract; the overlay owns the data) because a grep proved CORE hardcodes zero connector names.
+
+### Added
+- **`/configure-project` — a new companion skill (and `configure-project.mjs`).** Bootstraps and health-checks a project for the current harness: confirms the install + manifests, validates the memory store, resolves workspace identity (detect-only — never mutates), reports connector capability in two honest tiers, runs the capability probe, and generates `AGENTS.md` from a `CONTRACT.md` when one exists. The Codex-side counterpart to Claude Code's startup mandate; idempotent and report-only unless `--apply`. Wired as the Codex setup step in the Codex adapter. (CORE now ships seven companion utilities.)
+- **Two-tier capability reporting.** The check distinguishes what a script can verify from disk (manifests, store validation, MCP servers *declared* in `~/.claude.json` — not verified reachable, capability-probe rows) from session-live questions only the running agent can answer (is a connector reachable + authed this session? the `~/.codex/config.toml` server list, which the script does not parse; the live two-harness check). The script never asserts a capability it cannot check.
+- **`dryRun` mode for `workspace-fork-check`** — detect the fork decision without performing the multi-file mutation.
+
+### Changed
+- **Workspace-identity field standardized on `path`** across the schema, startup prose, and the fork-check writer. Legacy `project_path` stays read-tolerated for one release, then drops.
+- **The R-17 adversarial-run-gate is now wired into `protocols/analysis.md`.** Multi-agent runs are classified AUTHORIZED / ADVISORY / BLOCKED at Phase 0; ADVISORY (the Claude Code norm under R-17) watermarks the synthesis and withholds canonical-mutation authority until independent acceptance. This makes R-17's degraded state *enforced*, not just labelled — it does not close R-17.
+- **`source-registration-framework.md`** documents the overlay-owned `connector-map.json` contract and the script-visible/session-live capability boundary.
+
+### Fixed
+- **`workspace-fork-check` re-forked an already-registered workspace under a symlinked project root** (macOS `/tmp`→`/private/tmp`, OneDrive/Dropbox/iCloud sync roots). The fork decision compared paths with `resolve()` while the CLI entry-guard canonicalizes with `realpathSync`, so the live cwd and the registered index path differed by symlink-vs-real form and the workspace re-forked on every startup. Both comparison sides now canonicalize with `realpathSync` (resolve-fallback when the path is absent).
+- **`generate-agents-md` crashed with an uncaught ENOENT when `CONTRACT.md` was absent.** It now skips cleanly (the common case for a project without an adopted contract); a present-but-malformed contract still throws loudly.
+
 ## [3.2.2] — 2026-06-01
 
 A patch fixing a slug-encoding bug that broke MEMORY.md auto-refresh and the visibility canary on dotted usernames, plus three `check-units` validator false-positives. Track A of the Codex co-existence workstream — folder-independent fixes from Crest's multi-source report, converged + ratified with Hale.

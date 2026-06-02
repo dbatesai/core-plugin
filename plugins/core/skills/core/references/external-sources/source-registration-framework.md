@@ -103,6 +103,16 @@ CORE does not ship `kind` enum values beyond the three abstract shape categories
 
 CORE does not maintain a registry of "known external systems." There is no preset for Asana, Confluence, GitHub, Linear, Notion, or any specific system. The framework is the only thing CORE knows about.
 
+**CORE ships no connector name-map.** The same external system is exposed under different MCP tool names by different harnesses — Claude Code might surface a connector as `mcp__claude_ai_<…>` while Codex surfaces the equivalent as `mcp__codex_apps__<…>`, and some connectors are present on one harness and absent on the other. Translating between those names is **overlay-owned**, the same boundary as platform credentials above: the names are deployment-specific, and CORE stays harness- and platform-agnostic. An installation that needs name translation provides a project-local `connector-map.json`; CORE's tooling (`configure-project`) **reads and reports** that map if present but ships none of its own. Baking a name-map of speculative, un-live-confirmed connector names into the shipped plugin would be both dormant (no CORE skill consumes it) and wrong-by-drift the moment a harness renames a connector.
+
+Optional project-local `connector-map.json` shape (overlay-authored; CORE only reads it):
+
+```json
+{ "connectors": { "<canonical-name>": { "claude-code": "mcp__claude_ai_<…>", "codex": "mcp__codex_apps__<…>" } } }
+```
+
+**The capability check is two-tier, and the boundary is load-bearing.** A script can read what's *configured on disk* (Claude Code's `mcpServers` in `~/.claude.json`; the presence of `~/.codex/config.toml`) and validate the store — but it cannot see whether a connector is actually reachable and authed *in the running session*. So `configure-project` separates **script-visible** facts (manifests, store validation, connectors *declared in config*, capability-probe rows) from **session-live** questions the agent answers from the running session (is this connector reachable+authed now? the `config.toml` server list it doesn't parse; the live two-harness check). Reporting a configured-on-disk connector as "available" would be the exact fake-capability/silent-degradation failure CORE exists to prevent. Configured ≠ reachable; the receipt keeps that line bright.
+
 ---
 
 ## 2. Observation schema during draft state
