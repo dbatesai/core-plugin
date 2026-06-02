@@ -34,6 +34,7 @@
 
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
@@ -139,23 +140,9 @@ function readUnit(memoriesDir, id) {
   return { id, path, fm };
 }
 
+// Flat frontmatter map for a unit (M1: shared parser, was a local copy).
 function parseFrontmatter(text) {
-  text = text.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
-  if (!text.startsWith('---\n')) return {};
-  const end = text.indexOf('\n---', 4);
-  if (end === -1) return {};
-  const raw = text.slice(4, end);
-  const fm = {};
-  for (const line of raw.split('\n')) {
-    if (!line.trim() || line.trimStart().startsWith('#')) continue;
-    if (line.startsWith(' ') || line.startsWith('\t')) continue;
-    const colonIdx = line.indexOf(':');
-    if (colonIdx === -1) continue;
-    const k = line.slice(0, colonIdx).trim();
-    const v = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, '');
-    if (v !== '') fm[k] = v;
-  }
-  return fm;
+  return parseFlatFrontmatter(text)[0];
 }
 
 // ---------- Classification ----------
