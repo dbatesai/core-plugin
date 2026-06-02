@@ -166,22 +166,29 @@ function ageInDays(updatedIso, todayIso) {
 }
 
 /**
- * The most-recent YYYY-MM-DD anchored date in the bullet text — the
- * completion-time proxy for a closed item ("shipped 2026-05-27"). Returns null
- * when the bullet carries no date. Ignores dates inside `[[unit-name-...]]`
- * wikilinks and obs-id slugs so a unit reference doesn't masquerade as a
- * completion date — those are matched by extractBackingUnitRefs, not here.
+ * The most-recent NON-FUTURE YYYY-MM-DD in the bullet text — the completion-time
+ * proxy for a closed item ("shipped 2026-05-27"). Returns null when the bullet
+ * carries no usable date. Dates that aren't completion dates are stripped first:
+ *   - `[[wikilink]]` targets and bare obs-ids (matched by extractBackingUnitRefs)
+ *   - `(parenthetical citations)` like `(DC-106, 2026-06-01)` — this project's
+ *     normal citation style; the date is a unit's date, not the work's
+ *   - `\`backtick code spans\`` — version strings, the stub's own pointer date
+ * Future dates (> today) are ignored: a planning/target date is not a completion
+ * date, and counting it would either mask a real past date or disable aging.
+ * (Review 2026-06-02d: P1/P2 citation-leak + future-date.)
  */
-export function extractMostRecentDate(text) {
+export function extractMostRecentDate(text, today = null) {
   if (!text) return null;
-  // Strip wikilinks and bare obs-ids (they embed dates that aren't completion dates).
+  const todayIso = today || todayUTC();
   const cleaned = text
     .replace(/\[\[[^\]]*\]\]/g, ' ')
-    .replace(/\bobs-[a-z0-9-]*\d{4}-\d{2}-\d{2}\b/gi, ' ');
+    .replace(/\bobs-[a-z0-9-]*\d{4}-\d{2}-\d{2}\b/gi, ' ')
+    .replace(/`[^`]*`/g, ' ')        // backtick code spans (version strings, stub pointer date)
+    .replace(/\([^)]*\)/g, ' ');     // parenthetical citations: (DC-106, 2026-06-01)
   const dates = [];
   for (const m of cleaned.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
-    const [iso, y, mo, d] = m;
-    if (+mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31) dates.push(iso);
+    const [iso, , mo, d] = m;
+    if (+mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31 && iso <= todayIso) dates.push(iso);
   }
   if (!dates.length) return null;
   dates.sort();
@@ -208,9 +215,18 @@ function classifyBulletStrict(bullet, memoriesDir, todayIso) {
   return { decision: 'demote', maxUpdated, ageDays: age, refs, ageSource: 'backing-unit' };
 }
 
+/** A demotion stub left by a prior run: `… → see `PROJECT-ARCHIVE.md §Moves …``.
+ *  It's an [x] bullet carrying re-ageable dates, so it must NOT re-enter the gate
+ *  (else a later finalize demotes the stub → stub-of-stub, breaking the trail.
+ *  Review 2026-06-02d HIGH, reproduced by two reviewers). */
+const STUB_RE = /→\s*see\s+`?PROJECT-ARCHIVE\.md\s+§Moves/;
+
 export function classifyBullet(bullet, projectDir, { today, strict = false } = {}) {
   if (bullet.checkbox !== 'x') {
     return { decision: 'keep', reason: 'not-closed' };
+  }
+  if (STUB_RE.test(bullet.text)) {
+    return { decision: 'keep', reason: 'already-stubbed' };
   }
   const memoriesDir = join(projectDir, '_memories');
   const todayIso = today || todayUTC();
@@ -221,7 +237,7 @@ export function classifyBullet(bullet, projectDir, { today, strict = false } = {
   // bullet text (completion proxy) first; fall back to cited-unit dates only
   // when the bullet itself carries no date. Backing-unit status no longer gates.
   const refs = extractBackingUnitRefs(bullet.text);
-  const textDate = extractMostRecentDate(bullet.text);
+  const textDate = extractMostRecentDate(bullet.text, todayIso);
   let maxUpdated = textDate;
   let ageSource = 'bullet-text';
   if (!maxUpdated) {
@@ -288,7 +304,7 @@ function appendToArchiveMoves(archivePath, block) {
 
 // ---------- Public API ----------
 
-export function demoteMoves(projectDir, { today, dryRun = false, strict = false } = {}) {
+export function demoteMoves(projectDir, { today, dryRun = false, strict = false, applyLargeBatch = false } = {}) {
   const todayIso = today || todayUTC();
   const projectMdPath = join(projectDir, 'PROJECT.md');
   let text;
@@ -332,19 +348,34 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false 
     candidates: stats.candidates,
   }, { today: todayIso });
 
-  if (demotions.length >= LARGE_BATCH_WARNING_THRESHOLD) {
+  const largeBatch = demotions.length >= LARGE_BATCH_WARNING_THRESHOLD;
+  if (largeBatch) {
     logEvent(projectDir, 'hygiene-log.jsonl', {
       kind: 'demote-moves-large-batch',
       candidate_count: demotions.length,
       threshold: LARGE_BATCH_WARNING_THRESHOLD,
+      held: !dryRun && !applyLargeBatch,
     }, { today: todayIso });
     process.stderr.write(
-      `warn: demote-moves found ${demotions.length} candidates (threshold ${LARGE_BATCH_WARNING_THRESHOLD}). ` +
-      `First-run scale on this project; expected to taper.\n`
+      `warn: demote-moves found ${demotions.length} candidates (threshold ${LARGE_BATCH_WARNING_THRESHOLD}).\n`
     );
   }
 
   if (dryRun || demotions.length === 0) return stats;
+
+  // A large first batch is a bulk migration of a user-owned file (PROJECT.md).
+  // Hold it: write nothing, surface the candidates, and require an explicit
+  // --apply-large-batch so a human looks before N items leave the agenda at once.
+  // (Review 2026-06-02d MED: the warning otherwise fired AFTER the writes.)
+  if (largeBatch && !applyLargeBatch) {
+    stats.held = true;
+    stats.held_reason = 'large-batch-needs-confirmation';
+    process.stderr.write(
+      `demote-moves: holding ${demotions.length} demotions (>= ${LARGE_BATCH_WARNING_THRESHOLD}). ` +
+      `Nothing written. Review the candidates, then re-run with --apply-large-batch to proceed.\n`
+    );
+    return stats;
+  }
 
   const archivePath = ensureArchiveFile(projectDir);
   const block = renderArchiveBlock(demotions, todayIso);
@@ -389,16 +420,18 @@ export function main(argv) {
   let dryRun = false;
   let asJson = false;
   let strict = false;
+  let applyLargeBatch = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--dry-run') dryRun = true;
     else if (a === '--json') asJson = true;
     else if (a === '--strict') strict = true;
+    else if (a === '--apply-large-batch') applyLargeBatch = true;
     else if (!a.startsWith('--')) projectDir = resolve(a);
   }
 
   let stats;
-  try { stats = demoteMoves(projectDir, { dryRun, strict }); }
+  try { stats = demoteMoves(projectDir, { dryRun, strict, applyLargeBatch }); }
   catch (e) {
     process.stderr.write(`error: ${e.message}\n`);
     return 2;
@@ -408,13 +441,15 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(stats, null, 2) + '\n');
     return 0;
   }
-  const mode = dryRun ? ' (dry-run)' : '';
-  process.stdout.write(`demote-moves${mode}: ${stats.demoted} demoted, ${stats.kept} kept.\n`);
+  const mode = dryRun ? ' (dry-run)' : stats.held ? ' (HELD — nothing written)' : '';
+  const verb = stats.held ? 'would demote' : 'demoted';
+  process.stdout.write(`demote-moves${mode}: ${stats.demoted} ${verb}, ${stats.kept} kept.\n`);
   if (stats.candidates && stats.candidates.length) {
     for (const c of stats.candidates) {
       process.stdout.write(`  • ${c.title}  (age ${c.ageDays}d)\n`);
     }
   }
+  if (stats.held) process.stdout.write(`  → large batch held; re-run with --apply-large-batch to write.\n`);
   return 0;
 }
 

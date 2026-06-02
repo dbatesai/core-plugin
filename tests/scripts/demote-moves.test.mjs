@@ -158,3 +158,78 @@ test('extractMovesSection isolates the Moves body', () => {
   assert.ok(/- \[x\] a/.test(m));
   assert.ok(!/## Notes/.test(m));
 });
+
+// ---------- Adversarial-review fixes (2026-06-02d) ----------
+
+test('a demotion stub is never re-demoted (already-stubbed) — fixes the HIGH idempotency bug', () => {
+  const dir = scratchProject();
+  const b = bullet('- [x] **Shipped long ago 2026-03-01** → see `PROJECT-ARCHIVE.md §Moves 2026-04-01`');
+  const r = classifyBullet(b, dir, { today: TODAY });
+  assert.equal(r.decision, 'keep');
+  assert.equal(r.reason, 'already-stubbed');
+});
+
+test('extractMostRecentDate ignores citation, backtick, and future dates', () => {
+  // (DC-106, date) is this project's citation style — the date is the unit's, not the work's.
+  assert.equal(extractMostRecentDate('Closed the loop (DC-106, 2026-06-01)', TODAY), null);
+  assert.equal(extractMostRecentDate('bumped `cfg-2026-09-01`', TODAY), null);          // backtick span
+  assert.equal(extractMostRecentDate('target ship 2099-01-01', TODAY), null);            // future
+  assert.equal(extractMostRecentDate('done 2026-03-01, target 2099-01-01', TODAY), '2026-03-01'); // past wins over future
+});
+
+test('classifyBullet keeps an item whose only date is a leaked citation (no-age-signal)', () => {
+  const dir = scratchProject();
+  const r = classifyBullet(bullet('- [x] **Did a thing** — see (DC-106, 2026-01-01)'), dir, { today: TODAY });
+  assert.equal(r.decision, 'keep');
+  assert.equal(r.reason, 'no-age-signal');
+});
+
+function projectWithAgedClosed(n) {
+  const dir = scratchProject();
+  const lines = ['# P', '', '## Moves', '', '### Active', ''];
+  for (let i = 0; i < n; i++) lines.push(`- [x] **Item ${i} shipped 2026-03-01** — done.`);
+  lines.push('', '## Notes', '', 'end');
+  writeFileSync(join(dir, 'PROJECT.md'), lines.join('\n'));
+  return dir;
+}
+
+test('large batch (>=20) is HELD — nothing written — until --apply-large-batch', () => {
+  const dir = projectWithAgedClosed(22);
+  try {
+    const held = demoteMoves(dir, { today: TODAY });
+    assert.equal(held.held, true);
+    assert.equal(held.demoted, 22);
+    assert.equal(existsSync(join(dir, 'PROJECT-ARCHIVE.md')), false, 'held batch writes nothing');
+    const applied = demoteMoves(dir, { today: TODAY, applyLargeBatch: true });
+    assert.ok(!applied.held);
+    assert.ok(existsSync(join(dir, 'PROJECT-ARCHIVE.md')), 'apply-large-batch writes');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('multi-bullet demotion preserves an adjacent kept bullet (rewriteMovesWithStubs surgery)', () => {
+  const dir = scratchProject();
+  writeFileSync(join(dir, 'PROJECT.md'), [
+    '# P', '', '## Moves', '', '### Active', '',
+    '- [x] **Old A 2026-03-01** — done.',
+    '- [ ] **Active keep** — keep me.',
+    '- [x] **Old B 2026-03-02** — done.',
+    '', '## Notes', '', 'end',
+  ].join('\n'));
+  try {
+    const stats = demoteMoves(dir, { today: TODAY });
+    assert.equal(stats.demoted, 2);
+    const project = readFileSync(join(dir, 'PROJECT.md'), 'utf8');
+    assert.ok(/Active keep/.test(project), 'adjacent active bullet survives between two demotions');
+    assert.equal((project.match(/→ see `PROJECT-ARCHIVE/g) || []).length, 2, 'two stubs left');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('--strict end-to-end keeps a cited-active item that the loosened default demotes', () => {
+  const dir = scratchProject({ 'dc-99': { status: 'active', updated: '2026-03-01' } });
+  writeFileSync(join(dir, 'PROJECT.md'),
+    ['# P', '', '## Moves', '', '- [x] **Item 2026-03-01** — see `dc-99`.', '', '## Notes', ''].join('\n'));
+  try {
+    assert.equal(demoteMoves(dir, { today: TODAY, strict: true }).demoted, 0, 'strict keeps it (cited unit active)');
+    assert.equal(demoteMoves(dir, { today: TODAY }).demoted, 1, 'loosened default demotes it');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
