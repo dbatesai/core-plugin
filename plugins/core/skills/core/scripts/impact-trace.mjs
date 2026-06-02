@@ -25,9 +25,8 @@
 import { realpathSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractEdges } from './priority.mjs';
+import { extractEdges, isInvalidated } from './priority.mjs';
 import { iterActiveUnits } from './check-units.mjs';
-import { isInvalidated } from './bitemporal.mjs';
 
 export const IMPACT_VERSION = '1.0.0';
 

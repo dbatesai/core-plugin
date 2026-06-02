@@ -38,47 +38,20 @@
 import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadUnit, extractEdges, parseIsoDate } from './priority.mjs';
+import {
+  loadUnit, extractEdges, parseIsoDate,
+  effectiveValidity, validAt, isInvalidated,
+} from './priority.mjs';
 import { iterActiveUnits } from './check-units.mjs';
 
 export const BITEMPORAL_VERSION = '1.0.0';
 
-// ---------- effective validity (read-time created-default) ----------
-
-/**
- * The effective world-time validity interval for a unit.
- * t_valid defaults to created (the conversation/file world-time proxy) when not
- * explicitly set; t_invalid is null (open interval) until supersession stamps it.
- * @returns {{ t_valid: string|null, t_invalid: string|null }} ISO date strings
- */
-export function effectiveValidity(unit) {
-  const fm = unit.fm || {};
-  const tValid = fm.t_valid ? String(fm.t_valid).trim() : (fm.created ? String(fm.created).trim() : null);
-  const tInvalid = fm.t_invalid ? String(fm.t_invalid).trim() : null;
-  return { t_valid: tValid, t_invalid: tInvalid };
-}
-
-/** Was this unit valid at `dateStr`? t_valid <= date AND (t_invalid is null OR date < t_invalid). */
-export function validAt(unit, dateStr) {
-  const date = parseIsoDate(dateStr);
-  if (!date) return false;
-  const { t_valid, t_invalid } = effectiveValidity(unit);
-  const vFrom = parseIsoDate(t_valid);
-  if (vFrom && date.getTime() < vFrom.getTime()) return false;
-  if (t_invalid) {
-    const vTo = parseIsoDate(t_invalid);
-    if (vTo && date.getTime() >= vTo.getTime()) return false;
-  }
-  return true;
-}
-
-/** Is this unit invalidated as of `today` (t_invalid in the past)? */
-export function isInvalidated(unit, today) {
-  const { t_invalid } = effectiveValidity(unit);
-  if (!t_invalid) return false;
-  const vTo = parseIsoDate(t_invalid);
-  return !!vTo && vTo.getTime() <= today.getTime();
-}
+// The read-time validity predicates (effectiveValidity / validAt / isInvalidated)
+// now live in priority.mjs — the canonical unit module — so every reader shares
+// one definition (validity-dimension consolidation, 2026-06-02). Re-exported here
+// for back-compat: this module's CLI, its writer/metrics functions, and any
+// existing importer keep working against the same single source.
+export { effectiveValidity, validAt, isInvalidated };
 
 // ---------- supersession classification (shared by writer + metrics) ----------
 

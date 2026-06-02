@@ -291,6 +291,58 @@ export function extractEdges(unit) {
   return result;
 }
 
+// ---------- Validity dimension (read-time predicates) ----------
+//
+// Validity (t_valid/t_invalid) is a unit dimension — the same kind of thing as
+// topics or confidence-level. Its read predicates live here in the canonical
+// unit module so every reader (priority, retrieval suppression, bitemporal CLI,
+// impact-trace, hygiene) shares ONE definition instead of re-deriving it. Per
+// the validity-dimension consolidation (2026-06-02): no second store-walk, no
+// parallel "bi-temporal layer."
+//
+//   t_valid    when the fact became true in the world. Defaults to `created`
+//              (computed here, NOT stored) — for a fact born from conversation
+//              or a local file, "when it became true" is when CORE recorded it.
+//              Written explicitly only when world-time diverges from record-time
+//              (the overlay case: an extractor reading a source's own timestamp).
+//   t_invalid  when the fact stopped being true. Empty while it holds; stamped
+//              by supersession (B supersedes A ⇒ A.t_invalid = B.t_valid).
+
+/**
+ * The effective world-time validity interval for a unit. t_valid defaults to
+ * created when not explicitly set; t_invalid is null (open) until supersession
+ * stamps it.
+ * @returns {{ t_valid: string|null, t_invalid: string|null }} ISO date strings
+ */
+export function effectiveValidity(unit) {
+  const fm = unit.fm || {};
+  const tValid = fm.t_valid ? String(fm.t_valid).trim() : (fm.created ? String(fm.created).trim() : null);
+  const tInvalid = fm.t_invalid ? String(fm.t_invalid).trim() : null;
+  return { t_valid: tValid, t_invalid: tInvalid };
+}
+
+/** Was this unit valid at `dateStr`? t_valid <= date AND (t_invalid is null OR date < t_invalid). */
+export function validAt(unit, dateStr) {
+  const date = parseIsoDate(dateStr);
+  if (!date) return false;
+  const { t_valid, t_invalid } = effectiveValidity(unit);
+  const vFrom = parseIsoDate(t_valid);
+  if (vFrom && date.getTime() < vFrom.getTime()) return false;
+  if (t_invalid) {
+    const vTo = parseIsoDate(t_invalid);
+    if (vTo && date.getTime() >= vTo.getTime()) return false;
+  }
+  return true;
+}
+
+/** Is this unit invalidated as of `today` (t_invalid in the past)? */
+export function isInvalidated(unit, today) {
+  const { t_invalid } = effectiveValidity(unit);
+  if (!t_invalid) return false;
+  const vTo = parseIsoDate(t_invalid);
+  return !!vTo && vTo.getTime() <= today.getTime();
+}
+
 // ---------- Section mapping for PROJECT.md render ----------
 
 const TYPE_TO_SECTION = {
