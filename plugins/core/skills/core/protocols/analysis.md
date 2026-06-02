@@ -62,6 +62,22 @@ Five phases. Each has a clear transition criterion. Don't advance unless the cri
 
 Phase transitions are decisions, not timers. If Phase 3 produces flat agreement after one round, that's a convergence-watch trip — see the monitor-pattern section below.
 
+## Authority gate — run at Phase 0, before spawning
+
+Every multi-agent run passes the anti-anchoring authority gate at setup. Run it before you spawn and carry the decision through the whole run:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/adversarial-run-gate.mjs" --harness <harness> --json
+```
+
+The gate reads the live `anti-anchoring-mechanism` capability row — the real row, not a policy string — and returns one typed `decision`. Branch on `decision`, never on the booleans; `ADVISORY` must never be mistaken for `AUTHORIZED`:
+
+- **AUTHORIZED** — anti-anchoring is PASS. The synthesis may be the authority for a canonical mutation (graduating a unit, rendering PROJECT.md, approving a release gate).
+- **ADVISORY** — anti-anchoring is DEGRADED / UNKNOWN / NOT-YET. This is the normal case on Claude Code today (R-17). The run is allowed, but its output is advisory only: stamp the SYNTHESIS with the gate's `watermark`, and do **not** let it directly drive a canonical mutation — an independent agent or the user accepts the finding first.
+- **BLOCKED** — the capability row is absent (setup anomaly). Fix the descriptor before running; don't proceed.
+
+This is enforcement, not closure: the gate makes the DEGRADED state load-bearing (advisory output watermarked, mutation authority held), but it does not by itself close R-17 — the physical-isolation proof is separate. If `CORE_ROOT` is unresolved, treat the run as ADVISORY and say so in the synthesis.
+
 ## Output shape
 
 Multi-agent runs land structured output in two places:

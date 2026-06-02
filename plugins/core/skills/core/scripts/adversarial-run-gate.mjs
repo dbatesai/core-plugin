@@ -21,6 +21,8 @@
  * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
  */
 
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { runPreAction } from './capability-probe.mjs';
 
 export const ADVERSARIAL_ACTION = 'multi-agent-adversarial-run';
@@ -90,4 +92,58 @@ export async function evaluateAdversarialRun(opts = {}) {
   const preAction = await runPreAction(ADVERSARIAL_ACTION, opts);
   const decision = classifyAdversarialRun(preAction);
   return { ...decision, gate: { permitted: preAction.permitted, block_reason: preAction.block_reason } };
+}
+
+// --- CLI entry --------------------------------------------------------------
+// Library-only through v3.2.x: the gate had no runnable entry, so analysis.md
+// (its only consumer) couldn't actually invoke it and the gate shipped dormant.
+// This entry makes it runnable from a skill via Bash and prints the typed
+// `decision` so the protocol branches on one string instead of re-deriving
+// intent from booleans (the HC_555 hazard).
+
+function parseFlags(argv) {
+  const flags = new Map();
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) continue;
+    const key = a.slice(2);
+    const next = argv[i + 1];
+    if (next !== undefined && !next.startsWith('--')) { flags.set(key, next); i++; }
+    else flags.set(key, true);
+  }
+  return flags;
+}
+
+function renderMd(d) {
+  const lines = [
+    `# Adversarial-run gate: ${d.decision}`,
+    '',
+    `- authority for canonical mutation: ${d.authority_for_mutation ? 'yes' : 'NO'}`,
+    `- advisory/review generation: ${d.advisory_allowed ? 'allowed' : 'NOT allowed'}`,
+    `- anti-anchoring status: ${d.anti_anchoring_status ?? 'n/a'}`,
+  ];
+  if (d.watermark) lines.push('', `> ${d.watermark}`);
+  return lines.join('\n') + '\n';
+}
+
+export async function main(argv) {
+  const flags = parseFlags(argv);
+  const harness = typeof flags.get('harness') === 'string' ? flags.get('harness') : undefined;
+  let decision;
+  try {
+    decision = await evaluateAdversarialRun({ harness });
+  } catch (err) {
+    process.stderr.write(`error: adversarial-run-gate failed: ${err.message}\n`);
+    return 2;
+  }
+  process.stdout.write(flags.get('md') ? renderMd(decision) : `${JSON.stringify(decision, null, 2)}\n`);
+  // Exit code lets a shell caller branch without parsing: BLOCKED (setup
+  // anomaly — no decidable row) is non-zero; AUTHORIZED and ADVISORY are 0
+  // (advisory runs are fail-open by design — allowed, just watermarked).
+  return decision.decision === 'BLOCKED' ? 1 : 0;
+}
+
+const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
+if (_cliEntryCanonical(process.argv[1]) === _cliEntryCanonical(fileURLToPath(import.meta.url))) {
+  main(process.argv.slice(2)).then((code) => process.exit(code));
 }

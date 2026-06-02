@@ -1,5 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { runPreAction } from '../../plugins/core/skills/core/scripts/capability-probe.mjs';
 import {
   classifyAdversarialRun, evaluateAdversarialRun, ADVERSARIAL_ACTION, ADVISORY_WATERMARK, ADVERSARIAL_DECISIONS,
@@ -66,5 +69,27 @@ test('decision enum is machine-readable: AUTHORIZED / ADVISORY / BLOCKED (HC_555
   for (const s of ['PASS', 'DEGRADED', 'UNKNOWN', 'NOT-YET']) {
     const d = classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: s }] });
     assert.ok(ADVERSARIAL_DECISIONS.includes(d.decision));
+  }
+});
+
+// --- CLI entry + protocol wiring (the gate is no longer a dormant library) ---
+
+const GATE_PATH = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/adversarial-run-gate.mjs', import.meta.url));
+const ANALYSIS_MD = fileURLToPath(new URL('../../plugins/core/skills/core/protocols/analysis.md', import.meta.url));
+
+test('CLI: the gate is runnable via Bash and prints a typed decision in the enum', () => {
+  const out = execFileSync('node', [GATE_PATH, '--harness', 'claude-code', '--json'], { encoding: 'utf8' });
+  const decision = JSON.parse(out);
+  assert.ok(ADVERSARIAL_DECISIONS.includes(decision.decision), 'CLI must print a decision in the published enum');
+  assert.equal(decision.decision, 'ADVISORY', 'claude-code anti-anchoring is DEGRADED → ADVISORY');
+  assert.equal(decision.authority_for_mutation, false, 'advisory output is never mutation authority');
+  assert.match(decision.watermark, /DEGRADED/, 'advisory output must carry the DEGRADED watermark');
+});
+
+test('wire-in: analysis.md invokes the adversarial-run gate (the orphan is wired)', () => {
+  const md = readFileSync(ANALYSIS_MD, 'utf8');
+  assert.match(md, /adversarial-run-gate\.mjs/, 'the multi-agent protocol must invoke the gate script at setup');
+  for (const d of ['AUTHORIZED', 'ADVISORY', 'BLOCKED']) {
+    assert.ok(md.includes(d), `analysis.md must document the ${d} decision branch`);
   }
 });
