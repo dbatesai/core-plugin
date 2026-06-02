@@ -22,6 +22,7 @@
 
 import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 
@@ -223,7 +224,7 @@ export function main(argv) {
 
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
 const _argv1 = _canon(process.argv[1]);
-const _self = _canon(new URL(import.meta.url).pathname);
+const _self = _canon(fileURLToPath(import.meta.url));
 if (process.env.CORE_DEBUG_CLI_ENTRY === '1') {
   process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_argv1)} self=${JSON.stringify(_self)} match=${_argv1 === _self}\n`);
 }

@@ -33,9 +33,20 @@ import { readFileSync, readdirSync, existsSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mapProjectPathToSlug } from './project-slug.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const DEFAULT_SAMPLE = 25;
+
+/**
+ * Default native-memory surface for a project on Claude Code:
+ * ~/.claude/projects/<canonical-slug>/memory/MEMORY.md. Uses the canonical
+ * mapProjectPathToSlug so a dotted corporate username encodes dots→dashes and
+ * matches the real folder (the dotted-username bug project-slug.mjs kills).
+ */
+export function mappedNativePath(projectRoot, { home = homedir() } = {}) {
+  return join(home, '.claude', 'projects', mapProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md');
+}
 
 // High-signal identifier shapes (mirrors analyze-retrieval-skip's term policy): DC-/R-
 // ids, acronyms, CamelCase product names. Low-signal prose never becomes a term, so a
@@ -116,7 +127,7 @@ if (isMain()) {
   const opt = (n) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : null; };
   const projectRoot = resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
   // Default native surface on Claude Code: the project's auto-memory MEMORY.md.
-  const nativePath = opt('native') || join(homedir(), '.claude', 'projects', String(projectRoot).replace(/\//g, '-'), 'memory', 'MEMORY.md');
+  const nativePath = opt('native') || mappedNativePath(projectRoot);
   const nativeContent = existsSync(nativePath) ? readFileSync(nativePath, 'utf8') : '';
   const { coreTerms, coreText } = loadCoreTerms(projectRoot);
   const report = auditMemoryBoundary({ nativeEntries: extractNativeEntries(nativeContent), coreTerms, coreText, sampleSize: Number(opt('sample')) || DEFAULT_SAMPLE });

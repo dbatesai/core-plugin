@@ -118,6 +118,23 @@ test('resolveTranscriptPath: claude-code picks latest .jsonl by mtime', () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test('resolveTranscriptPath: dotted username maps dots→dashes to match Claude projects folder (M2)', () => {
+  // A corporate dotted username: Claude Code's ~/.claude/projects/<slug> encodes
+  // dots AND slashes to dashes. A slash-only replace leaves the dot and looks in
+  // the wrong dir → transcript not found → classifier silently UNAVAILABLE.
+  const home = mkdtempSync(join(tmpdir(), 'rt-dot-'));
+  try {
+    const cwd = '/Users/David.Bates28/proj';
+    const correctSlug = '-Users-David-Bates28-proj'; // canonical: dots → dashes too
+    const dir = join(home, '.claude', 'projects', correctSlug);
+    mkdirSync(dir, { recursive: true });
+    const f = join(dir, 'session.jsonl');
+    writeFileSync(f, '{}\n');
+    assert.equal(resolveTranscriptPath('claude-code', { cwd, home }), f,
+      'resolves the transcript via the dot-encoded canonical slug');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test('readTranscript: fail-open on missing transcript (available:false, no throw)', () => {
   const r = readTranscript({ harness: 'claude-code', cwd: '/no/such', home: '/tmp/none' });
   assert.equal(r.available, false);

@@ -32,6 +32,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { mapProjectPathToSlug } from './project-slug.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const SUPPORTED_HARNESSES = new Set(['claude-code', 'codex']);
@@ -40,7 +41,7 @@ export const SUPPORTED_HARNESSES = new Set(['claude-code', 'codex']);
 export function resolveTranscriptPath(harness, { cwd = process.cwd(), home = homedir(), override = null } = {}) {
   if (override) return existsSync(override) ? override : null;
   if (harness === 'claude-code') {
-    const mapped = String(cwd).replace(/\//g, '-');
+    const mapped = mapProjectPathToSlug(String(cwd));
     return latestFile(join(home, '.claude', 'projects', mapped), (f) => f.endsWith('.jsonl'));
   }
   if (harness === 'codex') {
