@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import {
   extractCitations, buildUnitIndex, resolveCitation, runCitationResolver,
   parseFrontmatter, extractReadUnitFilenames, runStaleContextTripwire,
-  buildVocabulary, runAnticipationGap,
+  buildVocabulary, runAnticipationGap, isCommandInjection,
 } from '../../plugins/core/skills/core/scripts/metrics-detectors.mjs';
 
 // ---------------------------------------------------------------- helpers ---
@@ -187,6 +187,43 @@ test('buildVocabulary filters short and stopword tokens', () => {
   });
 });
 
+test('buildVocabulary filters generic CORE-domain stopwords', () => {
+  withStore(['dc-64-core-project-memory-retrieval.md'], (mem) => {
+    const vocab = buildVocabulary(mem);
+    assert.ok(!vocab.has('core'), 'generic domain word filtered');
+    assert.ok(!vocab.has('project'), 'generic domain word filtered');
+    assert.ok(!vocab.has('memory'), 'generic domain word filtered');
+    assert.ok(vocab.has('retrieval'), 'distinctive term kept');
+  });
+});
+
+test('buildVocabulary applies document-frequency rarity filter on a large corpus', () => {
+  // 100 units all containing "common", one containing "rarewidget".
+  // "common" appears in 100% of units → filtered; "rarewidget" in 1% → kept.
+  const files = {};
+  for (let i = 0; i < 100; i++) files[`obs-2026060${i % 10}-common-token-${i}.md`] = '# u\n';
+  files['dc-99-rarewidget-distinctive.md'] = '# u\n';
+  withStore(files, (mem) => {
+    const vocab = buildVocabulary(mem);
+    assert.ok(!vocab.has('common'), 'high document-frequency term filtered as generic');
+    assert.ok(!vocab.has('token'), 'high document-frequency term filtered as generic');
+    assert.ok(vocab.has('rarewidget'), 'rare distinctive term kept');
+  });
+});
+
+test('runAnticipationGap does not fire on generic words against a large corpus', () => {
+  const files = {};
+  for (let i = 0; i < 100; i++) files[`obs-2026060${i % 10}-project-context-${i}.md`] = '# u\n';
+  withStore(files, (mem) => {
+    const events = [
+      { role: 'user', kind: 'text', text: 'tell me about the project context and the work' },
+      { role: 'assistant', kind: 'text', text: 'sure' },
+    ];
+    // "project", "context", "work" are all generic/high-DF → no gap fired.
+    assert.equal(runAnticipationGap(events, mem).length, 0, 'generic words must not over-fire');
+  });
+});
+
 test('runAnticipationGap flags turn where user introduces a vocabulary term first', () => {
   withStore(['dc-64-retrieval-ladder.md'], (mem) => {
     const events = [
@@ -209,6 +246,24 @@ test('runAnticipationGap does not flag when agent already mentioned the term', (
     ];
     const gaps = runAnticipationGap(events, mem);
     assert.equal(gaps.length, 0, 'agent mentioned retrieval first — no gap');
+  });
+});
+
+test('isCommandInjection recognizes skill/command scaffold text', () => {
+  assert.ok(isCommandInjection('<command-name>core:core</command-name>'));
+  assert.ok(isCommandInjection('Base directory for this skill: /path/to/skill'));
+  assert.ok(isCommandInjection('text with <system-reminder> in it'));
+  assert.ok(!isCommandInjection('What about the retrieval ladder?'));
+});
+
+test('runAnticipationGap skips command-injection turns (the biggest over-fire source)', () => {
+  withStore(['dc-64-retrieval-ladder.md', 'dc-99-anticipation-gap.md'], (mem) => {
+    const events = [
+      // A /command injection turn that happens to mention distinctive terms.
+      { role: 'user', kind: 'text', text: '<command-name>core:core</command-name> work on retrieval and anticipation' },
+      { role: 'assistant', kind: 'text', text: 'on it' },
+    ];
+    assert.equal(runAnticipationGap(events, mem).length, 0, 'command-injection turn must not fire a gap');
   });
 });
 

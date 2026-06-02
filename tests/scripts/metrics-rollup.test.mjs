@@ -73,6 +73,34 @@ test('readOrientSignal returns null when no signal has been written', () => {
   });
 });
 
+// ---- Calibration gate (Phase 3): PROVISIONAL clears only when calibrated AND version-matched ----
+
+import { CLASSIFIER_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
+
+function writeCalState(home, state) {
+  const dir = join(home, '.core', 'workspaces', WID, 'metrics');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'calibration-state.json'), JSON.stringify(state) + '\n');
+}
+
+test('rollup drops PROVISIONAL when calibration is cleared at the current classifier version', () => {
+  withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
+    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, overall_precision: 0.82 });
+    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    assert.equal(r.calibrated, true);
+    assert.doesNotMatch(r.signal, /PROVISIONAL/, 'calibrated signal drops the tag');
+  });
+});
+
+test('rollup keeps PROVISIONAL when calibration was run against a stale classifier version', () => {
+  withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
+    writeCalState(home, { is_calibrated: true, classifier_version: '0.0.1-old', overall_precision: 0.99 });
+    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    assert.equal(r.calibrated, false, 'version mismatch ⇒ treat as uncalibrated');
+    assert.match(r.signal, /PROVISIONAL/, 'stale-version calibration cannot clear the tag');
+  });
+});
+
 // ---- Privacy gate (spec §18): default-off; opt-in per workspace ----
 
 test('metricsEnabled is OFF by default (privacy-safe for plugin distribution)', () => {

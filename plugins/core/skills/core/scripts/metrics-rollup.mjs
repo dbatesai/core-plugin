@@ -23,14 +23,26 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { CLASSIFIER_VERSION } from './classify-turns.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
 
-/** Read calibration state without importing the full calibration module. */
+/**
+ * Read calibration state and decide whether the rollup may drop the PROVISIONAL
+ * tag. A calibration only counts if it was run against the CURRENT classifier
+ * version — calibrate at v0.1.0, then improve the classifier, and the old
+ * precision number no longer describes what's running. Version mismatch ⇒ treat
+ * as uncalibrated (the R-1 honesty spine: never launder stale confidence).
+ */
 function readCalibrationState(metaDir) {
   const f = join(metaDir, 'calibration-state.json');
   if (!existsSync(f)) return { is_calibrated: false, provisional: true };
-  try { return JSON.parse(readFileSync(f, 'utf8')); } catch { return { is_calibrated: false, provisional: true }; }
+  let s;
+  try { s = JSON.parse(readFileSync(f, 'utf8')); } catch { return { is_calibrated: false, provisional: true }; }
+  if (s.is_calibrated && s.classifier_version !== CLASSIFIER_VERSION) {
+    return { ...s, is_calibrated: false, provisional: true, version_mismatch: true };
+  }
+  return s;
 }
 
 function readClassified(dir, date) {

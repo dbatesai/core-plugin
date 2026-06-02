@@ -185,30 +185,65 @@ const GAP_STOPWORDS = new Set([
   'when', 'then', 'than', 'they', 'them', 'some', 'more', 'also',
   'each', 'will', 'your', 'what', 'over', 'make', 'like', 'back',
   'only', 'just', 'both', 'same', 'high', 'open', 'next', 'last',
+  // Generic CORE-domain words that appear in nearly every unit filename —
+  // including them makes the detector fire on almost any project prompt.
+  'core', 'project', 'memory', 'skill', 'skills', 'plugin', 'agent',
+  'user', 'session', 'unit', 'units', 'system', 'work',
 ]);
 
+// A term is distinctive only if it appears in at most this fraction of units.
+// Words that show up across a large share of the corpus (project, memory, core)
+// are generic noise, not the foundational nouns the spec's anticipation-gap
+// signal is meant to catch ("severity scaled by how foundational").
+export const MAX_DOC_FREQUENCY_FRACTION = 0.05;
+
 /**
- * Build vocabulary from unit filenames: strip type prefix + number, split on
- * hyphens, filter short/stopword tokens. Returns a Set<string>.
+ * Build the distinctive-term vocabulary from unit filenames. Splits each filename
+ * on hyphens (after stripping the type prefix + number), then keeps only terms
+ * whose document frequency is below MAX_DOC_FREQUENCY_FRACTION of the corpus.
+ * Returns a Set<string> of distinctive terms (so `.has()` answers "is this a
+ * distinctive project term"). Rarity filtering is what kills the generic-word
+ * over-fire on a large corpus while leaving small corpora (every term df=1) intact.
  */
 export function buildVocabulary(memoriesDir) {
-  const vocab = new Set();
+  const df = new Map(); // term -> count of units it appears in
+  let unitCount = 0;
   try {
     walkMd(memoriesDir, (name) => {
+      unitCount += 1;
       const base = name.replace(/\.md$/, '');
-      // Strip leading type prefix and number: dc-64-, risk-5-, obs-20260602-, rf-, etc.
       const stripped = base.replace(/^(dc|risk|r|obs|rf)-[\d-]*/, '');
+      const seen = new Set();
       for (const token of stripped.split('-')) {
         const t = token.toLowerCase();
-        if (t.length >= 4 && !GAP_STOPWORDS.has(t)) vocab.add(t);
+        if (t.length >= 4 && !GAP_STOPWORDS.has(t)) seen.add(t);
       }
+      for (const t of seen) df.set(t, (df.get(t) || 0) + 1);
     });
   } catch { /* ignore — fail open */ }
+
+  // Threshold: at most MAX_DOC_FREQUENCY_FRACTION of units, with a floor of 3 so
+  // small corpora (where every term is df=1) keep all their terms.
+  const maxDf = Math.max(3, Math.ceil(unitCount * MAX_DOC_FREQUENCY_FRACTION));
+  const vocab = new Set();
+  for (const [term, count] of df) {
+    if (count <= maxDf) vocab.add(term);
+  }
   return vocab;
 }
 
 function tokenizeText(text) {
   return (text || '').toLowerCase().split(/\W+/).filter((t) => t.length >= 4);
+}
+
+// A "user" turn that is really skill/command-injection scaffold, not a person
+// typing. These carry the harness's command sentinels or a skill's loaded prose;
+// counting them as "the user introduced material" is a category error (it's the
+// single biggest anticipation-gap over-fire source — every /command turn fires).
+const COMMAND_INJECTION_RE = /<command-(name|message|args)>|Base directory for this skill:|<system-reminder>|This is the runtime half of/i;
+
+export function isCommandInjection(text) {
+  return COMMAND_INJECTION_RE.test(text || '');
 }
 
 /** Pair events into turns: {userText, assistantText}. */
@@ -250,7 +285,7 @@ export function runAnticipationGap(events, memoriesDir) {
   for (let i = 0; i < turns.length; i++) {
     const { userText, assistantText } = turns[i];
 
-    if (userText) {
+    if (userText && !isCommandInjection(userText)) {
       const missed = [];
       for (const word of tokenizeText(userText)) {
         if (vocab.has(word) && !agentMentioned.has(word)) missed.push(word);
@@ -331,6 +366,7 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
       detector_version: DETECTOR_VERSION,
       session_id: sid,
       severity: 'low',
+      provisional: true, // heuristic — filename-token match, not calibrated; never surface as graded
       turn_idx: g.turnIdx,
       terms: g.terms,
     })),
@@ -375,7 +411,7 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
         process.stdout.write(`  ⚠ ${s.filename} (${s.days_stale}d, status: ${s.status})\n`);
     }
     if (r.anticipation_gaps === 0) process.stdout.write(`anticipation-gap: clean\n`);
-    else process.stdout.write(`anticipation-gap: ${r.anticipation_gaps} turn(s) where user introduced material first\n`);
+    else process.stdout.write(`anticipation-gap [PROVISIONAL — heuristic, uncalibrated]: ${r.anticipation_gaps} turn(s) where user introduced a distinctive project term first\n`);
   }
   process.exit(0);
 }
