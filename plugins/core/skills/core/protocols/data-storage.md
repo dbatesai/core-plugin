@@ -253,6 +253,8 @@ Harness-local recall (via the `read-auto-memory` adapter verb — Claude Code's 
 
 **Default retrieval excludes observations.** Only graduated units surface by default. Observations are queryable on demand ("show me observations about X").
 
+**Default retrieval excludes invalidated units.** A unit whose validity dimension shows `t_invalid` in the past is suppressed from the Tier-2 candidate set the same way a retired unit is — the fact no longer holds in the world. Cold history stays reachable by an explicit point-in-time query (`graph-walk --include-invalid`, `bitemporal --as-of`). See `references/retrieval.md` walk-termination.
+
 **The semantic tier is where graduation-style reasoning happens.** The Explore subagent is strictly more capable than a vector store at single-user scale because it has the full LLM as its embedding model — it can reason about queries in context, distinguish polysemy, recognize negations, and synthesize structured answers with citations rather than chunks.
 
 Detail in `references/retrieval.md`.
@@ -520,7 +522,7 @@ Always read frontmatter to confirm a unit's status before relying on it; the fil
 
 Before any non-exempt Write or Edit on a project-context, DM-meta, or skill-product artifact, narrate the placement choice in user-visible chat. The user should see where you're writing, what kind of surface it is, why that surface (especially if another reasonable surface exists), and what naming convention you're following. This isn't an approval gate — announce and proceed. The point is that placement decisions don't get smuggled past the user.
 
-A natural-prose version is fine — *"Writing the swarm synthesis to `_outputs/<date>/<topic>/SYNTHESIS.md` as the per-topic output artifact; standard naming convention for swarm outputs."* The `pwd-guard.mjs` hook may inject a structured-format reminder when it fires; the reminder is fine as machine-generated context, but your own voice in the chat is plain prose.
+A natural-prose version is fine — *"Writing the swarm synthesis to `_outputs/<date>/<topic>/SYNTHESIS.md` as the per-topic output artifact; standard naming convention for swarm outputs."* A harness hook may inject a structured-format reminder on these writes (the CORE author's install wires one; most installs won't have it); that reminder is fine as machine-generated context, but your own voice in the chat is plain prose.
 
 When two or more surfaces could legitimately hold the same artifact, name the alternative explicitly and the reason for the choice. When no surface fits, say so as a clear *uncovered artifact* announcement, propose where you're putting it, and file a §Moves item to extend the closure list — the user can redirect on the next turn.
 
@@ -540,7 +542,7 @@ The test: exempt only when the path is determined by the artifact's own name, sc
 
 ### Skill-product writes
 
-When the proposed path is `~/.claude/skills/core/**` or `~/.claude/plugins/**/skills/core/**`, declare `intent: skill-edit` so the hook recognizes the write as intentional. The `pwd-guard.mjs` hook fires on writes to these paths as advisory machine context; your own narration to the user follows the plain-prose pattern above.
+When the proposed path is `~/.claude/skills/core/**` or `~/.claude/plugins/**/skills/core/**`, declare `intent: skill-edit` so any configured skill-edit guard recognizes the write as intentional. Such a guard, where an install has one wired, fires on writes to these paths as advisory machine context; your own narration to the user follows the plain-prose pattern above.
 
 ---
 

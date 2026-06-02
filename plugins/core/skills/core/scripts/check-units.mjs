@@ -145,6 +145,27 @@ export function checkSchema(units, memoriesDir, report) {
     if (declaredId && stem && declaredId !== stem)
       report.push({ level: 'WARN', check: 'id-mismatch', unit_id: uid, detail: `Declared id '${declaredId}' doesn't match filename stem '${stem}'` });
 
+    // Validity-dimension fields (t_valid/t_invalid) — optional on any unit,
+    // validated here beside every other frontmatter field.
+    // Schema only validates well-formedness: ISO dates, and t_valid <= t_invalid.
+    // Semantics + population live in bitemporal.mjs; the created-default is
+    // computed at read-time, so absence is normal and never flagged.
+    const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+    const tValidRaw = u.fm.t_valid;
+    const tInvalidRaw = u.fm.t_invalid;
+    const fmtOf = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).trim());
+    let tValidStr = null, tInvalidStr = null;
+    if (tValidRaw !== undefined && tValidRaw !== null && tValidRaw !== '') {
+      tValidStr = fmtOf(tValidRaw);
+      if (!isoRe.test(tValidStr)) report.push({ level: 'WARN', check: 't_valid-format', unit_id: uid, detail: `Field 't_valid' must be ISO date (YYYY-MM-DD), found '${tValidStr}'` });
+    }
+    if (tInvalidRaw !== undefined && tInvalidRaw !== null && tInvalidRaw !== '') {
+      tInvalidStr = fmtOf(tInvalidRaw);
+      if (!isoRe.test(tInvalidStr)) report.push({ level: 'WARN', check: 't_invalid-format', unit_id: uid, detail: `Field 't_invalid' must be ISO date (YYYY-MM-DD), found '${tInvalidStr}'` });
+    }
+    if (tValidStr && tInvalidStr && isoRe.test(tValidStr) && isoRe.test(tInvalidStr) && tValidStr > tInvalidStr)
+      report.push({ level: 'WARN', check: 't_valid-after-t_invalid', unit_id: uid, detail: `t_valid (${tValidStr}) is after t_invalid (${tInvalidStr}) — a fact can't stop being true before it started` });
+
     // by-when validation — optional field for open-question units (DC-85 §2).
     // Schema only validates well-formedness; staleness signaling lives in /orient.
     const byWhen = u.fm['by-when'];

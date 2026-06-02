@@ -25,6 +25,7 @@ export const DC_NAMED = /^dc-([a-z][a-z0-9-]*)\.md$/;
 export const SUMMARY_MAX = 100;
 
 export function parseFrontmatter(text) {
+  text = text.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
   if (!text.startsWith('---\n')) return [{}, text];
   const end = text.indexOf('\n---', 4);
   if (end === -1) return [{}, text];

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] — 2026-06-02
+
+The instrumented-memory system (Phases 0–4) and the validity dimension. CORE now measures its own recognition — a per-turn classifier, a daily rollup, and an `/orient` signal — all privacy-gated and default-off, with the classifier honestly marked PROVISIONAL until a human-labeled calibration set clears a 0.7-precision gate. Units gain an optional world-time validity dimension (`t_valid`/`t_invalid`) that retrieval honors by suppressing invalidated facts. The whole thing is additive — a project that opts into nothing behaves exactly as on 3.3.0.
+
+### Added
+- **Instrumented-memory recognition loop (Phases 0–4).** Per-turn six-state classifier, daily metrics rollup + `/orient` recognition signal, and citation-resolver / stale-context / anticipation-gap detectors — all behind a privacy gate (default-off, opt-in per workspace via `metrics_enabled` / `CORE_METRICS_ENABLED`). The classifier is **PROVISIONAL**: uncalibrated until ~100 hand-labeled turns clear a 0.7-precision gate, and every surface says so. `/orient` only flags an upward recognition-failure trend, never an absolute level.
+- **Validity dimension on units.** Optional `t_valid`/`t_invalid` world-time fields, `--as-of` point-in-time reconstruction, a storage-health `--metrics` readout, and Tier-2 retrieval suppression of invalidated units (`--include-invalid` walks cold history). Additive — units without the fields behave exactly as before.
+- **Impact-propagation trace** over `depends-on` edges and **absence-with-deadline** detection.
+- **Calibration harness** with a self-grading guard: precision is computed only from human labels, never the classifier's own output (the R-1 anti-self-confirmation guard).
+- **Memory + metrics extension contracts** for downstream overlays: passthrough capture, additive detectors, and the `world-time-policy` source hook for populating `t_valid` from a source's own timestamps.
+- **`orphan-detector`** — definition-of-done enforcement: every script must be reached by a skill and every protocol indexed.
+
+### Changed
+- **`demote-moves` archives completed `[x]` §Moves items on checkbox + age** rather than requiring all cited units to be in terminal status (the old gate never fired on real corpora and let PROJECT.md grow unbounded). `--strict` restores the old behavior; a large first batch is held until `--apply-large-batch` so a bulk migration of a user-owned file gets a look.
+- **Validity is consolidated as a dimension on units** — read predicates in `priority.mjs`, field-validation in `check-units`, suppression in `graph-walk` — not a standalone subsystem.
+- **Frontmatter parsers are CRLF-tolerant**; a `.gitattributes` normalizes line endings to LF (Windows/OneDrive checkouts).
+
+### Fixed
+- **demote-moves stub re-demotion**: an archive stub could re-demote itself across a date boundary, degrading the pointer trail. Now guarded. Citation, backtick, and future dates are no longer misread as completion dates.
+- **`generate-memory-index` Windows no-op** (`fileURLToPath`); slug encoders handle Windows drive letters.
+- Pre-release prose fixes (dev-meta leak, push-policy contradiction, stale references).
+
+### Notes
+- R-17 trust-based anti-anchoring on Claude Code remains **DEGRADED** — multi-agent analysis output is advisory-only and watermarked until independent acceptance. The physical-isolation proof that would close R-17 is separate and not in this release.
+
 ## [3.3.0] — 2026-06-01
 
 Track B of the Codex co-existence workstream (DC-104) — the structural half: a project bootstrap/health-check for either harness, a real fork-check bug fix, and the supporting contract. Plus the workspace-identity field standardization and the R-17 adversarial-run-gate wiring that were already on `next`. Track B's pre-build `/core` review reshaped it: CORE ships no connector name-map (it ships the contract; the overlay owns the data) because a grep proved CORE hardcodes zero connector names.

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  auditMemoryBoundary, extractNativeEntries, formatReport,
+  auditMemoryBoundary, extractNativeEntries, formatReport, mappedNativePath,
 } from '../../plugins/core/skills/core/scripts/audit-memory-boundary.mjs';
 
 // --- extractNativeEntries: native surface → sampled entries with terms ---
@@ -78,4 +78,16 @@ test('audit: empty native surface → clean, zero candidates', () => {
   const r = auditMemoryBoundary({ nativeEntries: [], coreTerms, coreText: '' });
   assert.equal(r.nativeOnly.length, 0);
   assert.equal(r.stats.nativeTotal, 0);
+});
+
+// --- mappedNativePath: canonical slug for the default MEMORY.md location (M2) ---
+
+test('mappedNativePath: dotted username maps dots→dashes (matches Claude projects folder)', () => {
+  // The default native surface is ~/.claude/projects/<slug>/memory/MEMORY.md.
+  // A slash-only encoder leaves the dot and mislocates MEMORY.md on a corporate
+  // dotted username — the same dotted-username bug project-slug.mjs exists to kill.
+  assert.equal(
+    mappedNativePath('/Users/David.Bates28/proj', { home: '/h' }),
+    '/h/.claude/projects/-Users-David-Bates28-proj/memory/MEMORY.md',
+  );
 });

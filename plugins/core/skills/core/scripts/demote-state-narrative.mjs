@@ -130,6 +130,7 @@ export function parseStateBullets(stateBody) {
 // demote-* script needs them.
 
 function parseFrontmatter(text) {
+  text = text.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
   if (!text.startsWith('---\n')) return {};
   const end = text.indexOf('\n---', 4);
   if (end === -1) return {};

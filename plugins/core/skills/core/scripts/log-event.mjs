@@ -65,6 +65,55 @@ export function todayUTC() {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Resolve the workspace id for a project from its <project>/workspace.json
+ * pointer. Falls back to the project basename slug when the pointer is absent.
+ * Layer-2/3 metrics derivatives (classified, detectors, rollups) live under the
+ * operational-meta dir keyed by this id (spec §17.6).
+ */
+export function resolveWorkspaceId(projectDir) {
+  try {
+    const p = JSON.parse(readFileSync(join(projectDir, 'workspace.json'), 'utf8'));
+    if (p && p.workspace_id) return p.workspace_id;
+  } catch { /* fall through */ }
+  return (projectDir.split(/[\\/]/).pop() || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+/**
+ * Operational-meta metrics dir for a workspace (spec §17.6): the derived,
+ * regeneratable side of the split — classified/, detectors/, rollups/, etc.
+ * Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
+ */
+export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
+  return join(home, '.core', 'workspaces', workspaceId, 'metrics');
+}
+
+/**
+ * Privacy gate for the Layer 2/3 metrics interpretation passes (spec §18).
+ *
+ * Metrics capture logs the content of prompts, responses, and context sources —
+ * by CORE's own taxonomy a smuggling tripwire (data-storage.md). So it is
+ * DEFAULT-OFF and opt-in, never on by default for a plugin-distributed install:
+ *   - `CORE_METRICS_ENABLED` env var truthy (1/true/yes), OR
+ *   - `<project>/workspace.json` carries `"metrics_enabled": true`.
+ * `CORE_METRICS_ENABLED=0`/false force-disables even if the workspace flag is set,
+ * so a user can hard-off it per shell. Returns false on any ambiguity — the
+ * privacy-safe default. The owner opts in per workspace; everyone else captures
+ * nothing unless they choose to.
+ */
+export function metricsEnabled({ project, env = process.env } = {}) {
+  const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
+  if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
+  if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
+  if (project) {
+    try {
+      const p = JSON.parse(readFileSync(join(project, 'workspace.json'), 'utf8'));
+      if (p && p.metrics_enabled === true) return true;
+    } catch { /* fall through */ }
+  }
+  return false; // privacy-safe default
+}
+
 export function eventLogPath(projectDir, filename, { today } = {}) {
   const date = today || todayUTC();
   return join(projectDir, '_sessions', date, filename);

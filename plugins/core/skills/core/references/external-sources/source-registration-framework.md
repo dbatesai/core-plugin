@@ -83,6 +83,7 @@ stability-defaults:
   - pattern: "<structural signal>"
     proposed-class: durably-correct | durably-suspect
 body-construction-policy: <prose guidance for the extractor on body construction>
+world-time-policy: <prose: how this source's world-time maps to the bi-temporal t_valid field>
 archive-policy-overrides: <prose declaration if standard graduation doesn't fit>
 authority-unit-id: <id of the source-of-authority unit in _memories/>
 ```
@@ -90,6 +91,7 @@ authority-unit-id: <id of the source-of-authority unit in _memories/>
 - `confidence-overrides` — rules that change the default for specific content patterns. Example: a free-text source might default to `inferred` but override to `sourced` when the content is a verbatim quote. Each rule is a `when` (structural signal in the source data) + a `confidence` value.
 - `stability-defaults` — patterns that warrant the extractor proposing a stability-class. Example: a structured source might propose `durably-suspect` when an automation actor set a field and no human edit followed. Patterns are structural signals (provenance markers, edit history), not age-based.
 - `body-construction-policy` — prose guidance for the extractor on how to construct the observation body from this source's raw content. Distinct from archive-policy-overrides: body-construction-policy governs *write-time* body construction (what makes it into the body and how it's structured); archive-policy-overrides governs *downstream lifecycle* (retention, pruning). Examples: *"trim to key decision passages only; verbatim capture in ## Verbatim subsection per claim; do not ingest full source content into any single observation body"*; *"extract each commitment as a separate observation; do not summarize multiple commitments into one body."*
+- `world-time-policy` — prose telling the extractor how to derive the bi-temporal `t_valid` (world-time the fact became true) from this source's own metadata. CORE can't infer this generically — only the source knows when its underlying fact became true — so it's the overlay's hook into the bi-temporal dimension. Examples: *"use the message send-time"*; *"use the doc's effective-date field, fall back to created"*. Optional; absent it, `t_valid` rides the `created`-default (fine for sources whose record-time ≈ world-time, like a live conversation). The same extractor hook later carries provenance population. Full contract: `references/memory-extension-contracts.md`.
 - `archive-policy-overrides` — when standard graduation rules don't fit. Rare. Use only when the source's data has a fundamentally different lifecycle than typical observations.
 - `authority-unit-id` — id of the `source-of-authority` unit that the intake protocol created for this source. Written by the intake protocol at registration time. Provides the explicit round-trip: registration ↔ authority unit. Without this pointer, re-intake (when authority changes) has to find the prior unit by convention rather than by explicit link. On re-intake, the protocol creates a new authority unit superseding the prior, updates this field to the new unit's id, and updates the `authority` prose to match.
 

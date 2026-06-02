@@ -68,6 +68,7 @@ A branch terminates when ANY of these are true:
 - Hop count reaches the cap (2 default, 3 max)
 - Candidate has already been visited (cycle)
 - Candidate's R·S proxy < 0.3
+- Candidate is **invalidated** — its `t_invalid` is in the past, so the fact no longer holds in the world. Suppressed from the candidate set the same way a retired unit is, and the branch stops there (a superseded fact's successor is reachable directly via the supersedes edge). Record these in the retrieval event's `stale_suppressed_count`. `graph-walk.mjs` does this by default; `--include-invalid` walks cold history for an `--as-of`-style reconstruction.
 - Candidate has no edges of the followed types
 - Total result set exceeds budget (default 15 units; tune per query)
 

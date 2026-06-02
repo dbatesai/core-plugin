@@ -16,6 +16,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export function parseFrontmatter(content) {
+  content = content.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return {};
   const fmText = match[1];

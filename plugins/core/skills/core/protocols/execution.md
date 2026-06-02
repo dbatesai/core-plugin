@@ -65,7 +65,7 @@ Reserve extended thinking for high-stakes judgment. The cost isn't justified for
 
 MCP tools (task trackers, mail systems, calendars, document stores, chat platforms) are not pre-approved. Any create/update/delete on an external system needs explicit user approval, or you spawn a second agent specifically to verify the action before executing it. The guard agent's job is one thing: confirm the action with the user, verify the parameters, then execute or abort.
 
-Pushes always require explicit yes. Every push, every repo, every time. Commits are autonomous.
+Commits are autonomous. Pushes follow the user's established per-repo policy (canonical in `protocols/data-storage.md §"Push policy is per-user, per-repo"`): confirm every push by default, push autonomously only on repos where the user has named standing authorization, and on repos under a release process work through the release flow rather than pushing directly to main.
 
 ## Graceful halt
 

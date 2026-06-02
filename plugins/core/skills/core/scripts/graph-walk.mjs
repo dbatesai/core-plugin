@@ -13,17 +13,21 @@
  *                           { memoriesDir: '_memories', hops: 2,
  *                             sessionTopics: ['memory-architecture'] });
  *
+ * Validity-suppression: invalidated units (t_invalid in the past) are excluded
+ * from the candidate set the same way retired units are, and the branch stops
+ * there. Pass --include-invalid (or includeInvalidated:true) to walk cold history.
+ *
  * CLI:
  *   node graph-walk.mjs <seed-unit-path> [--memories <dir>] [--hops 2]
  *                       [--budget 15] [--intent t1,t2] [--prune 0.3]
- *                       [--format json|text]
+ *                       [--include-invalid] [--format json|text]
  */
 
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  loadUnit, scoreProxyRS, extractEdges, parseIsoDate,
+  loadUnit, scoreProxyRS, extractEdges, parseIsoDate, isInvalidated,
   SCORE_PRUNE_THRESHOLD,
 } from './priority.mjs';
 
@@ -82,6 +86,8 @@ export function walk(seedPath, {
   sessionTopics = [],
   pruneThreshold = SCORE_PRUNE_THRESHOLD,
   today = null,
+  includeInvalidated = false,
+  stats = null,
 } = {}) {
   const n = new Date();
   const t = today || new Date(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()));
@@ -89,6 +95,13 @@ export function walk(seedPath, {
   const seed = loadUnit(seedPath);
   const seedResolved = resolve(String(seedPath));
   const inverse = buildInverseEdgeIndex(mDir);
+
+  // Validity-suppression: a unit whose t_invalid is in the past is excluded from
+  // the "currently valid" candidate set — the same rule that suppresses retired
+  // units — and the walk does not traverse through it (a superseded fact's
+  // successor is reachable directly via the supersedes edge). Cold history stays
+  // reachable with includeInvalidated:true (the --as-of / explicit-history case).
+  let suppressedInvalidated = 0;
 
   const visited = new Set([seedResolved]);
   const queue = []; // [hop, path, edgeType, sourceId, direction]
@@ -115,6 +128,10 @@ export function walk(seedPath, {
 
     let unit;
     try { unit = loadUnit(path); } catch { continue; }
+
+    // Suppress invalidated units beside the R·S prune — and stop the branch, so
+    // we don't traverse a stale fact's neighbors into the valid candidate set.
+    if (!includeInvalidated && isInvalidated(unit, t)) { suppressedInvalidated++; continue; }
 
     const rs = scoreProxyRS(unit, t);
     if (rs < pruneThreshold) continue;
@@ -145,6 +162,7 @@ export function walk(seedPath, {
   }
 
   results.sort((a, b) => a.hop - b.hop || b.rs_score - a.rs_score);
+  if (stats) stats.suppressed_invalidated = suppressedInvalidated;
   return results;
 }
 
@@ -157,6 +175,7 @@ export function main(argv) {
   let prune = SCORE_PRUNE_THRESHOLD;
   let todayArg = null;
   let format = 'json';
+  let includeInvalidated = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -167,6 +186,7 @@ export function main(argv) {
     else if (a === '--prune') { prune = parseFloat(argv[++i]); }
     else if (a === '--today') { todayArg = argv[++i]; }
     else if (a === '--format') { format = argv[++i]; }
+    else if (a === '--include-invalid') { includeInvalidated = true; }
     else if (!a.startsWith('--')) { seedArg = a; }
   }
 
@@ -179,7 +199,8 @@ export function main(argv) {
   const today = todayArg ? (parseIsoDate(todayArg) || new Date()) : null;
   const sessionTopics = intentStr ? intentStr.split(',').map(s => s.trim()).filter(Boolean) : [];
 
-  const candidates = walk(seedPath, { memoriesDir, hops, budget, sessionTopics, pruneThreshold: prune, today });
+  const stats = {};
+  const candidates = walk(seedPath, { memoriesDir, hops, budget, sessionTopics, pruneThreshold: prune, today, includeInvalidated, stats });
 
   if (format === 'json') {
     const out = candidates.map(c => ({
@@ -200,6 +221,9 @@ export function main(argv) {
       console.log(`  hop=${c.hop}  rs=${c.rs_score.toFixed(3)}  [${c.via_edge_type}]  ${c.unit_id}  (via ${c.via_source})`);
     }
     console.log(`\n${candidates.length} candidates (budget=${budget})`);
+    if (stats.suppressed_invalidated) {
+      console.log(`${stats.suppressed_invalidated} invalidated unit(s) suppressed (use --include-invalid to include cold history)`);
+    }
   }
   return 0;
 }
