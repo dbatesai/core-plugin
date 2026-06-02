@@ -1,28 +1,28 @@
 # CORE
 
-A project intelligence agent that lives in your editor.
+An AI agent that knows your whole project — not just the file in front of it — and remembers it from one session to the next.
 
-I built this because I kept noticing the same gap. The AI assistants I worked with were great at the task in front of them and useless at the project around them. Every session started cold. Decisions made on Tuesday didn't exist on Thursday, and the conversation moved fast while the project stayed still.
+I built this because I kept hitting the same wall. The AI assistants I worked with were good at the task in front of them and lost on the project around them. Every session started cold. A decision I made on Tuesday didn't exist on Thursday. The conversation moved fast and the project stood still.
 
-CORE is the answer I built. A single agent that knows the project, watches the data, remembers across sessions, and pushes back when I'm wrong.
+CORE is what I built to fix that. One agent that knows the project, watches the data, remembers across sessions, and pushes back when I'm wrong.
 
 ## What it does in a session
 
-- Reads project context from a unit store at `<project>/_memories/` via a four-tier retrieval ladder — never reads the project cover-to-cover.
-- Renders `PROJECT.md` from canonical units; you edit either surface and the change propagates back.
-- Captures observations as the conversation moves, graduates them into units when they earn it, and runs memory hygiene to keep things current.
-- Reaches for multi-agent adversarial analysis when stakes warrant — architectural decisions, classification, public copy, anything where a single pass would converge sycophantically.
-- Persists across sessions. The agent picks up where you left off, with the relationship intact.
+- Pulls in the context it needs from a store of saved facts in `<project>/_memories/`, instead of re-reading the whole project every time.
+- Keeps `PROJECT.md` written from those facts. You can edit either one — the file or the underlying facts — and the change carries back to the other.
+- Writes down what you say as you say it, turns the parts worth keeping into permanent notes, and prunes the rest so the memory stays current instead of piling up.
+- Brings in a small team of agents to argue a question out when the stakes are high — an architecture call, a tricky judgment, public copy, anything where one quick answer tends to agree with itself.
+- Picks up where you left off next session, the working relationship intact.
 
-## The critic part
+## The arguing part
 
-When something architecturally significant lands on the table, CORE spawns 3–5 agents — a Generator, a Critic that frames its predictions BEFORE reading the Generator's work, sometimes a Monitor that watches for sycophancy patterns. The discipline costs tokens and wall time. It earns its keep on decisions where being wrong is expensive.
+When something big lands on the table, CORE runs a few agents against each other: one drafts an answer, another writes down what it expects to find *before* it reads the draft, and sometimes a third watches for the agents quietly agreeing just to agree. It costs tokens and wall-clock time. It earns that back on the decisions where being wrong is expensive.
 
-The empirical baseline behind this: LLM critics flip their position 84.5% of the time under social pressure. Isolated agents produce analysis 9 points more diverse than agents who've seen each other's work. Default sycophancy is the failure mode the anti-anchoring machinery exists to fight.
+The reason it works this way: when you lean on a single AI critic, it caves to social pressure and reverses itself about 85% of the time. Agents kept apart produce noticeably more varied analysis than agents who've already read each other's work. Quiet agreement is the failure this setup exists to catch.
 
 ## Install
 
-CORE is hosted on GitHub, not in the official Claude marketplace. You install by pointing Claude Code at this repo (or a local copy) and then installing the plugin from there. Two equivalent paths:
+CORE lives on GitHub, not in the official Claude marketplace. You install it by pointing Claude Code at this repo (or a local copy) and installing the plugin from there. Two paths, same result.
 
 **From inside the Claude Code app** (two slash commands in any session):
 
@@ -38,18 +38,18 @@ claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Either path installs the skill, seven sub-skills, and two hooks. Hooks register through the plugin manifest; your `~/.claude/settings.json` stays as you left it. See [INSTALL.md](INSTALL.md) for local-file installs, one-session-only loading via `--plugin-dir`, the `--append-system-prompt` template, and migration notes if you had an older clone.
+Either path installs the main skill, seven sub-skills, and two hooks. The hooks come in through the plugin manifest, so your `~/.claude/settings.json` stays exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session with `--plugin-dir`, installing on Codex, and troubleshooting.
 
-Seven sub-skills ship bundled and are invocable as top-level slash commands: **`/orient`** (thread resumption), **`/finalize`** (session close with session summary + hygiene), **`/process-memory`** (user-invoked memory hygiene pass — pulls inbox, graduates observations, validates units, regenerates indexes, compacts PROJECT.md when over the file cap), **`/register-sources`** (register external data sources that feed project memory), **`/configure-project`** (bootstrap + health-check a project's CORE setup, idempotent, report-only unless `--apply`), **`/vibecheck`** (session vibe captured as ASCII, logged to `~/.core/vibes/`), and **`/organize-files`** (clean version-qualifier chaos and content-staleness from any directory). Two hooks register automatically: a skill-edit PWD guard and a per-turn voice reminder.
+The seven sub-skills are slash commands you can run on their own: **`/orient`** (pick a thread back up), **`/finalize`** (close a session — writes a summary and runs memory cleanup), **`/process-memory`** (clean up memory on demand — pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it's over the size cap), **`/register-sources`** (point CORE at outside data that should feed the project's memory), **`/configure-project`** (set up and health-check a project's CORE files — read-only unless you pass `--apply`), **`/vibecheck`** (capture how the session felt as ASCII art, saved to `~/.core/vibes/`), and **`/organize-files`** (clean up version-name sprawl and stale files in any folder). The two hooks register on their own: a guard that reminds you before a write touches installed skill files, and a per-turn nudge to keep the voice plain.
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full picture — the unit store, the retrieval ladder, memory hygiene, the single-agent reasoning discipline, when multi-agent fires, validation, debug mode, hooks.
+[ARCHITECTURE.md](ARCHITECTURE.md) walks through the whole design — the memory store, how retrieval works, memory cleanup, how the agent reasons on its own, when it brings in the swarm, validation, debug mode, and the hooks.
 
-## How it works in one paragraph
+## How the memory works, briefly
 
-The memory architecture is two tiers — observations (capture-everything) and units (graduated, reasoned facts) — plus a canonical flag. Units have YAML frontmatter, typed edges (six kinds: cites, supersedes, depends-on, conflicts-with, references-person, references-topic), and a body with the full reasoning. Retrieval starts in-context, escalates to grep, then to a typed-edge graph walk, then to a semantic Explore subagent. The priority function ranks the candidate set on recency, frequency, source-type weight, and alignment with the current conversation. Memory hygiene runs three verbs — archive, retire, cold-store — to keep things current without losing history. PROJECT.md is rendered from canonical units, and user edits propagate back to source-of-truth.
+Memory comes in two layers. The first catches everything you say as raw observations. The second holds the facts worth keeping — promoted from those observations once they've earned it, each with a short reasoning trail and typed links to related facts (six kinds: cites, supersedes, depends-on, conflicts-with, references-person, references-topic). When CORE needs something, it looks in what's already loaded first, then searches the files by keyword, then walks the links between facts, and only spins up a deeper semantic search if those come up short. A ranking function decides what's most relevant right now, weighing how recent a fact is, how often it shows up, where it came from, and how well it matches what you're talking about. Cleanup runs in three moves — archive, retire, cold-store — so old material steps out of the way without being lost. `PROJECT.md` is written from the kept facts, and anything you edit there flows back to the source.
 
 ## Status
 
-This is a personal tool released publicly. It works on its own; CORE uses itself across sessions to keep developing.
+A personal tool, released in the open. It stands on its own, and I use CORE on CORE to keep building it.

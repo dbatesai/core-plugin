@@ -1,92 +1,110 @@
 # Install
 
-## What you need
+CORE is a Claude Code plugin hosted on GitHub. The quickest way in is the marketplace path below. If you're on Codex, or you want to run a local copy, those are further down.
 
-- The Claude desktop app.
-- The the CORE plugin zip file (you've already got it if you're reading this).
+## Install (Claude Code)
 
-## Install
+You add the marketplace once, then install the plugin from it. Do it from inside a Claude session or from the terminal — same result.
 
-1. Open Claude.
-2. Click **Customize** in the top bar.
-3. In the sidebar, click **Personal plugins**.
-4. Click the **+** button → **Create plugin** → **Upload plugin**.
-5. Drag the CORE plugin zip into the drop zone (or click **Browse files** and pick it).
-6. Click **Upload**.
+**Inside the Claude Code app**, paste these two lines into any session:
 
-CORE will appear in your plugin list. Start a fresh session and type `/core` to use it.
+```
+/plugin marketplace add dbatesai/core-plugin
+/plugin install core@core
+```
+
+**From the terminal** with the `claude` CLI:
+
+```
+claude plugins marketplace add dbatesai/core-plugin
+claude plugins install core@core
+```
+
+Start a fresh session and type `/core`. That's it — the plugin registers the main skill, seven sub-skills, and two hooks, and your `~/.claude/settings.json` is left alone.
 
 ## What you get
 
 | Slash command | What it does |
 |---|---|
 | `/core` | The agent. Starts the session, loads your project context, and talks with you. |
-| `/orient` | Quick thread-resume — load project context and print a readiness summary. |
-| `/finalize` | Session close — write a session summary, update project state, run memory hygiene. |
-| `/process-memory` | User-invoked memory hygiene pass — pulls inbox, graduates observations, validates units, regenerates indexes, compacts PROJECT.md when over the file cap. |
-| `/vibecheck` | Capture the session's emotional truth as ASCII art. |
-| `/organize-files` | Clean up version-qualifier chaos and stale content in any folder. |
+| `/orient` | Pick a thread back up — load project context and print a readiness summary. |
+| `/finalize` | Close a session — write a summary, update project state, run memory cleanup. |
+| `/process-memory` | Clean up memory on demand — pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it's over the size cap. |
+| `/register-sources` | Point CORE at outside data that should feed the project's memory. |
+| `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
+| `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
+| `/organize-files` | Clean up version-name sprawl and stale files in any folder. |
 
-## First session
+Two hooks register on their own: a guard that reminds you before a write touches installed skill files, and a per-turn nudge to keep the voice plain.
 
-Open a project folder in Claude and type `/core`. The agent reads any project context it can find (`PROJECT.md`, prior memory units) and prints a readiness summary. On a fresh project with no prior state, it'll interview you about scope and stakeholders before getting started.
+## Your first session
 
-After that, just talk. The agent captures what matters as you go.
+Open a project folder in Claude Code and type `/core`. The agent reads whatever project context it can find (`PROJECT.md`, any saved memory) and prints a readiness summary. On a brand-new project with nothing saved yet, it interviews you about scope and the people involved before it starts.
+
+After that, just talk. It captures what matters as you go.
 
 ## Updates
 
-**From a zip:** when you get a new zip, repeat the install steps — upload the new zip and it replaces the previous version.
+Once the marketplace is added, you pull new versions with one command:
 
-**From GitHub (auto-updates):** if you'd prefer Claude to pull updates directly, add the marketplace once and you won't need zip files again:
+```
+/plugin update core@core
+```
 
-1. Open a Claude session.
-2. Paste this and hit enter: `/plugin marketplace add dbatesai/core-plugin`
-3. Then: `/plugin install core`
+in a session, or `claude plugins update core@core` from the terminal. An update only lands when a new `version` ships, so a session that doesn't move the version won't trigger a refresh.
 
-After that, `/plugin update core` gets you the latest version whenever one ships.
+## Run a local copy
+
+If you've cloned the repo and want to point Claude Code at your copy instead of the GitHub one:
+
+```
+claude plugins marketplace add ~/path/to/core-plugin
+claude plugins install core@core
+```
+
+To try it for a single session without installing anything, load the plugin directory directly:
+
+```
+claude --plugin-dir ~/path/to/core-plugin/plugins/core
+```
 
 ## Install on Codex
 
-CORE ships a Codex-shaped plugin alongside the Claude Code plugin. The skill content is the same; the manifest at `plugins/core/.codex-plugin/plugin.json` and the marketplace at `.agents/plugins/marketplace.json` make the bundle self-installable on Codex CLI.
+CORE ships a Codex-shaped plugin next to the Claude Code one. The skill content is identical; the manifest at `plugins/core/.codex-plugin/plugin.json` and the marketplace at `.agents/plugins/marketplace.json` make the bundle install itself on Codex CLI.
 
-The Codex zip is marketplace-shaped: the bundle root is the marketplace, and the plugin lives at `plugins/core/` inside it.
+The bundle root is the marketplace, and the plugin sits at `plugins/core/` inside it. From a local copy:
 
-From a zip:
+```
+codex plugin marketplace add ~/path/to/core-plugin
+codex plugin add core@core
+codex plugin list
+```
 
-1. Unzip the bundle to a stable path (e.g. `~/Plugins/core-marketplace/`).
-2. Register the local marketplace and install the plugin:
-
-   ```
-   codex plugin marketplace add ~/Plugins/core-marketplace
-   codex plugin add core@core
-   codex plugin list
-   ```
-
-3. The list should show `core@core (installed, enabled)`.
-
-Verify the install:
+The list should show `core@core (installed, enabled)`. To confirm the files landed:
 
 ```
 test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
 test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 ```
 
-The plugin lands in Codex's plugin cache at `~/.codex/plugins/cache/core/core/<version>/`. Codex auto-discovers the bundled skills (`core`, `orient`, `finalize`, `process-memory`, `vibecheck`, `organize-files`) via the manifest's `skills:` pointer. Standalone skills you already have at `~/.codex/skills/` are not touched by the plugin install.
+Codex finds the bundled skills (`core`, `orient`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `organize-files`) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
 
-To update from a new zip: replace the unzipped bundle, bump the version inside `plugins/core/.codex-plugin/plugin.json` (or use a dev tag like `2.0.1-dev.YYYYMMDD`) for cache differentiation, and rerun `codex plugin add core@core`.
-
-If a prior install used a different marketplace name (e.g. `local-core` from a hand-crafted shim), remove it first: `codex plugin remove core@local-core` then `codex plugin marketplace remove local-core`.
+If a previous install used a different marketplace name (say `local-core` from a hand-rolled shim), remove it first: `codex plugin remove core@local-core`, then `codex plugin marketplace remove local-core`.
 
 ## Uninstall
 
-Customize → Personal plugins → CORE → remove.
+```
+/plugin uninstall core@core
+```
 
-Your project-level data (`PROJECT.md`, `_memories/`, `_summaries/` inside each project folder) stays. So does the agent's cross-project memory at `~/.core/`. If you want those gone too, delete them manually.
+Your project data — `PROJECT.md`, `_memories/`, `_summaries/` inside each project folder — stays put. So does the agent's cross-project memory at `~/.core/`. Delete those by hand if you want them gone too.
 
 ## Troubleshooting
 
-**`/core` isn't recognized.** Restart Claude. Plugins register at session start.
+**`/core` isn't recognized.** Restart Claude Code. Plugins register at session start.
 
 **The agent doesn't introduce itself by name.** It picks a name on first run. If it didn't, ask it to.
 
-**Sub-skill name collisions.** If another plugin claims `/orient`, `/finalize`, `/process-memory`, `/vibecheck`, or `/organize-files`, registration may collide. Disable the other one or remove it.
+**A sub-skill name collides.** If another plugin already claims `/orient`, `/finalize`, `/process-memory`, `/register-sources`, `/configure-project`, `/vibecheck`, or `/organize-files`, registration can clash. Disable or remove the other plugin.
+
+**Installing from a zip through the desktop app's upload dialog.** That dialog currently fails for `.zip` and `.plugin` files on both Windows and macOS (a known Claude bug). Use the marketplace path above instead — it's the supported route.

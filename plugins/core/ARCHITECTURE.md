@@ -1,20 +1,20 @@
 # Architecture
 
-The how and why behind CORE's v2 design. The skill itself is the contract; this doc explains the reasoning that backs it. Every sentence here either describes a decision the architecture rests on or shows you something concrete you can do with it.
+This explains how CORE's v2 design works and why it's built this way. The skill files are the actual contract; this is the reasoning behind them.
 
-## The reframe
+## How CORE changed shape
 
-CORE started as a multi-agent adversarial reasoning framework — a `/core` skill that spawned expert persona swarms and used GAN-style generator-critic loops to produce findings single-pass analysis misses.
+CORE started as a multi-agent reasoning framework — a `/core` skill that spun up expert-persona swarms and ran generator-critic loops to find things a single pass misses.
 
-In May 2026 it reframed (DC-64, 2026-05-16d). The reframe: **CORE is project intelligence in chat with a critic baked in, not a multi-agent framework.** A single competent agent that knows the project's context, watches data sources, remembers across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Multi-agent swarms are one tool the agent reaches for. Not the product.
+In May 2026 it changed shape (DC-64, 2026-05-16d). Now it's one capable agent that knows the project, watches its data sources, remembers across sessions, raises decisions and risks before you ask, and argues back when you're too sure. The swarm is still there, but the agent reaches for it as a tool when the stakes call for it, rather than running everything through it.
 
-What changed in practice: the swarm machinery moved from being the default execution path to being an internal protocol (`protocols/analysis.md`) the agent invokes when stakes warrant. The memory architecture went from informal "auto-memory + session summaries + DECISIONS.md" to a structured unit store with typed edges and a four-tier retrieval ladder. PROJECT.md went from hand-edited synthesis to render-from-units with edit-detection and propagation back. Plain voice became the rule the project enforces in several places — SKILL.md's opening, per-protocol headers, the per-turn voice-reminder hook, and the agent's own continuous self-evaluation.
+Three things changed in practice. The swarm machinery moved from the default path to an internal protocol (`protocols/analysis.md`) the agent calls when stakes warrant. Memory went from a loose mix of auto-memory, session summaries, and a `DECISIONS.md` to a structured store of facts with typed links between them and a four-tier way of retrieving them. `PROJECT.md` went from hand-edited to written from those facts, with edits detected and carried back. And plain voice became a rule the project enforces in a few places at once — the top of `SKILL.md`, the protocol headers, a per-turn reminder hook, and the agent's own self-checks.
 
-The reframe doesn't drop the adversarial discipline. The anti-anchoring rule (Critic frames before reading Generator), the persuasion log, the four named failure modes, the external-audience test — they apply to all reasoning, solo or swarm. The discipline didn't change; the staffing did.
+The argue-it-out discipline didn't go anywhere. The agent still frames its predictions before reading a draft, keeps a log of what changed its mind, audits itself against four named failure modes, and runs the external-audience test before any claim about people. That holds whether it's working alone or in a swarm. What changed was the staffing, not the discipline.
 
-## The memory architecture (the spine)
+## How memory works
 
-The architectural spine of v2 is memory storage and retrieval. Everything else organizes around it.
+Memory is the heart of the design. Everything else organizes around how facts get stored and found.
 
 ### Two tiers
 
@@ -90,9 +90,9 @@ Plus graduation (observations → units), contradiction reconciliation, index re
 
 Runs at `/finalize` (comprehensive), on meaningful changes (lightweight, only what's triggered), on-demand, after PROJECT.md user-edit, on hash mismatch.
 
-Every operation logged twice — narrative in `<project>/autonomous-run-log.md`, machine-readable in `~/.core/hygiene-log.jsonl`. Every operation reversible.
+Every operation is logged twice — in plain prose in `<project>/autonomous-run-log.md`, and machine-readable in `<project>/_sessions/<date>/hygiene-log.jsonl`. Every operation can be undone.
 
-Memory hygiene fully absorbs the v1 "dream cycle" mechanism. Former phases map to hygiene verbs and continuous-self-evaluation; nothing is left as a separate ritual.
+Memory hygiene took over the old v1 "dream cycle" entirely. Its phases became hygiene verbs and self-checks; nothing is left as a separate ritual.
 
 ## Reasoning discipline (single-agent default)
 
@@ -128,7 +128,7 @@ Two hooks register through the plugin manifest.
 | UserPromptSubmit | Injects the plain-voice imperative each turn to counter the coding-assistant baseline |
 | PreToolUse Write/Edit | Skill-product guard — surfaces a Pre-Write Declaration reminder when writes target installed skill paths |
 
-Visible curation is a trust signal. The user should always see the agent keeping context fresh — narration as context gets captured, PROJECT.md sections rendering as they change, the autonomous run log appending in real time.
+Showing the work is how the agent earns trust. You should always be able to watch it keep context current — saying what it just captured, re-rendering `PROJECT.md` sections as they change, appending to the run log as it goes.
 
 ## Validation
 
@@ -158,16 +158,16 @@ Lifecycle: per-session, 30-day archive, 90-day cold-store.
 |---|---|
 | Skill product (this plugin) | Installed via `/plugin install core@core` into `~/.claude/plugins/cache/<marketplace>/core/<version>/skills/core/`. Legacy direct-install at `~/.claude/skills/core/` is recognized for clone-into-skills users. |
 | User's project context | User-owned. `<user-project>/_memories/` plus the rendered `<user-project>/PROJECT.md`. |
-| Cross-project operational meta | Machine-local at `~/.core/` — DM profile, workspace registry, dream cycles, swarm effectiveness. |
+| Cross-project operational meta | Machine-local at `~/.core/` — the agent's profile, the workspace registry, the controlled vocabulary, saved agent configs, and cross-project research. |
 | Auto-memory | Machine-local at `~/.claude/projects/<hash>/memory/`. Cached, rebuilt each bootstrap. |
 
 The skill product is intentionally minimal — protocols, agents, references, scripts, schemas, templates. Everything else lives in user-owned or machine-local space, by design.
 
-### `${CLAUDE_PLUGIN_ROOT}` is load-bearing
+### How scripts get found: `${CLAUDE_PLUGIN_ROOT}`
 
-Every protocol that invokes a script does so via `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs`. The environment variable resolves to the absolute path the plugin manager installed the plugin into — `~/.claude/plugins/cache/<marketplace>/core/<version>/` for plugin installs, or the local directory for `marketplace add ~/path/to/plugin`. The indirection lets the scripts move with the plugin install location without protocol edits.
+Every protocol that runs a script calls it as `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs`. That environment variable resolves to wherever the plugin manager actually installed the plugin — `~/.claude/plugins/cache/<marketplace>/core/<version>/` for a normal install, or the local directory for `marketplace add ~/path/to/plugin`. Going through the variable means the scripts move with the install and no protocol has to be edited.
 
-For downstream wrappers — plugins that mirror upstream skills into their own marketplace entry, or any other project that overlays CORE — this constraint is **load-bearing**:
+If you're building a wrapper — a plugin that mirrors these skills into its own marketplace entry, or any project that layers on top of CORE — this part matters, because getting it wrong breaks every script call silently:
 
 - The wrapper plugin must keep upstream skills at `skills/<skill-name>/` directly under the plugin root — same layout as upstream. Don't nest, don't rename, don't restructure. Wrappers that put the skills at a different relative path (e.g. `wrapped-skills/core/`) silently break every `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/...` invocation in upstream protocols.
 - The wrapper's `${CLAUDE_PLUGIN_ROOT}` resolves to the wrapper's install root, not upstream's. That's correct — the wrapper ships its own copy of the scripts at the same relative path. The contract is "scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs` relative to whichever plugin is loaded."
