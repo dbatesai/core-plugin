@@ -2,15 +2,26 @@
  * demote-moves.mjs — auto-demote closed §Moves bullets to PROJECT-ARCHIVE.md.
  *
  * Phase 1b of the DC-85 memory architecture redesign. Closed bullets ([x])
- * whose most-recent backing-unit `updated:` date is >30 days old AND all
- * cited units are in stable terminal status get moved to PROJECT-ARCHIVE.md
- * §Moves under a date-stamped subsection. A one-line stub pointer replaces
- * the original bullet so the trail back to the archive entry is preserved.
+ * older than the 30-day floor get moved to PROJECT-ARCHIVE.md §Moves under a
+ * date-stamped subsection. A one-line stub pointer replaces the original
+ * bullet so the trail back to the archive entry is preserved.
  *
- * Conservative defaults (advisor 2026-05-24):
- *  - Bullets with no backing-unit citation never demote.
- *  - Bullets where any cited unit is missing or still active never demote.
- *  - The 30-day floor uses max(updated:) across cited units, not min.
+ * Demotion rule (default, loosened 2026-06-02): a completed item is done —
+ * it leaves the agenda on checkbox-state + age, regardless of whether its
+ * backing-unit `status:` was kept tidy. Age comes from the most-recent date
+ * IN THE BULLET TEXT (the completion-time proxy — "shipped 2026-05-27"),
+ * falling back to max(updated:/created:) across any cited units when the
+ * bullet carries no date. Keep only when no age can be proven at all.
+ *
+ * Why the change: the original gate required ALL cited units to be in
+ * terminal status AND ≥30 days stale. On a real corpus that left 75 shipped
+ * items stranded on the agenda (PROJECT.md grew to 196KB) — an [x] item whose
+ * referenced decision is still `active`, or that carried no `*Backed by*`
+ * footer, never demoted. A done item is done; the active unit it cites is a
+ * reference, not a reason to keep the finished work on the agenda.
+ *
+ * --strict restores the original conservative gate (require refs present, all
+ * cited units terminal, age from unit dates) for callers that want it.
  *
  * Active items ([ ]) and partial items ([~]) are never touched.
  *
@@ -153,37 +164,79 @@ function ageInDays(updatedIso, todayIso) {
   return Math.floor((t - u) / 86_400_000);
 }
 
-export function classifyBullet(bullet, projectDir, { today } = {}) {
+/**
+ * The most-recent YYYY-MM-DD anchored date in the bullet text — the
+ * completion-time proxy for a closed item ("shipped 2026-05-27"). Returns null
+ * when the bullet carries no date. Ignores dates inside `[[unit-name-...]]`
+ * wikilinks and obs-id slugs so a unit reference doesn't masquerade as a
+ * completion date — those are matched by extractBackingUnitRefs, not here.
+ */
+export function extractMostRecentDate(text) {
+  if (!text) return null;
+  // Strip wikilinks and bare obs-ids (they embed dates that aren't completion dates).
+  const cleaned = text
+    .replace(/\[\[[^\]]*\]\]/g, ' ')
+    .replace(/\bobs-[a-z0-9-]*\d{4}-\d{2}-\d{2}\b/gi, ' ');
+  const dates = [];
+  for (const m of cleaned.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
+    const [iso, y, mo, d] = m;
+    if (+mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31) dates.push(iso);
+  }
+  if (!dates.length) return null;
+  dates.sort();
+  return dates[dates.length - 1];
+}
+
+/**
+ * Strict (original) gate: require backing-unit citations, all present, all in
+ * terminal status, then age from max(updated:/created:) across them. Preserved
+ * behind --strict for callers that want the conservative behavior.
+ */
+function classifyBulletStrict(bullet, memoriesDir, todayIso) {
+  const refs = extractBackingUnitRefs(bullet.text);
+  if (refs.length === 0) return { decision: 'keep', reason: 'no-backing-units' };
+  const units = refs.map(id => readUnit(memoriesDir, id));
+  if (units.some(u => u === null)) return { decision: 'keep', reason: 'missing-cited-unit', refs };
+  const stillActive = units.find(u => !TERMINAL_STATUSES.includes(String(u.fm.status || 'active').toLowerCase()));
+  if (stillActive) return { decision: 'keep', reason: 'cited-unit-still-active', activeUnit: stillActive.id };
+  const dates = units.map(u => u.fm.updated || u.fm.created).filter(Boolean).sort();
+  if (dates.length === 0) return { decision: 'keep', reason: 'no-updated-dates' };
+  const maxUpdated = dates[dates.length - 1];
+  const age = ageInDays(maxUpdated, todayIso);
+  if (age < CLOSE_AGE_DAYS) return { decision: 'keep', reason: 'too-recent', maxUpdated, ageDays: age };
+  return { decision: 'demote', maxUpdated, ageDays: age, refs, ageSource: 'backing-unit' };
+}
+
+export function classifyBullet(bullet, projectDir, { today, strict = false } = {}) {
   if (bullet.checkbox !== 'x') {
     return { decision: 'keep', reason: 'not-closed' };
   }
-  const refs = extractBackingUnitRefs(bullet.text);
-  if (refs.length === 0) {
-    return { decision: 'keep', reason: 'no-backing-units' };
-  }
   const memoriesDir = join(projectDir, '_memories');
-  const units = refs.map(id => readUnit(memoriesDir, id));
-  if (units.some(u => u === null)) {
-    return { decision: 'keep', reason: 'missing-cited-unit', refs };
-  }
-  const stillActive = units.find(u => {
-    const status = String(u.fm.status || 'active').toLowerCase();
-    return !TERMINAL_STATUSES.includes(status);
-  });
-  if (stillActive) {
-    return { decision: 'keep', reason: 'cited-unit-still-active', activeUnit: stillActive.id };
-  }
-  const dates = units.map(u => u.fm.updated || u.fm.created).filter(Boolean).sort();
-  if (dates.length === 0) {
-    return { decision: 'keep', reason: 'no-updated-dates' };
-  }
-  const maxUpdated = dates[dates.length - 1];
   const todayIso = today || todayUTC();
+
+  if (strict) return classifyBulletStrict(bullet, memoriesDir, todayIso);
+
+  // Loosened default: a completed item is done. Age it by the date in the
+  // bullet text (completion proxy) first; fall back to cited-unit dates only
+  // when the bullet itself carries no date. Backing-unit status no longer gates.
+  const refs = extractBackingUnitRefs(bullet.text);
+  const textDate = extractMostRecentDate(bullet.text);
+  let maxUpdated = textDate;
+  let ageSource = 'bullet-text';
+  if (!maxUpdated) {
+    const units = refs.map(id => readUnit(memoriesDir, id)).filter(Boolean);
+    const dates = units.map(u => u.fm.updated || u.fm.created).filter(Boolean).sort();
+    if (dates.length) { maxUpdated = dates[dates.length - 1]; ageSource = 'backing-unit'; }
+  }
+  if (!maxUpdated) {
+    // Can't prove the item is aged — keep it rather than demote a possibly-recent one.
+    return { decision: 'keep', reason: 'no-age-signal', refs };
+  }
   const age = ageInDays(maxUpdated, todayIso);
   if (age < CLOSE_AGE_DAYS) {
-    return { decision: 'keep', reason: 'too-recent', maxUpdated, ageDays: age };
+    return { decision: 'keep', reason: 'too-recent', maxUpdated, ageDays: age, ageSource };
   }
-  return { decision: 'demote', maxUpdated, ageDays: age, refs };
+  return { decision: 'demote', maxUpdated, ageDays: age, refs, ageSource };
 }
 
 // ---------- Stub + archive rendering ----------
@@ -234,7 +287,7 @@ function appendToArchiveMoves(archivePath, block) {
 
 // ---------- Public API ----------
 
-export function demoteMoves(projectDir, { today, dryRun = false } = {}) {
+export function demoteMoves(projectDir, { today, dryRun = false, strict = false } = {}) {
   const todayIso = today || todayUTC();
   const projectMdPath = join(projectDir, 'PROJECT.md');
   let text;
@@ -250,7 +303,7 @@ export function demoteMoves(projectDir, { today, dryRun = false } = {}) {
   const demotions = [];
   const kept = [];
   for (const bullet of bullets) {
-    const result = classifyBullet(bullet, projectDir, { today: todayIso });
+    const result = classifyBullet(bullet, projectDir, { today: todayIso, strict });
     if (result.decision === 'demote') {
       demotions.push({ bullet, result, title: extractBulletTitle(bullet.text) });
     } else {
@@ -334,15 +387,17 @@ export function main(argv) {
   let projectDir = process.cwd();
   let dryRun = false;
   let asJson = false;
+  let strict = false;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--dry-run') dryRun = true;
     else if (a === '--json') asJson = true;
+    else if (a === '--strict') strict = true;
     else if (!a.startsWith('--')) projectDir = resolve(a);
   }
 
   let stats;
-  try { stats = demoteMoves(projectDir, { dryRun }); }
+  try { stats = demoteMoves(projectDir, { dryRun, strict }); }
   catch (e) {
     process.stderr.write(`error: ${e.message}\n`);
     return 2;
