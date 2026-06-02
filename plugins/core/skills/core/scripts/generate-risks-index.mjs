@@ -33,7 +33,7 @@ export function parseFrontmatter(text) {
 // M12: a `|` in any cell value splits the markdown table row and corrupts the substring
 // check-units index-drift detection relies on. Escape pipes + flatten newlines per cell.
 export function escapeCell(v) {
-  return String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }
 
 export function extractSummary(body) {

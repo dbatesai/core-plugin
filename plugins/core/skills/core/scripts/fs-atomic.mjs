@@ -13,6 +13,11 @@
  * partial. The temp file lives in the SAME directory as the target so the rename stays
  * on one filesystem (a cross-device rename would fall back to a non-atomic copy).
  *
+ * Windows caveat: renameSync can throw EPERM/EACCES if another process holds the TARGET
+ * open (an editor, antivirus, or a sync client mid-scan). That error propagates and the
+ * temp file is cleaned up, so the target is never corrupted — strictly safer than the bare
+ * writeFileSync this replaced (which would truncate). The caller sees a throw, not a partial.
+ *
  * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
  */
 

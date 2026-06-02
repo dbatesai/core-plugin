@@ -54,6 +54,12 @@ const PIN_CONTRIBUTION = {
   floor: ['floor', 0.7],
   true: ['floor', 0.9],
   always: ['override', 1.5],
+  // NOTE: this `false` entry is currently UNREACHABLE — pinContribution() short-circuits
+  // pin===false to ['none', 0.0] before this table is consulted, so `pinned: false` is
+  // treated as neutral (no demotion), NOT as the multiply-0.3 penalty DC-69 describes.
+  // Kept here to mark the spec-vs-impl gap; resolving it (restore the penalty by dropping
+  // `false` from the early-return, or amend DC-69 to "neutral") is a deliberate design call,
+  // not a hardening change. No live unit uses `pinned: false`, so behavior is moot today.
   false: ['multiply', 0.3],
 };
 

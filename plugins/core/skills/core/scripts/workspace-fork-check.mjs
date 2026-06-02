@@ -120,21 +120,18 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
   const nowIso = now.toISOString();
   const newDataPath = `~/.core/workspaces/${newId}/`;
 
-  // H3: the LOCAL POINTER is the irreplaceable surface — if it's mutated to newId and a
-  // crash/EACCES/ENOSPC hits before the index entry + meta dir land, the next startup
-  // misses on both path-match and id-match and the workspace is silently de-registered.
-  // So write the recoverable, derived surfaces FIRST (index entry, then meta dir+manifest),
-  // and the local pointer LAST and atomically. On any failure before the pointer write, the
-  // pointer still names the copied-from id, so resolution falls back to normal fork re-detection
-  // next session rather than orphaning the workspace.
-  index.push({
-    name: pointer.name || newId,
-    path: cwdResolved,
-    workspace_id: newId,
-    last_active: nowIso,
-  });
-  writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n');
-
+  // H3: the fork mutates three surfaces. checkFork resolves PATH-MATCH (an index entry whose
+  // path == cwd) BEFORE id-match, so the index entry is what makes a fork "stick" on the next
+  // run. Write order is therefore meta-dir+manifest → index entry → local pointer (last), and
+  // every write is atomic (temp-file + rename, no torn file). The ordering enforces the
+  // invariant "an index entry always implies its meta dir exists":
+  //   • crash before the index entry → pointer still names the copied-from id, no path-match →
+  //     clean re-fork next session (a leftover empty meta dir is harmless litter, reused on the
+  //     re-fork's same id);
+  //   • crash after the index but before the pointer → path-match resolves to a fully-present
+  //     (index + meta) newId; only the pointer's id is stale, and resolution doesn't depend on it.
+  // The shared index.json is atomic too, so a torn write can't break fork-detection for EVERY
+  // workspace (the prior bare writeFileSync could).
   const newMetaDir = join(coreDir, 'workspaces', newId);
   mkdirSync(newMetaDir, { recursive: true });
   const newManifest = {
@@ -146,7 +143,15 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
     last_active: nowIso,
     dm_notes: `Auto-forked from ${localId} on ${nowIso} — copied workspace detected at ${cwdResolved}.`,
   };
-  writeFileSync(join(newMetaDir, 'workspace.json'), JSON.stringify(newManifest, null, 2) + '\n');
+  atomicWriteFileSync(join(newMetaDir, 'workspace.json'), JSON.stringify(newManifest, null, 2) + '\n');
+
+  index.push({
+    name: pointer.name || newId,
+    path: cwdResolved,
+    workspace_id: newId,
+    last_active: nowIso,
+  });
+  atomicWriteFileSync(indexPath, JSON.stringify(index, null, 2) + '\n');
 
   const newPointer = {
     ...pointer,

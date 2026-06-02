@@ -64,3 +64,21 @@ test('a missing --memory-md target exits 2 cleanly (no uncaught ENOENT crash)', 
     assert.equal(code, 2, 'a missing target refuses with exit 2 instead of throwing');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('a missing _memories SOURCE dir exits 2 cleanly (no uncaught ENOENT from iterUnits)', () => {
+  const { dir, memMd } = scratchMemoryMd();
+  try {
+    const badSource = join(dir, 'no-such-memories');
+    const code = quietStderr(() => main([badSource, '--memory-md', memMd]));
+    assert.equal(code, 2, 'a bad source dir refuses with exit 2 instead of throwing deep in iterUnits');
+    assert.equal(readFileSync(memMd, 'utf8'), CURATED, 'target untouched on source error');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a malformed --today exits 2 cleanly (no RangeError from toISOString)', () => {
+  const { dir, memMd } = scratchMemoryMd();
+  try {
+    const code = quietStderr(() => main([join(dir, '_memories'), '--memory-md', memMd, '--today', 'garbage']));
+    assert.equal(code, 2, 'malformed --today refuses with exit 2');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

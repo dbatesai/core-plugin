@@ -34,7 +34,7 @@ export function parseFrontmatter(text) {
 // table row and corrupts the substring check-units index-drift detection relies on.
 // Escape pipes and flatten any stray newline so each value stays one well-formed cell.
 export function escapeCell(v) {
-  return String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+  return String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }
 
 export function extractSummary(body) {

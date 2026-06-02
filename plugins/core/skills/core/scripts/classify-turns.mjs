@@ -33,7 +33,12 @@ import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 
-export const CLASSIFIER_VERSION = '0.1.0';
+// 0.2.0: the M6 hardening changed classification OUTPUT — word-boundary in-context matching,
+// the asked-term denylist, and wiring the previously-dead ladderReturnedContent discriminator
+// all shift the state distribution. Any behavior-affecting change MUST bump this, so the R-1
+// honesty guard (metrics-rollup gates the PROVISIONAL tag on a classifier_version match)
+// correctly invalidates a calibration cleared under the old behavior.
+export const CLASSIFIER_VERSION = '0.2.0';
 
 // A clarifying question — the agent asking the user instead of answering.
 const CLARIFYING_RE = /\b(what (is|does|are|do you mean)|what'?s|which|i'?m not (sure|familiar)|could you (remind|clarify|explain)|can you (remind|clarify|explain)|remind me|not familiar with|haven'?t (seen|come across)|don'?t (have|see) (context|background)|where (is|does)|tell me (more )?about)\b/i;

@@ -20,7 +20,7 @@
  *        [--top N] [--today YYYY-MM-DD]
  */
 
-import { readFileSync, writeFileSync, realpathSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
@@ -79,10 +79,14 @@ export function resolveDescription(existing, fm, unitText) {
   return extractFirstBodyLine(unitText);
 }
 
+// Returns a Date for a YYYY-MM-DD arg, or null if the arg is present but malformed
+// (so the caller can refuse cleanly rather than throw a RangeError downstream on toISOString).
 function todayFromArg(arg) {
   if (arg) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(arg)) return null;
     const [y, m, d] = arg.split('-').map(Number);
-    return new Date(Date.UTC(y, m - 1, d));
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return Number.isNaN(dt.getTime()) ? null : dt;
   }
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -205,6 +209,11 @@ export function main(argv) {
   const memoriesDir = resolve(memoriesDirArg);
   memoryMdPath = resolve(memoryMdPath);
 
+  // Guard the SOURCE dir too (mirrors the sibling generators): a bad/typo'd _memories path
+  // would otherwise throw an uncaught ENOENT deep in iterUnits→readdirSync. Refuse with exit 2.
+  try { readdirSync(memoriesDir); }
+  catch { process.stderr.write(`error: _memories source dir not readable: ${memoriesDir}\n`); return 2; }
+
   const mismatch = projectIdentityMismatch(memoriesDir, memoryMdPath);
   if (mismatch) {
     process.stderr.write(
@@ -218,6 +227,10 @@ export function main(argv) {
   }
 
   const today = todayFromArg(todayArg);
+  if (today === null) {
+    process.stderr.write(`error: --today must be YYYY-MM-DD (got ${JSON.stringify(todayArg)})\n`);
+    return 2;
+  }
 
   // A missing target MEMORY.md is an operator/setup error, not a crash: readFileSync would
   // throw an uncaught ENOENT (exit 1, ugly stack). Refuse cleanly with exit 2 instead.

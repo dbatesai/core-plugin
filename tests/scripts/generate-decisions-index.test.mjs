@@ -9,6 +9,8 @@ test('escapeCell escapes pipes and backslashes and flattens newlines', () => {
   assert.equal(escapeCell('A | B'), 'A \\| B');
   assert.equal(escapeCell('back\\slash'), 'back\\\\slash');
   assert.equal(escapeCell('line1\nline2'), 'line1 line2');
+  assert.equal(escapeCell('a\rb'), 'a b', 'a lone carriage return is flattened too');
+  assert.equal(escapeCell('a\r\n\nb'), 'a b', 'runs of CR/LF collapse to one space');
   assert.equal(escapeCell(null), '');
 });
 

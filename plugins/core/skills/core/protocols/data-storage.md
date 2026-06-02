@@ -457,7 +457,7 @@ The user wins. Pause the render. Edit-detection surfaces the in-progress edit; y
 
 ### Two units make the same claim
 
-Reconcile at the next hygiene pass. The reconciliation either merges them (pick the canonical id, update edges in every citing unit, retire the merged-away unit) or keeps both with a `conflicts-with` edge if they genuinely make incompatible variants of the claim. The merge case writes an after-action report to `~/.core/hygiene-log.jsonl` with the canonical id, the merged-away id, every edge rewritten, and the count of out-edges union-merged.
+Reconcile at the next hygiene pass. The reconciliation either merges them (pick the canonical id, update edges in every citing unit, retire the merged-away unit) or keeps both with a `conflicts-with` edge if they genuinely make incompatible variants of the claim. The merge case writes an after-action report to `<project>/_sessions/<date>/hygiene-log.jsonl` with the canonical id, the merged-away id, every edge rewritten, and the count of out-edges union-merged.
 
 ### Retired content re-emerges in a conversation
 
@@ -536,7 +536,7 @@ You don't have to narrate placement when the path is fully determined without a 
 - Harness-local recall writes (path resolved per the `save-recall-note` adapter verb in `harnesses/<name>.md` — Claude Code's `~/.claude/projects/<hash>/memory/`, Codex's `~/.codex/memories/extensions/ad_hoc/notes/`).
 - Edits to a file the user explicitly named in the same turn.
 - State cache writes (`~/.core/state-cache.json`).
-- Hygiene log entries (`~/.core/hygiene-log.jsonl`).
+- Hygiene log entries (`<project>/_sessions/<date>/hygiene-log.jsonl`).
 
 The test: exempt only when the path is determined by the artifact's own name, schema, or the user's explicit statement — not by classification you had to make.
 
@@ -578,7 +578,6 @@ Three rings, one read at runtime.
 ├── index.json                     ← global workspace registry
 ├── topics.md                      ← controlled vocabulary
 ├── state-cache.json               ← edit-detection hashes
-├── hygiene-log.jsonl              ← machine-readable hygiene operations
 ├── workspaces/<id>/               ← per-workspace operational meta
 │   ├── workspace.json
 │   └── last-bootstrap.json        ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
