@@ -34,16 +34,16 @@ export function slugify(name) {
     .replace(/^-+|-+$/g, '');
 }
 
-// An index entry's registered project path. The schema (schemas/workspace.md)
-// specifies `project_path`; the live index and both readers (this script +
-// startup.md's prose path-match) historically used `path`. Read both so a
-// schema-compliant `project_path` entry isn't invisible to the path-match —
-// when it was, this script could never recognize its own registered workspace
-// and re-forked it on every startup (Meridian, R11, 2026-05-31:
-// local-llm-build-r11 -> -2 -> -3 ...). Standardizing the field across schema +
-// startup prose is a separate cleanup; this read tolerates both conventions.
+// An index entry's registered project path. STANDARDIZED on `path` 2026-06-01:
+// the live index, startup.md's prose path-match, this script's index writer, and
+// now the schema + manifest writer all use `path`. `project_path` was a minority
+// patch (it was what the schema documented while reality used `path`), and a
+// `project_path`-keyed entry invisible to a `path`-only read is what re-forked a
+// workspace on every startup (Meridian, R11, 2026-05-31: local-llm-build-r11 ->
+// -2 -> -3 ...). This read stays tolerant of legacy `project_path` for one
+// release for back-compat, then drops — `path` is preferred.
 export function entryPath(entry) {
-  return entry.project_path || entry.path || null;
+  return entry.path || entry.project_path || null;
 }
 
 export function resolveCollision(slug, existingIds) {
@@ -120,7 +120,7 @@ export function checkFork({ cwd, coreDir, now = new Date() }) {
     schema_version: 'v2',
     workspace_id: newId,
     name: pointer.name || newId,
-    project_path: cwdResolved,
+    path: cwdResolved,
     created: nowIso,
     last_active: nowIso,
     dm_notes: `Auto-forked from ${localId} on ${nowIso} — copied workspace detected at ${cwdResolved}.`,

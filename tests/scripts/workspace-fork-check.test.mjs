@@ -27,10 +27,10 @@ const NOW = new Date('2026-05-31T00:00:00Z');
 
 // ---------- entryPath: tolerate both field conventions ----------
 
-test('entryPath reads project_path (schema) or path (live index)', () => {
-  assert.equal(entryPath({ project_path: '/a' }), '/a');
+test('entryPath prefers canonical `path`, tolerates legacy `project_path`', () => {
   assert.equal(entryPath({ path: '/b' }), '/b');
-  assert.equal(entryPath({ project_path: '/a', path: '/b' }), '/a'); // project_path wins
+  assert.equal(entryPath({ project_path: '/a' }), '/a'); // legacy entry still readable
+  assert.equal(entryPath({ project_path: '/a', path: '/b' }), '/b'); // path wins (canonical 2026-06-01)
   assert.equal(entryPath({}), null);
 });
 
@@ -93,6 +93,22 @@ test('copied workspace (id resolves to a project_path elsewhere) -> fork', () =>
       const r2 = checkFork({ cwd, coreDir, now: NOW });
       assert.equal(r2.action, 'no-fork', 'must not re-fork its own output');
       assert.equal(r2.reason, 'path-match');
+    },
+  );
+});
+
+// ---------- Standardization (2026-06-01): forked manifest emits canonical `path` ----------
+
+test('forked manifest emits canonical `path`, not legacy `project_path`', () => {
+  withFixture(
+    { workspace_id: 'orig3', name: 'orig-proj3' },
+    [{ workspace_id: 'orig3', name: 'orig-proj3', path: '/somewhere/else' }],
+    ({ cwd, coreDir }) => {
+      const r = checkFork({ cwd, coreDir, now: NOW });
+      assert.equal(r.action, 'forked');
+      const manifest = JSON.parse(readFileSync(join(r.new_meta_dir, 'workspace.json'), 'utf8'));
+      assert.equal(manifest.path, cwd, 'manifest records the project path under canonical `path`');
+      assert.ok(!('project_path' in manifest), 'manifest must not emit the deprecated project_path');
     },
   );
 });

@@ -27,7 +27,7 @@ A **delivery workspace** is the DM's **operational meta** about **source data** 
 |-------|------|----------|-------------|
 | `workspace_id` | string | yes | Unique workspace identifier |
 | `name` | string | yes | Human-readable workspace name |
-| `project_path` | string | yes | Absolute path to the source data's root directory (where `PROJECT.md` lives) |
+| `path` | string | yes | Absolute path to the source data's root directory (where `PROJECT.md` lives). *Canonical field as of 2026-06-01; the legacy name `project_path` is still read-tolerated for one release, then dropped.* |
 | `created` | string (ISO 8601) | yes | When the workspace was first registered |
 | `last_active` | string (ISO 8601) | yes | Last time the DM performed work in this workspace. Updated automatically. |
 | `session_log_refs` | array of strings | no | Optional list of paths to session log directories at `<project>/_sessions/YYYY-MM-DD/`. When present, the workspace *points to* them; it does not hold them. |
@@ -44,7 +44,7 @@ A **delivery workspace** is the DM's **operational meta** about **source data** 
 {
   "workspace_id": "ws-example-project",
   "name": "Example Project",
-  "project_path": "/Users/<user>/Documents/Projects/example-project",
+  "path": "/Users/<user>/Documents/Projects/example-project",
   "created": "2026-03-15T10:00:00Z",
   "last_active": "2026-03-31T14:30:00Z",
   "session_log_refs": [
@@ -82,7 +82,7 @@ The index is an array of workspace summary objects:
   {
     "workspace_id": "ws-example-project",
     "name": "Example Project",
-    "project_path": "/Users/<user>/Documents/Projects/example-project",
+    "path": "/Users/<user>/Documents/Projects/example-project",
     "last_active": "2026-03-31T14:30:00Z"
   }
 ]
