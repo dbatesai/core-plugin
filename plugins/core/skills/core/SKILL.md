@@ -114,6 +114,7 @@ Supporting references:
 - `references/model-assignments.md` — model tier per pipeline stage; consult before dispatching graduation, render, external pulls.
 - `references/hygiene-strategies.md` — deeper hygiene sub-protocols (graduation reasoning, archive integrity, edge reconciliation).
 - `references/instruction-surface-contract.md` — (v3.0) the contract→generator system: one `CONTRACT.md` generates `CLAUDE.md`/`AGENTS.md`. Read when adopting the contract system, editing a contract, or handling a contract-drift release gate.
+- `references/memory-extension-contracts.md` — (Phase 4) how an overlay extends CORE's memory + metrics layers without a core change: the bi-temporal validity dimension (built), the provenance/salience/person-synthesis layer contracts (specified, built when a consumer lands), the `world-time-policy` source hook, and the metrics passthrough/additive-detector seams. Read when building a downstream wrapper's memory layer or its storage/retrieval metrics.
 - `agents/base-protocol.md` — included in every spawned agent prompt; carries the reasoning discipline that applies whether you're solo or in a swarm.
 - `schemas/output.md` — output schema for multi-agent runs.
 - `schemas/workspace.md` — workspace manifest structure.
