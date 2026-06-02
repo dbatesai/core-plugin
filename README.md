@@ -38,9 +38,9 @@ claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Either path installs the skill, five sub-skills, and two hooks. Hooks register through the plugin manifest; your `~/.claude/settings.json` stays as you left it. See [INSTALL.md](INSTALL.md) for local-file installs, one-session-only loading via `--plugin-dir`, the `--append-system-prompt` template, and migration notes if you had an older clone.
+Either path installs the skill, seven sub-skills, and two hooks. Hooks register through the plugin manifest; your `~/.claude/settings.json` stays as you left it. See [INSTALL.md](INSTALL.md) for local-file installs, one-session-only loading via `--plugin-dir`, the `--append-system-prompt` template, and migration notes if you had an older clone.
 
-Five sub-skills ship bundled and are invocable as top-level slash commands: **`/orient`** (thread resumption), **`/finalize`** (session close with session summary + hygiene), **`/process-memory`** (user-invoked memory hygiene pass — pulls inbox, graduates observations, validates units, regenerates indexes, compacts PROJECT.md when over the file cap), **`/vibecheck`** (session vibe captured as ASCII, logged to `~/.core/vibes/`), and **`/organize-files`** (clean version-qualifier chaos and content-staleness from any directory). Two hooks register automatically: a skill-edit PWD guard and a per-turn voice reminder.
+Seven sub-skills ship bundled and are invocable as top-level slash commands: **`/orient`** (thread resumption), **`/finalize`** (session close with session summary + hygiene), **`/process-memory`** (user-invoked memory hygiene pass — pulls inbox, graduates observations, validates units, regenerates indexes, compacts PROJECT.md when over the file cap), **`/register-sources`** (register external data sources that feed project memory), **`/configure-project`** (bootstrap + health-check a project's CORE setup, idempotent, report-only unless `--apply`), **`/vibecheck`** (session vibe captured as ASCII, logged to `~/.core/vibes/`), and **`/organize-files`** (clean version-qualifier chaos and content-staleness from any directory). Two hooks register automatically: a skill-edit PWD guard and a per-turn voice reminder.
 
 ## Architecture
 

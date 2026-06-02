@@ -253,6 +253,8 @@ Harness-local recall (via the `read-auto-memory` adapter verb — Claude Code's 
 
 **Default retrieval excludes observations.** Only graduated units surface by default. Observations are queryable on demand ("show me observations about X").
 
+**Default retrieval excludes invalidated units.** A unit whose validity dimension shows `t_invalid` in the past is suppressed from the Tier-2 candidate set the same way a retired unit is — the fact no longer holds in the world. Cold history stays reachable by an explicit point-in-time query (`graph-walk --include-invalid`, `bitemporal --as-of`). See `references/retrieval.md` walk-termination.
+
 **The semantic tier is where graduation-style reasoning happens.** The Explore subagent is strictly more capable than a vector store at single-user scale because it has the full LLM as its embedding model — it can reason about queries in context, distinguish polysemy, recognize negations, and synthesize structured answers with citations rather than chunks.
 
 Detail in `references/retrieval.md`.
