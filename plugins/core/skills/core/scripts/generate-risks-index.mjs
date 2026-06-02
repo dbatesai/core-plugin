@@ -44,6 +44,12 @@ export function parseFrontmatter(text) {
   return [fm, body];
 }
 
+// M12: a `|` in any cell value splits the markdown table row and corrupts the substring
+// check-units index-drift detection relies on. Escape pipes + flatten newlines per cell.
+export function escapeCell(v) {
+  return String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
+
 export function extractSummary(body) {
   for (const line of body.split('\n')) {
     const s = line.trim();
@@ -107,7 +113,7 @@ export function buildIndex(memoriesDir) {
     '|---|---|---|---|',
   ];
   for (const r of rows) {
-    lines.push(`| ${r.id} | ${r.date} | ${r.status} | ${r.summary} |`);
+    lines.push(`| ${escapeCell(r.id)} | ${escapeCell(r.date)} | ${escapeCell(r.status)} | ${escapeCell(r.summary)} |`);
   }
   lines.push('');
   return lines.join('\n');
