@@ -117,3 +117,19 @@ test('validate CLI treats negated query terms as exclusions, not positive matche
   assert.match(report, /Expected: \["expected-no-heartbeat"\]/);
   assert.match(report, /Forbidden hits: \[\]/);
 });
+
+test('M8: a forbidden-hit FAIL row is internally consistent (no FAIL | 1 | 1), precision zeroed', () => {
+  // The forbidden fixture ranks the forbidden unit in the candidate pool but below the
+  // scoreK precision cut, so before the fix the row read FAIL | 1 | 1 — status and P/R
+  // disagreeing. A contaminated candidate pool must zero the run's precision.
+  const project = writeFixtureProject();
+  const result = spawnSync(process.execPath, [SCRIPT, project], { cwd: process.cwd(), encoding: 'utf8' });
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+
+  const report = readFileSync(join(project, '_outputs/validation', new Date().toISOString().slice(0, 10), 'REPORT.md'), 'utf8');
+  const failRow = report.split('\n').find(l => /^\|\s*FAIL\s*\|/.test(l));
+  assert.ok(failRow, 'a FAIL row must be present');
+  assert.doesNotMatch(failRow, /^\|\s*FAIL\s*\|\s*1\s*\|\s*1\s*\|/, 'no confusing FAIL | 1 | 1 row');
+  // The precision column (first number after FAIL) must be 0 on a forbidden-contaminated row.
+  assert.match(failRow, /^\|\s*FAIL\s*\|\s*0\s*\|/, 'precision is zeroed when a forbidden unit is in the candidate pool');
+});
