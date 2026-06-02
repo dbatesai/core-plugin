@@ -73,15 +73,15 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 | Meaningful PROJECT.md change | User removes fact → retire-trigger fires for the affected units. |
 | Edit-detection hash mismatch | Reconciliation pass runs as a follow-on after edit-detection captures the user's change. |
 
-### Mid-session debounce and batching
+### Mid-session batching
 
-Rapid edits in a single turn (a graduation followed by an index regen followed by a render) shouldn't trigger three separate hygiene passes. The debounce rule:
+Rapid edits in a single turn (a graduation followed by an index regen followed by a render) shouldn't trigger a separate hygiene pass each. Batch instead — and judge the batching by agent turns, which you can observe, not by wall-clock seconds, which you can't reliably measure between turns. The rule:
 
-- **Same-turn coalescing.** Multiple triggers within a single agent turn batch into one hygiene call at turn's end. If the user edits PROJECT.md and the agent then writes two new units in the same turn, all three events fire one combined hygiene pass after the agent's last write.
-- **Cross-turn cooldown.** A hygiene pass that ran within the previous 60 seconds doesn't re-fire unless the new trigger is structural (graduation candidate, contradiction, retire-on-removal). Comprehensive `/finalize` passes bypass the cooldown.
-- **Burst suppression.** If three triggers fire in 30 seconds, the next hygiene pass is deferred until activity quiets (no triggers for 30 seconds). Burst suppression prevents trigger storms during long rapid edits.
+- **Same-turn coalescing.** Multiple triggers within a single agent turn batch into one hygiene call at turn's end. If the user edits PROJECT.md and you then write two new units in the same turn, all three events fire one combined hygiene pass after your last write.
+- **Don't re-run within a turn for non-structural triggers.** If you already ran a hygiene pass this turn, don't re-fire it for a cosmetic or repeat trigger — let the next structural trigger (graduation candidate, contradiction, retire-on-removal) carry it, or the next `/finalize`. Comprehensive `/finalize` passes always run regardless.
+- **Stay quiet during a burst.** When you're in a long run of rapid edits, defer the pass until the edits settle rather than firing on each one.
 
-The agent narrates when a pass is debounced or suppressed: *"Three hygiene triggers in 20 seconds — coalescing into one pass when the edits settle."*
+Narrate when you batch: *"Several hygiene triggers this turn — coalescing into one pass once the edits settle."*
 
 ### Render-collision handling
 
