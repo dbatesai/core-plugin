@@ -191,8 +191,16 @@ export function main(argv) {
     const candidateK = Math.max(5, scoreK);
     const candidates = simulateRetrievalTier1(query, projectPath, candidateK);
     const retrieved = candidates.slice(0, scoreK);
+    // The forbidden check spans the whole candidate pool (candidateK): a forbidden unit
+    // surfacing anywhere in retrieval is a failure, even below the scoreK precision cut —
+    // that's the designed semantic (see the "not first, but still in the candidate set" test).
     const forbiddenHits = candidates.filter(x => forbidden.includes(x));
-    const [p, r] = scorePrecisionRecall(retrieved, expected, forbidden);
+    let [p, r] = scorePrecisionRecall(retrieved, expected, forbidden);
+    // M8: scorePrecisionRecall only sees the scoreK slice, so a forbidden ranked between
+    // scoreK and candidateK left status=FAIL while P/R both read 1.0 — the confusing
+    // `FAIL | 1.0 | 1.0` row. A contaminated candidate pool zeroes the run's precision so
+    // the row is internally consistent (FAIL | 0.0 | R) without weakening the forbidden check.
+    if (forbiddenHits.length) p = 0.0;
     const status = forbiddenHits.length ? 'FAIL' : (p >= 0.8 && r >= 0.8) ? 'PASS' : (p < 0.5 || r < 0.5) ? 'FAIL' : 'INVESTIGATE';
     results.push({ query, precision: p, recall: r, status, retrieved: candidates.slice(0, 5), expected, forbiddenHits });
     const icon = status === 'PASS' ? 'PASS' : status === 'FAIL' ? 'FAIL' : 'INV';

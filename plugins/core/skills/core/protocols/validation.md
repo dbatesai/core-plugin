@@ -74,8 +74,6 @@ Aggregate pass rate is reported alongside individual results.
 - Per-test result table: status, precision, recall, query (truncated).
 - Detail section: each query, expected units, retrieved (top 5), and any forbidden hits.
 
-The runner also writes a summary line to `~/.core/hygiene-log.jsonl` so hygiene's continuous self-evaluation can spot trends across runs.
-
 ## Cadence
 
 - **Weekly automatic** — fires from memory hygiene's comprehensive pass at the first `/finalize` of each calendar week.

@@ -38,6 +38,32 @@ test('PASS anti-anchoring authorizes mutation', () => {
   assert.equal(d.watermark, null);
 });
 
+test('M9: identity PASS but operation-scoped mutation gate denied → ADVISORY, not AUTHORIZED', () => {
+  // runPreAction can set mutation_permitted=false on a PASS row (e.g. harness_mismatch,
+  // since the adversarial action declares allowed_harnesses). A decision-branching consumer
+  // (HC_555) would mutate on AUTHORIZED — the operation-scoped denial must fold into `decision`.
+  const d = classifyAdversarialRun({
+    rows: [{
+      capability_id: 'anti-anchoring-mechanism',
+      identity_status: 'PASS',
+      mutation_permitted: false,
+      mutation_block_reason: 'harness_mismatch',
+    }],
+  });
+  assert.equal(d.decision, 'ADVISORY', 'a denied mutation gate must not read as AUTHORIZED');
+  assert.equal(d.authority_for_mutation, false, 'no mutation authority when the gate denied');
+  assert.equal(d.advisory_allowed, true, 'advisory generation is still fine');
+  assert.equal(d.blocked_reason, 'harness_mismatch', 'the operation-scoped block reason is surfaced');
+});
+
+test('M9: identity PASS with mutation gate explicitly permitted stays AUTHORIZED', () => {
+  const d = classifyAdversarialRun({
+    rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'PASS', mutation_permitted: true }],
+  });
+  assert.equal(d.decision, 'AUTHORIZED');
+  assert.equal(d.authority_for_mutation, true);
+});
+
 test('NEGATIVE: UNKNOWN anti-anchoring does NOT silently grant mutation authority', () => {
   const d = classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'UNKNOWN' }] });
   assert.equal(d.authority_for_mutation, false, 'UNKNOWN must not authorize a mutation');

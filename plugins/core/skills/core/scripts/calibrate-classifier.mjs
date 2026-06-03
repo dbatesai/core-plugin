@@ -39,6 +39,13 @@ export const CALIBRATION_VERSION = '1.0.0';
 export const PRECISION_THRESHOLD = 0.7;
 export const MIN_LABELED = 100;
 
+// The six recognition states classify-turns can emit. M7: the gate must measure per-class
+// coverage against this canonical set so it can't clear while whole states sit unmeasured.
+export const CANONICAL_STATES = [
+  'tier-0-win', 'tier-1-3-win', 'rec-fail-tier-0',
+  'rec-fail-tier-1-3-trigger', 'mechanics-failure', 'capture-miss',
+];
+
 // ============================================================
 // Calibration state (persisted to ~/.core/workspaces/<id>/metrics/)
 // ============================================================
@@ -103,7 +110,15 @@ export function computePrecision(labeledTurns) {
   // Macro average: mean of per-class precisions, ignoring null.
   const vals = Object.values(by_state).filter((v) => v !== null);
   const overall = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-  return { overall, by_state, labeled_count: valid.length };
+
+  // M7 coverage: the macro average above only spans classes the heuristic PREDICTED, so a
+  // classifier that emits 2 of 6 states can clear 0.7 with the other 4 unmeasured. A gold
+  // state the heuristic never predicts is an unmeasured class — surface it so the gate can
+  // refuse to clear until every state present in the gold labels has at least one prediction.
+  const goldStates = new Set(valid.map((t) => t.gold_state));
+  const unmeasured_gold_states = [...goldStates].filter((s) => by_state[s] == null).sort();
+  const coverage_complete = unmeasured_gold_states.length === 0;
+  return { overall, by_state, labeled_count: valid.length, unmeasured_gold_states, coverage_complete };
 }
 
 // ============================================================
@@ -236,7 +251,11 @@ export function importLabels({ worksheetFile, metaDir }) {
   }
 
   const p = computePrecision(labeled);
-  const is_calibrated = p.labeled_count >= MIN_LABELED && p.overall !== null && p.overall >= PRECISION_THRESHOLD;
+  // M7: the gate also requires per-class coverage — every state present in the gold labels
+  // must have been predicted at least once. Without this, a heuristic that emits only 2 of 6
+  // states clears 0.7 on those 2 while the other 4 sit unmeasured.
+  const is_calibrated = p.labeled_count >= MIN_LABELED && p.overall !== null
+    && p.overall >= PRECISION_THRESHOLD && p.coverage_complete;
   const today = todayUTC();
   const state = {
     schema_version: CALIBRATION_VERSION,
@@ -248,12 +267,16 @@ export function importLabels({ worksheetFile, metaDir }) {
     precision_by_state: Object.fromEntries(
       Object.entries(p.by_state).map(([s, v]) => [s, v !== null ? Math.round(v * 1000) / 1000 : null]),
     ),
+    coverage_complete: p.coverage_complete,
+    unmeasured_gold_states: p.unmeasured_gold_states,
     updated_at: today,
     notes: is_calibrated
-      ? `Calibrated ${today}. Overall precision: ${p.overall !== null ? Math.round(p.overall * 100) : '?'}% (cleared ${PRECISION_THRESHOLD} bar).`
+      ? `Calibrated ${today}. Overall precision: ${p.overall !== null ? Math.round(p.overall * 100) : '?'}% (cleared ${PRECISION_THRESHOLD} bar, all gold states measured).`
       : p.labeled_count < MIN_LABELED
         ? `${p.labeled_count} labeled turns (need ${MIN_LABELED}+). Precision: ${p.overall !== null ? Math.round(p.overall * 100) + '%' : 'n/a'}.`
-        : `${p.labeled_count} labeled turns. Precision ${p.overall !== null ? Math.round(p.overall * 100) : '?'}% did not clear ${PRECISION_THRESHOLD} bar.`,
+        : !p.coverage_complete
+          ? `${p.labeled_count} labeled turns, precision ${p.overall !== null ? Math.round(p.overall * 100) : '?'}%, but ${p.unmeasured_gold_states.length} gold state(s) unmeasured (${p.unmeasured_gold_states.join(', ')}) — gate held until the heuristic predicts them.`
+          : `${p.labeled_count} labeled turns. Precision ${p.overall !== null ? Math.round(p.overall * 100) : '?'}% did not clear ${PRECISION_THRESHOLD} bar.`,
   };
   writeCalibrationState(metaDir, state);
   return { status: 'OK', ...state };

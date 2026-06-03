@@ -19,29 +19,21 @@
 import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 
 export const RISK_NUMERIC = /^risk-(\d+)-.+\.md$/;
 export const RISK_NAMED = /^risk-([a-z][a-z0-9-]*)\.md$/;
 export const SUMMARY_MAX = 100;
 
+// M1: delegates to the shared flat parser (was a local copy). Export kept for the callsite.
 export function parseFrontmatter(text) {
-  text = text.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
-  if (!text.startsWith('---\n')) return [{}, text];
-  const end = text.indexOf('\n---', 4);
-  if (end === -1) return [{}, text];
-  const raw = text.slice(4, end);
-  const body = text.slice(end + 4).replace(/^\n+/, '');
-  const fm = {};
-  for (const line of raw.split('\n')) {
-    if (!line.trim() || line.trimStart().startsWith('#')) continue;
-    if (line.startsWith(' ') || line.startsWith('\t')) continue;
-    if (!line.includes(':')) continue;
-    const colonIdx = line.indexOf(':');
-    const k = line.slice(0, colonIdx).trim();
-    const v = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, '');
-    if (v !== '') fm[k] = v;
-  }
-  return [fm, body];
+  return parseFlatFrontmatter(text);
+}
+
+// M12: a `|` in any cell value splits the markdown table row and corrupts the substring
+// check-units index-drift detection relies on. Escape pipes + flatten newlines per cell.
+export function escapeCell(v) {
+  return String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
 }
 
 export function extractSummary(body) {
@@ -107,7 +99,7 @@ export function buildIndex(memoriesDir) {
     '|---|---|---|---|',
   ];
   for (const r of rows) {
-    lines.push(`| ${r.id} | ${r.date} | ${r.status} | ${r.summary} |`);
+    lines.push(`| ${escapeCell(r.id)} | ${escapeCell(r.date)} | ${escapeCell(r.status)} | ${escapeCell(r.summary)} |`);
   }
   lines.push('');
   return lines.join('\n');

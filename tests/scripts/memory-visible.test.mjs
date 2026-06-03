@@ -47,6 +47,18 @@ test('write-canary: upgrades a legacy HTML-comment canary in place (no accumulat
   assert.ok(!c.includes('<!--'), 'legacy HTML comment fully removed');
 });
 
+test('M16: prose that mentions the canary tag survives a canary write (only the managed line is replaced)', () => {
+  // A documentation line that explains the mechanism contains the tag literal but is NOT
+  // the managed canary line. The old bare-tag strip deleted it; the anchored regex must not.
+  const prose = 'The `' + CANARY_TAG + '` mechanism proves injected memory is in-context.';
+  let c = CANARY_TAG + ' tok-OLD — at next startup, echo this token first as `VISIBILITY-CANARY-ECHO: tok-OLD` to prove memory is in-context.\n\n## Notes\n' + prose + '\n';
+  c = upsertCanaryLine(c, 'tok-NEW');
+  const managed = c.split('\n').filter((l) => /VISIBILITY-CANARY-ECHO/.test(l) && l.startsWith(CANARY_TAG));
+  assert.equal(managed.length, 1, 'exactly one managed canary line');
+  assert.ok(managed[0].includes('tok-NEW') && !managed[0].includes('tok-OLD'), 'managed line replaced');
+  assert.ok(c.includes(prose), 'documentation prose mentioning the tag must survive');
+});
+
 test('write-canary: records side-file with token + memory_written; return is redacted', () => {
   const home = mkdtempSync(join(tmpdir(), 'mv-'));
   try {
@@ -173,6 +185,21 @@ test('scanTranscript records the echo and every tool by name', () => {
   const ev = scanTranscript([tool('Skill', {}), txt('tok-x here'), tool('Bash', { command: 'ls' })], 'tok-x');
   assert.equal(ev.filter((e) => e.kind === 'echo').length, 1);
   assert.deepEqual(ev.filter((e) => e.kind === 'tool').map((e) => e.name), ['Skill', 'Bash']);
+});
+
+test('H2: a user-role text block carrying the token is NOT an echo (only the agent echoes)', () => {
+  const userTxt = (text) => line({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
+  // The injected MEMORY.md surfaces as a user-role block; it carries the token but is not
+  // an agent echo. Before the role filter this falsely satisfied the probe.
+  const ev = scanTranscript([userTxt('here is your memory: tok-x'), txt('tok-x')], 'tok-x');
+  assert.equal(ev.filter((e) => e.kind === 'echo').length, 1, 'only the assistant text block counts as an echo');
+  assert.equal(ev.find((e) => e.kind === 'echo').idx, 1, 'the echo is the assistant line, not the user line');
+});
+
+test('H2: a user-only transcript with the token produces no echo at all', () => {
+  const userTxt = (text) => line({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
+  const ev = scanTranscript([userTxt('tok-x in injected context')], 'tok-x');
+  assert.equal(ev.filter((e) => e.kind === 'echo').length, 0);
 });
 
 test('redactToken never emits the raw token', () => {

@@ -100,7 +100,7 @@ Render-vs-hygiene collision on the same section is the seam where this matters; 
 Every hygiene operation gets logged twice:
 
 - Human-readable narrative in `<project>/autonomous-run-log.md`: `[2026-05-17 14:32] HYGIENE archive — dc-XX-<slug>: priority 0.04, last_accessed 90d, source weight 0.5 — moved to _memories/archive/`
-- Machine-readable record in `~/.core/hygiene-log.jsonl`: `{"ts": "...", "verb": "archive", "unit_id": "dc-XX-<slug>", "reason": "priority_below_threshold", "trigger": "finalize", ...}`
+- Machine-readable record in `<project>/_sessions/<date>/hygiene-log.jsonl`: `{"ts": "...", "verb": "archive", "unit_id": "dc-XX-<slug>", "reason": "priority_below_threshold", "trigger": "finalize", ...}`
 
 The dual log is intentional. The run log is what the user reads during the session; the JSONL is what subsequent hygiene passes consult to detect patterns (over-archive, under-graduate, etc.).
 

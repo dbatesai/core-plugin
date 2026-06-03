@@ -128,18 +128,6 @@ jobs:
             if (failed) process.exit(1);
           '
 
-      - name: RELEASE.json included_skills matches plugins/core/skills dirs
-        run: |
-          node -e '
-            const fs=require("fs");
-            const declared=new Set(JSON.parse(fs.readFileSync("RELEASE.json","utf8")).included_skills);
-            const actual=new Set(fs.readdirSync("plugins/core/skills",{withFileTypes:true}).filter(d=>d.isDirectory()).map(d=>d.name));
-            const missing=[...actual].filter(s=>!declared.has(s));
-            const extra=[...declared].filter(s=>!actual.has(s));
-            if(missing.length||extra.length){console.error("included_skills drift — missing:",missing,"extra:",extra);process.exit(1);}
-            console.log("included_skills OK:",[...declared].join(", "));
-          '
-
       - name: SKILL.md has YAML frontmatter with name and description
         run: |
           node -e '

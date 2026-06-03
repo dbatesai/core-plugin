@@ -23,6 +23,8 @@ import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs'
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent } from './log-event.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 
 export const DECISIONS_HEADER = '**Decisions (dated, append-only):**';
 export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
@@ -51,24 +53,9 @@ export function parseArgv(argv) {
   return { positional, flags };
 }
 
+// M1: delegates to the shared flat parser (was a local copy). Export kept for the callsite.
 export function parseFrontmatter(text) {
-  text = text.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
-  if (!text.startsWith('---\n')) return [{}, text];
-  const end = text.indexOf('\n---', 4);
-  if (end === -1) return [{}, text];
-  const raw = text.slice(4, end);
-  const body = text.slice(end + 4).replace(/^\n+/, '');
-  const fm = {};
-  for (const line of raw.split('\n')) {
-    if (!line.trim() || line.trimStart().startsWith('#')) continue;
-    if (line.startsWith(' ') || line.startsWith('\t')) continue;
-    if (!line.includes(':')) continue;
-    const colonIdx = line.indexOf(':');
-    const k = line.slice(0, colonIdx).trim();
-    const v = line.slice(colonIdx + 1).trim().replace(/^["']|["']$/g, '');
-    if (v !== '') fm[k] = v;
-  }
-  return [fm, body];
+  return parseFlatFrontmatter(text);
 }
 
 export function loadUnits(memoriesDir) {
@@ -274,7 +261,7 @@ export function main(argv) {
   const { text: newText, stats } = compactDecisions(text, units);
   const after = Buffer.byteLength(newText, 'utf8');
   const wrote = newText !== text;
-  if (wrote) writeFileSync(projectMd, newText);
+  if (wrote) atomicWriteFileSync(projectMd, newText);
 
   const sizes = sectionSizes(newText);
   logEvent(projectDir, 'hygiene-log.jsonl', {

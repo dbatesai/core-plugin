@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -89,10 +89,76 @@ test('copied workspace (id resolves to a project_path elsewhere) -> fork', () =>
       const forked = idx.find(e => e.workspace_id === r.new_id);
       assert.ok(forked && entryPath(forked), 'forked entry carries a resolvable path');
 
+      // H3: the local pointer is written atomically (no leftover temp file in cwd) and the
+      // pointer now names the new id (the multi-file fork completed consistently).
+      const cwdLeftovers = readdirSync(cwd).filter(n => n.includes('.tmp-'));
+      assert.deepEqual(cwdLeftovers, [], 'atomic pointer write must leave no temp file in the project dir');
+      const ptr = JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8'));
+      assert.equal(ptr.workspace_id, r.new_id, 'local pointer (written last) carries the forked id');
+
       // idempotent: re-running finds the fresh path-keyed entry -> no second fork
       const r2 = checkFork({ cwd, coreDir, now: NOW });
       assert.equal(r2.action, 'no-fork', 'must not re-fork its own output');
       assert.equal(r2.reason, 'path-match');
+    },
+  );
+});
+
+// ---------- H3 crash-simulation: the meta→index→pointer write order is recoverable ----------
+// The fork mutates three surfaces. checkFork resolves path-match (index path==cwd) BEFORE
+// id-match, so the safe order is meta-dir → index → pointer, all atomic. These tests assert
+// that a crash at each inter-file boundary leaves a recoverable state.
+
+test('H3 crash-sim: index entry landed but pointer not (crash before pointer) → path-match resolves, no re-fork', () => {
+  // Simulates: meta dir + index entry written for newId, pointer still names the old id.
+  withFixture(
+    { workspace_id: 'orig', name: 'p' },                       // pointer NOT yet rewritten
+    [{ workspace_id: 'newid', name: 'p', path: '__CWD__' }],   // index already has newId@cwd
+    ({ cwd, coreDir }) => {
+      const idxPath = join(coreDir, 'index.json');
+      const idx = JSON.parse(readFileSync(idxPath, 'utf8'));
+      idx[0].path = cwd;
+      writeFileSync(idxPath, JSON.stringify(idx, null, 2));
+      mkdirSync(join(coreDir, 'workspaces', 'newid'), { recursive: true }); // meta dir written first
+      const r = checkFork({ cwd, coreDir, now: NOW });
+      assert.equal(r.action, 'no-fork', 'a landed index entry must resolve, not re-fork');
+      assert.equal(r.reason, 'path-match');
+      assert.equal(r.workspace_id, 'newid', 'resolves to the forked id via path-match (pointer id is stale but unused)');
+    },
+  );
+});
+
+test('H3 crash-sim: meta dir landed but index entry not (crash before index) → clean re-fork, leftover meta dir harmless', () => {
+  // Simulates: a prior fork wrote the meta dir then crashed before the index entry. The pointer
+  // still names the copied-from id (registered at a foreign path), so this must re-fork cleanly.
+  withFixture(
+    { workspace_id: 'orig', name: 'p' },
+    [{ workspace_id: 'orig', name: 'p', path: '/somewhere/else/entirely' }],
+    ({ cwd, coreDir }) => {
+      mkdirSync(join(coreDir, 'workspaces', 'project'), { recursive: true }); // leftover from the crashed attempt (slug of cwd basename)
+      const r = checkFork({ cwd, coreDir, now: NOW });
+      assert.equal(r.action, 'forked', 'must re-fork; no path-match exists yet, so the workspace is not orphaned');
+      assert.equal(r.original_id, 'orig');
+      const idx = JSON.parse(readFileSync(join(coreDir, 'index.json'), 'utf8'));
+      const forked = idx.find(e => e.workspace_id === r.new_id);
+      assert.ok(forked && canonicalPath(entryPath(forked)) === canonicalPath(cwd), 'now fully registered at cwd');
+      // and the second run is a clean no-op (idempotent)
+      assert.equal(checkFork({ cwd, coreDir, now: NOW }).action, 'no-fork');
+    },
+  );
+});
+
+test('H3: a real fork leaves no temp file in ~/.core (index + manifest written atomically)', () => {
+  withFixture(
+    { workspace_id: 'origAtomic', name: 'p' },
+    [{ workspace_id: 'origAtomic', name: 'p', path: '/elsewhere' }],
+    ({ cwd, coreDir }) => {
+      const r = checkFork({ cwd, coreDir, now: NOW });
+      assert.equal(r.action, 'forked');
+      // No .tmp- leftovers in the core dir (index.json) or the new meta dir (manifest).
+      assert.deepEqual(readdirSync(coreDir).filter(n => n.includes('.tmp-')), [], 'index.json written atomically');
+      const metaDir = join(coreDir, 'workspaces', r.new_id);
+      assert.deepEqual(readdirSync(metaDir).filter(n => n.includes('.tmp-')), [], 'manifest written atomically');
     },
   );
 });

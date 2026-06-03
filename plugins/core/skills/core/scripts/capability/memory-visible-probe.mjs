@@ -94,8 +94,14 @@ export function scanTranscript(lines, token) {
     let e; try { e = JSON.parse(line); } catch { return; }
     const content = e?.message?.content;
     if (!Array.isArray(content)) return;
+    // H2: the probe proves the AGENT echoed the canary (memory in-context AND surfaced).
+    // The injected MEMORY.md text and any user/tool-result text block also carry the token,
+    // so an unfiltered text match is a false-pass — the cardinal sin for this cluster. Only
+    // an assistant-role text block counts as an echo. Tool_use is assistant-authored by
+    // construction, so the ordering scan over tools is unaffected.
+    const isAssistant = e?.message?.role === 'assistant' || e?.type === 'assistant';
     for (const c of content) {
-      if (c?.type === 'text' && token && typeof c.text === 'string' && c.text.includes(token)) {
+      if (isAssistant && c?.type === 'text' && token && typeof c.text === 'string' && c.text.includes(token)) {
         events.push({ idx, kind: 'echo' });
       }
       if (c?.type === 'tool_use') events.push({ idx, kind: 'tool', name: c.name });

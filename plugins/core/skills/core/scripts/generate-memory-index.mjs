@@ -20,7 +20,7 @@
  *        [--top N] [--today YYYY-MM-DD]
  */
 
-import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
@@ -79,10 +79,14 @@ export function resolveDescription(existing, fm, unitText) {
   return extractFirstBodyLine(unitText);
 }
 
+// Returns a Date for a YYYY-MM-DD arg, or null if the arg is present but malformed
+// (so the caller can refuse cleanly rather than throw a RangeError downstream on toISOString).
 function todayFromArg(arg) {
   if (arg) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(arg)) return null;
     const [y, m, d] = arg.split('-').map(Number);
-    return new Date(Date.UTC(y, m - 1, d));
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return Number.isNaN(dt.getTime()) ? null : dt;
   }
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
@@ -177,12 +181,24 @@ export function main(argv) {
   let topN = 30;
   let todayArg = null;
 
+  let topRaw = null;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--memory-md') memoryMdPath = argv[++i];
-    else if (a === '--top') topN = parseInt(argv[++i], 10);
+    else if (a === '--top') topRaw = argv[++i];
     else if (a === '--today') todayArg = argv[++i];
     else if (!a.startsWith('--')) memoriesDirArg = a;
+  }
+
+  // M13: an unvalidated parseInt('--top garbage') yields NaN, and ranked.slice(0, NaN) is
+  // EMPTY — which then OVERWRITES the curated MEMORY.md top-units block with nothing (silent
+  // data-thinning, not an error). Validate: --top must be a positive integer or we refuse.
+  if (topRaw != null) {
+    if (!/^\d+$/.test(String(topRaw).trim()) || parseInt(topRaw, 10) < 1) {
+      process.stderr.write(`error: --top must be a positive integer (got ${JSON.stringify(topRaw)}); refusing to thin MEMORY.md.\n`);
+      return 2;
+    }
+    topN = parseInt(topRaw, 10);
   }
 
   if (!memoriesDirArg || !memoryMdPath) {
@@ -192,6 +208,11 @@ export function main(argv) {
 
   const memoriesDir = resolve(memoriesDirArg);
   memoryMdPath = resolve(memoryMdPath);
+
+  // Guard the SOURCE dir too (mirrors the sibling generators): a bad/typo'd _memories path
+  // would otherwise throw an uncaught ENOENT deep in iterUnits→readdirSync. Refuse with exit 2.
+  try { readdirSync(memoriesDir); }
+  catch { process.stderr.write(`error: _memories source dir not readable: ${memoriesDir}\n`); return 2; }
 
   const mismatch = projectIdentityMismatch(memoriesDir, memoryMdPath);
   if (mismatch) {
@@ -206,7 +227,17 @@ export function main(argv) {
   }
 
   const today = todayFromArg(todayArg);
+  if (today === null) {
+    process.stderr.write(`error: --today must be YYYY-MM-DD (got ${JSON.stringify(todayArg)})\n`);
+    return 2;
+  }
 
+  // A missing target MEMORY.md is an operator/setup error, not a crash: readFileSync would
+  // throw an uncaught ENOENT (exit 1, ugly stack). Refuse cleanly with exit 2 instead.
+  if (!existsSync(memoryMdPath)) {
+    process.stderr.write(`error: --memory-md target does not exist: ${memoryMdPath}\n`);
+    return 2;
+  }
   const oldText = readFileSync(memoryMdPath, 'utf8');
   const existingDescriptions = parseExistingDescriptions(oldText);
   const newSection = renderPriorityBlock({

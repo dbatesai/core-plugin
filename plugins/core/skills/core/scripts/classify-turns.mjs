@@ -33,7 +33,12 @@ import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 
-export const CLASSIFIER_VERSION = '0.1.0';
+// 0.2.0: the M6 hardening changed classification OUTPUT — word-boundary in-context matching,
+// the asked-term denylist, and wiring the previously-dead ladderReturnedContent discriminator
+// all shift the state distribution. Any behavior-affecting change MUST bump this, so the R-1
+// honesty guard (metrics-rollup gates the PROVISIONAL tag on a classifier_version match)
+// correctly invalidates a calibration cleared under the old behavior.
+export const CLASSIFIER_VERSION = '0.2.0';
 
 // A clarifying question — the agent asking the user instead of answering.
 const CLARIFYING_RE = /\b(what (is|does|are|do you mean)|what'?s|which|i'?m not (sure|familiar)|could you (remind|clarify|explain)|can you (remind|clarify|explain)|remind me|not familiar with|haven'?t (seen|come across)|don'?t (have|see) (context|background)|where (is|does)|tell me (more )?about)\b/i;
@@ -59,11 +64,30 @@ export function ladderReturnedContent(toolEvents) {
  * vocabulary-shaped token (DC-xx / R-xx / [[name]] / a multi-cap or hyphenated id)
  * near the clarifying phrase; else the longest capitalized/hyphenated token.
  */
+// Common English hyphenations that look like a project handle to the regex but aren't.
+// Not exhaustive — covers the noise that actually shows up in clarifying questions (M6).
+const COMMON_HYPHENATED = new Set([
+  'opt-in', 'opt-out', 'in-context', 'out-of', 'well-known', 'real-time', 'end-to-end',
+  'follow-up', 'day-to-day', 'up-to-date', 'state-of-the-art', 'so-called', 'long-term',
+  'short-term', 'full-time', 'part-time', 'high-level', 'low-level', 'self-referential',
+  're-run', 're-read', 'one-line', 'two-tier', 'first-class', 'load-bearing',
+]);
+
 export function extractAskedTerm(text) {
   if (!text) return null;
-  const idRe = /\b(?:DC-\d+|R-\d+)\b|\[\[[^\]]+\]\]|\b[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+){1,}\b/g;
-  const ids = text.match(idRe);
-  if (ids && ids.length) return ids.sort((a, b) => b.length - a.length)[0].replace(/[[\]]/g, '');
+  // Structured project ids first: DC-xx / R-xx / [[wikilink]] — unambiguous.
+  const structured = text.match(/\b(?:DC-\d+|R-\d+)\b|\[\[[^\]]+\]\]/g);
+  if (structured && structured.length) {
+    return structured.sort((a, b) => b.length - a.length)[0].replace(/[[\]]/g, '');
+  }
+  // Generic hyphenated tokens, but NOT ordinary hyphenated English ("opt-in", "well-known").
+  // M6: the old regex matched those greedily and polluted the asked-term. A denylist of common
+  // English hyphenations filters the noise while keeping lowercase project terms like
+  // "register-trigger" (a structural digit/uppercase rule would wrongly drop those).
+  const hyphenated = (text.match(/\b[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+){1,}\b/g) || [])
+    .filter((t) => !COMMON_HYPHENATED.has(t.toLowerCase()))
+    .sort((a, b) => b.length - a.length);
+  if (hyphenated.length) return hyphenated[0];
   const caps = (text.match(/\b[A-Z][A-Za-z0-9]{3,}\b/g) || []).sort((a, b) => b.length - a.length);
   return caps[0] || null;
 }
@@ -89,9 +113,15 @@ export function classifyTurn(turn, { isInContext, isOnDisk }) {
 
   if (inContext) return { state: 'rec-fail-tier-0', evidence: { term, found: 'context' } };
   if (onDisk) {
-    return ladder
-      ? { state: 'mechanics-failure', evidence: { term, found: 'disk', ladder_walk: true } }
-      : { state: 'rec-fail-tier-1-3-trigger', evidence: { term, found: 'disk', ladder_walk: false } };
+    if (!ladder) return { state: 'rec-fail-tier-1-3-trigger', evidence: { term, found: 'disk', ladder_walk: false } };
+    // M6: mechanics-failure is defined as "agent walked the ladder; it came back EMPTY anyway"
+    // — so it requires the ladder to have surfaced nothing. The dead ladderReturnedContent
+    // discriminator is the test. If the ladder walked AND returned content but the agent still
+    // asked, the mechanism worked — the content was effectively in context for this turn — so
+    // that's a tier-0-grade recognition failure, not a mechanics failure.
+    return ladderReturnedContent(toolEvents)
+      ? { state: 'rec-fail-tier-0', evidence: { term, found: 'context-via-ladder', ladder_walk: true } }
+      : { state: 'mechanics-failure', evidence: { term, found: 'disk', ladder_walk: true, ladder_empty: true } };
   }
   return { state: 'capture-miss', evidence: { term, found: 'nowhere' } };
 }
@@ -125,6 +155,19 @@ export function summarize(classified) {
 
 // ---- CLI plumbing: build the context/disk predicates from the real project ----
 
+const _escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Word-boundary containment over an already-lowercased blob. A bare `.includes` made any
+ * substring (e.g. "opt-in" inside "adopt-inline") read as present; a token boundary that
+ * tolerates the hyphen/colon characters in project ids (DC-99, references-topic) fixes that.
+ */
+export function containsTerm(blob, term) {
+  const t = String(term || '').toLowerCase().trim();
+  if (!t) return false;
+  return new RegExp('(^|[^a-z0-9])' + _escapeRe(t) + '([^a-z0-9]|$)').test(blob);
+}
+
 function buildPredicates(project) {
   const contextBlob = ['CLAUDE.md', 'MEMORY.md', 'PROJECT.md']
     .map((f) => safeRead(join(project, f)))
@@ -133,10 +176,12 @@ function buildPredicates(project) {
     // PROJECT.md is the load-bearing one and lives in the project — good enough v1.
     .toLowerCase();
   const diskBlob = listDiskTerms(project).toLowerCase();
-  const norm = (t) => (t || '').toLowerCase();
+  // M6: a bare substring test made any term that's a SUBSTRING of the 184KB PROJECT.md read
+  // "in context" — a short token like "opt-in" matches inside unrelated words, biasing the
+  // headline rec-fail-tier-0 rate upward. Match on a word boundary instead.
   return {
-    isInContext: (term) => contextBlob.includes(norm(term)),
-    isOnDisk: (term) => diskBlob.includes(norm(term)),
+    isInContext: (term) => containsTerm(contextBlob, term),
+    isOnDisk: (term) => containsTerm(diskBlob, term),
   };
 }
 

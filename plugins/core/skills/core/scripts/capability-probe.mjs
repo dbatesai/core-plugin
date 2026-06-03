@@ -57,6 +57,36 @@ export function detectConsumingHarness(env = process.env) {
   return detectConsumingHarnessSignal(env).harness;
 }
 
+// ---------- Row conformance (M10) ----------
+
+// row-schema.md §"Producer expectations": observed_at, harness, cwd, env_signals are
+// UNCONDITIONAL on every row. Only memory-accessed-probe emits env_signals; the other
+// five delegates omit it (and target-surface omits harness), so non-conformant rows used
+// to reach the history store that drift/regression analysis read. The orchestrator is the
+// one choke point every row passes through, so it backfills any missing unconditional
+// field here — never overwriting a value the probe set, only filling a gap. Keys mirror
+// memory-accessed-probe's ENV_SIGNAL_KEYS (single canonical set across the cluster).
+const ENV_SIGNAL_KEYS = ['CLAUDE_PLUGIN_ROOT', 'CODEX_PLUGIN_ROOT', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'];
+
+function gatherEnvSignals(env = process.env) {
+  const out = {};
+  for (const k of ENV_SIGNAL_KEYS) out[k] = env[k] ?? null;
+  return out;
+}
+
+function conformRow(row, opts = {}) {
+  if (!row || typeof row !== 'object') return row;
+  const env = opts.env || process.env;
+  if (row.observed_at == null) row.observed_at = new Date().toISOString();
+  if (row.harness == null) row.harness = opts.harness || detectConsumingHarness(env);
+  if (row.cwd == null) row.cwd = opts.cwd || process.cwd();
+  // env_signals is non-conformant when absent OR an empty object — row-schema.md requires the
+  // four ENV_SIGNAL_KEYS at minimum. makeNotYetRow/makeUnknownRow emit `{}`, so guard on empty too.
+  const es = row.env_signals;
+  if (es == null || (typeof es === 'object' && Object.keys(es).length === 0)) row.env_signals = gatherEnvSignals(env);
+  return row;
+}
+
 // ---------- Probe invocation ----------
 
 // For v2.6.0-β, the only declared capability is `plugin-root-resolution` and
@@ -66,7 +96,7 @@ export function detectConsumingHarness(env = process.env) {
 async function invokeProbe(capability, opts = {}) {
   if (capability.delegate === 'resolve-plugin-root.mjs') {
     const row = resolvePluginRoot(opts);
-    return { ...row, capability_id: capability.capability_id, capability_kind: capability.capability_kind };
+    return conformRow({ ...row, capability_id: capability.capability_id, capability_kind: capability.capability_kind }, opts);
   }
   // Sub-directory delegates — capability/*.mjs scripts (e.g. target-surface probes)
   if (capability.delegate && capability.delegate.startsWith('capability/')) {
@@ -80,18 +110,18 @@ async function invokeProbe(capability, opts = {}) {
       mod = await importer(delegatePath);
     } catch (e) {
       // Delegate didn't load (file missing / not implemented yet) — NOT-YET, not a crash.
-      return makeNotYetRow(capability, `delegate import failed: ${e.message}`);
+      return conformRow(makeNotYetRow(capability, `delegate import failed: ${e.message}`), opts);
     }
     try {
       const row = await mod.probe(opts);
-      return { ...row, capability_id: capability.capability_id, capability_kind: capability.capability_kind };
+      return conformRow({ ...row, capability_id: capability.capability_id, capability_kind: capability.capability_kind }, opts);
     } catch (e) {
       // §7 probe-itself validation: a probe that threw mid-execution is UNKNOWN, not a
       // missing row. Surface the crash so it can never pass silently as absent.
-      return makeUnknownRow(capability, e.message);
+      return conformRow(makeUnknownRow(capability, e.message), opts);
     }
   }
-  return makeNotYetRow(capability);
+  return conformRow(makeNotYetRow(capability), opts);
 }
 
 function makeNotYetRow(capability, reason = 'per-harness probe script not yet implemented') {
@@ -245,7 +275,9 @@ export async function runPreAction(actionName, opts = {}) {
   const declaredIds = new Set(relevantCaps.map(c => c.capability_id));
   for (const reqId of requiredIds) {
     if (!declaredIds.has(reqId)) {
-      rows.push({
+      // conformRow so this synthetic row carries the unconditional cwd/env_signals the history
+      // store expects (it's pushed directly, bypassing invokeProbe).
+      rows.push(conformRow({
         schema_version: SCHEMA_VERSION,
         capability_id: reqId,
         capability_name: reqId,
@@ -261,7 +293,7 @@ export async function runPreAction(actionName, opts = {}) {
           agrees_with_others: false,
           weight: 'conflicting',
         }],
-      });
+      }, { harness }));
     }
   }
 
@@ -281,8 +313,13 @@ export async function runPreAction(actionName, opts = {}) {
       row.mutation_block_reason = `identity-${String(row.identity_status).toLowerCase()}`;
       continue;
     }
-    // Authority gate (stable enum code: 'authority_not_allowed')
-    if (allowedAuthorities && !allowedAuthorities.has(row.authority)) {
+    // Authority gate (stable enum code: 'authority_not_allowed'). The `authority` field is an
+    // identity/plugin-root concept (canonical-source vs installed-cache); only those rows carry
+    // it. A non-identity row in the required set — e.g. the mutation-kind target-surface row,
+    // which has no `authority` — must NOT be force-failed here, or the action it gates can never
+    // be permitted (it's governed by its own identity PASS + the harness/signal gates below).
+    // So apply the authority restriction only to rows that actually declare an authority.
+    if (allowedAuthorities && row.authority != null && !allowedAuthorities.has(row.authority)) {
       row.mutation_permitted = false;
       row.mutation_block_reason = 'authority_not_allowed';
       continue;
