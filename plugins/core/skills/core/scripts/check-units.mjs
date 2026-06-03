@@ -47,6 +47,25 @@ export const VALID_EDGE_TYPES = new Set([
   'depended-on-by', 'supersedes-claim',
 ]);
 
+// Edge targets that legitimately live OUTSIDE the project unit store. The integrity
+// walk would otherwise flag these as dangling (see obs-validator-cross-store-blindness):
+//   1. cross-store units by naming convention — feedback_/project_/reference_ live in
+//      the harness auto-memory or cross-project memory, never in <project>/_memories/.
+//   2. citations and file paths — research papers ("Park et al. (arxiv…)"), doc paths
+//      (docs/specs/…), stale mirror paths — never unit IDs (they carry whitespace,
+//      parentheses, or a path separator a kebab-case unit id can't).
+// Recognized refs are reported as a benign 'external-ref', not 'dangling-edge', so a
+// genuine broken unit reference stands out instead of hiding in the cross-store noise.
+export const KNOWN_EXTERNAL_PREFIXES = [
+  'feedback_', 'feedback-', 'project_', 'project-', 'reference_', 'reference-',
+];
+export function isExternalRef(target) {
+  const t = String(target).replace(/\.md$/, '');
+  if (KNOWN_EXTERNAL_PREFIXES.some(p => t.startsWith(p))) return true;
+  if (/[\s()]/.test(t) || t.includes('/')) return true; // citation or file path, not a unit id
+  return false;
+}
+
 export const ARCHIVE_RS_THRESHOLD = 0.05;
 export const STALE_DAYS = 90;
 
@@ -219,8 +238,13 @@ export function checkIntegrity(units, memoriesDir, today, report) {
       // external vocab reference and is always valid here.
       if (e.type === 'references-topic') continue;
       const targetStem = target.replace(/\.md$/, '');
-      if (!allFiles.has(targetStem) && !allFiles.has(target))
-        report.push({ level: 'WARN', check: 'dangling-edge', unit_id: uid, detail: `Edge target '${target}' (type=${JSON.stringify(e.type)}) not found in unit store — external ref or missing unit?` });
+      if (!allFiles.has(targetStem) && !allFiles.has(target)) {
+        if (isExternalRef(target)) {
+          report.push({ level: 'WARN', check: 'external-ref', unit_id: uid, detail: `Edge target '${target}' (type=${JSON.stringify(e.type)}) is a recognized cross-store/external reference (not in the project unit store) — expected, not a break.` });
+        } else {
+          report.push({ level: 'WARN', check: 'dangling-edge', unit_id: uid, detail: `Edge target '${target}' (type=${JSON.stringify(e.type)}) not found in unit store — external ref or missing unit?` });
+        }
+      }
     }
 
     const rs = scoreProxyRS(u, today);
@@ -330,6 +354,7 @@ export function jsonReport(report, memoriesDir, mode, today) {
 // (and largely eliminated by flow-style array parsing). These return exit 0.
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
+  'external-ref',
 ]);
 
 // Exit-code contract: 0 = pass (including pass-with-benign-warnings),

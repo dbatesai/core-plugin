@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   checkIntegrity, checkSchema, exitCode, iterActiveUnits, iterAllUnitFiles,
+  isExternalRef, BENIGN_WARN_CHECKS,
 } from '../../plugins/core/skills/core/scripts/check-units.mjs';
 
 function withStore(fn) {
@@ -128,6 +129,71 @@ test('A2: references-topic edge to vocabulary is NOT a dangling-edge', () => wit
   const danglers = report.filter(f => f.check === 'dangling-edge');
   assert.ok(!danglers.some(f => f.detail.includes('memory-boundary')),
     'references-topic target is controlled vocab, not a unit — must not dangle');
+}));
+
+// --- Cross-store / external-ref recognition (2026-06-03; obs-validator-cross-store-blindness) ---
+
+test('cross-store prefixed edge target is external-ref, not dangling-edge', () => withStore((memories) => {
+  writeFileSync(join(memories, 'src.md'), unit({
+    id: 'src',
+    edges: 'edges:\n  - {type: cites, target: feedback_no_naked_dc_references}',
+  }));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date('2026-06-03'), report);
+
+  assert.equal(report.some(f => f.check === 'external-ref'), true,
+    'feedback_-prefixed target lives in cross-project memory — recognized external, not a break');
+  assert.equal(report.some(f => f.check === 'dangling-edge'), false);
+}));
+
+test('citation- and path-shaped edge targets are external-ref, not dangling-edge', () => withStore((memories) => {
+  writeFileSync(join(memories, 'src.md'), unit({
+    id: 'src',
+    edges: [
+      'edges:',
+      '  - {type: cites, target: Park et al. 2023 (arxiv.org/abs/2304.03442)}',
+      '  - {type: cites, target: docs/specs/2026-05-20-render-design.md}',
+    ].join('\n'),
+  }));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date('2026-06-03'), report);
+
+  assert.equal(report.filter(f => f.check === 'external-ref').length, 2,
+    'a citation (whitespace/parens) and a file path (slash) are not unit ids');
+  assert.equal(report.some(f => f.check === 'dangling-edge'), false);
+}));
+
+test('isExternalRef discriminates external refs from genuine unit ids', () => {
+  assert.equal(isExternalRef('feedback_state_is_current_truth'), true);
+  assert.equal(isExternalRef('project_bblens_tmobile_wrapper'), true);
+  assert.equal(isExternalRef('reference_keel_handoff_channels'), true);
+  assert.equal(isExternalRef('MemoryBank (arxiv.org/abs/2305.10250)'), true);
+  assert.equal(isExternalRef('core-skill/skills/core/scripts/README.md'), true);
+  // genuine unit-id shapes must NOT be masked — these still dangle if missing
+  assert.equal(isExternalRef('dc-99-missing'), false);
+  assert.equal(isExternalRef('obs-some-observation-2026-06-03'), false);
+  assert.equal(isExternalRef('risk-12-mcp-write-arbitration'), false);
+});
+
+test('external-ref is a benign warn check (does not block exit code)', () => {
+  assert.equal(BENIGN_WARN_CHECKS.has('external-ref'), true);
+  assert.equal(exitCode([{ level: 'WARN', check: 'external-ref' }]), 0,
+    'cross-store references must not degrade the exit code');
+});
+
+test('a genuinely missing unit-shaped target still flags dangling-edge (regression guard)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'src.md'), unit({
+    id: 'src',
+    edges: 'edges:\n  - {type: cites, target: dc-99-missing}',
+  }));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date('2026-06-03'), report);
+
+  assert.equal(report.some(f => f.check === 'dangling-edge'), true,
+    'a missing kebab-case unit id is a real break, not external');
 }));
 
 test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail (2)', () => {

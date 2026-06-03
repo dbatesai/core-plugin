@@ -65,6 +65,7 @@ Walk the unit store and run the hygiene operations from `protocols/hygiene.md`:
 - **Archive proposals** — surface low-priority candidates (R·S < 0.05, no recent reference) for `y / N / per-unit` approval. User-authored units always gate here.
 - **Retire confirmations** — any unit whose claim disappeared from PROJECT.md this session gets `status: retired`.
 - **Cold-store proposals** — surface any archived-and-retired-and-365d+ units.
+- **Unit-store validation (schema + integrity).** Run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs --store <project> --schema --integrity`. `/finalize` is the primary scheduled hygiene event, so it carries the validator rather than leaving schema/integrity checks only to `/process-memory` — a project that runs only `/finalize` would otherwise never see a frontmatter, enum, or edge problem (the disjoint-surface gap surfaced by the local-llm-build field report, 2026-06-03). Exit tiers: **0** pass-with-benign-warnings (`orphan`/`stale`/`external-ref` — cross-store and citation refs are expected, not breaks), **1** degraded (a real `dangling-edge`, `edge-unknown-type`, or other non-benign warning — surface it in plain voice; non-blocking), **2** hard fail (schema/enum/required-field — fix before closing). `edge-unknown-type` has no auto-fix (the safe-fix list covers only the inverse-duplicate types) — surface it as a relabel candidate, don't silently leave it. A `--schema`-only fast path is acceptable when the session didn't touch the store structurally.
 - **Index regeneration** — re-run if you see drift from Step 2; also run for any unit types changed this session.
 - **File-cap check** — if any synthesis file is over the Read-tool threshold, follow the graduation pattern in `protocols/hygiene.md`.
 - **Continuous self-evaluation** — review session-level signals (under-recall, over-recall, voice drift, smuggled architecture); write the retrospective at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`.
@@ -84,27 +85,6 @@ Walk the unit store and run the hygiene operations from `protocols/hygiene.md`:
 - **Plugin orphan check (dev-meta; definition-of-done enforcement)** — when this session edited the plugin tree itself (a new `scripts/*.mjs` or a `protocols/*.md`), run `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/orphan-detector.mjs`. It flags any script no skill/protocol/descriptor reaches and any protocol missing from the SKILL.md index — the "built but never wired" debt that recurs (`metrics-init` and `adversarial-run-gate` were both caught this way; the orphaned `clusters.md` protocol was retired rather than wired). Exit 1 = a new orphan: wire it AND assert the wiring in a test, or add it to the detector's `ALLOWLIST` with a reason if it's deliberately-staged forward-wiring. Allowlisted items still print every run so they stay visible. Skip on projects where you didn't touch the plugin (running it against an unmodified install is always clean).
 
 The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in `references/hygiene-strategies.md`.
-
----
-
-## Step 3.5 — Regenerate ROADMAP.md
-
-ROADMAP.md is a render. It should reflect the current release state after every session, not the state at the last time someone remembered to regenerate it. Run this after memory hygiene so the unit store and PROJECT.md §Moves are settled.
-
-Rebuild from source:
-- Read PROJECT.md §Moves (the session-current task list with release assignments)
-- Read the relevant decision units for each release (the `dc-*.md` units in `<project>/_memories/`)
-- Read `docs/playbooks/roadmap-playbook.md` for the eight-section per-release convention (What ships / Why this matters / Things to consider / Dependencies / Decisions / Current status)
-- Write `<project>/ROADMAP.md` with: the standard header preamble (what it is, how it's maintained, last-updated date), the big-picture prose, the "what the plugin does today" inventory anchored to the current released version (main branch), a "what ships next" section anchored to the next branch state, and per-release entries for the upcoming ladder
-
-Key honesty anchors:
-- "What the plugin does today" = what's on main (the shipped release), not next
-- "What ships next" = what's staged on next (unreleased, awaiting PR merge)
-- R-17 and any open risks surface explicitly in the applicable release entry rather than being buried
-
-Update the preamble `Last updated:` date to today.
-
-**Skip when** the session was trivial (no state changes, no new releases, no moved §Moves items) and the existing ROADMAP.md accurately reflects current state. When you skip, say so in one sentence.
 
 ---
 
