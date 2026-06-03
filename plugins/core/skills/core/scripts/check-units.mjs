@@ -45,7 +45,22 @@ export const VALID_EDGE_TYPES = new Set([
   'cites', 'supersedes', 'superseded-by', 'depends-on', 'conflicts-with',
   'references-person', 'references-topic',
   'depended-on-by', 'supersedes-claim',
+  // Blessed 2026-06-03 (2-corpus evidence, obs-20260603-edge-type-validation-gap-cross-corpus):
+  // both are semantically distinct from supersedes — 'refines' sharpens/elaborates a prior
+  // decision without replacing it (CORE); 'amends' modifies specific parts while the prior
+  // stands (local-llm-build / BBLens). Distinct intent → first-class, not relabeled away.
+  'refines', 'amends',
 ]);
+
+// Weak/informal edge types that carry no distinct semantics — normalize to a committed type
+// rather than blessing a near-synonym. The /process-memory safe-fix flow applies these as an
+// applyable relabel (the resolution path the cross-corpus gap report asked for); the validator
+// names the target in the edge-unknown-type detail so the fix is mechanical, not a guess.
+export const EDGE_TYPE_NORMALIZE = {
+  'relates': 'cites',
+  'relates-to': 'cites',
+  'related': 'cites',
+};
 
 // Edge targets that legitimately live OUTSIDE the project unit store. The integrity
 // walk would otherwise flag these as dangling (see obs-validator-cross-store-blindness):
@@ -149,7 +164,12 @@ export function checkSchema(units, memoriesDir, report) {
         const eType = item.type || '';
         const eTarget = item.target || '';
         if (!eType) report.push({ level: 'WARN', check: 'edge-missing-type', unit_id: uid, detail: `Edge [${i}] missing 'type' field` });
-        else if (!VALID_EDGE_TYPES.has(String(eType))) report.push({ level: 'WARN', check: 'edge-unknown-type', unit_id: uid, detail: `Edge [${i}] type '${eType}' not in committed types` });
+        else if (!VALID_EDGE_TYPES.has(String(eType))) {
+          const norm = EDGE_TYPE_NORMALIZE[String(eType)];
+          report.push({ level: 'WARN', check: 'edge-unknown-type', unit_id: uid, detail: norm
+            ? `Edge [${i}] type '${eType}' not in committed types — normalize to '${norm}' (safe-fix)`
+            : `Edge [${i}] type '${eType}' not in committed types — relabel to a committed type or surface for a bless decision` });
+        }
         if (!eTarget) {
           report.push({ level: 'FAIL', check: 'edge-missing-target', unit_id: uid, detail: `Edge [${i}] (type=${JSON.stringify(eType)}) missing 'target' field` });
         }

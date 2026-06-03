@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   checkIntegrity, checkSchema, exitCode, iterActiveUnits, iterAllUnitFiles,
-  isExternalRef, BENIGN_WARN_CHECKS,
+  isExternalRef, BENIGN_WARN_CHECKS, VALID_EDGE_TYPES, EDGE_TYPE_NORMALIZE,
 } from '../../plugins/core/skills/core/scripts/check-units.mjs';
 
 function withStore(fn) {
@@ -194,6 +194,41 @@ test('a genuinely missing unit-shaped target still flags dangling-edge (regressi
 
   assert.equal(report.some(f => f.check === 'dangling-edge'), true,
     'a missing kebab-case unit id is a real break, not external');
+}));
+
+// --- Edge-type vocabulary: bless refines/amends, normalize relates (2026-06-03) ---
+
+test('refines and amends are committed edge types (no edge-unknown-type)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'a.md'), unit({ id: 'a' }));
+  writeFileSync(join(memories, 'b.md'), unit({ id: 'b' }));
+  writeFileSync(join(memories, 'src.md'), unit({
+    id: 'src',
+    edges: 'edges:\n  - {type: refines, target: a}\n  - {type: amends, target: b}',
+  }));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.equal(report.some(f => f.check === 'edge-unknown-type'), false,
+    'refines + amends are blessed — distinct from supersedes');
+  assert.equal(VALID_EDGE_TYPES.has('refines'), true);
+  assert.equal(VALID_EDGE_TYPES.has('amends'), true);
+}));
+
+test('relates flags edge-unknown-type and names its normalize target', () => withStore((memories) => {
+  writeFileSync(join(memories, 'a.md'), unit({ id: 'a' }));
+  writeFileSync(join(memories, 'src.md'), unit({
+    id: 'src',
+    edges: 'edges:\n  - {type: relates, target: a}',
+  }));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  const warn = report.find(f => f.check === 'edge-unknown-type');
+  assert.ok(warn, 'relates is not committed — must flag');
+  assert.match(warn.detail, /normalize to 'cites'/, 'the safe-fix target is named for a mechanical relabel');
+  assert.equal(EDGE_TYPE_NORMALIZE['relates'], 'cites');
 }));
 
 test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail (2)', () => {

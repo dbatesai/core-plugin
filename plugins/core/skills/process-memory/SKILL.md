@@ -106,10 +106,11 @@ Read the output. The validator emits three counts: PASS, WARN, FAIL.
 - `status-value: closed` on a risk unit → rewrite to `archived`.
 - `status-value: superseded` on a decision unit → rewrite to `retired`.
 - `archived-in-active`: unit has `status: archived` but sits in active dir → move to `_memories/archive/`.
-- `edge-unknown-type`: edge type not in the six committed types (`cites`, `supersedes`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`) → remove the edge if it's `superseded-by` or `depended-on-by` (the inverse already lives on the other unit); otherwise surface.
+- `edge-unknown-type`: edge type not in the committed set (`cites`, `supersedes`, `superseded-by`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`, `depended-on-by`, `supersedes-claim`, `refines`, `amends`) → three cases: (a) `superseded-by`/`depended-on-by` → remove (the inverse already lives on the other unit); (b) a type in the normalize map (`relates`/`relates-to`/`related` → `cites`) → **relabel to the named target** — the validator prints the target in the warning detail, so this is a mechanical safe-fix, not a guess; (c) anything else → surface for a bless-or-relabel decision (don't invent a type). `refines` and `amends` are committed now (distinct from `supersedes`) and no longer flag.
+- `external-ref`: a cross-store/citation/path edge target recognized as legitimately outside the unit store (benign; not a break) — no fix, leave it.
 
 **Surface for human judgment** without auto-fixing:
-- `dangling-edge` / `edge-target-missing` — could be valid external references or typos; the user decides.
+- `dangling-edge` / `edge-target-missing` — a missing in-store unit (real break) or a typo; the user decides. (Recognized cross-store refs are `external-ref`, handled above — they no longer show here.)
 - `orphan` (no edges) — sometimes deliberate (risks often stand alone), sometimes a graduation gap.
 - Anything else the validator flags that isn't on the safe-fix list.
 
