@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import {
   checkIntegrity, checkSchema, exitCode, iterActiveUnits, iterAllUnitFiles,
   isExternalRef, BENIGN_WARN_CHECKS, VALID_EDGE_TYPES, EDGE_TYPE_NORMALIZE,
+  resolveChecks,
 } from '../../plugins/core/skills/core/scripts/check-units.mjs';
 
 function withStore(fn) {
@@ -41,6 +42,25 @@ function unit({
     '',
   ].filter(line => line !== '').join('\n');
 }
+
+test('H3: --schema and --integrity together run BOTH checks (additive, not last-wins)', () => {
+  // The old parser set mode= on each flag, so `--schema --integrity` silently
+  // resolved to integrity-only and the schema check never fired — exactly what
+  // /finalize was unknowingly doing. Flags are additive now.
+  const both = resolveChecks(['--store', 'x', '--schema', '--integrity']);
+  assert.equal(both.schema, true, 'schema check requested');
+  assert.equal(both.integrity, true, 'integrity check requested');
+  assert.equal(both.mode, 'all', 'label resolves to all');
+});
+
+test('H3: single flags and --mode still resolve as before (back-compat)', () => {
+  assert.deepEqual(resolveChecks(['--schema']), { schema: true, integrity: false, mode: 'schema' });
+  assert.deepEqual(resolveChecks(['--integrity']), { schema: false, integrity: true, mode: 'integrity' });
+  assert.deepEqual(resolveChecks(['--mode', 'schema']), { schema: true, integrity: false, mode: 'schema' });
+  assert.deepEqual(resolveChecks(['--mode', 'all']), { schema: true, integrity: true, mode: 'all' });
+  // no mode flags at all -> both (the documented default)
+  assert.deepEqual(resolveChecks(['--store', 'x']), { schema: true, integrity: true, mode: 'all' });
+});
 
 test('iterActiveUnits: returns real units regardless of their prose content', () => withStore((memories) => {
   writeFileSync(join(memories, 'real-unit.md'), unit({

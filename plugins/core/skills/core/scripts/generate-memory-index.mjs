@@ -20,11 +20,12 @@
  *        [--top N] [--today YYYY-MM-DD]
  */
 
-import { readFileSync, writeFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 const SECTION_HEADER_RE = /^## Top project units/;
 const EXISTING_LINE_RE = /^- \[([^\]]+)\]\(([^)]+)\) — (.+)$/;
@@ -250,7 +251,7 @@ export function main(argv) {
     return 0;
   }
 
-  writeFileSync(memoryMdPath, newText);
+  atomicWriteFileSync(memoryMdPath, newText);
   process.stderr.write(`Rewrote priority block in ${memoryMdPath} (${topN} units)\n`);
   return 0;
 }

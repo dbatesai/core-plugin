@@ -82,3 +82,13 @@ test('a malformed --today exits 2 cleanly (no RangeError from toISOString)', () 
     assert.equal(code, 2, 'malformed --today refuses with exit 2');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('H1: MEMORY.md write routes through atomicWriteFileSync, not a bare write', () => {
+  // MEMORY.md holds hand-curated, unreconstructable narrative; a crash mid-write
+  // must never truncate it. Crash-safety can't be behaviorally unit-tested without
+  // fault injection (fs-atomic.test.mjs covers the helper itself), so this is a
+  // static guard that the consumer uses the safe writer.
+  assert.match(SRC, /from '\.\/fs-atomic\.mjs'/, 'imports the atomic writer');
+  assert.match(SRC, /atomicWriteFileSync\(memoryMdPath/, 'writes MEMORY.md atomically');
+  assert.doesNotMatch(SRC, /\bwriteFileSync\(memoryMdPath/, 'no bare writeFileSync on the irreplaceable MEMORY.md surface');
+});

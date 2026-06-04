@@ -81,7 +81,7 @@ Review agents that participated in recent swarms. Files at `~/.core/agents/<keba
 
 Every hygiene run produces:
 1. Updated memory files (modified, merged, archived, deleted)
-2. A retrospective at `~/.core/memory-hygienes/<YYYY-MM-DD>.md`
+2. A retrospective at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`
 3. Updated index files reflecting any additions or removals
 4. If 3b ran: refreshed `archive-reconciliation-state.json` + Phase 3b section in retrospective
 5. If 3b promoted any stubs: corresponding PROJECT.md §D&R edits, gated on secondary confirmation

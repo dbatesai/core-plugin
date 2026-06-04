@@ -281,3 +281,13 @@ test('probe PASS for the documented startup order: Skill → echo → Read start
     assert.equal(row.identity_status, 'PASS', 'the documented Skill→echo→Read→Bash order verifies as PASS');
   });
 });
+
+test('H1: write-visibility-canary writes MEMORY.md atomically, not with a bare write', () => {
+  const canarySrc = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/write-visibility-canary.mjs'),
+    'utf8',
+  );
+  assert.match(canarySrc, /from '\.\/fs-atomic\.mjs'/, 'imports the atomic writer');
+  assert.match(canarySrc, /atomicWriteFileSync\(memPath/, 'writes MEMORY.md atomically');
+  assert.doesNotMatch(canarySrc, /\bwriteFileSync\(memPath\b/, 'no bare writeFileSync on the irreplaceable MEMORY.md surface');
+});

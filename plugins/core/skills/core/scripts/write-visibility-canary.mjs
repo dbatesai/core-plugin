@@ -30,6 +30,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { mapProjectPathToSlug } from './project-slug.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
 // M16: match only the MANAGED canary line, not any prose that mentions the tag. The old
@@ -74,7 +75,7 @@ export function writeCanary(opts = {}) {
   const memPath = opts.memoryPath || mappedMemoryPath(cwd, home);
   let memory_written = false;
   if (existsSync(memPath)) {
-    writeFileSync(memPath, upsertCanaryLine(readFileSync(memPath, 'utf8'), token));
+    atomicWriteFileSync(memPath, upsertCanaryLine(readFileSync(memPath, 'utf8'), token));
     memory_written = true;
   }
 

@@ -184,6 +184,16 @@ test('setFrontmatterField leaves text without frontmatter untouched', () => {
   assert.equal(setFrontmatterField('no frontmatter here', 't_invalid', '2026-01-01'), 'no frontmatter here');
 });
 
+test('H2: setFrontmatterField stamps a CRLF-authored unit (Windows/OneDrive), not silently skips it', () => {
+  // A CRLF unit opens with `---\r\n`; an LF-only fence regex returns the text
+  // unchanged, the caller sees next===text, the write is skipped, and the
+  // superseded unit stays "valid forever". Mirror the sibling readers' CRLF normalize.
+  const crlf = '---\r\nid: dc-x\r\nstatus: retired\r\ncreated: 2026-01-01\r\n---\r\n\r\nbody\r\n';
+  const out = setFrontmatterField(crlf, 't_invalid', '2026-03-01');
+  assert.match(out, /^t_invalid: 2026-03-01$/m, 't_invalid written into the CRLF unit');
+  assert.notEqual(out, crlf, 'did not no-op on CRLF input');
+});
+
 // ============================================================
 // applySupersessionStamps — round-trip through real files
 // ============================================================

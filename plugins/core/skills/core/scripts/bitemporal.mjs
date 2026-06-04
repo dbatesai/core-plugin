@@ -152,8 +152,14 @@ export function planSupersessionStamps(units) {
 
 /** Insert or replace a top-level scalar frontmatter field, preserving the rest. */
 export function setFrontmatterField(text, key, value) {
-  const m = text.match(/^(---\n)([\s\S]*?)(\n---)/);
-  if (!m) return text; // no frontmatter — leave untouched
+  // Normalize CRLF -> LF before matching. A unit authored with CRLF endings
+  // (Windows/OneDrive) opens with `---\r\n`, which an LF-only fence regex can't
+  // match — the stamp would be silently dropped. The sibling readers
+  // (parseFrontmatter in priority.mjs, parseFlatFrontmatter) normalize the same
+  // way, and .gitattributes pins *.md to eol=lf, so LF-on-write is canonical.
+  const normalized = text.replace(/\r\n/g, '\n');
+  const m = normalized.match(/^(---\n)([\s\S]*?)(\n---)/);
+  if (!m) return text; // no frontmatter — leave the ORIGINAL untouched
   const [, open, body, close] = m;
   const lines = body.split('\n');
   const keyRe = new RegExp(`^${key}\\s*:`);
@@ -167,7 +173,7 @@ export function setFrontmatterField(text, key, value) {
     if (anchor >= 0) lines.splice(anchor + 1, 0, `${key}: ${value}`);
     else lines.push(`${key}: ${value}`);
   }
-  return text.replace(m[0], `${open}${lines.join('\n')}${close}`);
+  return normalized.replace(m[0], `${open}${lines.join('\n')}${close}`);
 }
 
 /** Apply the planned stamps to disk. Returns count written. */

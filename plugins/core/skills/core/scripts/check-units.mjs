@@ -394,17 +394,42 @@ export function exitCode(report) {
 
 // ---------- CLI ----------
 
+/**
+ * Resolve which checks to run from the mode flags. ADDITIVE: `--schema` and
+ * `--integrity` (or two `--mode` flags) each turn ON their check rather than
+ * overwriting a single `mode`, so `--schema --integrity` runs BOTH. The old
+ * last-wins parser silently dropped the schema half of exactly that invocation
+ * (the disjoint-surface gap /finalize hit). No mode flag at all = both (default).
+ * @returns {{schema: boolean, integrity: boolean, mode: string}}
+ */
+export function resolveChecks(argv) {
+  let schema = false, integrity = false, explicit = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--mode') {
+      const mv = argv[++i];
+      if (mv === 'schema') schema = true;
+      else if (mv === 'integrity') integrity = true;
+      else { schema = true; integrity = true; } // 'all' or anything unrecognized
+      explicit = true;
+    } else if (a === '--schema') { schema = true; explicit = true; }
+    else if (a === '--integrity') { integrity = true; explicit = true; }
+  }
+  if (!explicit) { schema = true; integrity = true; }
+  const mode = schema && integrity ? 'all' : (schema ? 'schema' : 'integrity');
+  return { schema, integrity, mode };
+}
+
 export function main(argv) {
   let projectArg = '.';
-  let mode = 'all';
   let asJson = false;
   let todayArg = null;
+  const { schema: doSchema, integrity: doIntegrity, mode } = resolveChecks(argv);
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--mode') { mode = argv[++i]; }
-    else if (a === '--schema') { mode = 'schema'; }
-    else if (a === '--integrity') { mode = 'integrity'; }
+    if (a === '--mode') { i++; }                              // value handled by resolveChecks
+    else if (a === '--schema' || a === '--integrity') { /* handled by resolveChecks */ }
     else if (a === '--store') { projectArg = argv[++i]; }
     else if (a === '--json') { asJson = true; }
     else if (a === '--today') { todayArg = argv[++i]; }
@@ -426,8 +451,8 @@ export function main(argv) {
   const units = iterActiveUnits(memoriesDir);
   if (!units.length) { process.stderr.write(`error: no units found in ${memoriesDir}\n`); return 3; }
 
-  if (mode === 'schema' || mode === 'all') checkSchema(units, memoriesDir, report);
-  if (mode === 'integrity' || mode === 'all') checkIntegrity(units, memoriesDir, today, report);
+  if (doSchema) checkSchema(units, memoriesDir, report);
+  if (doIntegrity) checkIntegrity(units, memoriesDir, today, report);
 
   if (asJson) jsonReport(report, memoriesDir, mode, today);
   else printReport(report, memoriesDir, mode, today);
