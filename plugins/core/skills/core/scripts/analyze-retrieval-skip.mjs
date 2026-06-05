@@ -180,7 +180,12 @@ export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = 
 export function analyzeRetrievalSkip({ projectRoot = process.cwd(), harness = 'claude-code', home = homedir(), transcriptPath = null } = {}) {
   const coreStorePresent = existsSync(join(projectRoot, '_memories')) || existsSync(join(projectRoot, 'PROJECT.md'));
   const t = readTranscript({ harness, cwd: projectRoot, home, override: transcriptPath });
-  const toolExtractionPending = t.meta?.codex_tool_extraction === 'pending-hc-spec';
+  // The producer (read-transcript) emits 'implemented' (codex, tools extractable) or
+  // 'n/a' (other harnesses). The old `=== 'pending-hc-spec'` sentinel is retired, so
+  // this was dead. Re-synced as "any value that is neither known-good": abstains on a
+  // future schema drift instead of silently flooding false SKIPs.
+  const extraction = t.meta?.codex_tool_extraction;
+  const toolExtractionPending = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
   const terms = coreStorePresent ? buildProjectTerms(projectRoot) : new Set();
   const r = classifyRetrievalSkips({
     events: t.events, terms, coreStorePresent, transcriptAvailable: t.available, toolExtractionPending,

@@ -75,7 +75,7 @@ recency/frequency), plus held success-criteria a latent fact can be matched agai
 | **Who populates** | Overlay (and eventually CORE) at graduation, once the representation is decided. |
 | **CORE reader (when built)** | The priority function (DC-69) absorbing salience as a fourth signal — which is itself the foundational change the `/core` pass must rule on. |
 
-## 4. Person-node synthesis — **CONTRACT** (Phase 4 layer 5)
+## 4. Person-node synthesis — **CONTRACT** (Phase 4 layer 4)
 
 A person modeled as a queryable node whose "current state" is synthesized across the channels
 they appear in (BBLens use cases 8, M1).

@@ -193,8 +193,9 @@ export function classifyStateBullet(bullet, projectDir, { today, recencyDays = S
   const maxUpdated = dates[dates.length - 1];
   const todayIso = today || todayUTC();
   const age = ageInDays(maxUpdated, todayIso);
-  if (age < recencyDays) {
-    return { decision: 'keep', reason: 'too-recent', maxUpdated, ageDays: age };
+  if (!Number.isFinite(age) || age < recencyDays) {
+    // NaN (malformed date) keeps the item rather than silently demoting it.
+    return { decision: 'keep', reason: Number.isFinite(age) ? 'too-recent' : 'unparseable-date', maxUpdated, ageDays: age };
   }
   return { decision: 'demote', maxUpdated, ageDays: age, refs };
 }

@@ -186,7 +186,10 @@ export async function planAgentsMd(projectPath, { apply = false } = {}) {
     return { status: existsSync(agentsPath) ? 'present-would-refresh' : 'would-generate', contractPath, agentsPath };
   }
   const r = await generateAgentsMd({ contractPath, outputPath: agentsPath, mode: 'write' });
-  if (r.skipped) return { status: 'skipped-no-contract', contractPath, agentsPath };
+  // The existsSync above already proved the contract present, so r.skipped can only
+  // fire if CONTRACT.md vanished between the check and the read (TOCTOU) — report it
+  // as that, not the duplicate 'skipped-no-contract' the precheck already returns.
+  if (r.skipped) return { status: 'skipped-contract-vanished', contractPath, agentsPath };
   return { status: 'generated', contractPath, agentsPath, written: r.written || agentsPath };
 }
 

@@ -259,7 +259,7 @@ export function main(argv) {
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
 const _argv1 = _canon(process.argv[1]);
 const _self = _canon(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY === '1') {
+if (process.env.CORE_DEBUG_CLI_ENTRY) {
   process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_argv1)} self=${JSON.stringify(_self)} match=${_argv1 === _self}\n`);
 }
 if (_argv1 === _self) {

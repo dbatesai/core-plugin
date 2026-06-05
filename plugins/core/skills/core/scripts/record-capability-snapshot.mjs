@@ -128,6 +128,6 @@ export async function main(argv) {
 }
 
 const _c = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_c(process.argv[1]) === _c(fileURLToPath(import.meta.url))) {
+if (_c(process.argv[1] || '') === _c(fileURLToPath(import.meta.url))) {
   main(process.argv.slice(2)).then((code) => process.exit(code ?? 0));
 }

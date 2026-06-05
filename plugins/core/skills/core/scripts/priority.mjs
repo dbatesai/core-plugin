@@ -123,6 +123,10 @@ export function normalizeNewlines(text) {
   return typeof text === 'string' ? text.replace(/\r\n?/g, '\n') : text;
 }
 
+// priority.mjs owns its own frontmatter parser (rather than importing frontmatter-flat.mjs)
+// on purpose: priority is the base unit module that many scripts — including the parser's
+// other callers — import, so taking a dependency the other way risks an import cycle. Both
+// parsers normalize CRLF, so they agree on behavior; this is a deliberate duplication, not drift.
 export function parseFrontmatter(rawText) {
   const text = normalizeNewlines(rawText);
   if (!text.startsWith('---\n')) return [{}, text];

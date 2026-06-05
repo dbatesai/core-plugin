@@ -91,15 +91,14 @@ export const STALE_DAYS = 90;
 // validation. No separate producer/path map is needed.
 
 export function iterActiveUnits(memoriesDir) {
-  const skipDirs = new Set(['archive', 'cold-storage', '_validation']);
   const units = [];
   let entries;
   try { entries = readdirSync(memoriesDir, { withFileTypes: true }); } catch { return units; }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isDirectory()) {
-      if (!skipDirs.has(entry.name)) continue; // skip unknown sub-dirs
-      continue;
-    }
+    // Top-level only by design: archive/, cold-storage/, _validation/, observations/
+    // and every other sub-dir are out of the active set. (The old skipDirs allow-list
+    // was dead — both branches skipped, so all sub-dirs are skipped regardless.)
+    if (entry.isDirectory()) continue;
     if (!entry.name.endsWith('.md')) continue;
     const name = entry.name;
     if (name.startsWith('_') || name.startsWith('INDEX') || name === 'README.md') continue;

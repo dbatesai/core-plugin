@@ -81,9 +81,13 @@ export function findOrphans({ coreRoot, allowlist = ALLOWLIST } = {}) {
   }
 
   // Seed: scripts named in skill/protocol/reference prose (by full basename).
+  // Match on a boundary, not a bare substring: a plain includes('init.mjs') would
+  // falsely mark init.mjs reachable just because the prose mentions metrics-init.mjs.
   const wired = new Set();
+  const boundary = (name) => new RegExp(`(^|[^\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`);
   for (const s of scripts) {
-    if (docText.includes(basename(s))) wired.add(basename(s));
+    const name = basename(s);
+    if (boundary(name).test(docText)) wired.add(name);
   }
   // Transitive closure: anything imported by a wired script is wired.
   let grew = true;

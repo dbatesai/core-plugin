@@ -25,8 +25,8 @@
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
  */
 
-import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync, readdirSync, appendFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';

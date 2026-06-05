@@ -62,7 +62,7 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 
 **First consumer.** This document itself. The graduation criteria above are the doctrine; the maintenance of this file is the consumer. When the doctrines listed here lose their first-consumers (named below each entry), the entries get demoted to observation status rather than removed silently.
 
-**Codified in.** DC-98 (schema-consumer coupling, but the principle extends to doctrines per DC-98's note on doctrine layer). The metaphor: schemas have schema_version + Known Consumers list; doctrines have First Consumer + secondary-consumer roster.
+**Codified in.** DC-98 (schema-and-doctrine-consumer coupling — the same rule covers both, as it does at the top of this file). The metaphor: schemas have schema_version + Known Consumers list; doctrines have First Consumer + secondary-consumer roster.
 
 ---
 
