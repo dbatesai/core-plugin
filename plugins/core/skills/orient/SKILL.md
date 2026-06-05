@@ -26,7 +26,7 @@ Determine what you're orienting to:
 1. Is there a `workspace.json` in the current directory? Read it.
 2. Does `~/.core/index.json` have a workspace whose path matches the current directory? Use it.
 3. Has `/core` already been invoked this session? You're already oriented — surface the current state and stop.
-4. None of the above? Treat as a new workspace and run Phase 3B from the startup protocol (resolved per the path-replacement rule at the top of this file).
+4. None of the above? Treat as a new workspace and run the startup protocol's `§"Load — new workspace"` flow (resolved per the path-replacement rule at the top of this file).
 
 ---
 

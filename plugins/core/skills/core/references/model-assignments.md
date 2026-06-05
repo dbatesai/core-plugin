@@ -1,6 +1,6 @@
 # Model Assignments
 
-Single source of truth for which model runs at each pipeline stage. The main agent reads this before any dispatch that has model-tier flexibility. Per the v2 memory pipeline design (`docs/specs/2026-05-19-memory-pipeline-design.md`, session 19w).
+Single source of truth for which model runs at each pipeline stage. The main agent reads this before any dispatch that has model-tier flexibility. Per the v2 memory pipeline design (session 19w).
 
 The principle: fastest model that doesn't sacrifice quality at each stage. No Opus when Haiku suffices. No Haiku when Sonnet's judgment matters.
 

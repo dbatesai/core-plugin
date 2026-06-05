@@ -119,7 +119,7 @@ Supporting references:
 - `schemas/output.md` — output schema for multi-agent runs.
 - `schemas/workspace.md` — workspace manifest structure.
 
-The architecture's why lives in `ARCHITECTURE.md` at the plugin root. Read it when you need the rationale behind a how.
+The architecture's why lives in `ARCHITECTURE.md` in the source repo (it isn't shipped inside the installed plugin); the load-bearing doctrines also ship here in `references/architecture-doctrines.md`. Read either when you need the rationale behind a how.
 
 ---
 
