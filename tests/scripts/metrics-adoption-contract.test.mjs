@@ -17,29 +17,39 @@ function scratch(workspaceJson) {
   return dir;
 }
 
-// ---------- 1. Privacy gate: default-off, opt-in, explicit hard-off wins ----------
+// ---------- 1. Capture gate: DEFAULT-ON, opt-out (DC-107) ----------
+// Changed from default-off to default-on per David 2026-06-04: the instrumented-
+// memory thesis needs the corpus, and the calibration gate was starving under opt-in.
+// Opt out via env CORE_METRICS_ENABLED=0 or per-workspace metrics_enabled:false.
+// Explicit env wins over the workspace flag in both directions. Capture stays local.
 
-test('privacy gate defaults OFF with no env and no workspace flag', () => {
+test('capture gate defaults ON with no env and no workspace flag', () => {
   const dir = scratch({ workspace_id: 'x' });
+  try { assert.equal(metricsEnabled({ project: dir, env: {} }), true); }
+  finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a workspace opts OUT via workspace.json metrics_enabled:false', () => {
+  const dir = scratch({ workspace_id: 'x', metrics_enabled: false });
   try { assert.equal(metricsEnabled({ project: dir, env: {} }), false); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('privacy gate opts in via workspace.json metrics_enabled:true', () => {
+test('workspace.json metrics_enabled:true stays ON (explicit opt-in, harmless under default-on)', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: true });
   try { assert.equal(metricsEnabled({ project: dir, env: {} }), true); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('privacy gate opts in via CORE_METRICS_ENABLED env', () => {
-  const dir = scratch({ workspace_id: 'x' });
-  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_METRICS_ENABLED: '1' } }), true); }
+test('explicit CORE_METRICS_ENABLED=0 hard-off overrides a workspace opt-in', () => {
+  const dir = scratch({ workspace_id: 'x', metrics_enabled: true });
+  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_METRICS_ENABLED: '0' } }), false); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('explicit CORE_METRICS_ENABLED=0 hard-off overrides the workspace flag', () => {
-  const dir = scratch({ workspace_id: 'x', metrics_enabled: true });
-  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_METRICS_ENABLED: '0' } }), false); }
+test('explicit CORE_METRICS_ENABLED=1 forces ON over a workspace opt-out', () => {
+  const dir = scratch({ workspace_id: 'x', metrics_enabled: false });
+  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_METRICS_ENABLED: '1' } }), true); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

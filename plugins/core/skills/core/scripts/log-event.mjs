@@ -89,17 +89,21 @@ export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
 }
 
 /**
- * Privacy gate for the Layer 2/3 metrics interpretation passes (spec §18).
+ * Capture gate for the Layer 2/3 metrics interpretation passes (spec §18).
  *
- * Metrics capture logs the content of prompts, responses, and context sources —
- * by CORE's own taxonomy a smuggling tripwire (data-storage.md). So it is
- * DEFAULT-OFF and opt-in, never on by default for a plugin-distributed install:
- *   - `CORE_METRICS_ENABLED` env var truthy (1/true/yes), OR
- *   - `<project>/workspace.json` carries `"metrics_enabled": true`.
- * `CORE_METRICS_ENABLED=0`/false force-disables even if the workspace flag is set,
- * so a user can hard-off it per shell. Returns false on any ambiguity — the
- * privacy-safe default. The owner opts in per workspace; everyone else captures
- * nothing unless they choose to.
+ * DEFAULT-ON, opt-out (DC-107, David 2026-06-04). The instrumented-memory thesis
+ * needs the corpus — under the old default-off the calibration gate starved
+ * (CORE-on-CORE is too small to ever reach ~100 labeled turns), so the feedback
+ * loop the system exists to close couldn't close. Capture stays LOCAL (no network
+ * exfil); the accepted tradeoff is that a fresh marketplace install classifies its
+ * own conversation content into local artifacts unless the user opts out.
+ *
+ * Precedence (first match wins):
+ *   1. `CORE_METRICS_ENABLED` env false (0/false/no/off) → OFF — hard opt-out, beats everything.
+ *   2. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
+ *   3. `<project>/workspace.json` `"metrics_enabled": false` → OFF — per-workspace opt-out.
+ *   4. `<project>/workspace.json` `"metrics_enabled": true`  → ON — explicit opt-in (redundant now).
+ *   5. default → ON.
  */
 export function metricsEnabled({ project, env = process.env } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
@@ -108,10 +112,11 @@ export function metricsEnabled({ project, env = process.env } = {}) {
   if (project) {
     try {
       const p = JSON.parse(readFileSync(join(project, 'workspace.json'), 'utf8'));
-      if (p && p.metrics_enabled === true) return true;
+      if (p && p.metrics_enabled === false) return false; // per-workspace opt-out
+      if (p && p.metrics_enabled === true) return true;   // per-workspace opt-in (explicit)
     } catch { /* fall through */ }
   }
-  return false; // privacy-safe default
+  return true; // default-ON (DC-107): instrument by default; opt out via env or workspace flag
 }
 
 export function eventLogPath(projectDir, filename, { today } = {}) {

@@ -207,10 +207,10 @@ function walkNames(dir, out, depth = 0) {
 function safeRead(p) { try { return readFileSync(p, 'utf8'); } catch { return ''; } }
 
 export function runClassification({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, workspaceId, env }) {
-  // Privacy gate (spec §18): default-off; opt-in per workspace. Captures nothing
-  // — reads no transcript content, writes no records — unless explicitly enabled.
+  // Capture gate (spec §18, DC-107): default-on, opt-out. Captures nothing
+  // — reads no transcript content, writes no records — when the user has opted out.
   if (!metricsEnabled({ project, env })) {
-    return { status: 'DISABLED', reason: 'metrics opt-in not set (CORE_METRICS_ENABLED env or workspace.json metrics_enabled)', provisional: true };
+    return { status: 'DISABLED', reason: 'metrics opted out (CORE_METRICS_ENABLED=0 or workspace.json metrics_enabled:false)', provisional: true };
   }
   const t = readTranscript({ harness, cwd: cwd || project, home });
   if (!t.available) {

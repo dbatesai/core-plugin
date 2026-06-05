@@ -117,9 +117,11 @@ The observability layer (Phases 0–3) extends the same way. An overlay adds its
   detectors are added without touching capture (`metrics-detectors.mjs` is the pattern). An
   overlay writes its own domain detectors — e.g. a delivery-specific "missed-signal" detector —
   reading the same captured ground truth.
-- **The opt-in gate is the deployment switch.** Metrics are default-off; an overlay opts its
-  workspace in via `CORE_METRICS_ENABLED` or `workspace.json` `metrics_enabled`, and the whole
-  substrate (classifier, detectors, rollups, bi-temporal storage metrics) turns on for its corpus.
+- **The capture gate is the deployment switch.** Metrics are default-on (DC-107); the whole
+  substrate (classifier, detectors, rollups, bi-temporal storage metrics) runs for every workspace
+  unless it opts out via `CORE_METRICS_ENABLED=0` or `workspace.json` `metrics_enabled: false`.
+  Capture stays local. An overlay that wants a workspace dark sets the opt-out; everyone else
+  contributes to the corpus by default.
 
 What CORE owns: the six-state recognition taxonomy, the rollup, the `/orient` signal, the gold
 detectors, the calibration harness (`calibrate-classifier.mjs`) and its precision gate. What the
