@@ -22,12 +22,13 @@
  */
 
 import {
-  readFileSync, writeFileSync, renameSync, existsSync,
+  readFileSync, writeFileSync, existsSync,
   mkdirSync, rmSync, openSync, closeSync, statSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const BYTE_CAP = 512 * 1024;           // 512KB per workspace
 export const RETENTION_PER_CAPABILITY = 80;   // entries kept per capability_id on cap breach
@@ -182,9 +183,9 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
     const all = [...existing, ...newLines];
     const { kept, truncated } = applyRetention(all, opts.retentionOpts);
 
-    const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${randomBytes(2).toString('hex')}`;
-    writeFileSync(tmp, kept.join('\n') + '\n');
-    renameSync(tmp, file);
+    // M8: use the shared atomic writer rather than a hand-rolled temp+rename that
+    // had no temp-file cleanup on failure (an orphaned .tmp-* per failed append).
+    atomicWriteFileSync(file, kept.join('\n') + '\n');
 
     return { appended: newLines.length, truncated, path: file };
   } finally {

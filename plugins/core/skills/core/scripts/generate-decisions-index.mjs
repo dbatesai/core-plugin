@@ -16,10 +16,11 @@
  *       --store <project>/_memories/
  */
 
-import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const DC_NUMERIC = /^dc-(\d+)-.+\.md$/;
 export const DC_NAMED = /^dc-([a-z][a-z0-9-]*)\.md$/;
@@ -134,7 +135,10 @@ export function main(argv) {
 
   const indexPath = join(memoriesDir, 'INDEX-decisions.md');
   const content = buildIndex(memoriesDir);
-  writeFileSync(indexPath, content);
+  // Atomic write (M9): a crash mid-write leaves a truncated index, and check-units
+  // reads its substring form for drift detection — a half-written index produces
+  // FALSE drift reports, worse than a clean failure. Regenerable, but cheap to protect.
+  atomicWriteFileSync(indexPath, content);
   console.log(`Wrote ${indexPath}`);
   return 0;
 }

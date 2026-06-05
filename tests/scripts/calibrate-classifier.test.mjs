@@ -219,6 +219,24 @@ test('exportWorksheet writes JSONL + markdown when turns exist', () => {
   });
 });
 
+test('M7: re-running exportWorksheet the same day overwrites, never accumulates duplicate rows', () => {
+  withTmp((dir) => {
+    const cd = join(dir, 'classified');
+    mkdirSync(cd);
+    writeFileSync(join(cd, '2026-06-01.jsonl'), makeClassifiedJSONL(
+      Array.from({ length: 5 }, (_, i) => ({ state: 'rec-fail-tier-0', turn_idx: i })),
+    ));
+    const opts = { project: dir, classifiedDir: cd, calibrationDir: join(dir, 'calibration'), count: 5, today: '2026-06-01' };
+    const r1 = exportWorksheet(opts);
+    const r2 = exportWorksheet(opts); // same day = same file; the old appendFileSync loop doubled it
+    assert.equal(r1.jsonl_path, r2.jsonl_path, 'same date → same worksheet file');
+    const lines = readFileSync(r2.jsonl_path, 'utf8').split('\n').filter(Boolean);
+    assert.equal(lines.length, r2.sample_count, 'row count == sample size, not doubled across re-runs');
+    const ids = lines.map((l) => JSON.parse(l).turn_id);
+    assert.equal(new Set(ids).size, ids.length, 'no duplicate turn_ids to corrupt the precision count');
+  });
+});
+
 // ============================================================
 // importLabels
 // ============================================================

@@ -26,7 +26,7 @@
  */
 
 import {
-  existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync,
+  existsSync, readFileSync, writeFileSync, mkdirSync,
   readdirSync, realpathSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -184,20 +184,22 @@ export function exportWorksheet({ project, classifiedDir, calibrationDir, today,
   const jsonlPath = join(calibrationDir, `worksheet-${date}.jsonl`);
   const mdPath = join(calibrationDir, `worksheet-${date}.md`);
 
-  // Write JSONL (machine-readable, for import-labels).
-  for (const t of sample) {
-    const row = {
-      turn_id: `${t.session_id}-${t.turn_idx}`,
-      session_id: t.session_id,
-      turn_idx: t.turn_idx,
-      heuristic_state: t.state,
-      evidence: t.evidence || {},
-      gold_state: null,   // to be filled by the labeler
-      labeler: null,
-      confidence: null,
-    };
-    appendFileSync(jsonlPath, JSON.stringify(row) + '\n');
-  }
+  // Write JSONL (machine-readable, for import-labels). Build the whole file and
+  // write ONCE — appending in a loop into a date-stamped file meant a same-day
+  // re-run (a retry, or a different --count) accumulated duplicate/mixed turn_ids,
+  // which importLabels then double-counts toward MIN_LABELED and the precision
+  // average — corrupting the gate that decides whether the classifier is trusted (M7).
+  const jsonlRows = sample.map((t) => JSON.stringify({
+    turn_id: `${t.session_id}-${t.turn_idx}`,
+    session_id: t.session_id,
+    turn_idx: t.turn_idx,
+    heuristic_state: t.state,
+    evidence: t.evidence || {},
+    gold_state: null,   // to be filled by the labeler
+    labeler: null,
+    confidence: null,
+  }));
+  writeFileSync(jsonlPath, jsonlRows.join('\n') + '\n');
 
   // Write Markdown companion (human-readable labeling guide).
   const stateDist = {};
