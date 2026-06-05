@@ -193,3 +193,21 @@ test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and d
   assert.match(validation, /not reliably injected into agent Bash tool calls/,
     'validation.md must agree the env var is unreliable and defer to the startup resolver');
 });
+
+// M16 idiom lock: command bodies across all three surfaces must use the SAME
+// resolved-root variable — ${CORE_ROOT} — that startup.md resolves and
+// validation.md invokes. The pre-fix state showed ${CLAUDE_PLUGIN_ROOT} in the
+// finalize/process-memory command bodies while validation.md used ${CORE_ROOT},
+// a split that made the three reconciled surfaces disagree on the variable name a
+// reader would copy. CLAUDE_PLUGIN_ROOT may appear ONLY in prose (the "not
+// reliably injected" clause), never in a `node ${...}/skills/...` invocation.
+test('M16: finalize/process-memory invoke scripts via ${CORE_ROOT}, not ${CLAUDE_PLUGIN_ROOT}', () => {
+  const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
+  for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md']) {
+    const src = readFileSync(join(base, rel), 'utf8');
+    assert.doesNotMatch(src, /\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/core\/scripts/,
+      `${rel} command bodies must use \${CORE_ROOT}, not \${CLAUDE_PLUGIN_ROOT}`);
+    assert.match(src, /\$\{CORE_ROOT\}\/skills\/core\/scripts/,
+      `${rel} must invoke scripts via the resolved \${CORE_ROOT}`);
+  }
+});
