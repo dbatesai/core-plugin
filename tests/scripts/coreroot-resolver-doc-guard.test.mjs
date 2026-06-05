@@ -175,3 +175,21 @@ test('C1: bash ${//\\//} converts backslashes to forward slashes', () => {
   const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' });
   assert.equal(out, 'C:/Users/x', 'backslashes normalized to forward slashes by bash');
 });
+
+// M16: finalize/process-memory/validation must agree with startup.md that
+// ${CLAUDE_PLUGIN_ROOT} is NOT reliably injected into Bash calls, and resolve the
+// root from the loaded skill path instead. The old prose ("set on Claude Code
+// marketplace installs") contradicted startup and assumed the var was present.
+test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and defer to the startup resolver', () => {
+  const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
+  for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md']) {
+    const src = readFileSync(join(base, rel), 'utf8');
+    assert.doesNotMatch(src, /env var is set on Claude Code marketplace installs/,
+      `${rel} must not assert the env var is reliably set`);
+    assert.match(src, /not reliably injected into agent Bash tool calls/,
+      `${rel} must state the env var is unreliable in Bash calls (agrees with startup.md)`);
+  }
+  const validation = readFileSync(join(base, 'core', 'protocols', 'validation.md'), 'utf8');
+  assert.match(validation, /not reliably injected into agent Bash tool calls/,
+    'validation.md must agree the env var is unreliable and defer to the startup resolver');
+});
