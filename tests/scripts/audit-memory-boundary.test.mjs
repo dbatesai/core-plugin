@@ -1,11 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   auditMemoryBoundary, extractNativeEntries, formatReport, mappedNativePath,
 } from '../../plugins/core/skills/core/scripts/audit-memory-boundary.mjs';
+
+test('entry guard canonicalizes BOTH sides (consistent with sibling gates)', () => {
+  const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/audit-memory-boundary.mjs', import.meta.url)), 'utf8');
+  assert.doesNotMatch(src, /realpathSync\(process\.argv\[1\]\) === fileURLToPath\(import\.meta\.url\)/,
+    'one-sided guard must be gone');
+  assert.match(src, /canon\(process\.argv\[1\]\) === canon\(fileURLToPath\(import\.meta\.url\)\)/,
+    'both sides canonicalized');
+});
 
 // --- extractNativeEntries: native surface → sampled entries with terms ---
 

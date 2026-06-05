@@ -139,7 +139,10 @@ export function validateAdversarialArtifacts({ initialFrames = [], persuasionLog
 
 function readIf(p) { return p && existsSync(p) ? readFileSync(p, 'utf8') : ''; }
 
-function isMain() { try { return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } }
+// Canonicalize BOTH sides: Node resolves import.meta.url to the real file, but
+// argv[1] keeps the caller's symlinked/virtualized path. Comparing them raw makes
+// this release/authority gate silently no-op on a symlinked install (M2).
+function isMain() { try { const canon = (p) => realpathSync(p); return canon(process.argv[1]) === canon(fileURLToPath(import.meta.url)); } catch { return false; } }
 
 if (isMain()) {
   const args = process.argv.slice(2);

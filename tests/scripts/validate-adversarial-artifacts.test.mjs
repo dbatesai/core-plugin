@@ -1,9 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   validateInitialFrame, validatePersuasionLogLine, validateMindChangeLine,
   validateJsonl, validateAdversarialArtifacts,
 } from '../../plugins/core/skills/core/scripts/validate-adversarial-artifacts.mjs';
+
+test('M2: the CLI entry guard canonicalizes BOTH sides (no silent no-op on a symlinked install)', () => {
+  const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/validate-adversarial-artifacts.mjs', import.meta.url)), 'utf8');
+  assert.doesNotMatch(src, /realpathSync\(process\.argv\[1\]\) === fileURLToPath\(import\.meta\.url\)/,
+    'the one-sided guard (realpath on argv[1] only) must be gone');
+  assert.match(src, /canon\(process\.argv\[1\]\) === canon\(fileURLToPath\(import\.meta\.url\)\)/,
+    'both sides canonicalized through the same helper');
+});
 
 // --- initial-frame.json ---
 
