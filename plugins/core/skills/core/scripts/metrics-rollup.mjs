@@ -100,7 +100,9 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
 
   let signal;
   if (!todayRecs.length) {
-    signal = `metrics: no classified turns for ${date} yet${provisionalTag || ' [PROVISIONAL]'}`;
+    // provisionalTag is '' when calibrated; the old `|| ' [PROVISIONAL]'` fallback
+    // re-added the tag on a calibrated workspace, mislabeling honest metrics (M5).
+    signal = `metrics: no classified turns for ${date} yet${provisionalTag}`;
   } else {
     const todayPct = Math.round(headline.pct * 100);
     const avgStr = avg == null ? 'n/a (no prior 7d)' : `${Math.round(avg * 100)}%`;

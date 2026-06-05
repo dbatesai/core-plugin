@@ -6,6 +6,17 @@ import { tmpdir } from 'node:os';
 import { buildRollup, writeRollup, readOrientSignal } from '../../plugins/core/skills/core/scripts/metrics-rollup.mjs';
 import { metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 
+test('M5: a calibrated workspace with no turns must not mislabel the signal PROVISIONAL', () => {
+  withClassified({}, ({ home, project }) => {
+    const metaDir = join(home, '.core', 'workspaces', WID, 'metrics');
+    writeFileSync(join(metaDir, 'calibration-state.json'),
+      JSON.stringify({ is_calibrated: true, classifier_version: CLASSIFIER_VERSION }));
+    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    assert.equal(r.calibrated, true, 'calibration state read as calibrated');
+    assert.doesNotMatch(r.signal, /PROVISIONAL/, 'the no-turns signal must not claim provisional once calibrated');
+  });
+});
+
 const WID = 'ws-rollup';
 
 function withClassified(byDate, fn) {

@@ -5,8 +5,16 @@ import assert from 'node:assert/strict';
 // would mean the consolidation regressed (predicates moved back out, or never landed).
 import {
   effectiveValidity, validAt, isInvalidated, parseIsoDate,
-  parseFrontmatter, normalizeNewlines,
+  parseFrontmatter, normalizeNewlines, _todayFromArg,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
+
+test('M3: a malformed --today falls back to today, never null (no TypeError at toISOString)', () => {
+  const d = _todayFromArg('garbage');
+  assert.ok(d instanceof Date, 'returns a Date, not null');
+  assert.doesNotThrow(() => d.toISOString(), 'the display path can stamp it');
+  // a well-formed date still parses through
+  assert.equal(_todayFromArg('2026-03-01').toISOString().slice(0, 10), '2026-03-01');
+});
 // bitemporal.mjs must re-export the same functions so its CLI + existing importers keep working.
 import {
   effectiveValidity as biEffectiveValidity,

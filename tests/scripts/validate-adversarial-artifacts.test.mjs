@@ -2,17 +2,32 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+
+const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/validate-adversarial-artifacts.mjs', import.meta.url));
 import {
   validateInitialFrame, validatePersuasionLogLine, validateMindChangeLine,
   validateJsonl, validateAdversarialArtifacts,
 } from '../../plugins/core/skills/core/scripts/validate-adversarial-artifacts.mjs';
 
 test('M2: the CLI entry guard canonicalizes BOTH sides (no silent no-op on a symlinked install)', () => {
-  const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/validate-adversarial-artifacts.mjs', import.meta.url)), 'utf8');
+  const src = readFileSync(SCRIPT, 'utf8');
   assert.doesNotMatch(src, /realpathSync\(process\.argv\[1\]\) === fileURLToPath\(import\.meta\.url\)/,
     'the one-sided guard (realpath on argv[1] only) must be gone');
   assert.match(src, /canon\(process\.argv\[1\]\) === canon\(fileURLToPath\(import\.meta\.url\)\)/,
     'both sides canonicalized through the same helper');
+});
+
+test('M6: an unreadable --frames path reports an I/O error, not a schema-error cascade', () => {
+  let err;
+  try {
+    execFileSync('node', [SCRIPT, '--frames', '/no/such/frame-file.json'], { encoding: 'utf8', stdio: 'pipe' });
+  } catch (e) { err = e; }
+  assert.ok(err, 'a bad frames path exits non-zero');
+  assert.equal(err.status, 2, 'exit 2 = I/O error, distinct from exit 1 = invalid-but-readable');
+  assert.match(err.stderr, /frame file unreadable or not JSON: \/no\/such\/frame-file\.json/,
+    'names the unreadable file instead of emitting "missing required field" schema errors');
+  assert.doesNotMatch(err.stderr || '', /missing required field/, 'no misdirecting schema cascade');
 });
 
 // --- initial-frame.json ---

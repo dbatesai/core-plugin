@@ -4,8 +4,21 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  classifyRetrievalSkips, buildProjectTerms, formatReport,
+  classifyRetrievalSkips, buildProjectTerms, formatReport, parseSkipArgs,
 } from '../../plugins/core/skills/core/scripts/analyze-retrieval-skip.mjs';
+
+test('M4: a space-form flag value is not mistaken for the project root', () => {
+  // `--harness codex` with no explicit root must NOT set the root to "codex"
+  // (which has no _memories/ and would report NO-STORE on the real project).
+  const a = parseSkipArgs(['--harness', 'codex']);
+  assert.equal(a.rawRoot, null, 'no bare token → no root captured (caller falls back to cwd)');
+  assert.equal(a.harness, 'codex', 'the flag value was consumed as the harness');
+
+  const b = parseSkipArgs(['/real/project', '--harness', 'codex', '--json']);
+  assert.equal(b.rawRoot, '/real/project', 'the genuine bare token is the root');
+  assert.equal(b.harness, 'codex');
+  assert.equal(b.json, true);
+});
 
 // Transcript events use the read-transcript shape: { idx, kind:'text'|'tool', role, name?, text }.
 const userT = (idx, text) => ({ idx, kind: 'text', role: 'user', text });

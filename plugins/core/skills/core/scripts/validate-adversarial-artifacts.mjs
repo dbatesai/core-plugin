@@ -148,6 +148,14 @@ if (isMain()) {
   const args = process.argv.slice(2);
   const opt = (n) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : null; };
   const frames = (opt('frames') || '').split(',').filter(Boolean).map((p) => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return { __unreadable: p }; } });
+  // Surface I/O failures as I/O failures (M6). Without this, an unreadable/typo'd
+  // frame path flows in as an ordinary object and produces a cascade of
+  // "missing required field" SCHEMA errors — misdirecting whoever acts on it.
+  const unreadable = frames.filter((f) => f && f.__unreadable);
+  if (unreadable.length) {
+    for (const u of unreadable) process.stderr.write(`error: frame file unreadable or not JSON: ${u.__unreadable}\n`);
+    process.exit(2);
+  }
   const r = validateAdversarialArtifacts({ initialFrames: frames, persuasionLog: readIf(opt('persuasion')), mindChanges: readIf(opt('mind')), mode: opt('mode') || 'advisory' });
   if (args.includes('--json')) process.stdout.write(JSON.stringify(r, null, 2) + '\n');
   else {
