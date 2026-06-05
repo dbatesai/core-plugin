@@ -268,7 +268,7 @@ Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYY
 | File | Event kinds | Written by |
 |---|---|---|
 | `_sessions/<date>/retrieval-log.jsonl` | `retrieval`, `hot-section-synthesis`, `hot-section-over-budget`, `synthesis-pass-behavior` (Phase 3) | `record-retrieval-event.mjs`, `hot-section.mjs` |
-| `_sessions/<date>/hygiene-log.jsonl` | `demote-moves`, `demote-moves-large-batch`, `compact-project`, `project-md-over-cap` | `demote-moves.mjs`, `compact-project.mjs` |
+| `_sessions/<date>/hygiene-log.jsonl` | `demote-moves`, `demote-moves-large-batch`, `compact-project`, `demote-state-narrative`, `project-md-over-cap` | `demote-moves.mjs`, `compact-project.mjs`, `demote-state-narrative.mjs` |
 
 `/orient` Step 4 surfaces load-bearing signals from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
 

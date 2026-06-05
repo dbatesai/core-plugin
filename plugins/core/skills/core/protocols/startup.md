@@ -167,7 +167,7 @@ If the project folder turns out to have pre-existing content that wasn't visible
 
 ## Load — cold-start migration
 
-The project has substantive prior content but no v2 unit store. Run the eight steps below in order. Each step is load-bearing; don't demote any into "I'll handle that later in §Moves."
+The project has substantive prior content but no v2 unit store. Run the nine steps below in order. Each step is load-bearing; don't demote any into "I'll handle that later in §Moves."
 
 **Verify the model is appropriate.** Cold-start migration on a large project warrants Opus + ultrathink-level reasoning. Surface the recommendation if the session is on a smaller model before proceeding.
 
@@ -308,7 +308,7 @@ What to include:
 - Any elapsed-time signals that escalated.
 - The top 3 §Moves priorities as the agenda.
 - Anything auto-compacted during first-time setup, named explicitly (entries, not counts).
-- The recognition signal, when present and worth flagging: read the one-line `~/.core/workspaces/<id>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` at last session close; see `references/retrieval.md`). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
+- The recognition signal, when present and worth flagging: read the one-line `~/.core/workspaces/<id>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` at last session close — that script is the mechanism's source of truth). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
 - Plugin version + build: read both `version` and `build` from `../../.claude-plugin/plugin.json` relative to the skill base directory (which resolves to the plugin root's `plugin.json`) — that manifest is the single source of truth for both. Echo as "Plugin v<version> build <build>". If `plugin.json` is unreadable, omit the line; if it's readable but has no `build`, echo just "Plugin v<version>".
 
 Target voice:

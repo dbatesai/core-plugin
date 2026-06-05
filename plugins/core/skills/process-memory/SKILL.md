@@ -185,7 +185,7 @@ Complements Step 6.5: that one reads the retrieval *log* (precision/recall, need
 node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-skip.mjs" "<project>"
 ```
 
-Read the output honestly — these are **candidates, not verdicts** (term presence is a heuristic for memory-dependence). If `SKIPS-FOUND`, surface the flagged term(s) in plain voice as a self-audit prompt ("I answered about IGM without grepping `_memories/` first — that's the retrieval-skip pattern; worth checking I had it right."). `CLEAN` → one sentence or silence. `UNKNOWN` on Codex is expected until tool extraction lands — say so briefly, don't treat it as clean. This is the behavioral consumer of the `read-transcript` adapter verb; it surfaces the lapse so the user doesn't have to catch it.
+Read the output honestly — these are **candidates, not verdicts** (term presence is a heuristic for memory-dependence). If `SKIPS-FOUND`, surface the flagged term(s) in plain voice as a self-audit prompt ("I answered about IGM without grepping `_memories/` first — that's the retrieval-skip pattern; worth checking I had it right."). `CLEAN` → one sentence or silence. `UNKNOWN` on Codex is expected until tool extraction lands — say so briefly, don't treat it as clean. This is the behavioral consumer of the `read-transcript` helper (a self-dispatching script, not a `harness.md` contract verb); it surfaces the lapse so the user doesn't have to catch it.
 
 ## Step 6.5c — Memory-boundary audit (v3.0)
 
