@@ -194,16 +194,24 @@ test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and d
     'validation.md must agree the env var is unreliable and defer to the startup resolver');
 });
 
-// M16 idiom lock: command bodies across all three surfaces must use the SAME
-// resolved-root variable — ${CORE_ROOT} — that startup.md resolves and
-// validation.md invokes. The pre-fix state showed ${CLAUDE_PLUGIN_ROOT} in the
-// finalize/process-memory command bodies while validation.md used ${CORE_ROOT},
-// a split that made the three reconciled surfaces disagree on the variable name a
-// reader would copy. CLAUDE_PLUGIN_ROOT may appear ONLY in prose (the "not
-// reliably injected" clause), never in a `node ${...}/skills/...` invocation.
-test('M16: finalize/process-memory invoke scripts via ${CORE_ROOT}, not ${CLAUDE_PLUGIN_ROOT}', () => {
+// M16 idiom lock — SCOPED to the skill entry-points that resolve CORE_ROOT
+// themselves. These three each establish CORE_ROOT (finalize/process-memory via a
+// "Script path resolution" preamble; orient via its Step-2 retrieval-event block)
+// and so MUST reference that resolved variable in their own command bodies — not
+// ${CLAUDE_PLUGIN_ROOT}, which the same surfaces document as unreliable in Bash.
+// validation.md and startup.md are the other two CORE_ROOT surfaces (covered by
+// the doctrine test above + the resolver tests A1–B2).
+//
+// Deliberately OUT of scope: protocols/hygiene.md, references/retrieval.md,
+// references/hygiene-strategies.md, protocols/data-storage.md, scripts/README.md,
+// and script header-comments still write ${CLAUDE_PLUGIN_ROOT} as a shorthand
+// path-pointer. They carry no CORE_ROOT-resolution preamble of their own (they're
+// sub-references the core skill loads AFTER startup resolved CORE_ROOT), so the
+// env-var form is documentation shorthand there, not a runnable idiom mismatch.
+// Whether to unify the whole tree on ${CORE_ROOT} is a separate, larger call.
+test('M16: CORE_ROOT-resolving skills invoke scripts via ${CORE_ROOT}, not ${CLAUDE_PLUGIN_ROOT}', () => {
   const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
-  for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md']) {
+  for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md', 'orient/SKILL.md']) {
     const src = readFileSync(join(base, rel), 'utf8');
     assert.doesNotMatch(src, /\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/core\/scripts/,
       `${rel} command bodies must use \${CORE_ROOT}, not \${CLAUDE_PLUGIN_ROOT}`);

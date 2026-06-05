@@ -106,9 +106,9 @@ The hot section is the 5-7 line surface atop PROJECT.md that names what matters 
 
 **How to refresh:**
 
-1. Call `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/hot-section.mjs candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>...` with the session-intent topics from Step 2. Read the candidate list.
+1. Call `node ${CORE_ROOT}/skills/core/scripts/hot-section.mjs candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>...` with the session-intent topics from Step 2. Read the candidate list. (`CORE_ROOT` is the plugin root this skill resolved in Step 2's retrieval-event block — reuse it; `${CLAUDE_PLUGIN_ROOT}` is not reliably injected into Bash calls.)
 2. Compose 5-7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Spec §1.1 cap: usually 1-3 items, no bold-lead-in paragraphs unless the items genuinely need scannable headers.
-3. Call `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/hot-section.mjs apply <project> --text "<composed prose>"` to land the section atop PROJECT.md.
+3. Call `node ${CORE_ROOT}/skills/core/scripts/hot-section.mjs apply <project> --text "<composed prose>"` to land the section atop PROJECT.md.
 4. Narrate the refresh in one sentence as part of readiness — *"Refreshed the hot section: Phase 1a is mid-flight and DC-88 just reconciled."*
 
 The 500-token enforcement is Phase 1b; for Phase 1a, the agent self-disciplines on length.
