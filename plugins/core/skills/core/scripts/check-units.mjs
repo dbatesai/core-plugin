@@ -205,7 +205,7 @@ export function checkSchema(units, memoriesDir, report) {
       report.push({ level: 'WARN', check: 't_valid-after-t_invalid', unit_id: uid, detail: `t_valid (${tValidStr}) is after t_invalid (${tInvalidStr}) — a fact can't stop being true before it started` });
 
     // by-when validation — optional field for open-question units (DC-85 §2).
-    // Schema only validates well-formedness; staleness signaling lives in /orient.
+    // Schema only validates well-formedness; staleness signaling lives in the startup protocol.
     const byWhen = u.fm['by-when'];
     if (byWhen !== undefined && byWhen !== null && byWhen !== '') {
       if (typ && typ !== 'open-question')

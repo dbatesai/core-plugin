@@ -328,7 +328,7 @@ export function runAnticipationGap(events, memoriesDir) {
 
 /**
  * Walk active open-question units with a `by-when` in the past. The startup
- * protocol already surfaces these at /orient; promoting it to a Layer-2 detector
+ * protocol already surfaces these at startup; promoting it to a Layer-2 detector
  * makes the lapse a captured, escalatable event rather than a read-time-only
  * glance. The register-trigger half of the layer stays gated on DC-103.
  *

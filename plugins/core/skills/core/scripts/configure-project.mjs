@@ -111,7 +111,7 @@ function hasUnitFiles(dir) {
 
 // ── Workspace identity (script-visible, detect-only) ─────────────────────────
 // Always dry-run: configure-project REPORTS the identity decision; it never
-// mutates identity (the fork mutation is startup/orient's job). Wrapped in its
+// mutates identity (the fork mutation is startup's job). Wrapped in its
 // own try/catch because we import checkFork directly, bypassing the CLI main's
 // error wrapper.
 export function detectIdentity(projectPath, coreDir, now = new Date()) {
@@ -258,7 +258,7 @@ export function formatReceipt(r) {
 }
 
 function describeIdentity(id) {
-  if (id.status === 'would-fork') return `would fork (copied pointer from ${id.original_id}) — run /orient to register as ${id.new_id}`;
+  if (id.status === 'would-fork') return `would fork (copied pointer from ${id.original_id}) — run /core to register as ${id.new_id}`;
   if (id.status === 'error') return `could not resolve (${id.detail})`;
   if (id.reason === 'path-match') return `returning workspace${id.workspace_id ? ` (${id.workspace_id})` : ''}`;
   if (id.reason === 'no-pointer' || id.reason === 'no-index') return 'new / unregistered (no pointer or index yet)';

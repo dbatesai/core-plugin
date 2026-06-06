@@ -195,10 +195,10 @@ test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and d
 });
 
 // M16 idiom lock — SCOPED to the skill entry-points that resolve CORE_ROOT
-// themselves. These three each establish CORE_ROOT (finalize/process-memory via a
-// "Script path resolution" preamble; orient via its Step-2 retrieval-event block)
-// and so MUST reference that resolved variable in their own command bodies — not
-// ${CLAUDE_PLUGIN_ROOT}, which the same surfaces document as unreliable in Bash.
+// themselves. These two each establish CORE_ROOT (finalize/process-memory via a
+// "Script path resolution" preamble) and so MUST reference that resolved variable
+// in their own command bodies — not ${CLAUDE_PLUGIN_ROOT}, which the same surfaces
+// document as unreliable in Bash.
 // validation.md and startup.md are the other two CORE_ROOT surfaces (covered by
 // the doctrine test above + the resolver tests A1–B2).
 //
@@ -211,7 +211,7 @@ test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and d
 // Whether to unify the whole tree on ${CORE_ROOT} is a separate, larger call.
 test('M16: CORE_ROOT-resolving skills invoke scripts via ${CORE_ROOT}, not ${CLAUDE_PLUGIN_ROOT}', () => {
   const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
-  for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md', 'orient/SKILL.md']) {
+  for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md']) {
     const src = readFileSync(join(base, rel), 'utf8');
     assert.doesNotMatch(src, /\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/core\/scripts/,
       `${rel} command bodies must use \${CORE_ROOT}, not \${CLAUDE_PLUGIN_ROOT}`);

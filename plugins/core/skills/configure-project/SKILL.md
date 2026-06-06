@@ -9,7 +9,7 @@ Base directory for this skill: this `SKILL.md`'s directory.
 
 A project store is harness-agnostic (DC-104): Claude Code and Codex co-exist on one folder. This skill is the one-shot setup-and-health check that confirms a given harness is wired correctly against that shared store. It's the Codex-side counterpart to Claude Code's startup mandate — but it runs on either harness.
 
-It is **idempotent** and **report-only by default**. The only write it ever performs is generating `AGENTS.md`, and only when you pass `--apply` *and* a `CONTRACT.md` exists. Workspace identity is detected and reported, never mutated here (forking is `/orient`'s job).
+It is **idempotent** and **report-only by default**. The only write it ever performs is generating `AGENTS.md`, and only when you pass `--apply` *and* a `CONTRACT.md` exists. Workspace identity is detected and reported, never mutated here (forking is `/core`'s job — startup performs it).
 
 ## When to reach for it
 
@@ -19,7 +19,7 @@ It is **idempotent** and **report-only by default**. The only write it ever perf
 
 ## Run it
 
-**Resolve the plugin root from this skill's path**, the same way `/orient` does: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/configure-project/SKILL.md` to get `<PLUGIN_ROOT>`. The script lives at `<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs`. Don't guess the base from an env var; the loaded path carries the resolution.
+**Resolve the plugin root from this skill's path**, the same way the other CORE skills do: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/configure-project/SKILL.md` to get `<PLUGIN_ROOT>`. The script lives at `<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs`. Don't guess the base from an env var; the loaded path carries the resolution.
 
 ```bash
 # CORE_ROOT = this skill's base dir minus the trailing /skills/configure-project
@@ -45,5 +45,5 @@ Never restate a session-live question as a script-asserted fact. "Configured in 
 ## What it does NOT do
 
 - It does not ship connector name maps. Connector specifics are overlay-owned (see `references/external-sources/source-registration-framework.md`); the script only *reads* a project-local `connector-map.json` if an overlay provides one.
-- It does not fork or register a workspace. If identity reads `would-fork`, run `/orient` to perform the registration.
+- It does not fork or register a workspace. If identity reads `would-fork`, run `/core` to perform the registration.
 - It does not generate `AGENTS.md` without a `CONTRACT.md`. That's the common case today; it reports `skipped — no CONTRACT.md` and moves on.

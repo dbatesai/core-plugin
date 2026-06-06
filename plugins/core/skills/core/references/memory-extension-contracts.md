@@ -123,7 +123,7 @@ The observability layer (Phases 0–3) extends the same way. An overlay adds its
   Capture stays local. An overlay that wants a workspace dark sets the opt-out; everyone else
   contributes to the corpus by default.
 
-What CORE owns: the six-state recognition taxonomy, the rollup, the `/orient` signal, the gold
+What CORE owns: the six-state recognition taxonomy, the rollup, the startup readiness signal, the gold
 detectors, the calibration harness (`calibrate-classifier.mjs`) and its precision gate. What the
 overlay owns: its own event fields, its own `query_shape` vocabulary, its own detectors, and its
 own calibration labels. The classifier is PROVISIONAL until calibration clears 0.7 precision —

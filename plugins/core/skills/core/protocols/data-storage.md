@@ -161,7 +161,7 @@ Status lifecycle: `active` → `archived` (resolved with the answer captured els
 
 **Resolution by supersession.** When an open-question is answered, the answer typically lands as an observation or decision unit citing the open-question. The open-question itself moves to `status: archived` rather than being deleted — the question and its eventual answer both stay queryable.
 
-**Staleness at `/orient`.** The startup protocol's elapsed-time signals (per `protocols/startup.md` §"Elapsed-time signals") include a sweep over active open-question units. Any unit with a past `by-when` surfaces in the readiness summary. This is the absence-detection primitive — the architecture knows the question is past due even when nobody has explicitly noted it. Mechanism for the Michelle probe (spec §10).
+**Staleness at startup.** The startup protocol's elapsed-time signals (per `protocols/startup.md` §"Elapsed-time signals") include a sweep over active open-question units. Any unit with a past `by-when` surfaces in the readiness summary. This is the absence-detection primitive — the architecture knows the question is past due even when nobody has explicitly noted it. Mechanism for the Michelle probe (spec §10).
 
 ---
 
@@ -270,7 +270,7 @@ Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYY
 | `_sessions/<date>/retrieval-log.jsonl` | `retrieval`, `hot-section-synthesis`, `hot-section-over-budget`, `synthesis-pass-behavior` (Phase 3) | `record-retrieval-event.mjs`, `hot-section.mjs` |
 | `_sessions/<date>/hygiene-log.jsonl` | `demote-moves`, `demote-moves-large-batch`, `compact-project`, `demote-state-narrative`, `project-md-over-cap` | `demote-moves.mjs`, `compact-project.mjs`, `demote-state-narrative.mjs` |
 
-`/orient` Step 4 surfaces load-bearing signals from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
+The startup protocol surfaces the signals that matter from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
 
 ---
 
@@ -376,7 +376,7 @@ Hash-based comparison against the state cache at `~/.core/state-cache.json`:
 You update the cache on every read/write. You compare at every read.
 
 Runs at:
-- `/orient` (full sweep).
+- startup (full sweep).
 - Before any autonomous render (just-in-time).
 - `/finalize` (full sweep).
 - On-demand.

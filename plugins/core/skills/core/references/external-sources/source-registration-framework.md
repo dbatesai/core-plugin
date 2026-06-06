@@ -63,7 +63,7 @@ extractor-pointer: <installation-specific path or identifier for the extractor i
 - `relevance-contract` — prose declaration of how the extractor decides whether a given datum from this source is project-relevant. Examples: *"items mentioning project keywords or assigned to project participants"*; *"messages in chats whose members include any of the project participants"*; *"events whose subject includes a project keyword or whose attendees include any project stakeholder."*
 - `extractor-pointer` — installation-specific path to the extractor implementation. CORE doesn't dictate format — could be a script path, a skill name, a tool reference. The installation knows what its extractor looks like.
 
-  When `cadence: always-on`, the extractor-pointer may name two separate extractor references — a lightweight sweep path used at `/orient` and a full extraction path used during a full refresh:
+  When `cadence: always-on`, the extractor-pointer may name two separate extractor references — a lightweight sweep path used at startup and a full extraction path used during a full refresh:
 
   ```yaml
   extractor-pointer:

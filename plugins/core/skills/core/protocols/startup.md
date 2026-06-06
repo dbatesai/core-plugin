@@ -123,7 +123,8 @@ The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to
 - **Tier 1 (lexical retrieval):** read `<project>/PROJECT.md` to anchor the six-section view. Grep `<project>/_memories/` for session-intent topic terms to surface relevant active units. Load whatever the grep returns above the priority threshold.
 - **Tier 2 (graph walk):** for each loaded unit, walk its `supersedes` and `depends-on` edges one hop to pick up the related context. Stop when the candidate set is good enough.
 - **Tier 3 (semantic):** only escalate if Tier 0–2 leave the user's actual question unanswered. The `Explore` subagent reasons over the vault for semantic queries.
-- Read `<project>/inbox.md` if it exists. Raw pending items — promote worthwhile facts into the right units on the user's next review.
+- Read `<project>/inbox.md` if it exists. Raw pending items — promote worthwhile facts into the right units on the user's next review. When entries carry `mode: B` or `mode: C` frontmatter, they're pending review per the source-registration framework; count them for the readiness summary.
+- Read `<project>/_sources/*.yaml` if the directory exists — the registered external sources for this project. Note the names and count for the readiness summary.
 - Read `~/.core/workspaces/<id>/workspace.json` for cross-session metadata only (last-session date, timestamps). Don't read project facts from here — there aren't any.
 
 After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them.
@@ -140,7 +141,12 @@ Tier 0 in-context reuse does not need a retrieval row.
 - `<project>/PROJECT-ARCHIVE.md`, `<project>/IMPROVEMENT_LOG-ARCHIVE.md`. Single-write archive surfaces.
 - Legacy workspace files (`raid-log.md`, `decision-log.md`, `next-session.md`, `handoffs/`) under `~/.core/workspaces/<id>/` — pre-2026-04-21 structure. If `PROJECT.md` exists, ignore them. If it doesn't, surface the mismatch and offer to migrate.
 
-Run edit-detection on the files you read against `~/.core/state-cache.json`. If hashes don't match, the user edited something between sessions — propagate the edits back to the source-of-truth units before composing the readiness summary.
+Run edit-detection on the files you read against `~/.core/state-cache.json`. If hashes don't match, the user edited something between sessions:
+
+- **Unit files:** the edit IS the new truth. Update the state cache, propagate any frontmatter implications, narrate what changed.
+- **PROJECT.md:** the edit is the user's authorship asserting itself. Propagate back to the source units (frontmatter updates, `status: retired` for removed facts). Anti-resurrection fires for removals — a fact the user deleted stays deleted.
+
+Surface any edit in the readiness summary before the agenda.
 
 ## Load — new workspace
 
@@ -254,6 +260,8 @@ Starting calibrations — tune based on observed behavior:
 - **External-source claim age.** Task tracker or chat older than 24h: disclose and consider re-fetch. Document store older than 14d: disclose.
 - **Open-question past `by-when` (DC-85 §2).** Walk active open-question units in `<project>/_memories/`. For each unit with `type: open-question` AND `status: active` AND a `by-when` field whose ISO date is in the past, surface it in the readiness summary. Plain voice: *"One open question past its by-when: oq-michelle-design-review expected 5/22 — six days ago."* This is the absence-detection primitive; the architecture surfaces the lapse so the user doesn't have to remember it. The Michelle probe (spec §10) validates this mechanism.
 
+- **Recent hygiene-log signals (DC-85 Phase 1b).** Read `<project>/_sessions/<most-recent-date>/hygiene-log.jsonl` if present. Surface what matters in plain voice — don't pile on: a `demote-moves-large-batch` from the last 1–2 sessions → *"last `demote-moves` ran on N candidates (threshold M); criteria may be tightening or loosening — worth a glance next `/process-memory`"*; `project-md-over-cap` events that persist across sessions → *"PROJECT.md is stuck over the ~70KB soft target; the compactor warns, doesn't block."* Skip when the log is absent (fresh workspace) or shows clean steady-state.
+
 Apply these before composing readiness. If any of them escalate, lead with the escalation.
 
 ## Memory processing nudge
@@ -263,6 +271,37 @@ Read `<project>/_memories/_pm-state.json` if it exists. If `now - last_run > 24 
 > *"Memory processing hasn't run in [X hours/days] — worth running `/process-memory` when you get a moment."*
 
 Don't block on it. It's a nudge, not a gate.
+
+## Hot-section synthesis pass
+
+The hot section is the 5–7 line surface atop `<project>/PROJECT.md` that names what matters right now. Refresh it conditionally — only when candidate ranking has shifted meaningfully since the last synthesis, or when this session's intent diverges from what the existing hot section addresses. This runs after elapsed-time signals (an escalation can feed the refresh) and before the readiness summary (the refreshed section feeds the receipt).
+
+**When to refresh** (any one suffices):
+
+- The existing hot section is missing (project predates DC-85 Phase 1a, or it was cleared).
+- The existing hot section is older than 24 hours (the candidates underneath have likely shifted).
+- Session-intent topics don't overlap with the topics the existing hot section addresses (priority ranking will shift under the new intent).
+- An elapsed-time signal (above) escalated something the existing hot section doesn't mention.
+
+**When to skip:** the existing hot section is fresh, the session intent matches its framing, and nothing escalated. Skip silently — don't refresh just to refresh.
+
+**How to refresh** (reuse the `CORE_ROOT` resolved in §"Workspace resolution and routing"; the guard skips cleanly if it's blank):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>
+```
+
+Read the candidate list, then compose 5–7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Usually 1–3 items, no bold lead-in paragraphs unless the items genuinely need scannable headers. Land it:
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --text "<composed prose>"
+```
+
+The `apply` writes PROJECT.md, so **re-hash PROJECT.md into `~/.core/state-cache.json` after applying** — otherwise next session's edit-detection (§"Load — returning workspace") reads this synthesis as a user edit and misfires the propagate-back and anti-resurrection path against CORE's own hot-section prose. (`/finalize`'s close-of-session hot-section write needs the same reconciliation.)
+
+Narrate the refresh in one sentence as part of readiness — *"Refreshed the hot section: Phase 1a is mid-flight and DC-88 just reconciled."* The agent self-disciplines on length (the 500-token enforcement is Phase 1b).
 
 ## Compose the readiness summary
 
@@ -306,6 +345,7 @@ What to include:
 - What `PROJECT.md` currently says in §State — one or two sentences, not a recap of every section.
 - Active risks worth surfacing now (count plus the top one or two by impact).
 - Any elapsed-time signals that escalated.
+- Source-registration signals when they're worth mentioning: pending Mode B/C blocks in `<project>/inbox.md` (count plus a one-line nudge — *"three pending observations in the inbox waiting on review"*), or observations citing a `source:` not in `<project>/_sources/` (drift signal — name the source). Skip silently when the inbox is empty and no drift surfaced.
 - The top 3 §Moves priorities as the agenda.
 - Anything auto-compacted during first-time setup, named explicitly (entries, not counts).
 - The recognition signal, when present and worth flagging: read the one-line `~/.core/workspaces/<id>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` at last session close — that script is the mechanism's source of truth). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
@@ -319,7 +359,7 @@ What to skip: session summary content (not part of the bootstrap read); auto-mem
 
 **Record the bootstrap.** After readiness lands, write `~/.core/workspaces/<id>/last-bootstrap.json` with two fields: `session_started_at` (the Claude Code session-start timestamp — best available proxy is the timestamp of the first user message this session) and `bootstrap_completed_at` (now). This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
 
-After readiness lands, wait for the user's next move. The agenda topics get resolved or explicitly deferred before implementation work begins.
+After readiness lands, only ask what you still don't know — genuine gaps that no durable artifact resolved, with a hypothesis when you have one. Don't ask "what were we working on?" (you just read it), "what would you like to do today?" (the agenda tells you), or "can you catch me up?" (that's exactly what bootstrap prevents). Do ask deferred-decision questions ("PROJECT.md flags the X decision as deferred pending your call — have you decided?"), agenda-fork questions ("continue the v2 build or pivot to the stale R-5 risk first?"), and missing-unit questions ("the session-intent topic 'auto-creation rules' didn't surface a unit at Tier 1 or 2 — written yet, or still pending?"). Then wait for the user's next move; the agenda topics get resolved or explicitly deferred before implementation work begins.
 
 ## Long sessions — write the early summary stub
 

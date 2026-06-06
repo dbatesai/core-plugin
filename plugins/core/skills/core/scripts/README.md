@@ -60,7 +60,7 @@ Validated producer for retrieval-quality evidence. Writes a `kind: "retrieval"` 
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/record-retrieval-event.mjs <project> --event-json '{"trigger":"session-start","intent_topics":["memory"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"dc-memory","tier":1}],"dip_back_count":0}'
 ```
 
-Use it from startup, orient, refresh-context, and any Tier 1+ retrieval path. Invalid rows fail before write.
+Use it from startup, refresh-context, and any Tier 1+ retrieval path. Invalid rows fail before write.
 
 ### `check-units.mjs`
 
