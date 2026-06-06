@@ -80,7 +80,7 @@ The anti-resurrection rule: when the user removes a fact from PROJECT.md, that f
 
 ### Edit detection
 
-Hash-based comparison via `~/.core/state-cache.json`. Runs at `/orient`, before autonomous renders, at `/finalize`, on-demand. User edits become ground truth and propagate back to source units.
+Hash-based comparison via `~/.core/state-cache.json`. Runs at session start (`/core`), before autonomous renders, at `/finalize`, on-demand. User edits become ground truth and propagate back to source units; CORE's own renders (the hot-section block, stamped `last_written_by`) are skipped, not mistaken for user edits.
 
 ## Memory hygiene
 

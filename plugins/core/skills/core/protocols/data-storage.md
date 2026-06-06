@@ -375,6 +375,8 @@ Hash-based comparison against the state cache at `~/.core/state-cache.json`:
 
 You update the cache on every read/write. You compare at every read.
 
+CORE's own writes are not user edits. Scripts that render PROJECT.md (e.g. `hot-section.mjs apply`) stamp `last_written_by` with their own name; a diff confined to the marker-delimited hot-section block, or a file whose `last_written_by` is a CORE writer, is CORE's synthesis — refresh the entry, don't propagate or fire anti-resurrection.
+
 Runs at:
 - startup (full sweep).
 - Before any autonomous render (just-in-time).

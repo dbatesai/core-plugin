@@ -20,14 +20,13 @@ claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Start a fresh session and type `/core`. That's it — the plugin registers the main skill, seven sub-skills, and two hooks, and your `~/.claude/settings.json` is left alone.
+Start a fresh session and type `/core`. That's it — the plugin registers the main skill, six sub-skills, and two hooks, and your `~/.claude/settings.json` is left alone.
 
 ## What you get
 
 | Slash command | What it does |
 |---|---|
-| `/core` | The agent. Starts the session, loads your project context, and talks with you. |
-| `/orient` | Pick a thread back up — load project context and print a readiness summary. |
+| `/core` | The agent. Starts the session, loads your project context (picking a thread back up with a readiness summary), and talks with you. |
 | `/finalize` | Close a session — write a summary, update project state, run memory cleanup. |
 | `/process-memory` | Clean up memory on demand — pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it's over the size cap. |
 | `/register-sources` | Point CORE at outside data that should feed the project's memory. |
@@ -87,7 +86,7 @@ test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
 test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 ```
 
-Codex finds the bundled skills (`core`, `orient`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `organize-files`) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
+Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `organize-files`) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
 
 If a previous install used a different marketplace name (say `local-core` from a hand-rolled shim), remove it first: `codex plugin remove core@local-core`, then `codex plugin marketplace remove local-core`.
 
@@ -105,6 +104,6 @@ Your project data — `PROJECT.md`, `_memories/`, `_summaries/` inside each proj
 
 **The agent doesn't introduce itself by name.** It picks a name on first run. If it didn't, ask it to.
 
-**A sub-skill name collides.** If another plugin already claims `/orient`, `/finalize`, `/process-memory`, `/register-sources`, `/configure-project`, `/vibecheck`, or `/organize-files`, registration can clash. Disable or remove the other plugin.
+**A sub-skill name collides.** If another plugin already claims `/finalize`, `/process-memory`, `/register-sources`, `/configure-project`, `/vibecheck`, or `/organize-files`, registration can clash. Disable or remove the other plugin.
 
 **Installing from a zip through the desktop app's upload dialog.** That dialog currently fails for `.zip` and `.plugin` files on both Windows and macOS (a known Claude bug). Use the marketplace path above instead — it's the supported route.

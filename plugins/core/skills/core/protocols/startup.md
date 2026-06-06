@@ -141,12 +141,13 @@ Tier 0 in-context reuse does not need a retrieval row.
 - `<project>/PROJECT-ARCHIVE.md`, `<project>/IMPROVEMENT_LOG-ARCHIVE.md`. Single-write archive surfaces.
 - Legacy workspace files (`raid-log.md`, `decision-log.md`, `next-session.md`, `handoffs/`) under `~/.core/workspaces/<id>/` — pre-2026-04-21 structure. If `PROJECT.md` exists, ignore them. If it doesn't, surface the mismatch and offer to migrate.
 
-Run edit-detection on the files you read against `~/.core/state-cache.json`. If hashes don't match, the user edited something between sessions:
+Run edit-detection on the files you read against `~/.core/state-cache.json`. If a file's hash doesn't match, something changed between sessions — but first rule out CORE's own renders, which are not user edits:
 
-- **Unit files:** the edit IS the new truth. Update the state cache, propagate any frontmatter implications, narrate what changed.
-- **PROJECT.md:** the edit is the user's authorship asserting itself. Propagate back to the source units (frontmatter updates, `status: retired` for removed facts). Anti-resurrection fires for removals — a fact the user deleted stays deleted.
+- **CORE-authored writes.** A PROJECT.md diff confined to the marker-delimited hot-section block (`<!-- HOT-SECTION:BEGIN -->`…`<!-- HOT-SECTION:END -->`), or a file whose state-cache `last_written_by` is a CORE writer (e.g. `hot-section`), is CORE's synthesis — `hot-section.mjs apply` stamps that authorship itself. Refresh the cache entry and move on; do NOT propagate or fire anti-resurrection.
+- **Unit files:** a genuine user edit IS the new truth. Update the state cache, propagate any frontmatter implications, narrate what changed.
+- **PROJECT.md (user edit):** a change OUTSIDE the hot block is the user's authorship asserting itself. Propagate back to the source units (frontmatter updates, `status: retired` for removed facts). Anti-resurrection fires for removals — a fact the user deleted stays deleted.
 
-Surface any edit in the readiness summary before the agenda.
+Surface any genuine user edit in the readiness summary before the agenda.
 
 ## Load — new workspace
 
@@ -274,7 +275,7 @@ Don't block on it. It's a nudge, not a gate.
 
 ## Hot-section synthesis pass
 
-The hot section is the 5–7 line surface atop `<project>/PROJECT.md` that names what matters right now. Refresh it conditionally — only when candidate ranking has shifted meaningfully since the last synthesis, or when this session's intent diverges from what the existing hot section addresses. This runs after elapsed-time signals (an escalation can feed the refresh) and before the readiness summary (the refreshed section feeds the receipt).
+The hot section sits atop `<project>/PROJECT.md` — 5–7 lines naming what matters right now. Refresh it conditionally — only when candidate ranking has shifted meaningfully since the last synthesis, or when this session's intent diverges from what the existing hot section addresses. This runs after elapsed-time signals (an escalation can feed the refresh) and before the readiness summary (the refreshed section feeds the receipt).
 
 **When to refresh** (any one suffices):
 
@@ -299,7 +300,7 @@ Read the candidate list, then compose 5–7 lines of plain prose blending two in
 node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --text "<composed prose>"
 ```
 
-The `apply` writes PROJECT.md, so **re-hash PROJECT.md into `~/.core/state-cache.json` after applying** — otherwise next session's edit-detection (§"Load — returning workspace") reads this synthesis as a user edit and misfires the propagate-back and anti-resurrection path against CORE's own hot-section prose. (`/finalize`'s close-of-session hot-section write needs the same reconciliation.)
+`hot-section.mjs apply` writes PROJECT.md and stamps `last_written_by: hot-section` into `~/.core/state-cache.json` itself, so next session's edit-detection (§"Load — returning workspace") recognizes the change as CORE's synthesis, not a user edit — no manual reconciliation, and `/finalize`'s close-of-session hot-section write is covered the same way (both go through `applyHotSection`).
 
 Narrate the refresh in one sentence as part of readiness — *"Refreshed the hot section: Phase 1a is mid-flight and DC-88 just reconciled."* The agent self-disciplines on length (the 500-token enforcement is Phase 1b).
 
