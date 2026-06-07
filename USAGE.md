@@ -85,7 +85,7 @@ Supporting references live alongside them: `retrieval.md` (the four-tier ladder 
 
 ### Scripts
 
-The plugin ships the deterministic spine the commands run on — the surfaces where inference can't be trusted to be exact (DC-77). You don't call these directly; the commands and protocols do. Grouped by what they're for:
+The plugin ships the deterministic spine the commands run on — the surfaces where inference can't be trusted to be exact. You don't call these directly; the commands and protocols do. Grouped by what they're for:
 
 - **Memory store & retrieval** — `priority.mjs` (the ranking function), `check-units.mjs` (schema + integrity validation), `graph-walk.mjs` (typed-edge traversal), `generate-decisions-index.mjs` / `generate-risks-index.mjs` / `generate-memory-index.mjs` (the indexes).
 - **`PROJECT.md` rendering & hygiene** — `hot-section.mjs` (the top-of-file "right now" block), `compact-project.mjs` (file-cap compaction), `demote-moves.mjs` / `demote-state-narrative.mjs` (tier discipline).

@@ -6,7 +6,7 @@ This explains how CORE's v2 design works and why it's built this way. The skill 
 
 CORE started as a multi-agent reasoning framework — a `/core` skill that spun up expert-persona swarms and ran generator-critic loops to find things a single pass misses.
 
-In May 2026 it changed shape (DC-64, 2026-05-16d). Now it's one capable agent that knows the project, watches its data sources, remembers across sessions, raises decisions and risks before you ask, and argues back when you're too sure. The swarm is still there, but the agent reaches for it as a tool when the stakes call for it, rather than running everything through it.
+In May 2026 it changed shape. Now it's one capable agent that knows the project, watches its data sources, remembers across sessions, raises decisions and risks before you ask, and argues back when you're too sure. The swarm is still there, but the agent reaches for it as a tool when the stakes call for it, rather than running everything through it.
 
 Three things changed in practice. The swarm machinery moved from the default path to an internal protocol (`protocols/analysis.md`) the agent calls when stakes warrant. Memory went from a loose mix of auto-memory, session summaries, and a `DECISIONS.md` to a structured store of facts with typed links between them and a four-tier way of retrieving them. `PROJECT.md` went from hand-edited to written from those facts, with edits detected and carried back. And plain voice became a rule the project enforces in a few places at once — the top of `SKILL.md`, the protocol headers, a per-turn reminder hook, and the agent's own self-checks.
 
@@ -20,7 +20,7 @@ Memory is the heart of the design. Everything else organizes around how facts ge
 
 **Tier 1 — observations** at `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Capture-everything. Every utterance, tool output, casual mention. Low-effort YAML frontmatter (id, type, created, session, sources, references-person, references-topic). No edges required at write time.
 
-**Tier 2 — units** at `<project>/_memories/<prefix>-<slug>.md`, flat layout per DC-68. Graduated, reasoned facts. Rich frontmatter (id, type, status, created, updated, confidence, sources, references-person, references-topic, edges, canonical, last_accessed, access_count). Body holds the agent's reasoned reading — synthesis, not raw extract.
+**Tier 2 — units** at `<project>/_memories/<prefix>-<slug>.md`, flat layout. Graduated, reasoned facts. Rich frontmatter (id, type, status, created, updated, confidence, sources, references-person, references-topic, edges, canonical, last_accessed, access_count). Body holds the agent's reasoned reading — synthesis, not raw extract.
 
 The canonical flag (`canonical: true`) marks the top-priority units that surface in PROJECT.md and get a priority floor. Not a separate tier; a marker.
 
@@ -48,7 +48,7 @@ Default retrieval excludes observations. Only graduated units surface unless the
 
 Auto-memory at `~/.claude/projects/*/memory/` is queried alongside `_memories/` at every tier. Complementary, not competing.
 
-### Priority function (DC-69)
+### Priority function
 
 ```
 priority(unit, t) = w_R · R(unit, t)

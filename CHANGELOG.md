@@ -76,7 +76,7 @@ The instrumented-memory system (Phases 0–4) and the validity dimension. CORE n
 
 ## [3.3.0] — 2026-06-01
 
-Track B of the Codex co-existence workstream (DC-104) — the structural half: a project bootstrap/health-check for either harness, a real fork-check bug fix, and the supporting contract. Plus the workspace-identity field standardization and the R-17 adversarial-run-gate wiring that were already on `next`. Track B's pre-build `/core` review reshaped it: CORE ships no connector name-map (it ships the contract; the overlay owns the data) because a grep proved CORE hardcodes zero connector names.
+Track B of the Codex co-existence workstream — the structural half: a project bootstrap/health-check for either harness, a real fork-check bug fix, and the supporting contract. Plus the workspace-identity field standardization and the R-17 adversarial-run-gate wiring that were already on `next`. Track B's pre-build `/core` review reshaped it: CORE ships no connector name-map (it ships the contract; the overlay owns the data) because a grep proved CORE hardcodes zero connector names.
 
 ### Added
 - **`/configure-project` — a new companion skill (and `configure-project.mjs`).** Bootstraps and health-checks a project for the current harness: confirms the install + manifests, validates the memory store, resolves workspace identity (detect-only — never mutates), reports connector capability in two honest tiers, runs the capability probe, and generates `AGENTS.md` from a `CONTRACT.md` when one exists. The Codex-side counterpart to Claude Code's startup mandate; idempotent and report-only unless `--apply`. Wired as the Codex setup step in the Codex adapter. (CORE now ships seven companion utilities.)
@@ -247,13 +247,13 @@ This release folds in the v2.7 work that was never tagged — capability history
 - `skills/core/scripts/capability-probe.mjs` — Extended `invokeProbe()` to handle `capability/`-prefixed delegate paths via dynamic import. Added `allowed_signal_weight` gate to `runPreAction()` with `consuming_harness_signal_weak` block code. Updated `detectConsumingHarness` comment to reflect conflict-not-priority behavior.
 
 ### Decision units
-- DC-95: capability-probe-distribution — probe approach per harness vs universal
-- DC-96: effective-script-root-as-identity-gate — script root as the hard identity signal
-- DC-97: fail-open-startup-fail-closed-mutation — mode separation doctrine
-- DC-98: schema-and-doctrine-consumer-coupling — consumer-cited schema lifecycle
-- DC-99: harness-docs-as-contract-reference — docs-as-contract doctrine
-- DC-100: harness-memory-authority-boundary — memory authority per harness
-- R-17: trust-based-anti-anchoring-claude-code — DEGRADED-by-mechanism; closes in v2.8.0
+- capability-probe-distribution — probe approach per harness vs universal
+- effective-script-root-as-identity-gate — script root as the hard identity signal
+- fail-open-startup-fail-closed-mutation — mode separation doctrine
+- schema-and-doctrine-consumer-coupling — consumer-cited schema lifecycle
+- harness-docs-as-contract-reference — docs-as-contract doctrine
+- harness-memory-authority-boundary — memory authority per harness
+- trust-based-anti-anchoring-claude-code — degraded by mechanism; closes in v2.8.0
 
 ## [2.5.0] — 2026-05-27
 
@@ -264,7 +264,7 @@ This release folds in the v2.7 work that was never tagged — capability history
   - Detection-method results logged to `~/.core/workspaces/<id>/metrics/scaffold.log` for forensic trail. Resolved storage path pinned to sibling `storage-path.txt` for write-time consumers.
   - Stub README at project location when storage is redirected — preserves grep-discoverability and points user at actual location.
   - `CORE_METRICS_FORCE_PROJECT_LOCAL=1` and `CORE_METRICS_FORCE_APPDATA_FALLBACK=1` env-var escape hatches; both short-circuit detection.
-- `skills/core/scripts/demote-state-narrative.mjs` (~320 lines) — DC-85 Phase 1c §State narrative compaction. Demotes §State bullets to `PROJECT-ARCHIVE.md §State` when ALL three conditions hold: strict `*Backed by ...*` footer citation present, all cited units in terminal status (`resolved`/`archived`/`superseded`/`closed` — mirrors `demote-moves` for cross-script symmetry), AND the most-recent backing-unit `updated:` date is >60 days old. Conservative defaults match `demote-moves` — no citation, missing unit, or any-active-unit → keep. **Default mode is dry-run in v1** (only `--apply` writes) because §State demotion is materially riskier than §Moves demotion and the criteria are tuned for §State-heavy non-CORE corpora that haven't been exercised yet. The flip to apply-default waits on cross-corpus validation against `all-in-mesh-redemption` or similar. Older citation styles (`*DC-XX.*` shorthand) intentionally fall into the no-citation bucket per DC-93 §3. 36 unit tests cover the full classification matrix plus the dry-run-vs-apply contract.
+- `skills/core/scripts/demote-state-narrative.mjs` (~320 lines) — §State narrative compaction. Demotes §State bullets to `PROJECT-ARCHIVE.md §State` when ALL three conditions hold: strict `*Backed by ...*` footer citation present, all cited units in terminal status (`resolved`/`archived`/`superseded`/`closed` — mirrors `demote-moves` for cross-script symmetry), AND the most-recent backing-unit `updated:` date is >60 days old. Conservative defaults match `demote-moves` — no citation, missing unit, or any-active-unit → keep. **Default mode is dry-run in v1** (only `--apply` writes) because §State demotion is materially riskier than §Moves demotion and the criteria are tuned for §State-heavy non-CORE corpora that haven't been exercised yet. The flip to apply-default waits on cross-corpus validation against `all-in-mesh-redemption` or similar. Older citation styles fall into the no-citation bucket by design. 36 unit tests cover the full classification matrix plus the dry-run-vs-apply contract.
 
 ### Changed
 - `skills/core/scripts/log-event.mjs` (+100 lines, then +25 lines) — added OTel-format dual-write per spec §17.7 transition path. Legacy JSONL write at `_sessions/<date>/<filename>.jsonl` is byte-identical to before (existing analyzers untouched). New OTel-format span lines land at `<storage>/traces/<session-id>.jsonl` where `<storage>` is resolved via `resolveStoragePath()` honoring scaffold-time pin (preserves (g.5) AppData redirect on Windows+OneDrive). Session id resolves via a four-step chain: explicit option → `CLAUDE_CODE_SESSION_ID` (Claude Code's native env var per Probe 2) → `CODEX_THREAD_ID` (Codex Desktop, observed `019e6287-...` shape per RC Turn evt-c97d empirical confirmation) → sentinel `no-session-context`. New exports: `resolveStoragePath`, `resolveSessionId`, `traceLogPath`, `eventToOtelSpan`, `SCHEMA_VERSION` (semver `1.0.0`). Schema version on every emitted span per Anvil A8.
@@ -272,14 +272,14 @@ This release folds in the v2.7 work that was never tagged — capability history
 - `skills/finalize/SKILL.md` — Step 3 hygiene pass gains a `demote-state-narrative` bullet positioned after `compact-project.mjs`, with the v1 dry-run-default discipline named explicitly and the flip-to-apply gate documented.
 
 ### Notes
-- v2.5.0 bundles two threads of DC-85 follow-through work that landed end-to-end this release: **T1 Phase 1+2 of the metrics & observability v1 work** per spec `docs/specs/2026-05-25-metrics-and-observability-spec.md` (post-synthesis design, §17.12 v1 scope), and **Phase 1c of the memory architecture redesign** per DC-93 (Phase 1a + 1b already shipped in v2.3.0). T2 (SessionStart/Stop/SessionEnd hooks per WR-1/WR-2/WR-3 + RL-1/RL-3) and T3 (augmentation-event correlation per AS group) are upstream future work; the storage substrate ships first because every later layer depends on it.
+- v2.5.0 bundles two threads of follow-through work that landed end-to-end this release: **T1 Phase 1+2 of the metrics & observability v1 work** per spec `docs/specs/2026-05-25-metrics-and-observability-spec.md` (post-synthesis design, §17.12 v1 scope), and **Phase 1c of the memory architecture redesign** (Phase 1a + 1b already shipped in v2.3.0). T2 (SessionStart/Stop/SessionEnd hooks per WR-1/WR-2/WR-3 + RL-1/RL-3) and T3 (augmentation-event correlation per AS group) are upstream future work; the storage substrate ships first because every later layer depends on it.
 - Five collab-recorded design corrections empirically caught during the 30-fire metrics collab — captured in `obs-20260526-pseudo-code-discipline-before-lock` for graduation review.
 - Phase 1c first-fire dry-run on CORE PROJECT.md returned `0 demoted, 15 kept` as expected — CORE's §State backing units are all `status: active` (decisions are durable architectural artifacts on this corpus). The deeper criteria-vs-corpus mismatch finding — that the demote-* terminal-status set doesn't align with the actually-used `active` / `retired` vocabulary in CORE's 233-unit corpus — is captured in `obs-20260527-demote-terminal-status-corpus-mismatch` for follow-up alignment of both `demote-moves` and `demote-state-narrative`.
 
 ## [2.4.1] — 2026-05-26
 
 ### Changed
-- `skills/core/protocols/startup.md` — "Compose the readiness summary" section now opens with a "Before composing — view memory" paragraph instructing the agent to re-check the auto-memory it loaded earlier (especially cross-project feedback memories) before writing the first turn. Closes a recognition-failure mode where memory was loaded but not consulted at composition time. Mirrors Anthropic's memory-tool system prompt ("always view your memory directory before doing anything else"). This is Phase 0(b) of the DC-94 measurement window running through 2026-05-31.
+- `skills/core/protocols/startup.md` — "Compose the readiness summary" section now opens with a "Before composing — view memory" paragraph instructing the agent to re-check the auto-memory it loaded earlier (especially cross-project feedback memories) before writing the first turn. Closes a recognition-failure mode where memory was loaded but not consulted at composition time. Mirrors Anthropic's memory-tool system prompt ("always view your memory directory before doing anything else"). Part of the measurement window running through 2026-05-31.
 
 ## [2.4.0] — 2026-05-25
 
@@ -335,7 +335,7 @@ This release folds in the v2.7 work that was never tagged — capability history
 ## [2.3.0] — 2026-05-24
 
 ### Added
-- DC-85 Phase 1b: `scripts/demote-moves.mjs` auto-demotes closed `[x]` §Moves bullets to `PROJECT-ARCHIVE.md §Moves` when the most-recent backing-unit `updated:` date is >30 days old AND all cited units are in terminal status. Conservative defaults: bullets with no backing-unit citation never demote; bullets with any missing or still-active cited unit never demote; max(updated) across cited; never destructive (move-with-pointer + one-line stub). Auto-applies; `--dry-run` kept as inspection mode.
+- Phase 1b: `scripts/demote-moves.mjs` auto-demotes closed `[x]` §Moves bullets to `PROJECT-ARCHIVE.md §Moves` when the most-recent backing-unit `updated:` date is >30 days old AND all cited units are in terminal status. Conservative defaults: bullets with no backing-unit citation never demote; bullets with any missing or still-active cited unit never demote; max(updated) across cited; never destructive (move-with-pointer + one-line stub). Auto-applies; `--dry-run` kept as inspection mode.
 - Hot-tier 500-token budget enforcement in `scripts/hot-section.mjs`. `applyHotSection()` throws `HOT_SECTION_OVER_BUDGET` when synthesis exceeds the cap (with `allowOverBudget: true` escape hatch).
 - `scripts/compact-project.mjs` gains `HARD_CAP_BYTES = 70000` and a new `--section-sizes` flag for inspection-only breakdown.
 - New `scripts/log-event.mjs` shared structured-logging helper. Writes JSONL events to `<project>/_sessions/<YYYY-MM-DD>/<filename>` with silent-skip on bad project dir.
@@ -351,8 +351,8 @@ This release folds in the v2.7 work that was never tagged — capability history
 ## [2.2.0] — 2026-05-23
 
 ### Added
-- `protocols/clusters.md` — cluster naming discipline doc (DC-85 Phase 1a). Three valid naming triggers (project-shape at intake, traversal-pattern emergence, deliberate investigation), ratification gate, render-vs-load defaults, when-NOT-to-cluster guidance.
-- Source-of-authority hierarchy intake (DC-85 §8) in `protocols/startup.md` new-workspace path and `protocols/hygiene.md` on-demand setup. Captures governance ordering across project artifacts (PRD > HLSD > RTM > chat) as a per-project decision unit. Distinct from DC-87's per-external-source authority.
+- `protocols/clusters.md` — cluster naming discipline doc (Phase 1a). Three valid naming triggers (project-shape at intake, traversal-pattern emergence, deliberate investigation), ratification gate, render-vs-load defaults, when-NOT-to-cluster guidance.
+- Source-of-authority hierarchy intake in `protocols/startup.md` new-workspace path and `protocols/hygiene.md` on-demand setup. Captures governance ordering across project artifacts (PRD > HLSD > RTM > chat) as a per-project decision unit. Distinct from the per-external-source authority.
 - `by-when` optional frontmatter field on `open-question` units. Documented in `protocols/data-storage.md`; validated by `check-units.mjs` (ISO date format + wrong-type warning).
 - Open-question staleness check at `/orient` Step 4 — surfaces past-due `by-when` items in the readiness summary. Michelle probe mechanism.
 - `scripts/hot-section.mjs` — new script with `candidates` / `apply` / `current` / `clear` subcommands. Inserts agent-composed 5-7 line "Right now" section atop `PROJECT.md` between front-matter and §What & Why, bracketed by HTML-comment markers for idempotent find/replace.
@@ -378,7 +378,7 @@ This release folds in the v2.7 work that was never tagged — capability history
 ## [2.0.2] — 2026-05-23
 
 ### Added
-- Source-registration framework (DC-87) — source-agnostic intake protocol, `/register-sources` slash command, confidence-assignment guide, source-pull-log analyzer
+- Source-registration framework — source-agnostic intake protocol, `/register-sources` slash command, confidence-assignment guide, source-pull-log analyzer
 - Codex harness adapter — full CERT-READY at BUILD 20260521.5; dual plugin manifest (Claude Code + Codex)
 - Workspace fork-check script — auto-forks copied workspaces, prevents identity confusion
 

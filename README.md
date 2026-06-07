@@ -52,6 +52,7 @@ Type `/core` to start — it loads your project and orients before anything else
 
 - [USAGE.md](USAGE.md) — what each command, protocol, and script does.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the design behind it: the memory store, how retrieval works, memory hygiene, when the swarm fires, validation, and the hooks.
+- [llms.txt](llms.txt) — a structured map of this repo for AI agents: what CORE is, how to install it, and how to use it, with pointers into the docs.
 
 ## Status
 
