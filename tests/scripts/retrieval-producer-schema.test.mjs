@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const startupMd = readFileSync(join(ROOT, 'plugins', 'core', 'skills', 'core', 'protocols', 'startup.md'), 'utf8');
-const orientMd = readFileSync(join(ROOT, 'plugins', 'core', 'skills', 'orient', 'SKILL.md'), 'utf8');
 
 test('startup protocol gives agents the exact retrieval producer schema', () => {
   assert.match(startupMd, /record-retrieval-event\.mjs/, 'startup names the producer helper');
   assert.match(startupMd, /--event-json '\{/, 'startup shows an inline JSON producer example');
+  assert.match(startupMd, /"trigger":"session-start"/, 'startup emits the session-start trigger (the resumption bootstrap path — formerly orient)');
 
   for (const field of [
     'trigger',
@@ -35,19 +35,5 @@ test('startup protocol gives agents the exact retrieval producer schema', () => 
     startupMd,
     /highest tier reached|selected unit IDs/,
     'startup must not use ambiguous prose that led fresh agents to invent alias fields',
-  );
-});
-
-test('orient skill wires the retrieval producer (the most common retrieval path)', () => {
-  // /orient is a resumption bootstrap that runs the full ladder but historically
-  // never emitted a retrieval row — leaving analyze-retrieval-quality blind to the
-  // most common path. Guard the wiring so it can't silently regress.
-  assert.match(orientMd, /record-retrieval-event\.mjs/, 'orient names the producer helper');
-  assert.match(orientMd, /--event-json '\{/, 'orient shows an inline JSON producer example');
-  assert.match(orientMd, /"trigger":"session-start"/, 'orient emits the session-start trigger (it is a resumption bootstrap)');
-  assert.match(
-    orientMd,
-    /do not invent aliases/i,
-    'orient carries the same schema-fidelity warning as startup',
   );
 });

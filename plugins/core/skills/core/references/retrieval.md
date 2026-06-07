@@ -46,7 +46,7 @@ This returns a scored, hop-ordered candidate list. Read the top results. Fall ba
 - Maximum without explicit reason: 3 hops
 - 4+ hops = a signal that the graph is too sparse for this query OR the question is semantic and should escalate to Tier 3
 
-**Edge types to follow:** All six committed types per DC-68 are walkable in Tier 2. Body `[[wikilinks]]` are followed only at the seed step (one hop into the body), not transitively.
+**Edge types to follow:** All committed edge types (the DC-68 base set plus later additions — see `VALID_EDGE_TYPES` in `check-units.mjs`) are walkable in Tier 2. Body `[[wikilinks]]` are followed only at the seed step (one hop into the body), not transitively.
 
 #### Score-gated termination (DC-69)
 

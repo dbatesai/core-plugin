@@ -208,7 +208,7 @@ The good version lets a future reader (or synthesis pass) evaluate the chain. Th
 
 ## What this guide is not
 
-- **Not exhaustive.** Ten patterns cover most cases. Sources will produce findings that fit no pattern cleanly. Extractor judgment fills the gap; the pattern-fits-gap is the signal to expand the catalog in a future revision.
+- **Not exhaustive.** These twelve patterns cover most cases. Sources will produce findings that fit no pattern cleanly. Extractor judgment fills the gap; the pattern-fits-gap is the signal to expand the catalog in a future revision.
 
 - **Not source-specific.** The patterns describe structural signals any source might exhibit. An installation reading this should be able to map any of its sources' typical findings onto patterns without the guide naming the source's specific tool.
 

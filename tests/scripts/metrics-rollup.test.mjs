@@ -6,6 +6,17 @@ import { tmpdir } from 'node:os';
 import { buildRollup, writeRollup, readOrientSignal } from '../../plugins/core/skills/core/scripts/metrics-rollup.mjs';
 import { metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 
+test('M5: a calibrated workspace with no turns must not mislabel the signal PROVISIONAL', () => {
+  withClassified({}, ({ home, project }) => {
+    const metaDir = join(home, '.core', 'workspaces', WID, 'metrics');
+    writeFileSync(join(metaDir, 'calibration-state.json'),
+      JSON.stringify({ is_calibrated: true, classifier_version: CLASSIFIER_VERSION }));
+    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    assert.equal(r.calibrated, true, 'calibration state read as calibrated');
+    assert.doesNotMatch(r.signal, /PROVISIONAL/, 'the no-turns signal must not claim provisional once calibrated');
+  });
+});
+
 const WID = 'ws-rollup';
 
 function withClassified(byDate, fn) {
@@ -101,13 +112,13 @@ test('rollup keeps PROVISIONAL when calibration was run against a stale classifi
   });
 });
 
-// ---- Privacy gate (spec §18): default-off; opt-in per workspace ----
+// ---- Capture gate (spec §18, DC-107): default-on; opt-out per workspace/env ----
 
-test('metricsEnabled is OFF by default (privacy-safe for plugin distribution)', () => {
-  assert.equal(metricsEnabled({ project: '/no/such/project', env: {} }), false);
+test('metricsEnabled is ON by default (DC-107: instrument by default, capture stays local)', () => {
+  assert.equal(metricsEnabled({ project: '/no/such/project', env: {} }), true);
 });
 
-test('metricsEnabled opt-in via env, and explicit off wins over a workspace flag', () => {
+test('metricsEnabled honors explicit env opt-out, and env wins over a workspace flag', () => {
   assert.equal(metricsEnabled({ env: { CORE_METRICS_ENABLED: 'true' } }), true);
   assert.equal(metricsEnabled({ env: { CORE_METRICS_ENABLED: '1' } }), true);
   assert.equal(metricsEnabled({ env: { CORE_METRICS_ENABLED: '0' } }), false);
@@ -126,9 +137,10 @@ test('metricsEnabled opt-in via workspace.json metrics_enabled flag', () => {
 
 test('a disabled workspace produces no rollup artifacts', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    // no opt-in (env {} and no workspace flag) → disabled
-    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: {} }));
+    // DC-107: default is now ON, so opt out explicitly to exercise the disabled path.
+    const env = { CORE_METRICS_ENABLED: '0' };
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env }));
     assert.equal(r.disabled, true);
-    assert.equal(readOrientSignal(project, { home, workspaceId: WID }), null, 'no signal written when disabled');
+    assert.equal(readOrientSignal(project, { home, workspaceId: WID }), null, 'no signal written when opted out');
   });
 });

@@ -123,7 +123,12 @@ export function parseCodex(lines) {
       // apply_patch etc. input is a string carrying the patch / file paths.
       events.push({ idx, kind: 'tool', role: 'assistant', name: p.name, text: stringifyInput(p.input) });
     } else if (e.type === 'event_msg' && (p.type === 'agent_message' || p.type === 'user_message')) {
-      const text = typeof p.message === 'string' ? p.message : (typeof p.text === 'string' ? p.text : '');
+      // message/text are usually strings, but a structured-content payload carries an
+      // array of {text} blocks — pull text out of those too rather than dropping the turn.
+      const fromArray = (v) => Array.isArray(v) ? v.filter((c) => typeof c?.text === 'string').map((c) => c.text).join('\n') : '';
+      const text = typeof p.message === 'string' ? p.message
+        : typeof p.text === 'string' ? p.text
+        : fromArray(p.message) || fromArray(p.content);
       if (text) events.push({ idx, kind: 'text', role: p.type === 'user_message' ? 'user' : 'assistant', text });
     }
     // reasoning (encrypted) + *_output (return values, not access-intent) not surfaced.

@@ -338,12 +338,13 @@ export async function runPreAction(actionName, opts = {}) {
         continue;
       }
     }
-    // Signal-weight gate — when action requires 'strong', a weak-only signal is
-    // insufficient for mutation. Weak signal (e.g. only CODEX_THREAD_ID) is
-    // diagnostic but not authoritative enough for writes to shared surfaces.
-    if (requiredSignalWeight === 'strong' && row.consuming_harness_signal_weight === 'weak') {
+    // Signal-weight gate — when action requires 'strong', anything that isn't a
+    // strong signal (weak, OR null/unknown — an unknown-harness PASS) is insufficient
+    // for mutation. Checking `!== 'strong'` makes the gate self-sufficient rather than
+    // letting null slip through on the sibling allowed_harnesses gate.
+    if (requiredSignalWeight === 'strong' && row.consuming_harness_signal_weight !== 'strong') {
       row.mutation_permitted = false;
-      row.mutation_block_reason = 'consuming_harness_signal_weak';
+      row.mutation_block_reason = 'consuming_harness_signal_not_strong';
       continue;
     }
     // All gates passed for this row

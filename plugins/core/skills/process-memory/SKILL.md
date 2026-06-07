@@ -17,7 +17,7 @@ Run the memory housekeeping pass. After this finishes, the project's memory-rela
 
 Runs synchronously in the current session.
 
-**Script path resolution.** This file references scripts via `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<script>.mjs`. That env var is set on Claude Code marketplace installs but not on Codex. On Codex, derive the path mechanically: take the absolute path you loaded this `SKILL.md` from, replace `/skills/process-memory/SKILL.md` with `/skills/core/scripts/<script>.mjs`. Concretely: `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/process-memory/SKILL.md` → `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/core/scripts/<script>.mjs`. Do not construct paths against a guessed plugin base; the loaded path carries the resolution.
+**Script path resolution.** Commands below invoke scripts as `${CORE_ROOT}/skills/core/scripts/<script>.mjs`, where `CORE_ROOT` is the resolved plugin root — the same variable name `protocols/startup.md` and `protocols/validation.md` use. **`${CLAUDE_PLUGIN_ROOT}` is not reliably injected into agent Bash tool calls** (the same constraint `protocols/startup.md` documents — it's why startup resolves the root from the skill base directory, not the env var). So resolve `CORE_ROOT` once, the same way on every harness: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/process-memory/SKILL.md` — that prefix is your plugin root (Claude Code marketplace: `.../plugins/core`; Codex plugin cache: `~/.codex/plugins/cache/<marketplace>/core/<version>`). Reuse the `CORE_ROOT` value startup already resolved this session if you have it. **Guard discipline:** if you cannot resolve a concrete root, skip the affected script step and surface the skip in plain voice — never run `node` against a guessed or empty base. Do not depend on the env var being present.
 
 ---
 
@@ -95,7 +95,7 @@ Narrate: "Cleaned N ghost duplicates from `_memories/`." If zero, say nothing.
 Run the schema + integrity check:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs" "<project>/_memories"
+node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" "<project>/_memories"
 ```
 
 Read the output. The validator emits three counts: PASS, WARN, FAIL.
@@ -106,10 +106,11 @@ Read the output. The validator emits three counts: PASS, WARN, FAIL.
 - `status-value: closed` on a risk unit → rewrite to `archived`.
 - `status-value: superseded` on a decision unit → rewrite to `retired`.
 - `archived-in-active`: unit has `status: archived` but sits in active dir → move to `_memories/archive/`.
-- `edge-unknown-type`: edge type not in the six committed types (`cites`, `supersedes`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`) → remove the edge if it's `superseded-by` or `depended-on-by` (the inverse already lives on the other unit); otherwise surface.
+- `edge-unknown-type`: edge type not in the committed set (`cites`, `supersedes`, `superseded-by`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`, `depended-on-by`, `supersedes-claim`, `refines`, `amends`) → three cases: (a) `superseded-by`/`depended-on-by` → remove (the inverse already lives on the other unit); (b) a type in the normalize map (`relates`/`relates-to`/`related` → `cites`) → **relabel to the named target** — the validator prints the target in the warning detail, so this is a mechanical safe-fix, not a guess; (c) anything else → surface for a bless-or-relabel decision (don't invent a type). `refines` and `amends` are committed now (distinct from `supersedes`) and no longer flag.
+- `external-ref`: a cross-store/citation/path edge target recognized as legitimately outside the unit store (benign; not a break) — no fix, leave it.
 
 **Surface for human judgment** without auto-fixing:
-- `dangling-edge` / `edge-target-missing` — could be valid external references or typos; the user decides.
+- `dangling-edge` / `edge-target-missing` — a missing in-store unit (real break) or a typo; the user decides. (Recognized cross-store refs are `external-ref`, handled above — they no longer show here.)
 - `orphan` (no edges) — sometimes deliberate (risks often stand alone), sometimes a graduation gap.
 - Anything else the validator flags that isn't on the safe-fix list.
 
@@ -122,8 +123,8 @@ After auto-fixing, re-run the validator and report the new counts.
 Always run both generators (they're cheap and idempotent — if nothing changed, the file content is identical):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs" "<project>/_memories"
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-risks-index.mjs" "<project>/_memories"
+node "${CORE_ROOT}/skills/core/scripts/generate-decisions-index.mjs" "<project>/_memories"
+node "${CORE_ROOT}/skills/core/scripts/generate-risks-index.mjs" "<project>/_memories"
 ```
 
 Both write to `_memories/INDEX-*.md`. Top-level units only — archived ones in `_memories/archive/` are intentionally excluded from the index.
@@ -135,9 +136,9 @@ Both write to `_memories/INDEX-*.md`. Top-level units only — archived ones in 
 Run three scripts in order — demote-moves first, then compact-project, then demote-state-narrative. The first two auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs). The third is dry-run-default in v1 per DC-93 — only `--apply` writes.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/demote-moves.mjs" "<project>"
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs" "<project>"
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/demote-state-narrative.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/demote-moves.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/compact-project.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/demote-state-narrative.mjs" "<project>"
 ```
 
 - `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` on **checkbox + age** — a done item is done regardless of its cited units' status. Age = most-recent non-future date in the bullet text (citation/backtick/wikilink/obs-id dates stripped), falling back to cited-unit dates when the bullet has no date; kept when no age is provable or age < 30 days, and archived stubs are never re-demoted. `--strict` restores the old "all cited units terminal" gate. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. A large first batch (≥20) is **held** unless re-run with `--apply-large-batch` — narrate the held count and that nothing was written.
@@ -163,7 +164,7 @@ If over ~66KB, surface a recommendation but do not auto-compact — IMPROVEMENT_
 Run the retrieval-quality analyzer over the last 30 days of session logs:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs" "<project>"
 ```
 
 Read the output. The three signals worth surfacing in plain voice:
@@ -181,17 +182,17 @@ If the project has no `_sessions/<date>/retrieval-log.jsonl` files yet, the anal
 Complements Step 6.5: that one reads the retrieval *log* (precision/recall, needs logged events); this one reads the session *transcript* directly, so it works even when the log is empty. It detects the recognition-failure signature — a memory-dependent turn answered without reaching the CORE store first (the IGM-episode shape: a project term was asked about and answered from head, no `_memories/` grep).
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-skip.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/analyze-retrieval-skip.mjs" "<project>"
 ```
 
-Read the output honestly — these are **candidates, not verdicts** (term presence is a heuristic for memory-dependence). If `SKIPS-FOUND`, surface the flagged term(s) in plain voice as a self-audit prompt ("I answered about IGM without grepping `_memories/` first — that's the retrieval-skip pattern; worth checking I had it right."). `CLEAN` → one sentence or silence. `UNKNOWN` on Codex is expected until tool extraction lands — say so briefly, don't treat it as clean. This is the behavioral consumer of the `read-transcript` adapter verb; it surfaces the lapse so the user doesn't have to catch it.
+Read the output honestly — these are **candidates, not verdicts** (term presence is a heuristic for memory-dependence). If `SKIPS-FOUND`, surface the flagged term(s) in plain voice as a self-audit prompt ("I answered about IGM without grepping `_memories/` first — that's the retrieval-skip pattern; worth checking I had it right."). `CLEAN` → one sentence or silence. `UNKNOWN` on Codex is expected until tool extraction lands — say so briefly, don't treat it as clean. This is the behavioral consumer of the `read-transcript` helper (a self-dispatching script, not a `harness.md` contract verb); it surfaces the lapse so the user doesn't have to catch it.
 
 ## Step 6.5c — Memory-boundary audit (v3.0)
 
 Surface where native harness memory (MEMORY.md / `~/.codex/memories`) holds project-relevant facts the CORE store doesn't — read-only, sampled:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<project>"
 ```
 
 **Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection (DC-83) says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is deferred (design Q3).
@@ -203,7 +204,7 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<pro
 Read the per-session capability history and surface any drift:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-capability-drift.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/analyze-capability-drift.mjs" "<project>"
 ```
 
 It reads `~/.core/workspaces/<id>/capability-history.jsonl` (appended each session at startup by `record-capability-snapshot.mjs`), renders `<project>/_memories/_capability-drift-log.md`, and reports degrading drift + regressions. Narrate only what's actionable in plain voice — a capability that slipped PASS→DEGRADED, or one that stopped reporting between sessions. If there's no history yet, say so in one sentence ("No capability history yet — it accrues per session."). Healing-direction changes are informational; don't lead with them.

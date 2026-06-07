@@ -26,6 +26,8 @@
  */
 
 import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
@@ -78,9 +80,35 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 }
 
+// state-cache.json is the inference-level edit-detection cache at
+// ~/.core/state-cache.json: per file, who last wrote it and a content hash.
+// applyHotSection writes PROJECT.md on CORE's behalf via a script, so the agent's
+// "I wrote it" reflex never fires for it — left unrecorded, next session's
+// edit-detection reads CORE's own hot-section render as a USER edit and misfires
+// anti-resurrection. We stamp CORE authorship here so edit-detection can tell the
+// difference. (Edit-detection ALSO excludes the marker-delimited hot block — see
+// startup.md §"Load — returning workspace"; this stamp is the corroborating record
+// and keeps `last_written_by` honest about who actually touched PROJECT.md.)
+export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir() } = {}) {
+  const cachePath = join(home, '.core', 'state-cache.json');
+  let cache;
+  try { cache = JSON.parse(readFileSync(cachePath, 'utf8')); } catch { cache = { files: {} }; }
+  if (!cache || typeof cache !== 'object') cache = { files: {} };
+  if (!cache.files || typeof cache.files !== 'object') cache.files = {};
+  let content = '';
+  try { content = readFileSync(projectMdPath, 'utf8'); } catch { /* fall through with empty */ }
+  cache.files[projectMdPath] = {
+    last_hash: createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16),
+    last_written: now || nowIso(),
+    last_written_by: 'hot-section',
+  };
+  try { atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n'); }
+  catch { /* best-effort: a cache-write failure never blocks the synthesis */ }
+}
+
 // ---------- Public API ----------
 
-export function applyHotSection(projectDir, text, { now, allowOverBudget = false } = {}) {
+export function applyHotSection(projectDir, text, { now, allowOverBudget = false, home } = {}) {
   const tokens = estimateTokens(text);
   if (tokens > HOT_SECTION_TOKEN_BUDGET && !allowOverBudget) {
     logEvent(projectDir, 'retrieval-log.jsonl', {
@@ -114,7 +142,10 @@ export function applyHotSection(projectDir, text, { now, allowOverBudget = false
       updated = original.slice(0, insertAt) + block + original.slice(insertAt);
     }
   }
-  if (updated !== original) atomicWriteFileSync(path, updated);
+  if (updated !== original) {
+    atomicWriteFileSync(path, updated);
+    recordProjectMdWrite(path, { now, home });
+  }
   logEvent(projectDir, 'retrieval-log.jsonl', {
     kind: 'hot-section-synthesis',
     tokens,

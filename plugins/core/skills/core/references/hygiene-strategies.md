@@ -16,7 +16,7 @@ For each memory entry, assess four things:
 - **Redundant?** Another entry covering the same ground?
 - **Needs updating?** Mostly right but outdated in detail?
 
-Then act using one of five verbs: **promote** (observation proved true across sessions → permanent knowledge), **merge** (duplicate entries → one entry), **archive** (was useful, no longer relevant → `archived/` with a note), **delete** (wrong, or now in code/docs), **update** (mostly right, needs correction).
+Then act using one of these verbs, which map to the canonical model in `protocols/hygiene.md`: **graduate** (observation proved true across sessions → a permanent unit), **merge** (duplicate entries → one entry), **archive** (was useful, no longer relevant → `_memories/archive/` with a note; never autonomous on a user-authored unit), **retire** (wrong, superseded, or now captured in code/docs → frontmatter `status: retired`, **body preserved** for forensic value, anti-resurrection rule applies — you do not silently remove the unit), **update** (mostly right, needs correction). Literal file deletion is only ever for orphan **index entries** or non-unit scratch files — never a canonical unit; a unit that's "wrong" gets retired, not deleted.
 
 Also review the `dm_notes` field in each workspace's `workspace.json`. More than ~10 one-liner self-corrections → consolidate into a brief paragraph summarizing recurring patterns.
 
@@ -38,11 +38,11 @@ Suppression state persists at `~/.core/swarm-effectiveness/archive-reconciliatio
 
 Example: a decision unit archived three months back keeps showing up in protocols and session summaries as new work references it. Sub-protocol 3b surfaces it; the user decides whether to un-archive and surface in §D&R or suppress for a few cycles.
 
-### 3c — Compaction Volume
+### 3c — File-Cap Reconciliation
 
-Auto-MIGRATE runs autonomously per DC-46, but if it's archiving faster than expected, the user should see it and have the option to revisit the path (a) vs (b) choice. Count MIGRATE entries per workspace since the previous hygiene; surface the re-decision prompt when the count crosses the threshold.
+The DC-46 auto-MIGRATE classifier (path-(a)-vs-(b) re-decision) is **retired v1 machinery** — superseded by the file-cap monitoring in `protocols/hygiene.md`. There is no MIGRATE count and no path choice anymore. Instead: monitor the synthesis files (`PROJECT.md`, `IMPROVEMENT_LOG.md`, any project-flagged synthesis file) against the Read-tool soft target, and when one is over, proactively compact it per `hygiene.md §"file-cap monitoring and proactive compaction"` — archive/retire the units behind the over-cap section, rotate the log, leave grep stubs where a compaction migrates content. Surface the volume to the user (how much was compacted, from where to where) so the work stays visible; the user doesn't re-decide a strategy, they just see what happened.
 
-**Calibration default** — 5 MIGRATE entries per cycle per workspace. If the user consistently stays on path (a) without complaint at higher counts, raise it. If they want earlier re-decisions, lower it.
+**Calibration default** — trigger at ~80% of the Read-tool cap (the `compact-project.mjs --check` soft target). Tune per project if a synthesis file runs hot.
 
 ### 3d — Edge-Integrity Sweep
 
@@ -81,7 +81,7 @@ Review agents that participated in recent swarms. Files at `~/.core/agents/<keba
 
 Every hygiene run produces:
 1. Updated memory files (modified, merged, archived, deleted)
-2. A retrospective at `~/.core/memory-hygienes/<YYYY-MM-DD>.md`
+2. A retrospective at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`
 3. Updated index files reflecting any additions or removals
 4. If 3b ran: refreshed `archive-reconciliation-state.json` + Phase 3b section in retrospective
 5. If 3b promoted any stubs: corresponding PROJECT.md §D&R edits, gated on secondary confirmation

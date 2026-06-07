@@ -111,7 +111,7 @@ function hasUnitFiles(dir) {
 
 // ── Workspace identity (script-visible, detect-only) ─────────────────────────
 // Always dry-run: configure-project REPORTS the identity decision; it never
-// mutates identity (the fork mutation is startup/orient's job). Wrapped in its
+// mutates identity (the fork mutation is startup's job). Wrapped in its
 // own try/catch because we import checkFork directly, bypassing the CLI main's
 // error wrapper.
 export function detectIdentity(projectPath, coreDir, now = new Date()) {
@@ -186,7 +186,10 @@ export async function planAgentsMd(projectPath, { apply = false } = {}) {
     return { status: existsSync(agentsPath) ? 'present-would-refresh' : 'would-generate', contractPath, agentsPath };
   }
   const r = await generateAgentsMd({ contractPath, outputPath: agentsPath, mode: 'write' });
-  if (r.skipped) return { status: 'skipped-no-contract', contractPath, agentsPath };
+  // The existsSync above already proved the contract present, so r.skipped can only
+  // fire if CONTRACT.md vanished between the check and the read (TOCTOU) — report it
+  // as that, not the duplicate 'skipped-no-contract' the precheck already returns.
+  if (r.skipped) return { status: 'skipped-contract-vanished', contractPath, agentsPath };
   return { status: 'generated', contractPath, agentsPath, written: r.written || agentsPath };
 }
 
@@ -255,7 +258,7 @@ export function formatReceipt(r) {
 }
 
 function describeIdentity(id) {
-  if (id.status === 'would-fork') return `would fork (copied pointer from ${id.original_id}) — run /orient to register as ${id.new_id}`;
+  if (id.status === 'would-fork') return `would fork (copied pointer from ${id.original_id}) — run /core to register as ${id.new_id}`;
   if (id.status === 'error') return `could not resolve (${id.detail})`;
   if (id.reason === 'path-match') return `returning workspace${id.workspace_id ? ` (${id.workspace_id})` : ''}`;
   if (id.reason === 'no-pointer' || id.reason === 'no-index') return 'new / unregistered (no pointer or index yet)';

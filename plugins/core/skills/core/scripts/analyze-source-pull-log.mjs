@@ -66,7 +66,10 @@ export function loadEvents(workspaceId, { sinceDays = DEFAULT_SINCE_DAYS, allTim
   if (!existsSync(logPath)) return [];
 
   const t = today ? _parseTimestamp(today) || _nowUTC() : _nowUTC();
-  const cutoff = allTime ? null : new Date(t.getTime() - sinceDays * 86_400_000);
+  // A non-finite sinceDays (e.g. `--since-days abc` → NaN) would make the cutoff
+  // NaN and silently include ALL events. Fall back to the default window instead.
+  const days = Number.isFinite(sinceDays) ? sinceDays : DEFAULT_SINCE_DAYS;
+  const cutoff = allTime ? null : new Date(t.getTime() - days * 86_400_000);
 
   let raw;
   try { raw = readFileSync(logPath, 'utf8'); } catch { return []; }

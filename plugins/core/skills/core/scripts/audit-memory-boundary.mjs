@@ -120,7 +120,10 @@ export function formatReport(report) {
   return lines.join('\n');
 }
 
-function isMain() { try { return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } }
+// Canonicalize BOTH sides so a symlinked/virtualized install doesn't make the
+// CLI silently no-op (read-only audit, so low-stakes, but kept consistent with
+// its sibling gates).
+function isMain() { try { const canon = (p) => realpathSync(p); return canon(process.argv[1]) === canon(fileURLToPath(import.meta.url)); } catch { return false; } }
 
 if (isMain()) {
   const args = process.argv.slice(2);

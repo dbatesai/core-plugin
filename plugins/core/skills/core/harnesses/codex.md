@@ -74,7 +74,7 @@ Codex can inject memory-like context at session start when `features.memories = 
 
 Startup context also comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat those as instruction surfaces, not project memory. Project facts live in `<project>/PROJECT.md` and `<project>/_memories/`.
 
-Codex assistant memory under `~/.codex/memories/` is harness-local recall, surface 4 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`. Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Codex memory is the explicit-save surface; mechanics live in `save-recall-note` below. CORE does not encode trigger phrases for when to invoke it — that's install-level configuration in the user's `AGENTS.md`.
+Codex assistant memory under `~/.codex/memories/` is harness-local recall, level 5 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`. Codex memory writes are not part of normal CORE project curation. Write project observations to `<project>/_memories/observations/...`. Codex memory is the explicit-save surface; mechanics live in `save-recall-note` below. CORE does not encode trigger phrases for when to invoke it — that's install-level configuration in the user's `AGENTS.md`.
 
 ## save-recall-note
 
@@ -144,7 +144,7 @@ If you're authoring a slash-command flow that spawns nested `codex exec`, do not
 
 Codex doesn't set `${CLAUDE_PLUGIN_ROOT}`. Companion skills that need to invoke scripts in the sibling core skill (`/finalize`, `/process-memory`) must derive the path from the loaded SKILL.md location rather than relying on the env var.
 
-The mechanical rule mirrors the protocol-resolution rule used in `skills/orient/SKILL.md` and `skills/finalize/SKILL.md`: take the absolute path you loaded SKILL.md from, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`, and invoke that. Concretely:
+The mechanical rule mirrors the protocol-resolution rule used in `skills/finalize/SKILL.md` and `skills/process-memory/SKILL.md`: take the absolute path you loaded SKILL.md from, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`, and invoke that. Concretely:
 
 - Claude Code marketplace install: `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<script>.mjs` works because the env var is set.
 - Codex plugin-cache install: derive the path from the loaded `~/.codex/plugins/cache/<marketplace>/core/<version>/skills/<wrapper>/SKILL.md`, replace `/skills/<wrapper>/SKILL.md` with `/skills/core/scripts/<script>.mjs`.

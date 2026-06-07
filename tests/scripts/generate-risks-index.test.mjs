@@ -1,9 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { escapeCell, buildIndex } from '../../plugins/core/skills/core/scripts/generate-risks-index.mjs';
+
+test('M9: INDEX-risks.md is written atomically (crash-safety, consistent with the decisions index)', () => {
+  const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/generate-risks-index.mjs', import.meta.url)), 'utf8');
+  assert.match(src, /from '\.\/fs-atomic\.mjs'/, 'imports the atomic writer');
+  assert.match(src, /atomicWriteFileSync\(indexPath/, 'index written atomically');
+  assert.doesNotMatch(src, /\bwriteFileSync\(indexPath/, 'no bare write of the index');
+});
 
 test('escapeCell escapes pipes and backslashes and flattens newlines', () => {
   assert.equal(escapeCell('A | B'), 'A \\| B');

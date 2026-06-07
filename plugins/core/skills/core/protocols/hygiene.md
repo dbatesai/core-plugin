@@ -139,7 +139,7 @@ Graduation — observation becoming unit — is the highest-value reasoning move
 
 ## On-demand project setup — governance-hierarchy capture (DC-85 §8)
 
-The new-workspace path in `protocols/startup.md` asks about source-authority hierarchy at intake. Returning workspaces that predate DC-85 won't have the unit yet. When a returning project would benefit from one (multi-document governance, recurring authority contradictions surfaced by synthesis-pass behavior #5, user mentions "what does the spec say vs. what we agreed in chat"), capture it on demand:
+The new-workspace path (in `protocols/startup-conditional-loads.md`) asks about source-authority hierarchy at intake. Returning workspaces that predate DC-85 won't have the unit yet. When a returning project would benefit from one (multi-document governance, recurring authority contradictions surfaced by synthesis-pass behavior #5, user mentions "what does the spec say vs. what we agreed in chat"), capture it on demand:
 
 - **Ask the user the same question the startup intake asks** — *"When this project's documents disagree, which one wins? PRD > HLSD > RTM > chat, or some other ordering, or single-source?"*
 - **Single-source / trivially-ordered projects: skip.** No unit needed; the question doesn't bind anything.

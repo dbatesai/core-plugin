@@ -60,7 +60,10 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
   try { entries = readdirSync(sessionsDir); } catch { return []; }
 
   const t = today || _todayUTC();
-  const cutoff = allTime ? null : new Date(t.getTime() - sinceDays * 86_400_000);
+  // A non-finite sinceDays (e.g. `--since-days abc` → NaN) would make the cutoff
+  // NaN and silently include ALL events. Fall back to the default window instead.
+  const days = Number.isFinite(sinceDays) ? sinceDays : DEFAULT_SINCE_DAYS;
+  const cutoff = allTime ? null : new Date(t.getTime() - days * 86_400_000);
 
   const events = [];
   for (const name of entries.sort()) {

@@ -36,6 +36,15 @@ test('extractMostRecentDate returns null when no date present', () => {
   assert.equal(extractMostRecentDate('Plugin release workflow complete'), null);
 });
 
+test('low: extractMostRecentDate rejects an impossible calendar date instead of rolling it forward', () => {
+  // 2026-02-30 passes a bare 1-31 day check but is not a real date; the old code
+  // accepted it and new Date() rolled it to Mar 2, yielding a wrong age.
+  assert.equal(extractMostRecentDate('closed 2026-02-30'), null, 'Feb 30 is not a date');
+  assert.equal(extractMostRecentDate('done 2025-13-01'), null, 'month 13 is not a date');
+  // a real date alongside an impossible one still returns the real one
+  assert.equal(extractMostRecentDate('shipped 2026-02-30, really 2026-02-27'), '2026-02-27');
+});
+
 test('extractMostRecentDate ignores dates embedded in wikilinks and obs-ids', () => {
   // The only "date" here is inside a unit reference — not a completion date.
   assert.equal(extractMostRecentDate('done [[obs-foo-2026-05-20]] and obs-bar-2026-05-21'), null);

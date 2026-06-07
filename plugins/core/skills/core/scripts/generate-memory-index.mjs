@@ -20,11 +20,12 @@
  *        [--top N] [--today YYYY-MM-DD]
  */
 
-import { readFileSync, writeFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 const SECTION_HEADER_RE = /^## Top project units/;
 const EXISTING_LINE_RE = /^- \[([^\]]+)\]\(([^)]+)\) — (.+)$/;
@@ -250,7 +251,7 @@ export function main(argv) {
     return 0;
   }
 
-  writeFileSync(memoryMdPath, newText);
+  atomicWriteFileSync(memoryMdPath, newText);
   process.stderr.write(`Rewrote priority block in ${memoryMdPath} (${topN} units)\n`);
   return 0;
 }
@@ -258,7 +259,7 @@ export function main(argv) {
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
 const _argv1 = _canon(process.argv[1]);
 const _self = _canon(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY === '1') {
+if (process.env.CORE_DEBUG_CLI_ENTRY) {
   process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_argv1)} self=${JSON.stringify(_self)} match=${_argv1 === _self}\n`);
 }
 if (_argv1 === _self) {

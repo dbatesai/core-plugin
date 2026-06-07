@@ -31,7 +31,7 @@ Three steps, in order:
 2. Execute the workspace-resolution and architecture-state routing it defines. If routing lands on cold-start migration or folder-rename, complete that work before continuing.
 3. Compose the readiness summary per the protocol's §"Compose the readiness summary" specification, and write or refresh `~/.core/workspaces/<id>/last-bootstrap.json` with the session-start timestamp.
 
-Exception — already bootstrapped this session. Check `~/.core/workspaces/<id>/last-bootstrap.json` if you can resolve the workspace id from `workspace.json` or `~/.core/index.json`. If the file exists and its `session_started_at` matches the current Claude Code session start time (within a 60-second window), you've already bootstrapped this session — skip the protocol read and pick up where the conversation left off. If the file is absent, stale, or you can't resolve the workspace, run the protocol.
+Exception — already bootstrapped this session. Check `~/.core/workspaces/<id>/last-bootstrap.json` if you can resolve the workspace id from `workspace.json` or `~/.core/index.json`. If the file exists and its `session_started_at` matches the current Claude Code session start time (within a 60-second window), you've already bootstrapped this session — skip the protocol read. If the user's task is just to resume or re-orient — no substantive work named, e.g. a bare `/core`, "where are we", "orient me" — re-compose a fresh readiness summary from current state per `protocols/startup.md` §"Compose the readiness summary" — that's the on-demand "where are we now?" (resolve `CORE_ROOT` first per the startup resolver if you want the capability and recognition-signal lines; without it those fail open and the receipt is prose-only). Otherwise pick up where the conversation left off and proceed with the task. If the file is absent, stale, or you can't resolve the workspace, run the protocol.
 
 If the user's task explicitly says "skip startup" or "don't bootstrap" — they have a reason, honor it, but flag the skip in your first reply so they see it.
 
@@ -92,6 +92,7 @@ Paths in this index resolve relative to the skill base directory (the one contai
 | Protocol | File | When |
 |---|---|---|
 | Startup | `protocols/startup.md` | Every session start, before accepting any task |
+| Startup conditional loads | `protocols/startup-conditional-loads.md` | Conditional-load — only when routing selects new-workspace or folder-rename (not read on a returning workspace) |
 | Harness adapter | `protocols/harness.md` | After startup; defines abstract verbs and points at the per-harness adapter |
 | Workspace | `protocols/workspace.md` | Creating or resuming a workspace |
 | Data storage | `protocols/data-storage.md` | Before writing any unit, observation, or render |
@@ -119,7 +120,7 @@ Supporting references:
 - `schemas/output.md` — output schema for multi-agent runs.
 - `schemas/workspace.md` — workspace manifest structure.
 
-The architecture's why lives in `ARCHITECTURE.md` at the plugin root. Read it when you need the rationale behind a how.
+The architecture's why lives in `ARCHITECTURE.md` in the source repo (it isn't shipped inside the installed plugin); the load-bearing doctrines also ship here in `references/architecture-doctrines.md`. Read either when you need the rationale behind a how.
 
 ---
 

@@ -45,7 +45,41 @@ export const VALID_EDGE_TYPES = new Set([
   'cites', 'supersedes', 'superseded-by', 'depends-on', 'conflicts-with',
   'references-person', 'references-topic',
   'depended-on-by', 'supersedes-claim',
+  // Blessed 2026-06-03 (2-corpus evidence, obs-20260603-edge-type-validation-gap-cross-corpus):
+  // both are semantically distinct from supersedes — 'refines' sharpens/elaborates a prior
+  // decision without replacing it (CORE); 'amends' modifies specific parts while the prior
+  // stands (local-llm-build / BBLens). Distinct intent → first-class, not relabeled away.
+  'refines', 'amends',
 ]);
+
+// Weak/informal edge types that carry no distinct semantics — normalize to a committed type
+// rather than blessing a near-synonym. The /process-memory safe-fix flow applies these as an
+// applyable relabel (the resolution path the cross-corpus gap report asked for); the validator
+// names the target in the edge-unknown-type detail so the fix is mechanical, not a guess.
+export const EDGE_TYPE_NORMALIZE = {
+  'relates': 'cites',
+  'relates-to': 'cites',
+  'related': 'cites',
+};
+
+// Edge targets that legitimately live OUTSIDE the project unit store. The integrity
+// walk would otherwise flag these as dangling (see obs-validator-cross-store-blindness):
+//   1. cross-store units by naming convention — feedback_/project_/reference_ live in
+//      the harness auto-memory or cross-project memory, never in <project>/_memories/.
+//   2. citations and file paths — research papers ("Park et al. (arxiv…)"), doc paths
+//      (docs/specs/…), stale mirror paths — never unit IDs (they carry whitespace,
+//      parentheses, or a path separator a kebab-case unit id can't).
+// Recognized refs are reported as a benign 'external-ref', not 'dangling-edge', so a
+// genuine broken unit reference stands out instead of hiding in the cross-store noise.
+export const KNOWN_EXTERNAL_PREFIXES = [
+  'feedback_', 'feedback-', 'project_', 'project-', 'reference_', 'reference-',
+];
+export function isExternalRef(target) {
+  const t = String(target).replace(/\.md$/, '');
+  if (KNOWN_EXTERNAL_PREFIXES.some(p => t.startsWith(p))) return true;
+  if (/[\s()]/.test(t) || t.includes('/')) return true; // citation or file path, not a unit id
+  return false;
+}
 
 export const ARCHIVE_RS_THRESHOLD = 0.05;
 export const STALE_DAYS = 90;
@@ -57,15 +91,14 @@ export const STALE_DAYS = 90;
 // validation. No separate producer/path map is needed.
 
 export function iterActiveUnits(memoriesDir) {
-  const skipDirs = new Set(['archive', 'cold-storage', '_validation']);
   const units = [];
   let entries;
   try { entries = readdirSync(memoriesDir, { withFileTypes: true }); } catch { return units; }
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (entry.isDirectory()) {
-      if (!skipDirs.has(entry.name)) continue; // skip unknown sub-dirs
-      continue;
-    }
+    // Top-level only by design: archive/, cold-storage/, _validation/, observations/
+    // and every other sub-dir are out of the active set. (The old skipDirs allow-list
+    // was dead — both branches skipped, so all sub-dirs are skipped regardless.)
+    if (entry.isDirectory()) continue;
     if (!entry.name.endsWith('.md')) continue;
     const name = entry.name;
     if (name.startsWith('_') || name.startsWith('INDEX') || name === 'README.md') continue;
@@ -130,7 +163,12 @@ export function checkSchema(units, memoriesDir, report) {
         const eType = item.type || '';
         const eTarget = item.target || '';
         if (!eType) report.push({ level: 'WARN', check: 'edge-missing-type', unit_id: uid, detail: `Edge [${i}] missing 'type' field` });
-        else if (!VALID_EDGE_TYPES.has(String(eType))) report.push({ level: 'WARN', check: 'edge-unknown-type', unit_id: uid, detail: `Edge [${i}] type '${eType}' not in committed types` });
+        else if (!VALID_EDGE_TYPES.has(String(eType))) {
+          const norm = EDGE_TYPE_NORMALIZE[String(eType)];
+          report.push({ level: 'WARN', check: 'edge-unknown-type', unit_id: uid, detail: norm
+            ? `Edge [${i}] type '${eType}' not in committed types — normalize to '${norm}' (safe-fix)`
+            : `Edge [${i}] type '${eType}' not in committed types — relabel to a committed type or surface for a bless decision` });
+        }
         if (!eTarget) {
           report.push({ level: 'FAIL', check: 'edge-missing-target', unit_id: uid, detail: `Edge [${i}] (type=${JSON.stringify(eType)}) missing 'target' field` });
         }
@@ -167,7 +205,7 @@ export function checkSchema(units, memoriesDir, report) {
       report.push({ level: 'WARN', check: 't_valid-after-t_invalid', unit_id: uid, detail: `t_valid (${tValidStr}) is after t_invalid (${tInvalidStr}) — a fact can't stop being true before it started` });
 
     // by-when validation — optional field for open-question units (DC-85 §2).
-    // Schema only validates well-formedness; staleness signaling lives in /orient.
+    // Schema only validates well-formedness; staleness signaling lives in the startup protocol.
     const byWhen = u.fm['by-when'];
     if (byWhen !== undefined && byWhen !== null && byWhen !== '') {
       if (typ && typ !== 'open-question')
@@ -219,8 +257,13 @@ export function checkIntegrity(units, memoriesDir, today, report) {
       // external vocab reference and is always valid here.
       if (e.type === 'references-topic') continue;
       const targetStem = target.replace(/\.md$/, '');
-      if (!allFiles.has(targetStem) && !allFiles.has(target))
-        report.push({ level: 'WARN', check: 'dangling-edge', unit_id: uid, detail: `Edge target '${target}' (type=${JSON.stringify(e.type)}) not found in unit store — external ref or missing unit?` });
+      if (!allFiles.has(targetStem) && !allFiles.has(target)) {
+        if (isExternalRef(target)) {
+          report.push({ level: 'WARN', check: 'external-ref', unit_id: uid, detail: `Edge target '${target}' (type=${JSON.stringify(e.type)}) is a recognized cross-store/external reference (not in the project unit store) — expected, not a break.` });
+        } else {
+          report.push({ level: 'WARN', check: 'dangling-edge', unit_id: uid, detail: `Edge target '${target}' (type=${JSON.stringify(e.type)}) not found in unit store — external ref or missing unit?` });
+        }
+      }
     }
 
     const rs = scoreProxyRS(u, today);
@@ -330,6 +373,7 @@ export function jsonReport(report, memoriesDir, mode, today) {
 // (and largely eliminated by flow-style array parsing). These return exit 0.
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
+  'external-ref',
 ]);
 
 // Exit-code contract: 0 = pass (including pass-with-benign-warnings),
@@ -349,17 +393,42 @@ export function exitCode(report) {
 
 // ---------- CLI ----------
 
+/**
+ * Resolve which checks to run from the mode flags. ADDITIVE: `--schema` and
+ * `--integrity` (or two `--mode` flags) each turn ON their check rather than
+ * overwriting a single `mode`, so `--schema --integrity` runs BOTH. The old
+ * last-wins parser silently dropped the schema half of exactly that invocation
+ * (the disjoint-surface gap /finalize hit). No mode flag at all = both (default).
+ * @returns {{schema: boolean, integrity: boolean, mode: string}}
+ */
+export function resolveChecks(argv) {
+  let schema = false, integrity = false, explicit = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--mode') {
+      const mv = argv[++i];
+      if (mv === 'schema') schema = true;
+      else if (mv === 'integrity') integrity = true;
+      else { schema = true; integrity = true; } // 'all' or anything unrecognized
+      explicit = true;
+    } else if (a === '--schema') { schema = true; explicit = true; }
+    else if (a === '--integrity') { integrity = true; explicit = true; }
+  }
+  if (!explicit) { schema = true; integrity = true; }
+  const mode = schema && integrity ? 'all' : (schema ? 'schema' : 'integrity');
+  return { schema, integrity, mode };
+}
+
 export function main(argv) {
   let projectArg = '.';
-  let mode = 'all';
   let asJson = false;
   let todayArg = null;
+  const { schema: doSchema, integrity: doIntegrity, mode } = resolveChecks(argv);
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--mode') { mode = argv[++i]; }
-    else if (a === '--schema') { mode = 'schema'; }
-    else if (a === '--integrity') { mode = 'integrity'; }
+    if (a === '--mode') { i++; }                              // value handled by resolveChecks
+    else if (a === '--schema' || a === '--integrity') { /* handled by resolveChecks */ }
     else if (a === '--store') { projectArg = argv[++i]; }
     else if (a === '--json') { asJson = true; }
     else if (a === '--today') { todayArg = argv[++i]; }
@@ -381,8 +450,8 @@ export function main(argv) {
   const units = iterActiveUnits(memoriesDir);
   if (!units.length) { process.stderr.write(`error: no units found in ${memoriesDir}\n`); return 3; }
 
-  if (mode === 'schema' || mode === 'all') checkSchema(units, memoriesDir, report);
-  if (mode === 'integrity' || mode === 'all') checkIntegrity(units, memoriesDir, today, report);
+  if (doSchema) checkSchema(units, memoriesDir, report);
+  if (doIntegrity) checkIntegrity(units, memoriesDir, today, report);
 
   if (asJson) jsonReport(report, memoriesDir, mode, today);
   else printReport(report, memoriesDir, mode, today);

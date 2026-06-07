@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.6.0] — 2026-06-07
+
+`/orient` is now a deprecated no-op — typing it prints a notice and points you to `/core`, which does everything it used to, including a fresh readiness summary when you re-run it mid-session. Metrics capture runs by default now: CORE measures how well it recognizes your project across sessions and writes the results to local disk only, with a per-workspace and environment-variable opt-out. The classifier behind that measurement is PROVISIONAL — it isn't calibrated, so the readiness summary only flags an upward recognition-failure trend, never an absolute score. Underneath, the deterministic scripts got safer: writes to irreplaceable files are atomic, the CLI entry guards no longer silently no-op on symlinked installs, and diagnostics fail loudly instead of producing wrong-but-plausible output. The startup protocol loads its rare branches only when it needs them. The test suite grew 490 → 528.
+
+### Deprecated
+- **`/orient`.** Folded into `/core`: picking a thread back up, the readiness summary, edit detection, hygiene-log signals, the hot-section refresh, and source-registration readiness all run when you type `/core`. Re-running `/core` mid-session with no task re-composes a fresh readiness summary. `/orient` still resolves but is now a no-op that prints a deprecation notice — kept so existing muscle memory, scripts, and wrappers don't break. Use `/core`.
+
+### Changed
+- **Metrics capture defaults to on, opt-out.** CORE captures recognition metrics to local disk under `<project>/_metrics/`. Opt out per workspace with `metrics_enabled: false` in `workspace.json`, or globally with `CORE_METRICS_ENABLED=0`. Capture stays local — nothing leaves your machine. The classifier stays PROVISIONAL until a human-labeled set clears a 0.7-precision gate; every surface that shows a recognition signal says so, and the readiness summary only flags an upward trend.
+- **Edge vocabulary adds `refines` and `amends`.** `refines` sharpens a prior decision without replacing it; `amends` modifies specific parts while the prior stands. Both are distinct from `supersedes`. Informal types (`relates`, `related`, `relates-to`) normalize to `cites`.
+- **Startup loads its rare branches on demand.** The new-workspace and folder-rename paths live in `protocols/startup-conditional-loads.md`, read only when routing selects them. Cold-start migration stays inline. Returning sessions carry a lighter startup protocol.
+- **`/finalize` validates the unit store.** It runs the schema and integrity check over `_memories/` as a closing step.
+- **One root-resolution idiom across surfaces.** Scripts resolve from the skill's own base directory; `${CLAUDE_PLUGIN_ROOT}` is documented as not reliably injected into agent shell calls and used only as a fallback. Command bodies in `/finalize`, `/process-memory`, and validation share the one idiom.
+
+### Fixed
+- Writes to MEMORY.md and the decision and risk indexes are atomic — an interrupted write can't truncate them or cause a false drift report.
+- The CLI entry guards in `metrics-init`, `validate-adversarial-artifacts`, and `audit-memory-boundary` canonicalize both sides, so they run instead of silently no-opping on symlinked installs.
+- `/finalize`'s unit check runs both the schema and integrity passes (the flags previously collapsed to integrity-only).
+- The validity supersession stamp tolerates CRLF line endings, so Windows/OneDrive-authored units get stamped.
+- Diagnostics fail loudly instead of producing wrong-but-plausible output: `priority --today`, retrieval-skip flag parsing, the rollup's PROVISIONAL label on calibrated workspaces, and unreadable adversarial-artifact paths.
+- The calibration worksheet is idempotent — a same-day re-run no longer double-counts turns toward the precision gate; capability-history appends are atomic.
+- Malformed dates no longer fall through to a demote; a non-finite `--since-days` no longer selects every event; Codex array-form transcript events parse.
+- Documentation corrected on shipped surfaces: authority ordering, hygiene verbs, cross-references, and counts.
+
 ## [3.5.0] — 2026-06-02
 
 A scripts-hardening release — the full open set from an internal review of all 48 shipped scripts, closed as one pass. Nothing about how you use `/core` changes; the deterministic spine under it gets safer. Highlights: writes to your project's irreplaceable files (PROJECT.md, the archive, the workspace pointer) are now atomic, so an interrupted write can never leave a half-written or truncated file. The capability gates that protect destructive actions now fail closed honestly — a mutation surface that can't prove it's writable, or an adversarial run whose anti-anchoring gate is denied, no longer reads as "all clear." And the self-measurement instruments (the recognition classifier, its calibration gate) got more honest about what they can and can't claim. The test suite grew 445 → 482.

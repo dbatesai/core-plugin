@@ -1,15 +1,15 @@
 /**
- * metrics-rollup.mjs — Layer 3 aggregation + the `/orient` one-line signal.
+ * metrics-rollup.mjs — Layer 3 aggregation + the one-line startup readiness signal.
  *
  * Reads the operational-meta `classified/<date>.jsonl` records (written by
  * classify-turns.mjs) and produces:
  *   - a daily rollup markdown (state distribution + the headline rec-fail-tier-0 rate)
- *   - a one-line `orient-signal.txt` the `/orient` startup reads, comparing today's
+ *   - a one-line `orient-signal.txt` the startup readiness pass reads, comparing today's
  *     rec-fail-tier-0 rate against the trailing 7-day average (spec §17.8).
  *
  * HONESTY GATE: classify-turns output is PROVISIONAL until Phase-3 calibration
  * proves >0.7 precision. This rollup therefore tags every surface `[PROVISIONAL]`
- * and the `/orient` signal says so out loud. No state distribution renders as
+ * and the startup readiness signal says so out loud. No state distribution renders as
  * evidence-grade until calibration clears (spec §17.12, Anvil A4; R-1 self-measuring
  * guard — CORE measuring itself must not launder its own confidence).
  *
@@ -100,7 +100,9 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
 
   let signal;
   if (!todayRecs.length) {
-    signal = `metrics: no classified turns for ${date} yet${provisionalTag || ' [PROVISIONAL]'}`;
+    // provisionalTag is '' when calibrated; the old `|| ' [PROVISIONAL]'` fallback
+    // re-added the tag on a calibrated workspace, mislabeling honest metrics (M5).
+    signal = `metrics: no classified turns for ${date} yet${provisionalTag}`;
   } else {
     const todayPct = Math.round(headline.pct * 100);
     const avgStr = avg == null ? 'n/a (no prior 7d)' : `${Math.round(avg * 100)}%`;
@@ -130,13 +132,13 @@ export function writeRollup(r) {
       ...footer,
     ];
     writeFileSync(join(r.metaDir, 'rollups', 'daily', `${r.date}.md`), lines.join('\n') + '\n');
-    // The one-line signal /orient reads.
+    // The one-line signal the startup readiness pass reads.
     writeFileSync(join(r.metaDir, 'orient-signal.txt'), r.signal + '\n');
   } catch { /* best-effort */ }
   return r;
 }
 
-/** What /orient reads at startup — the pre-computed one-line signal. */
+/** What the startup readiness pass reads — the pre-computed one-line signal. */
 export function readOrientSignal(project, { home = homedir(), workspaceId } = {}) {
   const wid = workspaceId || resolveWorkspaceId(project);
   const f = join(operationalMetricsDir(wid, { home }), 'orient-signal.txt');

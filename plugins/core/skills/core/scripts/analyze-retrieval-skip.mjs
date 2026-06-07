@@ -180,7 +180,12 @@ export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = 
 export function analyzeRetrievalSkip({ projectRoot = process.cwd(), harness = 'claude-code', home = homedir(), transcriptPath = null } = {}) {
   const coreStorePresent = existsSync(join(projectRoot, '_memories')) || existsSync(join(projectRoot, 'PROJECT.md'));
   const t = readTranscript({ harness, cwd: projectRoot, home, override: transcriptPath });
-  const toolExtractionPending = t.meta?.codex_tool_extraction === 'pending-hc-spec';
+  // The producer (read-transcript) emits 'implemented' (codex, tools extractable) or
+  // 'n/a' (other harnesses). The old `=== 'pending-hc-spec'` sentinel is retired, so
+  // this was dead. Re-synced as "any value that is neither known-good": abstains on a
+  // future schema drift instead of silently flooding false SKIPs.
+  const extraction = t.meta?.codex_tool_extraction;
+  const toolExtractionPending = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
   const terms = coreStorePresent ? buildProjectTerms(projectRoot) : new Set();
   const r = classifyRetrievalSkips({
     events: t.events, terms, coreStorePresent, transcriptAvailable: t.available, toolExtractionPending,
@@ -210,13 +215,29 @@ function isMain() {
   try { return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; }
 }
 
+/**
+ * Index-advancing arg parse. The first BARE token is the project root — but
+ * space-form flag values (`--harness codex`) are bare tokens too, so a `.find()`
+ * over non-`--` tokens grabbed `codex` as the root and reported NO-STORE on a
+ * directory with no `_memories/` (M4). Advancing past known value-flags fixes it.
+ * Returns rawRoot un-resolved (null if none) so callers/tests stay deterministic.
+ */
+export function parseSkipArgs(args) {
+  let rawRoot = null, harness = 'claude-code', transcriptPath = null, json = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--harness') { harness = args[++i]; }
+    else if (a.startsWith('--harness=')) { harness = a.split('=')[1]; }
+    else if (a === '--transcript') { transcriptPath = args[++i]; }
+    else if (a === '--json') { json = true; }
+    else if (!a.startsWith('--')) { if (rawRoot === null) rawRoot = a; }
+  }
+  return { rawRoot, harness, transcriptPath, json };
+}
+
 if (isMain()) {
-  const args = process.argv.slice(2);
-  const projectRoot = resolve(args.find((a) => !a.startsWith('--')) || process.cwd());
-  const harness = (args.find((a) => a.startsWith('--harness=')) || '').split('=')[1]
-    || (args.includes('--harness') ? args[args.indexOf('--harness') + 1] : 'claude-code');
-  const transcriptPath = args.includes('--transcript') ? args[args.indexOf('--transcript') + 1] : null;
-  const json = args.includes('--json');
+  const { rawRoot, harness, transcriptPath, json } = parseSkipArgs(process.argv.slice(2));
+  const projectRoot = resolve(rawRoot || process.cwd());
   const report = analyzeRetrievalSkip({ projectRoot, harness, transcriptPath });
   process.stdout.write(json ? JSON.stringify(report, null, 2) + '\n' : formatReport(report) + '\n');
 }

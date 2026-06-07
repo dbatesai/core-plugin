@@ -161,7 +161,7 @@ Status lifecycle: `active` → `archived` (resolved with the answer captured els
 
 **Resolution by supersession.** When an open-question is answered, the answer typically lands as an observation or decision unit citing the open-question. The open-question itself moves to `status: archived` rather than being deleted — the question and its eventual answer both stay queryable.
 
-**Staleness at `/orient`.** The startup protocol's elapsed-time signals (per `protocols/startup.md` §"Elapsed-time signals") include a sweep over active open-question units. Any unit with a past `by-when` surfaces in the readiness summary. This is the absence-detection primitive — the architecture knows the question is past due even when nobody has explicitly noted it. Mechanism for the Michelle probe (spec §10).
+**Staleness at startup.** The startup protocol's elapsed-time signals (per `protocols/startup.md` §"Elapsed-time signals") include a sweep over active open-question units. Any unit with a past `by-when` surfaces in the readiness summary. This is the absence-detection primitive — the architecture knows the question is past due even when nobody has explicitly noted it. Mechanism for the Michelle probe (spec §10).
 
 ---
 
@@ -175,12 +175,14 @@ Edges live in unit frontmatter as `{type, target, note?}` triples. The committed
 - `depends-on` — dependency. This unit's validity depends on the target.
 - `depended-on-by` — inverse of `depends-on`.
 - `conflicts-with` — contradiction. The two units make incompatible claims; reconciliation owed.
+- `refines` — sharpens or elaborates a prior decision without replacing it. The target still stands; this unit makes it more precise. Distinct from `supersedes`.
+- `amends` — modifies specific parts of the target while the rest of it stands. Distinct from `supersedes` (which retires the target whole).
 - `references-person` — a person mentioned in the unit (used on Tier 1 observations).
 - `references-topic` — a topic mentioned (used on Tier 1 observations).
 
 **Eager vs lazy writes.** Three types you write the moment you commit the unit, because retrieval and hygiene depend on them right away: `supersedes`, `depends-on`, `conflicts-with`. Inverse edges (`superseded-by`, `depended-on-by`) are eager for these too — written at the same time on the target unit.
 
-The other three — `cites`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
+The rest — `cites`, `refines`, `amends`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
 
 **Wikilinks** (`[[unit-id]]`) in the body are permitted as a secondary, organic edge form. Hygiene's reconciliation pass promotes durable wikilinks to typed edges (default type: `cites`) when they appear in citation-style contexts.
 
@@ -268,9 +270,9 @@ Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYY
 | File | Event kinds | Written by |
 |---|---|---|
 | `_sessions/<date>/retrieval-log.jsonl` | `retrieval`, `hot-section-synthesis`, `hot-section-over-budget`, `synthesis-pass-behavior` (Phase 3) | `record-retrieval-event.mjs`, `hot-section.mjs` |
-| `_sessions/<date>/hygiene-log.jsonl` | `demote-moves`, `demote-moves-large-batch`, `compact-project`, `project-md-over-cap` | `demote-moves.mjs`, `compact-project.mjs` |
+| `_sessions/<date>/hygiene-log.jsonl` | `demote-moves`, `demote-moves-large-batch`, `compact-project`, `demote-state-narrative`, `project-md-over-cap` | `demote-moves.mjs`, `compact-project.mjs`, `demote-state-narrative.mjs` |
 
-`/orient` Step 4 surfaces load-bearing signals from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
+The startup protocol surfaces the signals that matter from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
 
 ---
 
@@ -375,8 +377,10 @@ Hash-based comparison against the state cache at `~/.core/state-cache.json`:
 
 You update the cache on every read/write. You compare at every read.
 
+CORE's own writes are not user edits. Scripts that render PROJECT.md (e.g. `hot-section.mjs apply`) stamp `last_written_by` with their own name; a diff confined to the marker-delimited hot-section block, or a file whose `last_written_by` is a CORE writer, is CORE's synthesis — refresh the entry, don't propagate or fire anti-resurrection.
+
 Runs at:
-- `/orient` (full sweep).
+- startup (full sweep).
 - Before any autonomous render (just-in-time).
 - `/finalize` (full sweep).
 - On-demand.

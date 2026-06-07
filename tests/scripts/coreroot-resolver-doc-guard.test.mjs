@@ -175,3 +175,47 @@ test('C1: bash ${//\\//} converts backslashes to forward slashes', () => {
   const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' });
   assert.equal(out, 'C:/Users/x', 'backslashes normalized to forward slashes by bash');
 });
+
+// M16: finalize/process-memory/validation must agree with startup.md that
+// ${CLAUDE_PLUGIN_ROOT} is NOT reliably injected into Bash calls, and resolve the
+// root from the loaded skill path instead. The old prose ("set on Claude Code
+// marketplace installs") contradicted startup and assumed the var was present.
+test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and defer to the startup resolver', () => {
+  const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
+  for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md']) {
+    const src = readFileSync(join(base, rel), 'utf8');
+    assert.doesNotMatch(src, /env var is set on Claude Code marketplace installs/,
+      `${rel} must not assert the env var is reliably set`);
+    assert.match(src, /not reliably injected into agent Bash tool calls/,
+      `${rel} must state the env var is unreliable in Bash calls (agrees with startup.md)`);
+  }
+  const validation = readFileSync(join(base, 'core', 'protocols', 'validation.md'), 'utf8');
+  assert.match(validation, /not reliably injected into agent Bash tool calls/,
+    'validation.md must agree the env var is unreliable and defer to the startup resolver');
+});
+
+// M16 idiom lock — SCOPED to the skill entry-points that resolve CORE_ROOT
+// themselves. These two each establish CORE_ROOT (finalize/process-memory via a
+// "Script path resolution" preamble) and so MUST reference that resolved variable
+// in their own command bodies — not ${CLAUDE_PLUGIN_ROOT}, which the same surfaces
+// document as unreliable in Bash.
+// validation.md and startup.md are the other two CORE_ROOT surfaces (covered by
+// the doctrine test above + the resolver tests A1–B2).
+//
+// Deliberately OUT of scope: protocols/hygiene.md, references/retrieval.md,
+// references/hygiene-strategies.md, protocols/data-storage.md, scripts/README.md,
+// and script header-comments still write ${CLAUDE_PLUGIN_ROOT} as a shorthand
+// path-pointer. They carry no CORE_ROOT-resolution preamble of their own (they're
+// sub-references the core skill loads AFTER startup resolved CORE_ROOT), so the
+// env-var form is documentation shorthand there, not a runnable idiom mismatch.
+// Whether to unify the whole tree on ${CORE_ROOT} is a separate, larger call.
+test('M16: CORE_ROOT-resolving skills invoke scripts via ${CORE_ROOT}, not ${CLAUDE_PLUGIN_ROOT}', () => {
+  const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
+  for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md']) {
+    const src = readFileSync(join(base, rel), 'utf8');
+    assert.doesNotMatch(src, /\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/core\/scripts/,
+      `${rel} command bodies must use \${CORE_ROOT}, not \${CLAUDE_PLUGIN_ROOT}`);
+    assert.match(src, /\$\{CORE_ROOT\}\/skills\/core\/scripts/,
+      `${rel} must invoke scripts via the resolved \${CORE_ROOT}`);
+  }
+});

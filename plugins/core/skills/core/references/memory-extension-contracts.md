@@ -75,7 +75,7 @@ recency/frequency), plus held success-criteria a latent fact can be matched agai
 | **Who populates** | Overlay (and eventually CORE) at graduation, once the representation is decided. |
 | **CORE reader (when built)** | The priority function (DC-69) absorbing salience as a fourth signal — which is itself the foundational change the `/core` pass must rule on. |
 
-## 4. Person-node synthesis — **CONTRACT** (Phase 4 layer 5)
+## 4. Person-node synthesis — **CONTRACT** (Phase 4 layer 4)
 
 A person modeled as a queryable node whose "current state" is synthesized across the channels
 they appear in (BBLens use cases 8, M1).
@@ -117,11 +117,13 @@ The observability layer (Phases 0–3) extends the same way. An overlay adds its
   detectors are added without touching capture (`metrics-detectors.mjs` is the pattern). An
   overlay writes its own domain detectors — e.g. a delivery-specific "missed-signal" detector —
   reading the same captured ground truth.
-- **The opt-in gate is the deployment switch.** Metrics are default-off; an overlay opts its
-  workspace in via `CORE_METRICS_ENABLED` or `workspace.json` `metrics_enabled`, and the whole
-  substrate (classifier, detectors, rollups, bi-temporal storage metrics) turns on for its corpus.
+- **The capture gate is the deployment switch.** Metrics are default-on (DC-107); the whole
+  substrate (classifier, detectors, rollups, bi-temporal storage metrics) runs for every workspace
+  unless it opts out via `CORE_METRICS_ENABLED=0` or `workspace.json` `metrics_enabled: false`.
+  Capture stays local. An overlay that wants a workspace dark sets the opt-out; everyone else
+  contributes to the corpus by default.
 
-What CORE owns: the six-state recognition taxonomy, the rollup, the `/orient` signal, the gold
+What CORE owns: the six-state recognition taxonomy, the rollup, the startup readiness signal, the gold
 detectors, the calibration harness (`calibrate-classifier.mjs`) and its precision gate. What the
 overlay owns: its own event fields, its own `query_shape` vocabulary, its own detectors, and its
 own calibration labels. The classifier is PROVISIONAL until calibration clears 0.7 precision —

@@ -3,10 +3,18 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   appendRows, readHistory, canonicalRowHash, applyRetention, acquireLock,
   historyPath, lockPath, RETENTION_PER_CAPABILITY,
 } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
+
+test('M8: appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {
+  const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/capability-history.mjs', import.meta.url)), 'utf8');
+  assert.match(src, /from '\.\/fs-atomic\.mjs'/, 'imports the shared atomic writer');
+  assert.match(src, /atomicWriteFileSync\(file,/, 'history file written atomically');
+  assert.doesNotMatch(src, /\.tmp-\$\{process\.pid\}/, 'the hand-rolled temp+rename (no cleanup on failure) is gone');
+});
 
 function tmpHome() {
   return mkdtempSync(join(tmpdir(), 'caphist-'));

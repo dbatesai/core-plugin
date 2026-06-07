@@ -155,3 +155,16 @@ test('readTranscript: unsupported harness → unsupported meta, not available', 
 test('SUPPORTED_HARNESSES covers the two target harnesses', () => {
   ['claude-code', 'codex'].forEach((h) => assert.ok(SUPPORTED_HARNESSES.has(h)));
 });
+
+test('low: parseCodex extracts text from a structured-content (array) event_msg body, not just strings', () => {
+  // A string message still works; an array-of-blocks body was previously dropped.
+  const lines = [
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'plain string' } }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: [{ type: 'text', text: 'block one' }, { type: 'text', text: 'block two' }] } }),
+  ];
+  const ev = parseCodex(lines);
+  assert.equal(ev.length, 2, 'both turns surfaced — the array body is no longer dropped');
+  assert.equal(ev[0].text, 'plain string');
+  assert.equal(ev[1].text, 'block one\nblock two');
+  assert.equal(ev[1].role, 'assistant');
+});

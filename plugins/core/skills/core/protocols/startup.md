@@ -29,7 +29,7 @@ Then check the project's synthesis files for size overflow. `<project>/PROJECT.m
 
 Resolve deterministically when you can; ask the user only when it's genuinely ambiguous.
 
-Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; you'll route to new-workspace setup below unless the project has v1-era content that needs migrating.
+Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; the routing below will send you to the new-workspace branch (its procedure lives in `protocols/startup-conditional-loads.md`) unless the project has v1-era content that needs migrating.
 
 **Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is NOT injected into agent Bash tool calls, and `installed_plugins.json` has no usable entry for a local/source/dev install (`core-dev`) — both are unreliable as the *primary* source, and relying on them is what produced the field failure where CORE_ROOT resolved empty and every script was skipped. The one source always available is **this skill's base directory**: the harness shows it in the SKILL.md header as `<plugin-root>/skills/core`. Make that primary — strip the trailing `/skills/core` and substitute the concrete path for `<PLUGIN_ROOT>` below. The env var and `installed_plugins.json` are fallbacks only. Resolve once and reuse for every `node …` invocation:
 
@@ -112,6 +112,8 @@ Surface the routing decision to the user in plain voice before proceeding. *"Thi
 
 Routing failure is itself a defect. If you find yourself trying to load the unit store on an empty/missing `_memories/` or with the migration flag present, stop and re-route.
 
+**Conditional-load branches — read the sub-file when routing selects one.** When routing lands on **new-workspace** or **folder-rename**, **STOP and read `protocols/startup-conditional-loads.md` now**, then execute the matching section there and re-enter the returning-workspace load below. Those two branches don't fire on an established workspace, so their procedures live in that sub-file rather than loading every session. Do not run them from memory. The **cold-start migration** branch (and its migration-in-progress resume case) stays inline below — it's the one irreversible branch, its plan/flag backstops must always be in context, so it is *not* extracted. The **returning-workspace load** below is the common path; read it directly.
+
 ## Load — returning workspace
 
 **Precondition:** `<project>/_memories/` exists, contains at least one canonical unit, and no migration-in-progress flag.
@@ -123,7 +125,8 @@ The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to
 - **Tier 1 (lexical retrieval):** read `<project>/PROJECT.md` to anchor the six-section view. Grep `<project>/_memories/` for session-intent topic terms to surface relevant active units. Load whatever the grep returns above the priority threshold.
 - **Tier 2 (graph walk):** for each loaded unit, walk its `supersedes` and `depends-on` edges one hop to pick up the related context. Stop when the candidate set is good enough.
 - **Tier 3 (semantic):** only escalate if Tier 0–2 leave the user's actual question unanswered. The `Explore` subagent reasons over the vault for semantic queries.
-- Read `<project>/inbox.md` if it exists. Raw pending items — promote worthwhile facts into the right units on the user's next review.
+- Read `<project>/inbox.md` if it exists. Raw pending items — promote worthwhile facts into the right units on the user's next review. When entries carry `mode: B` or `mode: C` frontmatter, they're pending review per the source-registration framework; count them for the readiness summary.
+- Read `<project>/_sources/*.yaml` if the directory exists — the registered external sources for this project. Note the names and count for the readiness summary.
 - Read `~/.core/workspaces/<id>/workspace.json` for cross-session metadata only (last-session date, timestamps). Don't read project facts from here — there aren't any.
 
 After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them.
@@ -140,34 +143,17 @@ Tier 0 in-context reuse does not need a retrieval row.
 - `<project>/PROJECT-ARCHIVE.md`, `<project>/IMPROVEMENT_LOG-ARCHIVE.md`. Single-write archive surfaces.
 - Legacy workspace files (`raid-log.md`, `decision-log.md`, `next-session.md`, `handoffs/`) under `~/.core/workspaces/<id>/` — pre-2026-04-21 structure. If `PROJECT.md` exists, ignore them. If it doesn't, surface the mismatch and offer to migrate.
 
-Run edit-detection on the files you read against `~/.core/state-cache.json`. If hashes don't match, the user edited something between sessions — propagate the edits back to the source-of-truth units before composing the readiness summary.
+Run edit-detection on the files you read against `~/.core/state-cache.json`. If a file's hash doesn't match, something changed between sessions — but first rule out CORE's own renders, which are not user edits:
 
-## Load — new workspace
+- **CORE-authored writes.** A PROJECT.md diff confined to the marker-delimited hot-section block (`<!-- HOT-SECTION:BEGIN -->`…`<!-- HOT-SECTION:END -->`), or a file whose state-cache `last_written_by` is a CORE writer (e.g. `hot-section`), is CORE's synthesis — `hot-section.mjs apply` stamps that authorship itself. Refresh the cache entry and move on; do NOT propagate or fire anti-resurrection.
+- **Unit files:** a genuine user edit IS the new truth. Update the state cache, propagate any frontmatter implications, narrate what changed.
+- **PROJECT.md (user edit):** a change OUTSIDE the hot block is the user's authorship asserting itself. Propagate back to the source units (frontmatter updates, `status: retired` for removed facts). Anti-resurrection fires for removals — a fact the user deleted stays deleted.
 
-Interview first. Don't skip this.
-
-- What's the problem or task? Scope? Timeline? What does success look like?
-- Constraints? Stakeholders? What's already been tried?
-
-Then scaffold the synthesis: create `<project>/PROJECT.md` with the six sections (What & Why / State / People / Moves / Decisions & Risks / Notes) populated from the interview. Solo projects can declare "solo project, no §People" inline rather than leaving the section blank.
-
-Create the unit store: `mkdir -p <project>/_memories/observations/<YYYY-MM>/`. Project folders hold only data; the priority function and other executable units ship with the plugin (see DC-77).
-
-Create `<project>/inbox.md` if external pulls are expected. Create the project-folder pointer at `<project>/workspace.json` with `schema_version: v2`, `workspace_id`, `name`, `created`, `data_path`. Create the workspace meta at `~/.core/workspaces/<workspace-id>/workspace.json` with `schema_version: v2` plus the workspace schema fields, and `~/.core/workspaces/<id>/swarm-narrative.md` empty for now. Register the workspace by appending its entry to `~/.core/index.json` (with `schema_version: v2` if not already set at the index level).
-
-Then ask about external sources. *"Are there external data sources that should feed this project's memory? We can register them now, or add them later via `/register-sources`."* If the user names sources, walk through registration per `references/external-sources/source-registration-framework.md §3`. For each source: capture the authority statement (the prose answer becomes both the registration's `authority` field and a `source-of-authority` unit per DC-85), surface the installation's suggested defaults for `confidence-default` / `relevance-contract` / `cadence` / `kind` (or ask the user directly if there's no installation orchestration layer), then write `<project>/_sources/<source-name>.yaml` and the corresponding `<project>/_memories/source-of-authority-<source-name>.md` unit. Set `authority-unit-id` on the registration after the unit lands. Create `<project>/_sources/` only when at least one source is being registered. If the user defers, skip — `/register-sources` handles the same intake protocol on a returning workspace.
-
-**Then ask about governance-document hierarchy** (DC-85 §8). Distinct from the per-external-source authority captured above — this one captures the ordering of the project's own artifacts when they disagree. Ask: *"When the project's documents disagree about a fact — say a PRD and a chat log, or a design spec and a status update — which one wins? Some projects have a clear hierarchy (PRD > HLSD > RTM > chat); others are single-source and this is trivial. Worth a sentence either way."*
-
-Single-source or trivially-ordered projects: skip; no decision unit needed. Multi-document projects with a real hierarchy: write the answer as a decision unit named `dc-NN-source-authority-hierarchy.md` (per project; only one) with the ordered list and one-line rationale per ranked source. The unit gets `type: decision` and `topics: [source-authority, governance]`. Synthesis-pass behavior #5 (spec §5) consults this unit when contradictions are found across sources, so it's the load-bearing target for adversarial reasoning over multi-source projects. When governance changes later, supersede with a new unit and the `supersedes` edge handles the revision — synthesis-pass behavior #5 always reads the current authoritative version.
-
-The naming `dc-NN-source-authority-hierarchy.md` (singular, per-project) intentionally differs from the per-source DC-87 units `source-of-authority-<source-name>.md` (one per external source). Both are valid surfaces; they answer different questions. The DC-87 units say *"this source's authority claim is X."* The DC-85 §8 unit says *"across these sources, here's who wins on contradictions."*
-
-If the project folder turns out to have pre-existing content that wasn't visible during routing (session summaries or legacy handoffs in unusual locations, prior PROJECT.md, session logs surfaced during interview), drop into cold-start migration instead. The new-workspace scaffold is for truly empty projects; substantial prior content always routes through migration.
+Surface any genuine user edit in the readiness summary before the agenda.
 
 ## Load — cold-start migration
 
-The project has substantive prior content but no v2 unit store. Run the eight steps below in order. Each step is load-bearing; don't demote any into "I'll handle that later in §Moves."
+The project has substantive prior content but no v2 unit store. Run the nine steps below in order. Each step is load-bearing; don't demote any into "I'll handle that later in §Moves."
 
 **Verify the model is appropriate.** Cold-start migration on a large project warrants Opus + ultrathink-level reasoning. Surface the recommendation if the session is on a smaller model before proceeding.
 
@@ -204,29 +190,6 @@ If any command silently no-ops with no stdout and no file written, set `CORE_DEB
 
 **Step 9 — Remove the flag and re-enter the returning-workspace load.** Delete `<project>/_memories/.migration-in-progress` as the explicit signal migration completed cleanly. Then run the returning-workspace load against the now-populated store. The migration agent's side-effect knowledge of what it wrote is NOT a substitute for a deliberate load — the retrieval ladder is what actually puts unit content into working memory. Without this re-entry, subsequent turns degrade rapidly as working-memory awareness decays.
 
-## Load — folder rename only
-
-The project is already on v2 but has unprefixed CORE folders, or it's on DC-74-era `_handoffs/` and needs the summary rename. Run only the rename step, then proceed to the returning-workspace load.
-
-Announce the rename in plain voice. Example: *"This project has the pre-DC-74 folder names. Renaming `handoffs/` → `_summaries/`, `sessions/` → `_sessions/`, `outputs/` → `_outputs/` before loading."* Or, for the DC-74-to-summary case: *"This project still has the legacy `_handoffs/` folder. Renaming to `_summaries/` before loading."*
-
-For each folder that exists, use `git mv` (or plain `mv` if not in a git tree):
-- `handoffs/` → `_summaries/`
-- `summaries/` → `_summaries/`
-- `_handoffs/` (legacy) → `_summaries/`
-- `sessions/` → `_sessions/`
-- `outputs/` → `_outputs/`
-
-Skip any that don't exist.
-
-Sweep `<project>/_memories/*.md` for path-citations in frontmatter `sources:` and inline body text — update the bare path-strings to the current `_summaries/`, `_sessions/`, `_outputs/`. Don't touch paths inside historical text that explicitly described prior state (changelog entries describing "before" states, for instance).
-
-Sweep `<project>/PROJECT.md` for forward-looking path references to the same folders.
-
-Append a one-line entry to `<project>/IMPROVEMENT_LOG.md` recording the rename, if a project IMPROVEMENT_LOG exists.
-
-This is routine and idempotent — don't escalate to multi-agent, don't pause for approval.
-
 ## Session agenda
 
 The agenda is `PROJECT.md §Moves`. No separate next-session file — that died with the 2026-04-21 restructure.
@@ -254,6 +217,8 @@ Starting calibrations — tune based on observed behavior:
 - **External-source claim age.** Task tracker or chat older than 24h: disclose and consider re-fetch. Document store older than 14d: disclose.
 - **Open-question past `by-when` (DC-85 §2).** Walk active open-question units in `<project>/_memories/`. For each unit with `type: open-question` AND `status: active` AND a `by-when` field whose ISO date is in the past, surface it in the readiness summary. Plain voice: *"One open question past its by-when: oq-michelle-design-review expected 5/22 — six days ago."* This is the absence-detection primitive; the architecture surfaces the lapse so the user doesn't have to remember it. The Michelle probe (spec §10) validates this mechanism.
 
+- **Recent hygiene-log signals (DC-85 Phase 1b).** Read `<project>/_sessions/<most-recent-date>/hygiene-log.jsonl` if present. Surface what matters in plain voice — don't pile on: a `demote-moves-large-batch` from the last 1–2 sessions → *"last `demote-moves` ran on N candidates (threshold M); criteria may be tightening or loosening — worth a glance next `/process-memory`"*; `project-md-over-cap` events that persist across sessions → *"PROJECT.md is stuck over the ~70KB soft target; the compactor warns, doesn't block."* Skip when the log is absent (fresh workspace) or shows clean steady-state.
+
 Apply these before composing readiness. If any of them escalate, lead with the escalation.
 
 ## Memory processing nudge
@@ -263,6 +228,37 @@ Read `<project>/_memories/_pm-state.json` if it exists. If `now - last_run > 24 
 > *"Memory processing hasn't run in [X hours/days] — worth running `/process-memory` when you get a moment."*
 
 Don't block on it. It's a nudge, not a gate.
+
+## Hot-section synthesis pass
+
+The hot section sits atop `<project>/PROJECT.md` — 5–7 lines naming what matters right now. Refresh it conditionally — only when candidate ranking has shifted meaningfully since the last synthesis, or when this session's intent diverges from what the existing hot section addresses. This runs after elapsed-time signals (an escalation can feed the refresh) and before the readiness summary (the refreshed section feeds the receipt).
+
+**When to refresh** (any one suffices):
+
+- The existing hot section is missing (project predates DC-85 Phase 1a, or it was cleared).
+- The existing hot section is older than 24 hours (the candidates underneath have likely shifted).
+- Session-intent topics don't overlap with the topics the existing hot section addresses (priority ranking will shift under the new intent).
+- An elapsed-time signal (above) escalated something the existing hot section doesn't mention.
+
+**When to skip:** the existing hot section is fresh, the session intent matches its framing, and nothing escalated. Skip silently — don't refresh just to refresh.
+
+**How to refresh** (reuse the `CORE_ROOT` resolved in §"Workspace resolution and routing"; the guard skips cleanly if it's blank):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>
+```
+
+Read the candidate list, then compose 5–7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Usually 1–3 items, no bold lead-in paragraphs unless the items genuinely need scannable headers. Land it:
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --text "<composed prose>"
+```
+
+`hot-section.mjs apply` writes PROJECT.md and stamps `last_written_by: hot-section` into `~/.core/state-cache.json` itself, so next session's edit-detection (§"Load — returning workspace") recognizes the change as CORE's synthesis, not a user edit — no manual reconciliation, and `/finalize`'s close-of-session hot-section write is covered the same way (both go through `applyHotSection`).
+
+Narrate the refresh in one sentence as part of readiness — *"Refreshed the hot section: Phase 1a is mid-flight and DC-88 just reconciled."* The agent self-disciplines on length (the 500-token enforcement is Phase 1b).
 
 ## Compose the readiness summary
 
@@ -306,9 +302,10 @@ What to include:
 - What `PROJECT.md` currently says in §State — one or two sentences, not a recap of every section.
 - Active risks worth surfacing now (count plus the top one or two by impact).
 - Any elapsed-time signals that escalated.
+- Source-registration signals when they're worth mentioning: pending Mode B/C blocks in `<project>/inbox.md` (count plus a one-line nudge — *"three pending observations in the inbox waiting on review"*), or observations citing a `source:` not in `<project>/_sources/` (drift signal — name the source). Skip silently when the inbox is empty and no drift surfaced.
 - The top 3 §Moves priorities as the agenda.
 - Anything auto-compacted during first-time setup, named explicitly (entries, not counts).
-- The recognition signal, when present and worth flagging: read the one-line `~/.core/workspaces/<id>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` at last session close; see `references/retrieval.md`). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
+- The recognition signal, when present and worth flagging: read the one-line `~/.core/workspaces/<id>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` at last session close — that script is the mechanism's source of truth). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
 - Plugin version + build: read both `version` and `build` from `../../.claude-plugin/plugin.json` relative to the skill base directory (which resolves to the plugin root's `plugin.json`) — that manifest is the single source of truth for both. Echo as "Plugin v<version> build <build>". If `plugin.json` is unreadable, omit the line; if it's readable but has no `build`, echo just "Plugin v<version>".
 
 Target voice:
@@ -319,7 +316,7 @@ What to skip: session summary content (not part of the bootstrap read); auto-mem
 
 **Record the bootstrap.** After readiness lands, write `~/.core/workspaces/<id>/last-bootstrap.json` with two fields: `session_started_at` (the Claude Code session-start timestamp — best available proxy is the timestamp of the first user message this session) and `bootstrap_completed_at` (now). This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
 
-After readiness lands, wait for the user's next move. The agenda topics get resolved or explicitly deferred before implementation work begins.
+After readiness lands, only ask what you still don't know — genuine gaps that no durable artifact resolved, with a hypothesis when you have one. Don't ask "what were we working on?" (you just read it), "what would you like to do today?" (the agenda tells you), or "can you catch me up?" (that's exactly what bootstrap prevents). Do ask deferred-decision questions ("PROJECT.md flags the X decision as deferred pending your call — have you decided?"), agenda-fork questions ("continue the v2 build or pivot to the stale R-5 risk first?"), and missing-unit questions ("the session-intent topic 'auto-creation rules' didn't surface a unit at Tier 1 or 2 — written yet, or still pending?"). Then wait for the user's next move; the agenda topics get resolved or explicitly deferred before implementation work begins.
 
 ## Long sessions — write the early summary stub
 

@@ -123,6 +123,10 @@ export function normalizeNewlines(text) {
   return typeof text === 'string' ? text.replace(/\r\n?/g, '\n') : text;
 }
 
+// priority.mjs owns its own frontmatter parser (rather than importing frontmatter-flat.mjs)
+// on purpose: priority is the base unit module that many scripts — including the parser's
+// other callers — import, so taking a dependency the other way risks an import cycle. Both
+// parsers normalize CRLF, so they agree on behavior; this is a deliberate duplication, not drift.
 export function parseFrontmatter(rawText) {
   const text = normalizeNewlines(rawText);
   if (!text.startsWith('---\n')) return [{}, text];
@@ -409,8 +413,11 @@ export function iterUnits(memoriesDir) {
 
 // ---------- CLI ----------
 
-function _todayFromArg(arg) {
-  return arg ? parseIsoDate(arg) : _todayUTC();
+export function _todayFromArg(arg) {
+  // A malformed --today (fails parseIsoDate's regex) must fall back to today, not
+  // null — a null `today` then throws TypeError at today.toISOString() in the
+  // display path. Siblings (graph-walk, check-units) defend the same way (M3).
+  return (arg && parseIsoDate(arg)) || _todayUTC();
 }
 
 function _cliSections(ranked, topK) {

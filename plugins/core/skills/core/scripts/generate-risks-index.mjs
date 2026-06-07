@@ -16,10 +16,11 @@
  *       --store <project>/_memories/
  */
 
-import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const RISK_NUMERIC = /^risk-(\d+)-.+\.md$/;
 export const RISK_NAMED = /^risk-([a-z][a-z0-9-]*)\.md$/;
@@ -136,7 +137,9 @@ export function main(argv) {
 
   const indexPath = join(memoriesDir, 'INDEX-risks.md');
   const content = buildIndex(memoriesDir);
-  writeFileSync(indexPath, content);
+  // Atomic write (M9 sibling): same crash-safety as the decisions index; a
+  // half-written index would mislead check-units' drift detection.
+  atomicWriteFileSync(indexPath, content);
   console.log(`Wrote ${indexPath}`);
   return 0;
 }

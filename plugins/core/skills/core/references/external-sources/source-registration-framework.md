@@ -63,7 +63,7 @@ extractor-pointer: <installation-specific path or identifier for the extractor i
 - `relevance-contract` — prose declaration of how the extractor decides whether a given datum from this source is project-relevant. Examples: *"items mentioning project keywords or assigned to project participants"*; *"messages in chats whose members include any of the project participants"*; *"events whose subject includes a project keyword or whose attendees include any project stakeholder."*
 - `extractor-pointer` — installation-specific path to the extractor implementation. CORE doesn't dictate format — could be a script path, a skill name, a tool reference. The installation knows what its extractor looks like.
 
-  When `cadence: always-on`, the extractor-pointer may name two separate extractor references — a lightweight sweep path used at `/orient` and a full extraction path used during a full refresh:
+  When `cadence: always-on`, the extractor-pointer may name two separate extractor references — a lightweight sweep path used at startup and a full extraction path used during a full refresh:
 
   ```yaml
   extractor-pointer:
@@ -188,7 +188,7 @@ When a project's relationship to an existing source changes (authority shift, re
 
 ### Who runs the intake
 
-The intake protocol is part of CORE's startup flow (per `protocols/startup.md`) when a new project is detected with un-registered sources. The installation provides the source list (step 1) and the suggested defaults (steps 3-5); CORE provides the protocol that walks the user through the decisions and produces the registration files.
+The intake protocol is part of CORE's startup flow — the new-workspace branch in `protocols/startup-conditional-loads.md` — when a new project is detected with un-registered sources. The installation provides the source list (step 1) and the suggested defaults (steps 3-5); CORE provides the protocol that walks the user through the decisions and produces the registration files.
 
 ---
 
@@ -364,7 +364,7 @@ Three artifacts CORE ships in support of the framework:
 2. **`references/confidence-assignment-guide.md`.** Pattern catalog for confidence-level assignment, source-category-agnostic, pattern-anchored. Installations reference this when implementing extractors.
 3. **`scripts/analyze-source-pull-log.mjs`.** Monitoring log analyzer; reads the JSONL, produces aggregate statistics. Used by `/finalize` and on-demand.
 
-These three plus the existing observation schema, DC-70 promotion modes, `inbox.md`, `/process-memory`, and `protocols/startup.md` intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
+These three plus the existing observation schema, DC-70 promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
 
 ---
 

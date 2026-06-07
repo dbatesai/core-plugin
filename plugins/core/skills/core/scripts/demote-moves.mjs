@@ -175,8 +175,12 @@ export function extractMostRecentDate(text, today = null) {
     .replace(/\([^)]*\)/g, ' ');     // parenthetical citations: (DC-106, 2026-06-01)
   const dates = [];
   for (const m of cleaned.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
-    const [iso, , mo, d] = m;
-    if (+mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31 && iso <= todayIso) dates.push(iso);
+    const [iso, y, mo, d] = m;
+    if (iso > todayIso) continue;
+    // Reject impossible calendar dates (e.g. 2026-02-30) instead of letting them
+    // roll forward in new Date() to a wrong age. The reconstructed date must match.
+    const dt = new Date(Date.UTC(+y, +mo - 1, +d));
+    if (dt.getUTCFullYear() === +y && dt.getUTCMonth() === +mo - 1 && dt.getUTCDate() === +d) dates.push(iso);
   }
   if (!dates.length) return null;
   dates.sort();
@@ -199,7 +203,10 @@ function classifyBulletStrict(bullet, memoriesDir, todayIso) {
   if (dates.length === 0) return { decision: 'keep', reason: 'no-updated-dates' };
   const maxUpdated = dates[dates.length - 1];
   const age = ageInDays(maxUpdated, todayIso);
-  if (age < CLOSE_AGE_DAYS) return { decision: 'keep', reason: 'too-recent', maxUpdated, ageDays: age };
+  // A malformed date yields NaN; `NaN < CLOSE_AGE_DAYS` is false, which would fall
+  // through to demote — silently dropping a possibly-recent item off the agenda.
+  // Treat an un-ageable date as "keep", same as no date at all.
+  if (!Number.isFinite(age) || age < CLOSE_AGE_DAYS) return { decision: 'keep', reason: Number.isFinite(age) ? 'too-recent' : 'unparseable-date', maxUpdated, ageDays: age };
   return { decision: 'demote', maxUpdated, ageDays: age, refs, ageSource: 'backing-unit' };
 }
 
@@ -238,8 +245,9 @@ export function classifyBullet(bullet, projectDir, { today, strict = false } = {
     return { decision: 'keep', reason: 'no-age-signal', refs };
   }
   const age = ageInDays(maxUpdated, todayIso);
-  if (age < CLOSE_AGE_DAYS) {
-    return { decision: 'keep', reason: 'too-recent', maxUpdated, ageDays: age, ageSource };
+  if (!Number.isFinite(age) || age < CLOSE_AGE_DAYS) {
+    // NaN (malformed date) keeps the item rather than silently demoting it.
+    return { decision: 'keep', reason: Number.isFinite(age) ? 'too-recent' : 'unparseable-date', maxUpdated, ageDays: age, ageSource };
   }
   return { decision: 'demote', maxUpdated, ageDays: age, refs, ageSource };
 }
