@@ -29,7 +29,7 @@ Then check the project's synthesis files for size overflow. `<project>/PROJECT.m
 
 Resolve deterministically when you can; ask the user only when it's genuinely ambiguous.
 
-Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; you'll route to new-workspace setup below unless the project has v1-era content that needs migrating.
+Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; the routing below will send you to the new-workspace branch (its procedure lives in `protocols/startup-conditional-loads.md`) unless the project has v1-era content that needs migrating.
 
 **Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is NOT injected into agent Bash tool calls, and `installed_plugins.json` has no usable entry for a local/source/dev install (`core-dev`) — both are unreliable as the *primary* source, and relying on them is what produced the field failure where CORE_ROOT resolved empty and every script was skipped. The one source always available is **this skill's base directory**: the harness shows it in the SKILL.md header as `<plugin-root>/skills/core`. Make that primary — strip the trailing `/skills/core` and substitute the concrete path for `<PLUGIN_ROOT>` below. The env var and `installed_plugins.json` are fallbacks only. Resolve once and reuse for every `node …` invocation:
 
@@ -112,6 +112,8 @@ Surface the routing decision to the user in plain voice before proceeding. *"Thi
 
 Routing failure is itself a defect. If you find yourself trying to load the unit store on an empty/missing `_memories/` or with the migration flag present, stop and re-route.
 
+**Conditional-load branches — read the sub-file when routing selects one.** When routing lands on **new-workspace** or **folder-rename**, **STOP and read `protocols/startup-conditional-loads.md` now**, then execute the matching section there and re-enter the returning-workspace load below. Those two branches don't fire on an established workspace, so their procedures live in that sub-file rather than loading every session. Do not run them from memory. The **cold-start migration** branch (and its migration-in-progress resume case) stays inline below — it's the one irreversible branch, its plan/flag backstops must always be in context, so it is *not* extracted. The **returning-workspace load** below is the common path; read it directly.
+
 ## Load — returning workspace
 
 **Precondition:** `<project>/_memories/` exists, contains at least one canonical unit, and no migration-in-progress flag.
@@ -148,29 +150,6 @@ Run edit-detection on the files you read against `~/.core/state-cache.json`. If 
 - **PROJECT.md (user edit):** a change OUTSIDE the hot block is the user's authorship asserting itself. Propagate back to the source units (frontmatter updates, `status: retired` for removed facts). Anti-resurrection fires for removals — a fact the user deleted stays deleted.
 
 Surface any genuine user edit in the readiness summary before the agenda.
-
-## Load — new workspace
-
-Interview first. Don't skip this.
-
-- What's the problem or task? Scope? Timeline? What does success look like?
-- Constraints? Stakeholders? What's already been tried?
-
-Then scaffold the synthesis: create `<project>/PROJECT.md` with the six sections (What & Why / State / People / Moves / Decisions & Risks / Notes) populated from the interview. Solo projects can declare "solo project, no §People" inline rather than leaving the section blank.
-
-Create the unit store: `mkdir -p <project>/_memories/observations/<YYYY-MM>/`. Project folders hold only data; the priority function and other executable units ship with the plugin (see DC-77).
-
-Create `<project>/inbox.md` if external pulls are expected. Create the project-folder pointer at `<project>/workspace.json` with `schema_version: v2`, `workspace_id`, `name`, `created`, `data_path`. Create the workspace meta at `~/.core/workspaces/<workspace-id>/workspace.json` with `schema_version: v2` plus the workspace schema fields, and `~/.core/workspaces/<id>/swarm-narrative.md` empty for now. Register the workspace by appending its entry to `~/.core/index.json` (with `schema_version: v2` if not already set at the index level).
-
-Then ask about external sources. *"Are there external data sources that should feed this project's memory? We can register them now, or add them later via `/register-sources`."* If the user names sources, walk through registration per `references/external-sources/source-registration-framework.md §3`. For each source: capture the authority statement (the prose answer becomes both the registration's `authority` field and a `source-of-authority` unit per DC-85), surface the installation's suggested defaults for `confidence-default` / `relevance-contract` / `cadence` / `kind` (or ask the user directly if there's no installation orchestration layer), then write `<project>/_sources/<source-name>.yaml` and the corresponding `<project>/_memories/source-of-authority-<source-name>.md` unit. Set `authority-unit-id` on the registration after the unit lands. Create `<project>/_sources/` only when at least one source is being registered. If the user defers, skip — `/register-sources` handles the same intake protocol on a returning workspace.
-
-**Then ask about governance-document hierarchy** (DC-85 §8). Distinct from the per-external-source authority captured above — this one captures the ordering of the project's own artifacts when they disagree. Ask: *"When the project's documents disagree about a fact — say a PRD and a chat log, or a design spec and a status update — which one wins? Some projects have a clear hierarchy (PRD > HLSD > RTM > chat); others are single-source and this is trivial. Worth a sentence either way."*
-
-Single-source or trivially-ordered projects: skip; no decision unit needed. Multi-document projects with a real hierarchy: write the answer as a decision unit named `dc-NN-source-authority-hierarchy.md` (per project; only one) with the ordered list and one-line rationale per ranked source. The unit gets `type: decision` and `topics: [source-authority, governance]`. Synthesis-pass behavior #5 (spec §5) consults this unit when contradictions are found across sources, so it's the load-bearing target for adversarial reasoning over multi-source projects. When governance changes later, supersede with a new unit and the `supersedes` edge handles the revision — synthesis-pass behavior #5 always reads the current authoritative version.
-
-The naming `dc-NN-source-authority-hierarchy.md` (singular, per-project) intentionally differs from the per-source DC-87 units `source-of-authority-<source-name>.md` (one per external source). Both are valid surfaces; they answer different questions. The DC-87 units say *"this source's authority claim is X."* The DC-85 §8 unit says *"across these sources, here's who wins on contradictions."*
-
-If the project folder turns out to have pre-existing content that wasn't visible during routing (session summaries or legacy handoffs in unusual locations, prior PROJECT.md, session logs surfaced during interview), drop into cold-start migration instead. The new-workspace scaffold is for truly empty projects; substantial prior content always routes through migration.
 
 ## Load — cold-start migration
 
@@ -210,29 +189,6 @@ This step is load-bearing. The advisor-caught addition — enumerate the invento
 If any command silently no-ops with no stdout and no file written, set `CORE_DEBUG_CLI_ENTRY=1` and rerun — that surfaces the `process.argv[1]` vs `import.meta.url` mismatch the CLI entry guard depends on (path-normalization, symlinks, OneDrive virtualization on the invoking cwd).
 
 **Step 9 — Remove the flag and re-enter the returning-workspace load.** Delete `<project>/_memories/.migration-in-progress` as the explicit signal migration completed cleanly. Then run the returning-workspace load against the now-populated store. The migration agent's side-effect knowledge of what it wrote is NOT a substitute for a deliberate load — the retrieval ladder is what actually puts unit content into working memory. Without this re-entry, subsequent turns degrade rapidly as working-memory awareness decays.
-
-## Load — folder rename only
-
-The project is already on v2 but has unprefixed CORE folders, or it's on DC-74-era `_handoffs/` and needs the summary rename. Run only the rename step, then proceed to the returning-workspace load.
-
-Announce the rename in plain voice. Example: *"This project has the pre-DC-74 folder names. Renaming `handoffs/` → `_summaries/`, `sessions/` → `_sessions/`, `outputs/` → `_outputs/` before loading."* Or, for the DC-74-to-summary case: *"This project still has the legacy `_handoffs/` folder. Renaming to `_summaries/` before loading."*
-
-For each folder that exists, use `git mv` (or plain `mv` if not in a git tree):
-- `handoffs/` → `_summaries/`
-- `summaries/` → `_summaries/`
-- `_handoffs/` (legacy) → `_summaries/`
-- `sessions/` → `_sessions/`
-- `outputs/` → `_outputs/`
-
-Skip any that don't exist.
-
-Sweep `<project>/_memories/*.md` for path-citations in frontmatter `sources:` and inline body text — update the bare path-strings to the current `_summaries/`, `_sessions/`, `_outputs/`. Don't touch paths inside historical text that explicitly described prior state (changelog entries describing "before" states, for instance).
-
-Sweep `<project>/PROJECT.md` for forward-looking path references to the same folders.
-
-Append a one-line entry to `<project>/IMPROVEMENT_LOG.md` recording the rename, if a project IMPROVEMENT_LOG exists.
-
-This is routine and idempotent — don't escalate to multi-agent, don't pause for approval.
 
 ## Session agenda
 

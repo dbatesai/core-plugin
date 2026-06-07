@@ -92,6 +92,7 @@ Paths in this index resolve relative to the skill base directory (the one contai
 | Protocol | File | When |
 |---|---|---|
 | Startup | `protocols/startup.md` | Every session start, before accepting any task |
+| Startup conditional loads | `protocols/startup-conditional-loads.md` | Conditional-load — only when routing selects new-workspace or folder-rename (not read on a returning workspace) |
 | Harness adapter | `protocols/harness.md` | After startup; defines abstract verbs and points at the per-harness adapter |
 | Workspace | `protocols/workspace.md` | Creating or resuming a workspace |
 | Data storage | `protocols/data-storage.md` | Before writing any unit, observation, or render |
