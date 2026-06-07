@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.7.0] — 2026-06-07
+
+A documentation release. CORE now ships a full command reference and an agent-compatibility map, the README leads with the memory architecture instead of the swarm, and the public docs read from a user's perspective rather than a contributor's. The `/organize-files` utility no longer ships — it was a general-purpose file-cleanup tool, separate from CORE's project-intelligence mission.
+
+### Added
+- **`USAGE.md`.** A full reference for the plugin — every command, protocol, and script, and how they fit together.
+- **`llms.txt`.** An agent-compatibility map so other agents can read what CORE exposes without parsing the whole tree.
+
+### Changed
+- **README rewritten to be memory-forward.** The unit store and retrieval ladder lead; the multi-agent adversarial swarm is framed as one tool CORE reaches for, not the headline.
+- **Public docs read from a user/agent perspective.** README, INSTALL, and ARCHITECTURE were stripped of developer scaffolding (decision-codes, provenance pointers, contributor-only framing) so a reader installing the plugin sees what it does, not how it's built.
+
 ### Removed
 - **`/organize-files`.** The file-cleanup utility no longer ships with CORE — it was a general-purpose tool, separate from CORE's project-intelligence mission. The plugin now ships five companion utilities (`/finalize`, `/process-memory`, `/register-sources`, `/configure-project`, `/vibecheck`).
 
