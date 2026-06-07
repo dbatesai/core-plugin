@@ -24,11 +24,11 @@ Memory is the heart of the design. Everything else organizes around how facts ge
 
 The canonical flag (`canonical: true`) marks the top-priority units that surface in PROJECT.md and get a priority floor. Not a separate tier; a marker.
 
-### Six edge types
+### Edge types
 
-Edges in unit frontmatter as `{type, target, note?}`. The six committed types are `cites` (generic reference), `supersedes` (replacement), `depends-on` (dependency), `conflicts-with` (contradiction), `references-person` (mentioned person), and `references-topic` (mentioned topic).
+Edges in unit frontmatter as `{type, target, note?}`. The committed types are `cites` (generic reference), `supersedes` (replacement), `depends-on` (dependency), `conflicts-with` (contradiction), `references-person`, `references-topic`, plus `refines` (sharpens a prior decision without replacing it) and `amends` (modifies specific parts while the prior stands). Inverse forms — `depended-on-by`, `superseded-by` — close the graph where retrieval needs the back-edge.
 
-Three are eager at write time — `supersedes`, `depends-on`, `conflicts-with` — because retrieval and hygiene depend on them. The other three are eager when clear and lazy otherwise; hygiene's reconciliation pass catches what got missed. Six is the cap; new edge types require a new DC.
+Three are eager at write time — `supersedes`, `depends-on`, `conflicts-with` — because retrieval and hygiene depend on them. The rest are eager when clear and lazy otherwise; hygiene's reconciliation pass catches what got missed. The set is deliberately small: a new type has to carry distinct meaning, and informal near-synonyms (`relates`, `related`, `relates-to`) normalize to `cites` rather than expanding it.
 
 ### Four-tier retrieval ladder
 
@@ -81,6 +81,10 @@ The anti-resurrection rule: when the user removes a fact from PROJECT.md, that f
 ### Edit detection
 
 Hash-based comparison via `~/.core/state-cache.json`. Runs at session start (`/core`), before autonomous renders, at `/finalize`, on-demand. User edits become ground truth and propagate back to source units; CORE's own renders (the hot-section block, stamped `last_written_by`) are skipped, not mistaken for user edits.
+
+### Validity (world-time)
+
+A unit can carry an optional validity window — `t_valid` and `t_invalid` world-time fields marking when a fact was true in the world, separate from when CORE recorded it. Tier-2 retrieval suppresses a unit whose `t_invalid` is in the past, so an invalidated fact doesn't surface as current truth; a cold-history walk (`--include-invalid`) still reaches it. Point-in-time reconstruction (`--as-of <date>`) shows what the store held at a past moment, and impact propagation walks `depends-on` edges to flag what an invalidation touches. Units without these fields behave exactly as they did before — the dimension is additive.
 
 ## Memory hygiene
 
@@ -144,6 +148,14 @@ Cadence: weekly automatic (via memory hygiene's first /finalize of the week), on
 
 The validation report includes a final qualitative field: *"Did retrieval feel right in real use?"* Quantitative thresholds aren't the whole story.
 
+## Self-measurement
+
+CORE measures how well it recognizes a project across sessions. A per-turn classifier labels each turn with one of six recognition states; a daily rollup aggregates them and writes a one-line signal that the readiness summary surfaces when recognition is slipping. Companion detectors flag non-resolving citations, stale context, and anticipation gaps.
+
+Capture runs by default and writes only to local disk under `<project>/_metrics/` — nothing leaves the machine. Opt out per workspace with `metrics_enabled: false` in `workspace.json`, or globally with `CORE_METRICS_ENABLED=0`.
+
+The classifier is **PROVISIONAL**. It isn't calibrated, so the readiness summary only flags an *upward* recognition-failure trend — never an absolute level — and every surface that shows the signal says PROVISIONAL. Calibration clears once a human-labeled set reaches a 0.7-precision gate, and that precision is computed only from the labels, never from the classifier's own output.
+
 ## Debug mode
 
 Toggle-able logger at `~/.core/debug/<session-id>.jsonl`. Logs every retrieval, unit write, render, hygiene operation, graduation decision, multi-agent invocation in structured form. Flags anomalies inline (unit written but retrieval misses; missing inverse edge; retired fact re-appearing in render; priority function out-of-range; Tier 3 fired when Tier 1 should have caught it; hygiene operation reversed in same session).
@@ -163,17 +175,17 @@ Lifecycle: per-session, 30-day archive, 90-day cold-store.
 
 The skill product is intentionally minimal — protocols, agents, references, scripts, schemas, templates. Everything else lives in user-owned or machine-local space, by design.
 
-### How scripts get found: `${CLAUDE_PLUGIN_ROOT}`
+### How scripts get found
 
-Every protocol that runs a script calls it as `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs`. That environment variable resolves to wherever the plugin manager actually installed the plugin — `~/.claude/plugins/cache/<marketplace>/core/<version>/` for a normal install, or the local directory for `marketplace add ~/path/to/plugin`. Going through the variable means the scripts move with the install and no protocol has to be edited.
+Protocols resolve a plugin root once per session and call scripts as `<root>/skills/core/scripts/<name>.mjs`. The root is derived from the loaded skill's own base directory — the one signal reliable on every harness — because `${CLAUDE_PLUGIN_ROOT}` is not dependably injected into an agent's shell calls; it serves only as a fallback. The resolver canonicalizes the path, and if it can't confirm the scripts directory it skips the call and surfaces the degraded state rather than running against a wrong path. Resolving one root per session means the scripts move with the install and no protocol hardcodes a location.
 
 If you're building a wrapper — a plugin that mirrors these skills into its own marketplace entry, or any project that layers on top of CORE — this part matters, because getting it wrong breaks every script call silently:
 
-- The wrapper plugin must keep upstream skills at `skills/<skill-name>/` directly under the plugin root — same layout as upstream. Don't nest, don't rename, don't restructure. Wrappers that put the skills at a different relative path (e.g. `wrapped-skills/core/`) silently break every `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/...` invocation in upstream protocols.
-- The wrapper's `${CLAUDE_PLUGIN_ROOT}` resolves to the wrapper's install root, not upstream's. That's correct — the wrapper ships its own copy of the scripts at the same relative path. The contract is "scripts live at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs` relative to whichever plugin is loaded."
-- If a wrapper wants to add custom scripts, put them under the wrapper's own skill directory (`skills/<wrapper-skill-name>/scripts/`) and reference via the same `${CLAUDE_PLUGIN_ROOT}` pattern. Don't put custom scripts under `skills/core/` — that's the upstream-mirrored subtree, and the next refresh will overwrite them.
+- The wrapper plugin must keep upstream skills at `skills/<skill-name>/` directly under the plugin root — same layout as upstream. Don't nest, don't rename, don't restructure. Skills at a different relative path (e.g. `wrapped-skills/core/`) silently break every `skills/core/scripts/...` call in upstream protocols.
+- The resolved root is the loaded plugin's own root, so a wrapper ships its own copy of the scripts at the same relative path and the calls resolve there. The contract is "scripts live at `<resolved-root>/skills/core/scripts/<name>.mjs` relative to whichever plugin is loaded."
+- Custom scripts go under the wrapper's own skill directory (`skills/<wrapper-skill-name>/scripts/`), resolved the same way. Don't put custom scripts under `skills/core/` — that's the upstream-mirrored subtree, and the next refresh overwrites them.
 
-A 2026-05-20 downstream-wrapper migration verified this contract end-to-end. The "verbatim rsync" pattern — `rsync -a --delete --exclude '.git' --exclude '.DS_Store'` per-subtree from `core-plugin/skills/<name>/` into `<wrapper-plugin>/skills/<name>/` — is the supported overlay shape.
+The supported overlay shape is a verbatim per-subtree copy — `rsync -a --delete --exclude '.git' --exclude '.DS_Store'` from `core-plugin/skills/<name>/` into `<wrapper-plugin>/skills/<name>/`.
 
 ### Version vs BUILD — releases vs iterations
 
@@ -186,9 +198,7 @@ Both live in **one file** — `plugins/core/.claude-plugin/plugin.json` is the s
 
 Why both: `version` is the user-facing distribution identifier; bumping it forces every installed copy to pull on next `update`. `build` distinguishes iterations of a single `version`. Keeping them in one file means there is exactly one place to update and nothing to keep in sync.
 
-**Operational rule:** every PR that lands user-visible behavior changes (script flag changes, protocol changes, hook changes, fixes that resolve user-reported issues) bumps `version` at PR-merge time. Sessions that ship pure-dev-meta fixes (test coverage, comment cleanups, archive-only edits) can bump `BUILD` alone — those changes don't need to reach the user-installed copy.
-
-Discovered 2026-05-20: a stale install at `BUILD 20260518.1` with marketplace `version: 2.0.0` did not refresh under `claude plugins update` even though three sessions of fixes had landed with BUILD bumps but no version bump. Bumped to `2.0.1` to force propagation and documented the distinction.
+**Operational rule:** every PR that lands user-visible behavior changes (script flag changes, protocol changes, hook changes, fixes that resolve user-reported issues) bumps `version` at PR-merge time. Sessions that ship pure-dev-meta fixes (test coverage, comment cleanups, archive-only edits) can bump `build` alone — those changes don't need to reach the user-installed copy. A `claude plugins update` only refreshes an install when `version` moves, so a `build`-only change won't propagate on its own.
 
 ## Diagrams
 
