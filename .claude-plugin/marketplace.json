@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "core",
-      "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Ships with six companion utilities — `/finalize`, `/process-memory`, `/register-sources`, `/vibecheck`, `/organize-files`, `/configure-project` — that CORE invokes internally and that you can also call directly.",
+      "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Ships with five companion utilities — `/finalize`, `/process-memory`, `/register-sources`, `/vibecheck`, `/configure-project` — that CORE invokes internally and that you can also call directly.",
       "version": "3.6.0",
       "source": "./plugins/core",
       "category": "productivity",

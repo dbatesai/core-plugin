@@ -20,7 +20,7 @@ claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Start a fresh session and type `/core`. That's it — the plugin registers the main skill, six sub-skills, and two hooks, and your `~/.claude/settings.json` is left alone.
+Start a fresh session and type `/core`. That's it — the plugin registers the main skill, five sub-skills, and two hooks, and your `~/.claude/settings.json` is left alone.
 
 ## What you get
 
@@ -32,7 +32,6 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/register-sources` | Point CORE at outside data that should feed the project's memory. |
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
-| `/organize-files` | Clean up version-name sprawl and stale files in any folder. |
 
 Two hooks register on their own: a guard that reminds you before a write touches installed skill files, and a per-turn nudge to keep the voice plain.
 
@@ -104,6 +103,6 @@ Your project data — `PROJECT.md`, `_memories/`, `_summaries/` inside each proj
 
 **The agent doesn't introduce itself by name.** It picks a name on first run. If it didn't, ask it to.
 
-**A sub-skill name collides.** If another plugin already claims `/finalize`, `/process-memory`, `/register-sources`, `/configure-project`, `/vibecheck`, or `/organize-files`, registration can clash. Disable or remove the other plugin.
+**A sub-skill name collides.** If another plugin already claims `/finalize`, `/process-memory`, `/register-sources`, `/configure-project`, or `/vibecheck`, registration can clash. Disable or remove the other plugin.
 
 **Installing from a zip through the desktop app's upload dialog.** That dialog currently fails for `.zip` and `.plugin` files on both Windows and macOS (a known Claude bug). Use the marketplace path above instead — it's the supported route.

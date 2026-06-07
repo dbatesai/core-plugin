@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **`/organize-files`.** The file-cleanup utility no longer ships with CORE — it was a general-purpose tool, separate from CORE's project-intelligence mission. The plugin now ships five companion utilities (`/finalize`, `/process-memory`, `/register-sources`, `/configure-project`, `/vibecheck`).
+
 ## [3.6.0] — 2026-06-07
 
 `/orient` is now a deprecated no-op — typing it prints a notice and points you to `/core`, which does everything it used to, including a fresh readiness summary when you re-run it mid-session. Metrics capture runs by default now: CORE measures how well it recognizes your project across sessions and writes the results to local disk only, with a per-workspace and environment-variable opt-out. The classifier behind that measurement is PROVISIONAL — it isn't calibrated, so the readiness summary only flags an upward recognition-failure trend, never an absolute score. Underneath, the deterministic scripts got safer: writes to irreplaceable files are atomic, the CLI entry guards no longer silently no-op on symlinked installs, and diagnostics fail loudly instead of producing wrong-but-plausible output. The startup protocol loads its rare branches only when it needs them. The test suite grew 490 → 528.
