@@ -175,12 +175,14 @@ Edges live in unit frontmatter as `{type, target, note?}` triples. The committed
 - `depends-on` — dependency. This unit's validity depends on the target.
 - `depended-on-by` — inverse of `depends-on`.
 - `conflicts-with` — contradiction. The two units make incompatible claims; reconciliation owed.
+- `refines` — sharpens or elaborates a prior decision without replacing it. The target still stands; this unit makes it more precise. Distinct from `supersedes`.
+- `amends` — modifies specific parts of the target while the rest of it stands. Distinct from `supersedes` (which retires the target whole).
 - `references-person` — a person mentioned in the unit (used on Tier 1 observations).
 - `references-topic` — a topic mentioned (used on Tier 1 observations).
 
 **Eager vs lazy writes.** Three types you write the moment you commit the unit, because retrieval and hygiene depend on them right away: `supersedes`, `depends-on`, `conflicts-with`. Inverse edges (`superseded-by`, `depended-on-by`) are eager for these too — written at the same time on the target unit.
 
-The other three — `cites`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
+The rest — `cites`, `refines`, `amends`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
 
 **Wikilinks** (`[[unit-id]]`) in the body are permitted as a secondary, organic edge form. Hygiene's reconciliation pass promotes durable wikilinks to typed edges (default type: `cites`) when they appear in citation-style contexts.
 
