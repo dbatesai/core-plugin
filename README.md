@@ -4,51 +4,55 @@ An AI agent that knows your whole project — not just the file in front of it �
 
 I built this because I kept hitting the same wall. The AI assistants I worked with were good at the task in front of them and lost on the project around them. Every session started cold. A decision I made on Tuesday didn't exist on Thursday. The conversation moved fast and the project stood still.
 
-CORE is what I built to fix that. One agent that knows the project, watches the data, remembers across sessions, and pushes back when I'm wrong.
+CORE is what I built to fix that. One agent that knows the project, remembers across sessions, surfaces the decisions and risks I'd otherwise forget, and pushes back when I'm wrong.
 
-## What it does in a session
+## How it works
 
-- Pulls in the context it needs from a store of saved facts in `<project>/_memories/`, instead of re-reading the whole project every time.
-- Keeps `PROJECT.md` written from those facts. You can edit either one — the file or the underlying facts — and the change carries back to the other.
-- Writes down what you say as you say it, turns the parts worth keeping into permanent notes, and prunes the rest so the memory stays current instead of piling up.
-- Brings in a small team of agents to argue a question out when the stakes are high — an architecture call, a tricky judgment, public copy, anything where one quick answer tends to agree with itself.
-- Picks up where you left off next session, the working relationship intact.
+Memory sits at the center. CORE keeps facts about your project in a store of small files — one fact each — and pulls in what's relevant when you ask, instead of re-reading the whole project every time. It works in two layers: the first catches everything you say as raw observations; the second holds the facts worth keeping, promoted once they've earned it, each with a short reasoning trail and typed links to related facts. A ranking function decides what matters right now — weighing how recent a fact is, how often it shows up, where it came from, and how well it fits what you're talking about. Old material steps out of the way without being lost: archive, retire, cold-store.
 
-## The arguing part
+`PROJECT.md` gives that store a readable face — a six-section synthesis (what & why, state, people, moves, decisions & risks, notes) written from the kept facts. Edit the file or the underlying facts and the change carries to the other. Remove a fact and it stays removed.
 
-When something big lands on the table, CORE runs a few agents against each other: one drafts an answer, another writes down what it expects to find *before* it reads the draft, and sometimes a third watches for the agents quietly agreeing just to agree. It costs tokens and wall-clock time. It earns that back on the decisions where being wrong is expensive.
+In a session, that adds up to three things:
 
-The reason it works this way: when you lean on a single AI critic, it caves to social pressure and reverses itself about 85% of the time. Agents kept apart produce noticeably more varied analysis than agents who've already read each other's work. Quiet agreement is the failure this setup exists to catch.
+- It picks up where you left off — loads the context and prints a readiness summary before anything else.
+- It writes down what matters as you talk and prunes the rest, so the memory stays current instead of piling up.
+- It surfaces the decisions and risks you should be aware of, and challenges you when you're overconfident.
+
+## When it pushes back hard
+
+For the calls where being wrong is expensive — an architecture decision, a tricky judgment, public copy — CORE can run a few agents against each other: one drafts an answer, another writes down what it expects to find *before* it reads the draft, sometimes a third watches for the agents agreeing just to agree. It costs tokens and wall-clock time, and earns that back on the decisions that matter. It's one tool CORE reaches for, not what CORE is.
+
+The reason it works this way: a single AI critic caves to social pressure and reverses itself about 85% of the time, and agents kept apart produce noticeably more varied analysis than agents who've already read each other's work. Quiet agreement is the failure this setup exists to catch.
 
 ## Install
 
-CORE lives on GitHub, not in the official Claude marketplace. You install it by pointing Claude Code at this repo (or a local copy) and installing the plugin from there. Two paths, same result.
-
-**From inside the Claude Code app** (two slash commands in any session):
+CORE lives on GitHub, not the official Claude marketplace. Point Claude Code at this repo and install from there — two slash commands in any session:
 
 ```
 /plugin marketplace add dbatesai/core-plugin
 /plugin install core@core
 ```
 
-**From the terminal** (`claude` CLI):
+Or from the terminal:
 
 ```
 claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Either path installs the main skill, six sub-skills, and two hooks. The hooks come in through the plugin manifest, so your `~/.claude/settings.json` stays exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session with `--plugin-dir`, installing on Codex, and troubleshooting.
+Either path installs the main skill, five companion skills, and two hooks — the hooks come in through the manifest, so your `~/.claude/settings.json` stays exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session, installing on Codex, and troubleshooting.
 
-Typing `/core` picks a thread back up on its own — it loads your project context and prints a readiness summary before anything else. The six sub-skills are slash commands you can run on their own: **`/finalize`** (close a session — writes a summary and runs memory cleanup), **`/process-memory`** (clean up memory on demand — pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it's over the size cap), **`/register-sources`** (point CORE at outside data that should feed the project's memory), **`/configure-project`** (set up and health-check a project's CORE files — read-only unless you pass `--apply`), **`/vibecheck`** (capture how the session felt as ASCII art, saved to `~/.core/vibes/`), and **`/organize-files`** (clean up version-name sprawl and stale files in any folder). The two hooks register on their own: a guard that reminds you before a write touches installed skill files, and a per-turn nudge to keep the voice plain.
+## Commands
 
-## Architecture
+Type `/core` to start — it loads your project and orients before anything else. Five companions handle the rest: **`/finalize`** (close a session), **`/process-memory`** (clean up memory on demand), **`/register-sources`** (point CORE at outside data that should feed the project), **`/configure-project`** (set up and health-check a project), and **`/vibecheck`** (capture how the session felt). The two hooks register on their own: a guard before a write touches installed skill files, and a per-turn nudge to keep the voice plain.
 
-[ARCHITECTURE.md](ARCHITECTURE.md) walks through the whole design — the memory store, how retrieval works, memory cleanup, how the agent reasons on its own, when it brings in the swarm, validation, debug mode, and the hooks.
+[USAGE.md](USAGE.md) is the full reference — every command, protocol, and script, and what each one does.
 
-## How the memory works, briefly
+## Learn more
 
-Memory comes in two layers. The first catches everything you say as raw observations. The second holds the facts worth keeping — promoted from those observations once they've earned it, each with a short reasoning trail and typed links to related facts (cites, supersedes, depends-on, refines, amends, conflicts-with, and links to the people and topics a fact touches). When CORE needs something, it looks in what's already loaded first, then searches the files by keyword, then walks the links between facts, and only spins up a deeper semantic search if those come up short. A ranking function decides what's most relevant right now, weighing how recent a fact is, how often it shows up, where it came from, and how well it matches what you're talking about. Cleanup runs in three moves — archive, retire, cold-store — so old material steps out of the way without being lost. `PROJECT.md` is written from the kept facts, and anything you edit there flows back to the source.
+- [USAGE.md](USAGE.md) — what each command, protocol, and script does.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — the design behind it: the memory store, how retrieval works, memory hygiene, when the swarm fires, validation, and the hooks.
+- [llms.txt](llms.txt) — a structured map of this repo for AI agents: what CORE is, how to install it, and how to use it, with pointers into the docs.
 
 ## Status
 

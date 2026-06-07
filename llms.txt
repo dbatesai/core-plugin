@@ -1,0 +1,25 @@
+# CORE
+
+> A project-intelligence agent for Claude Code (and Codex). It knows your whole project across sessions, surfaces decisions and risks before you ask, and challenges overconfidence. You install it as a plugin and drive it with the `/core` slash command.
+
+CORE is a single agent backed by a unit-based memory store (one fact per file, with typed links), a four-tier retrieval ladder, and a rendered six-section project synthesis (`PROJECT.md`). It reaches for multi-agent adversarial review only when the stakes warrant it — that's one tool, not the product. It runs on Claude Code today and is built to be harness-agnostic.
+
+## Start here
+
+- [README.md](README.md): what CORE is, why it exists, how it works, and install commands.
+- [INSTALL.md](INSTALL.md): install on Claude Code or Codex, run a local copy, troubleshoot.
+- [USAGE.md](USAGE.md): the full reference — every command (`/core` plus five companions), every protocol, and the scripts — and what each one does.
+
+## How to use it
+
+- **Install (Claude Code):** `/plugin marketplace add dbatesai/core-plugin` then `/plugin install core@core`. From the terminal: `claude plugins marketplace add dbatesai/core-plugin` then `claude plugins install core@core`.
+- **Run:** type `/core` to start or resume a project. It loads your project context and prints a readiness summary before doing anything else.
+- **Companions:** `/finalize` (close a session), `/process-memory` (memory housekeeping on demand), `/register-sources` (point CORE at an outside data source), `/configure-project` (bootstrap and health-check a project), `/vibecheck` (capture the session's vibe).
+
+## Design
+
+- [ARCHITECTURE.md](ARCHITECTURE.md): the memory store and its two tiers, the retrieval ladder, memory hygiene, the world-time validity dimension, self-measurement, when the adversarial swarm fires, and how scripts resolve their plugin root.
+
+## Changes
+
+- [CHANGELOG.md](CHANGELOG.md): release history.
