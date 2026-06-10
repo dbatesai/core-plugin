@@ -27,7 +27,7 @@ A **delivery workspace** is the DM's **operational meta** about **source data** 
 |-------|------|----------|-------------|
 | `workspace_id` | string | yes | Unique workspace identifier |
 | `name` | string | yes | Human-readable workspace name |
-| `path` | string | yes | Absolute path to the source data's root directory (where `PROJECT.md` lives). *Canonical field as of 2026-06-01; the legacy name `project_path` is still read-tolerated for one release, then dropped.* |
+| `path` | string | yes | Absolute path to the source data's root directory (where `PROJECT.md` lives). *Canonical field as of 2026-06-01. The legacy name `project_path` remains read-tolerated through v3.7.0 and gets dropped in v3.8.0.* |
 | `created` | string (ISO 8601) | yes | When the workspace was first registered |
 | `last_active` | string (ISO 8601) | yes | Last time the DM performed work in this workspace. Updated automatically. |
 | `session_log_refs` | array of strings | no | Optional list of paths to session log directories at `<project>/_sessions/YYYY-MM-DD/`. When present, the workspace *points to* them; it does not hold them. |

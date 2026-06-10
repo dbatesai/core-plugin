@@ -1,12 +1,12 @@
 # CORE Output Schema
 
-The mandatory output structure that ALL agents must return, regardless of task type, team composition, or phase. No fields may be omitted — even when a field has nothing to report, the agent must explicitly state that (e.g., "No position changes during this execution").
+The output structure every adversarial and generative agent returns, regardless of task type, team composition, or phase. No fields may be omitted — even when a field has nothing to report, the agent must explicitly state that (e.g., "No position changes during this execution"). The Quality Sentinel measures against standards rather than argues, so it returns the specialized variant at the bottom of this file instead.
 
 The DM must process all eight fields when synthesizing results. Ignoring fields — particularly Persuasion Log, Mind Changes, Lingering Concerns, or Minority Views — defeats the adversarial quality signal CORE is designed to produce.
 
 ---
 
-## The Eight Fields
+## The Eight Fields — standard output (adversarial and generative agents)
 
 | # | Field | Type | Description |
 |---|---|---|---|
@@ -35,7 +35,7 @@ Field 1 is what single-pass analysis produces. Fields 4–8 are where CORE's adv
 
 ## Enforcement
 
-- No fields may be omitted from any agent output.
+- No fields may be omitted from any standard agent output. The Quality Sentinel's measurement variant below defines its own required sections.
 - The DM must process all eight fields during synthesis: reading, weighing, and incorporating into the synthesized result or explicitly noting why a concern was set aside.
 - Fields 7 and 8 are distinct and must not be conflated: Lingering Concerns are DM reservations; Minority Views are agent positions. Both travel with the output.
 
@@ -72,7 +72,7 @@ Minority Views:
 
 ---
 
-## Quality Sentinel Output (Specialized Schema)
+## Quality Sentinel Output (measurement variant)
 
 The Quality Sentinel uses a specialized schema because it measures against standards rather than performs adversarial analysis. Fields like Persuasion Log don't apply to standards measurement.
 
