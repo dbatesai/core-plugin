@@ -20,6 +20,12 @@
  * state distributions as evidence-grade until calibration clears. Capture (the
  * transcript) is ground truth; this interpretation is tunable and replayable.
  *
+ * CADENCE (honesty, MET-003): there is NO automatic trigger for this script. It
+ * runs only from user-invoked /finalize and /process-memory. A session closed
+ * without them produces no classified records, so the rollup and orient-signal
+ * go STALE (not wrong) until the next finalize. Never describe the rec-fail
+ * trend as continuous monitoring.
+ *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open: never throws.
  *
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
