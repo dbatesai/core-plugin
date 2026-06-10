@@ -45,6 +45,28 @@ jobs:
             node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))"
           done
 
+      - name: hooks.json entries conform to the hook schema
+        run: |
+          node -e '
+            const h = JSON.parse(require("fs").readFileSync("plugins/core/hooks/hooks.json","utf8"));
+            const KNOWN = ["UserPromptSubmit","PreToolUse","PostToolUse","SessionStart","SessionEnd",
+                           "PostCompact","PreCompact","Stop","SubagentStop","Notification"];
+            const hooks = (h && h.hooks) || {};
+            let failed = 0;
+            for (const [event, entries] of Object.entries(hooks)) {
+              if (!KNOWN.includes(event)) { console.error("unrecognized hook event: " + event); failed = 1; }
+              if (!Array.isArray(entries)) { console.error("hook event " + event + " is not an array"); failed = 1; continue; }
+              for (const entry of entries) {
+                const cmds = entry.hooks || [];
+                if (!Array.isArray(cmds) || cmds.length === 0 || cmds.some(c => c.type !== "command" || !c.command)) {
+                  console.error("hook entry under " + event + " missing type:\"command\" + command"); failed = 1;
+                }
+              }
+            }
+            if (failed) process.exit(1);
+            console.log("hooks.json schema ok (" + Object.keys(hooks).length + " event(s) registered)");
+          '
+
       - name: plugin.json has required fields
         run: |
           node -e '
@@ -149,7 +171,7 @@ jobs:
         run: |
           set -e
           shopt -s globstar nullglob
-          SCRIPTS=(plugins/core/skills/core/scripts/*.mjs)
+          SCRIPTS=(plugins/core/skills/core/scripts/**/*.mjs)
           if [ ${#SCRIPTS[@]} -eq 0 ]; then echo "FAIL: script glob matched zero files — path moved?"; exit 1; fi
           fail=0
           for f in "${SCRIPTS[@]}"; do
