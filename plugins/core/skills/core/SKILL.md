@@ -112,6 +112,9 @@ Supporting references:
 - `references/hygiene-strategies.md` — deeper hygiene sub-protocols (graduation reasoning, archive integrity, edge reconciliation).
 - `references/instruction-surface-contract.md` — (v3.0) the contract→generator system: one `CONTRACT.md` generates `CLAUDE.md`/`AGENTS.md`. Read when adopting the contract system, editing a contract, or handling a contract-drift release gate.
 - `references/memory-extension-contracts.md` — (Phase 4) how an overlay extends CORE's memory + metrics layers without a core change — and the closed sets that don't extend locally (unit/edge types, harness adapters, retrieval tiers): the bi-temporal validity dimension (built), the provenance/salience/person-synthesis layer specs (SPEC-ONLY, built when a consumer lands), the `world-time-policy` source hook, the metrics passthrough/additive-detector seams, and the wrapper stability contract. Read when building a downstream wrapper's memory layer or its storage/retrieval metrics.
+- `references/refinement-strategies.md` — catalog of multi-agent dispositions and refinement patterns; read when composing a swarm beyond the standard lenses or when a first composition isn't converging.
+- `references/confidence-assignment-guide.md` — pattern catalog for assigning `confidence-level` (sourced / inferred / reconstructed) when writing observations, conversation-sourced or extractor-sourced.
+- `templates/swarm-implement.md`, `templates/swarm-research.md`, `templates/swarm-review.md` — starting rosters and briefing skeletons for the three common swarm shapes; seed material, adapt rather than apply verbatim.
 - `agents/base-protocol.md` — included in every spawned agent prompt; carries the reasoning discipline that applies whether you're solo or in a swarm.
 - `schemas/output.md` — output schema for multi-agent runs.
 - `schemas/workspace.md` — workspace manifest structure.

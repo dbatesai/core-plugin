@@ -35,6 +35,8 @@ Hardware budget caps the upper end. From `protocols/execution.md`: ≥48GB → u
 
 Compose fresh personas for the task's specific shape. Saved compositions at `~/.core/agents/<name>.md` are starting points for continuity across multi-session work — reach for them when the value is recognizing the same agent across sessions, not as shortcuts when the right shape happens to share a name with a saved one. The lens framework in `agents/roles.md` is built for fresh composition; that's the primary practice.
 
+Three starting templates ship at `templates/swarm-implement.md`, `templates/swarm-research.md`, and `templates/swarm-review.md` — roster skeletons plus briefing scaffolds for the three common shapes in the sizing table above. `references/refinement-strategies.md` catalogs refinement dispositions for when a first composition isn't converging. Both are seed material, same status as saved compositions: starting points, never verbatim.
+
 ## Anti-anchoring enforcement
 
 The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the sycophancy measured in the project's independent-analysis runs, where LLM critics reversed their position 84.5% of the time under social pressure (`references/architecture-doctrines.md` cites the same findings).
