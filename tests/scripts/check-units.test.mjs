@@ -366,3 +366,34 @@ test('MEM-018: fresh units and observations are exempt from sources-missing', ()
 
   assert.equal(report.some(f => f.check === 'sources-missing'), false);
 }));
+
+// ---------- D8 / MEM-008 + MEM-014: empty required fields FAIL, oversize WARNs ----------
+
+test('MEM-008: a present-but-empty required field FAILs (type: with blank value)', () => withStore((memories) => {
+  // `type: ` parses to an empty list (the parser treats a blank value as a
+  // list opener), which passed both the key-presence check and the truthiness-
+  // guarded value check.
+  writeFileSync(join(memories, 'blank-type.md'), [
+    '---', 'id: blank-type', 'type:', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    '---', '', '# blank-type', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.check === 'required-field-empty' && f.detail.includes("'type'")),
+    'blank type must FAIL, not pass silently');
+}));
+
+test('MEM-014: an oversized unit WARNs unit-oversize (benign)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'big.md'), unit({ id: 'big', body: '# big\n\n' + 'x'.repeat(11_000) }));
+  writeFileSync(join(memories, 'small.md'), unit({ id: 'small' }));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.check === 'unit-oversize' && f.unit_id === 'big'));
+  assert.equal(report.some(f => f.check === 'unit-oversize' && f.unit_id === 'small'), false);
+  assert.ok(BENIGN_WARN_CHECKS.has('unit-oversize'), 'advisory — never blocks retrieval or startup');
+}));

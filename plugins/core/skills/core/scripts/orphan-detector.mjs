@@ -29,12 +29,24 @@ import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Scripts built ahead of their consumer on purpose. Each MUST carry a reason and,
-// where relevant, the decision that gates activation. Reviewed at /finalize.
+// Scripts built ahead of their consumer on purpose. Each entry carries the
+// reason, the date it was allowlisted, and a reviewBy date — when reviewBy
+// passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
+// can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
-  'instruction-surface-adapter.mjs':
-    'Deliberately-staged v3.0 instruction-surface system (dry-run core; --apply is David-gated + content-generation not implemented). Activation is tied to the pending "does the contract→generator system still earn its complexity at N=2 surfaces" decision (PROJECT.md §State). Wire or retire when that decides.',
+  'instruction-surface-adapter.mjs': {
+    reason: 'Deliberately-staged v3.0 instruction-surface system (dry-run core; --apply is David-gated + content-generation not implemented). Activation is tied to the pending "does the contract→generator system still earn its complexity at N=2 surfaces" decision (PROJECT.md §State). Wire or retire when that decides.',
+    allowlistDate: '2026-06-09',
+    reviewBy: '2026-09-09',
+  },
 });
+
+// Back-compat: callers (and older trees) may still pass string-form entries.
+function allowlistEntry(allowlist, name) {
+  const raw = allowlist[name];
+  if (!raw) return null;
+  return typeof raw === 'string' ? { reason: raw, allowlistDate: null, reviewBy: null } : raw;
+}
 
 function walk(dir, ext, out = []) {
   let entries;
@@ -57,7 +69,7 @@ export function resolveCoreRoot({ coreRootArg, scriptUrl } = {}) {
  * Find orphans under a plugin root.
  * @returns {{orphanScripts: string[], orphanProtocols: string[], allowlisted: string[], wiredCount: number, scriptCount: number}}
  */
-export function findOrphans({ coreRoot, allowlist = ALLOWLIST } = {}) {
+export function findOrphans({ coreRoot, allowlist = ALLOWLIST, today = new Date() } = {}) {
   const skillsDir = join(coreRoot, 'skills');
   const scriptsRoot = join(coreRoot, 'skills', 'core', 'scripts');
 
@@ -103,10 +115,17 @@ export function findOrphans({ coreRoot, allowlist = ALLOWLIST } = {}) {
 
   const orphanScripts = [];
   const allowlisted = [];
+  const staleAllowlisted = [];
+  const todayIso = today.toISOString().slice(0, 10);
   for (const s of scripts) {
     const name = basename(s);
     if (wired.has(name)) continue;
-    if (allowlist[name]) { allowlisted.push(name); continue; }
+    const entry = allowlistEntry(allowlist, name);
+    if (entry) {
+      allowlisted.push(name);
+      if (entry.reviewBy && entry.reviewBy < todayIso) staleAllowlisted.push(name);
+      continue;
+    }
     orphanScripts.push(relative(coreRoot, s));
   }
 
@@ -123,6 +142,7 @@ export function findOrphans({ coreRoot, allowlist = ALLOWLIST } = {}) {
     orphanScripts,
     orphanProtocols,
     allowlisted,
+    staleAllowlisted,
     wiredCount: wired.size,
     scriptCount: scripts.length,
   };
@@ -136,7 +156,13 @@ export function formatReport(r) {
   if (r.allowlisted.length) {
     L.push('');
     L.push('Allowlisted (deliberately-staged forward-wiring — still tracked):');
-    for (const a of r.allowlisted) L.push(`  ~ ${a} — ${ALLOWLIST[a]}`);
+    for (const a of r.allowlisted) {
+      const entry = allowlistEntry(ALLOWLIST, a);
+      const reason = entry ? entry.reason : '(allowlisted by caller)';
+      const stale = r.staleAllowlisted && r.staleAllowlisted.includes(a)
+        ? '  ⚠ REVIEW OVERDUE — re-justify or wire/retire' : '';
+      L.push(`  ~ ${a} — ${reason}${stale}`);
+    }
   }
   if (r.orphanScripts.length || r.orphanProtocols.length) {
     L.push('');

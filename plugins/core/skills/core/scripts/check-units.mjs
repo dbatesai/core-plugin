@@ -29,7 +29,7 @@
  * Exit codes: 0 = all pass, 1 = warnings, 2 = failures, 3 = setup error.
  */
 
-import { readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.mjs';
@@ -71,6 +71,11 @@ export function isExternalRef(target) {
 export const ARCHIVE_RS_THRESHOLD = 0.05;
 export const STALE_DAYS = 90;
 export const SOURCES_WARN_AGE_DAYS = 14;
+
+// MEM-014: PROJECT.md and the hot section are capped, but a single unit had no
+// size signal anywhere — retrieval reads matched units whole, so one bloated
+// unit eats disproportionate context. ~10KB ≈ 3K tokens at the 0.30 factor.
+export const UNIT_SIZE_WARN_BYTES = 10_000;
 
 // ---------- Unit iteration ----------
 
@@ -143,6 +148,16 @@ export function checkSchema(units, memoriesDir, report) {
 
     for (const fld of REQUIRED_FIELDS) {
       if (!(fld in u.fm)) report.push({ level: 'FAIL', check: 'required-field', unit_id: uid, detail: `Missing required frontmatter field: '${fld}'` });
+    }
+
+    // MEM-008: a key that is PRESENT but blank passed both the presence check
+    // (key in fm) and the value checks (guarded by truthiness). `type: `
+    // parses to an empty list; '' and null are the scalar variants.
+    for (const fld of ['id', 'type', 'status', 'created', 'updated']) {
+      if (!(fld in u.fm)) continue; // absence already FAILed above
+      const v = u.fm[fld];
+      const blank = v === null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0);
+      if (blank) report.push({ level: 'FAIL', check: 'required-field-empty', unit_id: uid, detail: `Required field '${fld}' is present but empty` });
     }
 
     const status = String(u.fm.status || '').toLowerCase();
@@ -227,6 +242,13 @@ export function checkSchema(units, memoriesDir, report) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(byWhenStr))
         report.push({ level: 'WARN', check: 'by-when-format', unit_id: uid, detail: `Field 'by-when' must be ISO date (YYYY-MM-DD), found '${byWhenStr}'` });
     }
+
+    // MEM-014 advisory size check.
+    let unitBytes = 0;
+    try { unitBytes = statSync(u.path).size; }
+    catch { unitBytes = Buffer.byteLength(String(u.body || ''), 'utf8'); }
+    if (unitBytes > UNIT_SIZE_WARN_BYTES)
+      report.push({ level: 'WARN', check: 'unit-oversize', unit_id: uid, detail: `Unit is ${unitBytes} bytes (> ${UNIT_SIZE_WARN_BYTES}) — split or compact; retrieval reads matched units whole` });
 
     report.push({ level: 'PASS', check: 'schema', unit_id: uid, detail: '' });
   }
@@ -399,7 +421,7 @@ export function jsonReport(report, memoriesDir, mode, today) {
 // (and largely eliminated by flow-style array parsing). These return exit 0.
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
-  'external-ref', 'sources-missing',
+  'external-ref', 'sources-missing', 'unit-oversize',
   // Legacy annotations predate the source-registration-framework vocab; visibility without degradation (SYN-005 follow-up).
   'confidence-level-value', 'stability-class-value',
 ]);
