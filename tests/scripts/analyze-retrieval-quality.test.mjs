@@ -54,3 +54,22 @@ test('formatReport surfaces telemetry-only evidence gaps plainly', () => {
   assert.match(formatted, /telemetry-only rows: 1/);
   assert.match(formatted, /not retrieval proof/i);
 });
+
+test('empty events array yields a zero report and the no-events message', () => {
+  const report = buildReport([]);
+  assert.equal(report.total_events, 0);
+  assert.equal(report.retrieval_events, 0);
+  assert.match(formatReport(report), /No retrieval events found/);
+});
+
+// Characterization: `units_retrieved` makes the row retrieval-shaped even with no
+// tier_reached; computeTierDistribution coerces the missing tier (NaN || 1) into
+// the T1 bucket — the row lands IN tier_distribution.total, not outside it.
+test('a retrieval row missing tier_reached does not crash the tier distribution (characterized: bucketed as T1)', () => {
+  const report = buildReport([
+    { ts: '2026-06-09T00:00:00.000Z', kind: 'retrieval', units_retrieved: [] },
+  ]);
+  assert.equal(report.retrieval_events, 1);
+  assert.equal(report.tier_distribution.total, 1, 'tier-less row is counted in the distribution');
+  assert.equal(report.tier_distribution.t1.count, 1, 'missing tier defaults to the T1 bucket');
+});

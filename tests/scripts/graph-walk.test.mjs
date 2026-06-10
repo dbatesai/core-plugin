@@ -60,3 +60,75 @@ test('an open-interval unit (no t_invalid) is never suppressed', () => {
     assert.equal(stats.suppressed_invalidated, 1); // only b-invalid, not a-valid
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// --- Error-path companions ---
+
+// Same write pattern as vault(), but caller controls the unit set.
+function customVault(units) {
+  const dir = mkdtempSync(join(tmpdir(), 'graph-walk-'));
+  const mem = join(dir, '_memories');
+  mkdirSync(mem, { recursive: true });
+  for (const { id, fm, edges = [] } of units) {
+    const lines = ['---', `id: ${id}`];
+    for (const [k, v] of Object.entries(fm)) lines.push(`${k}: ${v}`);
+    if (edges.length) {
+      lines.push('edges:');
+      for (const e of edges) lines.push(`  - { type: ${e.type}, target: ${e.target} }`);
+    }
+    lines.push('---', '', `# ${id}`, 'body');
+    writeFileSync(join(mem, `${id}.md`), lines.join('\n'));
+  }
+  return { dir, mem };
+}
+
+const FM = { type: 'decision', created: '2026-05-25', sources: 'PROJECT.md' };
+
+test('a dangling edge target is skipped without throwing', () => {
+  const { dir, mem } = customVault([
+    {
+      id: 'seed', fm: FM,
+      edges: [
+        { type: 'depends-on', target: 'a-valid' },
+        { type: 'depends-on', target: 'ghost-unit' }, // no ghost-unit.md on disk
+      ],
+    },
+    { id: 'a-valid', fm: FM },
+  ]);
+  try {
+    const ids = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY }).map(c => c.unit_id);
+    assert.ok(ids.includes('a-valid'), 'real neighbor still surfaces');
+    assert.ok(!ids.includes('ghost-unit'), 'dangling target never appears');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a circular edge pair terminates', () => {
+  const { dir, mem } = customVault([
+    { id: 'cyc-a', fm: FM, edges: [{ type: 'depends-on', target: 'cyc-b' }] },
+    { id: 'cyc-b', fm: FM, edges: [{ type: 'depends-on', target: 'cyc-a' }] },
+  ]);
+  try {
+    // If the visited-set guard were missing this would loop forever; returning
+    // at all is the termination proof.
+    const ids = walk(join(mem, 'cyc-a.md'), { memoriesDir: mem, today: TODAY }).map(c => c.unit_id);
+    const counts = new Map();
+    for (const id of ids) counts.set(id, (counts.get(id) || 0) + 1);
+    for (const [id, n] of counts) assert.equal(n, 1, `${id} appears at most once`);
+    assert.ok(ids.includes('cyc-b'), 'the cycle partner is still reachable');
+    assert.ok(!ids.includes('cyc-a'), 'the seed is not re-emitted as its own neighbor');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Characterization: a missing memoriesDir does NOT throw — buildInverseEdgeIndex
+// swallows the readdir failure and resolveTarget finds no neighbors, so walk()
+// silently returns an empty candidate set. If this ever changes to fail loudly,
+// this test should flip to assert.throws.
+test('a missing memoriesDir returns an empty candidate set without throwing (characterized: silent, not loud)', () => {
+  const { dir, mem } = customVault([
+    { id: 'seed', fm: FM, edges: [{ type: 'depends-on', target: 'a-valid' }] },
+    { id: 'a-valid', fm: FM },
+  ]);
+  try {
+    const results = walk(join(mem, 'seed.md'), { memoriesDir: join(dir, 'nope'), today: TODAY });
+    assert.deepEqual(results, [], 'no candidates resolve against a nonexistent memories dir');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
