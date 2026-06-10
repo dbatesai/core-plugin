@@ -158,7 +158,7 @@ Single-pass is the default because it works for most tasks. A single pass turns 
 
 ## Safety
 
-External-write approval and the guard-agent requirement live in `protocols/execution.md` §"Guard-gated destructive operations" — read that before any create/update/delete on an external system, and spawn the guard before any destructive operation on user data. If you hit an unrecoverable error, a high-risk operation, or you've fundamentally misread what the user wants: stop, tell the user what happened, and say what you'd do next.
+External-write approval and the guard-agent requirement live in `protocols/execution.md` §"Guard-gated destructive operations" — read that before any create/update/delete on an external system, and run the guard pass it defines (or get explicit user approval) before any destructive operation on user data. The guard pass is concrete, not aspirational: spawn it with the `spawn-subagent` adapter verb (per `protocols/harness.md`; on Claude Code that's the Agent/Task tool), and build its prompt from three parts — the Guard role text from `agents/roles.md §Guard`, the exact proposed operation (tool name, parameters, target system), and the instruction to return one verdict: APPROVED, APPROVED WITH CONDITIONS, or REJECTED with reason. Execute only on APPROVED (or with the named conditions met). If the harness's adapter drops `spawn-subagent`, there is no guard pass — fall back to surfacing the action for explicit user approval before executing. Never treat the guard as run when no second agent actually ran. If you hit an unrecoverable error, a high-risk operation, or you've fundamentally misread what the user wants: stop, tell the user what happened, and say what you'd do next.
 
 ---
 

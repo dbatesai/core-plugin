@@ -63,7 +63,7 @@ Reserve extended thinking for high-stakes judgment. The cost isn't justified for
 
 ## Guard-gated destructive operations
 
-MCP tools (task trackers, mail systems, calendars, document stores, chat platforms) are not pre-approved. Any create/update/delete on an external system needs explicit user approval, or you spawn a second agent specifically to verify the action before executing it. The guard agent's job is one thing: confirm the action with the user, verify the parameters, then execute or abort.
+MCP tools (task trackers, mail systems, calendars, document stores, chat platforms) are not pre-approved. Any create/update/delete on an external system needs explicit user approval, or you spawn a second agent specifically to verify the action before executing it — via the `spawn-subagent` adapter verb, prompted with the Guard role from `agents/roles.md §Guard` plus the exact operation (tool, parameters, target). The guard agent's job is one thing: assess the risk dimensions, verify the parameters, and return APPROVED / APPROVED WITH CONDITIONS / REJECTED. You execute only on approval. If the adapter drops `spawn-subagent`, surface the action for explicit user approval instead — no silent fallback to executing unguarded.
 
 Commits are autonomous. Pushes follow the user's established per-repo policy (canonical in `protocols/data-storage.md §"Push policy is per-user, per-repo"`): confirm every push by default, push autonomously only on repos where the user has named standing authorization, and on repos under a release process work through the release flow rather than pushing directly to main.
 
