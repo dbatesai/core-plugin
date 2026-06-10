@@ -118,7 +118,15 @@ Re-run the generators if you see drift from Step 2; also run for any unit types 
 
 ### 3.8 File-cap check
 
-If any synthesis file is over the Read-tool threshold, follow the graduation pattern in `protocols/hygiene.md`.
+Check `IMPROVEMENT_LOG.md` by name first — a generic "any synthesis file" sweep misses it reliably:
+
+```bash
+wc -c "<project>/IMPROVEMENT_LOG.md"
+```
+
+If it's over ~66KB, act now: IMPROVEMENT_LOG has a count-based rotation pattern (DC-42) that waits for `/finalize` discretion — `/process-memory` only surfaces the recommendation, and this is the step where the discretion actually runs. Propose the rotation to the user; don't carry the recommendation forward another session. Skip silently when the project has no `IMPROVEMENT_LOG.md`.
+
+Then the general sweep: if any other synthesis file is over the Read-tool threshold, follow the graduation pattern in `protocols/hygiene.md`.
 
 *On failure:* nothing to recover — this is a read-only size check.
 
