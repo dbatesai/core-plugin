@@ -231,12 +231,14 @@ The hot section sits atop `<project>/PROJECT.md` — 5–7 lines naming what mat
 node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>
 ```
 
-Read the candidate list, then compose 5–7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Usually 1–3 items, no bold lead-in paragraphs unless the items genuinely need scannable headers. Land it:
+Read the candidate list, then compose 5–7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Usually 1–3 items, no bold lead-in paragraphs unless the items genuinely need scannable headers. Write the composed prose to a draft file with your file-write tool — `~/.core/workspaces/<id>/hot-section-draft.md` — then land it by path. Never interpolate the prose into the shell as a `--text` argument: it's composed from unit bodies, which can carry quotes, backticks, and `$` that the shell will mangle or execute.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --text "<composed prose>"
+node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --file ~/.core/workspaces/<id>/hot-section-draft.md
 ```
+
+(`apply` also reads stdin when neither `--text` nor `--file` is given. `--text` stays available for short hand-typed strings that contain no unit-derived content.)
 
 `hot-section.mjs apply` writes PROJECT.md and stamps `last_written_by: hot-section` into `~/.core/state-cache.json` itself, so next session's edit-detection (§"Load — returning workspace") recognizes the change as CORE's synthesis, not a user edit — no manual reconciliation, and `/finalize`'s close-of-session hot-section write is covered the same way (both go through `applyHotSection`).
 
