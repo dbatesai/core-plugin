@@ -20,7 +20,8 @@
  * CLI:
  *   node graph-walk.mjs <seed-unit-path> [--memories <dir>] [--hops 2]
  *                       [--budget 15] [--intent t1,t2] [--prune 0.3]
- *                       [--include-invalid] [--format json|text]
+ *                       [--include-invalid] [--include-observations]
+ *                       [--format json|text]
  */
 
 import { existsSync, readdirSync, realpathSync } from 'node:fs';
@@ -31,7 +32,7 @@ import {
   SCORE_PRUNE_THRESHOLD,
 } from './priority.mjs';
 
-function resolveTarget(target, memoriesDir) {
+function resolveTarget(target, memoriesDir, includeObservations = false) {
   const t = target.trim();
   const direct = resolve(t);
   if (existsSync(direct)) return direct;
@@ -40,31 +41,50 @@ function resolveTarget(target, memoriesDir) {
   if (existsSync(c1)) return c1;
   const c2 = join(memoriesDir, t);
   if (existsSync(c2)) return c2;
+  if (includeObservations) {
+    // SYN-007: edges pointing into observations/<YYYY-MM>/ resolved to null.
+    const obsRoot = join(memoriesDir, 'observations');
+    const flat = join(obsRoot, `${stem}.md`);
+    if (existsSync(flat)) return flat;
+    let months;
+    try { months = readdirSync(obsRoot, { withFileTypes: true }); } catch { months = []; }
+    for (const m of months) {
+      if (!m.isDirectory()) continue;
+      const c = join(obsRoot, m.name, `${stem}.md`);
+      if (existsSync(c)) return c;
+    }
+  }
   return null;
 }
 
-// Build an inverse edge index: target-stem -> [{sourcePath, sourceId, edgeType}]
-// so walk() can surface inbound neighbors per Codex probe Round 2 finding.
-// Scans top-level *.md files in memoriesDir (skips _prefixed and INDEX*).
-export function buildInverseEdgeIndex(memoriesDir) {
+// Build an inverse edge index: target-stem -> [{sourcePath, sourceId, edgeType}].
+// Top-level scan by default; includeObservations also scans observations/ and
+// its month subdirs (SYN-007) so observation units can appear as inbound neighbors.
+export function buildInverseEdgeIndex(memoriesDir, { includeObservations = false } = {}) {
   const inverse = new Map();
-  let files;
-  try { files = readdirSync(memoriesDir); } catch { return inverse; }
-  for (const fname of files) {
-    if (!fname.endsWith('.md')) continue;
-    if (fname.startsWith('_') || fname.startsWith('INDEX')) continue;
-    const filePath = join(memoriesDir, fname);
-    let unit;
-    try { unit = loadUnit(filePath); } catch { continue; }
-    for (const e of extractEdges(unit)) {
-      const stem = String(e.target).trim().replace(/\.md$/, '');
-      if (!inverse.has(stem)) inverse.set(stem, []);
-      inverse.get(stem).push({
-        sourcePath: filePath,
-        sourceId: unit.id,
-        edgeType: e.type,
-      });
+  const scanDir = (dir) => {
+    let files;
+    try { files = readdirSync(dir); } catch { return; }
+    for (const fname of files) {
+      if (!fname.endsWith('.md')) continue;
+      if (fname.startsWith('_') || fname.startsWith('INDEX')) continue;
+      const filePath = join(dir, fname);
+      let unit;
+      try { unit = loadUnit(filePath); } catch { continue; }
+      for (const e of extractEdges(unit)) {
+        const stem = String(e.target).trim().replace(/\.md$/, '');
+        if (!inverse.has(stem)) inverse.set(stem, []);
+        inverse.get(stem).push({ sourcePath: filePath, sourceId: unit.id, edgeType: e.type });
+      }
     }
+  };
+  scanDir(memoriesDir);
+  if (includeObservations) {
+    const obsRoot = join(memoriesDir, 'observations');
+    scanDir(obsRoot);
+    let months;
+    try { months = readdirSync(obsRoot, { withFileTypes: true }); } catch { months = []; }
+    for (const m of months) if (m.isDirectory()) scanDir(join(obsRoot, m.name));
   }
   return inverse;
 }
@@ -87,6 +107,7 @@ export function walk(seedPath, {
   pruneThreshold = SCORE_PRUNE_THRESHOLD,
   today = null,
   includeInvalidated = false,
+  includeObservations = false,
   stats = null,
 } = {}) {
   const n = new Date();
@@ -94,7 +115,7 @@ export function walk(seedPath, {
   const mDir = resolve(memoriesDir);
   const seed = loadUnit(seedPath);
   const seedResolved = resolve(String(seedPath));
-  const inverse = buildInverseEdgeIndex(mDir);
+  const inverse = buildInverseEdgeIndex(mDir, { includeObservations });
 
   // Validity-suppression: a unit whose t_invalid is in the past is excluded from
   // the "currently valid" candidate set — the same rule that suppresses retired
@@ -107,7 +128,7 @@ export function walk(seedPath, {
   const queue = []; // [hop, path, edgeType, sourceId, direction]
 
   for (const e of extractEdges(seed)) {
-    const tp = resolveTarget(e.target, mDir);
+    const tp = resolveTarget(e.target, mDir, includeObservations);
     if (tp && !visited.has(resolve(tp))) {
       queue.push([1, tp, e.type, seed.id, 'outbound']);
     }
@@ -148,7 +169,7 @@ export function walk(seedPath, {
 
     if (hop < hops) {
       for (const e of extractEdges(unit)) {
-        const tp = resolveTarget(e.target, mDir);
+        const tp = resolveTarget(e.target, mDir, includeObservations);
         if (tp && !visited.has(resolve(tp))) {
           queue.push([hop + 1, tp, e.type, unit.id, 'outbound']);
         }
@@ -176,6 +197,7 @@ export function main(argv) {
   let todayArg = null;
   let format = 'json';
   let includeInvalidated = false;
+  let includeObservations = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -187,6 +209,7 @@ export function main(argv) {
     else if (a === '--today') { todayArg = argv[++i]; }
     else if (a === '--format') { format = argv[++i]; }
     else if (a === '--include-invalid') { includeInvalidated = true; }
+    else if (a === '--include-observations') { includeObservations = true; }
     else if (!a.startsWith('--')) { seedArg = a; }
   }
 
@@ -200,7 +223,7 @@ export function main(argv) {
   const sessionTopics = intentStr ? intentStr.split(',').map(s => s.trim()).filter(Boolean) : [];
 
   const stats = {};
-  const candidates = walk(seedPath, { memoriesDir, hops, budget, sessionTopics, pruneThreshold: prune, today, includeInvalidated, stats });
+  const candidates = walk(seedPath, { memoriesDir, hops, budget, sessionTopics, pruneThreshold: prune, today, includeInvalidated, includeObservations, stats });
 
   if (format === 'json') {
     const out = candidates.map(c => ({

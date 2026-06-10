@@ -22,11 +22,21 @@ function vault() {
     writeFileSync(join(mem, `${id}.md`), lines.join('\n'));
   };
   write('seed', { type: 'decision', created: '2026-05-25', sources: 'PROJECT.md' },
-    [{ type: 'depends-on', target: 'a-valid' }, { type: 'supersedes', target: 'b-invalid' }]);
+    [{ type: 'depends-on', target: 'a-valid' }, { type: 'supersedes', target: 'b-invalid' },
+     { type: 'cites', target: 'obs-inbound-2026-05-20' }]);
   write('a-valid', { type: 'decision', created: '2026-05-25', sources: 'PROJECT.md' });
   // Recent created (high R·S so it survives the prune) but a PAST t_invalid — so
   // validity-suppression is the only reason it leaves the valid candidate set.
   write('b-invalid', { type: 'decision', created: '2026-05-25', t_invalid: '2026-05-28', sources: 'PROJECT.md' });
+  // Observation unit in observations/<YYYY-MM>/ — invisible to the walk by
+  // default, reachable only with includeObservations (SYN-007).
+  const obsDir = join(mem, 'observations', '2026-05');
+  mkdirSync(obsDir, { recursive: true });
+  writeFileSync(join(obsDir, 'obs-inbound-2026-05-20.md'), [
+    '---', 'id: obs-inbound-2026-05-20', 'type: observation',
+    'created: 2026-05-25', 'sources: PROJECT.md',
+    'edges:', '  - { type: cites, target: seed }', '---', '', '# obs', 'body',
+  ].join('\n'));
   return { dir, mem };
 }
 
@@ -58,6 +68,24 @@ test('an open-interval unit (no t_invalid) is never suppressed', () => {
     const ids = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY, stats }).map(c => c.unit_id);
     assert.ok(ids.includes('a-valid'));
     assert.equal(stats.suppressed_invalidated, 1); // only b-invalid, not a-valid
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('SYN-007: observation units are invisible to the walk by default (back-compat)', () => {
+  const { dir, mem } = vault();
+  try {
+    const ids = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY }).map(c => c.unit_id);
+    assert.ok(!ids.includes('obs-inbound-2026-05-20'), 'default exclusion preserved');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('SYN-007: includeObservations surfaces inbound observation neighbors and resolves subdir targets', () => {
+  const { dir, mem } = vault();
+  try {
+    const ids = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY, includeObservations: true })
+      .map(c => c.unit_id);
+    assert.ok(ids.includes('obs-inbound-2026-05-20'),
+      'reachable both as an inbound citer and as a resolvable outbound target');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

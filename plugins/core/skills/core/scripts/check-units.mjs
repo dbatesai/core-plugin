@@ -23,6 +23,8 @@
  *   node check-units.mjs <project-path> --mode integrity
  *   node check-units.mjs <project-path> --integrity        (shorthand)
  *   node check-units.mjs <project-path> --json
+ *   node check-units.mjs <project-path> --include-observations
+ *       (full-store audit incl. observations/ — used by /process-memory)
  *
  * Exit codes: 0 = all pass, 1 = warnings, 2 = failures, 3 = setup error.
  */
@@ -75,7 +77,7 @@ export const STALE_DAYS = 90;
 // which the `name.startsWith('_')` skip below already exempts from schema and integrity
 // validation. No separate producer/path map is needed.
 
-export function iterActiveUnits(memoriesDir) {
+export function iterActiveUnits(memoriesDir, { includeObservations = false } = {}) {
   const units = [];
   let entries;
   try { entries = readdirSync(memoriesDir, { withFileTypes: true }); } catch { return units; }
@@ -92,6 +94,19 @@ export function iterActiveUnits(memoriesDir) {
       units.push(u);
     } catch (e) {
       units.push({ path: join(memoriesDir, name), fm: {}, body: `LOAD ERROR: ${e}`, id: name.replace(/\.md$/, '') });
+    }
+  }
+
+  if (includeObservations) {
+    // SYN-007: observation units live in observations/<YYYY-MM>/ and were never
+    // schema-audited, even though iterAllUnitFiles (the dangling-edge target
+    // set) is recursive — edges could point at observations that pass the
+    // dangling check but escape every other check. Opt-in keeps the default
+    // active set top-level-only.
+    const obsPaths = iterAllUnitFiles(join(memoriesDir, 'observations')).sort();
+    for (const p of obsPaths) {
+      try { units.push(loadUnit(p)); }
+      catch (e) { units.push({ path: p, fm: {}, body: `LOAD ERROR: ${e}`, id: basename(p, '.md') }); }
     }
   }
   return units;
@@ -422,6 +437,7 @@ export function main(argv) {
   let projectArg = '.';
   let asJson = false;
   let todayArg = null;
+  let includeObservations = false;
   const { schema: doSchema, integrity: doIntegrity, mode } = resolveChecks(argv);
 
   for (let i = 0; i < argv.length; i++) {
@@ -431,6 +447,7 @@ export function main(argv) {
     else if (a === '--store') { projectArg = argv[++i]; }
     else if (a === '--json') { asJson = true; }
     else if (a === '--today') { todayArg = argv[++i]; }
+    else if (a === '--include-observations') { includeObservations = true; }
     else if (!a.startsWith('--')) { projectArg = a; }
   }
 
@@ -446,7 +463,7 @@ export function main(argv) {
 
   const today = todayArg ? (() => { const d = parseIsoDate(todayArg); return d || new Date(); })() : new Date();
   const report = [];
-  const units = iterActiveUnits(memoriesDir);
+  const units = iterActiveUnits(memoriesDir, { includeObservations });
   if (!units.length) { process.stderr.write(`error: no units found in ${memoriesDir}\n`); return 3; }
 
   if (doSchema) checkSchema(units, memoriesDir, report);

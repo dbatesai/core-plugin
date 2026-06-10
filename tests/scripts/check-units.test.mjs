@@ -320,3 +320,23 @@ test('SYN-005 follow-up: legacy annotation WARNs are benign-class — store exit
   assert.equal(BENIGN_WARN_CHECKS.has('stability-class-value'), true);
   assert.equal(exitCode(report), 0, 'legacy annotations alone must not degrade the store');
 }));
+
+test('SYN-007: observation-subdir units are audited only with includeObservations', () => withStore((memories) => {
+  const obsDir = join(memories, 'observations', '2026-05');
+  mkdirSync(obsDir, { recursive: true });
+  writeFileSync(join(obsDir, 'obs-thing-2026-05-20.md'), [
+    '---', 'id: obs-thing-2026-05-20', 'type: observation', 'status: bogus-status',
+    'created: 2026-05-20', 'updated: 2026-05-20', 'topics: [tests]',
+    '---', '', '# obs', '',
+  ].join('\n'));
+
+  const defaultReport = [];
+  checkSchema(iterActiveUnits(memories), memories, defaultReport);
+  assert.equal(defaultReport.some(f => f.unit_id === 'obs-thing-2026-05-20'), false,
+    'default stays top-level-only');
+
+  const fullReport = [];
+  checkSchema(iterActiveUnits(memories, { includeObservations: true }), memories, fullReport);
+  assert.ok(fullReport.some(f => f.unit_id === 'obs-thing-2026-05-20' && f.check === 'status-value'),
+    'the full-store audit reaches the observation and flags its bogus status');
+}));
