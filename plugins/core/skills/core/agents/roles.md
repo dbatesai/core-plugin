@@ -140,11 +140,17 @@ The frontmatter:
 name: kebab-case-name
 role: lens or position type
 domain: the agent's analytical lens and specialty
-proven: true | false
+proven: true | false        # manually maintained — see note below
 last_used: ISO 8601 date
-sessions_used: count (used by hygiene Phase 5 to assess effectiveness)
+sessions_used: count
 effectiveness_notes: when this configuration has worked well, why
 ```
+
+`proven` and `effectiveness_notes` are **manually maintained**. No shipped hygiene step reads
+the `~/.core/swarm-effectiveness/` reports back into composition frontmatter, so `proven: true`
+records a human judgment at save time — don't treat it as machine-verified. Reopen condition:
+when the effectiveness corpus is large enough to be worth mining, a hygiene pass that proposes
+`proven` flips (the natural wiring: 3+ swarms with positive notes) replaces this note.
 
 The body has three sections that mirror the composition template at the top of this file:
 
