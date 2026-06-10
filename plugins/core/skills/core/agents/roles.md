@@ -28,7 +28,7 @@ More composition freedom means more DM-smuggling risk — the pattern where the 
 
 # Lenses
 
-These are dispositions. Adapt the language to the task; don't recite them.
+These are dispositions. Adapt the language to the task; don't recite them. Some lens entries also carry a rule marked **Load-bearing** (the Critic's pre-commit, the Sentinel's start-first rule, the Monitor's escalation ladder) — treat those exactly like the Structural-position rules further down: mandatory, and they win over disposition whenever the two pull against each other.
 
 ## Generator
 

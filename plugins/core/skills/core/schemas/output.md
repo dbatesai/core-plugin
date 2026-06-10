@@ -37,6 +37,7 @@ Field 1 is what single-pass analysis produces. Fields 4–8 are where CORE's adv
 
 - No fields may be omitted from any standard agent output. The Quality Sentinel's measurement variant below defines its own required sections.
 - The DM must process all eight fields during synthesis: reading, weighing, and incorporating into the synthesized result or explicitly noting why a concern was set aside.
+- DM synthesis warrants extended thinking — see the gate table in `agents/base-protocol.md` §"Extended thinking — when to use it".
 - Fields 7 and 8 are distinct and must not be conflated: Lingering Concerns are DM reservations; Minority Views are agent positions. Both travel with the output.
 
 ---
