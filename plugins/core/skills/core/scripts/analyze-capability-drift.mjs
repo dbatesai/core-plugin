@@ -18,7 +18,6 @@
 
 import { writeFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import { readHistory } from './capability-history.mjs';
 
 // identity_status rank — higher is healthier. Drift = new rank < old rank.

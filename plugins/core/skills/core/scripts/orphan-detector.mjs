@@ -25,7 +25,7 @@
  *   exit 1 — new orphan(s) found (wire it or allowlist it with a reason)
  */
 
-import { readdirSync, readFileSync, existsSync, statSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

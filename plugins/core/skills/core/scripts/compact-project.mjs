@@ -19,7 +19,7 @@
  * --check reports whether PROJECT.md is over the size cap; it does not write.
  */
 
-import { readFileSync, writeFileSync, readdirSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent } from './log-event.mjs';
@@ -144,7 +144,7 @@ export function compactDecisions(text, units) {
   let i = decLineIdx;
   while (i < endLineIdx) {
     const line = lines[i];
-    const m = line.match(/^- \`([^`]+)\`\s*—\s*\*?\*?DC-(\d+):/);
+    const m = line.match(/^- `([^`]+)`\s*—\s*\*?\*?DC-(\d+):/);
     if (!m) {
       newLines.push(line);
       i++;
@@ -157,7 +157,7 @@ export function compactDecisions(text, units) {
     // (which starts with `- \`` at column 0) or blank-then-entry boundary.
     let j = i + 1;
     while (j < endLineIdx) {
-      if (lines[j].match(/^- \`/) || RISKS_HEADER_PATTERN.test(lines[j])) break;
+      if (lines[j].match(/^- `/) || RISKS_HEADER_PATTERN.test(lines[j])) break;
       j++;
     }
     const entryBlock = lines.slice(i, j).join('\n').trimEnd();

@@ -135,7 +135,6 @@ export function parseFrontmatter(rawText) {
   const rawFm = text.slice(4, end);
   const body = text.slice(end + 4).replace(/^\n+/, '');
   const fm = {};
-  let currentKey = null;
   let currentList = null;
   let currentDict = null;
 
@@ -150,12 +149,10 @@ export function parseFrontmatter(rawText) {
       const k = stripped.slice(0, colonIdx).trim();
       const v = stripped.slice(colonIdx + 1).trim();
       if (v === '') {
-        currentKey = k;
         currentList = [];
         fm[k] = currentList;
       } else {
         fm[k] = _coerce(v);
-        currentKey = null;
         currentList = null;
       }
     } else if (stripped.startsWith('- ')) {

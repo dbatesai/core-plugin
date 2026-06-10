@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   appendRows, readHistory, canonicalRowHash, applyRetention, acquireLock,
-  historyPath, lockPath, RETENTION_PER_CAPABILITY,
 } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 
 test('M8: appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {

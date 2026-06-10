@@ -25,7 +25,7 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { resolve, join, basename } from 'node:path';

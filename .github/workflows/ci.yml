@@ -32,6 +32,9 @@ jobs:
           done
           exit $fail
 
+      - name: Lint scripts (oxlint, scoped rules)
+        run: npx --yes oxlint@1.69.0 -A all -D no-unused-vars -D no-useless-escape plugins/core/skills/core/scripts tests/scripts
+
       - name: Validate plugin manifests are well-formed JSON
         run: |
           set -e

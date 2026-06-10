@@ -261,7 +261,7 @@ test('importLabels computes precision and writes calibration-state.json', () => 
   withTmp((dir) => {
     const f = join(dir, 'worksheet.jsonl');
     // Write MIN_LABELED perfectly-labeled turns to clear both gates.
-    const lines = Array.from({ length: MIN_LABELED }, (_, i) =>
+    const lines = Array.from({ length: MIN_LABELED }, (_, _i) =>
       JSON.stringify({ heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' }),
     ).join('\n') + '\n';
     writeFileSync(f, lines);

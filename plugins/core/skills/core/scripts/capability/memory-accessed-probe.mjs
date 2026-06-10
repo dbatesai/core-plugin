@@ -48,7 +48,7 @@ export const CORE_SURFACE_RE = /(?:^|[\s/\\"'])(?:_memories[/\\]|PROJECT\.md(?![
 const NATIVE_SURFACE_RE = /(?:\.codex[/\\]memories|(?:^|[\s/\\"'])MEMORY\.md(?![.\w]))/;
 
 /** Pure classifier over normalized transcript events. */
-export function classifyAccess({ harness, transcriptAvailable, toolExtractionPending, events, coreStorePresent }) {
+export function classifyAccess({ harness: _harness, transcriptAvailable, toolExtractionPending, events, coreStorePresent }) {
   if (!coreStorePresent) {
     return { identity_status: 'NOT-YET', reason: 'no CORE store at this project (no _memories/ or PROJECT.md) — nothing to access' };
   }

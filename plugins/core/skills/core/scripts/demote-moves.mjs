@@ -32,7 +32,7 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { resolve, join } from 'node:path';
@@ -65,7 +65,7 @@ export function parseBullets(movesBody) {
   let cur = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const top = line.match(/^- \[([ x~\-])\]\s?(.*)$/);
+    const top = line.match(/^- \[([ x~-])\]\s?(.*)$/);
     if (top) {
       if (cur) bullets.push(cur);
       cur = {

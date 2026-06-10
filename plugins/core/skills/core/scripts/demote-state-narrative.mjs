@@ -30,7 +30,7 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { resolve, join } from 'node:path';

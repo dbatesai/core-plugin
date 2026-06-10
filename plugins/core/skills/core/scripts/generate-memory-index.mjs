@@ -64,7 +64,7 @@ export function extractFirstBodyLine(unitText) {
   for (const line of body.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const stripped = trimmed.replace(/^[#>*\-]+\s*/, '').trim();
+    const stripped = trimmed.replace(/^[#>*-]+\s*/, '').trim();
     if (stripped) return stripped;
   }
   return FALLBACK_DESCRIPTION;

@@ -50,7 +50,7 @@ import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  loadUnit, extractEdges, parseIsoDate,
+  extractEdges, parseIsoDate,
   effectiveValidity, validAt, isInvalidated,
 } from './priority.mjs';
 import { iterActiveUnits } from './check-units.mjs';

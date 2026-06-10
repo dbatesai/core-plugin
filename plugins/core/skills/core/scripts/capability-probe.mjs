@@ -24,7 +24,7 @@
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolvePluginRoot, detectConsumingHarnessSignal } from './resolve-plugin-root.mjs';
 

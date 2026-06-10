@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  parseContract, parseOverrides, renderForHarness, withProvenance, computeProvenance, HARNESS_OUTPUT,
+  parseContract, parseOverrides, renderForHarness, HARNESS_OUTPUT,
 } from '../../plugins/core/skills/core/scripts/contract-format.mjs';
 import { generate } from '../../plugins/core/skills/core/scripts/generate-claude-md.mjs';
 

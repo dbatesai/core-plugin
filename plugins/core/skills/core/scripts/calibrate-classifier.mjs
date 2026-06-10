@@ -32,7 +32,7 @@ import {
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { todayUTC, resolveWorkspaceId, operationalMetricsDir } from './log-event.mjs';
 import { CLASSIFIER_VERSION } from './classify-turns.mjs';
 
 export const CALIBRATION_VERSION = '1.0.0';
@@ -173,7 +173,7 @@ export function stratifiedSample(turns, count) {
 }
 
 /** Write a labeling worksheet for a set of classified turns. Returns the file path. */
-export function exportWorksheet({ project, classifiedDir, calibrationDir, today, count = 200 }) {
+export function exportWorksheet({ project: _project, classifiedDir, calibrationDir, today, count = 200 }) {
   const all = collectClassifiedTurns(classifiedDir);
   if (!all.length) return { status: 'EMPTY', message: 'No classified turns yet — accumulate real sessions first.' };
 

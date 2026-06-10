@@ -22,7 +22,7 @@
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs --cwd <dir> --core-dir <dir>
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { resolve, join, basename } from 'node:path';
 import { homedir } from 'node:os';

@@ -83,7 +83,7 @@ export function walk(seedPath, {
   memoriesDir = '_memories',
   hops = 2,
   budget = 15,
-  sessionTopics = [],
+  sessionTopics: _sessionTopics = [],
   pruneThreshold = SCORE_PRUNE_THRESHOLD,
   today = null,
   includeInvalidated = false,

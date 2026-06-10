@@ -60,7 +60,7 @@ test('initial-frame: bad confidence enum fails', () => {
 });
 
 test('initial-frame: missing required field fails', () => {
-  const { agent, ...noAgent } = goodFrame;
+  const { agent: _agent, ...noAgent } = goodFrame;
   assert.equal(validateInitialFrame(noAgent).valid, false);
 });
 
@@ -89,7 +89,7 @@ test('JSONL line: unparseable ts fails (was accepted before)', () => {
 
 test('JSONL line: wrong/missing schema_version fails', () => {
   assert.equal(validatePersuasionLogLine(pLine({ schema_version: '9.9' })).valid, false);
-  const { schema_version, ...noVer } = mLine({});
+  const { schema_version: _schema_version, ...noVer } = mLine({});
   assert.equal(validateMindChangeLine(noVer).valid, false);
 });
 
@@ -97,7 +97,7 @@ test('JSONL line: wrong/missing schema_version fails', () => {
 
 test('mind-change line: well-formed passes; missing persuaded_by fails', () => {
   assert.equal(validateMindChangeLine(mLine({ persuaded_by: 'B' })).valid, true);
-  const { persuaded_by, ...noPb } = mLine({});
+  const { persuaded_by: _persuaded_by, ...noPb } = mLine({});
   assert.equal(validateMindChangeLine(noPb).valid, false);
 });
 
