@@ -126,7 +126,7 @@ Reversal is autonomous (Mode A) when it's a self-correction (you just archived s
 | Cold-store losing edges | An edge pointing at a cold-stored unit dangles | Cold-store keeps edges intact in the moved file; retrieval treats the cold-target as a placeholder so the link doesn't 404 |
 | Mid-session conflict with user edit | You're about to render a section the user just edited | Edit-detection surfaces the change; render pauses on the conflicted section; reconcile before re-rendering |
 | Render-vs-hygiene collision (same section) | Hygiene fires on a unit flowing into a section the agent is mid-rendering | Defer hygiene until the render commits; see "Render-collision handling" above |
-| Trigger storm | Three+ hygiene triggers in 30 seconds during rapid edits | Burst suppression — defer the next pass until activity quiets (no triggers for 30 seconds) |
+| Trigger storm | Three+ hygiene triggers within a single agent turn during rapid edits | Burst suppression — batch into one pass at turn's end; if the burst spans turns, defer until a turn completes with no new trigger (per §"Mid-session batching": judge by turns, never wall-clock) |
 | Index drift | `INDEX-decisions.md` shows units that don't exist (or misses units that do) | Index regeneration runs at every `/finalize`; on detected drift, regenerate immediately |
 | Observation backlog | Observations pile up ungraduated; graduation candidates get lost in volume | Continuous self-evaluation surfaces "this observation keeps mattering" patterns; graduation passes at `/finalize` walk recent observations explicitly |
 

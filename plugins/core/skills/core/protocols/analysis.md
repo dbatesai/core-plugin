@@ -211,6 +211,7 @@ Once accepted:
 4. Write the effectiveness report at `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md` per `protocols/self-evolution.md`.
 5. Promote generalizable insights to `~/.core/research/` (research mode) or `~/.core/agents/` + `~/.core/task-configs/` (compositional patterns).
 6. Update `PROJECT.md` if the synthesis produced new decisions, risks, or moves.
-7. TeamDelete to free the context.
+7. Verify the writes landed before freeing anything: the synthesis, the review-finding unit, the swarm-narrative append, and the effectiveness report must each exist on disk with non-zero size (one `ls -la` over the four paths, or read each file's first line). A write can fail silently — disk full, permission, a bad path — and after TeamDelete the content is unrecoverable. On any missing or empty file, surface the error and retry the write; don't TeamDelete until all four check out.
+8. TeamDelete to free the context.
 
-Output saved before TeamDelete. Always. A failed TeamDelete with unsaved outputs is the worst failure mode in multi-agent execution.
+Output saved — and verified on disk — before TeamDelete. Always. A failed TeamDelete with unsaved outputs is the worst failure mode in multi-agent execution.
