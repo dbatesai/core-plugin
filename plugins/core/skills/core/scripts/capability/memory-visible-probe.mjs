@@ -111,8 +111,16 @@ export function scanTranscript(lines, token) {
 }
 
 /** Pure classifier (HC_623-hardened bar). */
-export function classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW }) {
-  if (!token) return { identity_status: 'NOT-YET', reason: 'no canary recorded — write step has not run' };
+export function classify({ token, canaryFileState = 'absent', memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW }) {
+  if (!token) {
+    // MET-006: a missing canary is almost always "/finalize didn't run last session"
+    // (abrupt end), not "never installed". A distinct reason_code lets the user and
+    // the readiness pass tell those apart instead of a generic NOT-YET.
+    if (canaryFileState === 'invalid') {
+      return { identity_status: 'NOT-YET', reason_code: 'canary-file-invalid', reason: 'canary side file exists but is unreadable or has no token — re-run /finalize to rewrite it' };
+    }
+    return { identity_status: 'NOT-YET', reason_code: 'finalize-not-run', reason: 'no canary recorded — the write step runs at /finalize session close, so this means /finalize has not run for this workspace yet (a skipped finalize last session looks the same)' };
+  }
   // Blocker 1: an echo only proves injection if the canary actually landed in the
   // injected memory window. Without that, PASS would prove transcript echo, not memory.
   if (!memoryWritten || !memoryHasToken) {
@@ -152,7 +160,7 @@ export async function probe(opts = {}) {
   const observed_at = new Date().toISOString();
 
   // Read expected token + injection facts from the side file (script-internal read).
-  let token = null, memoryWritten = false, memoryPath = null;
+  let token = null, memoryWritten = false, memoryPath = null, canaryFileState = 'absent';
   const sideFile = canaryFilePath(workspaceId, home);
   if (existsSync(sideFile)) {
     try {
@@ -160,7 +168,8 @@ export async function probe(opts = {}) {
       token = s.token || null;
       memoryWritten = s.memory_written === true;
       memoryPath = s.memory_path || null;
-    } catch { token = null; }
+      canaryFileState = token ? 'present' : 'invalid';
+    } catch { token = null; canaryFileState = 'invalid'; }
   }
 
   // Blocker 1: verify the token is actually in the MEMORY.md injection window now.
@@ -186,8 +195,8 @@ export async function probe(opts = {}) {
     try { events = scanTranscript(readFileSync(transcriptPath, 'utf8').split('\n'), token); transcriptAvailable = true; } catch { transcriptAvailable = false; }
   }
 
-  const { identity_status, reason } = classify({ token, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow });
-  return buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, transcriptAvailable, events, cwd, observed_at });
+  const { identity_status, reason, reason_code } = classify({ token, canaryFileState, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow });
+  return buildRow({ identity_status, reason, reason_code, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, transcriptAvailable, events, cwd, observed_at });
 }
 
 // Count REAL lines. A trailing newline produces a final empty split element that is
@@ -203,7 +212,7 @@ export function countLines(content) {
   return lines.length;
 }
 
-function buildRow({ identity_status, reason, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, transcriptAvailable, events, cwd, observed_at }) {
+function buildRow({ identity_status, reason, reason_code, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, transcriptAvailable, events, cwd, observed_at }) {
   const lineOver = Number.isFinite(memoryLineCount) && Number.isFinite(injectionLineWindow) && memoryLineCount > injectionLineWindow;
   const byteOver = Number.isFinite(memoryByteCount) && Number.isFinite(injectionByteWindow) && memoryByteCount > injectionByteWindow;
   const loadComplete = !(lineOver || byteOver);
@@ -227,6 +236,7 @@ function buildRow({ identity_status, reason, token, memoryWritten, memoryHasToke
     mutation_permitted: false,
     mutation_block_reason: 'read-only-context',
     identity_status,
+    ...(reason_code ? { reason_code } : {}),
     evidence,
   };
 }

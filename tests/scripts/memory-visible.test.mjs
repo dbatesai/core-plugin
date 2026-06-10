@@ -282,6 +282,28 @@ test('probe PASS for the documented startup order: Skill → echo → Read start
   });
 });
 
+test('MET-006: NOT-YET carries reason_code finalize-not-run when no canary side file exists', () => {
+  const r = classify({ token: null, canaryFileState: 'absent', memoryWritten: false, memoryHasToken: false, transcriptAvailable: false, events: [] });
+  assert.equal(r.identity_status, 'NOT-YET');
+  assert.equal(r.reason_code, 'finalize-not-run');
+  assert.match(r.reason, /finalize/i, 'names the /finalize dependency, not a generic not-set-up');
+});
+
+test('MET-006: NOT-YET distinguishes an unreadable/token-less side file from never-run', () => {
+  const r = classify({ token: null, canaryFileState: 'invalid', memoryWritten: false, memoryHasToken: false, transcriptAvailable: false, events: [] });
+  assert.equal(r.identity_status, 'NOT-YET');
+  assert.equal(r.reason_code, 'canary-file-invalid');
+});
+
+test('MET-006: probe row surfaces the reason_code when no side file exists', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'mv-rc-'));
+  try {
+    const row = await probe({ home, cwd: '/no/such/project', workspaceId: 'mv-rc-ws' });
+    assert.equal(row.identity_status, 'NOT-YET');
+    assert.equal(row.reason_code, 'finalize-not-run');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test('H1: write-visibility-canary writes MEMORY.md atomically, not with a bare write', () => {
   const canarySrc = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/write-visibility-canary.mjs'),
