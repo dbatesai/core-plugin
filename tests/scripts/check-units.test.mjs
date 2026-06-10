@@ -340,3 +340,29 @@ test('SYN-007: observation-subdir units are audited only with includeObservation
   assert.ok(fullReport.some(f => f.unit_id === 'obs-thing-2026-05-20' && f.check === 'status-value'),
     'the full-store audit reaches the observation and flags its bogus status');
 }));
+
+// ---------- D7 / MEM-018: sources-missing provenance advisory ----------
+
+test('MEM-018: an aged active non-observation unit with no sources WARNs sources-missing (benign)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'aged.md'), [
+    '---', 'id: aged', 'type: decision', 'status: active',
+    'created: 2026-01-01', 'updated: 2026-01-01', 'topics: [tests]',
+    '---', '', '# aged', '',
+  ].join('\n'));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+  assert.ok(report.some(f => f.check === 'sources-missing'), 'unknown provenance surfaced');
+  assert.ok(BENIGN_WARN_CHECKS.has('sources-missing'), 'advisory — must not gate startup');
+}));
+
+test('MEM-018: fresh units and observations are exempt from sources-missing', () => withStore((memories) => {
+  writeFileSync(join(memories, 'fresh.md'), unit({ id: 'fresh' })); // created 2026-05-30, today below makes it 10d old
+  writeFileSync(join(memories, 'obs-young.md'), unit({ id: 'obs-young', type: 'observation' }));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+  assert.equal(report.some(f => f.check === 'sources-missing'), false);
+}));

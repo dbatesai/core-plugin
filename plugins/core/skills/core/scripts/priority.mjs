@@ -7,7 +7,7 @@
  * F = distinct surface-types the unit appears in, normalized by 6.
  * S = source-type weight (PROJECT.md=1.0 … transcript=0.2).
  * A = Jaccard overlap of unit topics with session-intent topics.
- * P = pin contribution (floor 0.7 / floor 0.9 / override 1.5 / multiply 0.3).
+ * P = pin contribution (floor 0.7 / floor 0.9 / override 1.5; pinned:false is neutral).
  *
  * Per DC-77 the script lives in the plugin, not per-project.
  * Per DC-80 the plugin ships Node.js (.mjs) only.
@@ -54,13 +54,12 @@ const PIN_CONTRIBUTION = {
   floor: ['floor', 0.7],
   true: ['floor', 0.9],
   always: ['override', 1.5],
-  // NOTE: this `false` entry is currently UNREACHABLE — pinContribution() short-circuits
-  // pin===false to ['none', 0.0] before this table is consulted, so `pinned: false` is
-  // treated as neutral (no demotion), NOT as the multiply-0.3 penalty DC-69 describes.
-  // Kept here to mark the spec-vs-impl gap; resolving it (restore the penalty by dropping
-  // `false` from the early-return, or amend DC-69 to "neutral") is a deliberate design call,
-  // not a hardening change. No live unit uses `pinned: false`, so behavior is moot today.
-  false: ['multiply', 0.3],
+  // `pinned: false` is NEUTRAL by decision (MEM-005, 2026-06-09): the
+  // multiply-0.3 demotion DC-69 sketched was never reachable — pinContribution
+  // short-circuits false to ['none', 0.0] — no live unit uses pinned:false,
+  // and silently activating a 70% penalty would be an unasked-for behavior
+  // change. DC-69's unit (CORE workshop store) is to be amended to record
+  // "false → neutral"; this table row was dead code and is gone.
 };
 
 // ---------- Frontmatter parsing ----------
@@ -233,6 +232,12 @@ export function signalF(unit) {
   return surfacesSeen.size / 6.0;
 }
 
+// MEM-018: a unit with NO sources used to default to 0.5 — equal to an
+// explicitly summary-sourced unit, so unknown provenance ranked as well as
+// known-good provenance on the S dimension. Unknown now scores the
+// session_log tier: below summary (0.5), above transcript (0.2).
+export const NO_SOURCES_DEFAULT_S = 0.3;
+
 export function signalS(unit) {
   const sources = Array.isArray(unit.fm.sources) ? unit.fm.sources : [];
   let best = 0.0;
@@ -245,7 +250,7 @@ export function signalS(unit) {
     else if (s.includes('summary') || s.includes('handoff') || s.includes('output') || s.startsWith('outputs/')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.summary);
     else if (s.includes('session')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.session_log);
   }
-  return best > 0 ? best : 0.5;
+  return best > 0 ? best : NO_SOURCES_DEFAULT_S;
 }
 
 export function signalA(unit, sessionTopics) {

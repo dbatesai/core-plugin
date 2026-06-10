@@ -21,20 +21,24 @@ function vault() {
     lines.push('---', '', `# ${id}`, 'body');
     writeFileSync(join(mem, `${id}.md`), lines.join('\n'));
   };
-  write('seed', { type: 'decision', created: '2026-05-25', sources: 'PROJECT.md' },
+  // sources uses flow-style array form: signalS only reads Array sources, so the
+  // old scalar `sources: PROJECT.md` silently scored the NO-sources default —
+  // these fixtures only survived the R·S prune while that default was 0.5 (it is
+  // 0.3 since MEM-018). The array form gives the S=1.0 the fixtures always meant.
+  write('seed', { type: 'decision', created: '2026-05-25', sources: '[PROJECT.md]' },
     [{ type: 'depends-on', target: 'a-valid' }, { type: 'supersedes', target: 'b-invalid' },
      { type: 'cites', target: 'obs-inbound-2026-05-20' }]);
-  write('a-valid', { type: 'decision', created: '2026-05-25', sources: 'PROJECT.md' });
+  write('a-valid', { type: 'decision', created: '2026-05-25', sources: '[PROJECT.md]' });
   // Recent created (high R·S so it survives the prune) but a PAST t_invalid — so
   // validity-suppression is the only reason it leaves the valid candidate set.
-  write('b-invalid', { type: 'decision', created: '2026-05-25', t_invalid: '2026-05-28', sources: 'PROJECT.md' });
+  write('b-invalid', { type: 'decision', created: '2026-05-25', t_invalid: '2026-05-28', sources: '[PROJECT.md]' });
   // Observation unit in observations/<YYYY-MM>/ — invisible to the walk by
   // default, reachable only with includeObservations (SYN-007).
   const obsDir = join(mem, 'observations', '2026-05');
   mkdirSync(obsDir, { recursive: true });
   writeFileSync(join(obsDir, 'obs-inbound-2026-05-20.md'), [
     '---', 'id: obs-inbound-2026-05-20', 'type: observation',
-    'created: 2026-05-25', 'sources: PROJECT.md',
+    'created: 2026-05-25', 'sources: [PROJECT.md]',
     'edges:', '  - { type: cites, target: seed }', '---', '', '# obs', 'body',
   ].join('\n'));
   return { dir, mem };
@@ -109,7 +113,7 @@ function customVault(units) {
   return { dir, mem };
 }
 
-const FM = { type: 'decision', created: '2026-05-25', sources: 'PROJECT.md' };
+const FM = { type: 'decision', created: '2026-05-25', sources: '[PROJECT.md]' };
 
 test('a dangling edge target is skipped without throwing', () => {
   const { dir, mem } = customVault([

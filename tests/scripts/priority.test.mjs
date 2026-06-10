@@ -10,6 +10,7 @@ import {
   effectiveValidity, validAt, isInvalidated, parseIsoDate,
   parseFrontmatter, normalizeNewlines, _todayFromArg,
   rankUnits, main as priorityMain,
+  score, signalS, NO_SOURCES_DEFAULT_S,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
 test('M3: a malformed --today falls back to today, never null (no TypeError at toISOString)', () => {
@@ -142,4 +143,19 @@ test('MEM-011: a frontmatter-less unit is excluded from ranking and warned to st
     assert.ok(!ids.includes('broken'), 'damaged unit must not rank on default scores');
     assert.match(errOut, /broken\.md.*no parseable frontmatter/, 'the damage is surfaced, not swallowed');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------- D7: priority scoring calibration (MEM-005, MEM-018) ----------
+
+test('MEM-018: no-sources units score S=0.3 — below summary-sourced, above transcript', () => {
+  assert.equal(NO_SOURCES_DEFAULT_S, 0.3);
+  assert.equal(signalS({ fm: {} }), 0.3, 'unknown provenance no longer ties with summary');
+  assert.equal(signalS({ fm: { sources: ['summary-2026-06-01.md'] } }), 0.5, 'explicit summary still 0.5');
+});
+
+test('MEM-005: pinned:false is neutral — identical score to an unpinned unit (decided behavior)', () => {
+  const today = parseIsoDate('2026-06-09');
+  const base = { fm: { created: '2026-06-01', topics: ['a'] } };
+  const pinnedFalse = { fm: { created: '2026-06-01', topics: ['a'], pinned: false } };
+  assert.equal(score(pinnedFalse, [], today), score(base, [], today));
 });

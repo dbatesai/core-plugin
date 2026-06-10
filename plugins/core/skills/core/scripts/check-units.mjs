@@ -70,6 +70,7 @@ export function isExternalRef(target) {
 
 export const ARCHIVE_RS_THRESHOLD = 0.05;
 export const STALE_DAYS = 90;
+export const SOURCES_WARN_AGE_DAYS = 14;
 
 // ---------- Unit iteration ----------
 
@@ -288,6 +289,19 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     const status = String(u.fm.status || '').toLowerCase();
     if (status === 'archived' && !String(u.path).includes('archive'))
       report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit has status=archived but is not in archive/ subdir' });
+
+    // MEM-018: unknown provenance is now visible. An active, aged,
+    // non-observation unit with no sources scores the degraded S default —
+    // surface it so a sources entry gets added. Advisory (benign).
+    const srcVal = u.fm.sources;
+    const noSources = srcVal === undefined || srcVal === null || (Array.isArray(srcVal) && srcVal.length === 0);
+    const typLower = String(u.fm.type || '').toLowerCase();
+    if (noSources && typLower !== 'observation' && String(u.fm.status || 'active').toLowerCase() === 'active') {
+      const created = parseIsoDate(u.fm.created);
+      const srcAge = created ? Math.floor((today.getTime() - created.getTime()) / 86_400_000) : null;
+      if (srcAge !== null && srcAge > SOURCES_WARN_AGE_DAYS)
+        report.push({ level: 'WARN', check: 'sources-missing', unit_id: uid, detail: `Active ${typLower || 'unit'} ${srcAge}d old with no sources — unknown provenance scores S=0.3; add a sources entry` });
+    }
   }
 
   // INDEX-decisions drift
@@ -385,7 +399,7 @@ export function jsonReport(report, memoriesDir, mode, today) {
 // (and largely eliminated by flow-style array parsing). These return exit 0.
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
-  'external-ref',
+  'external-ref', 'sources-missing',
   // Legacy annotations predate the source-registration-framework vocab; visibility without degradation (SYN-005 follow-up).
   'confidence-level-value', 'stability-class-value',
 ]);
