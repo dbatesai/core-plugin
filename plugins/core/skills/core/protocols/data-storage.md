@@ -395,6 +395,29 @@ When a user edit is detected → ground truth → propagate back to source-of-tr
 
 Belt-and-suspenders for tracked files: cache is primary, `git diff` is the fallback.
 
+### Single-writer assumption (shared `~/.core/` files)
+
+`state-cache.json`, `index.json`, `dm-profile.md`, `topics.md`, and
+`workspaces/<id>/last-bootstrap.json` are shared across every session and every project. They
+assume **one writing session at a time** — there is no lock. Two concurrent Claude Code windows
+land last-write-wins, which can silently drop the other session's entries.
+
+Discipline, not machinery:
+
+- Write shared `~/.core/` JSON via write-temp-then-rename (the `fs-atomic.mjs` pattern, the
+  same one the fork-check uses for `index.json`) — never an in-place truncate-and-write. This
+  keeps a concurrent reader from seeing a torn file; it does not serialize writers.
+- If a shared file changed under you mid-session (content differs from what you last wrote),
+  assume a concurrent session: re-read, merge your entry into the fresh copy, narrate the
+  collision in one line. Don't overwrite the whole file from your stale in-context copy.
+- A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace —
+  `~/.core/<wrapper>/` — and must not write `index.json`, `state-cache.json`, `dm-profile.md`,
+  or `topics.md`. Shared-surface coordination between two writers is unhandled by design.
+
+Reopen condition: real locking, or a `CORE_META_ROOT` env-var redirect, gets built when an
+observed corruption is traced to a concurrent write, or when a second co-installed writer
+actually ships — the self-evolution "second writer" trip-wire, not speculation.
+
 ---
 
 ## Topic vocabulary
@@ -591,7 +614,8 @@ Three rings, one read at runtime.
 ├── workspaces/<id>/               ← per-workspace operational meta
 │   ├── workspace.json
 │   └── last-bootstrap.json        ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
-└── research/                      ← cross-project knowledge library
+├── research/                      ← cross-project knowledge library
+└── <wrapper>/                     ← co-installed wrapper sub-namespace (writes only here — never the shared files above)
 ```
 
 **Skill ring** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace) or `~/.claude/skills/core/` (legacy direct install)
