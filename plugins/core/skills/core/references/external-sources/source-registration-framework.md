@@ -295,6 +295,12 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 3. **Ensure observations land at the correct destination** per Mode A/B/C criteria. Either the extractor writes to the destination directly (preferred), or the orchestration skill routes the extractor's output.
 
+   Mode B/C blocks landing in `inbox.md` can be pre-flighted mechanically:
+   `node <plugin-root>/skills/core/scripts/check-inbox.mjs <project>` validates block structure
+   (required draft fields, valid `mode`, `judgment-needed` on Mode C, no graduation-only
+   fields). Extractors get a pass/fail signal at write time instead of waiting for a human
+   session; `/process-memory` runs the same check before its inbox walk.
+
 4. **Append to `source-pull-log.jsonl`** with the pull event per the monitoring contract (see §7).
 
 5. **Trigger graduation** when source pulls complete and graduation is warranted. The installation decides when (after every refresh; on a schedule; when inbox count crosses a threshold). The entry point is `/process-memory` or equivalent.

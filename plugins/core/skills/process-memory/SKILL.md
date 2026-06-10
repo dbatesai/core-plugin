@@ -45,7 +45,13 @@ Then narrate in plain voice: "Captured N observations from this session before p
 
 ## Step 1 — Pull inbox
 
-If `<project>/inbox.md` is non-empty, walk the entries. Two shapes can appear:
+If `<project>/inbox.md` is non-empty, run the mechanical pre-flight first:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/check-inbox.mjs" "<project>"
+```
+
+It validates block structure — required draft fields, valid `mode` values, `judgment-needed` present on Mode C, no graduation-only fields (a ratified `stability-class` belongs to graduation, not the extractor). FAILs name the block and field; fix or bounce the block back to its source rather than graduating it on a guess. WARNs ride along into the walk as context. Then walk the entries. Two shapes can appear:
 
 **Mode-tagged observation blocks** carry full frontmatter (id, type, status, source, source-instance, extracted-at, references-person, confidence-level, body) plus two framework fields: `mode: B | C` and, when Mode C, `judgment-needed: <prose>`. These come from extractors implementing the source-registration framework (see `references/external-sources/source-registration-framework.md §4`). The mode tells you the routing without re-deriving it from criteria. The two framework fields (`mode`, `judgment-needed`) are inbox-only annotations — strip them from the frontmatter before writing the graduated unit.
 
