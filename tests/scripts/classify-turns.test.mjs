@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   classifyTurn, classifyTurns, pairTurns, isClarifying, isLadderWalk, extractAskedTerm, summarize, containsTerm,
+  runClassification,
 } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
 const inCtx = (terms) => (t) => terms.includes(t);
@@ -117,4 +121,29 @@ test('classifyTurns + summarize produce a state distribution', () => {
   assert.equal(s.total, 2);
   assert.equal(s.distribution['tier-0-win'], 1);
   assert.equal(s.distribution['rec-fail-tier-0'], 1);
+});
+
+test('MET-008: runClassification classifies the session passed in, not the newest transcript', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ct-sid-'));
+  const project = mkdtempSync(join(tmpdir(), 'ct-proj-'));
+  try {
+    const dir = join(home, '.claude', 'projects', project.replace(/[/.]/g, '-'));
+    mkdirSync(dir, { recursive: true });
+    const turn = (u, a) => [
+      JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: u }] } }),
+      JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: a }] } }),
+    ].join('\n') + '\n';
+    // The session being closed: ONE turn.
+    writeFileSync(join(dir, 'sess-mine.jsonl'), turn('hello', 'The answer is 42.'));
+    // A newer session already started: THREE turns. mtime-latest would pick this.
+    writeFileSync(join(dir, 'sess-newer.jsonl'),
+      turn('a', 'r1.') + turn('b', 'r2.') + turn('c', 'r3.'));
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', workspaceId: 'ct-test-ws', env: {} });
+    assert.equal(r.status, 'OK');
+    assert.equal(r.transcript_resolution, 'session-id');
+    assert.equal(r.total, 1, 'classified the 1-turn session, not the 3-turn newer one');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });

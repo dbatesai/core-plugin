@@ -377,7 +377,7 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
   if (!metricsEnabled({ project, env })) {
     return { status: 'DISABLED', reason: 'metrics opt-in not set' };
   }
-  const t = readTranscript({ harness, cwd: cwd || project, home });
+  const t = readTranscript({ harness, cwd: cwd || project, home, sessionId, env });
   if (!t.available) return { status: 'UNAVAILABLE', reason: 'transcript unavailable' };
 
   const memoriesDir = join(project, '_memories');
@@ -447,6 +447,7 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
   return {
     status: 'OK',
     workspace_id: wid,
+    transcript_resolution: t.meta.transcript_resolution,
     broken_citations: brokenCitations.length,
     stale_units: staleUnits.length,
     anticipation_gaps: anticipationGaps.length,

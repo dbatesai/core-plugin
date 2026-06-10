@@ -212,7 +212,7 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   if (!metricsEnabled({ project, env })) {
     return { status: 'DISABLED', reason: 'metrics opted out (CORE_METRICS_ENABLED=0 or workspace.json metrics_enabled:false)', provisional: true };
   }
-  const t = readTranscript({ harness, cwd: cwd || project, home });
+  const t = readTranscript({ harness, cwd: cwd || project, home, sessionId, env });
   if (!t.available) {
     return { status: 'UNAVAILABLE', reason: 'transcript unavailable', provisional: true };
   }
@@ -236,7 +236,7 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
     mkdirSync(dir, { recursive: true });
     for (const r of records) appendFileSync(join(dir, `${date}.jsonl`), JSON.stringify(r) + '\n');
   } catch { /* best-effort */ }
-  return { status: 'OK', provisional: true, workspace_id: wid, ...summarize(classified), records };
+  return { status: 'OK', provisional: true, workspace_id: wid, transcript_resolution: t.meta.transcript_resolution, ...summarize(classified), records };
 }
 
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
