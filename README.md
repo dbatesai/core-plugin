@@ -40,18 +40,18 @@ claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Either path installs the main skill, five companion skills, and two hooks — the hooks come in through the manifest, so your `~/.claude/settings.json` stays exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session, installing on Codex, and troubleshooting.
+Either path installs the main skill and five companion skills, and leaves your `~/.claude/settings.json` exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session, installing on Codex, optional hooks, and troubleshooting.
 
 ## Commands
 
-Type `/core` to start — it loads your project and orients before anything else. Five companions handle the rest: **`/finalize`** (close a session), **`/process-memory`** (clean up memory on demand), **`/register-sources`** (point CORE at outside data that should feed the project), **`/configure-project`** (set up and health-check a project), and **`/vibecheck`** (capture how the session felt). The two hooks register on their own: a guard before a write touches installed skill files, and a per-turn nudge to keep the voice plain.
+Type `/core` to start — it loads your project and orients before anything else. Five companions handle the rest: **`/finalize`** (close a session), **`/process-memory`** (clean up memory on demand), **`/register-sources`** (point CORE at outside data that should feed the project), **`/configure-project`** (set up and health-check a project), and **`/vibecheck`** (capture how the session felt). Two optional hooks pair well with CORE — a guard before a write touches installed skill files, and a per-turn nudge to keep the voice plain. They live in your own `~/.claude/settings.json`; [INSTALL.md](INSTALL.md) shows how to add them.
 
 [USAGE.md](USAGE.md) is the full reference — every command, protocol, and script, and what each one does.
 
 ## Learn more
 
 - [USAGE.md](USAGE.md) — what each command, protocol, and script does.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — the design behind it: the memory store, how retrieval works, memory hygiene, when the swarm fires, validation, and the hooks.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — the design behind it: the memory store, how retrieval works, memory hygiene, when the swarm fires, validation, and the optional hooks.
 - [llms.txt](llms.txt) — a structured map of this repo for AI agents: what CORE is, how to install it, and how to use it, with pointers into the docs.
 
 ## Status
