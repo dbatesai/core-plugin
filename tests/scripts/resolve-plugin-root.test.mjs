@@ -78,6 +78,31 @@ test('classifyAuthority: unrecognized location still fails closed to unknown', (
   assert.equal(classifyAuthority('C:\\Temp\\random', 'C:\\Users\\david'), 'unknown');
 });
 
+// ---------- HARNESS-010: common Windows dev paths must classify, not fail closed ----------
+
+test('classifyAuthority: Visual Studio default source\\repos classifies as canonical-source', () => {
+  assert.equal(
+    classifyAuthority('C:\\Users\\david\\source\\repos\\core-plugin', 'C:\\Users\\david'),
+    'canonical-source');
+});
+
+test('classifyAuthority: home-level Projects and repos dirs classify', () => {
+  assert.equal(classifyAuthority('C:\\Users\\david\\Projects\\core-plugin', 'C:\\Users\\david'), 'canonical-source');
+  assert.equal(classifyAuthority('C:\\Users\\david\\repos\\core-plugin', 'C:\\Users\\david'), 'canonical-source');
+  assert.equal(classifyAuthority('/Users/dbates/Projects/core-plugin', '/Users/dbates'), 'canonical-source');
+});
+
+test('classifyAuthority: drive-root dev dirs classify (C:\\repos, D:\\dev, C:\\src)', () => {
+  assert.equal(classifyAuthority('C:\\repos\\core-plugin', 'C:\\Users\\david'), 'canonical-source');
+  assert.equal(classifyAuthority('D:\\dev\\core-plugin', 'C:\\Users\\david'), 'canonical-source');
+  assert.equal(classifyAuthority('C:\\src\\core-plugin', 'C:\\Users\\david'), 'canonical-source');
+});
+
+test('classifyAuthority: still fails closed outside recognized locations', () => {
+  assert.equal(classifyAuthority('C:\\Windows\\Temp\\x', 'C:\\Users\\david'), 'unknown');
+  assert.equal(classifyAuthority('E:\\games\\mods\\thing', 'C:\\Users\\david'), 'unknown');
+});
+
 // ---------- Finding 2: co-located multi-harness re-point ----------
 // The collapsed plugins/core/ layout co-locates .codex-plugin and .claude-plugin
 // in one dir. findPluginRootAnchor is codex-first-match-wins, so without the

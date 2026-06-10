@@ -120,6 +120,15 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
   if (r.includes(`${h}/src/`)) return 'canonical-source';
   if (r.includes(`${h}/work/`)) return 'canonical-source';
 
+  // Windows-common dev locations (HARNESS-010). Same conservative posture:
+  // recognize the well-known conventions, fail closed on everything else.
+  if (r.includes(`${h}/source/repos/`)) return 'canonical-source'; // Visual Studio default
+  if (r.includes(`${h}/Projects/`)) return 'canonical-source';     // home-level Projects (any OS)
+  if (r.includes(`${h}/repos/`)) return 'canonical-source';
+  // Drive-root dev dirs (C:/repos, D:/dev, C:/src, C:/code) — r is already
+  // forward-slash normalized, so one regex covers all drive letters.
+  if (/^[A-Za-z]:\/(dev|repos|src|code)\//.test(r)) return 'canonical-source';
+
   return 'unknown';
 }
 
