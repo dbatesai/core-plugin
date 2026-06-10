@@ -138,3 +138,9 @@ Two questions to answer first:
 2. **Does this surface need to be the same across all projects using CORE?** If yes, it belongs in the plugin (one source of truth, propagates via plugin update). Per-project copies create drift.
 
 If both are yes, write the script here as `.mjs`. If "deterministic across sessions" is no, it's probably inference-territory and a markdown spec is the better answer.
+
+## Proportionality note — the metrics layer at single-user scale
+
+The metrics stack here (six-state classifier → daily rollup → orient-signal, the silent-failure detectors, the calibration pipeline, OTel dual-write) is sized for a feedback loop that needs more corpus than a single-user install generates — the calibration pool sat at 57/100 labeled turns after months of real use. That is a deliberate forward-looking tradeoff: the architecture is being validated at small scale before it can earn its keep at larger scale, and capture is cheap while interpretation is replayable.
+
+The investment discipline until then: keep the one headline path robust — `classify-turns` → `metrics-rollup` → `orient-signal` (the rec-fail-tier-0 self-audit) — and don't grow the rest. The next investment in this layer is justified when any of these turns true: the calibration pool clears its gate, a second active user or workspace starts generating parallel corpora, or a consumer outside `/finalize` starts reading the OTel traces. Absent those, prefer hardening the headline path over adding subsystems.
