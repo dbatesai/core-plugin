@@ -70,7 +70,7 @@ Re-open this drop once a live Codex CLI install validates whether Codex hooks ca
 
 ## read-auto-memory
 
-Codex can inject memory-like context at session start when `features.memories = true` (experimental). When it does, the context is gated by `no_memories_if_mcp_or_web_search = true` and may be suppressed depending on session configuration. Treat any injected memory as harness-local recall — scratch cache, not project truth. Verify project-specific claims against the CORE unit store before acting. Run a startup probe to confirm whether injection occurred before relying on it for bootstrap behavior.
+Codex can inject memory-like context at session start when `features.memories = true` (experimental). When it does, the context is gated by `no_memories_if_mcp_or_web_search = true` and may be suppressed depending on session configuration. Treat any injected memory as harness-local recall — scratch cache, not project truth. Verify project-specific claims against the CORE unit store before acting. Startup probe, concretely: pick one fact you'd expect injected (the most recent session's one-line summary, or a canary-tagged line if one exists) and check whether it is already in your context *without reading any file*. Present → injection occurred; treat it as scratch cache. Absent → treat injection as not-occurred this session and rely on the CORE unit store alone; do not read the memory file to simulate injection.
 
 Startup context also comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat those as instruction surfaces, not project memory. Project facts live in `<project>/PROJECT.md` and `<project>/_memories/`.
 

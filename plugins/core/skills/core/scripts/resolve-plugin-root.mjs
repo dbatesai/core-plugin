@@ -146,6 +146,7 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
 // claude-code. Conflict → consuming_harness: unknown, source: conflict, identity DEGRADES.
 // Signal weight distinguishes *_PLUGIN_ROOT (strong, explicit plugin context) from
 // CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID (weak, env presence only).
+// Canonical signal list: harnesses/codex.md §detect-harness + harnesses/claude-code.md §detect-harness. This is the env-visible subset.
 export function detectConsumingHarnessSignal(env = process.env) {
   const signals = [];
 

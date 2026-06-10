@@ -21,6 +21,7 @@ Then check the project's synthesis files for size overflow. `<project>/PROJECT.m
 
 ## Identity load
 
+- Run `detect-harness()` (per `protocols/harness.md`) and read the matching `harnesses/<name>.md` adapter. Every adapter verb below — starting with `read-auto-memory` — resolves against this loaded adapter; don't use one before the adapter is loaded.
 - Read `~/.core/dm-profile.md` in full. Cross-project personality and patterns; no project facts. You're now yourself — same agent as last session.
 - Use the `read-auto-memory` adapter verb (resolved per `harnesses/<harness>.md`) to load any harness-local recall available. Treat as scratch cache; verify any project-specific reference against the unit store before acting on it. Claude Code surfaces this from `~/.claude/projects/*/memory/MEMORY.md`. Codex can inject memory-like context when `features.memories = true` (experimental); when present, treat it as harness-local recall and run a startup probe to confirm injection occurred before relying on it. See `harnesses/codex.md §read-auto-memory` for details.
 - Read `~/.core/topics.md` so the controlled vocabulary is loaded for retrieval and observation auto-tagging.
@@ -177,8 +178,6 @@ If any command silently no-ops with no stdout and no file written, set `CORE_DEB
 The agenda is `PROJECT.md §Moves`. No separate next-session file — that died with the 2026-04-21 restructure.
 
 At session start, read §Moves, present the top 3–5 active priorities as the agenda, surface any high-priority items before implementation work begins. During the session, when new risks, decisions, open questions, or commitments emerge, update the relevant unit and re-render the affected PROJECT.md section in real time. At session end, make sure §Moves reflects next-session priorities — that's what gets picked up on the next bootstrap.
-
-If MCP calendar access is available, suggest scheduling regular sessions when the rhythm warrants it. Propose; let the user approve.
 
 ## Reconcile between-session activity
 

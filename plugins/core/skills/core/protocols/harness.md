@@ -6,6 +6,16 @@ CORE runs on multiple LLM-agent harnesses. The skill content is harness-agnostic
 
 At session start, the agent runs `detect-harness()` (see below) to identify which harness it's running in, then reads the matching `harnesses/<name>.md` adapter file. The adapter resolves each abstract verb in this contract to the concrete tool calls the agent should use. Drops — operations one harness can't deliver — are named explicitly in the adapter with their rationale.
 
+## Drop handling
+
+Some adapters can't deliver every verb. Each adapter names its drops explicitly — the verb, the rationale, and a fallback when one exists. When a protocol step references a verb that is DROPPED on the current harness:
+
+1. **Substitute the adapter's named fallback** when the drop entry names one (e.g. Codex `notify-user` → in-conversation alert in your turn output).
+2. **No fallback named** → narrate the gap in plain voice and continue: what the step wanted, that this harness can't deliver it, and what you're doing instead.
+3. **Never silently skip** a dropped operation with user-visible side effects (a notification the user is waiting on, a scheduled follow-up). Silence converts a capability gap into a broken promise.
+
+Surface each distinct drop at most once per session — the first time the dropped verb is actually invoked, not as a startup recital. The adapter's drops list is the contract; this section is the runtime behavior.
+
 ## Universal verbs (no adapter entry needed)
 
 These operations resolve via inference; the agent picks the right tool per harness without an explicit mapping.
@@ -70,6 +80,12 @@ Persist `content` to the harness's local recall surface as a workflow hint for f
 ### detect-harness()
 
 Identify which harness the current session is running in. Returns one of: `claude-code`, `codex`, or future harness names. Called at session start before any adapter-verb resolution.
+
+The per-harness detection signal sets live in each adapter's §detect-harness section — that section is canonical. Scripts that do thin env-only detection (`resolve-plugin-root.mjs §detectConsumingHarnessSignal`, `configure-project.mjs §detectHarness`) cite it and intentionally use env-signal subsets; when adding a Codex signal, update `harnesses/codex.md §detect-harness` first, then the script subsets if the signal is env-visible.
+
+### configure-project()
+
+Bootstrap or health-check a CORE project for the current harness: confirm the install, validate the store, resolve workspace identity (detect-only), and generate the harness instruction surface when a `CONTRACT.md` exists. On Codex this is the explicit setup step (`harnesses/codex.md §configure-project`). On Claude Code the startup protocol's bootstrap covers the same ground, so an explicit invocation is optional — `/configure-project` remains available as a one-shot health check. Full behavioral contract: `skills/configure-project/SKILL.md`.
 
 ## How to use this contract
 

@@ -15,7 +15,7 @@ The user's task: $ARGUMENTS
 
 ## First — visibility-canary echo (v3.0 memory-visible)
 
-If your injected memory (the auto-loaded `MEMORY.md`) contains a line tagged `CORE-VISIBILITY-CANARY <token>`, your **first output this session** must echo that token on its own line — `VISIBILITY-CANARY-ECHO: <token>` — *before* you read any file, run the capability probe, or run any Bash/Grep/Glob. Echo it from what you already see in injected context; do **not** read `MEMORY.md` or the canary side-file to find it — reading a canary surface first defeats the proof. Loading this skill via the Skill tool is allowlisted and fine; a file read or shell command before the echo is not. If there is no canary line in your injected memory, skip this silently.
+If your injected memory (the auto-loaded `MEMORY.md`) contains a line tagged `CORE-VISIBILITY-CANARY <token>`, your **first output this session** must echo that token on its own line — `VISIBILITY-CANARY-ECHO: <token>` — *before* you read any file, run the capability probe, or run any Bash/Grep/Glob. Echo it from what you already see in injected context; do **not** read `MEMORY.md` or the canary side-file to find it — reading a canary surface first defeats the proof. Loading this skill via the Skill tool is allowlisted and fine; a file read or shell command before the echo is not. If there is no canary line in your injected memory, skip this silently. The canary rides Claude Code's auto-memory injection; on a harness without that injection (Codex without `features.memories`), there is nothing to echo — skip silently. It's a harness-specific probe, not a cross-harness requirement.
 
 This is the runtime half of `capability/memory-visible-probe.mjs`: the next-session transcript shows the echo before any non-allowlisted tool, which is how the probe verifies memory was actually *in context*, not merely present on disk. (It proves visibility, not use — see the probe's `capability_name`.)
 
@@ -101,7 +101,7 @@ Paths in this index resolve relative to the skill base directory (the one contai
 
 ### Harness adapter — read once at session start
 
-CORE runs on multiple LLM-agent harnesses. Skill prose uses abstract verb names; per-harness adapter files at `harnesses/<name>.md` resolve them to concrete tool calls. At session start, after bootstrap, run `detect-harness` (defined in `protocols/harness.md`) and load the matching `harnesses/<name>.md` adapter. Universal verbs (`read`, `write`, `shell`, etc.) need no adapter lookup — inference resolves them. Adapter verbs (`spawn-team`, `plan-task`, `notify-user`, etc.) require the mapping. Drops — capabilities one harness can't deliver — are named explicitly in each adapter with rationale.
+CORE runs on multiple LLM-agent harnesses. Skill prose uses abstract verb names; per-harness adapter files at `harnesses/<name>.md` resolve them to concrete tool calls. At session start, after bootstrap, run `detect-harness` (defined in `protocols/harness.md`) and load the matching `harnesses/<name>.md` adapter. Universal verbs (`read`, `write`, `shell`, etc.) need no adapter lookup — inference resolves them. Adapter verbs (`spawn-team`, `plan-task`, `notify-user`, etc.) require the mapping. Drops — capabilities one harness can't deliver — are named explicitly in each adapter with rationale. Read the drops list when you load the adapter; when a drop affects a requested operation, tell the user what isn't available and the fallback you're using, once per session per drop (`protocols/harness.md §Drop handling`).
 
 See `protocols/harness.md` for the verb contract.
 
@@ -130,7 +130,7 @@ These shape what you do moment to moment.
 
 **Get it right over getting it done.** Quality and completeness over speed and cost.
 
-**Self-unblock first.** When stuck, articulate the unblock plan in detail and run through it. Experiment. Try prototypes. Escalate only after self-unblock genuinely fails (~30 minutes of real stuck). When you do escalate, surface to the user via whatever notification channels your harness and install have available — push notifications, harness-native banners, anything the user has set up.
+**Self-unblock first.** When stuck, articulate the unblock plan in detail and run through it. Experiment. Try prototypes. Escalate only after self-unblock genuinely fails (~30 minutes of real stuck). When you do escalate, surface it through the `notify-user` adapter verb at the appropriate level. Where `notify-user` is dropped (Codex), the adapter's fallback is the in-conversation alert — state the escalation plainly in your turn output and don't imply a push went out.
 
 **Continuous self-evaluation.** Watch your own work — voice drift, retrieval quality, smuggled architectural moves you didn't surface to the user. Course-correct in-flow rather than waiting for the user to catch it.
 
