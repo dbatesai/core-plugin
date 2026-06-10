@@ -41,7 +41,7 @@ The project is already on v2 but has unprefixed CORE folders, or it's on DC-74-e
 
 Announce the rename in plain voice. Example: *"This project has the pre-DC-74 folder names. Renaming `handoffs/` → `_summaries/`, `sessions/` → `_sessions/`, `outputs/` → `_outputs/` before loading."* Or, for the DC-74-to-summary case: *"This project still has the legacy `_handoffs/` folder. Renaming to `_summaries/` before loading."*
 
-For each folder that exists, use `git mv` (or plain `mv` if not in a git tree):
+For each folder that exists, use `git mv` (or plain `mv` if not in a git tree). On cloud-sync-virtualized paths (OneDrive, Dropbox, iCloud Drive), `mv` can corrupt the sync state — use `cp -r <src> <dst>` then `rm -rf <src>` after verifying file counts match, same as `protocols/startup.md` Step 4:
 - `handoffs/` → `_summaries/`
 - `summaries/` → `_summaries/`
 - `_handoffs/` (legacy) → `_summaries/`

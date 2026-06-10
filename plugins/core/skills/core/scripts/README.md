@@ -123,6 +123,13 @@ For interactive HTML visualization of multi-agent session logs (agent reasoning 
 
 A CORE-specific eight-field-schema visualizer (Persuasion Log / Mind Changes / Minority Views with their CORE-prescribed shapes) is not currently shipped. If the generic skill output proves insufficient for reviewing CORE swarm runs in real use, that's the prompt to author a CORE-specific renderer here.
 
+## Cloud-synced stores (OneDrive / iCloud Drive / Dropbox)
+
+Two write surfaces interact with sync-client virtualization; everything funnels through them:
+
+- **File writes.** Every mutating script writes via `fs-atomic.mjs` (`atomicWriteFileSync`: sibling temp file + rename — the ONLY `renameSync` call site in the plugin). On Windows, OneDrive or antivirus can transiently hold the rename target open (EPERM/EACCES); the writer retries 3× with a 50ms delay before throwing, and a throw always leaves the old file intact. On iCloud Drive, the visible `.<name>.tmp-*` sibling can be uploaded as a conflict copy if the sync client races the rename — if conflict copies appear, move the store out of iCloud Drive (a `.nosync` temp dir is the known mitigation but would break same-filesystem rename atomicity, so it isn't the default).
+- **Folder renames.** The startup protocols (`protocols/startup.md` Step 4 and `protocols/startup-conditional-loads.md` §folder rename) never `mv` on a cloud-synced path: `mv` can corrupt the sync state. They use `cp -r <src> <dst>` then `rm -rf <src>` after verifying file counts match.
+
 ## Adding new scripts
 
 Two questions to answer first:
