@@ -153,6 +153,15 @@ test('MEM-018: no-sources units score S=0.3 — below summary-sourced, above tra
   assert.equal(signalS({ fm: { sources: ['summary-2026-06-01.md'] } }), 0.5, 'explicit summary still 0.5');
 });
 
+test('scalar sources string coerces to a single-element list — not the no-sources default', () => {
+  assert.equal(signalS({ fm: { sources: 'PROJECT.md' } }), 1.0,
+    'a scalar `sources: PROJECT.md` must score as one PROJECT.md source, not S=0.3');
+  assert.equal(signalS({ fm: { sources: 'summary-2026-06-01.md' } }), 0.5,
+    'a scalar summary source scores the summary tier');
+  assert.equal(signalS({ fm: { sources: '' } }), NO_SOURCES_DEFAULT_S,
+    'an empty-string scalar still scores the no-sources default');
+});
+
 test('MEM-005: pinned:false is neutral — identical score to an unpinned unit (decided behavior)', () => {
   const today = parseIsoDate('2026-06-09');
   const base = { fm: { created: '2026-06-01', topics: ['a'] } };

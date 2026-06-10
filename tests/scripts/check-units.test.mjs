@@ -357,6 +357,34 @@ test('MEM-018: an aged active non-observation unit with no sources WARNs sources
   assert.ok(BENIGN_WARN_CHECKS.has('sources-missing'), 'advisory — must not gate startup');
 }));
 
+test('scalar sources string WARNs sources-not-list (benign)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'scalar-src.md'), [
+    '---', 'id: scalar-src', 'type: decision', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'sources: PROJECT.md',
+    '---', '', '# scalar-src', '',
+  ].join('\n'));
+  writeFileSync(join(memories, 'list-src.md'), [
+    '---', 'id: list-src', 'type: decision', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'sources:', '  - PROJECT.md',
+    '---', '', '# list-src', '',
+  ].join('\n'));
+  // checkIntegrity WARNs index-missing (non-benign) on a store without
+  // INDEX-decisions.md — provide an empty one so exitCode isolates this check.
+  writeFileSync(join(memories, 'INDEX-decisions.md'), '# Decisions\n');
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+  assert.ok(report.some(f => f.check === 'sources-not-list' && f.unit_id === 'scalar-src'),
+    'scalar sources surfaced with a suggestion to use list form');
+  assert.equal(report.some(f => f.check === 'sources-not-list' && f.unit_id === 'list-src'), false,
+    'list-form sources do not warn');
+  assert.ok(BENIGN_WARN_CHECKS.has('sources-not-list'), 'advisory — must not gate startup');
+  assert.equal(exitCode(report), 0, 'a scalar sources field alone must not degrade the store');
+}));
+
 test('MEM-018: fresh units and observations are exempt from sources-missing', () => withStore((memories) => {
   writeFileSync(join(memories, 'fresh.md'), unit({ id: 'fresh' })); // created 2026-05-30, today below makes it 10d old
   writeFileSync(join(memories, 'obs-young.md'), unit({ id: 'obs-young', type: 'observation' }));

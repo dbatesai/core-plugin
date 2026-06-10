@@ -323,6 +323,10 @@ export function checkIntegrity(units, memoriesDir, today, report) {
       const srcAge = created ? Math.floor((today.getTime() - created.getTime()) / 86_400_000) : null;
       if (srcAge !== null && srcAge > SOURCES_WARN_AGE_DAYS)
         report.push({ level: 'WARN', check: 'sources-missing', unit_id: uid, detail: `Active ${typLower || 'unit'} ${srcAge}d old with no sources — unknown provenance scores S=0.3; add a sources entry` });
+    } else if (typeof srcVal === 'string' && srcVal.trim() !== '') {
+      // Scalar `sources: PROJECT.md` works (priority.mjs coerces it), but the
+      // list form is the documented shape — nudge toward it. Advisory (benign).
+      report.push({ level: 'WARN', check: 'sources-not-list', unit_id: uid, detail: `sources is a scalar string ('${srcVal}') — use list form (sources:\\n  - ${srcVal}) so the field reads as a list everywhere` });
     }
   }
 
@@ -421,7 +425,7 @@ export function jsonReport(report, memoriesDir, mode, today) {
 // (and largely eliminated by flow-style array parsing). These return exit 0.
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
-  'external-ref', 'sources-missing', 'unit-oversize',
+  'external-ref', 'sources-missing', 'sources-not-list', 'unit-oversize',
   // Legacy annotations predate the source-registration-framework vocab; visibility without degradation (SYN-005 follow-up).
   'confidence-level-value', 'stability-class-value',
 ]);

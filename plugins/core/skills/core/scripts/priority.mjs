@@ -239,7 +239,13 @@ export function signalF(unit) {
 export const NO_SOURCES_DEFAULT_S = 0.3;
 
 export function signalS(unit) {
-  const sources = Array.isArray(unit.fm.sources) ? unit.fm.sources : [];
+  // A scalar `sources: PROJECT.md` (string, not list) is valid-but-informal
+  // frontmatter — coerce it to a single-element list so it scores as one
+  // source instead of silently falling to NO_SOURCES_DEFAULT_S.
+  const raw = unit.fm.sources;
+  const sources = Array.isArray(raw) ? raw
+    : (typeof raw === 'string' && raw.trim() !== '') ? [raw]
+    : [];
   let best = 0.0;
   for (const src of sources) {
     if (typeof src !== 'string') continue;
