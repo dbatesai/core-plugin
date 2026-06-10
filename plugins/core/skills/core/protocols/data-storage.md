@@ -186,7 +186,7 @@ Edges live in unit frontmatter as `{type, target, note?}` triples. The committed
 
 The rest — `cites`, `refines`, `amends`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
 
-**Wikilinks** (`[[unit-id]]`) in the body are permitted as a secondary, organic edge form. Hygiene's reconciliation pass promotes durable wikilinks to typed edges (default type: `cites`) when they appear in citation-style contexts.
+**Wikilinks** (`[[unit-id]]`) in the body are permitted as a secondary, organic edge form. Hygiene's reconciliation pass promotes durable wikilinks to typed edges (default type: `cites`) when they appear in citation-style contexts — the procedure is `protocols/hygiene.md` §"Wikilink promotion".
 
 ---
 
@@ -354,6 +354,8 @@ When the user removes a fact from PROJECT.md, that fact is gone. You don't re-de
 
 If the same fact would have surfaced again on the next render, the retired status keeps it out. Resurrection requires the user actively un-retiring it.
 
+The rule treats every PROJECT.md deletion as intentional, and some aren't — a git revert or a save error can drop a section the user never meant to lose. So make each retirement discoverable instead of silent: when the retire fires from a PROJECT.md removal, log the retired unit ids in the autonomous run log, and name them once in the next session's readiness summary — *"Last session retired two units after PROJECT.md edits: dc-14-auth-approach, risk-3-vendor-lockin. Say 'un-retire <id>' if that deletion wasn't intentional."* Retire is fully reversible (`protocols/hygiene.md` §Reversal — flip `status: retired` back to `active`); the readiness mention is the recovery window. It doesn't weaken the rule: nothing un-retires without the user saying so.
+
 ### Authority over PROJECT.md sits with the user
 
 The user owns PROJECT.md. Manage it in whatever way best serves accuracy and thoroughness. Render mechanics, edit-detection, propagation back to units — these are tools, not the goal. Accuracy and thoroughness are what matter. The mechanisms can change.
@@ -475,7 +477,7 @@ You don't auto-reconcile across projects. The cross-project store is `~/.core/re
 
 ### No-response-inference default
 
-When the user goes quiet mid-conversation and you've staged a Mode B proposal: act on your best judgment after a reasonable delay, narrate what you did, log it. Don't block the session indefinitely waiting for a yes/no on something you can reverse. If the action is genuinely irreversible (push, destructive external op), wait — but also self-unblock with an unblock plan and execute the plan rather than freezing.
+When the user goes quiet mid-conversation and you've staged a Mode B proposal: act on your best judgment, narrate what you did, log it. The delay is concrete and measured in agent turns — you can't observe wall-clock time between turns. In an autonomous run, proceed after one turn; the user is intentionally unavailable and waiting longer buys nothing. In an interactive session, surface the proposal once more after about three turns, then act. Don't block the session indefinitely waiting for a yes/no on something you can reverse. If the action is irreversible — a push, a create/update/delete on an external system, anything that destroys or publishes what you can't restore — it does not auto-execute at any delay: it blocks for the session until the user answers. Self-unblock by lining up everything short of the irreversible step (staged commit, drafted payload, verified parameters) so the user's "yes" is the only thing left.
 
 ---
 

@@ -55,6 +55,7 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 - Archive / retire / cold-store with priority-aware triggers.
 - Graduation (observations → units → canonical flag).
 - Memory contradiction detection and reconciliation (was dream-cycle Phase 3a).
+- Wikilink promotion — durable `[[unit-id]]` body links become typed `cites` edges (see §"Wikilink promotion").
 - Index regeneration — `_memories/INDEX-decisions.md`, `_memories/INDEX-risks.md`, others (was dream-cycle Phase 3d).
 - File-cap monitoring and proactive compaction when synthesis files grow over the Read tool cap (replaces DC-46 machinery from v1).
 - Auto-memory ↔ unit-store reconciliation.
@@ -136,6 +137,16 @@ Reversal is autonomous (Mode A) when it's a self-correction (you just archived s
 Graduation — observation becoming unit — is the highest-value reasoning move CORE makes. Triggers, the seven-step process, the anti-miss bias, and the hand-off to multi-agent on hard calls all live in `protocols/data-storage.md` §Graduation. Hygiene's role is to surface candidates: `/finalize` walks recent observations and flags the ones that keep mattering, and on-demand passes do the same when the user asks.
 
 ---
+
+## Wikilink promotion
+
+Part of the reconciliation work at `/finalize` and `/process-memory`. No script — this is an agent-performed pass:
+
+1. Find candidates: `grep -rn '\[\[[a-z0-9-]\+\]\]' <project>/_memories --include='*.md'`, skipping `archive/` and `cold-storage/`.
+2. Resolve each `[[id]]` to an existing unit file. An id that resolves to nothing gets flagged in the hygiene log (`verb: wikilink-unresolved`) — never auto-create a unit to satisfy a link.
+3. Promote when the link is durable and citation-style — the sentence leans on the target as evidence, precedent, or source ("per [[dc-69-priority-function]]", "captured in [[obs-...]]"). A passing mention stays a wikilink; promotion is for links retrieval should be able to walk.
+4. Promotion means adding `{type: cites, target: <id>}` to the citing unit's `edges:` frontmatter when not already present. `cites` is a lazy, one-directional edge — no inverse edge required (per `protocols/data-storage.md` §"The committed edge types").
+5. Log each promotion in the hygiene JSONL (`verb: promote-wikilink`, with citing unit and target).
 
 ## On-demand project setup — governance-hierarchy capture (DC-85 §8)
 

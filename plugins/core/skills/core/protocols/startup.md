@@ -286,6 +286,7 @@ What to include:
 - What `PROJECT.md` currently says in §State — one or two sentences, not a recap of every section.
 - Active risks worth surfacing now (count plus the top one or two by impact).
 - Any elapsed-time signals that escalated.
+- Units retired by the anti-resurrection rule since the last readiness (the ids, with the one-line un-retire recovery phrase per `protocols/data-storage.md` §"The anti-resurrection rule"). Skip silently when none were retired.
 - Source-registration signals when they're worth mentioning: pending Mode B/C blocks in `<project>/inbox.md` (count plus a one-line nudge — *"three pending observations in the inbox waiting on review"*), or observations citing a `source:` not in `<project>/_sources/` (drift signal — name the source). Skip silently when the inbox is empty and no drift surfaced.
 - The top 3 §Moves priorities as the agenda.
 - Anything auto-compacted during first-time setup, named explicitly (entries, not counts).
