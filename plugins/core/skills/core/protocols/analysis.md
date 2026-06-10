@@ -48,6 +48,8 @@ Operational pattern:
 
 When you spawn the Critic agent, its prompt must include this discipline explicitly. Don't trust the model to do it on its own — the sycophancy pull is strong.
 
+Be honest about what enforces this. On current harnesses the frames-first ordering is prompt-level discipline plus file-system trust — nothing physically prevents a Critic from reading the Generators' output before writing its predictions. The authority gate below is the mitigation, not a fix: when isolation can't be proven, the run stays ADVISORY and its output never directly drives a canonical mutation. To make the ordering at least auditable, the Critic's Phase 1 predictions land in a file before any cross-pollination: `<project>/_outputs/<YYYY-MM-DD>/<topic>/critic-predictions.md`, written during Phase 1 with a timestamp header. A synthesis that can't point at a predictions file written before Phase 2 began fails the deep audit the same way an empty persuasion log does — the audit trail can't prove the discipline ran.
+
 ## Execution phases
 
 Five phases. Each has a clear transition criterion. Don't advance unless the criterion is met.
@@ -55,7 +57,7 @@ Five phases. Each has a clear transition criterion. Don't advance unless the cri
 | Phase | What happens | Transition criterion |
 |---|---|---|
 | **0 Setup** | Compose briefing, name the team, spawn agents, share briefing | All agents acknowledged briefing |
-| **1 Independent framing** | Each agent frames the task in isolation; Critic writes predictions before reading anyone else | ≥80% of agents have broadcast their independent position |
+| **1 Independent framing** | Each agent frames the task in isolation; Critic writes predictions to the timestamped `critic-predictions.md` (see anti-anchoring enforcement) before reading anyone else | ≥80% of agents have broadcast their independent position |
 | **2 Cross-pollination** | Agents share findings; Critic reads Generators; surprise lenses surface | All agents have read and acknowledged others' findings |
 | **3 Adversarial pressure** | Critic challenges Generators with evidence; Generators defend or update; persuasion-log entries land | Diminishing returns for 2+ exchanges, OR convergence-watch trips |
 | **4 Synthesis + deep audit** | DM composes synthesis; deep audit gate runs (see the deep-audit-gate section below); accept or reject | Deep audit passes the four named failure modes |
