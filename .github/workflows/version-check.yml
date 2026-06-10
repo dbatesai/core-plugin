@@ -57,3 +57,12 @@ jobs:
           fi
 
           echo "Version bumped: $BASE_VERSION → $PR_VERSION"
+
+      - name: CHANGELOG has a section for the new version
+        run: |
+          PR_VERSION=$(jq -r .version plugins/core/.claude-plugin/plugin.json)
+          if ! grep -qF "## [$PR_VERSION]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no \"## [$PR_VERSION]\" section. Move the [Unreleased] notes under a dated heading before merging."
+            exit 1
+          fi
+          echo "CHANGELOG entry found for $PR_VERSION"
