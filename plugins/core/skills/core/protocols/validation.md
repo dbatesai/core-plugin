@@ -54,6 +54,8 @@ node ${CORE_ROOT}/skills/core/scripts/validate.mjs <project-path>
 
 The runner walks `<project-path>/_memories/_validation/tests/test-*.yaml`, runs each test, scores precision and recall, writes a report to `<project-path>/_outputs/validation/<YYYY-MM-DD>/REPORT.md`, and exits with status 0 on pass / 1 on any FAIL.
 
+Two scripts get loosely called "the validator," and they do different jobs. `check-units.mjs` checks unit schema and edge integrity — the store check `/finalize` runs at every close. `validate.mjs`, this runner, simulates retrieval against the test corpus and scores precision and recall. When a protocol says "validate the store," that means `check-units.mjs`; this file owns the retrieval suite.
+
 The current runner simulates Tier 1 retrieval (OR-of-terms grep). Future versions add Tier 2 edge-walk simulation and Tier 3 Explore-subagent invocation. The thresholds and report shape stay constant across versions.
 
 ## Thresholds
