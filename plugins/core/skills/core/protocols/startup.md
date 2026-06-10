@@ -295,9 +295,23 @@ Target voice:
 
 What to skip: session summary content (not part of the bootstrap read); auto-memory cited as authoritative (it's scratch cache); session log recaps (per-session artifacts, not state); a full section-by-section recital (the user sees PROJECT.md when they want the full view).
 
-**Record the bootstrap.** After readiness lands, write `~/.core/workspaces/<id>/last-bootstrap.json` with two fields: `session_started_at` (the Claude Code session-start timestamp — best available proxy is the timestamp of the first user message this session) and `bootstrap_completed_at` (now). This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
+**Record the bootstrap.** After readiness lands, write `~/.core/workspaces/<id>/last-bootstrap.json` with two fields: `session_started_at` (the timestamp of the first user message this session — the one session-start marker you can actually observe; see §"Bootstrap dedup") and `bootstrap_completed_at` (now). This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
 
 After readiness lands, only ask what you still don't know — genuine gaps that no durable artifact resolved, with a hypothesis when you have one. Don't ask "what were we working on?" (you just read it), "what would you like to do today?" (the agenda tells you), or "can you catch me up?" (that's exactly what bootstrap prevents). Do ask deferred-decision questions ("PROJECT.md flags the X decision as deferred pending your call — have you decided?"), agenda-fork questions ("continue the v2 build or pivot to the stale R-5 risk first?"), and missing-unit questions ("the session-intent topic 'auto-creation rules' didn't surface a unit at Tier 1 or 2 — written yet, or still pending?"). Then wait for the user's next move; the agenda topics get resolved or explicitly deferred before implementation work begins.
+
+## Bootstrap dedup
+
+This is the authoritative definition of the already-bootstrapped check that `SKILL.md §"Before the task — startup"` summarizes.
+
+The marker is the first-user-message timestamp. `last-bootstrap.json`'s `session_started_at` holds the timestamp of the first user message of the session in which bootstrap ran — that's what "Record the bootstrap" above writes. It's a proxy: you have no access to the harness's session clock, but you can usually see when the conversation started.
+
+The check, in order:
+
+1. **New workspace — no dedup.** No `workspace.json` in the cwd and no matching `~/.core/index.json` entry means startup has never run here; it's startup that creates those files. Skip the dedup check and run the protocol. The check applies to returning sessions only.
+2. **Resolve and compare.** Resolve the workspace id, read `~/.core/workspaces/<id>/last-bootstrap.json`, and compare its `session_started_at` to the timestamp of the current session's first user message. Same first message (allow a few minutes of tolerance for format and timezone jitter — the question is "same session?", not "same second?") → bootstrap already ran; skip the protocol read.
+3. **Can't determine → run.** If you can't see the first user message's timestamp, or the file is absent or unparseable, treat bootstrap as not-yet-run and run the protocol. The failure direction is chosen deliberately: re-running bootstrap wastes a little time; wrongly skipping it means operating without routing, edit-detection, or the readiness contract.
+
+Known limitation, named: on a harness that exposes no message timestamps, this gate can't distinguish sessions and effectively always re-runs bootstrap. That is the designed degradation — double-bootstrap, never silent-skip.
 
 ## Long sessions — write the early summary stub
 
