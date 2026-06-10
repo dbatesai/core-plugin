@@ -20,7 +20,7 @@
  * CLI:
  *   node priority.mjs <project>/_memories/ [--top N] [--intent t1,t2,...]
  *                     [--today YYYY-MM-DD] [--sections] [--top-per-section N]
- *                     [--log <path>] [--log-label <string>]
+ *                     [--log <path>] [--log-label <string>] [--include-invalid]
  *
  * --log appends one JSONL audit entry per invocation to <path>. Useful for
  * render-on-change observability — protocols/data-storage.md §PROJECT.md ↔ units
@@ -403,9 +403,42 @@ export function iterUnits(memoriesDir) {
   for (const fname of readdirSync(memoriesDir).sort()) {
     if (!fname.endsWith('.md')) continue;
     if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
-    try { units.push(loadUnit(join(memoriesDir, fname))); } catch {}
+    const path = join(memoriesDir, fname);
+    try {
+      const u = loadUnit(path);
+      if (!Object.keys(u.fm).length) {
+        // Malformed/absent frontmatter parses to an empty map and would score
+        // on pure defaults, surfacing unflagged in ranked output (MEM-011).
+        // Tag it so rankUnits() excludes it; the stderr warn makes the damage
+        // visible (check-units reports the same file as a schema failure).
+        u.fm._load_error = true;
+        process.stderr.write(`warn: ${fname}: no parseable frontmatter — excluded from ranking\n`);
+      }
+      units.push(u);
+    } catch (e) {
+      // The old bare catch swallowed read failures silently (MEM-011).
+      process.stderr.write(`warn: ${fname}: failed to load (${e && e.message ? e.message : e}) — excluded from ranking\n`);
+    }
   }
   return units;
+}
+
+/**
+ * Rank every loadable, currently-valid unit (SOD-003). The bi-temporal
+ * suppression invariant — default retrieval excludes invalidated units
+ * (ARCHITECTURE.md, data-storage.md) — is applied HERE so every consumer
+ * (the CLI, generate-memory-index, any wrapper) inherits it instead of
+ * re-deriving it. Cold history stays reachable with includeInvalidated:true.
+ * @returns {Array<[number, object]>} [score, unit] pairs, descending.
+ */
+export function rankUnits(memoriesDir, { sessionTopics = [], today = null, includeInvalidated = false } = {}) {
+  const t = today || _todayUTC();
+  const ranked = iterUnits(memoriesDir)
+    .filter(u => !u.fm._load_error)
+    .filter(u => includeInvalidated || !isInvalidated(u, t))
+    .map(u => [score(u, sessionTopics, t), u]);
+  ranked.sort((a, b) => b[0] - a[0]);
+  return ranked;
 }
 
 // ---------- CLI ----------
@@ -450,6 +483,7 @@ export function main(argv) {
   let topPerSection = 5;
   let logPath = null;
   let logLabel = null;
+  let includeInvalid = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -460,6 +494,7 @@ export function main(argv) {
     else if (a === '--top-per-section') { topPerSection = parseInt(argv[++i], 10); }
     else if (a === '--log') { logPath = argv[++i]; }
     else if (a === '--log-label') { logLabel = argv[++i]; }
+    else if (a === '--include-invalid') { includeInvalid = true; }
     else if (!a.startsWith('--')) { memoriesDirArg = a; }
   }
 
@@ -472,8 +507,7 @@ export function main(argv) {
   const intent = intentStr ? intentStr.split(',').map(s => s.trim()).filter(Boolean) : [];
   const today = _todayFromArg(todayArg);
 
-  const ranked = iterUnits(memoriesDir).map(u => [score(u, intent, today), u]);
-  ranked.sort((a, b) => b[0] - a[0]);
+  const ranked = rankUnits(memoriesDir, { sessionTopics: intent, today, includeInvalidated: includeInvalid });
 
   if (logPath) {
     const rankings = ranked.slice(0, topN).map(([s, u]) => ({

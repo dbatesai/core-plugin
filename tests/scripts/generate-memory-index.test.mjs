@@ -83,6 +83,21 @@ test('a malformed --today exits 2 cleanly (no RangeError from toISOString)', () 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('SOD-003: the MEMORY.md priority block excludes invalidated units', () => {
+  const { dir, memMd } = scratchMemoryMd();
+  try {
+    writeFileSync(join(dir, '_memories', 'dc-live.md'),
+      '---\nid: dc-live\ntype: decision\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\ntopics: [a]\n---\n\n# live unit\n');
+    writeFileSync(join(dir, '_memories', 'dc-dead.md'),
+      '---\nid: dc-dead\ntype: decision\nstatus: superseded\ncreated: 2026-01-01\nupdated: 2026-06-01\nt_invalid: 2026-03-01\ntopics: [a]\n---\n\n# dead unit\n');
+    const code = quietStderr(() => main([join(dir, '_memories'), '--memory-md', memMd, '--today', '2026-06-09']));
+    assert.equal(code, 0);
+    const out = readFileSync(memMd, 'utf8');
+    assert.match(out, /dc-live/);
+    assert.doesNotMatch(out, /dc-dead/, 'index generation is a retrieval surface — same invariant');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('H1: MEMORY.md write routes through atomicWriteFileSync, not a bare write', () => {
   // MEMORY.md holds hand-curated, unreconstructable narrative; a crash mid-write
   // must never truncate it. Crash-safety can't be behaviorally unit-tested without

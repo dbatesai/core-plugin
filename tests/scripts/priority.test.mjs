@@ -1,11 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 // Validity predicates now live in priority.mjs (the canonical unit module) per the
 // 2026-06-02 validity-dimension consolidation — increment 2. These imports failing
 // would mean the consolidation regressed (predicates moved back out, or never landed).
 import {
   effectiveValidity, validAt, isInvalidated, parseIsoDate,
   parseFrontmatter, normalizeNewlines, _todayFromArg,
+  rankUnits, main as priorityMain,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
 test('M3: a malformed --today falls back to today, never null (no TypeError at toISOString)', () => {
@@ -81,4 +85,61 @@ test('parseFrontmatter parses a CRLF unit the same as an LF unit', () => {
 test('normalizeNewlines collapses CRLF and lone CR to LF; passes non-strings through', () => {
   assert.equal(normalizeNewlines('a\r\nb\rc\nd'), 'a\nb\nc\nd');
   assert.equal(normalizeNewlines(null), null);
+});
+
+// ---------- SOD-003 / MEM-011: suppression invariant + malformed-frontmatter surfacing ----------
+
+function rankVault() {
+  const dir = mkdtempSync(join(tmpdir(), 'priority-rank-'));
+  const mem = join(dir, '_memories');
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'dc-live.md'),
+    '---\nid: dc-live\ntype: decision\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\ntopics: [a]\n---\n\n# live\n');
+  writeFileSync(join(mem, 'dc-dead.md'),
+    '---\nid: dc-dead\ntype: decision\nstatus: superseded\ncreated: 2026-01-01\nupdated: 2026-06-01\nt_invalid: 2026-03-01\ntopics: [a]\n---\n\n# dead\n');
+  return { dir, mem };
+}
+
+function quiet(stream, fn) {
+  const orig = stream.write;
+  const chunks = [];
+  stream.write = (c) => { chunks.push(String(c)); return true; };
+  try { return [fn(), chunks.join('')]; } finally { stream.write = orig; }
+}
+
+test('SOD-003: rankUnits excludes invalidated units by default', () => {
+  const { dir, mem } = rankVault();
+  try {
+    const ids = rankUnits(mem, { today: parseIsoDate('2026-06-09') }).map(([, u]) => u.id);
+    assert.ok(ids.includes('dc-live'));
+    assert.ok(!ids.includes('dc-dead'), 't_invalid in the past must suppress the unit');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('SOD-003: includeInvalidated:true ranks cold history', () => {
+  const { dir, mem } = rankVault();
+  try {
+    const ids = rankUnits(mem, { today: parseIsoDate('2026-06-09'), includeInvalidated: true }).map(([, u]) => u.id);
+    assert.ok(ids.includes('dc-dead'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('SOD-003: the CLI ranking inherits the filter (invalidated id absent from --top output)', () => {
+  const { dir, mem } = rankVault();
+  try {
+    const [, out] = quiet(process.stdout, () => priorityMain([mem, '--today', '2026-06-09', '--top', '10']));
+    assert.match(out, /dc-live/);
+    assert.doesNotMatch(out, /dc-dead/, 'main() must not rank an invalidated unit');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('MEM-011: a frontmatter-less unit is excluded from ranking and warned to stderr', () => {
+  const { dir, mem } = rankVault();
+  try {
+    writeFileSync(join(mem, 'broken.md'), '---\nid: broken\nNO CLOSING FENCE\n');
+    const [ids, errOut] = quiet(process.stderr, () =>
+      rankUnits(mem, { today: parseIsoDate('2026-06-09') }).map(([, u]) => u.id));
+    assert.ok(!ids.includes('broken'), 'damaged unit must not rank on default scores');
+    assert.match(errOut, /broken\.md.*no parseable frontmatter/, 'the damage is surfaced, not swallowed');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

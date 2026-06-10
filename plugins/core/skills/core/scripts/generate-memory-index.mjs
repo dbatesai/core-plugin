@@ -23,7 +23,7 @@
 import { readFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { iterUnits, score } from './priority.mjs';
+import { rankUnits } from './priority.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 
@@ -94,8 +94,9 @@ function todayFromArg(arg) {
 }
 
 export function renderPriorityBlock({ memoriesDir, topN, today, existingDescriptions }) {
-  const ranked = iterUnits(memoriesDir).map(u => [score(u, [], today), u]);
-  ranked.sort((a, b) => b[0] - a[0]);
+  // rankUnits applies the bi-temporal suppression invariant + load-error
+  // filtering (SOD-003/MEM-011) — the index is a retrieval surface.
+  const ranked = rankUnits(memoriesDir, { today });
   const top = ranked.slice(0, topN);
 
   const projectRoot = dirname(memoriesDir);
