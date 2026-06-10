@@ -21,20 +21,61 @@ files) and collects usable metrics from them — CORE is a working instance, not
 overlays. An overlay runs the same contract on richer sources. Same dimension, same readers,
 same metrics; only source richness differs.
 
+## The extension boundary — what's open, what's closed
+
+Extension means **producing into shapes CORE already reads**. These seams are built and open
+today, with no core change:
+
+- **Field values on the shared unit schema** — an extractor populates `t_valid`,
+  `confidence-level`, `topics`, `sources`, body subsections; CORE's readers consume them as-is.
+- **The `world-time-policy` registration hook** (§5) and the other per-source registration
+  fields (`body-construction-policy`, `stability-defaults`, `confidence-default`).
+- **Inbox Mode B/C blocks** — any extractor that writes the block shape in
+  `external-sources/source-registration-framework.md §4` gets graduated by `/process-memory`,
+  and can pre-flight its output mechanically with `scripts/check-inbox.mjs`.
+- **Metrics capture passthrough** — extra event fields and new `query_shape` values ride
+  through `log-event.mjs` untouched (§6).
+- **Additive detectors** — new Layer-2 passes over the captured record, alongside
+  `metrics-detectors.mjs`.
+- **Saved agent compositions** under `~/.core/agents/`.
+
+These sets are **closed** — extending them is a core change shipped through this repo, not
+something a wrapper can register locally:
+
+- **Unit types and edge types.** `VALID_TYPES` / `VALID_EDGE_TYPES` in `scripts/check-units.mjs`
+  are hardcoded sets; a wrapper's novel type WARNs at validation and there is no project-local
+  override. New types get blessed into core on cross-corpus evidence — the `refines`/`amends`
+  precedent (2026-06-03, two corpora). Propose them upstream; don't carry unblessed types.
+- **Harness adapters.** `KNOWN_HARNESSES` in `scripts/contract-format.mjs` is
+  `['claude-code', 'codex']`. A new harness needs a `harnesses/<name>.md` adapter plus
+  generator support in core.
+- **Retrieval tiers.** The four-tier ladder is protocol prose with no registration point. A
+  wrapper cannot insert a tier; it can shape what enters the store, not how the ladder walks it.
+- **The priority function's signals.** `priority.mjs` weighs its R/F/S signals as shipped; no
+  hook.
+
+**Reopen condition.** This boundary is honest-docs-over-speculative-hooks by design. A local
+extension mechanism (e.g. a project-level allowed-types file `check-units.mjs` folds into its
+sets) gets revisited when a second wrapper demonstrates a concrete novel-type need that the
+upstream blessing path can't serve — not before.
+
 ---
 
 ## Status legend
 
 - **BUILT** — CORE produces and consumes the dimension today; the field is in the schema and a
   CORE reader honors it. Overlay populates from its own sources via the named hook.
-- **CONTRACT** — the field shape and semantics are specified here, but CORE ships no field and
-  no reader yet, because only an overlay would produce or consume it. CORE adds the field **when
-  there is a consumer** — a contract describing a field does not make an empty field a seam
-  (that is dormant machinery). The overlay may carry the field in its own layer now; CORE's
-  generic readers will honor it the day CORE grows one.
-- **CONTRACT / /core-owed** — same, plus the semantics involve a foundational judgment call
+- **SPEC-ONLY (UNBUILT)** — the field shape and semantics are specified here, but CORE ships no
+  field and no reader yet, because only an overlay would produce or consume it. CORE adds the
+  field **when there is a consumer** — a spec describing a field does not make an empty field a
+  seam (that is dormant machinery). The overlay may carry the field in its own layer now;
+  CORE's tooling preserves unknown frontmatter fields (never strips them), but **nothing in
+  CORE reads them today** — fields a wrapper writes against a SPEC-ONLY layer land in dead
+  space until a CORE reader ships.
+- **SPEC-ONLY / CONTESTED** — same, plus the semantics involve a foundational judgment call
   (e.g. a collision with an existing committed field) that is deferred to the parallel-critique
-  `/core` pass, not decided solo mid-build.
+  `/core` pass, not decided solo mid-build. Building against a CONTESTED layer risks rework
+  when the collision is ruled on.
 
 ---
 
@@ -51,7 +92,7 @@ The world-time validity axis, alongside CORE's record-time (`created`/`updated`)
 | **CORE readers** | `bitemporal.mjs --as-of <date>` (point-in-time reconstruction), `--metrics` (storage-health rollup), the stale-context detector (`metrics-detectors.mjs` — superseded-but-still-read = HIGH), `impact-trace.mjs --superseded-impact`. All operate on whatever validity intervals are present, regardless of who wrote them. |
 | **Suppression invariant** | A unit whose `t_invalid` is in the past is invalidated — excluded from the currently-valid set the way retired units are. Cold history stays reachable by `--as-of` or a supersedes-edge walk. |
 
-## 2. Provenance / deliberateness — **CONTRACT** (Phase 4 layer 2)
+## 2. Provenance / deliberateness — **SPEC-ONLY (UNBUILT)** (Phase 4 layer 2)
 
 Who said a fact, in what medium, and whether it was a human decision or an automation default.
 
@@ -64,7 +105,7 @@ Who said a fact, in what medium, and whether it was a human decision or an autom
 | **Status note** | The exact attribute set is a judgment call; treat this as the documented target, refined when the first consumer lands. |
 | **Current status** | No active build. Waits on the first CORE consumer — a provenance-attributed render or a by-source slice of retrieval metrics. No decision record tracks it yet; propose one when a consumer is named. |
 
-## 3. Salience — **CONTRACT / /core-owed** (Phase 4 layer 3)
+## 3. Salience — **SPEC-ONLY / CONTESTED** (Phase 4 layer 3)
 
 An explicit salience signal assigned at graduation (the missing third retrieval signal beyond
 recency/frequency), plus held success-criteria a latent fact can be matched against.
@@ -72,12 +113,12 @@ recency/frequency), plus held success-criteria a latent fact can be matched agai
 | | |
 |---|---|
 | **Proposed field** | `salience` (representation TBD — categorical vs numeric). |
-| **The owed decision** | `salience` collides with DC-69's numeric `confidence` and the categorical `confidence-level` — whether salience is a third axis, a re-use, or a reframe of DC-94 Lock 5 is a **foundational call deferred to the parallel-critique `/core` pass**. It is deliberately NOT decided solo. |
+| **The owed decision** | **CONTESTED — do not build against this field yet.** `salience` collides with DC-69's numeric `confidence` and the categorical `confidence-level` — whether salience is a third axis, a re-use, or a reframe of DC-94 Lock 5 is a **foundational call deferred to the parallel-critique `/core` pass**. It is deliberately NOT decided solo. The field shape (categorical vs numeric) is undecided; an overlay that writes `salience` today may have to migrate the representation when the call lands. |
 | **Who populates** | Overlay (and eventually CORE) at graduation, once the representation is decided. |
 | **CORE reader (when built)** | The priority function (DC-69) absorbing salience as a fourth signal — which is itself the foundational change the `/core` pass must rule on. |
 | **Current status** | No active build. Blocked on the owed representation decision above; DC-94 (the memory-graph edge-candidate audit) is the open decision it waits behind. |
 
-## 4. Person-node synthesis — **CONTRACT** (Phase 4 layer 4)
+## 4. Person-node synthesis — **SPEC-ONLY (UNBUILT)** (Phase 4 layer 4)
 
 A person modeled as a queryable node whose "current state" is synthesized across the channels
 they appear in (BBLens use cases 8, M1).
@@ -135,9 +176,36 @@ calibrate it.
 
 ---
 
+## Stability contract for wrappers
+
+What CORE keeps stable across releases. Breaking changes to any of these are versioned per the
+blast-radius policy (MAJOR/MINOR on the plugin version) and called out in `CHANGELOG.md`:
+
+- **Unit frontmatter shape** — the required fields and committed `status` values exported by
+  `scripts/check-units.mjs` (`REQUIRED_FIELDS`, `VALID_STATUSES`).
+- **The committed edge-type set** — additive growth only; existing types are never
+  re-semanticized or removed without a supersession note.
+- **The inbox Mode B/C block shape** (`external-sources/source-registration-framework.md §4`)
+  and the strip-on-graduation rule for `mode` / `judgment-needed`.
+- **Metrics event passthrough** — unknown event fields and `query_shape` values are never
+  rejected by capture.
+- **`~/.core/workspaces/<id>/` layout** for the files named in `protocols/data-storage.md`.
+- **Unknown-frontmatter preservation** — CORE tooling never strips fields it doesn't know.
+
+What is internal and may change without notice: script internals and exports not named above,
+analyzer output formats, `state-cache.json` shape, the OTel trace span fields while the trace
+layer is a collection stub, and anything marked SPEC-ONLY in this file.
+
+Co-installation rule: a wrapper writes only under its own `~/.core/<wrapper>/` sub-namespace
+and never the shared registry files — see `protocols/data-storage.md §Single-writer assumption`.
+
+---
+
 ## The one-line version
 
 CORE ships the dimension and the generic readers; the overlay populates from its richer sources
 and adds its own detectors. Same schema, same readers, same metrics — CORE on conversation +
 local files, the overlay on its delivery channels. A field ships in CORE only when a CORE reader
-consumes it; everything else is a contract the overlay can build against today.
+consumes it; SPEC-ONLY fields an overlay writes today are preserved but read by nothing in CORE
+yet. The closed sets (unit/edge types, harnesses, retrieval tiers) extend through core, not
+locally — see §The extension boundary.
