@@ -17,6 +17,8 @@
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs <project> --check
  *
  * --check reports whether PROJECT.md is over the size cap; it does not write.
+ * Scope: this script compacts §Decisions ONLY — §Moves is demote-moves.mjs,
+ * §State is demote-state-narrative.mjs.
  */
 
 import { readFileSync, readdirSync, realpathSync } from 'node:fs';
@@ -240,6 +242,10 @@ export function main(argv) {
     const size = Buffer.byteLength(text, 'utf8');
     const status = size > PROJECT_MD_CAP_BYTES ? 'OVER cap' : 'under cap';
     console.log(`PROJECT.md: ${size} bytes (${status}; cap ${PROJECT_MD_CAP_BYTES} bytes).`);
+    // MEM-012: the size is whole-file but this script's write path is partial —
+    // say so here so a caller never reads "under/over cap" as "this tool
+    // handles the whole file".
+    console.log('Scope: compact-project.mjs compacts §Decisions ONLY. §Moves demotion = demote-moves.mjs (auto-applies); §State narrative demotion = demote-state-narrative.mjs (dry-run; pass --apply). Run all three for full compaction.');
     return 0;
   }
 
@@ -285,8 +291,9 @@ export function main(argv) {
     });
     process.stderr.write(
       `note: PROJECT.md is ${after} bytes (over soft target ${SOFT_TARGET_BYTES}). ` +
-      `§Decisions compaction left ${after} bytes; demote-moves and §State narrative ` +
-      `compaction (Phase 1c) handle the remaining sections. Advisory only — the script never refuses to write.\n`
+      `compact-project handles §Decisions ONLY — run demote-moves.mjs (§Moves) and ` +
+      `demote-state-narrative.mjs --apply (§State) for the remaining sections. ` +
+      `Advisory only — the script never refuses to write.\n`
     );
   }
 

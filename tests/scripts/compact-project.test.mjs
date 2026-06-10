@@ -96,3 +96,25 @@ test('main() writes the compacted file and exits 0', () => {
     assert.match(after, /→ `_memories\/dc-12-pick-the-store\.md`/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+function captureStdout(fn) {
+  const lines = [];
+  const orig = console.log;
+  console.log = (...a) => lines.push(a.join(' '));
+  try { fn(); } finally { console.log = orig; }
+  return lines.join('\n');
+}
+
+test('MEM-012: --check names the §Decisions-only scope and the sibling scripts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'compact-'));
+  try {
+    mkdirSync(join(dir, '_memories'), { recursive: true });
+    writeFileSync(join(dir, 'PROJECT.md'),
+      '# P\n\n## Decisions & Risks\n\n**Decisions (dated, append-only):**\n');
+    const out = captureStdout(() => main([dir, '--check']));
+    assert.match(out, /bytes/, 'size report still present');
+    assert.match(out, /§Decisions ONLY/, 'scope stated where the caller reads it');
+    assert.match(out, /demote-moves\.mjs/, '§Moves owner named');
+    assert.match(out, /demote-state-narrative\.mjs/, '§State owner named');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
