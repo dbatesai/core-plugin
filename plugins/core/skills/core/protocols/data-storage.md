@@ -133,7 +133,7 @@ Top-priority units mark `canonical: true` in frontmatter. Canonical units get a 
 
 `open-question` is a Tier 2 unit type for unresolved questions whose answers shape the project: pending stakeholder decisions, awaited approvals, deliverables expected by a date, asks that need a response. Distinct from observation (a fact captured) and decision (a settled choice) — an open question is a known-unknown the project is waiting on.
 
-Frontmatter shape — same six required fields as other Tier 2 units (`id`, `type`, `status`, `created`, `updated`, `topics`), plus one optional field specific to open questions:
+Frontmatter shape — same six required fields as other Tier 2 units (`id`, `type`, `status`, `created`, `updated`, `topics`), plus optional fields specific to open questions (`by-when`; `deferrals` with `last_deferred`):
 
 ```yaml
 ---
@@ -156,6 +156,8 @@ before we can lock the spec.
 ```
 
 The `by-when` field is an optional ISO date (YYYY-MM-DD). When set on an `active` (unresolved) open-question and the date is in the past, the question is **stale**. Staleness is a retrieval signal, not a status — the unit stays `active` until resolved.
+
+The `deferrals` field is an optional integer: how many times the user has deferred answering this question, with `last_deferred` (ISO timestamp) alongside it. SKILL.md's persist-on-hard-questions ladder increments it each time a raised question gets deferred; the startup elapsed-time sweep surfaces any active open question with `deferrals: 2` or more. Without the field, no deferral has happened — absence means zero.
 
 Status lifecycle: `active` → `archived` (resolved with the answer captured elsewhere — usually a decision unit citing this one as `supersedes`-equivalent context) or `active` → `retired` (no longer relevant; the question stopped mattering).
 
