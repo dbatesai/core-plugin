@@ -225,6 +225,27 @@ export function storageMetrics(units, today) {
   // would predate the target's own t_valid — surfaced, never stamped).
   const { loose: looseEdges, conflicts } = classifySupersessions(units);
 
+  // SYN-006 consistency signal: a unit already terminal by status but with no
+  // t_invalid and no incoming supersedes/supersedes-claim edge can NEVER be
+  // stamped by the conservative writer — its t_invalid needs manual population
+  // (or the missing supersedes edge). Surfaced, never auto-stamped.
+  const supersededTargets = new Set();
+  for (const u of units) {
+    for (const e of extractEdges(u)) {
+      if (e.type === 'supersedes' || e.type === 'supersedes-claim')
+        supersededTargets.add(String(e.target).replace(/\.md$/, ''));
+    }
+  }
+  const unstampedTerminal = [];
+  for (const u of units) {
+    const status = String(u.fm.status || 'active').toLowerCase();
+    if (!TERMINAL_STATUSES.has(status)) continue;
+    if (u.fm.t_invalid) continue;
+    const id = basename(u.path, '.md');
+    if (!supersededTargets.has(id)) unstampedTerminal.push(id);
+  }
+  unstampedTerminal.sort();
+
   const total = units.length;
   const validNow = total - invalidated;
   intervals.sort((x, y) => x - y);
@@ -241,6 +262,8 @@ export function storageMetrics(units, today) {
     loose_edges: looseEdges,
     validity_conflicts: conflicts.length,            // supersession stamp would predate target t_valid (surfaced, never stamped)
     conflicts,
+    unstamped_terminal: unstampedTerminal.length,    // terminal status, no t_invalid, no incoming supersedes — manual-population candidates
+    unstamped_terminal_units: unstampedTerminal,
     churn_rate: total ? Math.round((invalidated / total) * 1000) / 1000 : 0,
     closed_interval_days: { count: intervals.length, mean, median, min: intervals[0] ?? null, max: intervals[intervals.length - 1] ?? null },
   };
@@ -291,6 +314,10 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
     if (m.loose_supersession_edges > 0) {
       process.stdout.write(`  ⚠ ${m.loose_supersession_edges} loose supersedes edge(s) — target still active (mis-typed edge or status-hygiene gap):\n`);
       for (const l of m.loose_edges) process.stdout.write(`      ${l.superseded_by} supersedes ${l.target} (status: ${l.target_status})\n`);
+    }
+    if (m.unstamped_terminal > 0) {
+      process.stdout.write(`  ⚠ ${m.unstamped_terminal} terminal unit(s) with no t_invalid and no incoming supersedes edge — populate t_invalid manually or add the supersedes edge:\n`);
+      for (const id of m.unstamped_terminal_units) process.stdout.write(`      ${id}\n`);
     }
     if (m.closed_interval_days.count) process.stdout.write(`  validity intervals (days): median ${m.closed_interval_days.median}, mean ${m.closed_interval_days.mean}, range ${m.closed_interval_days.min}–${m.closed_interval_days.max}\n`);
     process.exit(0);

@@ -246,6 +246,19 @@ test('storageMetrics counts invalidated, loose edges, and intervals', () => {
   assert.equal(m.closed_interval_days.count, 1);
 });
 
+test('SYN-006: storageMetrics counts terminal units the conservative writer can never stamp', () => {
+  const units = [
+    // terminal, no t_invalid, NO incoming supersedes — unreachable by the writer
+    unit({ id: 'dc-stranded', status: 'retired', created: '2026-01-01' }),
+    // terminal, no t_invalid, HAS incoming supersedes — the writer CAN stamp it
+    unit({ id: 'dc-covered', status: 'retired', created: '2026-01-01' }),
+    unit({ id: 'dc-new', status: 'active', created: '2026-02-01', edges: [{ type: 'supersedes', target: 'dc-covered' }] }),
+  ];
+  const m = storageMetrics(units, new Date(Date.UTC(2026, 5, 9)));
+  assert.equal(m.unstamped_terminal, 1);
+  assert.deepEqual(m.unstamped_terminal_units, ['dc-stranded']);
+});
+
 test('TERMINAL_STATUSES covers retired/superseded/archived', () => {
   assert.ok(TERMINAL_STATUSES.has('retired'));
   assert.ok(TERMINAL_STATUSES.has('superseded'));
