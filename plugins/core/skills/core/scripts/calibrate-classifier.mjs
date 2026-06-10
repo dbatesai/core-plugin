@@ -38,6 +38,26 @@ import { CLASSIFIER_VERSION } from './classify-turns.mjs';
 export const CALIBRATION_VERSION = '1.0.0';
 export const PRECISION_THRESHOLD = 0.7;
 export const MIN_LABELED = 100;
+export const MIN_LABELED_FLOOR = 30;
+
+/**
+ * MET-002 honesty fix: the 100-turn gate is structurally slow on a single-user
+ * install (the CORE-on-CORE pool sat at 57/100 after months), so PROVISIONAL is
+ * the EXPECTED steady state at that scale — not a failure to nag about. A
+ * workspace that wants a reachable gate sets `calibration_min_labeled` in
+ * <project>/workspace.json (floor 30: below that, per-class precision across six
+ * states is noise, and lowering further would launder confidence — the R-1 guard).
+ * REOPEN CONDITION for revisiting the 100 default: the pool clears 100 labeled
+ * turns anyway, or the install grows beyond a single user.
+ */
+export function resolveMinLabeled(project) {
+  try {
+    const p = JSON.parse(readFileSync(join(project, 'workspace.json'), 'utf8'));
+    const v = p?.calibration_min_labeled;
+    if (Number.isInteger(v) && v >= MIN_LABELED_FLOOR) return v;
+  } catch { /* fall through */ }
+  return MIN_LABELED;
+}
 
 // The six recognition states classify-turns can emit. M7: the gate must measure per-class
 // coverage against this canonical set so it can't clear while whole states sit unmeasured.
@@ -173,7 +193,7 @@ export function stratifiedSample(turns, count) {
 }
 
 /** Write a labeling worksheet for a set of classified turns. Returns the file path. */
-export function exportWorksheet({ project: _project, classifiedDir, calibrationDir, today, count = 200 }) {
+export function exportWorksheet({ project: _project, classifiedDir, calibrationDir, today, count = 200, minLabeled = MIN_LABELED }) {
   const all = collectClassifiedTurns(classifiedDir);
   if (!all.length) return { status: 'EMPTY', message: 'No classified turns yet — accumulate real sessions first.' };
 
@@ -207,7 +227,7 @@ export function exportWorksheet({ project: _project, classifiedDir, calibrationD
   const guide = [
     `# Calibration labeling worksheet — ${date}`,
     '',
-    `Generated: ${date} | Pool size: ${all.length} | Sample: ${sample.length} | Min needed: ${MIN_LABELED}`,
+    `Generated: ${date} | Pool size: ${all.length} | Sample: ${sample.length} | Min needed: ${minLabeled}`,
     '',
     '## Valid gold_state values',
     '- `tier-0-win` — agent had the answer at hand, no ladder walk needed',
@@ -238,7 +258,7 @@ export function exportWorksheet({ project: _project, classifiedDir, calibrationD
 }
 
 /** Read a labeled worksheet file, compute precision, write updated calibration state. */
-export function importLabels({ worksheetFile, metaDir }) {
+export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED }) {
   if (!existsSync(worksheetFile)) {
     return { status: 'ERROR', message: `Worksheet not found: ${worksheetFile}` };
   }
@@ -256,7 +276,7 @@ export function importLabels({ worksheetFile, metaDir }) {
   // M7: the gate also requires per-class coverage — every state present in the gold labels
   // must have been predicted at least once. Without this, a heuristic that emits only 2 of 6
   // states clears 0.7 on those 2 while the other 4 sit unmeasured.
-  const is_calibrated = p.labeled_count >= MIN_LABELED && p.overall !== null
+  const is_calibrated = p.labeled_count >= minLabeled && p.overall !== null
     && p.overall >= PRECISION_THRESHOLD && p.coverage_complete;
   const today = todayUTC();
   const state = {
@@ -265,6 +285,7 @@ export function importLabels({ worksheetFile, metaDir }) {
     is_calibrated,
     provisional: !is_calibrated,
     labeled_count: p.labeled_count,
+    min_labeled: minLabeled,
     overall_precision: p.overall !== null ? Math.round(p.overall * 1000) / 1000 : null,
     precision_by_state: Object.fromEntries(
       Object.entries(p.by_state).map(([s, v]) => [s, v !== null ? Math.round(v * 1000) / 1000 : null]),
@@ -274,8 +295,8 @@ export function importLabels({ worksheetFile, metaDir }) {
     updated_at: today,
     notes: is_calibrated
       ? `Calibrated ${today}. Overall precision: ${p.overall !== null ? Math.round(p.overall * 100) : '?'}% (cleared ${PRECISION_THRESHOLD} bar, all gold states measured).`
-      : p.labeled_count < MIN_LABELED
-        ? `${p.labeled_count} labeled turns (need ${MIN_LABELED}+). Precision: ${p.overall !== null ? Math.round(p.overall * 100) + '%' : 'n/a'}.`
+      : p.labeled_count < minLabeled
+        ? `${p.labeled_count} labeled turns (need ${minLabeled}+). Precision: ${p.overall !== null ? Math.round(p.overall * 100) + '%' : 'n/a'}.`
         : !p.coverage_complete
           ? `${p.labeled_count} labeled turns, precision ${p.overall !== null ? Math.round(p.overall * 100) : '?'}%, but ${p.unmeasured_gold_states.length} gold state(s) unmeasured (${p.unmeasured_gold_states.join(', ')}) — gate held until the heuristic predicts them.`
           : `${p.labeled_count} labeled turns. Precision ${p.overall !== null ? Math.round(p.overall * 100) : '?'}% did not clear ${PRECISION_THRESHOLD} bar.`,
@@ -293,17 +314,18 @@ export function importLabels({ worksheetFile, metaDir }) {
  * when to launch the labeling pass.
  */
 export function readinessReport({ project, home = homedir(), workspaceId }) {
+  const minLabeled = resolveMinLabeled(project);
   const wid = workspaceId || resolveWorkspaceId(project);
   const metaDir = operationalMetricsDir(wid, { home });
   const classifiedDir = join(metaDir, 'classified');
   const state = readCalibrationState(metaDir);
-  const turns = collectClassifiedTurns(classifiedDir, MIN_LABELED + 50);
+  const turns = collectClassifiedTurns(classifiedDir, minLabeled + 50);
   return {
     is_calibrated: state.is_calibrated,
     provisional: state.provisional,
     pool_size: turns.length,
-    min_needed: MIN_LABELED,
-    ready_to_label: turns.length >= MIN_LABELED,
+    min_needed: minLabeled,
+    ready_to_label: turns.length >= minLabeled,
     overall_precision: state.overall_precision,
     labeled_count: state.labeled_count,
     notes: state.notes,
@@ -345,7 +367,7 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
     const classifiedDir = join(metaDir, 'classified');
     const calibrationDir = join(project, '_metrics', 'calibration');
     const count = parseInt(opt('count') || '200', 10);
-    const r = exportWorksheet({ project, classifiedDir, calibrationDir, count });
+    const r = exportWorksheet({ project, classifiedDir, calibrationDir, count, minLabeled: resolveMinLabeled(project) });
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
     process.stdout.write(`calibrate-classifier: worksheet written — ${r.sample_count} turns from pool of ${r.pool_count}\n`);
     process.stdout.write(`  JSONL: ${r.jsonl_path}\n`);
@@ -358,7 +380,7 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
     if (!worksheetFile) { process.stdout.write('calibrate-classifier: --import-labels requires a file path\n'); process.exit(1); }
     const wid = resolveWorkspaceId(project);
     const metaDir = operationalMetricsDir(wid);
-    const r = importLabels({ worksheetFile, metaDir });
+    const r = importLabels({ worksheetFile, metaDir, minLabeled: resolveMinLabeled(project) });
     if (argv.includes('--json')) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(r.status === 'OK' ? 0 : 1); }
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
     process.stdout.write(`calibrate-classifier: ${r.is_calibrated ? '✔ CALIBRATED' : '○ still provisional'} — ${r.notes}\n`);
