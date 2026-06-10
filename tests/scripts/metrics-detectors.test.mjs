@@ -7,6 +7,7 @@ import {
   extractCitations, buildUnitIndex, resolveCitation, runCitationResolver,
   parseFrontmatter, extractReadUnitFilenames, runStaleContextTripwire,
   buildVocabulary, runAnticipationGap, isCommandInjection, runAbsenceWithDeadline,
+  runDetectors,
 } from '../../plugins/core/skills/core/scripts/metrics-detectors.mjs';
 
 // ---------------------------------------------------------------- helpers ---
@@ -332,4 +333,27 @@ test('runAnticipationGap dedupes terms within a single turn', () => {
       assert.equal(retrieval.length, 1, 'deduped within a turn');
     }
   });
+});
+
+test('MET-013: anticipation-gap records are stamped provisional + low severity at the source', () => {
+  const home = mkdtempSync(join(tmpdir(), 'md-prov-'));
+  const project = mkdtempSync(join(tmpdir(), 'md-proj-'));
+  try {
+    mkdirSync(join(project, '_memories'), { recursive: true });
+    writeFileSync(join(project, '_memories', 'dc-64-retrieval-ladder.md'), '---\ntype: decision\n---\n# ladder\n');
+    const slugDir = join(home, '.claude', 'projects', project.replace(/[/.]/g, '-'));
+    mkdirSync(slugDir, { recursive: true });
+    writeFileSync(join(slugDir, 'sess-d.jsonl'),
+      JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: 'tell me about the retrieval plan' }] } }) + '\n' +
+      JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: 'sure.' }] } }) + '\n');
+    const r = runDetectors({ project, harness: 'claude-code', home, sessionId: 'sess-d', workspaceId: 'md-prov-ws', env: {} });
+    assert.equal(r.status, 'OK');
+    for (const rec of r.records.filter((x) => x.detector === 'anticipation-gap')) {
+      assert.equal(rec.provisional, true, 'every anticipation-gap record self-declares heuristic status');
+      assert.equal(rec.severity, 'low');
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });

@@ -250,10 +250,10 @@ node "${CORE_ROOT}/skills/core/scripts/capability-probe.mjs" --startup --json 2>
   > ~/.core/workspaces/<id>/capability-state.json || true
 ```
 
-Then append this session's snapshot to the capability history — the per-session record that drift and regression analysis read at `/finalize` and `/process-memory`:
+Then append this session's snapshot to the capability history — the per-session record that drift and regression analysis read at `/finalize` and `/process-memory`: Fail-open but not silent: if both the home store and the project fallback fail, the script prints a one-line error to stderr — leave that visible rather than discarding it, so a dead snapshot path surfaces instead of failing invisibly for months.
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --workspace-id <id> 2>/dev/null || true
+node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --workspace-id <id> || true
 ```
 
 **Scaffold the metrics store (fail-open).** Once the workspace id is resolved, scaffold `_metrics/` so the observability substrate has somewhere to write — `log-event.mjs`'s OTel dual-write resolves its storage path from the pin file this writes, and on Windows+OneDrive this is what redirects payloads off the synced path. Idempotent and never fatal; a scaffold failure degrades metrics capture but never blocks the session.

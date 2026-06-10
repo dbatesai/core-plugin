@@ -73,3 +73,13 @@ test('a retrieval row missing tier_reached does not crash the tier distribution 
   assert.equal(report.tier_distribution.total, 1, 'tier-less row is counted in the distribution');
   assert.equal(report.tier_distribution.t1.count, 1, 'missing tier defaults to the T1 bucket');
 });
+
+test('MET-015: report header says calendar days and names the T1 exclusion rule', () => {
+  const report = buildReport([
+    { ts: '2026-06-09T10:00:00Z', tier_reached: 1, units_retrieved: [{ id: 'u1' }], intent_topics: ['x'], escalation_path: [1] },
+  ]);
+  const text = formatReport(report);
+  assert.match(text, /Calendar days with events/, 'no longer implies a session count');
+  assert.doesNotMatch(text, /Session dates in window/);
+  assert.match(text, /days with no retrieval events are excluded, not counted as perfect T1/i);
+});
