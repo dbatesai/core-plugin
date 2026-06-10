@@ -92,3 +92,7 @@ Bootstrap or health-check a CORE project for the current harness: confirm the in
 Skill prose references the abstract verb names (e.g., "spawn a team of critic + generator"). The agent resolves the verb against the loaded harness adapter and executes the concrete tool call. Universal verbs need no resolution — inference handles them.
 
 When extending CORE with a new feature that requires harness-specific machinery, name the verb here first, then add the per-harness mapping in each adapter file. If a verb cannot be mapped on a harness, name the drop with rationale in that adapter.
+
+## Minimum viable harness (named non-goal)
+
+This contract assumes a harness that can deliver the universal verbs against a real filesystem — at minimum `read`, `write`, `glob`, `grep`, and `shell`. A harness that cannot (a web-hosted chat surface with no filesystem) is **out of scope**: CORE's memory architecture is file-based, and there is no degraded in-memory mode. If `detect-harness()` matches no adapter, or the universal verbs themselves fail, say so plainly and stop — *"This environment can't run CORE: no filesystem access for the unit store."* — rather than limping through silently failing verbs. A filesystem-absent mode would be a new architecture decision (a DC with its own storage design), not an adapter file.
