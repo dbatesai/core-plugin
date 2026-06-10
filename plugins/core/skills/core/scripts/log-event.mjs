@@ -158,6 +158,38 @@ export function resolveSessionId({ explicit } = {}) {
   return 'no-session-context';
 }
 
+// MET-010: bound and sanitize what lands in metrics payloads. Project content
+// (unit ids, file paths, free text) reaches logEvent calls; without a cap, an
+// adversarial or just-huge value is serialized verbatim into the trace JSONL.
+export const MAX_ATTRIBUTE_STRING = 1000;
+const MAX_ATTRIBUTE_DEPTH = 4;
+const MAX_ATTRIBUTE_ENTRIES = 100;
+// C0 controls except \n (0x0A) and \t (0x09), plus DEL. JSON escaping makes them
+// inert on disk, but downstream renderers of the trace are not guaranteed to.
+const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+
+export function sanitizeAttributeValue(value, { maxLen = MAX_ATTRIBUTE_STRING, maxDepth = MAX_ATTRIBUTE_DEPTH } = {}) {
+  if (typeof value === 'string') {
+    const stripped = value.replace(CONTROL_CHARS_RE, '');
+    return stripped.length > maxLen
+      ? `${stripped.slice(0, maxLen)}…[truncated ${stripped.length - maxLen} chars]`
+      : stripped;
+  }
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (maxDepth <= 0) return '[depth-capped]';
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_ATTRIBUTE_ENTRIES).map((v) => sanitizeAttributeValue(v, { maxLen, maxDepth: maxDepth - 1 }));
+  }
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value).slice(0, MAX_ATTRIBUTE_ENTRIES)) {
+      out[sanitizeAttributeValue(k, { maxLen: 200, maxDepth: 1 })] = sanitizeAttributeValue(v, { maxLen, maxDepth: maxDepth - 1 });
+    }
+    return out;
+  }
+  return sanitizeAttributeValue(String(value), { maxLen, maxDepth });
+}
+
 /**
  * Convert a legacy event record into an OTel-format span line.
  *
@@ -173,7 +205,7 @@ export function eventToOtelSpan(event, { ts, sessionId } = {}) {
   if (sessionId) attributes['session.id'] = sessionId;
   for (const [k, v] of Object.entries(event)) {
     if (k === 'kind') continue;
-    attributes[`core.${k}`] = v;
+    attributes[`core.${k}`] = sanitizeAttributeValue(v);
   }
   return {
     schema_version: SCHEMA_VERSION,

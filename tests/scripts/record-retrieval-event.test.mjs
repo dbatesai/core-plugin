@@ -5,8 +5,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { recordRetrievalEvent } from '../../plugins/core/skills/core/scripts/record-retrieval-event.mjs';
+import { recordRetrievalEvent, normalizeRetrievalEvent } from '../../plugins/core/skills/core/scripts/record-retrieval-event.mjs';
 import { buildReport, loadEvents } from '../../plugins/core/skills/core/scripts/analyze-retrieval-quality.mjs';
+import { eventToOtelSpan, sanitizeAttributeValue, MAX_ATTRIBUTE_STRING } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 
 const PLUGIN_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const RECORD_RETRIEVAL_EVENT_SCRIPT = join(PLUGIN_ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', 'record-retrieval-event.mjs');
@@ -132,3 +133,38 @@ test('record-retrieval-event CLI writes an analyzer-visible row', () => withTemp
   assert.equal(result.status, 0, result.stderr);
   assert.equal(buildReport(loadEvents(root, { allTime: true })).retrieval_events, 1);
 }));
+
+test('MET-010: sanitizeAttributeValue caps string length with an explicit truncation marker', () => {
+  const long = 'x'.repeat(MAX_ATTRIBUTE_STRING + 4000);
+  const out = sanitizeAttributeValue(long);
+  assert.ok(out.length <= MAX_ATTRIBUTE_STRING + 40, 'bounded');
+  assert.match(out, /truncated 4000 chars/, 'truncation is visible, not silent');
+});
+
+test('MET-010: sanitizeAttributeValue strips control chars but keeps newlines/tabs', () => {
+  assert.equal(sanitizeAttributeValue('a\u0000b\u001bc\nd\te'), 'abc\nd\te');
+});
+
+test('MET-010: eventToOtelSpan sanitizes every promoted attribute, including nested objects', () => {
+  const span = eventToOtelSpan({
+    kind: 'retrieval',
+    note: 'y'.repeat(5000),
+    evil: 'a\u0000b\u001bc',
+    deep: { a: { b: { c: { d: { e: 'too deep' } } } } },
+  });
+  assert.ok(span.attributes['core.note'].length <= 1100);
+  assert.equal(span.attributes['core.evil'], 'abc');
+  assert.match(JSON.stringify(span.attributes['core.deep']), /depth-capped/);
+});
+
+test('MET-010: normalizeRetrievalEvent sanitizes unit ids and topics', () => {
+  const r = normalizeRetrievalEvent({
+    trigger: 'session-start',
+    intent_topics: ['memory\u0000-arch'],
+    tier_reached: 1,
+    escalation_path: [1],
+    units_retrieved: [{ id: 'dc-1\u001b-evil', tier: 1 }],
+  });
+  assert.equal(r.intent_topics[0], 'memory-arch');
+  assert.equal(r.units_retrieved[0].id, 'dc-1-evil');
+});
