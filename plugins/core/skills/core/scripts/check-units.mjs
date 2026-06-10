@@ -26,7 +26,7 @@
  *   node check-units.mjs <project-path> --include-observations
  *       (full-store audit incl. observations/ — used by /process-memory)
  *
- * Exit codes: 0 = all pass, 1 = warnings, 2 = failures, 3 = setup error.
+ * Exit codes: 0 = all pass, 1 = non-benign warnings, 2 = failures, 3 = setup error.
  */
 
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';

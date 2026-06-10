@@ -17,7 +17,7 @@ The user's task: $ARGUMENTS
 
 If your injected memory (the auto-loaded `MEMORY.md`) contains a line tagged `CORE-VISIBILITY-CANARY <token>`, your **first output this session** must echo that token on its own line — `VISIBILITY-CANARY-ECHO: <token>` — *before* you read any file, run the capability probe, or run any Bash/Grep/Glob. Echo it from what you already see in injected context; do **not** read `MEMORY.md` or the canary side-file to find it — reading a canary surface first defeats the proof. Loading this skill via the Skill tool is allowlisted and fine; a file read or shell command before the echo is not. If there is no canary line in your injected memory, skip this silently. The canary rides Claude Code's auto-memory injection; on a harness without that injection (Codex without `features.memories`), there is nothing to echo — skip silently. It's a harness-specific probe, not a cross-harness requirement.
 
-This is the runtime half of `capability/memory-visible-probe.mjs`: the next-session transcript shows the echo before any non-allowlisted tool, which is how the probe verifies memory was actually *in context*, not merely present on disk. (It proves visibility, not use — see the probe's `capability_name`.)
+This is the runtime half of `scripts/capability/memory-visible-probe.mjs`: the next-session transcript shows the echo before any non-allowlisted tool, which is how the probe verifies memory was actually *in context*, not merely present on disk. (It proves visibility, not use — see the probe's `capability_name`.)
 
 ---
 
@@ -89,7 +89,7 @@ Paths in this index resolve relative to the skill base directory (the one contai
 |---|---|---|
 | Startup | `protocols/startup.md` | Every session start, before accepting any task |
 | Startup conditional loads | `protocols/startup-conditional-loads.md` | Conditional-load — only when routing selects new-workspace or folder-rename (not read on a returning workspace) |
-| Harness adapter | `protocols/harness.md` | After startup; defines abstract verbs and points at the per-harness adapter |
+| Harness adapter | `protocols/harness.md` | At the start of startup's Identity load; defines abstract verbs and points at the per-harness adapter |
 | Workspace | `protocols/workspace.md` | Creating or resuming a workspace |
 | Data storage | `protocols/data-storage.md` | Before writing any unit, observation, or render |
 | Memory hygiene | `protocols/hygiene.md` | At `/finalize`, after meaningful change, on-demand |
@@ -101,7 +101,7 @@ Paths in this index resolve relative to the skill base directory (the one contai
 
 ### Harness adapter — read once at session start
 
-CORE runs on multiple LLM-agent harnesses. Skill prose uses abstract verb names; per-harness adapter files at `harnesses/<name>.md` resolve them to concrete tool calls. At session start, after bootstrap, run `detect-harness` (defined in `protocols/harness.md`) and load the matching `harnesses/<name>.md` adapter. Universal verbs (`read`, `write`, `shell`, etc.) need no adapter lookup — inference resolves them. Adapter verbs (`spawn-team`, `plan-task`, `notify-user`, etc.) require the mapping. Drops — capabilities one harness can't deliver — are named explicitly in each adapter with rationale. Read the drops list when you load the adapter; when a drop affects a requested operation, tell the user what isn't available and the fallback you're using, once per session per drop (`protocols/harness.md §Drop handling`).
+CORE runs on multiple LLM-agent harnesses. Skill prose uses abstract verb names; per-harness adapter files at `harnesses/<name>.md` resolve them to concrete tool calls. The startup protocol loads the adapter as the first step of its Identity load: run `detect-harness` (defined in `protocols/harness.md`) and read the matching `harnesses/<name>.md` adapter before using any adapter verb — `read-auto-memory`, the very next step, already needs it. Universal verbs (`read`, `write`, `shell`, etc.) need no adapter lookup — inference resolves them. Adapter verbs (`spawn-team`, `plan-task`, `notify-user`, etc.) require the mapping. Drops — capabilities one harness can't deliver — are named explicitly in each adapter with rationale. Read the drops list when you load the adapter; when a drop affects a requested operation, tell the user what isn't available and the fallback you're using, once per session per drop (`protocols/harness.md §Drop handling`).
 
 See `protocols/harness.md` for the verb contract.
 

@@ -452,6 +452,7 @@ export function main(argv) {
     if (argv[i] === '--from' && argv[i + 1]) from = argv[i + 1];
   }
   const row = resolvePluginRoot({ from });
+  // --print-root takes precedence over --json when both are passed.
   if (printRoot) {
     // Single-line contract for startup.md's resolver block (SYN-002): print the
     // plugin root with forward slashes — valid for Node on every platform and
