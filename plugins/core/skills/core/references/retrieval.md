@@ -82,6 +82,8 @@ The subagent runs its own Read + Grep + reasoning loop. It can follow edges or d
 
 The LLM reasoning inside the subagent IS the semantic layer. No precomputed embeddings. No vector store. The subagent handles synonymy, polysemy, negation, and context-dependent meaning in ways a vector similarity score cannot.
 
+**Degraded mode — no subagent tool available:** Some harnesses defer or omit the Agent/subagent tool, and it can be unavailable at retrieval time. Don't silently skip Tier 3 — run the same semantic pass inline: the DM performs an expanded Grep + Read loop over all topic-matched units (start from the Tier 1 lexical hits, widen the search terms with synonyms and adjacent vocabulary, read each candidate in full) and synthesizes the answer itself with file-path citations. Log the event with `tier_reached: 3` and `result: "degraded"` — or `result: "miss"` if nothing was found, since the event schema requires `miss` on an empty Tier 3 result — so retrieval-quality analysis can tell a true subagent pass from the inline fallback.
+
 **Cost discipline:** Tier 3 invocations cost tokens. Reserve for questions Tier 1+2 actually failed on. Every Tier 3 event — hit or miss — lands in the per-project retrieval log (`<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`) per the §Logging section below. The hygiene trip-wire check reads that log via `analyze-retrieval-quality.mjs` and detects repeated failures across sessions (per DC-67 trip-wire #3: documented repeated Explore-miss pattern earns a vector store).
 
 ---
@@ -161,6 +163,6 @@ Default window is 30 days. Output: tier distribution, top dip-back units (precis
 | Fact from current session context | 0 | (already loaded) |
 | Fact stored in a known unit | 1 | `Grep` + `Read` |
 | Chain of related decisions | 2 | typed-edge walk + `Read` |
-| Conceptual / fuzzy question | 3 | Explore subagent |
+| Conceptual / fuzzy question | 3 | Explore subagent — inline Grep+Read fallback when no subagent tool, logged `result: "degraded"` |
 | Walk terminated unexpectedly | — | Check R·S proxy; if < 0.3 the branch was pruned (correct behavior) |
 | Tier 3 fired more than once on similar queries | — | Trip-wire signal; memory hygiene will flag |
