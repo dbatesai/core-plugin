@@ -4,7 +4,7 @@ import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'nod
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { main } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
+import { main, spliceSection } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
 
 const SRC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/generate-memory-index.mjs'),
@@ -106,4 +106,11 @@ test('H1: MEMORY.md write routes through atomicWriteFileSync, not a bare write',
   assert.match(SRC, /from '\.\/fs-atomic\.mjs'/, 'imports the atomic writer');
   assert.match(SRC, /atomicWriteFileSync\(memoryMdPath/, 'writes MEMORY.md atomically');
   assert.doesNotMatch(SRC, /\bwriteFileSync\(memoryMdPath/, 'no bare writeFileSync on the irreplaceable MEMORY.md surface');
+});
+
+test('MEM-020: splice ends with exactly one trailing newline when the section is last', () => {
+  const md = '# idx\n\n## Top project units (refreshed 2026-06-01)\n\n- [a](a.md) — one';
+  const out = spliceSection(md, '## Top project units (refreshed 2026-06-09)\n\n- [b](b.md) — two\n');
+  assert.match(out, /two\n$/, 'POSIX final newline present');
+  assert.doesNotMatch(out, /\n\n$/, 'exactly one, not several');
 });

@@ -214,6 +214,15 @@ function ensureArchiveFile(projectDir) {
   return path;
 }
 
+// MEM-013: crash-retry idempotency — mirror of alreadyArchived in
+// demote-moves.mjs. Archive append happens before the PROJECT.md write; a
+// crash between the two would otherwise duplicate the block on retry.
+function alreadyArchived(archivePath, bullet) {
+  let text;
+  try { text = readFileSync(archivePath, 'utf8'); } catch { return false; }
+  return text.includes(bullet.rawLines.join('\n'));
+}
+
 function appendToArchiveState(archivePath, block) {
   let text = readFileSync(archivePath, 'utf8');
   const headingIdx = text.indexOf(ARCHIVE_STATE_HEADING);
@@ -323,8 +332,11 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
   if (!apply || demotions.length === 0) return stats;
 
   const archivePath = ensureArchiveFile(projectDir);
-  const block = renderArchiveBlock(demotions, todayIso);
-  appendToArchiveState(archivePath, block);
+  const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));
+  if (freshDemotions.length) {
+    const block = renderArchiveBlock(freshDemotions, todayIso);
+    appendToArchiveState(archivePath, block);
+  }
 
   const newState = rewriteStateWithStubs(state, bullets, demotions, todayIso);
   const beforeState = text.indexOf(state);

@@ -46,9 +46,10 @@
  *   node bitemporal.mjs <project> --metrics            storage-health rollup
  */
 
-import { readFileSync, writeFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 import {
   extractEdges, parseIsoDate,
   effectiveValidity, validAt, isInvalidated,
@@ -185,7 +186,7 @@ export function applySupersessionStamps(stamps) {
     try {
       const text = readFileSync(s.path, 'utf8');
       const next = setFrontmatterField(text, 't_invalid', s.t_invalid);
-      if (next !== text) { writeFileSync(s.path, next); written += 1; }
+      if (next !== text) { atomicWriteFileSync(s.path, next); written += 1; }
     } catch { /* best-effort per-unit */ }
   }
   return written;

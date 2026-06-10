@@ -250,3 +250,19 @@ test('SYN-005: strict mode demotes when the cited unit is retired (the schema te
   // Pre-fix: keep/cited-unit-still-active, because 'retired' was missing from the terminal array.
   assert.equal(r.decision, 'demote');
 });
+
+test('MEM-013: crash-retry does not duplicate the archive block', () => {
+  const dir = scratchProject();
+  const original = ['# P', '', '## Moves', '',
+    '- [x] **Old thing 2026-03-01** — done.', '', '## Notes', ''].join('\n');
+  writeFileSync(join(dir, 'PROJECT.md'), original);
+
+  demoteMoves(dir, { today: TODAY });               // completes: archive + stub
+  writeFileSync(join(dir, 'PROJECT.md'), original); // simulate crash AFTER archive append, BEFORE PROJECT.md write
+  const retry = demoteMoves(dir, { today: TODAY });
+
+  assert.equal(retry.demoted, 1, 'retry still stubs the bullet');
+  const archive = readFileSync(join(dir, 'PROJECT-ARCHIVE.md'), 'utf8');
+  assert.equal((archive.match(/Old thing 2026-03-01/g) || []).length, 1, 'archived exactly once');
+  assert.match(readFileSync(join(dir, 'PROJECT.md'), 'utf8'), /→ see `PROJECT-ARCHIVE\.md §Moves/);
+});

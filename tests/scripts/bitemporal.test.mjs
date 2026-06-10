@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadUnit } from '../../plugins/core/skills/core/scripts/priority.mjs';
@@ -257,6 +257,19 @@ test('SYN-006: storageMetrics counts terminal units the conservative writer can 
   const m = storageMetrics(units, new Date(Date.UTC(2026, 5, 9)));
   assert.equal(m.unstamped_terminal, 1);
   assert.deepEqual(m.unstamped_terminal_units, ['dc-stranded']);
+});
+
+const BITEMPORAL_SRC = readFileSync(
+  new URL('../../plugins/core/skills/core/scripts/bitemporal.mjs', import.meta.url), 'utf8');
+
+test('MEM-009: unit stamps route through atomicWriteFileSync, never a bare writeFileSync', () => {
+  // An interrupted bare write truncates the unit — body and frontmatter gone.
+  // Crash-safety is not behaviorally testable without fault injection
+  // (fs-atomic.test.mjs covers the helper), so this is the static guard the
+  // suite already uses for MEMORY.md (generate-memory-index H1).
+  assert.match(BITEMPORAL_SRC, /from '\.\/fs-atomic\.mjs'/, 'imports the atomic writer');
+  assert.match(BITEMPORAL_SRC, /atomicWriteFileSync\(s\.path/, 'stamps written atomically');
+  assert.doesNotMatch(BITEMPORAL_SRC, /\bwriteFileSync\(s\.path/, 'no bare write on unit files');
 });
 
 test('TERMINAL_STATUSES covers retired/superseded/archived', () => {

@@ -141,12 +141,16 @@ export function spliceSection(memoryMdText, newSection) {
   const newLines = newSection.split('\n');
   while (newLines.length && newLines[newLines.length - 1] === '') newLines.pop();
   const trailingBlank = endIdx < lines.length ? [''] : [];
-  return [
+  const out = [
     ...lines.slice(0, startIdx),
     ...newLines,
     ...trailingBlank,
     ...lines.slice(endIdx),
   ].join('\n');
+  // MEM-020: when the spliced section is last in the file, the join ends with
+  // no final newline — breaking POSIX convention and causing diff churn on the
+  // next edit. Normalize to exactly one trailing newline.
+  return out.replace(/\n*$/, '\n');
 }
 
 // Cross-project contamination guard.

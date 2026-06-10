@@ -302,6 +302,17 @@ function appendToArchiveMoves(archivePath, block) {
   atomicWriteFileSync(archivePath, text);
 }
 
+// MEM-013: crash-retry idempotency. The write order is archive-append THEN
+// PROJECT.md (deliberate — see the M4 note below); a crash between the two
+// leaves the bullets archived but still on the agenda, and a retry would
+// append a duplicate archive block. Skip any bullet whose exact raw lines are
+// already in the archive; the retry still stubs it out of PROJECT.md.
+export function alreadyArchived(archivePath, bullet) {
+  let text;
+  try { text = readFileSync(archivePath, 'utf8'); } catch { return false; }
+  return text.includes(bullet.rawLines.join('\n'));
+}
+
 // ---------- Public API ----------
 
 export function demoteMoves(projectDir, { today, dryRun = false, strict = false, applyLargeBatch = false } = {}) {
@@ -378,8 +389,11 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   }
 
   const archivePath = ensureArchiveFile(projectDir);
-  const block = renderArchiveBlock(demotions, todayIso);
-  appendToArchiveMoves(archivePath, block);
+  const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));
+  if (freshDemotions.length) {
+    const block = renderArchiveBlock(freshDemotions, todayIso);
+    appendToArchiveMoves(archivePath, block);
+  }
 
   const newMoves = rewriteMovesWithStubs(moves, bullets, demotions, todayIso);
   const beforeMoves = text.indexOf(moves);
