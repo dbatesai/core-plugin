@@ -312,9 +312,9 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 DC-85 defines three filter steps (relevance → extraction → confidence judgment). The framework requires these three judgments happen in order; it does not require they happen in separate processes.
 
-An installation may dispatch each step as a subagent (per DC-82 model-tier matrix — Haiku filter, Sonnet extraction, Sonnet confidence judgment). Or it may run all three inline in a single agent context. The choice is installation-level and is governed by performance/cost considerations the installation owns.
+An installation may dispatch each step as a subagent (per the model-tier matrix in `references/model-assignments.md` — Haiku filter, Sonnet extraction, Sonnet confidence judgment). Or it may run all three inline in a single agent context. The choice is installation-level and is governed by performance/cost considerations the installation owns.
 
-DC-82's model-assignment matrix becomes a **reference for installations**, not a prescription. CORE recommends; installations decide.
+Installations treat the model-assignment matrix (`references/model-assignments.md`) as a starting point rather than a prescription. CORE recommends; installations decide.
 
 ---
 

@@ -37,7 +37,7 @@ Compose fresh personas for the task's specific shape. Saved compositions at `~/.
 
 ## Anti-anchoring enforcement
 
-The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the empirically observed 84.5% sycophancy flip rate in LLM critics.
+The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the sycophancy measured in the project's independent-analysis runs, where LLM critics reversed their position 84.5% of the time under social pressure (`references/architecture-doctrines.md` cites the same findings).
 
 Operational pattern:
 
