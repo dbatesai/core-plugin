@@ -191,3 +191,17 @@ jobs:
             if (broken) { console.error(broken + " broken link(s)"); process.exit(1); }
             console.log("checked " + docs.length + " markdown files, all links resolve");
           '
+
+  test:
+    name: test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run node test suite
+        shell: bash
+        run: node --test tests/scripts/*.test.mjs
