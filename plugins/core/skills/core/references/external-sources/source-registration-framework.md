@@ -352,7 +352,7 @@ None initially. If the file grows past a threshold (say 50MB), a hygiene pass at
 
 ### Read protocol
 
-`/finalize` reads the log at session close to surface monitoring signals per DC-85 spec section 9. A CORE script (`scripts/analyze-source-pull-log.mjs`, to be drafted) aggregates per-source statistics over a window and produces a brief report integrated into `/finalize`'s output.
+`/finalize` reads the log at session close to surface monitoring signals per DC-85 spec section 9. This is wired: the finalize skill's Step 3 "Source-pull monitoring" bullet runs `scripts/analyze-source-pull-log.mjs --workspace <id>` whenever `<project>/_sources/` exists, aggregating the last 14 days and surfacing only actionable signals (a registered source with no pulls in window, a climbing error count, Mode-C distribution above ~30%). Wrapper authors can rely on monitoring being operational on any install that runs `/finalize`.
 
 ---
 
@@ -362,7 +362,7 @@ Three artifacts CORE ships in support of the framework:
 
 1. **This framework document.** The contract.
 2. **`references/confidence-assignment-guide.md`.** Pattern catalog for confidence-level assignment, source-category-agnostic, pattern-anchored. Installations reference this when implementing extractors.
-3. **`scripts/analyze-source-pull-log.mjs`.** Monitoring log analyzer; reads the JSONL, produces aggregate statistics. Used by `/finalize` and on-demand.
+3. **`scripts/analyze-source-pull-log.mjs`.** Monitoring log analyzer; reads the JSONL, produces aggregate statistics. Wired into `/finalize` (Step 3, "Source-pull monitoring") and available on-demand.
 
 These three plus the existing observation schema, DC-70 promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
 
