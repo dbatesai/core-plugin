@@ -118,7 +118,9 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
   }
 
   const nowIso = now.toISOString();
-  const newDataPath = `~/.core/workspaces/${newId}/`;
+  // Expanded absolute path (HARNESS-007): Node never expands ~, so the pointer
+  // must carry a consumer-usable path. coreDir honors --core-dir overrides.
+  const newDataPath = join(coreDir, 'workspaces', newId) + '/';
 
   // H3: the fork mutates three surfaces. checkFork resolves PATH-MATCH (an index entry whose
   // path == cwd) BEFORE id-match, so the index entry is what makes a fork "stick" on the next
