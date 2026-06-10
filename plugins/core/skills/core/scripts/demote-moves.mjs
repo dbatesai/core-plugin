@@ -39,7 +39,11 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
 
-export const TERMINAL_STATUSES = ['resolved', 'archived', 'superseded', 'closed'];
+// Terminal statuses come from the shared vocabulary (SYN-005): retired/archived/
+// superseded. 'resolved'/'closed' were never schema statuses and no longer gate;
+// 'retired' — the schema's actual done-status — now demotes (it never did before).
+export { TERMINAL_STATUSES } from './unit-vocab.mjs';
+import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 export const CLOSE_AGE_DAYS = 30;
 export const LARGE_BATCH_WARNING_THRESHOLD = 20;
 export const ARCHIVE_FILE = 'PROJECT-ARCHIVE.md';
@@ -197,7 +201,7 @@ function classifyBulletStrict(bullet, memoriesDir, todayIso) {
   if (refs.length === 0) return { decision: 'keep', reason: 'no-backing-units' };
   const units = refs.map(id => readUnit(memoriesDir, id));
   if (units.some(u => u === null)) return { decision: 'keep', reason: 'missing-cited-unit', refs };
-  const stillActive = units.find(u => !TERMINAL_STATUSES.includes(String(u.fm.status || 'active').toLowerCase()));
+  const stillActive = units.find(u => !TERMINAL_STATUSES.has(String(u.fm.status || 'active').toLowerCase()));
   if (stillActive) return { decision: 'keep', reason: 'cited-unit-still-active', activeUnit: stillActive.id };
   const dates = units.map(u => u.fm.updated || u.fm.created).filter(Boolean).sort();
   if (dates.length === 0) return { decision: 'keep', reason: 'no-updated-dates' };

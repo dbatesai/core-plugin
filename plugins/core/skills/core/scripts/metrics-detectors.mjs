@@ -11,7 +11,7 @@
  *
  *   stale-context        — every unit the agent read (via tool calls) that hasn't been
  *                          updated in > STALE_THRESHOLD_DAYS AND whose status is not
- *                          final/stable. Flags stale material presented as current.
+ *                          terminal/durably-correct. Flags stale material presented as current.
  *
  *   anticipation-gap     — project-vocabulary terms the user had to introduce because
  *                          the agent hadn't surfaced them first. Heuristic proxy for
@@ -29,6 +29,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 
 export const DETECTOR_VERSION = '0.2.0';
 
@@ -99,7 +100,12 @@ export function runCitationResolver(events, index) {
 
 export const STALE_THRESHOLD_DAYS = 30;
 
-const STABLE_STATUSES = new Set(['final', 'stable', 'foundational', 'closed', 'archived', 'superseded']);
+// A unit is "stable" for stale-context purposes when its status is terminal
+// (the schema's retired/archived/superseded — shared vocab, SYN-005) or its
+// stability-class is the schema's durably-correct. The old STABLE_STATUSES set
+// ('final','stable','foundational','closed',…) matched no schema value, so
+// out-of-schema statuses silently exempted units from the tripwire.
+const STABLE_STABILITY_CLASSES = new Set(['durably-correct']);
 
 /** Parse the minimal frontmatter we need from a unit file. */
 export function parseFrontmatter(content) {
@@ -124,8 +130,8 @@ function daysBetween(dateStr, today) {
 }
 
 function isStableUnit(fm) {
-  return STABLE_STATUSES.has((fm.status || '').toLowerCase()) ||
-    STABLE_STATUSES.has((fm['stability-class'] || '').toLowerCase());
+  return TERMINAL_STATUSES.has((fm.status || '').toLowerCase()) ||
+    STABLE_STABILITY_CLASSES.has((fm['stability-class'] || '').toLowerCase());
 }
 
 /**

@@ -162,11 +162,12 @@ test('runAbsenceWithDeadline flags active open-questions past their by-when', ()
   );
 });
 
-test('runStaleContextTripwire skips stable/final units regardless of age', () => {
+test('runStaleContextTripwire skips terminal/durably-correct units regardless of age', () => {
+  // fixtures changed from the out-of-schema 'final'/'stable' (SYN-005)
   withStore(
     {
-      'dc-final.md': unitContent({ status: 'final', updated: '2020-01-01' }),
-      'dc-stable.md': unitContent({ status: 'active', updated: '2020-01-01', stabilityClass: 'stable' }),
+      'dc-final.md': unitContent({ status: 'retired', updated: '2020-01-01' }),
+      'dc-stable.md': unitContent({ status: 'active', updated: '2020-01-01', stabilityClass: 'durably-correct' }),
     },
     (mem) => {
       const events = [
@@ -174,7 +175,18 @@ test('runStaleContextTripwire skips stable/final units regardless of age', () =>
         { kind: 'tool', text: '_memories/dc-stable.md' },
       ];
       const stale = runStaleContextTripwire(events, mem, '2026-06-02', 30);
-      assert.equal(stale.length, 0, 'stable/final units exempt from stale-context');
+      assert.equal(stale.length, 0, 'terminal/durably-correct units exempt from stale-context');
+    },
+  );
+});
+
+test('SYN-005: out-of-schema status final is NOT stable — an aged final unit trips stale-context', () => {
+  withStore(
+    { 'dc-bogus.md': unitContent({ status: 'final', updated: '2020-01-01' }) },
+    (mem) => {
+      const events = [{ kind: 'tool', text: '_memories/dc-bogus.md' }];
+      const stale = runStaleContextTripwire(events, mem, '2026-06-02', 30);
+      assert.ok(stale.length >= 1, 'out-of-schema final must not exempt the unit from the tripwire');
     },
   );
 });

@@ -66,7 +66,9 @@ export { effectiveValidity, validAt, isInvalidated };
 
 // ---------- supersession classification (shared by writer + metrics) ----------
 
-export const TERMINAL_STATUSES = new Set(['retired', 'superseded', 'archived']);
+// Shared terminal-status contract (SYN-005): one definition in unit-vocab.mjs.
+export { TERMINAL_STATUSES } from './unit-vocab.mjs';
+import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 
 /**
  * Walk every supersedes edge B→A and classify it. A supersedes edge alone does

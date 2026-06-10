@@ -267,3 +267,35 @@ test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail 
   // Clean → 0.
   assert.equal(exitCode([]), 0);
 });
+
+test('SYN-005: unknown confidence-level and stability-class values WARN', () => withStore((memories) => {
+  writeFileSync(join(memories, 'annotated.md'), [
+    '---', 'id: annotated', 'type: observation', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'confidence-level: banana',
+    'stability-class: garbage',
+    '---', '', '# annotated', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.check === 'confidence-level-value'), 'banana must WARN');
+  assert.ok(report.some(f => f.check === 'stability-class-value'), 'garbage must WARN');
+}));
+
+test('SYN-005: schema confidence-level and stability-class values pass clean', () => withStore((memories) => {
+  writeFileSync(join(memories, 'clean.md'), [
+    '---', 'id: clean', 'type: observation', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'confidence-level: sourced',
+    'proposed-stability-class: durably-correct',
+    '---', '', '# clean', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.equal(report.some(f => f.check === 'confidence-level-value'), false);
+  assert.equal(report.some(f => f.check === 'stability-class-value'), false);
+}));

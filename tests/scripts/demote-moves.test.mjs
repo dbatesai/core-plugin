@@ -242,3 +242,11 @@ test('--strict end-to-end keeps a cited-active item that the loosened default de
     assert.equal(demoteMoves(dir, { today: TODAY }).demoted, 1, 'loosened default demotes it');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('SYN-005: strict mode demotes when the cited unit is retired (the schema terminal status)', () => {
+  const dir = scratchProject({ 'dc-50-old': { status: 'retired', updated: '2026-03-01' } });
+  const b = bullet('- [x] **Closed an old decision** — see `dc-50-old`.');
+  const r = classifyBullet(b, dir, { today: TODAY, strict: true });
+  // Pre-fix: keep/cited-unit-still-active, because 'retired' was missing from the terminal array.
+  assert.equal(r.decision, 'demote');
+});

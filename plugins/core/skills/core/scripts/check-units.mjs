@@ -35,32 +35,17 @@ import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.m
 // ---------- Schema constants ----------
 
 export const REQUIRED_FIELDS = new Set(['id', 'type', 'status', 'created', 'updated', 'topics']);
-export const VALID_STATUSES = new Set(['active', 'retired', 'archived', 'superseded']);
-export const VALID_TYPES = new Set([
-  'decision', 'risk', 'person', 'deliverable', 'principle',
-  'explainer', 'review-finding', 'observation', 'topic', 'reference',
-  'feedback', 'memory', 'open-question',
-]);
-export const VALID_EDGE_TYPES = new Set([
-  'cites', 'supersedes', 'superseded-by', 'depends-on', 'conflicts-with',
-  'references-person', 'references-topic',
-  'depended-on-by', 'supersedes-claim',
-  // Blessed 2026-06-03 (2-corpus evidence, obs-20260603-edge-type-validation-gap-cross-corpus):
-  // both are semantically distinct from supersedes — 'refines' sharpens/elaborates a prior
-  // decision without replacing it (CORE); 'amends' modifies specific parts while the prior
-  // stands (local-llm-build / BBLens). Distinct intent → first-class, not relabeled away.
-  'refines', 'amends',
-]);
 
-// Weak/informal edge types that carry no distinct semantics — normalize to a committed type
-// rather than blessing a near-synonym. The /process-memory safe-fix flow applies these as an
-// applyable relabel (the resolution path the cross-corpus gap report asked for); the validator
-// names the target in the edge-unknown-type detail so the fix is mechanical, not a guess.
-export const EDGE_TYPE_NORMALIZE = {
-  'relates': 'cites',
-  'relates-to': 'cites',
-  'related': 'cites',
-};
+// Vocabulary constants live in unit-vocab.mjs (SYN-005 unification) and are
+// re-exported here so every existing importer and test keeps working.
+export {
+  VALID_STATUSES, TERMINAL_STATUSES, VALID_TYPES, VALID_EDGE_TYPES,
+  EDGE_TYPE_NORMALIZE, VALID_CONFIDENCE_LEVELS, VALID_STABILITY_CLASSES,
+} from './unit-vocab.mjs';
+import {
+  VALID_STATUSES, VALID_TYPES, VALID_EDGE_TYPES, EDGE_TYPE_NORMALIZE,
+  VALID_CONFIDENCE_LEVELS, VALID_STABILITY_CLASSES,
+} from './unit-vocab.mjs';
 
 // Edge targets that legitimately live OUTSIDE the project unit store. The integrity
 // walk would otherwise flag these as dangling (see obs-validator-cross-store-blindness):
@@ -151,6 +136,18 @@ export function checkSchema(units, memoriesDir, report) {
     const typ = String(u.fm.type || '').toLowerCase();
     if (typ && !VALID_TYPES.has(typ))
       report.push({ level: 'WARN', check: 'type-value', unit_id: uid, detail: `Unknown type '${typ}'` });
+
+    // confidence-level / stability-class — typed by the source-registration
+    // framework but previously unvalidated: a unit could carry
+    // confidence-level: banana and pass everything (SYN-005 / SCH-003).
+    const conf = String(u.fm['confidence-level'] || '').toLowerCase();
+    if (conf && !VALID_CONFIDENCE_LEVELS.has(conf))
+      report.push({ level: 'WARN', check: 'confidence-level-value', unit_id: uid, detail: `Unknown confidence-level '${conf}' (expected: ${[...VALID_CONFIDENCE_LEVELS].sort().join(', ')})` });
+    for (const scField of ['stability-class', 'proposed-stability-class']) {
+      const sc = String(u.fm[scField] || '').toLowerCase();
+      if (sc && !VALID_STABILITY_CLASSES.has(sc))
+        report.push({ level: 'WARN', check: 'stability-class-value', unit_id: uid, detail: `Unknown ${scField} '${sc}' (expected: ${[...VALID_STABILITY_CLASSES].sort().join(', ')})` });
+    }
 
     const topics = u.fm.topics;
     if (topics !== undefined && topics !== null && !Array.isArray(topics))
