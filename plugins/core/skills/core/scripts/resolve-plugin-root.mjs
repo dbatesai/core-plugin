@@ -436,11 +436,26 @@ function buildRow(f) {
 
 export function main(argv) {
   const asJson = argv.includes('--json');
+  const printRoot = argv.includes('--print-root');
   let from;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--from' && argv[i + 1]) from = argv[i + 1];
   }
   const row = resolvePluginRoot({ from });
+  if (printRoot) {
+    // Single-line contract for startup.md's resolver block (SYN-002): print the
+    // plugin root with forward slashes — valid for Node on every platform and
+    // safe to interpolate under bash, zsh, Git-Bash, PowerShell, and CMD — or
+    // print nothing and exit 2. Root LOCATION is knowable even when identity is
+    // DEGRADED; quality is a separate dimension consumers read via --json.
+    if (row.manifest_path) {
+      const root = dirname(dirname(row.manifest_path)).replace(/\\/g, '/');
+      process.stdout.write(root + '\n');
+      return 0;
+    }
+    process.stderr.write('CORE-ROOT-UNRESOLVED: no plugin manifest found walking up from this script\n');
+    return 2;
+  }
   if (asJson) {
     process.stdout.write(JSON.stringify(row, null, 2) + '\n');
   } else {

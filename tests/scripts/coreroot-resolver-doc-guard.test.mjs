@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, realpathSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +17,8 @@ import { execFileSync } from 'node:child_process';
 //   A. static doc-guard — the footgun pattern stays out, the guards stay in
 //   B. live smoke — the ACTUAL resolver block from the doc runs under a fixture
 //      HOME and resolves correctly (this leg would have caught the SyntaxError)
-//   C. transform unit — the bash separator swap turns backslashes into slashes
+//   C. delegation guard — the block delegates to resolve-plugin-root.mjs
+//      --print-root (SYN-002), with the env var demoted to script-locating only
 // The Windows-Git-Bash leg is Meridian's on-box smoke; it cannot run on macOS CI.
 
 const STARTUP = join(
@@ -26,40 +27,29 @@ const STARTUP = join(
 );
 const md = readFileSync(STARTUP, 'utf8');
 
-// Extract the first ```bash fenced block that contains the installed_plugins.json
-// fallback — that's the resolver block.
+// Extract the first ```bash fenced block that contains the --print-root call —
+// that's the resolver block (SYN-002: single node call, no inline node -e).
 function resolverBlock(src) {
   const blocks = [...src.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]);
-  const block = blocks.find((b) => b.includes('installed_plugins.json'));
-  assert.ok(block, 'resolver bash block (with installed_plugins.json) found in startup.md');
+  const block = blocks.find((b) => b.includes('--print-root'));
+  assert.ok(block, 'resolver bash block (with --print-root) found in startup.md');
   return block;
 }
 
-// Isolate the `node -e "..."` payload from the resolver block.
-function nodePayload(block) {
-  const m = block.match(/node -e "([\s\S]*?)"\s*\)/);
-  assert.ok(m, 'node -e payload found in resolver block');
-  return m[1];
-}
-
-test('A1: resolver node -e payload contains no backslash (the exact Windows footgun)', () => {
-  const payload = nodePayload(resolverBlock(md));
-  assert.ok(
-    !payload.includes('\\'),
-    'no backslash may appear inside the double-quoted node -e payload — it collapses in-shell and SyntaxErrors',
-  );
-  assert.ok(
-    !/replace\(\//.test(payload),
-    'no regex-replace separator swap inside node -e — do the swap in bash instead',
-  );
+test('A1: resolver block contains no inline node -e payload (the Windows quoting footgun class)', () => {
+  const block = resolverBlock(md);
+  assert.ok(!block.includes('node -e'), 'no inline node -e — resolution lives in resolve-plugin-root.mjs');
+  assert.ok(!block.includes('\\\\'), 'no escaped-backslash sequences in the block');
 });
 
-test('A2: separator normalization happens in bash, not node', () => {
+test('A2: no bash-only separator normalization remains (script normalizes)', () => {
+  assert.ok(!md.includes('${CORE_ROOT//'), 'bash parameter-expansion swap removed from startup.md — --print-root prints forward slashes');
+});
+
+test('C1: resolver block delegates to --print-root with the env-var fallback for locating the script', () => {
   const block = resolverBlock(md);
-  assert.ok(
-    block.includes('${CORE_ROOT//\\\\//}'),
-    'bash parameter-expansion separator swap (${CORE_ROOT//\\\\//}) is present',
-  );
+  assert.match(block, /resolve-plugin-root\.mjs" --print-root/, 'primary --print-root call present');
+  assert.match(block, /\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/core\/scripts\/resolve-plugin-root\.mjs/, 'env-var fallback locates the script, never asserts the root');
 });
 
 test('A3: the structural gate and loud marker are present', () => {
@@ -110,32 +100,32 @@ test('A5: readiness surfacing for an unresolved root is loud, not silent', () =>
   );
 });
 
-// ---- Leg B: live smoke. Run the ACTUAL resolver block under a fixture HOME. ----
+// ---- Leg B: live smoke. Run the ACTUAL resolver block under a fixture HOME,
+// pre-substituting <PLUGIN_ROOT> the way the agent does from the SKILL.md header. ----
 
-function fixtureHome({ installSubdir, withScripts }) {
+const REAL_RESOLVER = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..', '..', 'plugins', 'core', 'skills', 'core', 'scripts', 'resolve-plugin-root.mjs',
+);
+
+function fixtureHome({ withScripts }) {
   const home = mkdtempSync(join(tmpdir(), 'coreroot-fixture-'));
-  const installPath = join(home, installSubdir);
+  const installPath = join(home, 'install');
   if (withScripts) {
-    mkdirSync(join(installPath, 'skills', 'core', 'scripts'), { recursive: true });
-    // The resolver's tier-2 `-f workspace-fork-check.mjs` check is bypassed
-    // (we force tier 3), but the final `-d scripts` gate must see a real dir.
-    writeFileSync(join(installPath, 'skills', 'core', 'scripts', 'workspace-fork-check.mjs'), '// fixture\n');
+    const scriptsDir = join(installPath, 'skills', 'core', 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    cpSync(REAL_RESOLVER, join(scriptsDir, 'resolve-plugin-root.mjs'));
+    mkdirSync(join(installPath, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(installPath, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name: 'core', version: '0.0.0-fixture' }));
   } else {
     mkdirSync(installPath, { recursive: true });
   }
-  const pluginsDir = join(home, '.claude', 'plugins');
-  mkdirSync(pluginsDir, { recursive: true });
-  const manifest = {
-    plugins: { 'core@core': [{ scope: 'user', installPath }] },
-  };
-  writeFileSync(join(pluginsDir, 'installed_plugins.json'), JSON.stringify(manifest));
   return { home, installPath };
 }
 
-// Run the resolver block verbatim, forcing tier 3 (literal <PLUGIN_ROOT> won't
-// exist, CLAUDE_PLUGIN_ROOT unset), and echo the final CORE_ROOT state.
-function runResolver(home) {
-  const block = resolverBlock(md);
+function runResolver(home, pluginRootSub) {
+  const block = resolverBlock(md).replaceAll('<PLUGIN_ROOT>', pluginRootSub);
   const script = `${block}\nprintf 'RESULT:%s\\n' "$CORE_ROOT"`;
   return execFileSync('bash', ['-c', script], {
     env: { HOME: home, PATH: process.env.PATH },
@@ -143,37 +133,28 @@ function runResolver(home) {
   });
 }
 
-test('B1: resolver block executes under a fixture (no SyntaxError) and resolves the install path', () => {
-  const { home, installPath } = fixtureHome({ installSubdir: 'install', withScripts: true });
+test('B1: substituted block resolves the install path via --print-root (no quoting failure)', () => {
+  const { home, installPath } = fixtureHome({ withScripts: true });
   try {
-    const out = runResolver(home);
-    assert.ok(out.includes(`CORE_ROOT=${installPath}`), `echoes resolved root; got:\n${out}`);
-    assert.ok(out.includes(`RESULT:${installPath}`), `CORE_ROOT holds the install path; got:\n${out}`);
-    assert.ok(!/SyntaxError/.test(out), 'no SyntaxError from the node payload');
+    const out = runResolver(home, installPath);
+    const real = realpathSync(installPath);
+    assert.ok(out.includes(`CORE_ROOT=${real}`), `echoes resolved root; got:\n${out}`);
+    assert.ok(out.includes(`RESULT:${real}`), `CORE_ROOT holds the install path; got:\n${out}`);
+    assert.ok(!/SyntaxError/.test(out), 'no SyntaxError anywhere in resolution');
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test('B2: a missing scripts dir blanks CORE_ROOT and emits the loud marker (skip-and-surface)', () => {
-  const { home } = fixtureHome({ installSubdir: 'install', withScripts: false });
+test('B2: an unsubstituted/wrong PLUGIN_ROOT blanks CORE_ROOT and emits the loud marker', () => {
+  const { home } = fixtureHome({ withScripts: false });
   try {
-    const out = runResolver(home);
+    const out = runResolver(home, join(home, 'install'));
     assert.ok(out.includes('CORE-ROOT-UNRESOLVED'), `emits unresolved marker; got:\n${out}`);
     assert.ok(/RESULT:\s*$/m.test(out), `CORE_ROOT is blank, not a wrong path; got:\n${out}`);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
-});
-
-// ---- Leg C: the bash separator swap, in isolation. ----
-
-test('C1: bash ${//\\//} converts backslashes to forward slashes', () => {
-  // Build the backslash path at runtime so the shell never sees a literal one
-  // in the test source either.
-  const script = 'p="C:$(printf \'\\\\\')Users$(printf \'\\\\\')x"; printf \'%s\' "${p//\\\\//}"';
-  const out = execFileSync('bash', ['-c', script], { encoding: 'utf8' });
-  assert.equal(out, 'C:/Users/x', 'backslashes normalized to forward slashes by bash');
 });
 
 // M16: finalize/process-memory/validation must agree with startup.md that
@@ -202,7 +183,7 @@ test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and d
 // validation.md and startup.md are the other two CORE_ROOT surfaces (covered by
 // the doctrine test above + the resolver tests A1–B2).
 //
-// Deliberately OUT of scope: protocols/hygiene.md, references/retrieval.md,
+// Deliberately OUT of scope: references/retrieval.md,
 // references/hygiene-strategies.md, protocols/data-storage.md, scripts/README.md,
 // and script header-comments still write ${CLAUDE_PLUGIN_ROOT} as a shorthand
 // path-pointer. They carry no CORE_ROOT-resolution preamble of their own (they're
@@ -218,4 +199,14 @@ test('M16: CORE_ROOT-resolving skills invoke scripts via ${CORE_ROOT}, not ${CLA
     assert.match(src, /\$\{CORE_ROOT\}\/skills\/core\/scripts/,
       `${rel} must invoke scripts via the resolved \${CORE_ROOT}`);
   }
+});
+
+// SYN-002 sweep: hygiene.md commands and the register-sources path rule no longer
+// lean on ${CLAUDE_PLUGIN_ROOT} as a primary source.
+test('SYN-002: hygiene.md uses resolved CORE_ROOT; register-sources derives from the loaded path', () => {
+  const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
+  const hygiene = readFileSync(join(base, 'core', 'protocols', 'hygiene.md'), 'utf8');
+  assert.doesNotMatch(hygiene, /\$\{CLAUDE_PLUGIN_ROOT\}/, 'hygiene.md swept to ${CORE_ROOT}');
+  const rs = readFileSync(join(base, 'register-sources', 'SKILL.md'), 'utf8');
+  assert.doesNotMatch(rs, /lives at `\$\{CLAUDE_PLUGIN_ROOT\}/, 'register-sources leads with loaded-path derivation, not the env var');
 });

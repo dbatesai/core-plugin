@@ -158,3 +158,54 @@ test('re-point makes Step 4 corroborate the consuming harness env var', () => {
     assert.equal(envEvidence.weight, 'corroborating');
   });
 });
+
+import { execFileSync } from 'node:child_process';
+
+// ---------- SYN-002: --print-root (single cross-shell CORE_ROOT source) ----------
+// startup.md's resolver block delegates to `node resolve-plugin-root.mjs
+// --print-root` instead of bash-only parameter expansion. Contract: print
+// exactly one line — the plugin root with forward slashes — and exit 0; or
+// print nothing to stdout, a CORE-ROOT-UNRESOLVED marker to stderr, exit 2.
+
+test('--print-root prints the plugin root on one line and exits 0', () => {
+  withFixture(['codex', 'claude'], ({ pluginRoot, from }) => {
+    const out = execFileSync(process.execPath, [from, '--print-root'], { encoding: 'utf8' });
+    assert.equal(out.trim(), pluginRoot.replace(/\\/g, '/'));
+  });
+});
+
+test('--print-root output contains no backslashes (bash/PowerShell/Git-Bash safe)', () => {
+  withFixture(['claude'], ({ from }) => {
+    const out = execFileSync(process.execPath, [from, '--print-root'], { encoding: 'utf8' });
+    assert.ok(!out.includes('\\'), 'separators normalized to forward slashes');
+  });
+});
+
+test('--print-root still prints the root when identity is DEGRADED (location is knowable)', () => {
+  // codex-only manifest + Claude env = split-brain DEGRADED, but the root
+  // location itself is unambiguous; startup needs the path either way.
+  withFixture(['codex'], ({ pluginRoot, from }) => {
+    const out = execFileSync(process.execPath, [from, '--print-root'],
+      { encoding: 'utf8', env: { ...process.env, ...claudeEnv(pluginRoot) } });
+    assert.equal(out.trim(), pluginRoot.replace(/\\/g, '/'));
+  });
+});
+
+test('--print-root with no anchor above prints nothing to stdout and exits 2', () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'print-root-none-')));
+  try {
+    const from = join(base, 'resolve-plugin-root.mjs');
+    copyFileSync(RESOLVER, from);
+    let code = 0, stdout = '';
+    try {
+      stdout = execFileSync(process.execPath, [from, '--print-root'], { encoding: 'utf8' });
+    } catch (e) {
+      code = e.status;
+      stdout = e.stdout;
+    }
+    assert.equal(code, 2, 'unresolved root exits 2');
+    assert.equal(stdout.trim(), '', 'nothing on stdout when unresolved');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});

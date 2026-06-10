@@ -31,45 +31,14 @@ Resolve deterministically when you can; ask the user only when it's genuinely am
 
 Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; the routing below will send you to the new-workspace branch (its procedure lives in `protocols/startup-conditional-loads.md`) unless the project has v1-era content that needs migrating.
 
-**Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is NOT injected into agent Bash tool calls, and `installed_plugins.json` has no usable entry for a local/source/dev install (`core-dev`) — both are unreliable as the *primary* source, and relying on them is what produced the field failure where CORE_ROOT resolved empty and every script was skipped. The one source always available is **this skill's base directory**: the harness shows it in the SKILL.md header as `<plugin-root>/skills/core`. Make that primary — strip the trailing `/skills/core` and substitute the concrete path for `<PLUGIN_ROOT>` below. The env var and `installed_plugins.json` are fallbacks only. Resolve once and reuse for every `node …` invocation:
+**Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is NOT injected into agent Bash tool calls, and `installed_plugins.json` has no usable entry for a local/source/dev install (`core-dev`) — both are unreliable as the *primary* source. The one source always available is **this skill's base directory**: the harness shows it in the SKILL.md header as `<plugin-root>/skills/core`. Strip the trailing `/skills/core`, substitute the concrete path for `<PLUGIN_ROOT>` below, and let `resolve-plugin-root.mjs --print-root` do the verification — it realpaths from its own module location, walks up to the plugin manifest, and prints the root with forward slashes on every platform. The resolution itself is one `node` call, so it behaves identically under bash, zsh, Git-Bash, and PowerShell — no bash-only parameter expansion, no inline `node -e` payload. Resolve once and reuse for every `node …` invocation:
 
 ```bash
-# Preference order: skill base directory (always injected) → CLAUDE_PLUGIN_ROOT env →
-# installed_plugins.json. Substitute <PLUGIN_ROOT> with this skill's base directory minus
-# the trailing "/skills/core" (read it from the SKILL.md header). If you cannot substitute
-# it, the line no-ops and the fallbacks run — never worse than the old behavior.
-CORE_ROOT="<PLUGIN_ROOT>"
-if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-check.mjs" ]; then
-  CORE_ROOT="${CLAUDE_PLUGIN_ROOT}"
-fi
-if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-check.mjs" ]; then
-  # Last resort: read the install path from installed_plugins.json. The node
-  # payload prints installPath RAW — no regex, no backslash literal — because a
-  # backslash inside a double-quoted `node -e` collapses in the shell (\\ becomes
-  # \) and yields a compile-time SyntaxError that try/catch cannot catch. That was
-  # the silent failure: empty CORE_ROOT then resolved `node "/skills/..."` against
-  # the Git-Bash MSYS root on Windows. Separator normalization happens in bash
-  # below, where no backslash has to survive node's parser.
-  CORE_ROOT=$(node -e "
-    try {
-      const fs = require('fs'), os = require('os');
-      const d = JSON.parse(fs.readFileSync(os.homedir() + '/.claude/plugins/installed_plugins.json', 'utf8'));
-      const plugins = d.plugins || {};
-      // core@core first, then any 'core@<marketplace>' key — the marketplace name may differ.
-      let entries = plugins['core@core'];
-      if (!entries) { const k = Object.keys(plugins).find(k => /^core@/.test(k)); entries = k ? plugins[k] : []; }
-      entries = entries || [];
-      const entry = entries.find(e => e.scope === 'user') || entries[0];
-      process.stdout.write(entry?.installPath || '');
-    } catch (e) {}
-  ")
-  # Normalize Windows backslashes to forward slashes in the shell (no-op on POSIX paths).
-  CORE_ROOT="${CORE_ROOT//\\//}"
-fi
-# Resolve to a definite state. On success, echo the root so it carries forward;
-# on failure, BLANK it and emit a structured marker. Every downstream `node` call
-# is guarded on the scripts dir, so a blank root skips-and-surfaces instead of
-# running against the wrong drive (the Windows MSYS-root failure Meridian hit).
+# Substitute <PLUGIN_ROOT> with this skill's base directory minus the trailing
+# "/skills/core" (read it from the SKILL.md header). The script verifies and
+# normalizes; the env var is a fallback for FINDING the script only.
+CORE_ROOT="$(node "<PLUGIN_ROOT>/skills/core/scripts/resolve-plugin-root.mjs" --print-root 2>/dev/null ||
+             node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/resolve-plugin-root.mjs" --print-root 2>/dev/null)"
 if [ -d "$CORE_ROOT/skills/core/scripts" ]; then
   echo "CORE_ROOT=$CORE_ROOT"
 else
@@ -78,7 +47,11 @@ else
 fi
 ```
 
-If the resolved install is stale (an older build that predates `workspace-fork-check.mjs`), the missing-scripts directory check above catches it: `CORE_ROOT` is blanked and the block prints `CORE-ROOT-UNRESOLVED`. In that case the fork-check and Step-8 commands skip via their own guards, and the readiness receipt surfaces the skip (see "Compose the readiness summary") with the advice to run `claude plugins update core@core`.
+**On PowerShell/CMD (Windows Codex):** the same `node … --print-root` call is the whole resolution — run it and substitute its printed path as the literal `CORE_ROOT` value in every subsequent script call. Don't port the bash gate; the script's exit code (0 resolved, 2 unresolved) is the signal. If the call fails, treat the session as CORE-ROOT-UNRESOLVED and surface it the same way.
+
+**Last-resort fallback (no shell tricks):** if both invocations fail and you're on Claude Code, read `~/.claude/plugins/installed_plugins.json` with the read tool, find the `core@…` entry's `installPath`, and re-run `--print-root` against `<installPath>/skills/core/scripts/resolve-plugin-root.mjs`. This replaces the old inline `node -e` payload — the read goes through the file tool, so there is no quoting footgun on any platform.
+
+If the resolved install is stale (an older build missing a script a newer protocol references), the individual `node` call fails loudly with a module-not-found error instead of silently no-opping. Surface that in the readiness receipt the same way as an unresolved root, with the advice to run `claude plugins update core@core`. A fully missing scripts dir is still caught by the gate above: `CORE_ROOT` is blanked and the block prints `CORE-ROOT-UNRESOLVED`, so the fork-check and Step-8 commands skip via their own guards.
 
 **Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution. The guard is mechanical, not advisory — if `CORE_ROOT` is blank or its scripts dir is absent, the call skips with a marker instead of running `node` against an empty/wrong path:
 
