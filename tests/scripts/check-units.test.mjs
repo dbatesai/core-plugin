@@ -299,3 +299,24 @@ test('SYN-005: schema confidence-level and stability-class values pass clean', (
   assert.equal(report.some(f => f.check === 'confidence-level-value'), false);
   assert.equal(report.some(f => f.check === 'stability-class-value'), false);
 }));
+
+test('SYN-005 follow-up: legacy annotation WARNs are benign-class — store exits 0, not degraded', () => withStore((memories) => {
+  // Pre-framework annotations like confidence-level: high / stability-class: stable
+  // get WARN-level visibility but must NOT degrade an otherwise-healthy store.
+  writeFileSync(join(memories, 'legacy.md'), [
+    '---', 'id: legacy', 'type: observation', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'confidence-level: high',
+    'stability-class: stable',
+    '---', '', '# legacy', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.level === 'WARN' && f.check === 'confidence-level-value'), 'legacy value still WARNs (visibility)');
+  assert.ok(report.some(f => f.level === 'WARN' && f.check === 'stability-class-value'), 'legacy value still WARNs (visibility)');
+  assert.equal(BENIGN_WARN_CHECKS.has('confidence-level-value'), true);
+  assert.equal(BENIGN_WARN_CHECKS.has('stability-class-value'), true);
+  assert.equal(exitCode(report), 0, 'legacy annotations alone must not degrade the store');
+}));

@@ -371,6 +371,8 @@ export function jsonReport(report, memoriesDir, mode, today) {
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
   'external-ref',
+  // Legacy annotations predate the source-registration-framework vocab; visibility without degradation (SYN-005 follow-up).
+  'confidence-level-value', 'stability-class-value',
 ]);
 
 // Exit-code contract: 0 = pass (including pass-with-benign-warnings),
