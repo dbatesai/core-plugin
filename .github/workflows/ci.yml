@@ -192,6 +192,50 @@ jobs:
             console.log("checked " + docs.length + " markdown files, all links resolve");
           '
 
+      - name: Doc skill enumerations match shipped skills
+        run: |
+          node -e '
+            const fs = require("fs");
+            const shipped = new Set(fs.readdirSync("plugins/core/skills", { withFileTypes: true })
+              .filter(d => d.isDirectory()).map(d => d.name));
+            // Non-skill slash commands / hyphenated names the docs may legitimately mention.
+            const allow = new Set(["plugin", "core-plugin", "cut-release"]);
+            const docs = ["README.md", "INSTALL.md", "USAGE.md"].filter(f => fs.existsSync(f));
+            let failed = 0;
+            for (const doc of docs) {
+              const src = fs.readFileSync(doc, "utf8");
+              // 1. Backticked slash-command references: `/name`
+              for (const m of src.matchAll(/`\/([a-z][a-z0-9-]*)`/g)) {
+                const name = m[1];
+                if (!shipped.has(name) && !allow.has(name)) {
+                  console.error(doc + ": references `/" + name + "` but plugins/core/skills/" + name + "/ does not exist");
+                  failed = 1;
+                }
+              }
+              // 2. Backticked bare kebab-case names on lines that enumerate skills
+              for (const line of src.split("\n")) {
+                if (!/skills/i.test(line)) continue;
+                for (const m of line.matchAll(/`([a-z][a-z0-9]*(?:-[a-z0-9]+)+)`/g)) {
+                  const name = m[1];
+                  if (!shipped.has(name) && !allow.has(name)) {
+                    console.error(doc + ": skill enumeration names `" + name + "` but plugins/core/skills/" + name + "/ does not exist");
+                    failed = 1;
+                  }
+                }
+              }
+            }
+            // 3. Every shipped skill is documented in INSTALL.md
+            const install = fs.readFileSync("INSTALL.md", "utf8");
+            for (const name of shipped) {
+              if (!install.includes(name)) {
+                console.error("INSTALL.md does not mention shipped skill \"" + name + "\"");
+                failed = 1;
+              }
+            }
+            if (failed) process.exit(1);
+            console.log("doc/skill cross-check OK (" + shipped.size + " skills, " + docs.length + " docs)");
+          '
+
   test:
     name: test suite
     runs-on: ubuntu-latest
