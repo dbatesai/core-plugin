@@ -85,8 +85,11 @@ export function initMetrics({ projectDir, workspaceId }) {
 
   // Create the storage hierarchy per matrix
   // - traces/  per-session OTel trace JSONL (PM-1, PM-2 immutable + content-addressed)
+  //            — written by log-event.mjs; no reader yet (collection stub)
   // - payloads/ content-addressed body files (PM-3 flat <digest-32>.json)
+  //            — RESERVED: scaffolded for the spec'd payload store; no writer ships yet
   // - queue/    receiver-down events buffer (RL-2)
+  //            — RESERVED: scaffolded for the spec'd push path; no writer ships yet
   for (const sub of ['traces', 'payloads', 'queue']) {
     try {
       mkdirSync(join(storagePath, sub), { recursive: true });

@@ -95,7 +95,12 @@ Every successful retrieval (Tier 1, 2, or 3) updates the retrieved unit's frontm
 - `last_accessed: <today>` — set to current date
 - `access_count: <int + 1>` — increment
 
-This feeds the priority function's recency (R) and frequency (F) signals for next time. The update is a cheap mid-session write to the unit file.
+`last_accessed` feeds the priority function's recency (R) signal. **`access_count` is written
+but not yet read** — `priority.mjs` currently derives its frequency (F) signal from surface
+diversity in `sources:`, not from this counter. Keep writing it: the corpus is cheap and
+retroactively useful, and the named future consumer is `priority.mjs` absorbing it into F. If
+that wiring is still absent at the next doc-honesty audit, drop the write instruction rather
+than carrying a dead slot. The update is a cheap mid-session write to the unit file.
 
 ---
 

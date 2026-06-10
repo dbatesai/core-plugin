@@ -4,6 +4,15 @@ The durable, in-repo contract for the three artifacts CORE's anti-anchoring disc
 
 These artifacts are how we know the adversarial process actually ran. They prove the discipline *executed and recorded itself* — they do NOT prove physical isolation. R-17 closure (physical anti-anchoring) needs a staging manifest + the empirical Workflow spike; these schemas are necessary, not sufficient, for that.
 
+**Status: validator shipped, producer pending.** `protocols/analysis.md` requires
+persuasion-log and mind-changes *content* in agent outputs, but no protocol step yet instructs
+a swarm to write these three artifact *files* — so on most installs
+`validate-adversarial-artifacts.mjs` has no corpus to validate. Treat the shapes below as the
+committed contract a producer will write into, not as something already flowing. Reopen: either
+analysis.md Phases 1/3 gain explicit write instructions for `initial-frame.json` /
+`persuasion-log.jsonl` / `mind-changes.jsonl`, or this schema archives per Doctrine 3 (a schema
+lives only as long as its consumer).
+
 ## `initial-frame.json` — one per agent, written in Phase 1 before peer exposure
 | Field | Required | Check |
 |---|---|---|

@@ -11,11 +11,12 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  *
  * Phase 2 (2026-05-26, T1 of metrics & observability v1): adds OTel-format
- * dual-write to `<project>/_metrics/traces/<session-id>.jsonl`. Per spec
- * §17.7 the transition is six-week dual-write; existing analyzers continue
- * reading the legacy `_sessions/<date>/<filename>.jsonl` files until the
- * OTel substrate is proven, then `analyze-retrieval-quality.mjs` gets a
- * one-shot rewrite.
+ * dual-write to `<project>/_metrics/traces/<session-id>.jsonl`. STATUS
+ * (2026-06-09): the trace write is a COLLECTION STUB — no analyzer reads the
+ * OTel rows yet; every consumer (`analyze-retrieval-quality.mjs` etc.) still
+ * reads the legacy `_sessions/<date>/<filename>.jsonl` files. Until a trace
+ * reader ships, the OTel side is corpus accumulation, not a substrate; the
+ * planned one-shot analyzer rewrite lands with that reader.
  *
  * Dual-write overhead: +26 µs per event per Probe 3 (2026-05-26 metrics probes).
  * Negligible at any realistic event rate.
