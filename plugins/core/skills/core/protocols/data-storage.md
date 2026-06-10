@@ -253,6 +253,8 @@ Tier 2: Graph walk via typed-edge frontmatter (relational)
 Tier 3: Semantic via Explore subagent (LLM reasoning over the vault)
 ```
 
+Session-intent topics drive Tier 1's grep terms. At session start, before any user message exists, they default to the bootstrap set `orient`, `memory`, `state` (per `protocols/startup.md` §"Load — returning workspace") and resolve to the user's actual words after the first turn.
+
 Harness-local recall (via the `read-auto-memory` adapter verb — Claude Code's `MEMORY.md`, Codex memories, equivalents) is queried alongside `_memories/` at every tier as scratch context. Useful for hints; never authoritative — verify against the unit store before acting. See §"Authority ordering" above for where it sits in the stack.
 
 **Default retrieval excludes observations.** Only graduated units surface by default. Observations are queryable on demand ("show me observations about X").

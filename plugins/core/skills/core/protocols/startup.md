@@ -101,10 +101,20 @@ Routing failure is itself a defect. If you find yourself trying to load the unit
 
 **Precondition:** `<project>/_memories/` exists, contains at least one canonical unit, and no migration-in-progress flag.
 
+**Integrity probe before loading.** "Populated" is not "healthy" — a crashed migration or a half-synced store can leave partial units that this routing would otherwise load silently as a returning workspace. Before the tiered load, run the same integrity check cold-start Step 8b uses (guarded like every script call):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" --store <project> --integrity \
+  || echo "CORE-INTEGRITY-DEGRADED: store failed the integrity probe (or CORE_ROOT unresolved — probe skipped)"
+```
+
+Exit 0 → proceed normally. Anything else → degraded path: still load PROJECT.md and whatever units parse (the user needs to work), but lead the readiness summary with the failure and the probe's output, hold anti-resurrection and autonomous renders until the store is reconciled (you can't trust edit-detection against a broken store), and propose the fix — `/process-memory`, or resuming the migration if the damage traces to one. Never load a failing store silently as if it were healthy.
+
 The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to know enough to answer the user's next question, not to load every file.
 
 - Read `<project>/workspace.json` to get the workspace id and data path.
-- **Tier 0 (in-context):** the session-intent topics are whatever the user just said or typed. Pull those into mind, and read `<project>/PROJECT.md` to anchor the six-section view — `references/retrieval.md` counts that read as Tier 0, the already-loaded surface. If the conversation is empty (cold start), the session-intent is "orient and present the state."
+- **Tier 0 (in-context):** the session-intent topics are whatever the user just said or typed. Pull those into mind, and read `<project>/PROJECT.md` to anchor the six-section view — `references/retrieval.md` counts that read as Tier 0, the already-loaded surface. If the conversation is empty (cold start, no user message yet), the session-intent topics default to the bootstrap set — `orient`, `memory`, `state` — and that's what the first Tier 1 grep runs on; they resolve to the user's actual words after the first turn.
 - **Tier 1 (lexical retrieval):** Grep `<project>/_memories/` for session-intent topic terms to surface relevant active units. Load whatever the grep returns above the priority threshold.
 - **Tier 2 (graph walk):** for each loaded unit, walk its `supersedes` and `depends-on` edges one hop to pick up the related context. Stop when the candidate set is good enough.
 - **Tier 3 (semantic):** only escalate if Tier 0–2 leave the user's actual question unanswered. The `Explore` subagent reasons over the vault for semantic queries.
@@ -112,11 +122,11 @@ The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to
 - Read `<project>/_sources/*.yaml` if the directory exists — the registered external sources for this project. Note the names and count for the readiness summary.
 - Read `~/.core/workspaces/<id>/workspace.json` for cross-session metadata only (last-session date, timestamps). Don't read project facts from here — there aren't any.
 
-After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them.
+After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them. The example below shows the schema only — fill every value from what actually happened this bootstrap: `units_retrieved` lists the units your grep or walk actually selected (real ids from THIS project), `intent_topics` the actual session-intent topics, the counts the real counts. Logging the placeholder values records a retrieval that never happened.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["orient","memory"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"dc-memory-index","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200,"usefulness_outcome":"useful"}'
+node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["<actual-topic-1>","<actual-topic-2>"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"<unit-id-actually-retrieved>","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200,"usefulness_outcome":"useful"}'
 ```
 
 Tier 0 in-context reuse does not need a retrieval row.
