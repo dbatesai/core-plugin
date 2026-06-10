@@ -53,6 +53,15 @@ fi
 
 If the resolved install is stale (an older build missing a script a newer protocol references), the individual `node` call fails loudly with a module-not-found error instead of silently no-opping. Surface that in the readiness receipt the same way as an unresolved root, with the advice to run `claude plugins update core@core`. A fully missing scripts dir is still caught by the gate above: `CORE_ROOT` is blanked and the block prints `CORE-ROOT-UNRESOLVED`, so the fork-check and Step-8 commands skip via their own guards.
 
+**Probe the hardware budget (cross-platform).** Run once, right after the root resolves — `protocols/execution.md §"Hardware budget"` reads this result when sizing multi-agent work, and `os.totalmem()` works identically on Mac, Linux, and Windows (no `sysctl`):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/hardware-budget.mjs" || true
+```
+
+Note the printed profile for later; don't narrate it unless the session actually goes multi-agent.
+
 **Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution. The guard is mechanical, not advisory — if `CORE_ROOT` is blank or its scripts dir is absent, the call skips with a marker instead of running `node` against an empty/wrong path:
 
 ```bash

@@ -29,7 +29,7 @@ When you invoke it, read `protocols/analysis.md` first. That protocol owns the s
 
 ## Hardware budget
 
-Run `sysctl -n hw.memsize` once at session start (or earlier — startup.md may have done it already). Hardware shapes how aggressive multi-agent can be:
+Startup runs the cross-platform hardware probe — `node "${CORE_ROOT}/skills/core/scripts/hardware-budget.mjs"`, which reads `os.totalmem()` on every OS (see `protocols/startup.md §"Workspace resolution and routing"`). Reuse that result; if startup couldn't run it (unresolved root), run the same command now. Hardware shapes how aggressive multi-agent can be:
 
 | Memory | Profile | Multi-agent max | Strategy |
 |---|---|---|---|
