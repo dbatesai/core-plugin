@@ -240,6 +240,8 @@ Tell the user what happened across all steps in one tight block:
 - PROJECT.md: before/after bytes if compacted, or "under cap" if not
 - IMPROVEMENT_LOG.md: under cap, or surfaced recommendation
 - Retrieval quality: tier distribution + any anomalies, or "clean"
+- Memory-boundary audit: 0 native-only → silence; candidates → name them as graduation prompts
+- Capability drift: clean → silence; a PASS→DEGRADED slip or a capability that stopped reporting → surfaced in plain voice
 - Anything else worth knowing
 
 Two or three sentences if everything was clean. Longer only if there's something the user needs to act on.
