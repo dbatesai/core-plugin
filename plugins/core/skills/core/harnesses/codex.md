@@ -19,6 +19,8 @@ If any of these conditions hold, harness is Codex.
 
 Use Codex's subagent invocation surface. Custom agents can be defined at `~/.codex/agents/<name>/`. For ad-hoc exploration, invoke the general agent with the prompt verbatim. Subagent output returns inline.
 
+**Schema note (2026-06-09, unvalidated):** the concrete tool is `spawn_agent` (see the nickname note below), but its parameter schema has not been re-verified against a live Codex CLI install since the May 2026 GA churn. Before the first spawn of a session, inspect the installed Codex tool definition for the actual tool name, required params, and result shape. The verb-level intent is stable — pass the brief verbatim as the prompt, read the result inline — even if field names moved. Treat any parameter shape written here as a starting hypothesis, not a contract, until a live install validates it.
+
 Codex's `spawn_agent` tool may return its own generated nickname (e.g., `Dalton`, `Bohr`) for the subagent invocation. That nickname is at the tool-instance layer — Codex's bookkeeping — not the CORE identity layer. The CORE identity lives in the brief, the log filename, and what the agent calls itself in its own narrative. Ignore the returned nickname for CORE purposes; the file-scratchpad filename is the authoritative identity surface.
 
 ## spawn-team
@@ -114,7 +116,11 @@ Run it as the setup step on a folder, or any time you want a "is this project wi
 ```bash
 # Derive PLUGIN_ROOT from the loaded SKILL.md path (the `${CLAUDE_PLUGIN_ROOT}`
 # rule below). The script self-resolves CORE_ROOT too, but pass --core-root for safety.
-node "<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs" --project "$(pwd)" --core-root "<PLUGIN_ROOT>" --harness codex
+# Run from the project directory and OMIT --project — the script defaults to the
+# process cwd. ($(pwd) is bash-only: PowerShell evaluates it to a PathInfo object
+# and the argument breaks silently.)
+node "<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs" --core-root "<PLUGIN_ROOT>" --harness codex
+# Not in the project directory? Pass --project with an absolute literal path.
 # --apply to actually write AGENTS.md (needs a CONTRACT.md); --json for the structured report
 ```
 
