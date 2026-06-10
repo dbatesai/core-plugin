@@ -50,6 +50,6 @@ When a harness needs something the contract doesn't cover, put it in `<harness>.
 
 The only per-harness facts in the generators are the harness name and the output filename (`HARNESS_OUTPUT`). Everything else is shared. A harness absent from `canonical_for` triggers a warning if you generate for it. This keeps the system harness-agnostic — the contract describes the project, the generators map it to each surface.
 
-## Not yet (v3.0 remaining)
+## Remaining caveats
 
-The public README/ARCHITECTURE rewrite describing the maintenance-model shift is still open — don't claim it as done. `audit-memory-boundary.mjs` shipped (memory-authority audit, sampled, read-only) and runs in `/finalize` and `/process-memory`; its conflict-detection scope is deliberately deferred, so describe it as shipped-with-conflict-detection-deferred, not complete.
+The public README/ARCHITECTURE rewrite this section used to track shipped with the v3.6.0–v3.7.0 public-docs overhaul. Still open: `audit-memory-boundary.mjs` shipped (memory-authority audit, sampled, read-only) and runs in `/finalize` and `/process-memory`, but its conflict-detection scope is deliberately deferred — describe it as shipped-with-conflict-detection-deferred, not complete.

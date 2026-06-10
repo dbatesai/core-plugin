@@ -62,6 +62,7 @@ Who said a fact, in what medium, and whether it was a human decision or an autom
 | **Who populates** | Overlay extractors, from source metadata (a Teams message carries speaker + medium; a SharePoint doc carries author). CORE's simple sources rarely diverge from single-author/single-medium, so CORE ships no field until a CORE reader needs one. |
 | **CORE reader (when built)** | A render/retrieval surface that attributes a fact to its speaker/medium, and a provenance-attributed slice of retrieval metrics (retrieval quality by source). Until that consumer exists, CORE does not add the fields. |
 | **Status note** | The exact attribute set is a judgment call; treat this as the documented target, refined when the first consumer lands. |
+| **Current status** | No active build. Waits on the first CORE consumer — a provenance-attributed render or a by-source slice of retrieval metrics. No decision record tracks it yet; propose one when a consumer is named. |
 
 ## 3. Salience — **CONTRACT / /core-owed** (Phase 4 layer 3)
 
@@ -74,6 +75,7 @@ recency/frequency), plus held success-criteria a latent fact can be matched agai
 | **The owed decision** | `salience` collides with DC-69's numeric `confidence` and the categorical `confidence-level` — whether salience is a third axis, a re-use, or a reframe of DC-94 Lock 5 is a **foundational call deferred to the parallel-critique `/core` pass**. It is deliberately NOT decided solo. |
 | **Who populates** | Overlay (and eventually CORE) at graduation, once the representation is decided. |
 | **CORE reader (when built)** | The priority function (DC-69) absorbing salience as a fourth signal — which is itself the foundational change the `/core` pass must rule on. |
+| **Current status** | No active build. Blocked on the owed representation decision above; DC-94 (the memory-graph edge-candidate audit) is the open decision it waits behind. |
 
 ## 4. Person-node synthesis — **CONTRACT** (Phase 4 layer 4)
 
@@ -85,6 +87,7 @@ they appear in (BBLens use cases 8, M1).
 | **Shape** | A `person`-type unit per person, with inbound edges from facts that mention them; a synthesis render that answers "what's X's current position / when did they last appear / who's gone quiet." |
 | **Who populates** | Overlay — it has the multi-person, multi-channel corpus. CORE's corpus is effectively single-person (the author), so CORE ships the minimal `person` type it already has and defers the multi-channel synthesis render to the overlay that can exercise it. |
 | **CORE reader (when built)** | A person-synthesis render over the §People surface. |
+| **Current status** | No active build. Waits on an overlay with a multi-person corpus; nothing tracks it beyond this contract. |
 
 ## 5. Source population hook — the `world-time-policy` registration field
 
