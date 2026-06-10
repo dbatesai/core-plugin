@@ -50,6 +50,15 @@ When a harness needs something the contract doesn't cover, put it in `<harness>.
 
 The only per-harness facts in the generators are the harness name and the output filename (`HARNESS_OUTPUT`). Everything else is shared. A harness absent from `canonical_for` triggers a warning if you generate for it. This keeps the system harness-agnostic — the contract describes the project, the generators map it to each surface.
 
+## When there is no CONTRACT.md (the common case)
+
+Behavior is asymmetric per harness — intentional, but it has to be known:
+
+- **Claude Code:** the project usually already has a `CLAUDE.md` (hand-written or `/init`-generated). CORE leaves it alone — no contract means no generation and no drift checking.
+- **Codex:** there is no instruction surface unless someone writes one. `configure-project --apply` is deliberately a no-op without `CONTRACT.md` (it reports `skipped-no-contract`); it never invents an `AGENTS.md`. A Codex project that wants agent instructions either adopts the contract system (workflow above — `migrate-to-contract.mjs` will draft from any existing harness file) or hand-writes `AGENTS.md`.
+
+Net effect: a Codex user without a contract can end up with no instruction surface at all. When `configure-project` reports `skipped-no-contract` on a project that also has no `AGENTS.md`, say so and name the two options — don't leave the project silently bare.
+
 ## Remaining caveats
 
 The public README/ARCHITECTURE rewrite this section used to track shipped with the v3.6.0–v3.7.0 public-docs overhaul. Still open: `audit-memory-boundary.mjs` shipped (memory-authority audit, sampled, read-only) and runs in `/finalize` and `/process-memory`, but its conflict-detection scope is deliberately deferred — describe it as shipped-with-conflict-detection-deferred, not complete.
