@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   classifyTurn, classifyTurns, pairTurns, isClarifying, isLadderWalk, extractAskedTerm, summarize, containsTerm,
-  runClassification,
+  runClassification, buildPredicates, CLASSIFIER_VERSION,
 } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
 const inCtx = (terms) => (t) => terms.includes(t);
@@ -146,4 +146,41 @@ test('MET-008: runClassification classifies the session passed in, not the newes
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   }
+});
+
+function predicateFixture() {
+  const project = mkdtempSync(join(tmpdir(), 'ct-pred-'));
+  writeFileSync(join(project, 'CLAUDE.md'), 'Project rules mention alpha-injected-term here.\n');
+  writeFileSync(join(project, 'PROJECT.md'), '# Synthesis\nThe beta-disk-term decision lives here.\n');
+  mkdirSync(join(project, '_memories'), { recursive: true });
+  writeFileSync(join(project, '_memories', 'dc-9-gamma-thing.md'),
+    '---\ntype: decision\ntopics: delta-frontmatter-term\n---\n# Gamma unit about epsilon-heading-term\n\nbody\n');
+  return project;
+}
+
+test('MET-004: PROJECT.md is NOT in-context unless the transcript shows it was read', () => {
+  const project = predicateFixture();
+  try {
+    const cold = buildPredicates(project, { events: [] });
+    assert.equal(cold.isInContext('alpha-injected-term'), true, 'harness-injected CLAUDE.md counts');
+    assert.equal(cold.isInContext('beta-disk-term'), false, 'unread PROJECT.md must not count as context');
+    assert.equal(cold.isOnDisk('beta-disk-term'), true, 'PROJECT.md content counts as on-disk');
+    const warm = buildPredicates(project, { events: [{ kind: 'tool', text: `Read ${project}/PROJECT.md` }] });
+    assert.equal(warm.isInContext('beta-disk-term'), true, 'a transcript-evidenced read promotes it to context');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('MET-005: a term in a unit frontmatter or first heading (not its filename) reads as on-disk', () => {
+  const project = predicateFixture();
+  try {
+    const p = buildPredicates(project, { events: [] });
+    assert.equal(p.isOnDisk('delta-frontmatter-term'), true, 'frontmatter topics are indexed');
+    assert.equal(p.isOnDisk('epsilon-heading-term'), true, 'H1 headings are indexed');
+    assert.equal(p.isOnDisk('zeta-nowhere-term'), false, 'absent terms still read as nowhere');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('MET-004/005: predicate changes bumped the classifier version (R-1 calibration invalidation)', () => {
+  assert.notEqual(CLASSIFIER_VERSION, '0.2.0');
+  assert.equal(CLASSIFIER_VERSION, '0.3.0');
 });
