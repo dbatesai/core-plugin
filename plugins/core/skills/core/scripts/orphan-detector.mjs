@@ -34,6 +34,11 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
+  'generate-summary-index.mjs': {
+    reason: 'Deliberately-staged DC-94a shared dependency (the compact retrieval index). Its consumers — retrieve-context.mjs (DC-94a Task 8) and select-relevant-units.mjs (DC-94b Task 10) — import it transitively; once Task 8/9 wire retrieve-context into the per-turn hook, this becomes transitively reached and the entry is removed. Gated on the dc-94a-overnight build reaching Task 8.',
+    allowlistDate: '2026-06-27',
+    reviewBy: '2026-09-27',
+  },
   'instruction-surface-adapter.mjs': {
     reason: 'Deliberately-staged v3.0 instruction-surface system (dry-run core; --apply is David-gated + content-generation not implemented). Activation is tied to the pending "does the contract→generator system still earn its complexity at N=2 surfaces" decision (PROJECT.md §State). Wire or retire when that decides.',
     allowlistDate: '2026-06-09',
