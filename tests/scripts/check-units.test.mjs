@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import {
   checkIntegrity, checkSchema, exitCode, iterActiveUnits, iterAllUnitFiles,
   isExternalRef, BENIGN_WARN_CHECKS, VALID_EDGE_TYPES, EDGE_TYPE_NORMALIZE,
-  resolveChecks,
+  resolveChecks, checkLinkDensity,
 } from '../../plugins/core/skills/core/scripts/check-units.mjs';
 
 function withStore(fn) {
@@ -42,6 +42,32 @@ function unit({
     '',
   ].filter(line => line !== '').join('\n');
 }
+
+test('DC-94a: warns on active decision with <3 edges', () => {
+  const report = checkLinkDensity([{ id: 'dc-x', type: 'decision', status: 'active', edges: [{ type: 'cites', target: 'dc-y' }] }]);
+  assert.ok(report.some(r => r.check === 'link-density' && r.unit_id === 'dc-x'));
+});
+
+test('DC-94a: does not warn on observations', () => {
+  const report = checkLinkDensity([{ id: 'obs-x', type: 'observation', status: 'active', edges: [] }]);
+  assert.ok(!report.some(r => r.check === 'link-density'));
+});
+
+test('DC-94a: does not warn on a well-linked unit (>=3 edges)', () => {
+  const report = checkLinkDensity([{ id: 'dc-z', type: 'decision', status: 'active', edges: [{ type: 'cites', target: 'a' }, { type: 'depends-on', target: 'b' }, { type: 'refines', target: 'c' }] }]);
+  assert.ok(!report.some(r => r.check === 'link-density'));
+});
+
+test('DC-94a: does not warn on a retired under-linked unit (only active units)', () => {
+  const report = checkLinkDensity([{ id: 'dc-old', type: 'decision', status: 'retired', edges: [] }]);
+  assert.ok(!report.some(r => r.check === 'link-density'));
+});
+
+test('DC-94a: link-density is a benign WARN (does not degrade exit code)', () => {
+  assert.ok(BENIGN_WARN_CHECKS.has('link-density'));
+  const report = checkLinkDensity([{ id: 'dc-x', type: 'decision', status: 'active', edges: [] }]);
+  assert.equal(exitCode(report), 0, 'an under-linked unit warns but does not block');
+});
 
 test('H3: --schema and --integrity together run BOTH checks (additive, not last-wins)', () => {
   // The old parser set mode= on each flag, so `--schema --integrity` silently

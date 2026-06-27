@@ -258,6 +258,30 @@ export function checkSchema(units, memoriesDir, report) {
 
 export const FRESH_STORE_ORPHAN_RATIO = 0.30;
 
+// DC-94a link-at-graduation: an active, non-observation unit should carry at least
+// LINK_DENSITY_MIN outgoing typed edges — a graduated decision/risk that connects to
+// nothing is invisible to Tier-2 edge-walk retrieval. WARN tier (benign): an adoption
+// ramp, not a hard gate. Observations are exempt (they're capture, not graduated units),
+// and only active units count (a retired unit's link debt is moot). Accepts both the
+// loaded-unit shape ({fm, path}) and a plain {id, type, status, edges} object so it's
+// callable standalone and from the integrity walk.
+export const LINK_DENSITY_MIN = 3;
+
+export function checkLinkDensity(units, report = []) {
+  for (const u of units || []) {
+    const id = u.id != null ? String(u.id) : (u.path ? basename(u.path, '.md') : '');
+    const type = String(u.type ?? u.fm?.type ?? '').toLowerCase();
+    const status = String(u.status ?? u.fm?.status ?? 'active').toLowerCase();
+    if (status !== 'active') continue;
+    if (type === 'observation') continue;
+    const edges = Array.isArray(u.edges) ? u.edges : extractEdges(u);
+    if (edges.length < LINK_DENSITY_MIN) {
+      report.push({ level: 'WARN', check: 'link-density', unit_id: id, detail: `Active ${type || 'unit'} has ${edges.length} edge(s) (< ${LINK_DENSITY_MIN}) — link it to related units at graduation, or argue why it stands alone` });
+    }
+  }
+  return report;
+}
+
 export function checkIntegrity(units, memoriesDir, today, report) {
   const backlinks = {};
   for (const u of units) backlinks[basename(u.path, '.md')] = new Set();
@@ -329,6 +353,9 @@ export function checkIntegrity(units, memoriesDir, today, report) {
       report.push({ level: 'WARN', check: 'sources-not-list', unit_id: uid, detail: `sources is a scalar string ('${srcVal}') — use list form (sources:\\n  - ${srcVal}) so the field reads as a list everywhere` });
     }
   }
+
+  // DC-94a link-at-graduation density (WARN tier, benign).
+  checkLinkDensity(units, report);
 
   // INDEX-decisions drift
   const indexPath = join(memoriesDir, 'INDEX-decisions.md');
@@ -425,7 +452,7 @@ export function jsonReport(report, memoriesDir, mode, today) {
 // (and largely eliminated by flow-style array parsing). These return exit 0.
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
-  'external-ref', 'sources-missing', 'sources-not-list', 'unit-oversize',
+  'external-ref', 'sources-missing', 'sources-not-list', 'unit-oversize', 'link-density',
   // Legacy annotations predate the source-registration-framework vocab; visibility without degradation (SYN-005 follow-up).
   'confidence-level-value', 'stability-class-value',
 ]);
