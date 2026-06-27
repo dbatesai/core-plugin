@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   classifyTurn, classifyTurns, pairTurns, isClarifying, isLadderWalk, extractAskedTerm, summarize, containsTerm,
-  runClassification, buildPredicates, CLASSIFIER_VERSION,
+  runClassification, buildPredicates, CLASSIFIER_VERSION, PROXY_VERSION,
 } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
 const inCtx = (terms) => (t) => terms.includes(t);
@@ -40,6 +40,19 @@ test('M6: containsTerm matches on a word boundary, not a bare substring', () => 
   assert.equal(containsTerm('we adopt-inline rendering here', 'opt-in'), false, 'substring of a larger word must not match');
   assert.equal(containsTerm('see dc-104 for the rationale', 'DC-104'), true, 'case-insensitive, id with digits');
   assert.equal(containsTerm('see dc-1040 for the rationale', 'DC-104'), false, 'dc-104 must not match inside dc-1040');
+});
+
+test('DC-94a: isInContext proxy does not over-fire on a substring inside a large blob', () => {
+  // The plan's exact scenario: "master" must NOT count as in-context just because
+  // "speedmaster" appears somewhere in a 180KB blob. (Already fixed by M6/MET-004;
+  // this locks the specific large-PROJECT.md case as a regression guard.)
+  const bigDoc = 'x'.repeat(120000) + ' speedmaster ' + 'y'.repeat(60000);
+  assert.equal(containsTerm(bigDoc, 'master'), false, 'substring of speedmaster must not count');
+  assert.equal(containsTerm('we discussed the speedmaster today', 'speedmaster'), true, 'whole-token hit still fires');
+});
+
+test('DC-94a: PROXY_VERSION is 2 (word-boundary + read-gated, supersedes the v1 .includes proxy)', () => {
+  assert.equal(PROXY_VERSION, 2);
 });
 
 test('M6: ladder walked AND returned content but the agent still asked → rec-fail-tier-0 (discriminator wired)', () => {
@@ -142,6 +155,27 @@ test('MET-008: runClassification classifies the session passed in, not the newes
     assert.equal(r.status, 'OK');
     assert.equal(r.transcript_resolution, 'session-id');
     assert.equal(r.total, 1, 'classified the 1-turn session, not the 3-turn newer one');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('DC-94a: each classified record is stamped with proxy_version', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ct-pv-'));
+  const project = mkdtempSync(join(tmpdir(), 'ct-pvp-'));
+  try {
+    const dir = join(home, '.claude', 'projects', project.replace(/[/.]/g, '-'));
+    mkdirSync(dir, { recursive: true });
+    const turn = (u, a) => [
+      JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: u }] } }),
+      JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: a }] } }),
+    ].join('\n') + '\n';
+    writeFileSync(join(dir, 'sess-pv.jsonl'), turn('hello', 'The answer is 42.'));
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-pv', workspaceId: 'ct-pv-ws', env: {} });
+    assert.equal(r.status, 'OK');
+    assert.ok(r.records.length >= 1);
+    assert.equal(r.records[0].proxy_version, PROXY_VERSION, 'record carries the proxy version so calibration can invalidate across a proxy change');
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
