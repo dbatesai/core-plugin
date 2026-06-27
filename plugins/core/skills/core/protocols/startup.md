@@ -285,6 +285,8 @@ node "${CORE_ROOT}/skills/core/scripts/check-context-integrity.mjs" \
   --project <project>/PROJECT.md --project-read-lines <lines-read> || true
 ```
 
+**Per-turn retrieval (DC-94a, opt-in — Gate G2).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`) over the incoming prompt and injects the top matches. It ships **default-off**: a no-op unless `CORE_RETRIEVAL_HOOK=1`, and it is deliberately not registered in the plugin manifest. Whether per-turn injection becomes default-on (and the top-N) is David's call on the Task 11 precision evidence; until then a user opts in by wiring it as a `UserPromptSubmit` hook in their own settings (the script header documents the exact form).
+
 Read the output. When **any row is non-PASS**, narrate in plain voice:
 
 > *"Continuing with degraded capability evidence. plugin-root-resolution: DEGRADED (harness split-brain). Identity is best-effort this session."*
