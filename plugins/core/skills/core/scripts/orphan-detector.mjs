@@ -34,6 +34,11 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
+  'retrieve-context.mjs': {
+    reason: 'Deliberately-staged DC-94a per-turn retriever. Built and tested ahead of its consumer; Task 9 wires it into the UserPromptSubmit hook (flag-gated default-off, Gate G2). Remove this entry once the hook names it. It transitively reaches generate-summary-index.mjs, but since this script is itself only allowlisted (not skill-reached) until Task 9, generate-summary-index stays allowlisted too.',
+    allowlistDate: '2026-06-27',
+    reviewBy: '2026-09-27',
+  },
   'score-ladder.mjs': {
     reason: 'Deliberately-staged DC-94b obligation-3 acceptance scorer. Consumed by the obligation3-ladder test now and by the Task 10 prototype + Task 12 build report; it is the measurement contract, not runtime-wired into a skill. Remove from allowlist if/when abstract-relevance retrieval is promoted to infrastructure (Gate G3) and the scorer joins a wired path; until then it stays a test/measurement utility.',
     allowlistDate: '2026-06-27',
