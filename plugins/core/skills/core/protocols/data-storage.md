@@ -46,6 +46,17 @@ The memory architecture is two tiers plus a canonical flag. Both tiers are markd
 
 Capture-everything. Every utterance, tool output, casual mention, conversational signal that *could* matter. Low-effort frontmatter, no edges required at write time, bias-to-capture.
 
+**What's worth capturing — the forward-decision test (DC-94a).** Bias-to-capture doesn't mean capture noise. The test for whether a fact earns a write: *would this fact, sitting in context six weeks from now, change what the agent says or builds?* If yes, capture it. The keep-list, concretely:
+
+- **Preferences and constraints — with the context that makes them actionable.** Not "David likes X" but "David wants X *because* Y, *except when* Z." The condition is the load-bearing part.
+- **Decisions — and the fork not taken.** What was decided, and what was rejected and why. The road not traveled is what stops the agent re-proposing it next session.
+- **Risks — with their status.** Open, mitigated, accepted, closed. A risk with no status is a rumor.
+- **Multi-session patterns.** Anything that's recurred — a repeated correction, a habit, a recurring blocker — is a signal worth a durable record, not just an in-the-moment note.
+- **Conflicts — linked at capture.** When a new fact contradicts an existing one, write the `conflicts-with` edge as you capture it, not later. The contradiction is the most retrieval-valuable thing about it.
+- **Values and dispositions — not only stated wants.** "Wants an iconic chronograph" is a want; "values heritage and first-of-its-kind movements" is a value. The value is what lets the agent reason to an instance the user never named (the obligation-3 leap). Capture the disposition behind the request, not just the request.
+
+The discard-list — things that *feel* worth keeping but aren't: ephemeral state that's already stale by next session; restating what a durable artifact (PROJECT.md, the README, a spec) already records; a fact that only matters to the current conversation and changes no future decision. When something is genuinely transient, let it pass — an over-stuffed store dilutes the retrieval signal as surely as a missing fact does.
+
 ```yaml
 ---
 id: obs-2026-05-17-1432-architect-timeline
