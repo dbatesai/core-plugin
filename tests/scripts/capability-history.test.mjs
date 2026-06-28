@@ -76,7 +76,7 @@ test('appendRows/readHistory: project-local store supports sandboxed capability 
   const project = mkdtempSync(join(tmpdir(), 'caphist-project-'));
   try {
     const res = appendRows('ws-project', [sampleRow()], { session_id: 's1' }, { project });
-    assert.match(res.path, /_metrics\/capability-history\/ws-project\.jsonl$/);
+    assert.match(res.path, /_metrics[/\\]capability-history[/\\]ws-project\.jsonl$/); // [/\\]: path.join emits backslashes on Windows
     assert.ok(existsSync(res.path), 'project-local history file created');
     const hist = readHistory('ws-project', { project });
     assert.equal(hist.length, 1);

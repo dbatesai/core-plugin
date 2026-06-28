@@ -18,11 +18,10 @@ test('mapProjectPathToSlug: plain path (no dots) unchanged in shape', () => {
     '-Users-dbates-Documents-Projects-CORE');
 });
 
-test('mapProjectPathToSlug: Windows backslashes AND the drive colon convert', () => {
-  // The drive colon must convert too — a path segment can't contain ':' on Windows,
-  // so a slug that keeps 'C:' produces an un-creatable directory (the crash that broke
-  // classify-turns on windows-latest). ':' → '-' like the other separators. The exact
-  // encoding Claude Code uses for a real Windows projects folder still wants Meridian's
+test('mapProjectPathToSlug: Windows backslashes and the drive colon convert', () => {
+  // The drive colon must encode too — a ':' is invalid in a path segment on Windows,
+  // so the slug can't be a creatable ~/.claude/projects/<slug>/ directory otherwise.
+  // The exact encoding Claude Code uses on a real Windows box still wants Meridian's
   // on-box confirmation; this at least produces a valid, internally-consistent path.
   assert.equal(mapProjectPathToSlug('C:\\Users\\David.Bates28\\proj'),
     'C--Users-David-Bates28-proj');

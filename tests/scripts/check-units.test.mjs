@@ -106,7 +106,7 @@ test('iterAllUnitFiles: returns real unit files regardless of their prose conten
     body: '# Real unit\n\nOrdinary prose body — nothing here exempts it from validation.',
   }));
 
-  const stems = iterAllUnitFiles(memories).map(path => path.split('/').at(-1));
+  const stems = iterAllUnitFiles(memories).map(path => path.split(/[/\\]/).at(-1)); // [/\\]: Windows paths use backslash
 
   assert.deepEqual(stems, ['real-unit.md']);
 }));

@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-A hardening pass built from a fresh-eyes audit of the whole shipped tree. The audit produced 111 findings; remediation ran as 8 workstreams over 71 commits, touching scripts, protocols, docs, and CI. Day-to-day use of `/core` doesn't change — the deterministic layer underneath gets harder to break mid-operation and more honest about what it can claim. The test suite grew 528 → 679.
+## [3.8.0] — 2026-06-28
+
+A hardening pass built from a fresh-eyes audit of the whole shipped tree, a new first-class unit type, and a real Windows-portability fix. The audit produced 111 findings; remediation ran as 8 workstreams over 71 commits, touching scripts, protocols, docs, and CI. Day-to-day use of `/core` doesn't change — the deterministic layer underneath gets harder to break mid-operation and more honest about what it can claim. The test suite grew 528 → 681, and the Windows CI leg is now genuinely green (24 portability bugs the audit batch had shipped unverified are fixed).
 
 ### Added
+- **`premise` unit type.** A first-class type for axioms — facts a decision can violate and be wrong by definition, distinct from `principle` (which guides). Premises are exempt from the staleness/archive-candidate check: a settled, rarely-touched axiom is correct, not stale.
 - **CI.** Every push runs the full test suite on Linux and Windows, plus doc-drift, hooks-schema, lint, and release gates — docs that enumerate shipped skills or counts now fail the build when they drift from the tree.
 - **`check-inbox.mjs`.** A mechanical pre-flight for inbox graduation — it reads the inbox and reports what's there before any judgment pass runs.
 - **Shared `unit-vocab.mjs`.** One module owns the status/type/edge vocabulary for every script that reads units; the scripts no longer carry their own diverging copies, and a `retired` unit now demotes instead of slipping through the status checks.
@@ -26,6 +29,7 @@ A hardening pass built from a fresh-eyes audit of the whole shipped tree. The au
 - Metrics resolve the session transcript by session id; file mtime is demoted to a label, so a concurrently-written transcript can't be misattributed.
 - The metrics lock uses bounded, CPU-yielding retries instead of a 5-second busy-spin.
 - A scalar `sources:` value in unit frontmatter now scores as one source instead of silently falling to the no-sources default, and the store validator nudges toward list form with a benign warning.
+- **Windows portability.** 24 real bugs the audit batch shipped while assuming the Windows CI leg was green (it had never run clean): dynamic `import()` now uses `file://` URLs; path builders use `posix.join`; project slugs strip the drive colon; the Claude-projects home seam honors `USERPROFILE`; `fileURLToPath` no longer throws on a driveless file URL; and a top-level-await module that perturbed the test runner was hardened. Both test legs and the validate gate are green on Windows.
 
 ## [3.7.0] — 2026-06-07
 

@@ -341,7 +341,7 @@ test('MET-013: anticipation-gap records are stamped provisional + low severity a
   try {
     mkdirSync(join(project, '_memories'), { recursive: true });
     writeFileSync(join(project, '_memories', 'dc-64-retrieval-ladder.md'), '---\ntype: decision\n---\n# ladder\n');
-    const slugDir = join(home, '.claude', 'projects', project.replace(/[/.]/g, '-'));
+    const slugDir = join(home, '.claude', 'projects', project.replace(/[/.\\:]/g, '-')); // backslash + drive-colon: Windows temp paths, matches mapProjectPathToSlug
     mkdirSync(slugDir, { recursive: true });
     writeFileSync(join(slugDir, 'sess-d.jsonl'),
       JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: 'tell me about the retrieval plan' }] } }) + '\n' +

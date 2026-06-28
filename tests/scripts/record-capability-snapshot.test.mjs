@@ -31,7 +31,10 @@ test('resolveSessionId with an empty env generates a distinct per-invocation fal
 test('recordSnapshot appends to the workspace history rather than clobbering it', async () => {
   const home = mkdtempSync(join(tmpdir(), 'rcs-home-'));
   try {
-    const r1 = await recordSnapshot({ workspaceId: 'ws-test', home, sessionId: 's-one' });
+    // Pass an explicit harness — recordSnapshot detects it from env at real startup,
+    // but CI has no harness env signal, so an ambient-detected 'unknown' harness yields
+    // zero probe rows. The test verifies append behavior, not harness detection.
+    const r1 = await recordSnapshot({ workspaceId: 'ws-test', harness: 'claude-code', home, sessionId: 's-one' });
     assert.equal(r1.workspace_id, 'ws-test');
     assert.equal(r1.session_id, 's-one');
     assert.equal(r1.storage, 'home');
@@ -41,7 +44,7 @@ test('recordSnapshot appends to the workspace history rather than clobbering it'
     const lines1 = readFileSync(r1.path, 'utf8').trim().split('\n');
     assert.equal(lines1.length, r1.appended);
 
-    const r2 = await recordSnapshot({ workspaceId: 'ws-test', home, sessionId: 's-two' });
+    const r2 = await recordSnapshot({ workspaceId: 'ws-test', harness: 'claude-code', home, sessionId: 's-two' });
     const lines2 = readFileSync(r2.path, 'utf8').trim().split('\n');
     assert.equal(r2.path, r1.path, 'same history file');
     assert.equal(lines2.length, r1.appended + r2.appended, 'second snapshot appended');

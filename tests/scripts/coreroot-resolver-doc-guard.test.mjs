@@ -137,7 +137,7 @@ test('B1: substituted block resolves the install path via --print-root (no quoti
   const { home, installPath } = fixtureHome({ withScripts: true });
   try {
     const out = runResolver(home, installPath);
-    const real = realpathSync(installPath);
+    const real = realpathSync(installPath).replace(/\\/g, '/'); // resolve-plugin-root prints forward slashes on every platform
     assert.ok(out.includes(`CORE_ROOT=${real}`), `echoes resolved root; got:\n${out}`);
     assert.ok(out.includes(`RESULT:${real}`), `CORE_ROOT holds the install path; got:\n${out}`);
     assert.ok(!/SyntaxError/.test(out), 'no SyntaxError anywhere in resolution');

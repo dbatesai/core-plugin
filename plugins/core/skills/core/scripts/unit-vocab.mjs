@@ -36,8 +36,15 @@ export const TERMINAL_STATUSES = new Set(['retired', 'archived', 'superseded']);
 export const VALID_TYPES = new Set([
   'decision', 'risk', 'person', 'deliverable', 'principle',
   'explainer', 'review-finding', 'observation', 'topic', 'reference',
-  'feedback', 'memory', 'open-question',
+  'feedback', 'memory', 'open-question', 'premise',
 ]);
+
+// Premises are axioms, not trade-offs: a decision that violates a premise is wrong
+// by definition (distinct from 'principle', which guides). They live on the always-
+// loaded Critical Premises surface and do not decay — the staleness/archive-candidate
+// check exempts them (a premise that's rarely touched is settled, not stale). See the
+// EXEMPT_FROM_STALENESS set below.
+export const EXEMPT_FROM_STALENESS = new Set(['premise']);
 
 export const VALID_EDGE_TYPES = new Set([
   'cites', 'supersedes', 'superseded-by', 'depends-on', 'conflicts-with',

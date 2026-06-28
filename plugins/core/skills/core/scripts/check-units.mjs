@@ -43,10 +43,11 @@ export const REQUIRED_FIELDS = new Set(['id', 'type', 'status', 'created', 'upda
 export {
   VALID_STATUSES, TERMINAL_STATUSES, VALID_TYPES, VALID_EDGE_TYPES,
   EDGE_TYPE_NORMALIZE, VALID_CONFIDENCE_LEVELS, VALID_STABILITY_CLASSES,
+  EXEMPT_FROM_STALENESS,
 } from './unit-vocab.mjs';
 import {
   VALID_STATUSES, VALID_TYPES, VALID_EDGE_TYPES, EDGE_TYPE_NORMALIZE,
-  VALID_CONFIDENCE_LEVELS, VALID_STABILITY_CLASSES,
+  VALID_CONFIDENCE_LEVELS, VALID_STABILITY_CLASSES, EXEMPT_FROM_STALENESS,
 } from './unit-vocab.mjs';
 
 // Edge targets that legitimately live OUTSIDE the project unit store. The integrity
@@ -328,7 +329,10 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     const rs = scoreProxyRS(u, today);
     if (rs < ARCHIVE_RS_THRESHOLD) {
       const status = String(u.fm.status || 'active').toLowerCase();
-      if (status === 'active')
+      const typ = String(u.fm.type || '').toLowerCase();
+      // Premises are axioms — a settled, rarely-touched premise is correct, not stale.
+      // Exempt them from the archive-candidate WARN (EXEMPT_FROM_STALENESS, unit-vocab).
+      if (status === 'active' && !EXEMPT_FROM_STALENESS.has(typ))
         report.push({ level: 'WARN', check: 'stale', unit_id: uid, detail: `R·S=${rs.toFixed(3)} < ${ARCHIVE_RS_THRESHOLD} — archive candidate per DC-69` });
     }
 
