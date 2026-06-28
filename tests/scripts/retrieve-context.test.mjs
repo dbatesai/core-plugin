@@ -4,9 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { retrieveContext, tokenize } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
-// The obligation-3 fixture store lives in the CORE repo, a sibling of core-plugin.
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'CORE',
-  '_outputs', '2026-06-27', 'fixtures', 'obligation3-store');
+// The obligation-3 fixture store lives in-repo under tests/fixtures/ so CI (which checks
+// out only core-plugin) can reach it. The generated _lib/ cache is gitignored + regenerated.
+const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
 test('tokenize lowercases, splits on non-word, drops stopwords', () => {
   const toks = tokenize('The Omega Speedmaster, on sale!');

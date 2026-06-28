@@ -4,8 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { retrieveContext } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'CORE',
-  '_outputs', '2026-06-27', 'fixtures', 'obligation3-store');
+const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
 // A small labeled query set over the fixture store (validates A4 — does the lexical
 // hook inject relevant units, or noise?). Each query lists the unit ids a human would

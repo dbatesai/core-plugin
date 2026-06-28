@@ -4,8 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { selectCandidates } from '../../plugins/core/skills/core/scripts/select-relevant-units.mjs';
 
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'CORE',
-  '_outputs', '2026-06-27', 'fixtures', 'obligation3-store');
+const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
 test('candidate shortlist includes the value unit for an abstract query', () => {
   // The key design seam: the shortlist is RECALL-oriented, so the value-rung unit

@@ -5,8 +5,7 @@ import { join, dirname } from 'node:path';
 import { scoreLadder, RUNGS, PROVISIONAL_BAR } from '../../plugins/core/skills/core/scripts/score-ladder.mjs';
 import { retrieveContext } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'CORE',
-  '_outputs', '2026-06-27', 'fixtures', 'obligation3-store');
+const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
 test('ladder has four rungs with expected ids', () => {
   assert.equal(RUNGS.length, 4);

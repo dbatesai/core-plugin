@@ -6,8 +6,7 @@ import { join, dirname } from 'node:path';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'CORE',
-  '_outputs', '2026-06-27', 'fixtures', 'obligation3-store');
+const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
 function runHook(prompt, env) {
   return execFileSync('node', [HOOK], {
