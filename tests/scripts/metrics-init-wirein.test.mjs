@@ -16,11 +16,13 @@ test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pi
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
   const origHome = process.env.HOME;
+  const origUserProfile = process.env.USERPROFILE;
   const origForce = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
   try {
     process.env.HOME = home;
-    // Precondition: this platform's homedir() must honor $HOME, or the test is moot.
-    assert.equal(homedir(), home, 'test requires os.homedir() to honor $HOME');
+    process.env.USERPROFILE = home; // Windows: os.homedir() reads USERPROFILE, not HOME
+    // Precondition: this platform's homedir() must honor the redirected home, or the test is moot.
+    assert.equal(homedir(), home, 'test requires os.homedir() to honor the redirected home');
     // Force a non-default storage path so "honors the pin" is distinguishable from
     // "fell back to project-local".
     process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
@@ -43,6 +45,7 @@ test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pi
     assert.equal(resolved, pinned, 'log-event resolves to the metrics-init pin, not the project-local default');
   } finally {
     if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
+    if (origUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = origUserProfile;
     if (origForce === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
     else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = origForce;
     rmSync(home, { recursive: true, force: true });
@@ -54,8 +57,10 @@ test('wire-in: metrics-init is idempotent (second run leaves the pin intact)', (
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
   const origHome = process.env.HOME;
+  const origUserProfile = process.env.USERPROFILE;
   try {
     process.env.HOME = home;
+    process.env.USERPROFILE = home; // Windows: os.homedir() reads USERPROFILE, not HOME
     assert.equal(homedir(), home);
     const r1 = initMetrics({ projectDir: project, workspaceId: 'ws-idem' });
     const r2 = initMetrics({ projectDir: project, workspaceId: 'ws-idem' });
@@ -63,6 +68,7 @@ test('wire-in: metrics-init is idempotent (second run leaves the pin intact)', (
     assert.equal(r1.storagePath, r2.storagePath, 'storage path stable across runs');
   } finally {
     if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
+    if (origUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = origUserProfile;
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   }
@@ -80,7 +86,7 @@ test('M1: metrics-init still runs when invoked through a symlink (entry guard ca
   try {
     symlinkSync(METRICS_INIT, link);
     const out = execFileSync('node', [link, project, 'ws-symlink'], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, HOME: home, USERPROFILE: home }, // USERPROFILE: Windows homedir()
       encoding: 'utf8',
     });
     // On the buggy one-sided guard the module imports, the guard is false, and the
