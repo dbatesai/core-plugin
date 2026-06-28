@@ -23,7 +23,7 @@
  * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
  */
 
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

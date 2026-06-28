@@ -20,7 +20,7 @@ claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Start a fresh session and type `/core`. That's it — the plugin registers the main skill, five sub-skills, and two hooks, and your `~/.claude/settings.json` is left alone.
+Start a fresh session and type `/core`. That's it — the plugin registers the main skill and its companion skills, and your `~/.claude/settings.json` is left alone.
 
 ## What you get
 
@@ -33,7 +33,25 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
 
-Two hooks register on their own: a guard that reminds you before a write touches installed skill files, and a per-turn nudge to keep the voice plain.
+### Optional hooks (manual)
+
+The plugin ships no hooks — `plugins/core/hooks/hooks.json` is empty, so installing CORE never edits your settings. Two hooks pair well with CORE; add either to your own `~/.claude/settings.json` if you want them. A per-turn plain-voice reminder:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "echo 'Plain person voice — no tic words, no bullet-tables where prose works.'" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+A skill-write guard works the same way: a `PreToolUse` entry with a `Write|Edit` matcher pointing at a small script of your own that warns when the target path sits under an installed plugin directory. The hook format is documented in the Claude Code hooks reference.
 
 ## Your first session
 
@@ -85,7 +103,9 @@ test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
 test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 ```
 
-Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `organize-files`) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
+Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
+
+One difference from Claude Code worth knowing: Codex runs no hook layer for CORE, so write-safety guards there rest on the agent's own discipline rather than harness enforcement (`harnesses/codex.md §hook-register` has the detail and the reopen conditions).
 
 If a previous install used a different marketplace name (say `local-core` from a hand-rolled shim), remove it first: `codex plugin remove core@local-core`, then `codex plugin marketplace remove local-core`.
 

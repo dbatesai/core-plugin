@@ -75,7 +75,7 @@ Each entry captures: what this swarm revealed about agent effectiveness, what yo
 
 ## Analysis-protocol effectiveness report
 
-After every substantial multi-agent run, write a structured effectiveness report to `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md`.
+After every substantial multi-agent run, write a structured effectiveness report to `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md`. Verify it exists with non-zero size before the swarm's TeamDelete — the after-action checklist in `protocols/analysis.md` carries the full verification step. A silently failed write here costs future calibration: these reports are read before composing the next swarm.
 
 | Section | What to cover |
 |---|---|

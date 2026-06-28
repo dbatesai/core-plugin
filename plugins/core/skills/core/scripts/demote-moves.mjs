@@ -32,14 +32,18 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
 
-export const TERMINAL_STATUSES = ['resolved', 'archived', 'superseded', 'closed'];
+// Terminal statuses come from the shared vocabulary (SYN-005): retired/archived/
+// superseded. 'resolved'/'closed' were never schema statuses and no longer gate;
+// 'retired' — the schema's actual done-status — now demotes (it never did before).
+export { TERMINAL_STATUSES } from './unit-vocab.mjs';
+import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 export const CLOSE_AGE_DAYS = 30;
 export const LARGE_BATCH_WARNING_THRESHOLD = 20;
 export const ARCHIVE_FILE = 'PROJECT-ARCHIVE.md';
@@ -65,7 +69,7 @@ export function parseBullets(movesBody) {
   let cur = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const top = line.match(/^- \[([ x~\-])\]\s?(.*)$/);
+    const top = line.match(/^- \[([ x~-])\]\s?(.*)$/);
     if (top) {
       if (cur) bullets.push(cur);
       cur = {
@@ -197,7 +201,7 @@ function classifyBulletStrict(bullet, memoriesDir, todayIso) {
   if (refs.length === 0) return { decision: 'keep', reason: 'no-backing-units' };
   const units = refs.map(id => readUnit(memoriesDir, id));
   if (units.some(u => u === null)) return { decision: 'keep', reason: 'missing-cited-unit', refs };
-  const stillActive = units.find(u => !TERMINAL_STATUSES.includes(String(u.fm.status || 'active').toLowerCase()));
+  const stillActive = units.find(u => !TERMINAL_STATUSES.has(String(u.fm.status || 'active').toLowerCase()));
   if (stillActive) return { decision: 'keep', reason: 'cited-unit-still-active', activeUnit: stillActive.id };
   const dates = units.map(u => u.fm.updated || u.fm.created).filter(Boolean).sort();
   if (dates.length === 0) return { decision: 'keep', reason: 'no-updated-dates' };
@@ -298,6 +302,17 @@ function appendToArchiveMoves(archivePath, block) {
   atomicWriteFileSync(archivePath, text);
 }
 
+// MEM-013: crash-retry idempotency. The write order is archive-append THEN
+// PROJECT.md (deliberate — see the M4 note below); a crash between the two
+// leaves the bullets archived but still on the agenda, and a retry would
+// append a duplicate archive block. Skip any bullet whose exact raw lines are
+// already in the archive; the retry still stubs it out of PROJECT.md.
+export function alreadyArchived(archivePath, bullet) {
+  let text;
+  try { text = readFileSync(archivePath, 'utf8'); } catch { return false; }
+  return text.includes(bullet.rawLines.join('\n'));
+}
+
 // ---------- Public API ----------
 
 export function demoteMoves(projectDir, { today, dryRun = false, strict = false, applyLargeBatch = false } = {}) {
@@ -374,8 +389,11 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   }
 
   const archivePath = ensureArchiveFile(projectDir);
-  const block = renderArchiveBlock(demotions, todayIso);
-  appendToArchiveMoves(archivePath, block);
+  const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));
+  if (freshDemotions.length) {
+    const block = renderArchiveBlock(freshDemotions, todayIso);
+    appendToArchiveMoves(archivePath, block);
+  }
 
   const newMoves = rewriteMovesWithStubs(moves, bullets, demotions, todayIso);
   const beforeMoves = text.indexOf(moves);

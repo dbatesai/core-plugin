@@ -6,7 +6,7 @@
  * A §State bullet is demotable when:
  *  - It has at least one `*Backed by ...*` italicized footer citation.
  *  - All cited units are present in `_memories/` and in terminal status
- *    (resolved / archived / superseded / closed / converged / shipped).
+ *    (retired / archived / superseded — shared vocab, SYN-005).
  *  - The most-recent backing-unit `updated:` date is >60 days old.
  *
  * Conservative defaults (mirrors demote-moves.mjs):
@@ -30,7 +30,7 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { resolve, join } from 'node:path';
@@ -38,24 +38,13 @@ import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
 import { extractBackingUnitRefs } from './demote-moves.mjs';
 
-// Mirrors demote-moves' set exactly so both scripts share the same
-// terminal-status contract. Note: an empirical check on CORE's 233-unit
-// corpus (2026-05-27) found that 229 units are status:active and 3 are
-// retired — no unit currently uses any of the four terminal statuses
-// here. The validator schema (`check-units.mjs §VALID_STATUSES`) accepts
-// `active / retired / archived / superseded`, so `resolved` and `closed`
-// are out-of-schema but tolerated. The criteria-vs-corpus mismatch is the
-// same finding as `obs-demote-moves-first-fire-2026-05-24` — it runs
-// deeper than citation discipline. Symmetry with demote-moves is more
-// important than fitting CORE's current shape; a follow-up decision will
-// align both sets to actual corpus usage. Don't add `retired` here alone
-// without updating demote-moves too.
-export const TERMINAL_STATUSES = [
-  'resolved',
-  'archived',
-  'superseded',
-  'closed',
-];
+// Terminal statuses come from the shared vocabulary (SYN-005). This resolves
+// the 2026-05-27 criteria-vs-corpus mismatch noted here previously: 'retired'
+// (229-active/3-retired corpus) is now terminal in BOTH demoters at once, and
+// the out-of-schema 'resolved'/'closed' no longer gate. Symmetry with
+// demote-moves is structural now — both import the same Set.
+export { TERMINAL_STATUSES } from './unit-vocab.mjs';
+import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 export const STATE_CLOSE_AGE_DAYS = 60;
 export const LARGE_BATCH_WARNING_THRESHOLD = 20;
 export const ARCHIVE_FILE = 'PROJECT-ARCHIVE.md';
@@ -181,7 +170,7 @@ export function classifyStateBullet(bullet, projectDir, { today, recencyDays = S
   }
   const stillActive = units.find(u => {
     const status = String(u.fm.status || 'active').toLowerCase();
-    return !TERMINAL_STATUSES.includes(status);
+    return !TERMINAL_STATUSES.has(status);
   });
   if (stillActive) {
     return { decision: 'keep', reason: 'cited-unit-still-active', activeUnit: stillActive.id };
@@ -223,6 +212,15 @@ function ensureArchiveFile(projectDir) {
     atomicWriteFileSync(path, header);
   }
   return path;
+}
+
+// MEM-013: crash-retry idempotency — mirror of alreadyArchived in
+// demote-moves.mjs. Archive append happens before the PROJECT.md write; a
+// crash between the two would otherwise duplicate the block on retry.
+function alreadyArchived(archivePath, bullet) {
+  let text;
+  try { text = readFileSync(archivePath, 'utf8'); } catch { return false; }
+  return text.includes(bullet.rawLines.join('\n'));
 }
 
 function appendToArchiveState(archivePath, block) {
@@ -334,8 +332,11 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
   if (!apply || demotions.length === 0) return stats;
 
   const archivePath = ensureArchiveFile(projectDir);
-  const block = renderArchiveBlock(demotions, todayIso);
-  appendToArchiveState(archivePath, block);
+  const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));
+  if (freshDemotions.length) {
+    const block = renderArchiveBlock(freshDemotions, todayIso);
+    appendToArchiveState(archivePath, block);
+  }
 
   const newState = rewriteStateWithStubs(state, bullets, demotions, todayIso);
   const beforeState = text.indexOf(state);

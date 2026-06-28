@@ -71,3 +71,30 @@ test('traceSupersededImpact stays quiet when invalidated units have no live depe
 test('IMPACT_VERSION is exported', () => {
   assert.equal(typeof IMPACT_VERSION, 'string');
 });
+
+test('SYN-006: refines puts the refining unit downstream of its target', () => {
+  const units = [
+    unit('a', { edges: [{ type: 'refines', target: 'b' }] }), // a refines b
+  ];
+  const affects = buildAffectsGraph(units);
+  assert.ok(affects.get('b')?.has('a'), 'a change to b affects its refinement a');
+});
+
+test('SYN-006: amends puts the amending unit downstream of its target', () => {
+  const units = [
+    unit('a', { edges: [{ type: 'amends', target: 'b' }] }),
+  ];
+  const affects = buildAffectsGraph(units);
+  assert.ok(affects.get('b')?.has('a'), 'a change to b affects its amendment a');
+});
+
+test('SYN-006: a refining dependent of an invalidated unit surfaces as a review candidate', () => {
+  const today = new Date(Date.UTC(2026, 5, 9));
+  const units = [
+    unit('dc-old', { status: 'retired', created: '2026-01-01', t_invalid: '2026-03-01' }),
+    unit('dc-refiner', { status: 'active', created: '2026-02-01', edges: [{ type: 'refines', target: 'dc-old' }] }),
+  ];
+  const traces = traceSupersededImpact(units, today);
+  assert.equal(traces.length, 1);
+  assert.deepEqual(traces[0].dependents, ['dc-refiner']);
+});

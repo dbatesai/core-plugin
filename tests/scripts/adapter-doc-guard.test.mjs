@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 // — they catch an accidental revert of the Workflow/Teams split, the ScheduleWakeup
 // dynamic-cadence answer, or the Codex schedule drop (the DC-75 parity boundary).
 const HARNESSES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'harnesses');
+const BASE = join(HARNESSES, '..');
 const claudeMd = readFileSync(join(HARNESSES, 'claude-code.md'), 'utf8');
 const codexMd = readFileSync(join(HARNESSES, 'codex.md'), 'utf8');
 
@@ -46,4 +47,17 @@ test('claude-code.md spawn-subagent offers worktree isolation + a subagent_type 
 test('codex.md preserves the schedule DROP (DC-75 parity boundary)', () => {
   const s = section(codexMd, 'schedule');
   assert.ok(/DROP/i.test(s), 'Codex schedule remains a documented drop');
+});
+
+test('harness.md defines the drop-handling runtime contract (SYN-017)', () => {
+  const s = readFileSync(join(BASE, 'protocols', 'harness.md'), 'utf8');
+  assert.match(s, /## Drop handling/, 'drop-handling section exists');
+  assert.match(s, /once per session/i, 'once-per-session surfacing rule named');
+  assert.match(s, /[Nn]ever silently skip/, 'no-silent-skip rule named');
+  assert.match(s, /### configure-project/, 'configure-project is a contract verb');
+});
+
+test('SKILL.md tells the agent to read and surface drops (SKILL-016)', () => {
+  const s = readFileSync(join(BASE, 'SKILL.md'), 'utf8');
+  assert.match(s, /Drop handling/, 'SKILL.md points at the drop-handling contract');
 });

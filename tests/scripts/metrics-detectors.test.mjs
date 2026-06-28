@@ -7,6 +7,7 @@ import {
   extractCitations, buildUnitIndex, resolveCitation, runCitationResolver,
   parseFrontmatter, extractReadUnitFilenames, runStaleContextTripwire,
   buildVocabulary, runAnticipationGap, isCommandInjection, runAbsenceWithDeadline,
+  runDetectors,
 } from '../../plugins/core/skills/core/scripts/metrics-detectors.mjs';
 
 // ---------------------------------------------------------------- helpers ---
@@ -162,11 +163,12 @@ test('runAbsenceWithDeadline flags active open-questions past their by-when', ()
   );
 });
 
-test('runStaleContextTripwire skips stable/final units regardless of age', () => {
+test('runStaleContextTripwire skips terminal/durably-correct units regardless of age', () => {
+  // fixtures changed from the out-of-schema 'final'/'stable' (SYN-005)
   withStore(
     {
-      'dc-final.md': unitContent({ status: 'final', updated: '2020-01-01' }),
-      'dc-stable.md': unitContent({ status: 'active', updated: '2020-01-01', stabilityClass: 'stable' }),
+      'dc-final.md': unitContent({ status: 'retired', updated: '2020-01-01' }),
+      'dc-stable.md': unitContent({ status: 'active', updated: '2020-01-01', stabilityClass: 'durably-correct' }),
     },
     (mem) => {
       const events = [
@@ -174,7 +176,18 @@ test('runStaleContextTripwire skips stable/final units regardless of age', () =>
         { kind: 'tool', text: '_memories/dc-stable.md' },
       ];
       const stale = runStaleContextTripwire(events, mem, '2026-06-02', 30);
-      assert.equal(stale.length, 0, 'stable/final units exempt from stale-context');
+      assert.equal(stale.length, 0, 'terminal/durably-correct units exempt from stale-context');
+    },
+  );
+});
+
+test('SYN-005: out-of-schema status final is NOT stable — an aged final unit trips stale-context', () => {
+  withStore(
+    { 'dc-bogus.md': unitContent({ status: 'final', updated: '2020-01-01' }) },
+    (mem) => {
+      const events = [{ kind: 'tool', text: '_memories/dc-bogus.md' }];
+      const stale = runStaleContextTripwire(events, mem, '2026-06-02', 30);
+      assert.ok(stale.length >= 1, 'out-of-schema final must not exempt the unit from the tripwire');
     },
   );
 });
@@ -320,4 +333,27 @@ test('runAnticipationGap dedupes terms within a single turn', () => {
       assert.equal(retrieval.length, 1, 'deduped within a turn');
     }
   });
+});
+
+test('MET-013: anticipation-gap records are stamped provisional + low severity at the source', () => {
+  const home = mkdtempSync(join(tmpdir(), 'md-prov-'));
+  const project = mkdtempSync(join(tmpdir(), 'md-proj-'));
+  try {
+    mkdirSync(join(project, '_memories'), { recursive: true });
+    writeFileSync(join(project, '_memories', 'dc-64-retrieval-ladder.md'), '---\ntype: decision\n---\n# ladder\n');
+    const slugDir = join(home, '.claude', 'projects', project.replace(/[/.\\:]/g, '-')); // backslash + drive-colon: Windows temp paths, matches mapProjectPathToSlug
+    mkdirSync(slugDir, { recursive: true });
+    writeFileSync(join(slugDir, 'sess-d.jsonl'),
+      JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: 'tell me about the retrieval plan' }] } }) + '\n' +
+      JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: 'sure.' }] } }) + '\n');
+    const r = runDetectors({ project, harness: 'claude-code', home, sessionId: 'sess-d', workspaceId: 'md-prov-ws', env: {} });
+    assert.equal(r.status, 'OK');
+    for (const rec of r.records.filter((x) => x.detector === 'anticipation-gap')) {
+      assert.equal(rec.provisional, true, 'every anticipation-gap record self-declares heuristic status');
+      assert.equal(rec.severity, 'low');
+    }
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });

@@ -1,10 +1,10 @@
 # Architecture Doctrines
 
-A thin normative index of the load-bearing architectural rules CORE has converged on. Five doctrines, each with a named first consumer. Per DC-98 (doctrine-consumer coupling), **a doctrine without an active consumer is an observation, not a doctrine.** Graduation requires a named first consumer; release-review verifies the consumer still exists.
+A thin normative index of the load-bearing architectural rules CORE has converged on. Five entries: four doctrines with live consumers, plus one candidate (Doctrine 1) held at observation status until its consumer lands. Per DC-98 (doctrine-consumer coupling), **a doctrine without an active consumer is an observation, not a doctrine.** Graduation requires a named first consumer; release-review verifies the consumer still exists.
 
 The doctrines live here, not in protocol prose, because they cut across protocols. When a protocol document needs to lean on a doctrine, it cites this file by anchor. Consumers cite the doctrine by name; readers come here for the rule.
 
-## Doctrine 1 — Probe before propose
+## Doctrine 1 — Probe before propose *(candidate — no wired consumer; observation status per Doctrine 5)*
 
 > When stakes warrant adversarial review, run an empirical probe before composing the analysis prompt.
 
@@ -12,9 +12,9 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 
 **How to apply.** Before spawning an adversarial swarm for architectural / classification / public-copy / graduation work, ask: *"What's the cheapest empirical check that would shift my frame if it returned a different answer than I expect?"* Run it. Compose the swarm prompt with the probe result in hand. The Anvil + Sextant + Pillar parallel-critique pattern that pressure-tested the metrics spec is the canonical instance (5 pre-flight probes ran empirically before the spec frame was finalized; one collapsed v1 scope from emit-everything to subscribe-and-augment).
 
-**First consumer.** `protocols/analysis.md` (v2.8.0 will formalize the probe-before-propose step). The metrics spec session 47 work demonstrated the pattern; the protocol codifies it.
+**First consumer.** None wired. `protocols/analysis.md` contains no probe-before-propose step — the v2.8.0 plan that was to add one never landed, and that stale note is removed. The metrics-spec session-47 work demonstrated the pattern empirically, but per Doctrine 5 a demonstration is not a consumer.
 
-**When this graduates from observation to doctrine.** When `protocols/analysis.md` actively cites this rule. Until then, it lives here as a graduated observation with implementation pending.
+**When this graduates from observation to doctrine.** When `protocols/analysis.md` gains a probe-before-propose step that cites this entry by anchor — an execution-logic change that goes through its own adversarial pass, not a doc edit. Until then this entry is an observation by this file's own rule: kept in place so the candidate stays visible, but it governs nothing, and release review must not count it as a consumer-backed doctrine.
 
 ## Doctrine 2 — Documentation as contract reference
 

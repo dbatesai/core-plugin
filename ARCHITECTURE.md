@@ -8,7 +8,7 @@ CORE started as a multi-agent reasoning framework — a `/core` skill that spun 
 
 In May 2026 it changed shape. Now it's one capable agent that knows the project, watches its data sources, remembers across sessions, raises decisions and risks before you ask, and argues back when you're too sure. The swarm is still there, but the agent reaches for it as a tool when the stakes call for it, rather than running everything through it.
 
-Three things changed in practice. The swarm machinery moved from the default path to an internal protocol (`protocols/analysis.md`) the agent calls when stakes warrant. Memory went from a loose mix of auto-memory, session summaries, and a `DECISIONS.md` to a structured store of facts with typed links between them and a four-tier way of retrieving them. `PROJECT.md` went from hand-edited to written from those facts, with edits detected and carried back. And plain voice became a rule the project enforces in a few places at once — the top of `SKILL.md`, the protocol headers, a per-turn reminder hook, and the agent's own self-checks.
+Three things changed in practice. The swarm machinery moved from the default path to an internal protocol (`protocols/analysis.md`) the agent calls when stakes warrant. Memory went from a loose mix of auto-memory, session summaries, and a `DECISIONS.md` to a structured store of facts with typed links between them and a four-tier way of retrieving them. `PROJECT.md` went from hand-edited to written from those facts, with edits detected and carried back. And plain voice became a rule the project enforces in a few places at once — the top of `SKILL.md`, the protocol headers, the agent's own self-checks, and an optional per-turn reminder hook you can add yourself.
 
 The argue-it-out discipline didn't go anywhere. The agent still frames its predictions before reading a draft, keeps a log of what changed its mind, audits itself against four named failure modes, and runs the external-audience test before any claim about people. That holds whether it's working alone or in a swarm. What changed was the staffing, not the discipline.
 
@@ -125,7 +125,7 @@ The full multi-agent machinery — phase structure, briefing format, monitor pat
 
 ## Hooks and visible curation
 
-Two hooks register through the plugin manifest.
+The plugin ships no hooks — `plugins/core/hooks/hooks.json` is empty, and installing CORE never edits your settings. Two hooks pair well with CORE; wire either into your own `~/.claude/settings.json` (INSTALL.md §"Optional hooks" shows how):
 
 | Hook | What it does |
 |---|---|

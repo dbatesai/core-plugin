@@ -123,6 +123,13 @@ For interactive HTML visualization of multi-agent session logs (agent reasoning 
 
 A CORE-specific eight-field-schema visualizer (Persuasion Log / Mind Changes / Minority Views with their CORE-prescribed shapes) is not currently shipped. If the generic skill output proves insufficient for reviewing CORE swarm runs in real use, that's the prompt to author a CORE-specific renderer here.
 
+## Cloud-synced stores (OneDrive / iCloud Drive / Dropbox)
+
+Two write surfaces interact with sync-client virtualization; everything funnels through them:
+
+- **File writes.** Every mutating script writes via `fs-atomic.mjs` (`atomicWriteFileSync`: sibling temp file + rename — the ONLY `renameSync` call site in the plugin). On Windows, OneDrive or antivirus can transiently hold the rename target open (EPERM/EACCES); the writer retries 3× with a 50ms delay before throwing, and a throw always leaves the old file intact. On iCloud Drive, the visible `.<name>.tmp-*` sibling can be uploaded as a conflict copy if the sync client races the rename — if conflict copies appear, move the store out of iCloud Drive (a `.nosync` temp dir is the known mitigation but would break same-filesystem rename atomicity, so it isn't the default).
+- **Folder renames.** The startup protocols (`protocols/startup.md` Step 4 and `protocols/startup-conditional-loads.md` §folder rename) never `mv` on a cloud-synced path: `mv` can corrupt the sync state. They use `cp -r <src> <dst>` then `rm -rf <src>` after verifying file counts match.
+
 ## Adding new scripts
 
 Two questions to answer first:
@@ -131,3 +138,9 @@ Two questions to answer first:
 2. **Does this surface need to be the same across all projects using CORE?** If yes, it belongs in the plugin (one source of truth, propagates via plugin update). Per-project copies create drift.
 
 If both are yes, write the script here as `.mjs`. If "deterministic across sessions" is no, it's probably inference-territory and a markdown spec is the better answer.
+
+## Proportionality note — the metrics layer at single-user scale
+
+The metrics stack here (six-state classifier → daily rollup → orient-signal, the silent-failure detectors, the calibration pipeline, OTel dual-write) is sized for a feedback loop that needs more corpus than a single-user install generates — the calibration pool sat at 57/100 labeled turns after months of real use. That is a deliberate forward-looking tradeoff: the architecture is being validated at small scale before it can earn its keep at larger scale, and capture is cheap while interpretation is replayable.
+
+The investment discipline until then: keep the one headline path robust — `classify-turns` → `metrics-rollup` → `orient-signal` (the rec-fail-tier-0 self-audit) — and don't grow the rest. The next investment in this layer is justified when any of these turns true: the calibration pool clears its gate, a second active user or workspace starts generating parallel corpora, or a consumer outside `/finalize` starts reading the OTel traces. Absent those, prefer hardening the headline path over adding subsystems.

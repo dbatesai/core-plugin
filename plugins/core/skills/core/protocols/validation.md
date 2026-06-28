@@ -54,7 +54,9 @@ node ${CORE_ROOT}/skills/core/scripts/validate.mjs <project-path>
 
 The runner walks `<project-path>/_memories/_validation/tests/test-*.yaml`, runs each test, scores precision and recall, writes a report to `<project-path>/_outputs/validation/<YYYY-MM-DD>/REPORT.md`, and exits with status 0 on pass / 1 on any FAIL.
 
-The current runner simulates Tier 1 retrieval (OR-of-terms grep). Future versions add Tier 2 edge-walk simulation and Tier 3 Explore-subagent invocation. The thresholds and report shape stay constant across versions.
+Two scripts get loosely called "the validator," and they do different jobs. `check-units.mjs` checks unit schema and edge integrity — the store check `/finalize` runs at every close. `validate.mjs`, this runner, simulates retrieval against the test corpus and scores precision and recall. When a protocol says "validate the store," that means `check-units.mjs`; this file owns the retrieval suite.
+
+The current runner simulates Tier 1 retrieval (OR-of-terms grep) only. A test with `tier_expected: 2` or `3` is outside what the runner can verify — a unit reachable only via edge walk scores FAIL here even though real retrieval would find it. Those FAILs are not authoritative; handle them per §"Failure handling" step 2, and exclude them from the all-tests-failing substrate-broken signal. Future versions add Tier 2 edge-walk simulation and Tier 3 Explore-subagent invocation. The thresholds and report shape stay constant across versions.
 
 ## Thresholds
 
@@ -85,7 +87,7 @@ Aggregate pass rate is reported alongside individual results.
 When a test fails:
 
 1. **Re-examine the test.** Is the `expected_memories` list correct? Did the expected unit get archived since the test was written? Has the unit's prefix or slug changed?
-2. **Try the next tier.** The runner simulates Tier 1 only by default. If the expected unit is genuinely Tier 2 (reachable only via edge walk), the test should specify `tier_expected: 2` and the runner should escalate.
+2. **Check `tier_expected`.** The runner simulates Tier 1 only. If the test specifies `tier_expected: 2` or `3`, the FAIL is expected, not evidence of breakage: perform the walk yourself — start from the Tier 1 hits, follow `supersedes` / `depends-on` edges one hop (Tier 2), or run the Explore subagent (Tier 3) — and record the manual result in the report as INVESTIGATE with a note (`manual-tier-2: reached` or `not-reached`). Exclude these tests from the aggregate FAIL count when deciding whether to pause-and-surface.
 3. **Mark INVESTIGATE in the report**, document the gap, and continue — don't block the build on a single test failure unless it represents systemic substrate breakage.
 4. **If ALL tests fail < 0.5**, that's the substrate-broken signal. Pause-and-surface to the user with the report path.
 

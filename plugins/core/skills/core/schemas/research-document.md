@@ -21,6 +21,8 @@ source_session: "YYYY-MM-DD"
 sources:                                  # Source material breakdown
   - type: "web|academic|internal|external-llm"
     count: N
+sensitivity: "public|internal|restricted" # Inherits from the MOST restricted source material
+derived-from-restricted: false            # true when any finding derives from restricted sources
 supersedes: null                          # ID of what this replaced, or null
 superseded_by: null                       # ID of replacement, or null
 tags: ["tag1", "tag2"]                    # For discovery and overlap detection
@@ -30,6 +32,8 @@ summary: "One-paragraph executive summary for index scanning"
 ```
 
 Supersession is the audit trail — when a new research document replaces an older one on the same topic, write `supersedes` in the new document's frontmatter and `superseded_by` in the older one's. Nothing is deleted.
+
+`sensitivity` and `derived-from-restricted` are required by the provenance discipline in `protocols/analysis.md §Research mode` — they gate external sharing. Sensitivity inherits from the most restricted source material the document draws on; `derived-from-restricted: true` whenever any finding rests on restricted-tier sources, even indirectly.
 
 ---
 

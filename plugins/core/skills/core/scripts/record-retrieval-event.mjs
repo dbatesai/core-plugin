@@ -10,7 +10,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { logEvent } from './log-event.mjs';
+import { logEvent, sanitizeAttributeValue } from './log-event.mjs';
 
 export const VALID_TRIGGERS = new Set([
   'session-start',
@@ -55,7 +55,7 @@ function normalizeUnit(unit, idx) {
   if (unit.score !== undefined && (typeof unit.score !== 'number' || Number.isNaN(unit.score))) {
     fail(`units_retrieved[${idx}].score`, 'must be a number when present');
   }
-  return { ...unit, id: unit.id.trim() };
+  return { ...unit, id: sanitizeAttributeValue(unit.id.trim(), { maxLen: 200 }) };
 }
 
 export function normalizeRetrievalEvent(event) {
@@ -70,7 +70,7 @@ export function normalizeRetrievalEvent(event) {
   }
   const intentTopics = event.intent_topics.map((topic, idx) => {
     requireString(topic, `intent_topics[${idx}]`);
-    return topic.trim();
+    return sanitizeAttributeValue(topic.trim(), { maxLen: 200 });
   });
 
   if (!Number.isInteger(event.tier_reached) || event.tier_reached < 1 || event.tier_reached > 3) {

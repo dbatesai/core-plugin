@@ -19,6 +19,8 @@ If any of these conditions hold, harness is Codex.
 
 Use Codex's subagent invocation surface. Custom agents can be defined at `~/.codex/agents/<name>/`. For ad-hoc exploration, invoke the general agent with the prompt verbatim. Subagent output returns inline.
 
+**Schema note (2026-06-09, unvalidated):** the concrete tool is `spawn_agent` (see the nickname note below), but its parameter schema has not been re-verified against a live Codex CLI install since the May 2026 GA churn. Before the first spawn of a session, inspect the installed Codex tool definition for the actual tool name, required params, and result shape. The verb-level intent is stable — pass the brief verbatim as the prompt, read the result inline — even if field names moved. Treat any parameter shape written here as a starting hypothesis, not a contract, until a live install validates it.
+
 Codex's `spawn_agent` tool may return its own generated nickname (e.g., `Dalton`, `Bohr`) for the subagent invocation. That nickname is at the tool-instance layer — Codex's bookkeeping — not the CORE identity layer. The CORE identity lives in the brief, the log filename, and what the agent calls itself in its own narrative. Ignore the returned nickname for CORE purposes; the file-scratchpad filename is the authoritative identity surface.
 
 ## spawn-team
@@ -70,7 +72,7 @@ Re-open this drop once a live Codex CLI install validates whether Codex hooks ca
 
 ## read-auto-memory
 
-Codex can inject memory-like context at session start when `features.memories = true` (experimental). When it does, the context is gated by `no_memories_if_mcp_or_web_search = true` and may be suppressed depending on session configuration. Treat any injected memory as harness-local recall — scratch cache, not project truth. Verify project-specific claims against the CORE unit store before acting. Run a startup probe to confirm whether injection occurred before relying on it for bootstrap behavior.
+Codex can inject memory-like context at session start when `features.memories = true` (experimental). When it does, the context is gated by `no_memories_if_mcp_or_web_search = true` and may be suppressed depending on session configuration. Treat any injected memory as harness-local recall — scratch cache, not project truth. Verify project-specific claims against the CORE unit store before acting. Startup probe, concretely: pick one fact you'd expect injected (the most recent session's one-line summary, or a canary-tagged line if one exists) and check whether it is already in your context *without reading any file*. Present → injection occurred; treat it as scratch cache. Absent → treat injection as not-occurred this session and rely on the CORE unit store alone; do not read the memory file to simulate injection.
 
 Startup context also comes from `<project>/AGENTS.md` and `~/.codex/AGENTS.md`; treat those as instruction surfaces, not project memory. Project facts live in `<project>/PROJECT.md` and `<project>/_memories/`.
 
@@ -114,7 +116,11 @@ Run it as the setup step on a folder, or any time you want a "is this project wi
 ```bash
 # Derive PLUGIN_ROOT from the loaded SKILL.md path (the `${CLAUDE_PLUGIN_ROOT}`
 # rule below). The script self-resolves CORE_ROOT too, but pass --core-root for safety.
-node "<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs" --project "$(pwd)" --core-root "<PLUGIN_ROOT>" --harness codex
+# Run from the project directory and OMIT --project — the script defaults to the
+# process cwd. ($(pwd) is bash-only: PowerShell evaluates it to a PathInfo object
+# and the argument breaks silently.)
+node "<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs" --core-root "<PLUGIN_ROOT>" --harness codex
+# Not in the project directory? Pass --project with an absolute literal path.
 # --apply to actually write AGENTS.md (needs a CONTRACT.md); --json for the structured report
 ```
 
@@ -123,7 +129,7 @@ It is idempotent and report-only unless `--apply` is passed. Echo both tiers of 
 ## Notes
 
 - Universal verbs (`read`, `write`, `edit`, `glob`, `grep`, `shell`, `web-fetch`, `web-search`) resolve via inference to Codex's `read`, `write`, `apply_patch`, `shell` + `find`, `shell` + `rg`, `shell`, MCP-server or `shell` + `curl`, MCP-server (Brave / Firecrawl) respectively. No explicit mapping needed.
-- The plugin ships dual manifests (`.claude-plugin/plugin.json` for Claude Code, `.codex-plugin/plugin.json` for Codex) in the same repo; Codex installs the bundle into `~/.codex/plugins/cache/<marketplace>/core/<version>/` via `codex plugin marketplace add` + `codex plugin add`. Skill content under `skills/core/` is shared between both harnesses.
+- The plugin ships dual manifests (`.claude-plugin/plugin.json` for Claude Code, `.codex-plugin/plugin.json` for Codex) in the same repo; Codex installs the bundle into `~/.codex/plugins/cache/<marketplace>/core/<version>/` via `codex plugin marketplace add` + `codex plugin add`. Skill content under `skills/core/` is shared between both harnesses. The manifests are intentionally asymmetric: the Claude manifest carries `build` (startup's readiness line reads it — single source of truth), the Codex manifest carries `skills` and `interface` (Codex marketplace requirements with no Claude Code equivalent). Name/version/license/author must always agree — `tests/scripts/manifest-parity.test.mjs` enforces it.
 - Voice baseline catalog ships empty initially. Build empirically if usage warrants.
 
 ### Known RTK collisions on Codex

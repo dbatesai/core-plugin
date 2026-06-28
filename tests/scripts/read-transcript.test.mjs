@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  parseClaudeCode, parseCodex, parseTranscript, resolveTranscriptPath, readTranscript, SUPPORTED_HARNESSES,
+  parseClaudeCode, parseCodex, parseTranscript, resolveTranscriptPath, resolveTranscript, readTranscript, SUPPORTED_HARNESSES,
 } from '../../plugins/core/skills/core/scripts/read-transcript.mjs';
 
 // --- Claude Code parser (verified schema: message.content[]) ---
@@ -154,6 +154,68 @@ test('readTranscript: unsupported harness → unsupported meta, not available', 
 
 test('SUPPORTED_HARNESSES covers the two target harnesses', () => {
   ['claude-code', 'codex'].forEach((h) => assert.ok(SUPPORTED_HARNESSES.has(h)));
+});
+
+// --- MET-008: session-id-exact resolution; mtime is a documented fallback ---
+
+test('MET-008: explicit sessionId resolves the exact transcript even when another file is newer', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-sid-'));
+  try {
+    const cwd = '/work/Proj';
+    const dir = join(home, '.claude', 'projects', cwd.replace(/\//g, '-'));
+    mkdirSync(dir, { recursive: true });
+    const mine = join(dir, 'sess-aaa.jsonl');
+    writeFileSync(mine, '{}\n');
+    const newer = join(dir, 'sess-bbb.jsonl'); // a NEW session started before the analyzers ran
+    writeFileSync(newer, '{}\n');
+    const r = resolveTranscript('claude-code', { cwd, home, sessionId: 'sess-aaa', env: {} });
+    assert.equal(r.path, mine, 'exact session-id match must beat mtime');
+    assert.equal(r.resolution, 'session-id');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('MET-008: CLAUDE_CODE_SESSION_ID env is used when no explicit sessionId is passed', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-env-'));
+  try {
+    const cwd = '/work/Proj';
+    const dir = join(home, '.claude', 'projects', cwd.replace(/\//g, '-'));
+    mkdirSync(dir, { recursive: true });
+    const mine = join(dir, 'sess-env.jsonl');
+    writeFileSync(mine, '{}\n');
+    writeFileSync(join(dir, 'sess-other.jsonl'), '{}\n');
+    const r = resolveTranscript('claude-code', { cwd, home, env: { CLAUDE_CODE_SESSION_ID: 'sess-env' } });
+    assert.equal(r.path, mine);
+    assert.equal(r.resolution, 'session-id');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('MET-008: no file matches the session id → documented mtime fallback', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-fb-'));
+  try {
+    const cwd = '/work/Proj';
+    const dir = join(home, '.claude', 'projects', cwd.replace(/\//g, '-'));
+    mkdirSync(dir, { recursive: true });
+    const only = join(dir, 'sess-zzz.jsonl');
+    writeFileSync(only, '{}\n');
+    const r = resolveTranscript('claude-code', { cwd, home, sessionId: 'sess-gone', env: {} });
+    assert.equal(r.path, only, 'falls back rather than failing');
+    assert.equal(r.resolution, 'mtime-fallback', 'fallback is labeled, never silent');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('MET-008: readTranscript stamps meta.transcript_resolution', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-meta-'));
+  try {
+    const cwd = '/work/Proj';
+    const dir = join(home, '.claude', 'projects', cwd.replace(/\//g, '-'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'sess-m.jsonl'), JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }) + '\n');
+    const r = readTranscript({ harness: 'claude-code', cwd, home, sessionId: 'sess-m', env: {} });
+    assert.equal(r.available, true);
+    assert.equal(r.meta.transcript_resolution, 'session-id');
+    const fb = readTranscript({ harness: 'claude-code', cwd, home, sessionId: 'nope', env: {} });
+    assert.equal(fb.meta.transcript_resolution, 'mtime-fallback');
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 test('low: parseCodex extracts text from a structured-content (array) event_msg body, not just strings', () => {

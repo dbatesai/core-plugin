@@ -23,11 +23,13 @@
  *   node check-units.mjs <project-path> --mode integrity
  *   node check-units.mjs <project-path> --integrity        (shorthand)
  *   node check-units.mjs <project-path> --json
+ *   node check-units.mjs <project-path> --include-observations
+ *       (full-store audit incl. observations/ — used by /process-memory)
  *
- * Exit codes: 0 = all pass, 1 = warnings, 2 = failures, 3 = setup error.
+ * Exit codes: 0 = all pass, 1 = non-benign warnings, 2 = failures, 3 = setup error.
  */
 
-import { readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.mjs';
@@ -35,32 +37,18 @@ import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.m
 // ---------- Schema constants ----------
 
 export const REQUIRED_FIELDS = new Set(['id', 'type', 'status', 'created', 'updated', 'topics']);
-export const VALID_STATUSES = new Set(['active', 'retired', 'archived', 'superseded']);
-export const VALID_TYPES = new Set([
-  'decision', 'risk', 'person', 'deliverable', 'principle',
-  'explainer', 'review-finding', 'observation', 'topic', 'reference',
-  'feedback', 'memory', 'open-question',
-]);
-export const VALID_EDGE_TYPES = new Set([
-  'cites', 'supersedes', 'superseded-by', 'depends-on', 'conflicts-with',
-  'references-person', 'references-topic',
-  'depended-on-by', 'supersedes-claim',
-  // Blessed 2026-06-03 (2-corpus evidence, obs-20260603-edge-type-validation-gap-cross-corpus):
-  // both are semantically distinct from supersedes — 'refines' sharpens/elaborates a prior
-  // decision without replacing it (CORE); 'amends' modifies specific parts while the prior
-  // stands (local-llm-build / BBLens). Distinct intent → first-class, not relabeled away.
-  'refines', 'amends',
-]);
 
-// Weak/informal edge types that carry no distinct semantics — normalize to a committed type
-// rather than blessing a near-synonym. The /process-memory safe-fix flow applies these as an
-// applyable relabel (the resolution path the cross-corpus gap report asked for); the validator
-// names the target in the edge-unknown-type detail so the fix is mechanical, not a guess.
-export const EDGE_TYPE_NORMALIZE = {
-  'relates': 'cites',
-  'relates-to': 'cites',
-  'related': 'cites',
-};
+// Vocabulary constants live in unit-vocab.mjs (SYN-005 unification) and are
+// re-exported here so every existing importer and test keeps working.
+export {
+  VALID_STATUSES, TERMINAL_STATUSES, VALID_TYPES, VALID_EDGE_TYPES,
+  EDGE_TYPE_NORMALIZE, VALID_CONFIDENCE_LEVELS, VALID_STABILITY_CLASSES,
+  EXEMPT_FROM_STALENESS,
+} from './unit-vocab.mjs';
+import {
+  VALID_STATUSES, VALID_TYPES, VALID_EDGE_TYPES, EDGE_TYPE_NORMALIZE,
+  VALID_CONFIDENCE_LEVELS, VALID_STABILITY_CLASSES, EXEMPT_FROM_STALENESS,
+} from './unit-vocab.mjs';
 
 // Edge targets that legitimately live OUTSIDE the project unit store. The integrity
 // walk would otherwise flag these as dangling (see obs-validator-cross-store-blindness):
@@ -83,6 +71,12 @@ export function isExternalRef(target) {
 
 export const ARCHIVE_RS_THRESHOLD = 0.05;
 export const STALE_DAYS = 90;
+export const SOURCES_WARN_AGE_DAYS = 14;
+
+// MEM-014: PROJECT.md and the hot section are capped, but a single unit had no
+// size signal anywhere — retrieval reads matched units whole, so one bloated
+// unit eats disproportionate context. ~10KB ≈ 3K tokens at the 0.30 factor.
+export const UNIT_SIZE_WARN_BYTES = 10_000;
 
 // ---------- Unit iteration ----------
 
@@ -90,7 +84,7 @@ export const STALE_DAYS = 90;
 // which the `name.startsWith('_')` skip below already exempts from schema and integrity
 // validation. No separate producer/path map is needed.
 
-export function iterActiveUnits(memoriesDir) {
+export function iterActiveUnits(memoriesDir, { includeObservations = false } = {}) {
   const units = [];
   let entries;
   try { entries = readdirSync(memoriesDir, { withFileTypes: true }); } catch { return units; }
@@ -107,6 +101,19 @@ export function iterActiveUnits(memoriesDir) {
       units.push(u);
     } catch (e) {
       units.push({ path: join(memoriesDir, name), fm: {}, body: `LOAD ERROR: ${e}`, id: name.replace(/\.md$/, '') });
+    }
+  }
+
+  if (includeObservations) {
+    // SYN-007: observation units live in observations/<YYYY-MM>/ and were never
+    // schema-audited, even though iterAllUnitFiles (the dangling-edge target
+    // set) is recursive — edges could point at observations that pass the
+    // dangling check but escape every other check. Opt-in keeps the default
+    // active set top-level-only.
+    const obsPaths = iterAllUnitFiles(join(memoriesDir, 'observations')).sort();
+    for (const p of obsPaths) {
+      try { units.push(loadUnit(p)); }
+      catch (e) { units.push({ path: p, fm: {}, body: `LOAD ERROR: ${e}`, id: basename(p, '.md') }); }
     }
   }
   return units;
@@ -144,6 +151,16 @@ export function checkSchema(units, memoriesDir, report) {
       if (!(fld in u.fm)) report.push({ level: 'FAIL', check: 'required-field', unit_id: uid, detail: `Missing required frontmatter field: '${fld}'` });
     }
 
+    // MEM-008: a key that is PRESENT but blank passed both the presence check
+    // (key in fm) and the value checks (guarded by truthiness). `type: `
+    // parses to an empty list; '' and null are the scalar variants.
+    for (const fld of ['id', 'type', 'status', 'created', 'updated']) {
+      if (!(fld in u.fm)) continue; // absence already FAILed above
+      const v = u.fm[fld];
+      const blank = v === null || (typeof v === 'string' && v.trim() === '') || (Array.isArray(v) && v.length === 0);
+      if (blank) report.push({ level: 'FAIL', check: 'required-field-empty', unit_id: uid, detail: `Required field '${fld}' is present but empty` });
+    }
+
     const status = String(u.fm.status || '').toLowerCase();
     if (status && !VALID_STATUSES.has(status))
       report.push({ level: 'WARN', check: 'status-value', unit_id: uid, detail: `Unknown status '${status}' (expected: ${[...VALID_STATUSES].sort().join(', ')})` });
@@ -151,6 +168,18 @@ export function checkSchema(units, memoriesDir, report) {
     const typ = String(u.fm.type || '').toLowerCase();
     if (typ && !VALID_TYPES.has(typ))
       report.push({ level: 'WARN', check: 'type-value', unit_id: uid, detail: `Unknown type '${typ}'` });
+
+    // confidence-level / stability-class — typed by the source-registration
+    // framework but previously unvalidated: a unit could carry
+    // confidence-level: banana and pass everything (SYN-005 / SCH-003).
+    const conf = String(u.fm['confidence-level'] || '').toLowerCase();
+    if (conf && !VALID_CONFIDENCE_LEVELS.has(conf))
+      report.push({ level: 'WARN', check: 'confidence-level-value', unit_id: uid, detail: `Unknown confidence-level '${conf}' (expected: ${[...VALID_CONFIDENCE_LEVELS].sort().join(', ')})` });
+    for (const scField of ['stability-class', 'proposed-stability-class']) {
+      const sc = String(u.fm[scField] || '').toLowerCase();
+      if (sc && !VALID_STABILITY_CLASSES.has(sc))
+        report.push({ level: 'WARN', check: 'stability-class-value', unit_id: uid, detail: `Unknown ${scField} '${sc}' (expected: ${[...VALID_STABILITY_CLASSES].sort().join(', ')})` });
+    }
 
     const topics = u.fm.topics;
     if (topics !== undefined && topics !== null && !Array.isArray(topics))
@@ -215,6 +244,13 @@ export function checkSchema(units, memoriesDir, report) {
         report.push({ level: 'WARN', check: 'by-when-format', unit_id: uid, detail: `Field 'by-when' must be ISO date (YYYY-MM-DD), found '${byWhenStr}'` });
     }
 
+    // MEM-014 advisory size check.
+    let unitBytes = 0;
+    try { unitBytes = statSync(u.path).size; }
+    catch { unitBytes = Buffer.byteLength(String(u.body || ''), 'utf8'); }
+    if (unitBytes > UNIT_SIZE_WARN_BYTES)
+      report.push({ level: 'WARN', check: 'unit-oversize', unit_id: uid, detail: `Unit is ${unitBytes} bytes (> ${UNIT_SIZE_WARN_BYTES}) — split or compact; retrieval reads matched units whole` });
+
     report.push({ level: 'PASS', check: 'schema', unit_id: uid, detail: '' });
   }
 }
@@ -269,13 +305,33 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     const rs = scoreProxyRS(u, today);
     if (rs < ARCHIVE_RS_THRESHOLD) {
       const status = String(u.fm.status || 'active').toLowerCase();
-      if (status === 'active')
+      const typ = String(u.fm.type || '').toLowerCase();
+      // Premises are axioms — a settled, rarely-touched premise is correct, not stale.
+      // Exempt them from the archive-candidate WARN (EXEMPT_FROM_STALENESS, unit-vocab).
+      if (status === 'active' && !EXEMPT_FROM_STALENESS.has(typ))
         report.push({ level: 'WARN', check: 'stale', unit_id: uid, detail: `R·S=${rs.toFixed(3)} < ${ARCHIVE_RS_THRESHOLD} — archive candidate per DC-69` });
     }
 
     const status = String(u.fm.status || '').toLowerCase();
     if (status === 'archived' && !String(u.path).includes('archive'))
       report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit has status=archived but is not in archive/ subdir' });
+
+    // MEM-018: unknown provenance is now visible. An active, aged,
+    // non-observation unit with no sources scores the degraded S default —
+    // surface it so a sources entry gets added. Advisory (benign).
+    const srcVal = u.fm.sources;
+    const noSources = srcVal === undefined || srcVal === null || (Array.isArray(srcVal) && srcVal.length === 0);
+    const typLower = String(u.fm.type || '').toLowerCase();
+    if (noSources && typLower !== 'observation' && String(u.fm.status || 'active').toLowerCase() === 'active') {
+      const created = parseIsoDate(u.fm.created);
+      const srcAge = created ? Math.floor((today.getTime() - created.getTime()) / 86_400_000) : null;
+      if (srcAge !== null && srcAge > SOURCES_WARN_AGE_DAYS)
+        report.push({ level: 'WARN', check: 'sources-missing', unit_id: uid, detail: `Active ${typLower || 'unit'} ${srcAge}d old with no sources — unknown provenance scores S=0.3; add a sources entry` });
+    } else if (typeof srcVal === 'string' && srcVal.trim() !== '') {
+      // Scalar `sources: PROJECT.md` works (priority.mjs coerces it), but the
+      // list form is the documented shape — nudge toward it. Advisory (benign).
+      report.push({ level: 'WARN', check: 'sources-not-list', unit_id: uid, detail: `sources is a scalar string ('${srcVal}') — use list form (sources:\\n  - ${srcVal}) so the field reads as a list everywhere` });
+    }
   }
 
   // INDEX-decisions drift
@@ -373,7 +429,9 @@ export function jsonReport(report, memoriesDir, mode, today) {
 // (and largely eliminated by flow-style array parsing). These return exit 0.
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
-  'external-ref',
+  'external-ref', 'sources-missing', 'sources-not-list', 'unit-oversize',
+  // Legacy annotations predate the source-registration-framework vocab; visibility without degradation (SYN-005 follow-up).
+  'confidence-level-value', 'stability-class-value',
 ]);
 
 // Exit-code contract: 0 = pass (including pass-with-benign-warnings),
@@ -423,6 +481,7 @@ export function main(argv) {
   let projectArg = '.';
   let asJson = false;
   let todayArg = null;
+  let includeObservations = false;
   const { schema: doSchema, integrity: doIntegrity, mode } = resolveChecks(argv);
 
   for (let i = 0; i < argv.length; i++) {
@@ -432,6 +491,7 @@ export function main(argv) {
     else if (a === '--store') { projectArg = argv[++i]; }
     else if (a === '--json') { asJson = true; }
     else if (a === '--today') { todayArg = argv[++i]; }
+    else if (a === '--include-observations') { includeObservations = true; }
     else if (!a.startsWith('--')) { projectArg = a; }
   }
 
@@ -447,7 +507,7 @@ export function main(argv) {
 
   const today = todayArg ? (() => { const d = parseIsoDate(todayArg); return d || new Date(); })() : new Date();
   const report = [];
-  const units = iterActiveUnits(memoriesDir);
+  const units = iterActiveUnits(memoriesDir, { includeObservations });
   if (!units.length) { process.stderr.write(`error: no units found in ${memoriesDir}\n`); return 3; }
 
   if (doSchema) checkSchema(units, memoriesDir, report);

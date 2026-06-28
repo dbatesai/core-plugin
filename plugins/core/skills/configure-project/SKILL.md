@@ -16,6 +16,8 @@ It is **idempotent** and **report-only by default**. The only write it ever perf
 - Standing up CORE on a folder from Codex for the first time.
 - A second harness (Codex) opening a folder Claude Code already manages — confirm it reads as a returning workspace, not a fork.
 - A quick "is this project healthy here?" check: store validates, manifests present, identity resolves, instruction surface exists.
+- After upgrading the plugin (say, v3.5 to v3.7), to confirm the store is still compatible. If identity reads `would-fork` or validation reports unknown-field warnings, run `/core` and let startup perform the migrations — this skill reports drift, it doesn't fix it.
+- On Claude Code, as a printable receipt. Startup already runs the bootstrap there, so nothing is missing without this skill — but `/configure-project` gives you a one-shot report confirming what startup found, which is useful right after install.
 
 ## Run it
 

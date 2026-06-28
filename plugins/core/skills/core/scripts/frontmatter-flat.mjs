@@ -12,6 +12,17 @@
  * M1: five near-identical copies of this parser collapsed to one. Returns [fm, body];
  * callers that only need the map use `const [fm] = parseFlatFrontmatter(text)`.
  *
+ * WHAT THIS PARSER DROPS — read before substituting it for priority.mjs's
+ * parseFrontmatter (MEM-015):
+ *   - ALL indented lines: `edges:` blocks, multi-line `topics:`/`sources:`
+ *     lists, nested maps. A caller that needs edge or list data MUST use
+ *     parseFrontmatter from priority.mjs — substituting this parser loses
+ *     that data silently (no error, no warning).
+ *   - empty-valued keys (`type: ` yields no key at all).
+ *   - type coercion: every value stays a string ('5', 'true').
+ * The conformance test in tests/scripts/frontmatter-flat.test.mjs pins the
+ * two parsers to agreement on top-level scalars.
+ *
  * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
  */
 

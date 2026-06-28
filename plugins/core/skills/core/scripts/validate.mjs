@@ -86,7 +86,7 @@ export const STOPWORDS = new Set([
 ]);
 
 export function extractQueryFeatures(query) {
-  const rawTerms = query.split(/\s+/).map(t => t.toLowerCase().replace(/[.,?!()\[\]"']/g, '')).filter(Boolean);
+  const rawTerms = query.split(/\s+/).map(t => t.toLowerCase().replace(/[.,?!()[\]"']/g, '')).filter(Boolean);
   const terms = [];
   const negatedTerms = [];
   for (let i = 0; i < rawTerms.length; i += 1) {

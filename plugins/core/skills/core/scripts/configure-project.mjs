@@ -54,6 +54,7 @@ export function resolveCoreRoot({ coreRootArg, scriptUrl } = {}) {
 // ── Harness detection (thin) ─────────────────────────────────────────────────
 // Mirrors capability-probe's consuming-harness signals without importing its
 // startup machinery. Codex sets CODEX_* env; default to claude-code.
+// Canonical signal list: harnesses/<name>.md §detect-harness. Env-visible subset only.
 export function detectHarness(env = process.env) {
   if (env.CORE_HARNESS) return env.CORE_HARNESS;
   if (env.CODEX_PLUGIN_ROOT || env.CODEX_HARNESS || env.CODEX_SANDBOX) return 'codex';

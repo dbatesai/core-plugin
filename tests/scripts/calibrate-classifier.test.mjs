@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import {
   computePrecision, emptyCalibrationState, readCalibrationState, writeCalibrationState,
   collectClassifiedTurns, stratifiedSample, exportWorksheet, importLabels,
-  PRECISION_THRESHOLD, MIN_LABELED,
+  PRECISION_THRESHOLD, MIN_LABELED, resolveMinLabeled, MIN_LABELED_FLOOR,
 } from '../../plugins/core/skills/core/scripts/calibrate-classifier.mjs';
 
 // --- M7: per-class coverage gate ---
@@ -261,7 +261,7 @@ test('importLabels computes precision and writes calibration-state.json', () => 
   withTmp((dir) => {
     const f = join(dir, 'worksheet.jsonl');
     // Write MIN_LABELED perfectly-labeled turns to clear both gates.
-    const lines = Array.from({ length: MIN_LABELED }, (_, i) =>
+    const lines = Array.from({ length: MIN_LABELED }, (_, _i) =>
       JSON.stringify({ heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' }),
     ).join('\n') + '\n';
     writeFileSync(f, lines);
@@ -301,4 +301,52 @@ test('importLabels stays provisional when precision < threshold despite enough l
     assert.equal(r.status, 'OK');
     assert.equal(r.is_calibrated, false, 'not calibrated: precision below threshold');
   });
+});
+
+// ============================================================
+// MET-002: workspace-configurable calibration gate
+// ============================================================
+
+test('MET-002: resolveMinLabeled defaults to 100 with no workspace.json', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cal-min-'));
+  try { assert.equal(resolveMinLabeled(dir), 100); }
+  finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('MET-002: resolveMinLabeled honors workspace.json calibration_min_labeled at or above the floor', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cal-min2-'));
+  try {
+    writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ workspace_id: 'w', calibration_min_labeled: 40 }));
+    assert.equal(resolveMinLabeled(dir), 40);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('MET-002: resolveMinLabeled rejects values below the floor and non-integers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cal-min3-'));
+  try {
+    writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ calibration_min_labeled: 5 }));
+    assert.equal(resolveMinLabeled(dir), 100, 'below MIN_LABELED_FLOOR → default');
+    writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ calibration_min_labeled: '50' }));
+    assert.equal(resolveMinLabeled(dir), 100, 'string → default');
+    assert.ok(MIN_LABELED_FLOOR >= 30, 'floor stays statistically meaningful');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('MET-002: importLabels clears the gate at a configured lower threshold and records it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cal-imp-'));
+  try {
+    const ws = join(dir, 'worksheet.jsonl');
+    // 30 labeled rows, all correct, spanning two states → full coverage of gold states.
+    const rows = [];
+    for (let i = 0; i < 30; i++) {
+      const s = i % 2 === 0 ? 'tier-0-win' : 'rec-fail-tier-0';
+      rows.push(JSON.stringify({ turn_id: `s-${i}`, heuristic_state: s, gold_state: s }));
+    }
+    writeFileSync(ws, rows.join('\n') + '\n');
+    const metaDir = join(dir, 'meta');
+    const r = importLabels({ worksheetFile: ws, metaDir, minLabeled: 30 });
+    assert.equal(r.status, 'OK');
+    assert.equal(r.is_calibrated, true, '30 labeled turns clear a 30-turn gate at 100% precision');
+    assert.equal(r.min_labeled, 30, 'the threshold used is recorded in the state for honesty');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -7,7 +7,7 @@
  * F = distinct surface-types the unit appears in, normalized by 6.
  * S = source-type weight (PROJECT.md=1.0 … transcript=0.2).
  * A = Jaccard overlap of unit topics with session-intent topics.
- * P = pin contribution (floor 0.7 / floor 0.9 / override 1.5 / multiply 0.3).
+ * P = pin contribution (floor 0.7 / floor 0.9 / override 1.5; pinned:false is neutral).
  *
  * Per DC-77 the script lives in the plugin, not per-project.
  * Per DC-80 the plugin ships Node.js (.mjs) only.
@@ -20,7 +20,7 @@
  * CLI:
  *   node priority.mjs <project>/_memories/ [--top N] [--intent t1,t2,...]
  *                     [--today YYYY-MM-DD] [--sections] [--top-per-section N]
- *                     [--log <path>] [--log-label <string>]
+ *                     [--log <path>] [--log-label <string>] [--include-invalid]
  *
  * --log appends one JSONL audit entry per invocation to <path>. Useful for
  * render-on-change observability — protocols/data-storage.md §PROJECT.md ↔ units
@@ -54,13 +54,12 @@ const PIN_CONTRIBUTION = {
   floor: ['floor', 0.7],
   true: ['floor', 0.9],
   always: ['override', 1.5],
-  // NOTE: this `false` entry is currently UNREACHABLE — pinContribution() short-circuits
-  // pin===false to ['none', 0.0] before this table is consulted, so `pinned: false` is
-  // treated as neutral (no demotion), NOT as the multiply-0.3 penalty DC-69 describes.
-  // Kept here to mark the spec-vs-impl gap; resolving it (restore the penalty by dropping
-  // `false` from the early-return, or amend DC-69 to "neutral") is a deliberate design call,
-  // not a hardening change. No live unit uses `pinned: false`, so behavior is moot today.
-  false: ['multiply', 0.3],
+  // `pinned: false` is NEUTRAL by decision (MEM-005, 2026-06-09): the
+  // multiply-0.3 demotion DC-69 sketched was never reachable — pinContribution
+  // short-circuits false to ['none', 0.0] — no live unit uses pinned:false,
+  // and silently activating a 70% penalty would be an unasked-for behavior
+  // change. DC-69's unit (CORE workshop store) is to be amended to record
+  // "false → neutral"; this table row was dead code and is gone.
 };
 
 // ---------- Frontmatter parsing ----------
@@ -135,7 +134,6 @@ export function parseFrontmatter(rawText) {
   const rawFm = text.slice(4, end);
   const body = text.slice(end + 4).replace(/^\n+/, '');
   const fm = {};
-  let currentKey = null;
   let currentList = null;
   let currentDict = null;
 
@@ -150,12 +148,10 @@ export function parseFrontmatter(rawText) {
       const k = stripped.slice(0, colonIdx).trim();
       const v = stripped.slice(colonIdx + 1).trim();
       if (v === '') {
-        currentKey = k;
         currentList = [];
         fm[k] = currentList;
       } else {
         fm[k] = _coerce(v);
-        currentKey = null;
         currentList = null;
       }
     } else if (stripped.startsWith('- ')) {
@@ -236,8 +232,20 @@ export function signalF(unit) {
   return surfacesSeen.size / 6.0;
 }
 
+// MEM-018: a unit with NO sources used to default to 0.5 — equal to an
+// explicitly summary-sourced unit, so unknown provenance ranked as well as
+// known-good provenance on the S dimension. Unknown now scores the
+// session_log tier: below summary (0.5), above transcript (0.2).
+export const NO_SOURCES_DEFAULT_S = 0.3;
+
 export function signalS(unit) {
-  const sources = Array.isArray(unit.fm.sources) ? unit.fm.sources : [];
+  // A scalar `sources: PROJECT.md` (string, not list) is valid-but-informal
+  // frontmatter — coerce it to a single-element list so it scores as one
+  // source instead of silently falling to NO_SOURCES_DEFAULT_S.
+  const raw = unit.fm.sources;
+  const sources = Array.isArray(raw) ? raw
+    : (typeof raw === 'string' && raw.trim() !== '') ? [raw]
+    : [];
   let best = 0.0;
   for (const src of sources) {
     if (typeof src !== 'string') continue;
@@ -248,7 +256,7 @@ export function signalS(unit) {
     else if (s.includes('summary') || s.includes('handoff') || s.includes('output') || s.startsWith('outputs/')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.summary);
     else if (s.includes('session')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.session_log);
   }
-  return best > 0 ? best : 0.5;
+  return best > 0 ? best : NO_SOURCES_DEFAULT_S;
 }
 
 export function signalA(unit, sessionTopics) {
@@ -406,9 +414,42 @@ export function iterUnits(memoriesDir) {
   for (const fname of readdirSync(memoriesDir).sort()) {
     if (!fname.endsWith('.md')) continue;
     if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
-    try { units.push(loadUnit(join(memoriesDir, fname))); } catch {}
+    const path = join(memoriesDir, fname);
+    try {
+      const u = loadUnit(path);
+      if (!Object.keys(u.fm).length) {
+        // Malformed/absent frontmatter parses to an empty map and would score
+        // on pure defaults, surfacing unflagged in ranked output (MEM-011).
+        // Tag it so rankUnits() excludes it; the stderr warn makes the damage
+        // visible (check-units reports the same file as a schema failure).
+        u.fm._load_error = true;
+        process.stderr.write(`warn: ${fname}: no parseable frontmatter — excluded from ranking\n`);
+      }
+      units.push(u);
+    } catch (e) {
+      // The old bare catch swallowed read failures silently (MEM-011).
+      process.stderr.write(`warn: ${fname}: failed to load (${e && e.message ? e.message : e}) — excluded from ranking\n`);
+    }
   }
   return units;
+}
+
+/**
+ * Rank every loadable, currently-valid unit (SOD-003). The bi-temporal
+ * suppression invariant — default retrieval excludes invalidated units
+ * (ARCHITECTURE.md, data-storage.md) — is applied HERE so every consumer
+ * (the CLI, generate-memory-index, any wrapper) inherits it instead of
+ * re-deriving it. Cold history stays reachable with includeInvalidated:true.
+ * @returns {Array<[number, object]>} [score, unit] pairs, descending.
+ */
+export function rankUnits(memoriesDir, { sessionTopics = [], today = null, includeInvalidated = false } = {}) {
+  const t = today || _todayUTC();
+  const ranked = iterUnits(memoriesDir)
+    .filter(u => !u.fm._load_error)
+    .filter(u => includeInvalidated || !isInvalidated(u, t))
+    .map(u => [score(u, sessionTopics, t), u]);
+  ranked.sort((a, b) => b[0] - a[0]);
+  return ranked;
 }
 
 // ---------- CLI ----------
@@ -453,6 +494,7 @@ export function main(argv) {
   let topPerSection = 5;
   let logPath = null;
   let logLabel = null;
+  let includeInvalid = false;
 
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -463,6 +505,7 @@ export function main(argv) {
     else if (a === '--top-per-section') { topPerSection = parseInt(argv[++i], 10); }
     else if (a === '--log') { logPath = argv[++i]; }
     else if (a === '--log-label') { logLabel = argv[++i]; }
+    else if (a === '--include-invalid') { includeInvalid = true; }
     else if (!a.startsWith('--')) { memoriesDirArg = a; }
   }
 
@@ -475,8 +518,7 @@ export function main(argv) {
   const intent = intentStr ? intentStr.split(',').map(s => s.trim()).filter(Boolean) : [];
   const today = _todayFromArg(todayArg);
 
-  const ranked = iterUnits(memoriesDir).map(u => [score(u, intent, today), u]);
-  ranked.sort((a, b) => b[0] - a[0]);
+  const ranked = rankUnits(memoriesDir, { sessionTopics: intent, today, includeInvalidated: includeInvalid });
 
   if (logPath) {
     const rankings = ranked.slice(0, topN).map(([s, u]) => ({

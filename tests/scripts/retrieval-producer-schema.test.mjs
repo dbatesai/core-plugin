@@ -37,3 +37,11 @@ test('startup protocol gives agents the exact retrieval producer schema', () => 
     'startup must not use ambiguous prose that led fresh agents to invent alias fields',
   );
 });
+
+test('MEM-001: retrieval.md documents the Tier 3 degraded fallback for harnesses without a subagent tool', () => {
+  const doc = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/references/retrieval.md'),
+    'utf8');
+  assert.match(doc, /Degraded mode/, 'the fallback has a named home in the Tier 3 section');
+  assert.match(doc, /result: "degraded"/, 'and specifies the logging contract');
+});

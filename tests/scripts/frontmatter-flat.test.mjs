@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseFlatFrontmatter } from '../../plugins/core/skills/core/scripts/frontmatter-flat.mjs';
+import { parseFrontmatter } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
 test('parses top-level key: value pairs, strips quotes, returns [fm, body]', () => {
   const [fm, body] = parseFlatFrontmatter('---\nid: dc-99\nstatus: "accepted"\n---\n\n# Title\nbody text\n');
@@ -32,4 +33,31 @@ test('no frontmatter → empty map + original text as body', () => {
 test('null/undefined input is safe', () => {
   assert.deepEqual(parseFlatFrontmatter(null), [{}, '']);
   assert.deepEqual(parseFlatFrontmatter(undefined), [{}, '']);
+});
+
+// MEM-016: priority.mjs keeps its own (nested, coercing) parser beside this
+// flat one ON PURPOSE — but nothing guaranteed the two stay in agreement on
+// the fields both handle. This guard parses representative unit shapes with
+// BOTH parsers and asserts the top-level scalars agree, so a YAML-handling
+// change to one parser that silently diverges the other fails the suite.
+const REPRESENTATIVE_UNITS = [
+  // plain unit with nested topics + edges (flat parser drops the nests — fine)
+  '---\nid: dc-99-thing\ntype: decision\nstatus: active\ncreated: 2026-05-30\nupdated: 2026-06-01\ntopics:\n  - a\nedges:\n  - { type: cites, target: dc-1 }\n---\n\n# T\nbody\n',
+  // CRLF + quoted value (Windows/OneDrive-authored)
+  '---\r\nid: r-9\r\ntype: risk\r\nstatus: "accepted"\r\ncreated: 2026-01-02\r\nupdated: 2026-01-03\r\n---\r\nbody\r\n',
+  // comment line + flow-style topics (flat keeps the raw string; scalar fields still agree)
+  '---\nid: obs-x-2026-06-01\ntype: observation\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\n# comment: ignored\ntopics: [a, b]\n---\nbody\n',
+];
+const CONFORMANT_SCALARS = ['id', 'type', 'status', 'created', 'updated'];
+
+test('MEM-016: both parsers agree on top-level scalar fields across representative units', () => {
+  for (const text of REPRESENTATIVE_UNITS) {
+    const [flat] = parseFlatFrontmatter(text);
+    const [canon] = parseFrontmatter(text);
+    for (const key of CONFORMANT_SCALARS) {
+      if (!(key in flat) && !(key in canon)) continue;
+      assert.equal(String(canon[key]), String(flat[key]),
+        `'${key}' diverged between parsers on fixture starting ${JSON.stringify(text.slice(0, 30))}`);
+    }
+  }
 });

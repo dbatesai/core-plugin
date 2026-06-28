@@ -16,4 +16,4 @@ just run /core, which orients automatically (and re-run /core mid-session for a
 fresh readiness summary). This command no longer does anything on its own.
 ```
 
-After printing the notice, take no further action unless the user asks for something specific.
+After printing the notice, do no further project work in this invocation. If the user wants orientation, point them at `/core` — anything they type next starts a normal turn outside this shim.

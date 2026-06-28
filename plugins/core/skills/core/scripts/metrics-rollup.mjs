@@ -18,7 +18,7 @@
  * CLI:  node metrics-rollup.mjs <project> [--json] [--today YYYY-MM-DD]
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';

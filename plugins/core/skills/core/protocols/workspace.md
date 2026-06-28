@@ -32,14 +32,14 @@ If you want to mark a workspace "inactive," instead update PROJECT.md §State wi
 
 ## Progressive wind-down
 
-As engagement signals decrease, progressively reduce proactive activity:
+As engagement signals decrease, progressively reduce proactive activity. The four levels below describe a judgment call, not measured states — there is no stored engagement metric and no threshold formula. You re-read the always-live signals above (`last_active`, session frequency, §Moves pressure, open items) each session and place the project by judgment:
 
 - High engagement → full proactivity: updates, suggestions, risk alerts.
 - Declining → reduce frequency, focus on critical items only.
 - Low engagement → minimal: only surface urgent risks or deadline warnings.
 - No engagement → silent: stop proactive activity entirely.
 
-Wind-down is continuous, not stepped. When approaching silence, use judgment on whether to send a final check-in based on delivery risk, open moves, and the user's engagement pattern.
+Wind-down is continuous, not stepped, and it's re-inferred every session rather than carried over — nothing durable records "this project is winding down," which also means the call costs nothing to reverse the moment the user re-engages. When approaching silence, use judgment on whether to send a final check-in based on delivery risk, open moves, and the user's engagement pattern.
 
 ## Reactivation
 

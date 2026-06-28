@@ -158,9 +158,10 @@ export function computeTierDistribution(events) {
 
 export function buildReport(events) {
   const retrievalEvents = events.filter(isRetrievalShapedEvent);
-  // Count distinct calendar dates from event timestamps — more reliable than
-  // counting unique ev.session IDs, which are absent in events written without
-  // a session context (producing a misleading "Sessions: 0" when events exist).
+  // Count distinct calendar DAYS from event timestamps (reported as such — these are
+  // not sessions; more reliable than counting unique ev.session IDs, which are absent
+  // in events written without a session context, producing a misleading "Sessions: 0"
+  // when events exist).
   const DATE_RE = /^\d{4}-\d{2}-\d{2}/;
   const sessions = new Set(
     events
@@ -187,7 +188,7 @@ export function formatReport(report) {
   const lines = [];
   const retrievalEvents = report.retrieval_events ?? report.total_events;
   const telemetryOnlyEvents = report.telemetry_only_events ?? 0;
-  lines.push(`Session dates in window: ${report.sessions} | Total events: ${report.total_events}`);
+  lines.push(`Calendar days with events: ${report.sessions} | Total events: ${report.total_events}`);
   lines.push(`Retrieval-shaped events: ${retrievalEvents} | telemetry-only rows: ${telemetryOnlyEvents}`);
   if (telemetryOnlyEvents > 0) {
     lines.push('Telemetry-only rows are not retrieval proof.');
@@ -196,6 +197,7 @@ export function formatReport(report) {
     return lines.join('\n');
   }
   lines.push(`Tier distribution: T1=${pct(td.t1.pct)}, T2=${pct(td.t2.pct)}, T3=${pct(td.t3.pct)}`);
+  lines.push('Note: T1 counts only logged retrievals — days with no retrieval events are excluded, not counted as perfect T1.');
   lines.push('');
 
   const noisyDipBacks = report.dip_back_rates.filter(r => r.rate > 0);

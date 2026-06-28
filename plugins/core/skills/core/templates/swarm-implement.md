@@ -75,6 +75,10 @@ This is the most critical operational lesson from live execution:
 
 Never rely on task status alone. Never rely on task dependencies alone. The `send-message` completion handshake is the only reliable signal that the file is ready for validation.
 
+## Harness Notes
+
+`send-message` here is the abstract adapter verb, not a tool name. On Claude Code it resolves to the `SendMessage` tool (`harnesses/claude-code.md §send-message`). On Codex there is no message tool — the equivalent is a scratchpad file write, and the completion signal is the presence of `<scratchpad>/<from>-complete.md` (`harnesses/codex.md §send-message` and `§await-completion`). The handshake discipline is identical on both: the validator reads nothing until the completion signal exists.
+
 ## GAN Loop
 
 Minimal in implementation swarms. The loop is: implement, validate, approve. If validation fails, the editor fixes and re-signals. Do not apply review swarm adversarial patterns here -- multi-round generator-critic exchanges are over-engineered for deterministic execution. Save the adversarial energy for the review swarm that preceded this one.

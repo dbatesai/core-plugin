@@ -144,3 +144,21 @@ test('a disabled workspace produces no rollup artifacts', () => {
     assert.equal(readOrientSignal(project, { home, workspaceId: WID }), null, 'no signal written when opted out');
   });
 });
+
+test('MET-013: detector output (anticipation-gap) can never reach the headline signal', () => {
+  const home = mkdtempSync(join(tmpdir(), 'mr-det-'));
+  const project = mkdtempSync(join(tmpdir(), 'mr-proj-'));
+  try {
+    const wid = 'mr-det-ws';
+    const detDir = join(home, '.core', 'workspaces', wid, 'metrics', 'detectors');
+    mkdirSync(detDir, { recursive: true });
+    writeFileSync(join(detDir, '2026-06-09.jsonl'),
+      JSON.stringify({ detector: 'anticipation-gap', provisional: true, severity: 'low', terms: ['x'] }) + '\n');
+    const r = buildRollup({ project, today: '2026-06-09', home, workspaceId: wid });
+    assert.match(r.signal, /no classified turns/, 'rollup reads classified/ only — heuristics never grade the headline');
+    assert.deepEqual(r.distribution, {});
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});

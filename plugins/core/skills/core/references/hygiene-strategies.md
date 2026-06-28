@@ -2,6 +2,8 @@
 
 Memory hygiene is how CORE keeps its knowledge useful. Without it, the memory grows, contradictions accumulate, orphaned entries drain retrieval quality, and session logs pile up unchecked. Run it every 3–5 sessions, after any session that spawned 3+ agents, or when entries start visibly contradicting each other.
 
+Phase numbers in this file are the walk order for a full hygiene pass. The canonical mapping from the former dream-cycle phases to current mechanisms lives in `protocols/hygiene.md` §"Dream cycle absorption" — when the two files disagree on a phase number or scope, that table wins.
+
 ## Phase 1: Memory Inventory
 
 Check the indexes before reading anything else. For each memory store (`~/.claude/projects/*/memory/`, `~/.claude/memory/`), compare what's indexed against what's on disk. Orphan files get index entries or move to `archived/`; indexed entries pointing at missing files get removed. A wrong map silently breaks everything downstream.

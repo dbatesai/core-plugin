@@ -23,7 +23,7 @@
 import { readFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { iterUnits, score } from './priority.mjs';
+import { rankUnits } from './priority.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 
@@ -64,7 +64,7 @@ export function extractFirstBodyLine(unitText) {
   for (const line of body.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const stripped = trimmed.replace(/^[#>*\-]+\s*/, '').trim();
+    const stripped = trimmed.replace(/^[#>*-]+\s*/, '').trim();
     if (stripped) return stripped;
   }
   return FALLBACK_DESCRIPTION;
@@ -94,8 +94,9 @@ function todayFromArg(arg) {
 }
 
 export function renderPriorityBlock({ memoriesDir, topN, today, existingDescriptions }) {
-  const ranked = iterUnits(memoriesDir).map(u => [score(u, [], today), u]);
-  ranked.sort((a, b) => b[0] - a[0]);
+  // rankUnits applies the bi-temporal suppression invariant + load-error
+  // filtering (SOD-003/MEM-011) — the index is a retrieval surface.
+  const ranked = rankUnits(memoriesDir, { today });
   const top = ranked.slice(0, topN);
 
   const projectRoot = dirname(memoriesDir);
@@ -140,12 +141,16 @@ export function spliceSection(memoryMdText, newSection) {
   const newLines = newSection.split('\n');
   while (newLines.length && newLines[newLines.length - 1] === '') newLines.pop();
   const trailingBlank = endIdx < lines.length ? [''] : [];
-  return [
+  const out = [
     ...lines.slice(0, startIdx),
     ...newLines,
     ...trailingBlank,
     ...lines.slice(endIdx),
   ].join('\n');
+  // MEM-020: when the spliced section is last in the file, the join ends with
+  // no final newline — breaking POSIX convention and causing diff churn on the
+  // next edit. Normalize to exactly one trailing newline.
+  return out.replace(/\n*$/, '\n');
 }
 
 // Cross-project contamination guard.

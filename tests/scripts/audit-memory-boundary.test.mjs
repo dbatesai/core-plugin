@@ -1,8 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   auditMemoryBoundary, extractNativeEntries, formatReport, mappedNativePath,
@@ -99,4 +97,10 @@ test('mappedNativePath: dotted username maps dots→dashes (matches Claude proje
     mappedNativePath('/Users/David.Bates28/proj', { home: '/h' }),
     '/h/.claude/projects/-Users-David-Bates28-proj/memory/MEMORY.md',
   );
+});
+
+test('MET-009: the report self-declares its current-project-only scope', () => {
+  const report = auditMemoryBoundary({ nativeEntries: [], coreTerms: new Set(), coreText: '' });
+  assert.match(report.scope, /current project only/i);
+  assert.match(report.scope, /cross-project/i, 'names what it does NOT detect');
 });

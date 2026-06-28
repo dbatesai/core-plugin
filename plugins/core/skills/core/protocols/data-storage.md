@@ -67,7 +67,7 @@ during weekly sync.
 
 Location: `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Date-organized for browsability — observations are high-volume; flat-with-prefix at the unit-store root would overwhelm. This is the explicit observation exception to the DC-68 flat-layout rule.
 
-You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `~/.core/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, you can add it under Mode A (autonomous, narrated).
+You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `~/.core/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, you can add it under Mode A (autonomous, narrated). When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
 
 ### External-source observations — three-layer filtering
 
@@ -133,7 +133,7 @@ Top-priority units mark `canonical: true` in frontmatter. Canonical units get a 
 
 `open-question` is a Tier 2 unit type for unresolved questions whose answers shape the project: pending stakeholder decisions, awaited approvals, deliverables expected by a date, asks that need a response. Distinct from observation (a fact captured) and decision (a settled choice) — an open question is a known-unknown the project is waiting on.
 
-Frontmatter shape — same six required fields as other Tier 2 units (`id`, `type`, `status`, `created`, `updated`, `topics`), plus one optional field specific to open questions:
+Frontmatter shape — same six required fields as other Tier 2 units (`id`, `type`, `status`, `created`, `updated`, `topics`), plus optional fields specific to open questions (`by-when`; `deferrals` with `last_deferred`):
 
 ```yaml
 ---
@@ -156,6 +156,8 @@ before we can lock the spec.
 ```
 
 The `by-when` field is an optional ISO date (YYYY-MM-DD). When set on an `active` (unresolved) open-question and the date is in the past, the question is **stale**. Staleness is a retrieval signal, not a status — the unit stays `active` until resolved.
+
+The `deferrals` field is an optional integer: how many times the user has deferred answering this question, with `last_deferred` (ISO timestamp) alongside it. SKILL.md's persist-on-hard-questions ladder increments it each time a raised question gets deferred; the startup elapsed-time sweep surfaces any active open question with `deferrals: 2` or more. Without the field, no deferral has happened — absence means zero.
 
 Status lifecycle: `active` → `archived` (resolved with the answer captured elsewhere — usually a decision unit citing this one as `supersedes`-equivalent context) or `active` → `retired` (no longer relevant; the question stopped mattering).
 
@@ -184,7 +186,7 @@ Edges live in unit frontmatter as `{type, target, note?}` triples. The committed
 
 The rest — `cites`, `refines`, `amends`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
 
-**Wikilinks** (`[[unit-id]]`) in the body are permitted as a secondary, organic edge form. Hygiene's reconciliation pass promotes durable wikilinks to typed edges (default type: `cites`) when they appear in citation-style contexts.
+**Wikilinks** (`[[unit-id]]`) in the body are permitted as a secondary, organic edge form. Hygiene's reconciliation pass promotes durable wikilinks to typed edges (default type: `cites`) when they appear in citation-style contexts — the procedure is `protocols/hygiene.md` §"Wikilink promotion".
 
 ---
 
@@ -250,6 +252,8 @@ Tier 2: Graph walk via typed-edge frontmatter (relational)
    ↓ miss or insufficient
 Tier 3: Semantic via Explore subagent (LLM reasoning over the vault)
 ```
+
+Session-intent topics drive Tier 1's grep terms. At session start, before any user message exists, they default to the bootstrap set `orient`, `memory`, `state` (per `protocols/startup.md` §"Load — returning workspace") and resolve to the user's actual words after the first turn.
 
 Harness-local recall (via the `read-auto-memory` adapter verb — Claude Code's `MEMORY.md`, Codex memories, equivalents) is queried alongside `_memories/` at every tier as scratch context. Useful for hints; never authoritative — verify against the unit store before acting. See §"Authority ordering" above for where it sits in the stack.
 
@@ -352,6 +356,8 @@ When the user removes a fact from PROJECT.md, that fact is gone. You don't re-de
 
 If the same fact would have surfaced again on the next render, the retired status keeps it out. Resurrection requires the user actively un-retiring it.
 
+The rule treats every PROJECT.md deletion as intentional, and some aren't — a git revert or a save error can drop a section the user never meant to lose. So make each retirement discoverable instead of silent: when the retire fires from a PROJECT.md removal, log the retired unit ids in the autonomous run log, and name them once in the next session's readiness summary — *"Last session retired two units after PROJECT.md edits: dc-14-auth-approach, risk-3-vendor-lockin. Say 'un-retire <id>' if that deletion wasn't intentional."* Retire is fully reversible (`protocols/hygiene.md` §Reversal — flip `status: retired` back to `active`); the readiness mention is the recovery window. It doesn't weaken the rule: nothing un-retires without the user saying so.
+
 ### Authority over PROJECT.md sits with the user
 
 The user owns PROJECT.md. Manage it in whatever way best serves accuracy and thoroughness. Render mechanics, edit-detection, propagation back to units — these are tools, not the goal. Accuracy and thoroughness are what matter. The mechanisms can change.
@@ -388,6 +394,29 @@ Runs at:
 When a user edit is detected → ground truth → propagate back to source-of-truth units → anti-resurrection fires for removals → audit trail captured in the autonomous run log.
 
 Belt-and-suspenders for tracked files: cache is primary, `git diff` is the fallback.
+
+### Single-writer assumption (shared `~/.core/` files)
+
+`state-cache.json`, `index.json`, `dm-profile.md`, `topics.md`, and
+`workspaces/<id>/last-bootstrap.json` are shared across every session and every project. They
+assume **one writing session at a time** — there is no lock. Two concurrent Claude Code windows
+land last-write-wins, which can silently drop the other session's entries.
+
+Discipline, not machinery:
+
+- Write shared `~/.core/` JSON via write-temp-then-rename (the `fs-atomic.mjs` pattern, the
+  same one the fork-check uses for `index.json`) — never an in-place truncate-and-write. This
+  keeps a concurrent reader from seeing a torn file; it does not serialize writers.
+- If a shared file changed under you mid-session (content differs from what you last wrote),
+  assume a concurrent session: re-read, merge your entry into the fresh copy, narrate the
+  collision in one line. Don't overwrite the whole file from your stale in-context copy.
+- A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace —
+  `~/.core/<wrapper>/` — and must not write `index.json`, `state-cache.json`, `dm-profile.md`,
+  or `topics.md`. Shared-surface coordination between two writers is unhandled by design.
+
+Reopen condition: real locking, or a `CORE_META_ROOT` env-var redirect, gets built when an
+observed corruption is traced to a concurrent write, or when a second co-installed writer
+actually ships — the self-evolution "second writer" trip-wire, not speculation.
 
 ---
 
@@ -473,7 +502,7 @@ You don't auto-reconcile across projects. The cross-project store is `~/.core/re
 
 ### No-response-inference default
 
-When the user goes quiet mid-conversation and you've staged a Mode B proposal: act on your best judgment after a reasonable delay, narrate what you did, log it. Don't block the session indefinitely waiting for a yes/no on something you can reverse. If the action is genuinely irreversible (push, destructive external op), wait — but also self-unblock with an unblock plan and execute the plan rather than freezing.
+When the user goes quiet mid-conversation and you've staged a Mode B proposal: act on your best judgment, narrate what you did, log it. The delay is concrete and measured in agent turns — you can't observe wall-clock time between turns. In an autonomous run, proceed after one turn; the user is intentionally unavailable and waiting longer buys nothing. In an interactive session, surface the proposal once more after about three turns, then act. Don't block the session indefinitely waiting for a yes/no on something you can reverse. If the action is irreversible — a push, a create/update/delete on an external system, anything that destroys or publishes what you can't restore — it does not auto-execute at any delay: it blocks for the session until the user answers. Self-unblock by lining up everything short of the irreversible step (staged commit, drafted payload, verified parameters) so the user's "yes" is the only thing left.
 
 ---
 
@@ -585,7 +614,8 @@ Three rings, one read at runtime.
 ├── workspaces/<id>/               ← per-workspace operational meta
 │   ├── workspace.json
 │   └── last-bootstrap.json        ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
-└── research/                      ← cross-project knowledge library
+├── research/                      ← cross-project knowledge library
+└── <wrapper>/                     ← co-installed wrapper sub-namespace (writes only here — never the shared files above)
 ```
 
 **Skill ring** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace) or `~/.claude/skills/core/` (legacy direct install)

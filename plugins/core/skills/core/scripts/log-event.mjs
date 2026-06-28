@@ -11,11 +11,12 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  *
  * Phase 2 (2026-05-26, T1 of metrics & observability v1): adds OTel-format
- * dual-write to `<project>/_metrics/traces/<session-id>.jsonl`. Per spec
- * §17.7 the transition is six-week dual-write; existing analyzers continue
- * reading the legacy `_sessions/<date>/<filename>.jsonl` files until the
- * OTel substrate is proven, then `analyze-retrieval-quality.mjs` gets a
- * one-shot rewrite.
+ * dual-write to `<project>/_metrics/traces/<session-id>.jsonl`. STATUS
+ * (2026-06-09): the trace write is a COLLECTION STUB — no analyzer reads the
+ * OTel rows yet; every consumer (`analyze-retrieval-quality.mjs` etc.) still
+ * reads the legacy `_sessions/<date>/<filename>.jsonl` files. Until a trace
+ * reader ships, the OTel side is corpus accumulation, not a substrate; the
+ * planned one-shot analyzer rewrite lands with that reader.
  *
  * Dual-write overhead: +26 µs per event per Probe 3 (2026-05-26 metrics probes).
  * Negligible at any realistic event rate.
@@ -158,6 +159,38 @@ export function resolveSessionId({ explicit } = {}) {
   return 'no-session-context';
 }
 
+// MET-010: bound and sanitize what lands in metrics payloads. Project content
+// (unit ids, file paths, free text) reaches logEvent calls; without a cap, an
+// adversarial or just-huge value is serialized verbatim into the trace JSONL.
+export const MAX_ATTRIBUTE_STRING = 1000;
+const MAX_ATTRIBUTE_DEPTH = 4;
+const MAX_ATTRIBUTE_ENTRIES = 100;
+// C0 controls except \n (0x0A) and \t (0x09), plus DEL. JSON escaping makes them
+// inert on disk, but downstream renderers of the trace are not guaranteed to.
+const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
+
+export function sanitizeAttributeValue(value, { maxLen = MAX_ATTRIBUTE_STRING, maxDepth = MAX_ATTRIBUTE_DEPTH } = {}) {
+  if (typeof value === 'string') {
+    const stripped = value.replace(CONTROL_CHARS_RE, '');
+    return stripped.length > maxLen
+      ? `${stripped.slice(0, maxLen)}…[truncated ${stripped.length - maxLen} chars]`
+      : stripped;
+  }
+  if (value == null || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (maxDepth <= 0) return '[depth-capped]';
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_ATTRIBUTE_ENTRIES).map((v) => sanitizeAttributeValue(v, { maxLen, maxDepth: maxDepth - 1 }));
+  }
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value).slice(0, MAX_ATTRIBUTE_ENTRIES)) {
+      out[sanitizeAttributeValue(k, { maxLen: 200, maxDepth: 1 })] = sanitizeAttributeValue(v, { maxLen, maxDepth: maxDepth - 1 });
+    }
+    return out;
+  }
+  return sanitizeAttributeValue(String(value), { maxLen, maxDepth });
+}
+
 /**
  * Convert a legacy event record into an OTel-format span line.
  *
@@ -173,7 +206,7 @@ export function eventToOtelSpan(event, { ts, sessionId } = {}) {
   if (sessionId) attributes['session.id'] = sessionId;
   for (const [k, v] of Object.entries(event)) {
     if (k === 'kind') continue;
-    attributes[`core.${k}`] = v;
+    attributes[`core.${k}`] = sanitizeAttributeValue(v);
   }
   return {
     schema_version: SCHEMA_VERSION,

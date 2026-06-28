@@ -68,6 +68,30 @@ A dispatch is **background** when the main agent doesn't need the result this tu
 
 ---
 
+## Alias → model-ID resolution
+
+The matrix uses tier aliases (`haiku`, `sonnet`, `opus`), not model IDs. Resolution depends on
+the harness:
+
+| Alias | Canonical model ID (snapshot 2026-06-09) |
+|---|---|
+| `haiku` | `claude-haiku-4-5` |
+| `sonnet` | `claude-sonnet-4-6` |
+| `opus` | `claude-opus-4-8` |
+
+- **Claude Code resolves the bare aliases natively** in its dispatch `model` parameter — pass
+  the alias through; it tracks the current generation without a doc change here.
+- **Harnesses without alias support** (Codex and any non-Anthropic-native dispatcher) need a
+  concrete ID. Resolve the alias against the harness's live model list at dispatch time; fall
+  back to the snapshot column only when no live lookup exists. The snapshot is dated because
+  model generations move — when a dispatch 404s on a snapshot ID, the snapshot is stale: query
+  the provider's models endpoint, use the newest ID in the tier, and update this table.
+- **If a tier doesn't exist on the harness**, step UP one tier rather than down — the matrix
+  assigns the cheapest model that doesn't sacrifice quality, so substituting downward breaks
+  the assignment's premise.
+
+---
+
 ## How to use this doc
 
 Before any dispatch:

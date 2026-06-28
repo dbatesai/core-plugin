@@ -38,10 +38,10 @@ test('probe: evidence points at the R-17 risk unit', async () => {
 test('probe: declares an honest closure target (not a false exact promise) + requirement + mechanism', async () => {
   const row = await probe();
   assert.equal(row.closure_target, CLOSURE_TARGET);
-  // Hale-ratified 2026-05-29: v2.8.x shipped WITHOUT closing R-17, so 'v2.8.0' was already false.
-  // Use 'v2.9+' and carry the real bar in closure_requirement.
-  assert.equal(CLOSURE_TARGET, 'v2.9+');
-  assert.match(CLOSURE_REQUIREMENT, /not-before-v2\.9\.0; requires physical anti-anchoring validation/);
+  // MET-007: 'v2.9+' became a stale promise the moment v2.9–v3.7 shipped without
+  // closure. 'unscheduled' is the honest state; CLOSURE_REQUIREMENT carries the bar.
+  assert.equal(CLOSURE_TARGET, 'unscheduled');
+  assert.match(CLOSURE_REQUIREMENT, /requires physical anti-anchoring isolation/);
   assert.equal(row.closure_requirement, CLOSURE_REQUIREMENT);
   assert.ok(typeof row.closure_mechanism_planned === 'string' && row.closure_mechanism_planned.length > 0);
 });

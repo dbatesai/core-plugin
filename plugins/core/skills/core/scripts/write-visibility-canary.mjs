@@ -44,7 +44,9 @@ export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
 const CANARY_LINE_RE = /^(?:<!--.*CORE-VISIBILITY-CANARY.*-->|CORE-VISIBILITY-CANARY\s+\S+.*VISIBILITY-CANARY-ECHO).*$\n?/gm;
 
 export function mappedMemoryPath(cwd, home) {
-  return join(home, '.claude', 'projects', mapProjectPathToSlug(cwd), 'memory', 'MEMORY.md');
+  // Forward-slash join (not path.join) — Claude Code's projects-folder slug uses '/'
+  // and the cross-platform tests expect it; Node's fs accepts forward slashes on Windows.
+  return [home, '.claude', 'projects', mapProjectPathToSlug(cwd), 'memory', 'MEMORY.md'].join('/');
 }
 export function canaryFilePath(workspaceId, home) {
   return join(home, '.core', 'workspaces', workspaceId, 'visibility-canary.json');

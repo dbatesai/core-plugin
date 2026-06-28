@@ -18,7 +18,7 @@
  * Called by capability-probe.mjs when the descriptor declares
  * delegate: 'capability/anti-anchoring-mechanism-probe.mjs'.
  *
- * Identity_status: always DEGRADED on Claude Code until v2.8.0 staging lands.
+ * Identity_status: always DEGRADED on Claude Code until the isolation mechanism ships (unscheduled).
  * This is a deliberate honest demotion, not a dynamic check — the negative-read
  * proof that could earn PASS is a v2.8.0 deliverable.
  *
@@ -27,12 +27,15 @@
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'anti-anchoring-mechanism';
-// Closure version is intentionally NOT a false exact promise (HC/Hale-ratified
-// 2026-05-29): v2.8.0/v2.8.1 shipped WITHOUT closing R-17, so the old 'v2.8.0' was
-// already false. Use 'v2.9+' and let CLOSURE_REQUIREMENT carry the real bar.
-export const CLOSURE_TARGET = 'v2.9+';
+// MET-007 honesty: 'v2.9+' became a stale promise — v2.9 through v3.7 all shipped
+// without closing R-17. No version promise until the isolation mechanism is actually
+// scheduled; CLOSURE_REQUIREMENT carries the real bar. The row stays in the startup
+// run deliberately: the descriptor's adversarial-run-gate action fail-closes on this
+// capability, and that gate is the row's consumer. Its per-session DEGRADED entries
+// are bounded by the history retention cap and deduped by row_content_hash.
+export const CLOSURE_TARGET = 'unscheduled';
 export const CLOSURE_REQUIREMENT =
-  'not-before-v2.9.0; requires physical anti-anchoring validation/consumer enforcement before closure';
+  'requires physical anti-anchoring isolation (per-agent working-directory) + initial-frame-before-peer-exposure staging before closure; no target version is promised until that work is scheduled';
 export const CLOSURE_MECHANISM_PLANNED =
   'per-agent working-directory isolation (native Workflow/Agent isolation:"worktree" is a candidate primitive — local-llm-build uses it) + initial-frame-before-peer-exposure staging';
 // The risk unit this row points at (must stay in sync with <project>/_memories/).

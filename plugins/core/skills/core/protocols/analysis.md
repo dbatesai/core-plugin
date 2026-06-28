@@ -35,9 +35,11 @@ Hardware budget caps the upper end. From `protocols/execution.md`: ≥48GB → u
 
 Compose fresh personas for the task's specific shape. Saved compositions at `~/.core/agents/<name>.md` are starting points for continuity across multi-session work — reach for them when the value is recognizing the same agent across sessions, not as shortcuts when the right shape happens to share a name with a saved one. The lens framework in `agents/roles.md` is built for fresh composition; that's the primary practice.
 
+Three starting templates ship at `templates/swarm-implement.md`, `templates/swarm-research.md`, and `templates/swarm-review.md` — roster skeletons plus briefing scaffolds for the three common shapes in the sizing table above. `references/refinement-strategies.md` catalogs refinement dispositions for when a first composition isn't converging. Both are seed material, same status as saved compositions: starting points, never verbatim.
+
 ## Anti-anchoring enforcement
 
-The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the empirically observed 84.5% sycophancy flip rate in LLM critics.
+The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the sycophancy measured in the project's independent-analysis runs, where LLM critics reversed their position 84.5% of the time under social pressure (`references/architecture-doctrines.md` cites the same findings).
 
 Operational pattern:
 
@@ -48,6 +50,8 @@ Operational pattern:
 
 When you spawn the Critic agent, its prompt must include this discipline explicitly. Don't trust the model to do it on its own — the sycophancy pull is strong.
 
+Be honest about what enforces this. On current harnesses the frames-first ordering is prompt-level discipline plus file-system trust — nothing physically prevents a Critic from reading the Generators' output before writing its predictions. The authority gate below is the mitigation, not a fix: when isolation can't be proven, the run stays ADVISORY and its output never directly drives a canonical mutation. To make the ordering at least auditable, the Critic's Phase 1 predictions land in a file before any cross-pollination: `<project>/_outputs/<YYYY-MM-DD>/<topic>/critic-predictions.md`, written during Phase 1 with a timestamp header. A synthesis that can't point at a predictions file written before Phase 2 began fails the deep audit the same way an empty persuasion log does — the audit trail can't prove the discipline ran.
+
 ## Execution phases
 
 Five phases. Each has a clear transition criterion. Don't advance unless the criterion is met.
@@ -55,7 +59,7 @@ Five phases. Each has a clear transition criterion. Don't advance unless the cri
 | Phase | What happens | Transition criterion |
 |---|---|---|
 | **0 Setup** | Compose briefing, name the team, spawn agents, share briefing | All agents acknowledged briefing |
-| **1 Independent framing** | Each agent frames the task in isolation; Critic writes predictions before reading anyone else | ≥80% of agents have broadcast their independent position |
+| **1 Independent framing** | Each agent frames the task in isolation; Critic writes predictions to the timestamped `critic-predictions.md` (see anti-anchoring enforcement) before reading anyone else | ≥80% of agents have broadcast their independent position |
 | **2 Cross-pollination** | Agents share findings; Critic reads Generators; surprise lenses surface | All agents have read and acknowledged others' findings |
 | **3 Adversarial pressure** | Critic challenges Generators with evidence; Generators defend or update; persuasion-log entries land | Diminishing returns for 2+ exchanges, OR convergence-watch trips |
 | **4 Synthesis + deep audit** | DM composes synthesis; deep audit gate runs (see the deep-audit-gate section below); accept or reject | Deep audit passes the four named failure modes |
@@ -209,6 +213,7 @@ Once accepted:
 4. Write the effectiveness report at `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md` per `protocols/self-evolution.md`.
 5. Promote generalizable insights to `~/.core/research/` (research mode) or `~/.core/agents/` + `~/.core/task-configs/` (compositional patterns).
 6. Update `PROJECT.md` if the synthesis produced new decisions, risks, or moves.
-7. TeamDelete to free the context.
+7. Verify the writes landed before freeing anything: the synthesis, the review-finding unit, the swarm-narrative append, and the effectiveness report must each exist on disk with non-zero size (one `ls -la` over the four paths, or read each file's first line). A write can fail silently — disk full, permission, a bad path — and after TeamDelete the content is unrecoverable. On any missing or empty file, surface the error and retry the write; don't TeamDelete until all four check out.
+8. TeamDelete to free the context.
 
-Output saved before TeamDelete. Always. A failed TeamDelete with unsaved outputs is the worst failure mode in multi-agent execution.
+Output saved — and verified on disk — before TeamDelete. Always. A failed TeamDelete with unsaved outputs is the worst failure mode in multi-agent execution.

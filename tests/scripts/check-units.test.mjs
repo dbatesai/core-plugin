@@ -80,7 +80,7 @@ test('iterAllUnitFiles: returns real unit files regardless of their prose conten
     body: '# Real unit\n\nOrdinary prose body — nothing here exempts it from validation.',
   }));
 
-  const stems = iterAllUnitFiles(memories).map(path => path.split('/').at(-1));
+  const stems = iterAllUnitFiles(memories).map(path => path.split(/[/\\]/).at(-1)); // [/\\]: Windows paths use backslash
 
   assert.deepEqual(stems, ['real-unit.md']);
 }));
@@ -267,3 +267,161 @@ test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail 
   // Clean → 0.
   assert.equal(exitCode([]), 0);
 });
+
+test('SYN-005: unknown confidence-level and stability-class values WARN', () => withStore((memories) => {
+  writeFileSync(join(memories, 'annotated.md'), [
+    '---', 'id: annotated', 'type: observation', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'confidence-level: banana',
+    'stability-class: garbage',
+    '---', '', '# annotated', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.check === 'confidence-level-value'), 'banana must WARN');
+  assert.ok(report.some(f => f.check === 'stability-class-value'), 'garbage must WARN');
+}));
+
+test('SYN-005: schema confidence-level and stability-class values pass clean', () => withStore((memories) => {
+  writeFileSync(join(memories, 'clean.md'), [
+    '---', 'id: clean', 'type: observation', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'confidence-level: sourced',
+    'proposed-stability-class: durably-correct',
+    '---', '', '# clean', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.equal(report.some(f => f.check === 'confidence-level-value'), false);
+  assert.equal(report.some(f => f.check === 'stability-class-value'), false);
+}));
+
+test('SYN-005 follow-up: legacy annotation WARNs are benign-class — store exits 0, not degraded', () => withStore((memories) => {
+  // Pre-framework annotations like confidence-level: high / stability-class: stable
+  // get WARN-level visibility but must NOT degrade an otherwise-healthy store.
+  writeFileSync(join(memories, 'legacy.md'), [
+    '---', 'id: legacy', 'type: observation', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'confidence-level: high',
+    'stability-class: stable',
+    '---', '', '# legacy', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.level === 'WARN' && f.check === 'confidence-level-value'), 'legacy value still WARNs (visibility)');
+  assert.ok(report.some(f => f.level === 'WARN' && f.check === 'stability-class-value'), 'legacy value still WARNs (visibility)');
+  assert.equal(BENIGN_WARN_CHECKS.has('confidence-level-value'), true);
+  assert.equal(BENIGN_WARN_CHECKS.has('stability-class-value'), true);
+  assert.equal(exitCode(report), 0, 'legacy annotations alone must not degrade the store');
+}));
+
+test('SYN-007: observation-subdir units are audited only with includeObservations', () => withStore((memories) => {
+  const obsDir = join(memories, 'observations', '2026-05');
+  mkdirSync(obsDir, { recursive: true });
+  writeFileSync(join(obsDir, 'obs-thing-2026-05-20.md'), [
+    '---', 'id: obs-thing-2026-05-20', 'type: observation', 'status: bogus-status',
+    'created: 2026-05-20', 'updated: 2026-05-20', 'topics: [tests]',
+    '---', '', '# obs', '',
+  ].join('\n'));
+
+  const defaultReport = [];
+  checkSchema(iterActiveUnits(memories), memories, defaultReport);
+  assert.equal(defaultReport.some(f => f.unit_id === 'obs-thing-2026-05-20'), false,
+    'default stays top-level-only');
+
+  const fullReport = [];
+  checkSchema(iterActiveUnits(memories, { includeObservations: true }), memories, fullReport);
+  assert.ok(fullReport.some(f => f.unit_id === 'obs-thing-2026-05-20' && f.check === 'status-value'),
+    'the full-store audit reaches the observation and flags its bogus status');
+}));
+
+// ---------- D7 / MEM-018: sources-missing provenance advisory ----------
+
+test('MEM-018: an aged active non-observation unit with no sources WARNs sources-missing (benign)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'aged.md'), [
+    '---', 'id: aged', 'type: decision', 'status: active',
+    'created: 2026-01-01', 'updated: 2026-01-01', 'topics: [tests]',
+    '---', '', '# aged', '',
+  ].join('\n'));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+  assert.ok(report.some(f => f.check === 'sources-missing'), 'unknown provenance surfaced');
+  assert.ok(BENIGN_WARN_CHECKS.has('sources-missing'), 'advisory — must not gate startup');
+}));
+
+test('scalar sources string WARNs sources-not-list (benign)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'scalar-src.md'), [
+    '---', 'id: scalar-src', 'type: decision', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'sources: PROJECT.md',
+    '---', '', '# scalar-src', '',
+  ].join('\n'));
+  writeFileSync(join(memories, 'list-src.md'), [
+    '---', 'id: list-src', 'type: decision', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    'sources:', '  - PROJECT.md',
+    '---', '', '# list-src', '',
+  ].join('\n'));
+  // checkIntegrity WARNs index-missing (non-benign) on a store without
+  // INDEX-decisions.md — provide an empty one so exitCode isolates this check.
+  writeFileSync(join(memories, 'INDEX-decisions.md'), '# Decisions\n');
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+  assert.ok(report.some(f => f.check === 'sources-not-list' && f.unit_id === 'scalar-src'),
+    'scalar sources surfaced with a suggestion to use list form');
+  assert.equal(report.some(f => f.check === 'sources-not-list' && f.unit_id === 'list-src'), false,
+    'list-form sources do not warn');
+  assert.ok(BENIGN_WARN_CHECKS.has('sources-not-list'), 'advisory — must not gate startup');
+  assert.equal(exitCode(report), 0, 'a scalar sources field alone must not degrade the store');
+}));
+
+test('MEM-018: fresh units and observations are exempt from sources-missing', () => withStore((memories) => {
+  writeFileSync(join(memories, 'fresh.md'), unit({ id: 'fresh' })); // created 2026-05-30, today below makes it 10d old
+  writeFileSync(join(memories, 'obs-young.md'), unit({ id: 'obs-young', type: 'observation' }));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+  assert.equal(report.some(f => f.check === 'sources-missing'), false);
+}));
+
+// ---------- D8 / MEM-008 + MEM-014: empty required fields FAIL, oversize WARNs ----------
+
+test('MEM-008: a present-but-empty required field FAILs (type: with blank value)', () => withStore((memories) => {
+  // `type: ` parses to an empty list (the parser treats a blank value as a
+  // list opener), which passed both the key-presence check and the truthiness-
+  // guarded value check.
+  writeFileSync(join(memories, 'blank-type.md'), [
+    '---', 'id: blank-type', 'type:', 'status: active',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    '---', '', '# blank-type', '',
+  ].join('\n'));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.check === 'required-field-empty' && f.detail.includes("'type'")),
+    'blank type must FAIL, not pass silently');
+}));
+
+test('MEM-014: an oversized unit WARNs unit-oversize (benign)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'big.md'), unit({ id: 'big', body: '# big\n\n' + 'x'.repeat(11_000) }));
+  writeFileSync(join(memories, 'small.md'), unit({ id: 'small' }));
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.check === 'unit-oversize' && f.unit_id === 'big'));
+  assert.equal(report.some(f => f.check === 'unit-oversize' && f.unit_id === 'small'), false);
+  assert.ok(BENIGN_WARN_CHECKS.has('unit-oversize'), 'advisory — never blocks retrieval or startup');
+}));

@@ -6,10 +6,11 @@
  * given a unit X, the transitive set of units that depend on X — so a change or a
  * supersession of X surfaces its blast radius instead of leaving it implicit.
  *
- * Deliberately rides the EXISTING edge types. The realreal scoped a distinct
- * `affects` edge type, but DC-68 fixes the committed-edge set at six and "a seventh
- * requires a new DC" — so the dedicated semantic defers to the bi-temporal contract
- * and a future DC. The depends-on walk is the generic mechanism CORE can run today.
+ * Rides the committed edge set only. The walk reads depends-on/depended-on-by
+ * plus refines/amends (both blessed 2026-06-03) in the affects-direction. A
+ * dedicated `affects` edge type still defers to a future DC per DC-68's
+ * committed-set rule — but refines/amends ARE committed, so ignoring them was
+ * an under-traversal, not gatekeeping (SYN-006).
  *
  * Pairs with bitemporal.mjs: traceSupersededImpact() reports, for every unit whose
  * t_invalid is now in the past, what still depends on it — the review candidates a
@@ -30,11 +31,18 @@ import { iterActiveUnits } from './check-units.mjs';
 
 export const IMPACT_VERSION = '1.0.0';
 
+// Edge types that put a unit downstream of its target: U --(t)--> T means a
+// change to T affects U. depends-on is the original; refines and amends joined
+// 2026-06-09 (SYN-006) — both are committed edge types (blessed 2026-06-03)
+// whose semantics make the refining/amending unit stale when its target moves.
+export const AFFECTS_EDGE_TYPES = new Set(['depends-on', 'refines', 'amends']);
+// Inverse direction: U --(depended-on-by)--> T means U affects T.
+export const AFFECTS_INVERSE_EDGE_TYPES = new Set(['depended-on-by']);
+
 /**
- * Build the affects-adjacency: affects[X] = set of units that depend on X (so a
- * change to X affects them). Reads both edge directions:
- *   - unit U has `depends-on` → T   ⟹  T affects U     (affects[T] += U)
- *   - unit U has `depended-on-by` → T ⟹  U affects T   (affects[U] += T)
+ * Build the affects-adjacency: affects[X] = set of units affected by a change
+ * to X. Reads depends-on / refines / amends (forward) and depended-on-by
+ * (inverse).
  */
 export function buildAffectsGraph(units) {
   const affects = new Map();
@@ -43,8 +51,8 @@ export function buildAffectsGraph(units) {
     const uid = basename(u.path, '.md');
     for (const e of extractEdges(u)) {
       const target = String(e.target).replace(/\.md$/, '');
-      if (e.type === 'depends-on') add(target, uid);
-      else if (e.type === 'depended-on-by') add(uid, target);
+      if (AFFECTS_EDGE_TYPES.has(e.type)) add(target, uid);
+      else if (AFFECTS_INVERSE_EDGE_TYPES.has(e.type)) add(uid, target);
     }
   }
   return affects;

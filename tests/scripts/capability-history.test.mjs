@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   appendRows, readHistory, canonicalRowHash, applyRetention, acquireLock,
-  historyPath, lockPath, RETENTION_PER_CAPABILITY,
+  LOCK_RETRY_INTERVAL_MS, LOCK_TIMEOUT_MS,
 } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 
 test('M8: appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {
@@ -76,7 +76,7 @@ test('appendRows/readHistory: project-local store supports sandboxed capability 
   const project = mkdtempSync(join(tmpdir(), 'caphist-project-'));
   try {
     const res = appendRows('ws-project', [sampleRow()], { session_id: 's1' }, { project });
-    assert.match(res.path, /_metrics\/capability-history\/ws-project\.jsonl$/);
+    assert.match(res.path, /_metrics[/\\]capability-history[/\\]ws-project\.jsonl$/); // [/\\]: path.join emits backslashes on Windows
     assert.ok(existsSync(res.path), 'project-local history file created');
     const hist = readHistory('ws-project', { project });
     assert.equal(hist.length, 1);
@@ -191,6 +191,31 @@ test('acquireLock: times out when lock held and not stale', () => {
       /could not acquire lock/,
     );
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('MET-011: contention waits via injected sleep in bounded retries — no busy-spin', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ch-spin-'));
+  try {
+    const lf = join(dir, 'x.lock');
+    writeFileSync(lf, 'held');
+    let t = 0;
+    const sleeps = [];
+    assert.throws(
+      () => acquireLock(lf, {
+        now: () => t,
+        timeoutMs: 100,
+        staleMs: Number.MAX_SAFE_INTEGER,
+        sleep: (ms) => { sleeps.push(ms); t += ms; },
+      }),
+      /could not acquire lock/,
+    );
+    assert.ok(sleeps.length >= 1 && sleeps.length <= 6, `bounded retry count, got ${sleeps.length}`);
+    assert.ok(sleeps.every((ms) => ms > 0 && ms <= LOCK_RETRY_INTERVAL_MS), 'each wait is one short interval');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('MET-011: default lock timeout is bounded at 1s, not 5s', () => {
+  assert.equal(LOCK_TIMEOUT_MS, 1000);
 });
 
 // --- two-writer fixture (HC's required proof: no lost history) ---

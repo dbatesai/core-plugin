@@ -44,6 +44,7 @@
         {
           "capability_id": "memory-visible-in-agent-context",
           "capability_kind": "observation",
+          "_doc": "Depends on /finalize: write-visibility-canary.mjs records the canary at session close. A skipped /finalize surfaces as NOT-YET with reason_code finalize-not-run — distinguish that from never-installed before debugging.",
           "delegate": "capability/memory-visible-probe.mjs",
           "required_for_actions": []
         },

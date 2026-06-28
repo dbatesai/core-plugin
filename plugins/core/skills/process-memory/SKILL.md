@@ -45,7 +45,13 @@ Then narrate in plain voice: "Captured N observations from this session before p
 
 ## Step 1 — Pull inbox
 
-If `<project>/inbox.md` is non-empty, walk the entries. Two shapes can appear:
+If `<project>/inbox.md` is non-empty, run the mechanical pre-flight first:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/check-inbox.mjs" "<project>"
+```
+
+It validates block structure — required draft fields, valid `mode` values, `judgment-needed` present on Mode C, no graduation-only fields (a ratified `stability-class` belongs to graduation, not the extractor). FAILs name the block and field; fix or bounce the block back to its source rather than graduating it on a guess. WARNs ride along into the walk as context. Then walk the entries. Two shapes can appear:
 
 **Mode-tagged observation blocks** carry full frontmatter (id, type, status, source, source-instance, extracted-at, references-person, confidence-level, body) plus two framework fields: `mode: B | C` and, when Mode C, `judgment-needed: <prose>`. These come from extractors implementing the source-registration framework (see `references/external-sources/source-registration-framework.md §4`). The mode tells you the routing without re-deriving it from criteria. The two framework fields (`mode`, `judgment-needed`) are inbox-only annotations — strip them from the frontmatter before writing the graduated unit.
 
@@ -234,6 +240,8 @@ Tell the user what happened across all steps in one tight block:
 - PROJECT.md: before/after bytes if compacted, or "under cap" if not
 - IMPROVEMENT_LOG.md: under cap, or surfaced recommendation
 - Retrieval quality: tier distribution + any anomalies, or "clean"
+- Memory-boundary audit: 0 native-only → silence; candidates → name them as graduation prompts
+- Capability drift: clean → silence; a PASS→DEGRADED slip or a capability that stopped reporting → surfaced in plain voice
 - Anything else worth knowing
 
 Two or three sentences if everything was clean. Longer only if there's something the user needs to act on.

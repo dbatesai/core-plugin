@@ -120,6 +120,15 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
   if (r.includes(`${h}/src/`)) return 'canonical-source';
   if (r.includes(`${h}/work/`)) return 'canonical-source';
 
+  // Windows-common dev locations (HARNESS-010). Same conservative posture:
+  // recognize the well-known conventions, fail closed on everything else.
+  if (r.includes(`${h}/source/repos/`)) return 'canonical-source'; // Visual Studio default
+  if (r.includes(`${h}/Projects/`)) return 'canonical-source';     // home-level Projects (any OS)
+  if (r.includes(`${h}/repos/`)) return 'canonical-source';
+  // Drive-root dev dirs (C:/repos, D:/dev, C:/src, C:/code) — r is already
+  // forward-slash normalized, so one regex covers all drive letters.
+  if (/^[A-Za-z]:\/(dev|repos|src|code)\//.test(r)) return 'canonical-source';
+
   return 'unknown';
 }
 
@@ -137,6 +146,7 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
 // claude-code. Conflict → consuming_harness: unknown, source: conflict, identity DEGRADES.
 // Signal weight distinguishes *_PLUGIN_ROOT (strong, explicit plugin context) from
 // CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID (weak, env presence only).
+// Canonical signal list: harnesses/codex.md §detect-harness + harnesses/claude-code.md §detect-harness. This is the env-visible subset.
 export function detectConsumingHarnessSignal(env = process.env) {
   const signals = [];
 
@@ -436,11 +446,27 @@ function buildRow(f) {
 
 export function main(argv) {
   const asJson = argv.includes('--json');
+  const printRoot = argv.includes('--print-root');
   let from;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--from' && argv[i + 1]) from = argv[i + 1];
   }
   const row = resolvePluginRoot({ from });
+  // --print-root takes precedence over --json when both are passed.
+  if (printRoot) {
+    // Single-line contract for startup.md's resolver block (SYN-002): print the
+    // plugin root with forward slashes — valid for Node on every platform and
+    // safe to interpolate under bash, zsh, Git-Bash, PowerShell, and CMD — or
+    // print nothing and exit 2. Root LOCATION is knowable even when identity is
+    // DEGRADED; quality is a separate dimension consumers read via --json.
+    if (row.manifest_path) {
+      const root = dirname(dirname(row.manifest_path)).replace(/\\/g, '/');
+      process.stdout.write(root + '\n');
+      return 0;
+    }
+    process.stderr.write('CORE-ROOT-UNRESOLVED: no plugin manifest found walking up from this script\n');
+    return 2;
+  }
   if (asJson) {
     process.stdout.write(JSON.stringify(row, null, 2) + '\n');
   } else {

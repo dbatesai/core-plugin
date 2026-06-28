@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   applyHotSection, recordProjectMdWrite, HOT_BEGIN, HOT_END,
 } from '../../plugins/core/skills/core/scripts/hot-section.mjs';
+
+const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/hot-section.mjs', import.meta.url));
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'hot-section-'));
@@ -54,5 +58,36 @@ test('recordProjectMdWrite tolerates a missing cache file (creates it)', () => {
     recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-06T00:00:00Z', home });
     const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
     assert.equal(cache.files[join(project, 'PROJECT.md')].last_written_by, 'hot-section');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('apply --file lands prose with shell metacharacters verbatim', () => {
+  const { root, project, home } = setup();
+  try {
+    const prose = 'Right now: `priority.mjs` re-ranked — "quotes", $CORE_ROOT, a \\ backslash, and ; semicolons all survive.';
+    const draft = join(root, 'draft.md');
+    writeFileSync(draft, prose);
+    const res = spawnSync(process.execPath, [SCRIPT, 'apply', project, '--file', draft], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 0, `apply --file exits 0 (stderr: ${res.stderr})`);
+    const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.ok(pm.includes(prose), 'metacharacter prose lands in PROJECT.md unaltered');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('apply reads stdin when neither --text nor --file is given', () => {
+  const { root, project, home } = setup();
+  try {
+    const prose = 'Right now: stdin path works — no shell interpolation of unit-derived text.';
+    const res = spawnSync(process.execPath, [SCRIPT, 'apply', project], {
+      encoding: 'utf8',
+      input: prose,
+      env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 0, `apply via stdin exits 0 (stderr: ${res.stderr})`);
+    const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.ok(pm.includes(prose), 'stdin prose lands in PROJECT.md');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

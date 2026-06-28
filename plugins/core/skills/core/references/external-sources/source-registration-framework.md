@@ -295,6 +295,12 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 3. **Ensure observations land at the correct destination** per Mode A/B/C criteria. Either the extractor writes to the destination directly (preferred), or the orchestration skill routes the extractor's output.
 
+   Mode B/C blocks landing in `inbox.md` can be pre-flighted mechanically:
+   `node <plugin-root>/skills/core/scripts/check-inbox.mjs <project>` validates block structure
+   (required draft fields, valid `mode`, `judgment-needed` on Mode C, no graduation-only
+   fields). Extractors get a pass/fail signal at write time instead of waiting for a human
+   session; `/process-memory` runs the same check before its inbox walk.
+
 4. **Append to `source-pull-log.jsonl`** with the pull event per the monitoring contract (see §7).
 
 5. **Trigger graduation** when source pulls complete and graduation is warranted. The installation decides when (after every refresh; on a schedule; when inbox count crosses a threshold). The entry point is `/process-memory` or equivalent.
@@ -312,9 +318,9 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 DC-85 defines three filter steps (relevance → extraction → confidence judgment). The framework requires these three judgments happen in order; it does not require they happen in separate processes.
 
-An installation may dispatch each step as a subagent (per DC-82 model-tier matrix — Haiku filter, Sonnet extraction, Sonnet confidence judgment). Or it may run all three inline in a single agent context. The choice is installation-level and is governed by performance/cost considerations the installation owns.
+An installation may dispatch each step as a subagent (per the model-tier matrix in `references/model-assignments.md` — Haiku filter, Sonnet extraction, Sonnet confidence judgment). Or it may run all three inline in a single agent context. The choice is installation-level and is governed by performance/cost considerations the installation owns.
 
-DC-82's model-assignment matrix becomes a **reference for installations**, not a prescription. CORE recommends; installations decide.
+Installations treat the model-assignment matrix (`references/model-assignments.md`) as a starting point rather than a prescription. CORE recommends; installations decide.
 
 ---
 
@@ -352,7 +358,7 @@ None initially. If the file grows past a threshold (say 50MB), a hygiene pass at
 
 ### Read protocol
 
-`/finalize` reads the log at session close to surface monitoring signals per DC-85 spec section 9. A CORE script (`scripts/analyze-source-pull-log.mjs`, to be drafted) aggregates per-source statistics over a window and produces a brief report integrated into `/finalize`'s output.
+`/finalize` reads the log at session close to surface monitoring signals per DC-85 spec section 9. This is wired: the finalize skill's Step 3 "Source-pull monitoring" bullet runs `scripts/analyze-source-pull-log.mjs --workspace <id>` whenever `<project>/_sources/` exists, aggregating the last 14 days and surfacing only actionable signals (a registered source with no pulls in window, a climbing error count, Mode-C distribution above ~30%). Wrapper authors can rely on monitoring being operational on any install that runs `/finalize`.
 
 ---
 
@@ -362,7 +368,7 @@ Three artifacts CORE ships in support of the framework:
 
 1. **This framework document.** The contract.
 2. **`references/confidence-assignment-guide.md`.** Pattern catalog for confidence-level assignment, source-category-agnostic, pattern-anchored. Installations reference this when implementing extractors.
-3. **`scripts/analyze-source-pull-log.mjs`.** Monitoring log analyzer; reads the JSONL, produces aggregate statistics. Used by `/finalize` and on-demand.
+3. **`scripts/analyze-source-pull-log.mjs`.** Monitoring log analyzer; reads the JSONL, produces aggregate statistics. Wired into `/finalize` (Step 3, "Source-pull monitoring") and available on-demand.
 
 These three plus the existing observation schema, DC-70 promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
 

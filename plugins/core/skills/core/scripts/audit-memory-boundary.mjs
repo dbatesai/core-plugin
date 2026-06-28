@@ -21,6 +21,13 @@
  * Match function is deterministic high-signal-term overlap (Q1 lean), so paraphrases can
  * read as "absent" — which is exactly why output is candidates, not a verdict.
  *
+ * SCOPE (MET-009): current-project-only by design. The audit reads only this
+ * project's native surface and this project's unit store, so it cannot detect
+ * cross-project contamination (a fact from Project A landing in Project B's
+ * MEMORY.md). If that becomes a real concern, the right tool is a separate
+ * audit scanning ALL projects' MEMORY.md files for overlapping high-signal
+ * terms — not a widening of this one.
+ *
  * The native surface is provided by the caller (resolved per harness via the
  * read-auto-memory adapter, DC-75) so this stays harness-agnostic.
  *
@@ -45,7 +52,10 @@ export const DEFAULT_SAMPLE = 25;
  * matches the real folder (the dotted-username bug project-slug.mjs kills).
  */
 export function mappedNativePath(projectRoot, { home = homedir() } = {}) {
-  return join(home, '.claude', 'projects', mapProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md');
+  // Forward-slash join (not path.join) so the slug path is identical on Windows and
+  // POSIX — Claude Code's projects-folder shape uses '/'-derived dashes, and Node's fs
+  // accepts forward slashes on Windows. path.join would emit backslashes and mislocate.
+  return [home, '.claude', 'projects', mapProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md'].join('/');
 }
 
 // High-signal identifier shapes (mirrors analyze-retrieval-skip's term policy): DC-/R-
@@ -89,6 +99,7 @@ export function auditMemoryBoundary({ nativeEntries = [], coreTerms = new Set(),
   }
   return {
     schema_version: SCHEMA_VERSION,
+    scope: 'current project only — audits this project\'s native memory against this project\'s CORE store; cross-project contamination (Project A facts in Project B\'s MEMORY.md) is out of scope and needs a separate all-projects scan',
     nativeOnly,
     stats: { nativeTotal: nativeEntries.length, sampled: sample.length, withTerms: sample.filter((e) => e.terms && e.terms.length).length, nativeOnly: nativeOnly.length },
     conflict_detection: 'deferred — see design Q3 (too noisy without a stronger matcher)',

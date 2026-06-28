@@ -4,7 +4,7 @@ import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'nod
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { main } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
+import { main, spliceSection } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
 
 const SRC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/generate-memory-index.mjs'),
@@ -83,6 +83,21 @@ test('a malformed --today exits 2 cleanly (no RangeError from toISOString)', () 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('SOD-003: the MEMORY.md priority block excludes invalidated units', () => {
+  const { dir, memMd } = scratchMemoryMd();
+  try {
+    writeFileSync(join(dir, '_memories', 'dc-live.md'),
+      '---\nid: dc-live\ntype: decision\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\ntopics: [a]\n---\n\n# live unit\n');
+    writeFileSync(join(dir, '_memories', 'dc-dead.md'),
+      '---\nid: dc-dead\ntype: decision\nstatus: superseded\ncreated: 2026-01-01\nupdated: 2026-06-01\nt_invalid: 2026-03-01\ntopics: [a]\n---\n\n# dead unit\n');
+    const code = quietStderr(() => main([join(dir, '_memories'), '--memory-md', memMd, '--today', '2026-06-09']));
+    assert.equal(code, 0);
+    const out = readFileSync(memMd, 'utf8');
+    assert.match(out, /dc-live/);
+    assert.doesNotMatch(out, /dc-dead/, 'index generation is a retrieval surface — same invariant');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('H1: MEMORY.md write routes through atomicWriteFileSync, not a bare write', () => {
   // MEMORY.md holds hand-curated, unreconstructable narrative; a crash mid-write
   // must never truncate it. Crash-safety can't be behaviorally unit-tested without
@@ -91,4 +106,11 @@ test('H1: MEMORY.md write routes through atomicWriteFileSync, not a bare write',
   assert.match(SRC, /from '\.\/fs-atomic\.mjs'/, 'imports the atomic writer');
   assert.match(SRC, /atomicWriteFileSync\(memoryMdPath/, 'writes MEMORY.md atomically');
   assert.doesNotMatch(SRC, /\bwriteFileSync\(memoryMdPath/, 'no bare writeFileSync on the irreplaceable MEMORY.md surface');
+});
+
+test('MEM-020: splice ends with exactly one trailing newline when the section is last', () => {
+  const md = '# idx\n\n## Top project units (refreshed 2026-06-01)\n\n- [a](a.md) — one';
+  const out = spliceSection(md, '## Top project units (refreshed 2026-06-09)\n\n- [b](b.md) — two\n');
+  assert.match(out, /two\n$/, 'POSIX final newline present');
+  assert.doesNotMatch(out, /\n\n$/, 'exactly one, not several');
 });

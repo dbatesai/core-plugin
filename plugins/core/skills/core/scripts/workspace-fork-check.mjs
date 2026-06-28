@@ -22,7 +22,7 @@
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/workspace-fork-check.mjs --cwd <dir> --core-dir <dir>
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { resolve, join, basename } from 'node:path';
 import { homedir } from 'node:os';
@@ -41,8 +41,8 @@ export function slugify(name) {
 // patch (it was what the schema documented while reality used `path`), and a
 // `project_path`-keyed entry invisible to a `path`-only read is what re-forked a
 // workspace on every startup (Meridian, R11, 2026-05-31: local-llm-build-r11 ->
-// -2 -> -3 ...). This read stays tolerant of legacy `project_path` for one
-// release for back-compat, then drops — `path` is preferred.
+// -2 -> -3 ...). This read stays tolerant of legacy `project_path` through
+// v3.7.0 for back-compat; the fallback gets removed in v3.8.0. `path` is preferred.
 export function entryPath(entry) {
   return entry.path || entry.project_path || null;
 }
@@ -118,7 +118,9 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
   }
 
   const nowIso = now.toISOString();
-  const newDataPath = `~/.core/workspaces/${newId}/`;
+  // Expanded absolute path (HARNESS-007): Node never expands ~, so the pointer
+  // must carry a consumer-usable path. coreDir honors --core-dir overrides.
+  const newDataPath = join(coreDir, 'workspaces', newId) + '/';
 
   // H3: the fork mutates three surfaces. checkFork resolves PATH-MATCH (an index entry whose
   // path == cwd) BEFORE id-match, so the index entry is what makes a fork "stick" on the next

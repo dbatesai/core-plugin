@@ -32,7 +32,8 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const BYTE_CAP = 512 * 1024;           // 512KB per workspace
 export const RETENTION_PER_CAPABILITY = 80;   // entries kept per capability_id on cap breach
-export const LOCK_TIMEOUT_MS = 5000;          // wait up to 5s to acquire lock
+export const LOCK_TIMEOUT_MS = 1000;          // bounded wait (MET-011 — was a 5s spin on the startup path)
+export const LOCK_RETRY_INTERVAL_MS = 25;     // sleep slice between lock-acquire retries
 export const STALE_LOCK_MS = 30000;           // a lock older than 30s is presumed stale
 
 function historyPath(workspaceId, home = homedir()) {
@@ -87,12 +88,20 @@ export function canonicalRowHash(row) {
   return createHash('sha256').update(canonical).digest('hex');
 }
 
+/** CPU-yielding synchronous sleep. Atomics.wait blocks without spinning — the
+ * callers are short-lived CLI processes, so blocking-but-idle is the honest
+ * tradeoff (MET-011); the busy-wait it replaces burned a core for up to 5s. */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * Acquire an advisory lock via exclusive file creation (wx flag).
  * Recovers stale locks (older than STALE_LOCK_MS). Returns a release function.
- * Throws if it can't acquire within LOCK_TIMEOUT_MS.
+ * Throws if it can't acquire within timeoutMs — bounded retries with a
+ * CPU-yielding sleep between attempts (MET-011), never a busy-spin.
  */
-export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT_MS, staleMs = STALE_LOCK_MS } = {}) {
+export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT_MS, staleMs = STALE_LOCK_MS, sleep = sleepSync } = {}) {
   const deadline = now() + timeoutMs;
   for (;;) {
     try {
@@ -112,9 +121,7 @@ export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT
       if (now() >= deadline) {
         throw new Error(`capability-history: could not acquire lock ${lockFile} within ${timeoutMs}ms`);
       }
-      // brief spin — synchronous busy-wait kept short; callers are infrequent
-      const spinUntil = Math.min(now() + 50, deadline);
-      while (now() < spinUntil) { /* spin */ }
+      sleep(Math.min(LOCK_RETRY_INTERVAL_MS, Math.max(1, deadline - now())));
     }
   }
 }

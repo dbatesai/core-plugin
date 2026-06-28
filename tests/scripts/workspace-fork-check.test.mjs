@@ -299,3 +299,22 @@ test('dryRun on a returning workspace still reports no-fork', () => {
     },
   );
 });
+
+// ---------- HARNESS-007: data_path must be an expanded absolute path ----------
+// Node does not expand ~ (only POSIX shells do); a tilde-literal data_path is
+// unusable by any consumer that reads it as a path, and doubly broken on Windows.
+
+test('forked pointer data_path is an expanded absolute path, not a tilde literal', () => {
+  withFixture(
+    { workspace_id: 'orig-dp', name: 'p' },
+    [{ workspace_id: 'orig-dp', name: 'p', path: '/somewhere/else/entirely' }],
+    ({ cwd, coreDir }) => {
+      const r = checkFork({ cwd, coreDir, now: NOW });
+      assert.equal(r.action, 'forked');
+      const ptr = JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8'));
+      assert.ok(!ptr.data_path.startsWith('~'), 'no leading tilde literal in data_path (a mid-path ~ like a Windows RUNNER~1 8.3 short name is legitimate)');
+      assert.equal(ptr.data_path, join(coreDir, 'workspaces', r.new_id) + '/',
+        'data_path is the expanded meta-dir path, consumer-usable on all platforms');
+    },
+  );
+});

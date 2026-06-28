@@ -1,7 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   classifyTurn, classifyTurns, pairTurns, isClarifying, isLadderWalk, extractAskedTerm, summarize, containsTerm,
+  runClassification, buildPredicates, CLASSIFIER_VERSION,
 } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
 const inCtx = (terms) => (t) => terms.includes(t);
@@ -117,4 +121,66 @@ test('classifyTurns + summarize produce a state distribution', () => {
   assert.equal(s.total, 2);
   assert.equal(s.distribution['tier-0-win'], 1);
   assert.equal(s.distribution['rec-fail-tier-0'], 1);
+});
+
+test('MET-008: runClassification classifies the session passed in, not the newest transcript', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ct-sid-'));
+  const project = mkdtempSync(join(tmpdir(), 'ct-proj-'));
+  try {
+    const dir = join(home, '.claude', 'projects', project.replace(/[/.\\:]/g, '-')); // backslash + drive-colon: Windows temp paths, matches mapProjectPathToSlug
+    mkdirSync(dir, { recursive: true });
+    const turn = (u, a) => [
+      JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: u }] } }),
+      JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: a }] } }),
+    ].join('\n') + '\n';
+    // The session being closed: ONE turn.
+    writeFileSync(join(dir, 'sess-mine.jsonl'), turn('hello', 'The answer is 42.'));
+    // A newer session already started: THREE turns. mtime-latest would pick this.
+    writeFileSync(join(dir, 'sess-newer.jsonl'),
+      turn('a', 'r1.') + turn('b', 'r2.') + turn('c', 'r3.'));
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', workspaceId: 'ct-test-ws', env: {} });
+    assert.equal(r.status, 'OK');
+    assert.equal(r.transcript_resolution, 'session-id');
+    assert.equal(r.total, 1, 'classified the 1-turn session, not the 3-turn newer one');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+function predicateFixture() {
+  const project = mkdtempSync(join(tmpdir(), 'ct-pred-'));
+  writeFileSync(join(project, 'CLAUDE.md'), 'Project rules mention alpha-injected-term here.\n');
+  writeFileSync(join(project, 'PROJECT.md'), '# Synthesis\nThe beta-disk-term decision lives here.\n');
+  mkdirSync(join(project, '_memories'), { recursive: true });
+  writeFileSync(join(project, '_memories', 'dc-9-gamma-thing.md'),
+    '---\ntype: decision\ntopics: delta-frontmatter-term\n---\n# Gamma unit about epsilon-heading-term\n\nbody\n');
+  return project;
+}
+
+test('MET-004: PROJECT.md is NOT in-context unless the transcript shows it was read', () => {
+  const project = predicateFixture();
+  try {
+    const cold = buildPredicates(project, { events: [] });
+    assert.equal(cold.isInContext('alpha-injected-term'), true, 'harness-injected CLAUDE.md counts');
+    assert.equal(cold.isInContext('beta-disk-term'), false, 'unread PROJECT.md must not count as context');
+    assert.equal(cold.isOnDisk('beta-disk-term'), true, 'PROJECT.md content counts as on-disk');
+    const warm = buildPredicates(project, { events: [{ kind: 'tool', text: `Read ${project}/PROJECT.md` }] });
+    assert.equal(warm.isInContext('beta-disk-term'), true, 'a transcript-evidenced read promotes it to context');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('MET-005: a term in a unit frontmatter or first heading (not its filename) reads as on-disk', () => {
+  const project = predicateFixture();
+  try {
+    const p = buildPredicates(project, { events: [] });
+    assert.equal(p.isOnDisk('delta-frontmatter-term'), true, 'frontmatter topics are indexed');
+    assert.equal(p.isOnDisk('epsilon-heading-term'), true, 'H1 headings are indexed');
+    assert.equal(p.isOnDisk('zeta-nowhere-term'), false, 'absent terms still read as nowhere');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('MET-004/005: predicate changes bumped the classifier version (R-1 calibration invalidation)', () => {
+  assert.notEqual(CLASSIFIER_VERSION, '0.2.0');
+  assert.equal(CLASSIFIER_VERSION, '0.3.0');
 });

@@ -55,6 +55,7 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 - Archive / retire / cold-store with priority-aware triggers.
 - Graduation (observations → units → canonical flag).
 - Memory contradiction detection and reconciliation (was dream-cycle Phase 3a).
+- Wikilink promotion — durable `[[unit-id]]` body links become typed `cites` edges (see §"Wikilink promotion").
 - Index regeneration — `_memories/INDEX-decisions.md`, `_memories/INDEX-risks.md`, others (was dream-cycle Phase 3d).
 - File-cap monitoring and proactive compaction when synthesis files grow over the Read tool cap (replaces DC-46 machinery from v1).
 - Auto-memory ↔ unit-store reconciliation.
@@ -125,7 +126,7 @@ Reversal is autonomous (Mode A) when it's a self-correction (you just archived s
 | Cold-store losing edges | An edge pointing at a cold-stored unit dangles | Cold-store keeps edges intact in the moved file; retrieval treats the cold-target as a placeholder so the link doesn't 404 |
 | Mid-session conflict with user edit | You're about to render a section the user just edited | Edit-detection surfaces the change; render pauses on the conflicted section; reconcile before re-rendering |
 | Render-vs-hygiene collision (same section) | Hygiene fires on a unit flowing into a section the agent is mid-rendering | Defer hygiene until the render commits; see "Render-collision handling" above |
-| Trigger storm | Three+ hygiene triggers in 30 seconds during rapid edits | Burst suppression — defer the next pass until activity quiets (no triggers for 30 seconds) |
+| Trigger storm | Three+ hygiene triggers within a single agent turn during rapid edits | Burst suppression — batch into one pass at turn's end; if the burst spans turns, defer until a turn completes with no new trigger (per §"Mid-session batching": judge by turns, never wall-clock) |
 | Index drift | `INDEX-decisions.md` shows units that don't exist (or misses units that do) | Index regeneration runs at every `/finalize`; on detected drift, regenerate immediately |
 | Observation backlog | Observations pile up ungraduated; graduation candidates get lost in volume | Continuous self-evaluation surfaces "this observation keeps mattering" patterns; graduation passes at `/finalize` walk recent observations explicitly |
 
@@ -136,6 +137,16 @@ Reversal is autonomous (Mode A) when it's a self-correction (you just archived s
 Graduation — observation becoming unit — is the highest-value reasoning move CORE makes. Triggers, the seven-step process, the anti-miss bias, and the hand-off to multi-agent on hard calls all live in `protocols/data-storage.md` §Graduation. Hygiene's role is to surface candidates: `/finalize` walks recent observations and flags the ones that keep mattering, and on-demand passes do the same when the user asks.
 
 ---
+
+## Wikilink promotion
+
+Part of the reconciliation work at `/finalize` and `/process-memory`. No script — this is an agent-performed pass:
+
+1. Find candidates: `grep -rn '\[\[[a-z0-9-]\+\]\]' <project>/_memories --include='*.md'`, skipping `archive/` and `cold-storage/`.
+2. Resolve each `[[id]]` to an existing unit file. An id that resolves to nothing gets flagged in the hygiene log (`verb: wikilink-unresolved`) — never auto-create a unit to satisfy a link.
+3. Promote when the link is durable and citation-style — the sentence leans on the target as evidence, precedent, or source ("per [[dc-69-priority-function]]", "captured in [[obs-...]]"). A passing mention stays a wikilink; promotion is for links retrieval should be able to walk.
+4. Promotion means adding `{type: cites, target: <id>}` to the citing unit's `edges:` frontmatter when not already present. `cites` is a lazy, one-directional edge — no inverse edge required (per `protocols/data-storage.md` §"The committed edge types").
+5. Log each promotion in the hygiene JSONL (`verb: promote-wikilink`, with citing unit and target).
 
 ## On-demand project setup — governance-hierarchy capture (DC-85 §8)
 
@@ -165,7 +176,7 @@ Storage and retrieval aren't frozen — they evolve based on observed performanc
 At every `/finalize` and `/process-memory` invocation, call:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project>
+[ -n "$CORE_ROOT" ] && node "${CORE_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs" <project>
 ```
 
 Default window is the last 30 days. The analyzer returns tier distribution, top dip-back units (precision proxy), and top tier-escalation topics (recall proxy). The main agent narrates the top anomalies in plain language — not the raw report dump.
@@ -217,7 +228,7 @@ There's no separate dream-cycle ritual anymore. The retrospective doc still gets
 DECISIONS.md grew to ~99K characters / 40K tokens in v1, over the Read tool cap. The v2 fix:
 
 1. Each decision in DECISIONS.md becomes a unit at `<project>/_memories/dc-<NN>-<slug>.md` with v2 unit shape (frontmatter + edges + reasoning body).
-2. `_memories/INDEX-decisions.md` is auto-generated by `node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs` (ships with the plugin per DC-77) — walks `_memories/dc-*.md`, parses frontmatter, sorts chronologically. Invoke from the project root or pass an explicit memories dir; the script overwrites `INDEX-decisions.md` in place.
+2. `_memories/INDEX-decisions.md` is auto-generated by `node "${CORE_ROOT}/skills/core/scripts/generate-decisions-index.mjs"` (`CORE_ROOT` as resolved at startup; ships with the plugin per DC-77) — walks `_memories/dc-*.md`, parses frontmatter, sorts chronologically. Invoke from the project root or pass an explicit memories dir; the script overwrites `INDEX-decisions.md` in place.
 3. DECISIONS.md is archived to `<project>/_memories/archive/DECISIONS-pre-graduation.md` (or wherever the cold-start migration plan placed v1 docs).
 4. PROJECT.md's Decisions & Risks section renders from active-status decision units only.
 

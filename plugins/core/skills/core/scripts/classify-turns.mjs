@@ -20,6 +20,12 @@
  * state distributions as evidence-grade until calibration clears. Capture (the
  * transcript) is ground truth; this interpretation is tunable and replayable.
  *
+ * CADENCE (honesty, MET-003): there is NO automatic trigger for this script. It
+ * runs only from user-invoked /finalize and /process-memory. A session closed
+ * without them produces no classified records, so the rollup and orient-signal
+ * go STALE (not wrong) until the next finalize. Never describe the rec-fail
+ * trend as continuous monitoring.
+ *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open: never throws.
  *
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
@@ -33,12 +39,17 @@ import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 
+// 0.3.0: MET-004/MET-005 predicate honesty — PROJECT.md leaves the unconditional
+// context blob (it's a disk file; it counts as context only with transcript evidence
+// of a read this session) and the disk check now indexes unit frontmatter + first
+// heading, not filenames alone. Both shift the state distribution, so any calibration
+// cleared under 0.2.0 is invalidated by the rollup's version-match guard.
 // 0.2.0: the M6 hardening changed classification OUTPUT — word-boundary in-context matching,
 // the asked-term denylist, and wiring the previously-dead ladderReturnedContent discriminator
 // all shift the state distribution. Any behavior-affecting change MUST bump this, so the R-1
 // honesty guard (metrics-rollup gates the PROVISIONAL tag on a classifier_version match)
 // correctly invalidates a calibration cleared under the old behavior.
-export const CLASSIFIER_VERSION = '0.2.0';
+export const CLASSIFIER_VERSION = '0.3.0';
 
 // A clarifying question — the agent asking the user instead of answering.
 const CLARIFYING_RE = /\b(what (is|does|are|do you mean)|what'?s|which|i'?m not (sure|familiar)|could you (remind|clarify|explain)|can you (remind|clarify|explain)|remind me|not familiar with|haven'?t (seen|come across)|don'?t (have|see) (context|background)|where (is|does)|tell me (more )?about)\b/i;
@@ -168,17 +179,17 @@ export function containsTerm(blob, term) {
   return new RegExp('(^|[^a-z0-9])' + _escapeRe(t) + '([^a-z0-9]|$)').test(blob);
 }
 
-function buildPredicates(project) {
-  const contextBlob = ['CLAUDE.md', 'MEMORY.md', 'PROJECT.md']
-    .map((f) => safeRead(join(project, f)))
-    .join('\n')
-    // CLAUDE.md is usually at repo root / home; MEMORY.md is in the harness store.
-    // PROJECT.md is the load-bearing one and lives in the project — good enough v1.
-    .toLowerCase();
-  const diskBlob = listDiskTerms(project).toLowerCase();
-  // M6: a bare substring test made any term that's a SUBSTRING of the 184KB PROJECT.md read
-  // "in context" — a short token like "opt-in" matches inside unrelated words, biasing the
-  // headline rec-fail-tier-0 rate upward. Match on a word boundary instead.
+export function buildPredicates(project, { events = [] } = {}) {
+  // MET-004: only harness-auto-injected surfaces are unconditionally "in context"
+  // (CLAUDE.md, MEMORY.md). PROJECT.md is a disk file the agent must explicitly
+  // read — counting it unconditionally under-reported rec-fail-tier-0. It joins
+  // the context blob only when this session's transcript shows a tool touching it.
+  const injected = ['CLAUDE.md', 'MEMORY.md'].map((f) => safeRead(join(project, f)));
+  const projectMdRead = (events || []).some((e) => e.kind === 'tool' && /PROJECT\.md/i.test(e.text || ''));
+  if (projectMdRead) injected.push(safeRead(join(project, 'PROJECT.md')));
+  const contextBlob = injected.join('\n').toLowerCase();
+  // PROJECT.md always counts as on-disk (it IS reachable by the ladder).
+  const diskBlob = (listDiskTerms(project) + '\n' + safeRead(join(project, 'PROJECT.md'))).toLowerCase();
   return {
     isInContext: (term) => containsTerm(contextBlob, term),
     isOnDisk: (term) => containsTerm(diskBlob, term),
@@ -186,7 +197,8 @@ function buildPredicates(project) {
 }
 
 function listDiskTerms(project) {
-  // Cheap proxy: the filenames + first lines under _memories/ + _summaries/ + docs/.
+  // Filenames + each unit's frontmatter and first heading (MET-005: filenames alone
+  // made body-only terms read as "nowhere on disk" → false capture-miss).
   const parts = [];
   for (const sub of ['_memories', '_summaries', 'docs']) {
     walkNames(join(project, sub), parts);
@@ -200,8 +212,22 @@ function walkNames(dir, out, depth = 0) {
   try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
   for (const e of entries) {
     out.push(e.name.replace(/\.md$/, '').replace(/-/g, ' '));
-    if (e.isDirectory()) walkNames(join(dir, e.name), out, depth + 1);
+    if (e.isDirectory()) { walkNames(join(dir, e.name), out, depth + 1); continue; }
+    if (e.name.endsWith('.md')) out.push(unitHeadTerms(join(dir, e.name)));
   }
+}
+
+/** Frontmatter block + first markdown heading of a unit (first 2KB — cheap, bounded). */
+function unitHeadTerms(path) {
+  let head;
+  try { head = readFileSync(path, 'utf8').slice(0, 2048); } catch { return ''; }
+  head = head.replace(/\r\n?/g, '\n');
+  const parts = [];
+  const fm = head.match(/^---\n([\s\S]*?)\n---/);
+  if (fm) parts.push(fm[1]);
+  const h1 = head.match(/^#\s+(.+)$/m);
+  if (h1) parts.push(h1[1]);
+  return parts.join('\n');
 }
 
 function safeRead(p) { try { return readFileSync(p, 'utf8'); } catch { return ''; } }
@@ -212,11 +238,11 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   if (!metricsEnabled({ project, env })) {
     return { status: 'DISABLED', reason: 'metrics opted out (CORE_METRICS_ENABLED=0 or workspace.json metrics_enabled:false)', provisional: true };
   }
-  const t = readTranscript({ harness, cwd: cwd || project, home });
+  const t = readTranscript({ harness, cwd: cwd || project, home, sessionId, env });
   if (!t.available) {
     return { status: 'UNAVAILABLE', reason: 'transcript unavailable', provisional: true };
   }
-  const ctx = buildPredicates(project);
+  const ctx = buildPredicates(project, { events: t.events });
   const classified = classifyTurns(t.events, ctx);
   const sid = resolveSessionId({ explicit: sessionId });
   const date = today || todayUTC();
@@ -236,7 +262,7 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
     mkdirSync(dir, { recursive: true });
     for (const r of records) appendFileSync(join(dir, `${date}.jsonl`), JSON.stringify(r) + '\n');
   } catch { /* best-effort */ }
-  return { status: 'OK', provisional: true, workspace_id: wid, ...summarize(classified), records };
+  return { status: 'OK', provisional: true, workspace_id: wid, transcript_resolution: t.meta.transcript_resolution, ...summarize(classified), records };
 }
 
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };

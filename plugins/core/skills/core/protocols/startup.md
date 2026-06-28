@@ -21,6 +21,7 @@ Then check the project's synthesis files for size overflow. `<project>/PROJECT.m
 
 ## Identity load
 
+- Run `detect-harness()` (per `protocols/harness.md`) and read the matching `harnesses/<name>.md` adapter. Every adapter verb below — starting with `read-auto-memory` — resolves against this loaded adapter; don't use one before the adapter is loaded.
 - Read `~/.core/dm-profile.md` in full. Cross-project personality and patterns; no project facts. You're now yourself — same agent as last session.
 - Use the `read-auto-memory` adapter verb (resolved per `harnesses/<harness>.md`) to load any harness-local recall available. Treat as scratch cache; verify any project-specific reference against the unit store before acting on it. Claude Code surfaces this from `~/.claude/projects/*/memory/MEMORY.md`. Codex can inject memory-like context when `features.memories = true` (experimental); when present, treat it as harness-local recall and run a startup probe to confirm injection occurred before relying on it. See `harnesses/codex.md §read-auto-memory` for details.
 - Read `~/.core/topics.md` so the controlled vocabulary is loaded for retrieval and observation auto-tagging.
@@ -31,45 +32,14 @@ Resolve deterministically when you can; ask the user only when it's genuinely am
 
 Look for `workspace.json` in the current working directory — that's the pointer file. If it's not there, check `~/.core/index.json` for workspaces whose `path` matches the current directory (prefix match). One match → use it. Multiple matches → sort by `last_active` descending and ask the user: *"Last time we worked, we were on [workspace name]. Continuing there, or switching to [other workspace]?"* If `index.json` has exactly one workspace, use it. No match anywhere → unregistered; the routing below will send you to the new-workspace branch (its procedure lives in `protocols/startup-conditional-loads.md`) unless the project has v1-era content that needs migrating.
 
-**Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is NOT injected into agent Bash tool calls, and `installed_plugins.json` has no usable entry for a local/source/dev install (`core-dev`) — both are unreliable as the *primary* source, and relying on them is what produced the field failure where CORE_ROOT resolved empty and every script was skipped. The one source always available is **this skill's base directory**: the harness shows it in the SKILL.md header as `<plugin-root>/skills/core`. Make that primary — strip the trailing `/skills/core` and substitute the concrete path for `<PLUGIN_ROOT>` below. The env var and `installed_plugins.json` are fallbacks only. Resolve once and reuse for every `node …` invocation:
+**Resolve plugin root before any script call.** `${CLAUDE_PLUGIN_ROOT}` is NOT injected into agent Bash tool calls, and `installed_plugins.json` has no usable entry for a local/source/dev install (`core-dev`) — both are unreliable as the *primary* source. The one source always available is **this skill's base directory**: the harness shows it in the SKILL.md header as `<plugin-root>/skills/core`. Strip the trailing `/skills/core`, substitute the concrete path for `<PLUGIN_ROOT>` below, and let `resolve-plugin-root.mjs --print-root` do the verification — it realpaths from its own module location, walks up to the plugin manifest, and prints the root with forward slashes on every platform. The resolution itself is one `node` call, so it behaves identically under bash, zsh, Git-Bash, and PowerShell — no bash-only parameter expansion, no inline `node -e` payload. Resolve once and reuse for every `node …` invocation:
 
 ```bash
-# Preference order: skill base directory (always injected) → CLAUDE_PLUGIN_ROOT env →
-# installed_plugins.json. Substitute <PLUGIN_ROOT> with this skill's base directory minus
-# the trailing "/skills/core" (read it from the SKILL.md header). If you cannot substitute
-# it, the line no-ops and the fallbacks run — never worse than the old behavior.
-CORE_ROOT="<PLUGIN_ROOT>"
-if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-check.mjs" ]; then
-  CORE_ROOT="${CLAUDE_PLUGIN_ROOT}"
-fi
-if [ -z "$CORE_ROOT" ] || [ ! -f "$CORE_ROOT/skills/core/scripts/workspace-fork-check.mjs" ]; then
-  # Last resort: read the install path from installed_plugins.json. The node
-  # payload prints installPath RAW — no regex, no backslash literal — because a
-  # backslash inside a double-quoted `node -e` collapses in the shell (\\ becomes
-  # \) and yields a compile-time SyntaxError that try/catch cannot catch. That was
-  # the silent failure: empty CORE_ROOT then resolved `node "/skills/..."` against
-  # the Git-Bash MSYS root on Windows. Separator normalization happens in bash
-  # below, where no backslash has to survive node's parser.
-  CORE_ROOT=$(node -e "
-    try {
-      const fs = require('fs'), os = require('os');
-      const d = JSON.parse(fs.readFileSync(os.homedir() + '/.claude/plugins/installed_plugins.json', 'utf8'));
-      const plugins = d.plugins || {};
-      // core@core first, then any 'core@<marketplace>' key — the marketplace name may differ.
-      let entries = plugins['core@core'];
-      if (!entries) { const k = Object.keys(plugins).find(k => /^core@/.test(k)); entries = k ? plugins[k] : []; }
-      entries = entries || [];
-      const entry = entries.find(e => e.scope === 'user') || entries[0];
-      process.stdout.write(entry?.installPath || '');
-    } catch (e) {}
-  ")
-  # Normalize Windows backslashes to forward slashes in the shell (no-op on POSIX paths).
-  CORE_ROOT="${CORE_ROOT//\\//}"
-fi
-# Resolve to a definite state. On success, echo the root so it carries forward;
-# on failure, BLANK it and emit a structured marker. Every downstream `node` call
-# is guarded on the scripts dir, so a blank root skips-and-surfaces instead of
-# running against the wrong drive (the Windows MSYS-root failure Meridian hit).
+# Substitute <PLUGIN_ROOT> with this skill's base directory minus the trailing
+# "/skills/core" (read it from the SKILL.md header). The script verifies and
+# normalizes; the env var is a fallback for FINDING the script only.
+CORE_ROOT="$(node "<PLUGIN_ROOT>/skills/core/scripts/resolve-plugin-root.mjs" --print-root 2>/dev/null ||
+             node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/resolve-plugin-root.mjs" --print-root 2>/dev/null)"
 if [ -d "$CORE_ROOT/skills/core/scripts" ]; then
   echo "CORE_ROOT=$CORE_ROOT"
 else
@@ -78,7 +48,20 @@ else
 fi
 ```
 
-If the resolved install is stale (an older build that predates `workspace-fork-check.mjs`), the missing-scripts directory check above catches it: `CORE_ROOT` is blanked and the block prints `CORE-ROOT-UNRESOLVED`. In that case the fork-check and Step-8 commands skip via their own guards, and the readiness receipt surfaces the skip (see "Compose the readiness summary") with the advice to run `claude plugins update core@core`.
+**On PowerShell/CMD (Windows Codex):** the same `node … --print-root` call is the whole resolution — run it and substitute its printed path as the literal `CORE_ROOT` value in every subsequent script call. Don't port the bash gate; the script's exit code (0 resolved, 2 unresolved) is the signal. If the call fails, treat the session as CORE-ROOT-UNRESOLVED and surface it the same way.
+
+**Last-resort fallback (no shell tricks):** if both invocations fail and you're on Claude Code, read `~/.claude/plugins/installed_plugins.json` with the read tool, find the `core@…` entry's `installPath`, and re-run `--print-root` against `<installPath>/skills/core/scripts/resolve-plugin-root.mjs`. This replaces the old inline `node -e` payload — the read goes through the file tool, so there is no quoting footgun on any platform.
+
+If the resolved install is stale (an older build missing a script a newer protocol references), the individual `node` call fails loudly with a module-not-found error instead of silently no-opping. Surface that in the readiness receipt the same way as an unresolved root, with the advice to run `claude plugins update core@core`. A fully missing scripts dir is still caught by the gate above: `CORE_ROOT` is blanked and the block prints `CORE-ROOT-UNRESOLVED`, so the fork-check and Step-8 commands skip via their own guards.
+
+**Probe the hardware budget (cross-platform).** Run once, right after the root resolves — `protocols/execution.md §"Hardware budget"` reads this result when sizing multi-agent work, and `os.totalmem()` works identically on Mac, Linux, and Windows (no `sysctl`):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/hardware-budget.mjs" || true
+```
+
+Note the printed profile for later; don't narrate it unless the session actually goes multi-agent.
 
 **Auto-fork copied workspaces.** Run the fork-check script as the first action of workspace resolution. The guard is mechanical, not advisory — if `CORE_ROOT` is blank or its scripts dir is absent, the call skips with a marker instead of running `node` against an empty/wrong path:
 
@@ -102,7 +85,7 @@ After resolution (including any fork), update `last_active` in `~/.core/index.js
 
 Now route by the project's architecture state. The retrieval-ladder load has an implicit precondition that the unit store exists and is populated — without that, the load is a silent no-op. Make the routing decision explicit:
 
-- **Migration-in-progress flag present.** If `<project>/_memories/.migration-in-progress` exists, a prior session started cold-start migration and didn't finish (or migration is running in another session). Resume migration — do not route to the returning-workspace load regardless of what else is in `_memories/`. The flag is the authoritative signal.
+- **Migration-in-progress flag present.** If `<project>/_memories/.migration-in-progress` exists, a prior session started cold-start migration and didn't finish (or migration is running in another session). Resume migration — do not route to the returning-workspace load regardless of what else is in `_memories/`. The flag is the authoritative signal, and its `step-N-complete` lines (see Step 2) tell you exactly where to re-enter: continue from the first step with no completion line.
 - **Unit store populated.** `<project>/_memories/` exists AND contains at least one canonical unit. A canonical unit is any `*.md` file in `_memories/` (recursive) whose name does not start with `_` (e.g., `_validation/`) and does not start with `INDEX`. Existence alone isn't enough — populated is the precondition. If populated AND no unprefixed CORE folders, route to the returning-workspace load.
 - **Unit store populated BUT unprefixed CORE folders exist.** Pre-DC-74 naming on `handoffs/`, `summaries/`, `sessions/`, or `outputs/`. Run the folder-rename-only path, then proceed to returning-workspace load.
 - **Unit store empty-or-missing, v1 markers present.** A prior PROJECT.md, `_summaries/` (or legacy `_handoffs/`), `_sessions/`, `_outputs/` (or unprefixed equivalents), `plan.md`, `specs/`, `rebuild/`, or legacy workspace meta at `~/.core/workspaces/<id>/tracking/` or `~/.core/workspaces/<id>/handoffs/` — any of these counts. Cold-start migration before any other load.
@@ -118,22 +101,32 @@ Routing failure is itself a defect. If you find yourself trying to load the unit
 
 **Precondition:** `<project>/_memories/` exists, contains at least one canonical unit, and no migration-in-progress flag.
 
+**Integrity probe before loading.** "Populated" is not "healthy" — a crashed migration or a half-synced store can leave partial units that this routing would otherwise load silently as a returning workspace. Before the tiered load, run the same integrity check cold-start Step 8b uses (guarded like every script call):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" --store <project> --integrity \
+  || echo "CORE-INTEGRITY-DEGRADED: store failed the integrity probe (or CORE_ROOT unresolved — probe skipped)"
+```
+
+Exit 0 → proceed normally. Anything else → degraded path: still load PROJECT.md and whatever units parse (the user needs to work), but lead the readiness summary with the failure and the probe's output, hold anti-resurrection and autonomous renders until the store is reconciled (you can't trust edit-detection against a broken store), and propose the fix — `/process-memory`, or resuming the migration if the damage traces to one. Never load a failing store silently as if it were healthy.
+
 The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to know enough to answer the user's next question, not to load every file.
 
 - Read `<project>/workspace.json` to get the workspace id and data path.
-- **Tier 0 (in-context):** the session-intent topics are whatever the user just said or typed. Pull those into mind. If the conversation is empty (cold start), the session-intent is "orient and present the state."
-- **Tier 1 (lexical retrieval):** read `<project>/PROJECT.md` to anchor the six-section view. Grep `<project>/_memories/` for session-intent topic terms to surface relevant active units. Load whatever the grep returns above the priority threshold.
+- **Tier 0 (in-context):** the session-intent topics are whatever the user just said or typed. Pull those into mind, and read `<project>/PROJECT.md` to anchor the six-section view — `references/retrieval.md` counts that read as Tier 0, the already-loaded surface. If the conversation is empty (cold start, no user message yet), the session-intent topics default to the bootstrap set — `orient`, `memory`, `state` — and that's what the first Tier 1 grep runs on; they resolve to the user's actual words after the first turn.
+- **Tier 1 (lexical retrieval):** Grep `<project>/_memories/` for session-intent topic terms to surface relevant active units. Load whatever the grep returns above the priority threshold.
 - **Tier 2 (graph walk):** for each loaded unit, walk its `supersedes` and `depends-on` edges one hop to pick up the related context. Stop when the candidate set is good enough.
 - **Tier 3 (semantic):** only escalate if Tier 0–2 leave the user's actual question unanswered. The `Explore` subagent reasons over the vault for semantic queries.
 - Read `<project>/inbox.md` if it exists. Raw pending items — promote worthwhile facts into the right units on the user's next review. When entries carry `mode: B` or `mode: C` frontmatter, they're pending review per the source-registration framework; count them for the readiness summary.
 - Read `<project>/_sources/*.yaml` if the directory exists — the registered external sources for this project. Note the names and count for the readiness summary.
 - Read `~/.core/workspaces/<id>/workspace.json` for cross-session metadata only (last-session date, timestamps). Don't read project facts from here — there aren't any.
 
-After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them.
+After any Tier 1+ retrieval during startup, write one retrieval-shaped row with the exact producer schema. Do not invent aliases such as `session_intent_topics`, `highest_tier_reached`, or `selected_units`; the helper rejects them. The example below shows the schema only — fill every value from what actually happened this bootstrap: `units_retrieved` lists the units your grep or walk actually selected (real ids from THIS project), `intent_topics` the actual session-intent topics, the counts the real counts. Logging the placeholder values records a retrieval that never happened.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["orient","memory"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"dc-memory-index","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200,"usefulness_outcome":"useful"}'
+node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["<actual-topic-1>","<actual-topic-2>"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"<unit-id-actually-retrieved>","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200,"usefulness_outcome":"useful"}'
 ```
 
 Tier 0 in-context reuse does not need a retrieval row.
@@ -161,17 +154,17 @@ The project has substantive prior content but no v2 unit store. Run the nine ste
 
 This step is load-bearing. The advisor-caught addition — enumerate the inventory before any destructive action so you're not discovering mid-flight — is what makes the rest mechanical. Promoted from advisor-caught to protocol-required 2026-05-20 after a downstream-wrapper migration validated the pattern on a real non-CORE workspace.
 
-**Step 2 — Write the migration-in-progress flag.** Create `<project>/_memories/.migration-in-progress` — a single line with the session timestamp and a brief reason (`2026-05-20T11:23:00Z — cold-start migration begun`). This flag guards against re-invocation mid-migration silently routing to the returning-workspace load on a partial store. If the flag is already present from a prior interrupted session, read it, decide whether to resume from partial state or restart, and rewrite the flag with this session's timestamp either way. The flag is removed at the end as the explicit signal that migration completed cleanly.
+**Step 2 — Write the migration-in-progress flag.** Create `<project>/_memories/.migration-in-progress`. First line: the session timestamp and a brief reason (`2026-05-20T11:23:00Z — cold-start migration begun`). The file is also the step-progress ledger: after each of Steps 3–7 completes, append one line in the form `step-N-complete 2026-05-20T11:41:00Z` (N = the step number, timestamp ISO). This flag guards against re-invocation mid-migration silently routing to the returning-workspace load on a partial store, and the step lines make a crash recoverable — a resume continues from the first step with no `step-N-complete` line instead of re-entering from the top and duplicating work. If the flag is already present from a prior interrupted session, read its step lines, resume from the first incomplete step (each step below carries its own "on re-entry" rule), and append a fresh resume line (`2026-05-21T09:00:00Z — resumed`) so the audit trail shows the gap. The flag is removed at the end as the explicit signal that migration completed cleanly — the step lines go with it.
 
-**Step 3 — Write the early summary stub.** Migration is the canonical long/autonomous/complex session that warrants the early summary (see "Long sessions" below).
+**Step 3 — Write the early summary stub.** Migration is the canonical long/autonomous/complex session that warrants the early summary (see "Long sessions" below). Append `step-3-complete <ISO>` to the flag when done. On failure (the stub won't write — permissions, disk): non-fatal — note the gap in the migration plan and continue; the stub is insurance, not a dependency. On re-entry: if today's stub already exists, append to it rather than recreating it.
 
-**Step 4 — Folder rename (DC-74 + summary rename).** If the project has unprefixed CORE folders (`handoffs/`, `summaries/`, `sessions/`, `outputs/`), rename them to the current underscore convention. For each folder being renamed, check `git ls-files <folder>` first — if any files are tracked, use `git mv` so history follows; otherwise plain `mv`. A project can live inside a git tree (a home-directory git repo is a common case) without its project subfolders being tracked, in which case `git mv` fails with a misleading "source directory is empty" error. The per-folder tracked check avoids that. On cloud-sync-virtualized paths (OneDrive, Dropbox, iCloud Drive), `mv` can corrupt the sync state — use `cp -r <src> <dst>` then `rm -rf <src>` after verifying counts match. Both `handoffs/` (pre-rename) and `summaries/` map to `_summaries/`; `sessions/` → `_sessions/`; `outputs/` → `_outputs/`. Run a path-citation sweep in `_memories/*.md` after the renames so frontmatter `sources:` pointers stay valid. Narrate the renames in plain voice as they happen.
+**Step 4 — Folder rename (DC-74 + summary rename).** If the project has unprefixed CORE folders (`handoffs/`, `summaries/`, `sessions/`, `outputs/`), rename them to the current underscore convention. For each folder being renamed, check `git ls-files <folder>` first — if any files are tracked, use `git mv` so history follows; otherwise plain `mv`. A project can live inside a git tree (a home-directory git repo is a common case) without its project subfolders being tracked, in which case `git mv` fails with a misleading "source directory is empty" error. The per-folder tracked check avoids that. On cloud-sync-virtualized paths (OneDrive, Dropbox, iCloud Drive), `mv` can corrupt the sync state — use `cp -r <src> <dst>` then `rm -rf <src>` after verifying counts match. Both `handoffs/` (pre-rename) and `summaries/` map to `_summaries/`; `sessions/` → `_sessions/`; `outputs/` → `_outputs/`. Run a path-citation sweep in `_memories/*.md` after the renames so frontmatter `sources:` pointers stay valid. Narrate the renames in plain voice as they happen. Append `step-4-complete <ISO>` to the flag when every folder is done. Failure handling, per folder: on the copy-then-delete path, verify file counts match (`find <src> -type f | wc -l` vs the same on `<dst>`) BEFORE the `rm -rf` — on mismatch, stop, keep the source, and surface; never delete a source you haven't verified. On re-entry: a folder whose underscore target already exists and whose source is gone is done — skip it; if BOTH source and target exist (crash between copy and delete), compare counts — equal means finish the delete, unequal means surface to the user rather than guess.
 
-**Step 5 — Read substrate.** On Claude Code, check `~/.claude/projects/<cwd-mapped>/` for prior session transcripts — substrate worth reading alongside session summaries, plans, and specs. On Codex there is no equivalent transcript surface; rely on `<project>/_summaries/` and any project-local plans or specs instead. Either way, anti-resurrection is strict: if a prior PROJECT.md exists, it's the user's curation surface — promote backing units for facts it endorses; capture substrate-only facts as observations but do not auto-promote them. Surface ambiguous cases. Preserve disagreement: multi-agent perspective outputs and rejected alternatives are gold for the "how we got here" reasoning; don't flatten them when graduating.
+**Step 5 — Read substrate.** On Claude Code, check `~/.claude/projects/<cwd-mapped>/` for prior session transcripts — substrate worth reading alongside session summaries, plans, and specs. On Codex there is no equivalent transcript surface; rely on `<project>/_summaries/` and any project-local plans or specs instead. Either way, anti-resurrection is strict: if a prior PROJECT.md exists, it's the user's curation surface — promote backing units for facts it endorses; capture substrate-only facts as observations but do not auto-promote them. Surface ambiguous cases. Preserve disagreement: multi-agent perspective outputs and rejected alternatives are gold for the "how we got here" reasoning; don't flatten them when graduating. Append `step-5-complete <ISO>` to the flag when the read is done. This step is read-only, so re-entry is naturally safe — re-read what you need. On failure (transcript surface unreadable or absent): proceed on `<project>/_summaries/` and project-local plans alone, and record in the migration plan which substrate was skipped so the gap is visible later.
 
-**Step 6 — Execute graduation per the plan from Step 1.** Walk the enumerated inventory and graduate units in the order the plan specifies (typically: people first, foundational decisions second, remaining decisions, risks, open-questions, observations last). Cite the plan as you go.
+**Step 6 — Execute graduation per the plan from Step 1.** Walk the enumerated inventory and graduate units in the order the plan specifies (typically: people first, foundational decisions second, remaining decisions, risks, open-questions, observations last). Cite the plan as you go. Graduation must be idempotent: before writing any unit, check whether its id already exists in `_memories/` (`ls <project>/_memories/<id>.md`) — if it does, skip it; a crash mid-step means re-entry walks the same inventory and the existence checks turn already-written units into no-ops instead of duplicates. Don't "improve" an existing unit on resume — finish the inventory first, reconcile after. Append `step-6-complete <ISO>` to the flag only after the LAST inventory item is written. On failure mid-inventory (a write errors): note the failing unit in the migration plan, continue with the rest of the inventory, and retry the failures before declaring the step complete — one bad unit shouldn't strand the whole store.
 
-**Step 7 — Re-render PROJECT.md and update workspace meta.** Compose the six-section view (What & Why / State / People / Moves / Decisions & Risks / Notes) from the freshly-graduated units. Update `~/.core/index.json` with `schema_version: v2` and `migrated_at`. Update `~/.core/workspaces/<id>/workspace.json` to v2 schema, preserving prior milestones and adding the migration milestone. Create `~/.core/workspaces/<id>/swarm-narrative.md` (empty) for future swarm runs.
+**Step 7 — Re-render PROJECT.md and update workspace meta.** Compose the six-section view (What & Why / State / People / Moves / Decisions & Risks / Notes) from the freshly-graduated units. Update `~/.core/index.json` with `schema_version: v2` and `migrated_at`. Update `~/.core/workspaces/<id>/workspace.json` to v2 schema, preserving prior milestones and adding the migration milestone. Create `~/.core/workspaces/<id>/swarm-narrative.md` (empty) for future swarm runs. Every write in this step is a full-content rewrite or an additive field update, so re-entry just redoes it — re-rendering PROJECT.md from the same units and re-stamping the same index fields are no-ops in effect. On partial failure (say PROJECT.md landed but the index update errored): redo only the failed writes; verify each of the four surfaces (PROJECT.md, index.json, workspace.json, swarm-narrative.md) exists and carries the expected change before appending `step-7-complete <ISO>` to the flag.
 
 **Step 8 — Six-command readiness check (numbered, not text).** Run these six commands explicitly. Do not demote this step into §Moves — a real-world migration retrospective surfaced exactly this trap: an agent silently moved "readiness check" into §Moves item #1 mid-migration, advisor caught the demotion, the check then revealed substantive issues that would have shipped uncaught. Naming it as a numbered step prevents the demotion.
 
@@ -196,8 +189,6 @@ The agenda is `PROJECT.md §Moves`. No separate next-session file — that died 
 
 At session start, read §Moves, present the top 3–5 active priorities as the agenda, surface any high-priority items before implementation work begins. During the session, when new risks, decisions, open questions, or commitments emerge, update the relevant unit and re-render the affected PROJECT.md section in real time. At session end, make sure §Moves reflects next-session priorities — that's what gets picked up on the next bootstrap.
 
-If MCP calendar access is available, suggest scheduling regular sessions when the rhythm warrants it. Propose; let the user approve.
-
 ## Reconcile between-session activity
 
 - **Notification responses.** Has the user responded to anything you pinged between sessions?
@@ -216,6 +207,7 @@ Starting calibrations — tune based on observed behavior:
 - **Time since assumption validated.** >5 sessions or >14 days: confidence decays. Surface for revalidation.
 - **External-source claim age.** Task tracker or chat older than 24h: disclose and consider re-fetch. Document store older than 14d: disclose.
 - **Open-question past `by-when` (DC-85 §2).** Walk active open-question units in `<project>/_memories/`. For each unit with `type: open-question` AND `status: active` AND a `by-when` field whose ISO date is in the past, surface it in the readiness summary. Plain voice: *"One open question past its by-when: oq-michelle-design-review expected 5/22 — six days ago."* This is the absence-detection primitive; the architecture surfaces the lapse so the user doesn't have to remember it. The Michelle probe (spec §10) validates this mechanism.
+- **Open-question deferred twice or more.** While walking the same active open-question units, surface any with `deferrals: 2` or more in the readiness summary with the escalation framing — why the question matters and what goes wrong if it stays unanswered. At `deferrals: 3`, propose recording it as an accepted risk with the user's explicit acknowledgment, per SKILL.md §"Persist on hard questions". This sweep is what makes the deferral ladder real across sessions — the count lives in the unit, not in your memory of the conversation.
 
 - **Recent hygiene-log signals (DC-85 Phase 1b).** Read `<project>/_sessions/<most-recent-date>/hygiene-log.jsonl` if present. Surface what matters in plain voice — don't pile on: a `demote-moves-large-batch` from the last 1–2 sessions → *"last `demote-moves` ran on N candidates (threshold M); criteria may be tightening or loosening — worth a glance next `/process-memory`"*; `project-md-over-cap` events that persist across sessions → *"PROJECT.md is stuck over the ~70KB soft target; the compactor warns, doesn't block."* Skip when the log is absent (fresh workspace) or shows clean steady-state.
 
@@ -249,12 +241,14 @@ The hot section sits atop `<project>/PROJECT.md` — 5–7 lines naming what mat
 node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>
 ```
 
-Read the candidate list, then compose 5–7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Usually 1–3 items, no bold lead-in paragraphs unless the items genuinely need scannable headers. Land it:
+Read the candidate list, then compose 5–7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Usually 1–3 items, no bold lead-in paragraphs unless the items genuinely need scannable headers. Write the composed prose to a draft file with your file-write tool — `~/.core/workspaces/<id>/hot-section-draft.md` — then land it by path. Never interpolate the prose into the shell as a `--text` argument: it's composed from unit bodies, which can carry quotes, backticks, and `$` that the shell will mangle or execute.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --text "<composed prose>"
+node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --file ~/.core/workspaces/<id>/hot-section-draft.md
 ```
+
+(`apply` also reads stdin when neither `--text` nor `--file` is given. `--text` stays available for short hand-typed strings that contain no unit-derived content.)
 
 `hot-section.mjs apply` writes PROJECT.md and stamps `last_written_by: hot-section` into `~/.core/state-cache.json` itself, so next session's edit-detection (§"Load — returning workspace") recognizes the change as CORE's synthesis, not a user edit — no manual reconciliation, and `/finalize`'s close-of-session hot-section write is covered the same way (both go through `applyHotSection`).
 
@@ -269,10 +263,10 @@ node "${CORE_ROOT}/skills/core/scripts/capability-probe.mjs" --startup --json 2>
   > ~/.core/workspaces/<id>/capability-state.json || true
 ```
 
-Then append this session's snapshot to the capability history — the per-session record that drift and regression analysis read at `/finalize` and `/process-memory`:
+Then append this session's snapshot to the capability history — the per-session record that drift and regression analysis read at `/finalize` and `/process-memory`: Fail-open but not silent: if both the home store and the project fallback fail, the script prints a one-line error to stderr — leave that visible rather than discarding it, so a dead snapshot path surfaces instead of failing invisibly for months.
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --workspace-id <id> 2>/dev/null || true
+node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --workspace-id <id> || true
 ```
 
 **Scaffold the metrics store (fail-open).** Once the workspace id is resolved, scaffold `_metrics/` so the observability substrate has somewhere to write — `log-event.mjs`'s OTel dual-write resolves its storage path from the pin file this writes, and on Windows+OneDrive this is what redirects payloads off the synced path. Idempotent and never fatal; a scaffold failure degrades metrics capture but never blocks the session.
@@ -302,10 +296,11 @@ What to include:
 - What `PROJECT.md` currently says in §State — one or two sentences, not a recap of every section.
 - Active risks worth surfacing now (count plus the top one or two by impact).
 - Any elapsed-time signals that escalated.
+- Units retired by the anti-resurrection rule since the last readiness (the ids, with the one-line un-retire recovery phrase per `protocols/data-storage.md` §"The anti-resurrection rule"). Skip silently when none were retired.
 - Source-registration signals when they're worth mentioning: pending Mode B/C blocks in `<project>/inbox.md` (count plus a one-line nudge — *"three pending observations in the inbox waiting on review"*), or observations citing a `source:` not in `<project>/_sources/` (drift signal — name the source). Skip silently when the inbox is empty and no drift surfaced.
 - The top 3 §Moves priorities as the agenda.
 - Anything auto-compacted during first-time setup, named explicitly (entries, not counts).
-- The recognition signal, when present and worth flagging: read the one-line `~/.core/workspaces/<id>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` at last session close — that script is the mechanism's source of truth). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
+- The recognition signal, when present and worth flagging: read the one-line `~/.core/workspaces/<id>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` the last time `/finalize` or `/process-memory` ran — that script is the mechanism's source of truth, and there is NO automatic hook: the signal refreshes only on those user-invoked passes, so a session that ends without them leaves the file stale, not wrong). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." Read it as "as of the last finalize", never as continuous trending. It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
 - Plugin version + build: read both `version` and `build` from `../../.claude-plugin/plugin.json` relative to the skill base directory (which resolves to the plugin root's `plugin.json`) — that manifest is the single source of truth for both. Echo as "Plugin v<version> build <build>". If `plugin.json` is unreadable, omit the line; if it's readable but has no `build`, echo just "Plugin v<version>".
 
 Target voice:
@@ -314,9 +309,23 @@ Target voice:
 
 What to skip: session summary content (not part of the bootstrap read); auto-memory cited as authoritative (it's scratch cache); session log recaps (per-session artifacts, not state); a full section-by-section recital (the user sees PROJECT.md when they want the full view).
 
-**Record the bootstrap.** After readiness lands, write `~/.core/workspaces/<id>/last-bootstrap.json` with two fields: `session_started_at` (the Claude Code session-start timestamp — best available proxy is the timestamp of the first user message this session) and `bootstrap_completed_at` (now). This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
+**Record the bootstrap.** After readiness lands, write `~/.core/workspaces/<id>/last-bootstrap.json` with two fields: `session_started_at` (the timestamp of the first user message this session — the one session-start marker you can actually observe; see §"Bootstrap dedup") and `bootstrap_completed_at` (now). This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
 
 After readiness lands, only ask what you still don't know — genuine gaps that no durable artifact resolved, with a hypothesis when you have one. Don't ask "what were we working on?" (you just read it), "what would you like to do today?" (the agenda tells you), or "can you catch me up?" (that's exactly what bootstrap prevents). Do ask deferred-decision questions ("PROJECT.md flags the X decision as deferred pending your call — have you decided?"), agenda-fork questions ("continue the v2 build or pivot to the stale R-5 risk first?"), and missing-unit questions ("the session-intent topic 'auto-creation rules' didn't surface a unit at Tier 1 or 2 — written yet, or still pending?"). Then wait for the user's next move; the agenda topics get resolved or explicitly deferred before implementation work begins.
+
+## Bootstrap dedup
+
+This is the authoritative definition of the already-bootstrapped check that `SKILL.md §"Before the task — startup"` summarizes.
+
+The marker is the first-user-message timestamp. `last-bootstrap.json`'s `session_started_at` holds the timestamp of the first user message of the session in which bootstrap ran — that's what "Record the bootstrap" above writes. It's a proxy: you have no access to the harness's session clock, but you can usually see when the conversation started.
+
+The check, in order:
+
+1. **New workspace — no dedup.** No `workspace.json` in the cwd and no matching `~/.core/index.json` entry means startup has never run here; it's startup that creates those files. Skip the dedup check and run the protocol. The check applies to returning sessions only.
+2. **Resolve and compare.** Resolve the workspace id, read `~/.core/workspaces/<id>/last-bootstrap.json`, and compare its `session_started_at` to the timestamp of the current session's first user message. Same first message (allow a few minutes of tolerance for format and timezone jitter — the question is "same session?", not "same second?") → bootstrap already ran; skip the protocol read.
+3. **Can't determine → run.** If you can't see the first user message's timestamp, or the file is absent or unparseable, treat bootstrap as not-yet-run and run the protocol. The failure direction is chosen deliberately: re-running bootstrap wastes a little time; wrongly skipping it means operating without routing, edit-detection, or the readiness contract.
+
+Known limitation, named: on a harness that exposes no message timestamps, this gate can't distinguish sessions and effectively always re-runs bootstrap. That is the designed degradation — double-bootstrap, never silent-skip.
 
 ## Long sessions — write the early summary stub
 

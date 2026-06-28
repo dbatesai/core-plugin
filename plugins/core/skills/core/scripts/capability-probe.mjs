@@ -24,8 +24,8 @@
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolvePluginRoot, detectConsumingHarnessSignal } from './resolve-plugin-root.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
@@ -104,7 +104,10 @@ async function invokeProbe(capability, opts = {}) {
     const delegatePath = join(SCRIPTS_DIR, capability.delegate);
     // opts._importer is a test seam (defaults to dynamic import) so the crash
     // and import-failure branches can be exercised without a shipping fixture.
-    const importer = opts._importer || ((p) => import(p));
+    // Default importer wraps the absolute path in a file:// URL — Windows import()
+    // rejects a bare drive-letter/backslash path (ERR_UNSUPPORTED_ESM_URL_SCHEME).
+    // The opts._importer test seam is left raw so fixtures can still pass a plain string.
+    const importer = opts._importer || ((p) => import(pathToFileURL(p).href));
     let mod;
     try {
       mod = await importer(delegatePath);
@@ -186,7 +189,8 @@ function makeUnknownRow(capability, errorMessage) {
     evidence: [
       {
         source: 'probe-execution',
-        value: { error: String(errorMessage).slice(0, 300), capability_id: capability.capability_id },
+        // MET-014: 1000 chars keeps a usable stack head; 300 cut real traces mid-frame.
+        value: { error: String(errorMessage).slice(0, 1000), capability_id: capability.capability_id },
         agrees_with_others: false,
         weight: 'conflicting',
         probe_failed: true,
