@@ -38,14 +38,13 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 2. **Update touched units.** For every unit you wrote to during the session, verify frontmatter — `updated:` timestamp, `last_accessed:`, `access_count:`, edges. Make sure inverse edges are set on `supersedes` / `depends-on` / `conflicts-with`.
 
-3. **Regenerate indexes.** Run both index generators unconditionally — they're cheap and idempotent, and running both means a session that only touched risk units doesn't close with a stale `INDEX-risks.md`:
+3. **Run mechanical maintenance (DC-110).** Run the consolidated mechanical pass — it regenerates both indexes + the summary index, cleans cloud-sync ghost duplicates, and checks the PROJECT.md cap, all signature-gated (cheap on an unchanged store) and recorded in the cadence ledger:
 
    ```bash
-   node ${CORE_ROOT}/skills/core/scripts/generate-decisions-index.mjs <project>/_memories/
-   node ${CORE_ROOT}/skills/core/scripts/generate-risks-index.mjs <project>/_memories/
+   node ${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs <project>
    ```
 
-   Both ship with the plugin per DC-77. The scripts auto-detect — if you pass a project root with a `_memories/` subdir, they write inside it; otherwise they write to whatever path you passed.
+   Ships with the plugin per DC-77. Surface its one-line narration to the user (it's never silent — visible-continuous-curation). Heavier hygiene ops (demote-moves, compaction, validation) stay in their own steps below; this consolidates the cheap deterministic regen/cleanup that used to be separate `generate-*-index.mjs` calls.
 
 4. **Render PROJECT.md from units.** Walk canonical units, compose the six sections (What & Why / State / People / Moves / Decisions & Risks / Notes), and show the user the draft. **Skip re-render when the user's PROJECT.md is curated and the new units are sparse backing-only.** Anti-resurrection cuts both ways — don't strip the user's curation just because the unit store is thin. If the existing PROJECT.md already reflects current truth and the new units add traceability without changing what the user sees, present the existing PROJECT.md for re-acceptance and note the choice; don't re-render from a sparse unit set.
 
