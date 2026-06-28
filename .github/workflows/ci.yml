@@ -275,6 +275,10 @@ jobs:
         with:
           node-version: '20'
 
+      - name: DIAG (temporary) configure-project standalone — surface the swallowed failing subtest
+        shell: bash
+        run: node --test tests/scripts/configure-project.test.mjs || true
+
       - name: Run node test suite
         shell: bash
         run: node --test tests/scripts/*.test.mjs
