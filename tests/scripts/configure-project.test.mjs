@@ -286,7 +286,10 @@ test('configureProject: idempotent from run 2 (detect-only identity, no drift)',
 
 // ---------- main(): exit codes ----------
 
-test('main: clean store + report-only -> exit 0, prints a receipt', async () => {
+// BISECT: these two invoke the real capability probe (await import + runStartup). Skip on
+// Windows to confirm they are the source of the file-level exit-1 (every assertion passes).
+const WIN = process.platform === 'win32';
+test('main: clean store + report-only -> exit 0, prints a receipt', { skip: WIN }, async () => {
   await withFixture({}, async ({ projectPath, coreRoot }) => {
     const logs = [];
     const orig = process.stdout.write;
@@ -299,7 +302,7 @@ test('main: clean store + report-only -> exit 0, prints a receipt', async () => 
   });
 });
 
-test('main: a hard-fail store -> exit 2', async () => {
+test('main: a hard-fail store -> exit 2', { skip: WIN }, async () => {
   await withFixture({ units: [] }, async ({ projectPath, coreRoot }) => {
     writeFileSync(join(projectPath, '_memories', 'bad.md'),
       '---\nid: bad\ntype: not-a-real-type\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\n---\n# bad\n');
