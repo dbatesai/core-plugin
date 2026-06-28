@@ -312,7 +312,7 @@ test('forked pointer data_path is an expanded absolute path, not a tilde literal
       const r = checkFork({ cwd, coreDir, now: NOW });
       assert.equal(r.action, 'forked');
       const ptr = JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8'));
-      assert.ok(!ptr.data_path.includes('~'), 'no tilde literal in data_path');
+      assert.ok(!ptr.data_path.startsWith('~'), 'no leading tilde literal in data_path (a mid-path ~ like a Windows RUNNER~1 8.3 short name is legitimate)');
       assert.equal(ptr.data_path, join(coreDir, 'workspaces', r.new_id) + '/',
         'data_path is the expanded meta-dir path, consumer-usable on all platforms');
     },
