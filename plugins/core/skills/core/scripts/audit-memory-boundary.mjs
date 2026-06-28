@@ -52,7 +52,10 @@ export const DEFAULT_SAMPLE = 25;
  * matches the real folder (the dotted-username bug project-slug.mjs kills).
  */
 export function mappedNativePath(projectRoot, { home = homedir() } = {}) {
-  return join(home, '.claude', 'projects', mapProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md');
+  // Forward-slash join (not path.join) so the slug path is identical on Windows and
+  // POSIX — Claude Code's projects-folder shape uses '/'-derived dashes, and Node's fs
+  // accepts forward slashes on Windows. path.join would emit backslashes and mislocate.
+  return [home, '.claude', 'projects', mapProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md'].join('/');
 }
 
 // High-signal identifier shapes (mirrors analyze-retrieval-skip's term policy): DC-/R-
