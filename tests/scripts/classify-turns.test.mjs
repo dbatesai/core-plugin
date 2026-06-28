@@ -7,6 +7,7 @@ import {
   classifyTurn, classifyTurns, pairTurns, isClarifying, isLadderWalk, extractAskedTerm, summarize, containsTerm,
   runClassification, buildPredicates, CLASSIFIER_VERSION, PROXY_VERSION,
 } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
+import { mapProjectPathToSlug } from '../../plugins/core/skills/core/scripts/project-slug.mjs';
 
 const inCtx = (terms) => (t) => terms.includes(t);
 const onDisk = (terms) => (t) => terms.includes(t);
@@ -140,7 +141,7 @@ test('MET-008: runClassification classifies the session passed in, not the newes
   const home = mkdtempSync(join(tmpdir(), 'ct-sid-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-proj-'));
   try {
-    const dir = join(home, '.claude', 'projects', project.replace(/[/.]/g, '-'));
+    const dir = join(home, '.claude', 'projects', mapProjectPathToSlug(project));
     mkdirSync(dir, { recursive: true });
     const turn = (u, a) => [
       JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: u }] } }),
@@ -165,7 +166,7 @@ test('DC-94a: each classified record is stamped with proxy_version', () => {
   const home = mkdtempSync(join(tmpdir(), 'ct-pv-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-pvp-'));
   try {
-    const dir = join(home, '.claude', 'projects', project.replace(/[/.]/g, '-'));
+    const dir = join(home, '.claude', 'projects', mapProjectPathToSlug(project));
     mkdirSync(dir, { recursive: true });
     const turn = (u, a) => [
       JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: u }] } }),
