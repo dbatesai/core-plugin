@@ -8,6 +8,10 @@ import {
   readConfiguredMcp, readConnectorMap, planAgentsMd, configureProject, formatReceipt, main,
 } from '../../plugins/core/skills/core/scripts/configure-project.mjs';
 
+// TEMP DIAGNOSTIC (remove after): surface the Windows-only unhandled rejection that
+// makes this file exit 1 with no failing subtest.
+process.on('unhandledRejection', (e) => { console.error('UNHANDLED-REJECTION:', (e && e.stack) || e); });
+
 const NOW = new Date('2026-06-01T00:00:00Z');
 
 const UNIT = (id) => `---
