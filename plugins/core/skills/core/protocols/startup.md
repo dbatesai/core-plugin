@@ -114,7 +114,7 @@ Exit 0 → proceed normally. Anything else → degraded path: still load PROJECT
 The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to know enough to answer the user's next question, not to load every file.
 
 - Read `<project>/workspace.json` to get the workspace id and data path.
-- **Tier 0 (in-context):** the session-intent topics are whatever the user just said or typed. Pull those into mind, and read `<project>/PROJECT.md` to anchor the six-section view — `references/retrieval.md` counts that read as Tier 0, the already-loaded surface. If the conversation is empty (cold start, no user message yet), the session-intent topics default to the bootstrap set — `orient`, `memory`, `state` — and that's what the first Tier 1 grep runs on; they resolve to the user's actual words after the first turn.
+- **Tier 0 (in-context):** the session-intent topics are whatever the user just said or typed. Pull those into mind, and read `<project>/PROJECT.md` **in full** to anchor the six-section view — `references/retrieval.md` counts that read as Tier 0, the already-loaded surface. Read the whole file, not a head slice — §Decisions & Risks and §Moves live well past the first screen, and a partial read silently drops them. If PROJECT.md is large enough to exceed one Read call, page through it (hot section first, then §Decisions & Risks, then the remainder within budget) and **keep track of how many lines you actually read** — that read-extent feeds the context-integrity check below (DC-94a), which surfaces any shortfall instead of letting it pass unnoticed. If the conversation is empty (cold start, no user message yet), the session-intent topics default to the bootstrap set — `orient`, `memory`, `state` — and that's what the first Tier 1 grep runs on; they resolve to the user's actual words after the first turn.
 - **Tier 1 (lexical retrieval):** Grep `<project>/_memories/` for session-intent topic terms to surface relevant active units. Load whatever the grep returns above the priority threshold.
 - **Tier 2 (graph walk):** for each loaded unit, walk its `supersedes` and `depends-on` edges one hop to pick up the related context. Stop when the candidate set is good enough.
 - **Tier 3 (semantic):** only escalate if Tier 0–2 leave the user's actual question unanswered. The `Explore` subagent reasons over the vault for semantic queries.
@@ -275,6 +275,17 @@ node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --workspa
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
 node "${CORE_ROOT}/skills/core/scripts/metrics-init.mjs" <project> <workspace-id> >/dev/null 2>&1 || true
 ```
+
+**Before composing — check context integrity (DC-94a).** You can answer from partial context without noticing it: MEMORY.md gets truncated at the injection cap, and a large PROJECT.md can exceed a single read. Run `check-context-integrity.mjs` with the lines you actually read from PROJECT.md this bootstrap (the returning-workspace Tier-1 load reads it in full or paged — pass that read-extent). If the marker comes back `CONTEXT-PARTIAL`, say what's missing in plain voice **before** your first substantive answer — *"Heads up: MEMORY.md is over the injection cap, so I'm missing roughly 12 of its entries this session, and I only loaded 80 of PROJECT.md's 2200 lines. I'll read the rest before I lean on anything from there."* A `CONTEXT-COMPLETE` marker needs no narration.
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/check-context-integrity.mjs" \
+  --memory ~/.claude/projects/<cwd-mapped>/memory/MEMORY.md \
+  --project <project>/PROJECT.md --project-read-lines <lines-read> || true
+```
+
+**Per-turn retrieval (DC-94a, opt-in — Gate G2).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`) over the incoming prompt and injects the top matches. It ships **default-off**: a no-op unless `CORE_RETRIEVAL_HOOK=1`, and it is deliberately not registered in the plugin manifest. Whether per-turn injection becomes default-on (and the top-N) is David's call on the Task 11 precision evidence; until then a user opts in by wiring it as a `UserPromptSubmit` hook in their own settings (the script header documents the exact form).
 
 Read the output. When **any row is non-PASS**, narrate in plain voice:
 

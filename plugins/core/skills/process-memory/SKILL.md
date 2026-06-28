@@ -124,16 +124,15 @@ After auto-fixing, re-run the validator and report the new counts.
 
 ---
 
-## Step 4 — Regenerate indexes
+## Step 4 — Run mechanical maintenance (DC-110)
 
-Always run both generators (they're cheap and idempotent — if nothing changed, the file content is identical):
+Run the consolidated mechanical pass. It regenerates both indexes + the summary index, cleans ghost duplicates, and checks the PROJECT.md cap — signature-gated (no-op when units are unchanged) and recorded in the cadence ledger (`_memories/_maintenance-state.json`):
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/generate-decisions-index.mjs" "<project>/_memories"
-node "${CORE_ROOT}/skills/core/scripts/generate-risks-index.mjs" "<project>/_memories"
+node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" "<project>"
 ```
 
-Both write to `_memories/INDEX-*.md`. Top-level units only — archived ones in `_memories/archive/` are intentionally excluded from the index.
+Surface its one-line narration (never silent — visible-continuous-curation). This is the mechanical half of upkeep; the judgment half (graduation review, Tier-C surfacing) is the rest of this pass. Indexes write to `_memories/INDEX-*.md`, top-level units only — archived ones in `_memories/archive/` are excluded. Autonomous/unattended runs are gated per `hygiene.md §"Autonomous maintenance"` and not enabled here.
 
 ---
 

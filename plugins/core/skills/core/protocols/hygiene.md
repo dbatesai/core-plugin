@@ -107,6 +107,29 @@ The dual log is intentional. The run log is what the user reads during the sessi
 
 ---
 
+## Mechanical maintenance — the cadence ledger (DC-110)
+
+The *mechanical* half of upkeep — index regeneration (decisions, risks, summary), ghost-duplicate cleanup, PROJECT.md cap check — is consolidated in `scripts/maintenance-run.mjs` and separated from the *judgment* half (graduation, retire calls) that stays in `/process-memory`. `/finalize` and `/process-memory` both invoke it:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" <project>
+```
+
+It is **signature-gated** (regenerates only when the unit set changed since last run — cheap on an unchanged store), **narrated** (returns a one-line summary of what ran; never silent — honors visible-continuous-curation), and **ledger-recorded** in `<project>/_memories/_maintenance-state.json` (per-op `run_count` + `last_run` — the cadence data DC-110 M2 observes). Surface its narration line in the run. `--dry-run` reports without writing.
+
+### Autonomous maintenance — gated, not built (DC-110 M3)
+
+DC-110 is ledger-first on purpose: maintenance runs **at invocation** (`/finalize`, `/process-memory`, on-demand), not on a per-turn hook. Running any maintenance op unattended/autonomously is gated behind four preconditions, none yet built:
+
+1. a **deterministic "clear-cut" gate** (DC-70-grade, like the six-factor cost gate) — no agent-adjudicated "clear-cut";
+2. a **kill switch** (env var / workspace flag);
+3. a **per-change audit log** (what changed, not just that an op ran);
+4. **cadence evidence** from the ledger showing the op has enough work to justify unattended runs.
+
+Autonomous graduation, autonomous edge-writing, and autonomous PROJECT.md §State/§Moves re-render all live behind these. Until they exist, maintenance never silently mutates the store between turns.
+
+---
+
 ## Reversal — every operation is reversible
 
 - **Archive → active**: move file from `_memories/archive/<prefix>-<slug>.md` back to `_memories/<prefix>-<slug>.md`. Remove `archived:` and `archived_at:` from frontmatter.

@@ -17,15 +17,15 @@
  *
  * Every site that turns a project path into a Claude-projects identity slug must use
  * this one function so the encoding can't drift again. Handles POSIX '/', Windows
- * '\\', and '.'. If a future case shows Claude also transforms another character
- * (e.g. spaces on cloud-sync paths), add it here — one place, one rule.
+ * '\\', '.', and the Windows drive colon ':' — a path segment can't contain a colon
+ * on Windows, so a slug that leaves `C:` in produces an un-creatable directory (the
+ * drive-colon class the v3.8.0 Windows-portability pass addressed). If a future case
+ * shows Claude also transforms another character (e.g. spaces on cloud-sync paths),
+ * add it here — one place, one rule.
  *
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
 export function mapProjectPathToSlug(p) {
-  // Path separators, dots, AND the Windows drive colon. A ':' can't appear in a path
-  // segment on Windows, so 'C:\proj' must encode to 'C--proj' — both for a valid
-  // ~/.claude/projects/<slug>/ dir and to match what Claude Code can produce there.
   return String(p).replace(/[/\\.:]/g, '-');
 }
