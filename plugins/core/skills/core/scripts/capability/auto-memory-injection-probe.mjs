@@ -31,7 +31,6 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'auto-memory-injection';
