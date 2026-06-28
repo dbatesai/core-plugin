@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
   resolveCoreRoot, detectHarness, checkManifests, validateStore, detectIdentity,
@@ -82,13 +83,16 @@ async function withFixture(opts, fn) {
 // ---------- resolveCoreRoot / detectHarness ----------
 
 test('resolveCoreRoot honors an explicit override', () => {
-  assert.equal(resolveCoreRoot({ coreRootArg: '/x/y/z' }), '/x/y/z');
+  // Compare against the platform's own resolve() — on Windows the override resolves to a
+  // drive-letter backslash path, so a hardcoded POSIX string would falsely fail.
+  assert.equal(resolveCoreRoot({ coreRootArg: '/x/y/z' }), resolve('/x/y/z'));
 });
 
 test('resolveCoreRoot walks three up from the scripts dir', () => {
   // file:///…/plugins/core/skills/core/scripts/foo.mjs  →  …/plugins/core
   const url = 'file:///tmp/p/plugins/core/skills/core/scripts/configure-project.mjs';
-  assert.equal(resolveCoreRoot({ scriptUrl: url }), '/tmp/p/plugins/core');
+  // Expected computed with the same platform path ops (Windows produces a drive+backslash path).
+  assert.equal(resolveCoreRoot({ scriptUrl: url }), resolve(dirname(fileURLToPath(url)), '..', '..', '..'));
 });
 
 test('detectHarness: codex env signals codex, else claude-code', () => {
@@ -286,10 +290,7 @@ test('configureProject: idempotent from run 2 (detect-only identity, no drift)',
 
 // ---------- main(): exit codes ----------
 
-// BISECT: these two invoke the real capability probe (await import + runStartup). Skip on
-// Windows to confirm they are the source of the file-level exit-1 (every assertion passes).
-const WIN = process.platform === 'win32';
-test('main: clean store + report-only -> exit 0, prints a receipt', { skip: WIN }, async () => {
+test('main: clean store + report-only -> exit 0, prints a receipt', async () => {
   await withFixture({}, async ({ projectPath, coreRoot }) => {
     const logs = [];
     const orig = process.stdout.write;
@@ -302,7 +303,7 @@ test('main: clean store + report-only -> exit 0, prints a receipt', { skip: WIN 
   });
 });
 
-test('main: a hard-fail store -> exit 2', { skip: WIN }, async () => {
+test('main: a hard-fail store -> exit 2', async () => {
   await withFixture({ units: [] }, async ({ projectPath, coreRoot }) => {
     writeFileSync(join(projectPath, '_memories', 'bad.md'),
       '---\nid: bad\ntype: not-a-real-type\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\n---\n# bad\n');
