@@ -27,6 +27,39 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const SUMMARY_MAX = 240;
 
+// A candidate unit file is any *.md not starting with `_` or `INDEX` (mirrors the
+// generation filter below). Shared so the signature covers exactly the file set the
+// index is built from.
+function isCandidateName(name) {
+  return name.endsWith('.md') && !name.startsWith('_') && !name.startsWith('INDEX');
+}
+
+/**
+ * computeSourceSignature — a cheap freshness fingerprint of the store's source units.
+ * Sorted `name:mtimeMs` over candidate files; NO frontmatter parsing, so it's safe to
+ * run on every retrieval. Changes when a unit is added, deleted, or edited in place
+ * (including a retire, which bumps the file's mtime) — the three cases that must
+ * invalidate the cached index. Tradeoff (DC-94b R1): a cloud-sync touch that bumps
+ * mtime without a content change triggers one benign regen — cheaper than hashing
+ * every file's content on every turn, and the regen is atomic + idempotent.
+ * @returns {string}
+ */
+export function computeSourceSignature(storePath) {
+  const memoriesDir = join(resolve(storePath), '_memories');
+  let entries;
+  try { entries = readdirSync(memoriesDir); } catch { return ''; }
+  const parts = [];
+  for (const name of entries) {
+    if (!isCandidateName(name)) continue;
+    let st;
+    try { st = statSync(join(memoriesDir, name)); } catch { continue; }
+    if (!st.isFile()) continue;
+    parts.push(`${name}:${st.mtimeMs}`);
+  }
+  parts.sort();
+  return parts.join('|');
+}
+
 // First `# ` heading stripped, else first non-blank non-heading line. Mirrors
 // generate-decisions-index.mjs extractSummary so the index reads the same shape.
 export function deriveSummary(body) {
@@ -88,7 +121,7 @@ export function generateSummaryIndex(storePath) {
     });
   }
   units.sort((a, b) => a.id.localeCompare(b.id));
-  const out = { count: units.length, generated: '', units };
+  const out = { count: units.length, generated: '', source_sig: computeSourceSignature(storePath), units };
 
   const libDir = join(memoriesDir, '_lib');
   try { mkdirSync(libDir, { recursive: true }); } catch { /* ignore */ }

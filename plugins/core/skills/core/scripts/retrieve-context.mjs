@@ -25,7 +25,7 @@
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generateSummaryIndex } from './generate-summary-index.mjs';
+import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { loadUnit, extractEdges } from './priority.mjs';
 
 // Small, conventional English stopword set — enough to stop "the/on/of" from
@@ -66,7 +66,15 @@ export function retrieveContext(query, storePath, { topN = 3 } = {}) {
   if (existsSync(indexPath)) {
     try { index = JSON.parse(readFileSync(indexPath, 'utf8')); } catch { index = null; }
   }
-  if (!index || !Array.isArray(index.units)) index = generateSummaryIndex(root);
+  // Regenerate when missing, corrupt, or STALE. Staleness = the source signature no
+  // longer matches the store's current units (added / deleted / edited-in-place,
+  // including a retire). Reusing a stale index lingered retired/deleted units in the
+  // retrieval surface — an anti-resurrection hole (DC-94b R1). A pre-signature index
+  // (no source_sig) is treated as stale so it gets re-stamped once.
+  if (!index || !Array.isArray(index.units) || index.source_sig === undefined ||
+      index.source_sig !== computeSourceSignature(root)) {
+    index = generateSummaryIndex(root);
+  }
 
   const units = index.units;
   const byId = new Map(units.map(u => [u.id, u]));
