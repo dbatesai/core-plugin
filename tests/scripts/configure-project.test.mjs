@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
   resolveCoreRoot, detectHarness, checkManifests, validateStore, detectIdentity,
@@ -89,10 +89,12 @@ test('resolveCoreRoot honors an explicit override', () => {
 });
 
 test('resolveCoreRoot walks three up from the scripts dir', () => {
-  // file:///…/plugins/core/skills/core/scripts/foo.mjs  →  …/plugins/core
-  const url = 'file:///tmp/p/plugins/core/skills/core/scripts/configure-project.mjs';
-  // Expected computed with the same platform path ops (Windows produces a drive+backslash path).
-  assert.equal(resolveCoreRoot({ scriptUrl: url }), resolve(dirname(fileURLToPath(url)), '..', '..', '..'));
+  // …/plugins/core/skills/core/scripts/foo.mjs  →  …/plugins/core
+  // Build the file URL via pathToFileURL so it's valid on every platform — a bare
+  // 'file:///tmp/...' URL has no drive letter and fileURLToPath throws on Windows.
+  const scriptPath = resolve('/tmp/p/plugins/core/skills/core/scripts/configure-project.mjs');
+  const url = pathToFileURL(scriptPath).href;
+  assert.equal(resolveCoreRoot({ scriptUrl: url }), resolve(dirname(scriptPath), '..', '..', '..'));
 });
 
 test('detectHarness: codex env signals codex, else claude-code', () => {
