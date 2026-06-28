@@ -34,6 +34,11 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
+  'select-relevant-units.mjs': {
+    reason: 'Deliberately-staged DC-94b abstract-relevance prototype scaffold (the recall-oriented candidate shortlist). Consumed by its test and the Task 10 agent experiment; the reasoning selection step is agent-run, not script-wired. Gate G3 — promoting the reasoning tier to default retrieval infrastructure is David\'s call on the measured evidence (_outputs/2026-06-27/obligation3-prototype-results.md). Remove this entry if/when G3 wires the reasoning tier into a skill path.',
+    allowlistDate: '2026-06-27',
+    reviewBy: '2026-09-27',
+  },
   'score-ladder.mjs': {
     reason: 'Deliberately-staged DC-94b obligation-3 acceptance scorer. Consumed by the obligation3-ladder test now and by the Task 10 prototype + Task 12 build report; it is the measurement contract, not runtime-wired into a skill. Remove from allowlist if/when abstract-relevance retrieval is promoted to infrastructure (Gate G3) and the scorer joins a wired path; until then it stays a test/measurement utility.',
     allowlistDate: '2026-06-27',
