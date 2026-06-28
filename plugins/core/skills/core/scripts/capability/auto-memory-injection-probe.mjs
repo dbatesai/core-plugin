@@ -31,7 +31,6 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'auto-memory-injection';
@@ -44,8 +43,12 @@ export const CANARY = '## Recent activity';
  * /Users/dbates/Documents/Projects/CORE → -Users-dbates-Documents-Projects-CORE
  */
 export function mappedMemoryPath(cwd, home = homedir()) {
-  const mapped = cwd.replace(/\//g, '-');
-  return join(home, '.claude', 'projects', mapped, 'memory', 'MEMORY.md');
+  // Map both POSIX and Windows separators to dash, and build the path with explicit
+  // forward slashes. path.join emits backslashes on Windows, which breaks the slug
+  // shape Claude Code's projects folder uses and the cross-platform tests; Node's fs
+  // accepts forward slashes on Windows, so a '/'-joined path still reads fine.
+  const mapped = String(cwd).replace(/[/\\]/g, '-');
+  return [home, '.claude', 'projects', mapped, 'memory', 'MEMORY.md'].join('/');
 }
 
 /**

@@ -18,9 +18,11 @@ test('mapProjectPathToSlug: plain path (no dots) unchanged in shape', () => {
     '-Users-dbates-Documents-Projects-CORE');
 });
 
-test('mapProjectPathToSlug: Windows backslashes also convert', () => {
+test('mapProjectPathToSlug: Windows backslashes and the drive colon convert', () => {
+  // The drive colon must encode too — a ':' is invalid in a path segment on Windows,
+  // so the slug can't be a creatable ~/.claude/projects/<slug>/ directory otherwise.
   assert.equal(mapProjectPathToSlug('C:\\Users\\David.Bates28\\proj'),
-    'C:-Users-David-Bates28-proj');
+    'C--Users-David-Bates28-proj');
 });
 
 test('projectIdentityMismatch: dotted username does NOT false-refuse (P1 regression)', () => {

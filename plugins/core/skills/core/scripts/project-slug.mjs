@@ -24,5 +24,8 @@
  */
 
 export function mapProjectPathToSlug(p) {
-  return String(p).replace(/[/\\.]/g, '-');
+  // Path separators, dots, AND the Windows drive colon. A ':' can't appear in a path
+  // segment on Windows, so 'C:\proj' must encode to 'C--proj' — both for a valid
+  // ~/.claude/projects/<slug>/ dir and to match what Claude Code can produce there.
+  return String(p).replace(/[/\\.:]/g, '-');
 }

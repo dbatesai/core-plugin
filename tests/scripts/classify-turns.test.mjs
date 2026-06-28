@@ -127,7 +127,7 @@ test('MET-008: runClassification classifies the session passed in, not the newes
   const home = mkdtempSync(join(tmpdir(), 'ct-sid-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-proj-'));
   try {
-    const dir = join(home, '.claude', 'projects', project.replace(/[/.]/g, '-'));
+    const dir = join(home, '.claude', 'projects', project.replace(/[/.\\:]/g, '-')); // backslash + drive-colon: Windows temp paths, matches mapProjectPathToSlug
     mkdirSync(dir, { recursive: true });
     const turn = (u, a) => [
       JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: u }] } }),

@@ -4,13 +4,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(__dirname, '../../plugins/core/skills/core/scripts/check-inbox.mjs');
 
-const { parseInboxBlocks, checkInbox } = await import(SCRIPT);
+// import() needs a file:// URL — a bare drive-letter path throws ERR_UNSUPPORTED_ESM_URL_SCHEME on Windows.
+const { parseInboxBlocks, checkInbox } = await import(pathToFileURL(SCRIPT).href);
 
 function makeProject({ inbox, units = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'check-inbox-'));

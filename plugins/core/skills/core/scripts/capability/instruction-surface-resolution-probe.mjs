@@ -29,7 +29,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { posix } from 'node:path';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'instruction-surface-resolution';
@@ -40,22 +40,27 @@ export const CAPABILITY_ID = 'instruction-surface-resolution';
  * construction — no IO — so it's testable on its own.
  */
 export function buildPrecedenceChain(cwd, home) {
-  const chain = [{ path: join(home, '.claude', 'CLAUDE.md'), scope: 'user-global' }];
+  // posix.join (not path.join) so the chain reads identically on Windows and POSIX —
+  // these are logical surface paths the tests compare. posix.join normalizes (no '//'
+  // at root), and Node's fs accepts forward slashes on Windows for the later existence check.
+  const j = posix.join;
+  const chain = [{ path: j(home, '.claude', 'CLAUDE.md'), scope: 'user-global' }];
   const ancestors = [];
   let dir = cwd;
   // Walk cwd → root, then reverse so the chain reads root → cwd.
-  // Bounded by the filesystem root (dirname(root) === root).
+  // Bounded by the filesystem root (dirname(root) === root). posix.dirname so the walk
+  // terminates the same way on Windows when the input cwd uses forward slashes.
   for (let i = 0; i < 256; i++) {
     ancestors.push(dir);
-    const parent = dirname(dir);
+    const parent = posix.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   ancestors.reverse(); // root → cwd (nearest-cwd last = highest precedence)
   for (const d of ancestors) {
-    chain.push({ path: join(d, 'CLAUDE.md'), scope: 'project' });
-    chain.push({ path: join(d, '.claude', 'CLAUDE.md'), scope: 'project-claude-dir' });
-    chain.push({ path: join(d, 'CLAUDE.local.md'), scope: 'local' });
+    chain.push({ path: j(d, 'CLAUDE.md'), scope: 'project' });
+    chain.push({ path: j(d, '.claude', 'CLAUDE.md'), scope: 'project-claude-dir' });
+    chain.push({ path: j(d, 'CLAUDE.local.md'), scope: 'local' });
   }
   return chain;
 }
