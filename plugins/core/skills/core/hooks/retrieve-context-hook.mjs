@@ -7,16 +7,18 @@
  * unit summaries to stdout, which Claude Code injects into the turn's context — so the
  * most relevant stored facts are in front of the agent every turn, not just at bootstrap.
  *
- * SHIPPED DEFAULT-OFF (Gate G2). The hook is a no-op unless CORE_RETRIEVAL_HOOK=1.
- * It is intentionally NOT registered in the plugin manifest (hooks/hooks.json) — the
- * plugin has shipped no manifest hooks since v3.2.0, and turning per-turn injection on
- * by default is David's call on the Task 11 precision evidence (top-N is tunable). To
- * opt in, a user adds a UserPromptSubmit hook to their settings pointing at this script
- * and sets CORE_RETRIEVAL_HOOK=1:
+ * SHIPPED DEFAULT-ON, OPT-OUT (Gate G2 resolved, 2026-06-28). Registered in the plugin
+ * manifest (hooks/hooks.json) as a UserPromptSubmit hook, so it is live on install. It
+ * runs every turn unless the user sets CORE_RETRIEVAL_HOOK=0 (mirrors the DC-107 metrics
+ * opt-out). Rationale: a default-off, manually-wired hook is invisible machinery no real
+ * user would enable — the north-star ("never fail to retrieve") is only served if it's
+ * actually live, and only then can the metrics layer measure whether injection helps.
+ * Known limit (DC-111): lexical matching can inject a topical-but-irrelevant unit on an
+ * abstract query (O1 noise) — bounded (byte-capped, advisory, fail-open) and the reasoning
+ * tier is the sequenced de-noiser. To opt out:
  *
- *   // ~/.claude/settings.json
- *   "hooks": { "UserPromptSubmit": [{ "hooks": [{ "type": "command",
- *     "command": "CORE_RETRIEVAL_HOOK=1 node <plugin>/skills/core/hooks/retrieve-context-hook.mjs" }] }] }
+ *   // ~/.claude/settings.json  (or set the env var)
+ *   CORE_RETRIEVAL_HOOK=0
  *
  * I/O contract: reads the UserPromptSubmit payload as JSON on stdin (uses `.prompt`;
  * store path from CORE_RETRIEVAL_STORE, else payload `.cwd`, else process.cwd()).
@@ -33,8 +35,9 @@ const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
 
 async function main() {
-  // Default-off gate (G2). No work, no output unless explicitly enabled.
-  if (process.env.CORE_RETRIEVAL_HOOK !== '1') return 0;
+  // Default-ON, opt-out gate (G2 shipped on, 2026-06-28). Runs unless explicitly
+  // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the DC-107 metrics opt-out).
+  if (process.env.CORE_RETRIEVAL_HOOK === '0') return 0;
 
   let payload = {};
   // Read stdin synchronously via fd 0 (works under execFileSync's input pipe).

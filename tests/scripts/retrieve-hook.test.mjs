@@ -16,9 +16,14 @@ function runHook(prompt, env) {
   });
 }
 
-test('default OFF: flag unset → no output, exit 0', () => {
+test('default ON: flag unset → injects (shipped on, opt-out — G2 resolved)', () => {
   const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '', CORE_RETRIEVAL_STORE: FIXT });
-  assert.equal(out.trim(), '', 'hook must be a no-op when CORE_RETRIEVAL_HOOK is not 1');
+  assert.match(out, /want-omega-speedmaster-on-sale-wait/, 'default-on hook injects with no flag set');
+});
+
+test('opt-out: CORE_RETRIEVAL_HOOK=0 → no output, exit 0', () => {
+  const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '0', CORE_RETRIEVAL_STORE: FIXT });
+  assert.equal(out.trim(), '', 'hook must be a no-op when explicitly opted out with =0');
 });
 
 test('flag ON: injects summaries for a known query', () => {
