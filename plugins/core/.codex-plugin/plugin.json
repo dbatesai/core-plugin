@@ -1,6 +1,6 @@
 {
   "name": "core",
-  "version": "3.8.0",
+  "version": "3.9.0",
   "description": "CORE is a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis; reaches for multi-agent adversarial analysis when stakes warrant. Use CORE for project work where continuity matters: ongoing development, architecture decisions, risk surfacing, decision tracking. Ships with five companion utilities (finalize, process-memory, register-sources, vibecheck, configure-project) that CORE invokes internally and can be invoked directly.",
   "author": {
     "name": "David Bates",
