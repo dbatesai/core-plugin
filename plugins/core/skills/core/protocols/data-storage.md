@@ -46,6 +46,17 @@ The memory architecture is two tiers plus a canonical flag. Both tiers are markd
 
 Capture-everything. Every utterance, tool output, casual mention, conversational signal that *could* matter. Low-effort frontmatter, no edges required at write time, bias-to-capture.
 
+**What's worth capturing — the forward-decision test (DC-94a).** Bias-to-capture doesn't mean capture noise. The test for whether a fact earns a write: *would this fact, sitting in context six weeks from now, change what the agent says or builds?* If yes, capture it. The keep-list, concretely:
+
+- **Preferences and constraints — with the context that makes them actionable.** Not "David likes X" but "David wants X *because* Y, *except when* Z." The condition is the load-bearing part.
+- **Decisions — and the fork not taken.** What was decided, and what was rejected and why. The road not traveled is what stops the agent re-proposing it next session.
+- **Risks — with their status.** Open, mitigated, accepted, closed. A risk with no status is a rumor.
+- **Multi-session patterns.** Anything that's recurred — a repeated correction, a habit, a recurring blocker — is a signal worth a durable record, not just an in-the-moment note.
+- **Conflicts — linked at capture.** When a new fact contradicts an existing one, write the `conflicts-with` edge as you capture it, not later. The contradiction is the most retrieval-valuable thing about it.
+- **Values and dispositions — not only stated wants.** "Wants an iconic chronograph" is a want; "values heritage and first-of-its-kind movements" is a value. The value is what lets the agent reason to an instance the user never named (the obligation-3 leap). Capture the disposition behind the request, not just the request.
+
+The discard-list — things that *feel* worth keeping but aren't: ephemeral state that's already stale by next session; restating what a durable artifact (PROJECT.md, the README, a spec) already records; a fact that only matters to the current conversation and changes no future decision. When something is genuinely transient, let it pass — an over-stuffed store dilutes the retrieval signal as surely as a missing fact does.
+
 ```yaml
 ---
 id: obs-2026-05-17-1432-architect-timeline
@@ -210,7 +221,8 @@ The graduation step is where the LLM's value lives — noticing connections acro
 4. Reason about cross-session impact: does this matter beyond the current session?
 5. Compose the graduated unit with rich frontmatter and edges.
 6. Edge back to source observations via `cites` with `note: "graduated from"`.
-7. Source observations stay in place — the raw record is preserved.
+7. **Link at graduation — at least 3 edges, or argue zero (DC-94a).** Before the write completes, name and write typed edges to at least three related units (what it depends on, supersedes, refines, conflicts with, or cites). A graduated decision or risk that connects to nothing is invisible to Tier-2 edge-walk retrieval — and the whole point of the store is that traversal finds an answer before the agent says "I don't know." If there genuinely are fewer than three real relationships, write one sentence in the body saying why it stands alone. `check-units --integrity` emits a benign `link-density` WARN for an active, non-observation unit under three edges, so under-linked units stay visible without blocking. Never invent an edge to clear the count — a false edge is worse than a missing one.
+8. Source observations stay in place — the raw record is preserved.
 
 ### Dispatch gate — Sonnet vs Opus
 

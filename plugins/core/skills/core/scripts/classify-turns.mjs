@@ -51,6 +51,16 @@ import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, 
 // correctly invalidates a calibration cleared under the old behavior.
 export const CLASSIFIER_VERSION = '0.3.0';
 
+// The in-context PROXY version, distinct from the classifier version. Proxy v1 was the
+// original `.includes` substring test that over-fired on a large PROJECT.md (any term
+// whose letters appeared anywhere read as "in context"). Proxy v2 is the current
+// word-boundary `containsTerm` + the MET-004 rule that PROJECT.md only counts as
+// in-context when this session's transcript shows it was actually read. Stamped on
+// every record (DC-94a) so the calibration layer can invalidate any label set cleared
+// under the old proxy — same R-1 honesty guard the classifier_version match enforces.
+// The label-independence half stays Gate G4 (David vouches); this only versions the proxy.
+export const PROXY_VERSION = 2;
+
 // A clarifying question — the agent asking the user instead of answering.
 const CLARIFYING_RE = /\b(what (is|does|are|do you mean)|what'?s|which|i'?m not (sure|familiar)|could you (remind|clarify|explain)|can you (remind|clarify|explain)|remind me|not familiar with|haven'?t (seen|come across)|don'?t (have|see) (context|background)|where (is|does)|tell me (more )?about)\b/i;
 
@@ -250,6 +260,7 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   const records = classified.map((c) => ({
     schema_version: '1.0.0',
     classifier_version: CLASSIFIER_VERSION,
+    proxy_version: PROXY_VERSION, // DC-94a: versions the in-context proxy so calibration invalidates across proxy changes
     provisional: true, // honesty gate — not evidence-grade until calibration
     session_id: sid,
     turn_idx: c.turnIdx,

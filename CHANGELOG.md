@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.9.0] — 2026-06-28
+
+This release makes the memory actively work for you mid-session instead of only at startup. The headline: per-turn retrieval is now live by default — on every prompt, the most relevant stored facts are surfaced into context automatically, so the agent stops failing to recall what it already knows. It also lands self-managed mechanical maintenance (the store keeps itself current without you invoking it) and the deterministic retrieval + integrity machinery underneath. Per-turn injection is opt-out (`CORE_RETRIEVAL_HOOK=0`). The test suite grew 681 → 739.
+
+### Added
+- **Per-turn retrieval, live by default.** A UserPromptSubmit hook surfaces the most relevant stored units into context on every prompt — automatic recall, not bootstrap-only. Registered in the plugin manifest; opt out with `CORE_RETRIEVAL_HOOK=0`. Lexical matching can occasionally surface a topical-but-irrelevant unit on an abstract query; injection is advisory, byte-capped, and fail-open (a reasoning-based de-noiser is the planned next step).
+- **Self-managed mechanical maintenance.** `maintenance-run.mjs` keeps the indexes, summary index, ghost-duplicate cleanup, and PROJECT.md cap-check current via a cadence ledger — narrated (never silent), signature-gated (no work when nothing changed), wired into `/finalize` and `/process-memory`. Autonomous/unattended maintenance stays gated behind explicit preconditions.
+- **Deterministic per-turn retrieval + summary index.** A lexical retriever (token overlap + one-hop edge expansion) over a compact `_lib/unit-summaries.json` index.
+- **Bootstrap context-integrity marker + full PROJECT.md read.** The agent is told when its context was truncated, and reads PROJECT.md whole instead of a head slice.
+- **Link-at-graduation + capture criteria.** Graduation writes denser edges; capture criteria add the forward-decision test and value/disposition capture.
+
+### Changed
+- **The summary index regenerates on source staleness** (a set-diff signature over the units), closing an anti-resurrection gap at the retrieval layer — a retired or deleted unit no longer lingers in retrieval results.
+- **The project-path slug encodes the Windows drive colon**, so `~/.claude/projects/<slug>` is a valid directory on Windows.
+
+### Fixed
+- Windows CI portability: the drive-colon slug, the obligation-3 test fixture moved in-repo so CI can reach it, and an unused import that failed the lint gate.
+- Metrics: versioned the in-context proxy (`proxy_version` 2) with an over-fire regression guard.
+
 ## [3.8.0] — 2026-06-28
 
 A hardening pass built from a fresh-eyes audit of the whole shipped tree, a new first-class unit type, and a real Windows-portability fix. The audit produced 111 findings; remediation ran as 8 workstreams over 71 commits, touching scripts, protocols, docs, and CI. Day-to-day use of `/core` doesn't change — the deterministic layer underneath gets harder to break mid-operation and more honest about what it can claim. The test suite grew 528 → 681, and the Windows CI leg is now genuinely green (24 portability bugs the audit batch had shipped unverified are fixed).

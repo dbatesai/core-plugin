@@ -1,3 +1,14 @@
 {
-  "hooks": {}
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/core/hooks/retrieve-context-hook.mjs\""
+          }
+        ]
+      }
+    ]
+  }
 }
