@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+CORE now runs itself end to end — installing the plugin is the only step. Two new lifecycle hooks close the loop: a **SessionStart** hook makes `/core` the agent's first action of every session (you never type it), and a **SessionEnd** hook discharges the session close in the background (you never type `/finalize`). Memory bootstraps, stays current, and closes out on its own.
+
+- **Self-invoking startup.** A SessionStart hook injects a directive so the agent runs `/core` before anything else. It leans on `/core`'s own bootstrap dedup (won't re-run if it already ran this session) and re-orients after a compaction. Opt out with `CORE_AUTOSTART=0`.
+- **Self-discharging close.** A SessionEnd hook spawns a detached, recursion-guarded `claude -p "/finalize"` at session end; a startup catch-up backstops a missed fire (hard kill, no PATH, crash mid-run). The close is incremental — it discharges only owed work via a per-op completion marker and a single-flight lock, so a crashed close is detected and resumed rather than trusted. Opt out with `CORE_AUTO_CLOSE=0`.
+- **Control-surface protection.** Every PROJECT.md write is edit-gated: edit-detection runs first in every path and a between-session user edit always wins (anti-resurrection holds; a catch-up render can never clobber your edit).
+- **Close reflection.** The old fresh-eyes + summary steps became two reflection tasks on the close agent — resynthesis (capture what the session concluded) and a decision-gated perspective pass (turn the overconfidence/anti-smuggling lens on the session's own output). The session summary is now a one-line trace plus a short resume stub; full narrative on demand.
+
+Behavior note: this changes turn-1 and session-end behavior for every install. Both hooks are opt-out via the env vars above. On Codex (no validated SessionEnd-equivalent) the close is startup-catch-up-only — same correctness, later timing.
+
+The test suite grew 739 → 753.
+
+### Fixed
+
+- Corrected stale `project_path` documentation: the schema and fork-check comment claimed the legacy field would be dropped in v3.8.0, but that drop never shipped — it remains a tolerant-read fallback until a dedicated migration removes it.
+
 ## [3.9.0] — 2026-06-28
 
 This release makes the memory actively work for you mid-session instead of only at startup. The headline: per-turn retrieval is now live by default — on every prompt, the most relevant stored facts are surfaced into context automatically, so the agent stops failing to recall what it already knows. It also lands self-managed mechanical maintenance (the store keeps itself current without you invoking it) and the deterministic retrieval + integrity machinery underneath. Per-turn injection is opt-out (`CORE_RETRIEVAL_HOOK=0`). The test suite grew 681 → 739.

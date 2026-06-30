@@ -41,8 +41,9 @@ export function slugify(name) {
 // patch (it was what the schema documented while reality used `path`), and a
 // `project_path`-keyed entry invisible to a `path`-only read is what re-forked a
 // workspace on every startup (Meridian, R11, 2026-05-31: local-llm-build-r11 ->
-// -2 -> -3 ...). This read stays tolerant of legacy `project_path` through
-// v3.7.0 for back-compat; the fallback gets removed in v3.8.0. `path` is preferred.
+// -2 -> -3 ...). This read stays tolerant of legacy `project_path` for back-compat
+// (the planned v3.8.0 removal did not happen; the fallback stays until a dedicated
+// migration drops it). `path` is preferred.
 export function entryPath(entry) {
   return entry.path || entry.project_path || null;
 }
