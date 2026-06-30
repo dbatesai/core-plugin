@@ -34,6 +34,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { shouldSpawn } from '../scripts/close-pass.mjs';
+import { logHookEvent } from './hook-log.mjs';
 
 // The op set the close agent is responsible for. Kept in sync with the close-pass marker
 // (close-pass.mjs STORE_DERIVED) and what /finalize discharges headlessly.
@@ -53,24 +54,41 @@ function isCoreWorkspace(store) {
 
 function main() {
   // Guard 1 — recursion: we're inside the spawned close agent's own SessionEnd. No-op.
-  if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') return 0;
+  // (Logging this is useful — it proves the child's SessionEnd fired AND was suppressed.)
+  if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'recursion-guard' });
+    return 0;
+  }
   // Guard 2 — kill switch: auto-close disabled.
-  if (process.env.CORE_AUTO_CLOSE === '0') return 0;
+  if (process.env.CORE_AUTO_CLOSE === '0') {
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'kill-switch' });
+    return 0;
+  }
 
   let payload = {};
   let raw = '';
   try { raw = readFileSync(0, 'utf8'); } catch { raw = ''; }
   if (raw.trim()) { try { payload = JSON.parse(raw); } catch { payload = {}; } }
 
-  if (SKIP_REASONS.has(String(payload.reason || ''))) return 0;
+  const reason = String(payload.reason || '');
+  if (SKIP_REASONS.has(reason)) {
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'session-reason=' + reason });
+    return 0;
+  }
 
   const store = resolve(process.env.CORE_CLOSE_STORE || payload.cwd || process.cwd());
-  if (!isCoreWorkspace(store)) return 0;
+  if (!isCoreWorkspace(store)) {
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-core-workspace', cwd: store });
+    return 0;
+  }
 
   // Guard 3 — spawn pre-check. didWork is approximated by "a transcript exists" (any real
   // session produced one); the authoritative gate is owed-work, which shouldSpawn checks.
   const didWork = !!payload.transcript_path && existsSync(String(payload.transcript_path));
-  if (!shouldSpawn(store, { didWork, allOps: CLOSE_OPS })) return 0;
+  if (!shouldSpawn(store, { didWork, allOps: CLOSE_OPS })) {
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'nothing-owed', cwd: store });
+    return 0;
+  }
 
   // Spawn the detached close agent. unref() + detached + ignored stdio = survives our exit.
   // CORE_CLOSE_PASS_ACTIVE=1 trips Guard 1 in the child's own SessionEnd (no recursive spawn).
@@ -82,8 +100,10 @@ function main() {
       stdio: 'ignore',
     });
     child.unref();
+    logHookEvent({ hook: 'session-end', action: 'spawn', reason: 'session-reason=' + (reason || 'unknown'), cwd: store });
   } catch {
     // claude not on PATH, or spawn failed — startup catch-up covers it. Never block exit.
+    logHookEvent({ hook: 'session-end', action: 'spawn-failed', cwd: store });
   }
   return 0;
 }

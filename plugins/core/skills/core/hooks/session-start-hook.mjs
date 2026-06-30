@@ -23,11 +23,17 @@
  * never block the session opening.
  */
 
+import { logHookEvent } from './hook-log.mjs';
+
 const DIRECTIVE = `CORE session protocol: this environment has the CORE project-intelligence plugin installed. Before anything else this session — before answering the user, before any other tool call — invoke the \`/core\` skill. It runs startup routing, loads cross-session project memory, and composes a readiness summary, and it self-deduplicates (it won't re-run if it already ran this session). Run \`/core\` first, then address the user's request.`;
 
 function main() {
-  if (process.env.CORE_AUTOSTART === '0') return 0;
+  if (process.env.CORE_AUTOSTART === '0') {
+    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'opt-out' });
+    return 0;
+  }
   process.stdout.write(DIRECTIVE + '\n');
+  logHookEvent({ hook: 'session-start', action: 'inject' });
   return 0;
 }
 
