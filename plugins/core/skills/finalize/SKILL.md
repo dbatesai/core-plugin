@@ -14,9 +14,43 @@ Execute every step in order. Don't skip.
 
 ---
 
-## Step 1 — Fresh-eyes review
+## Mode, incremental discharge, and the reliability spine (spec 2026-06-29)
 
-Before writing anything, re-read the session from the top with fresh eyes. Reason against the user's stated intent, goal, and measure of success. Ask:
+Finalize runs two ways. **Interactive** — the user typed `/finalize`. **Headless** — `CORE_CLOSE_HEADLESS=1` is set (the SessionEnd close hook spawned you with `claude -p "/finalize"`; `close-pass-hook.mjs`). The work is the same; what differs is that headless can't show a draft or wait for an accept, so it defers anything that needs a human (§Step 2 render-and-accept) to the next startup's incremental gate.
+
+**Discharge is incremental in both modes.** Don't re-run every step unconditionally. Consult the per-op close marker and the DC-110 cadence ledger, run only what's *owed*, skip what's already current. The reliability spine is `close-pass.mjs` (spec §8), which gives a single-flight lock (no two close agents racing the same store), a per-op completion marker (a partial close is detected, not trusted), and three-state startup detection. Use it as the frame around the whole pass:
+
+```bash
+# Begin: acquire the lock + write the in-progress marker enumerating owed ops.
+node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs begin <project> --session <session-id> \
+  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,summary-stub,memory-refresh
+# (if it prints "lock held; another close is running" — STOP; a close is already in flight)
+
+# After each op completes, record it (this is what makes a crashed close recoverable):
+node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs record <project> --op <op> --status done
+
+# At the very end, after every owed op:
+node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs finish <project> --session <session-id>
+```
+
+`begin` refusing the lock is not an error — it means another close (a startup catch-up, or a second exit hook) holds it; stop silently. An op you legitimately skip as not-owed gets `--status skipped`; a failure gets `--status failed --note "..."` so startup re-owes it.
+
+**The control-surface rule — every PROJECT.md write is edit-gated (spec §7).** Before any render (Step 2.4), hot-section (Step 2.6), or §Moves/§State mutation (Steps 3.1–3.3), run edit-detection against `~/.core/state-cache.json` exactly as `startup.md §"Load — returning workspace"` defines it. If the user edited PROJECT.md (outside the hot block) since CORE last wrote it, the user's edit wins: propagate it back to source units, fire anti-resurrection for removals, and do NOT clobber it with a fresh render this pass. A render only proceeds when edit-detection clears. This is non-negotiable in headless mode — there's no human to catch a bad overwrite.
+
+**Kill switch.** `CORE_AUTO_CLOSE=0` halts auto-discharge (it gates the hook before you're ever spawned). It also covers any in-session autonomous maintenance — if it's set, don't run the EDIT-GATED writers unattended; surface what's owed and let the next interactive close handle it.
+
+**The two reflection tasks are the heart of the close (spec §5), not ceremony.** They replace the old scattered fresh-eyes/self-eval/summary steps:
+
+- **Reflection Task A — Resynthesis (every substantive close).** Re-read the session and distill what it actually decided, concluded, or changed — separated from the meander and the paths not taken. Then ensure each is captured: graduate the units that didn't get written in-flight (Step 2.1), update PROJECT.md (edit-gated), write the resume stub (Step 4). The deterministic completeness check (every explicit request → a task or unit; every decision named in the transcript → a written unit; the citation-resolver / anticipation-gap detectors in Step 3.13) is the *floor* of this task — the mechanical guarantee under the synthesis, not a substitute for it. Record op `reflection-a`.
+- **Reflection Task B — Perspective pass (when the session produced decisions/conclusions).** Turn the right critical perspective on what the session concluded, before it hardens: did we converge too fast (R-3)? did a decision get smuggled without being surfaced (R-DM-SMUGGLING)? is a conclusion overconfident or self-serving (R-1)? does anything contradict a prior decision? Load the relevant prior decision units to apply cross-time perspective. This is CORE's "challenge overconfidence" turned on the session's *own* output — the check the in-session agent does poorly because it's too close to the work. Gated: run it when the session actually produced a decision or conclusion worth critiquing (a trivial session skips it); it MAY run every N closes rather than every close if the ledger cadence shows per-session is overkill. When Task B surfaces something real, it is **not** silently absorbed — leave it for the next startup to raise (write it as an open-question unit or a `_sessions/<date>/perspective-note.md`). Record op `reflection-b`.
+
+In **headless** mode you run both reflection tasks and all EDIT-GATED writers *only where edit-detection clears*; a materially-changed §State/§Moves render that would need a human accept (Step 2.5) is written but flagged for the next startup's incremental accept gate rather than declared canonical. In **interactive** mode the human is present, so Step 2.5 runs live.
+
+---
+
+## Step 1 — Session reflection (Tasks A + B)
+
+This is Reflection Task A + Task B from the Mode section above — the heart of the close, not a checklist. Re-read the session from the top against the user's stated intent, goal, and measure of success. Ask:
 
 - What did we actually accomplish vs. what we set out to do?
 - What decisions were made? Are they captured as units?
@@ -26,7 +60,7 @@ Before writing anything, re-read the session from the top with fresh eyes. Reaso
 - Did anything break or degrade that we didn't fix?
 - Is the project better than we found it?
 
-Write a one-paragraph honest assessment. It goes into the summary.
+Task A (resynthesis) distills what the session concluded and ensures each conclusion is captured (graduation in Step 2.1, the resume stub in Step 4). Task B (perspective, when the session produced decisions/conclusions) turns the R-1/R-3/smuggling lens on the session's own output and leaves anything real for the next startup to raise. Write a one-paragraph honest assessment; it feeds the resume stub and, on demand, the full narrative. Record ops `reflection-a` and (when run) `reflection-b` via `close-pass.mjs record`.
 
 ---
 
@@ -48,7 +82,7 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 4. **Render PROJECT.md from units.** Walk canonical units, compose the six sections (What & Why / State / People / Moves / Decisions & Risks / Notes), and show the user the draft. **Skip re-render when the user's PROJECT.md is curated and the new units are sparse backing-only.** Anti-resurrection cuts both ways — don't strip the user's curation just because the unit store is thin. If the existing PROJECT.md already reflects current truth and the new units add traceability without changing what the user sees, present the existing PROJECT.md for re-acceptance and note the choice; don't re-render from a sparse unit set.
 
-5. **Render-and-accept.** Present the draft (or the preserved-existing PROJECT.md per the skip rule above). User accepts (Mode A continues) or edits (Mode B-ish — edits become ground truth, propagate back to units, anti-resurrection fires for removals). Write the accepted PROJECT.md to disk.
+5. **Render-and-accept — incremental gate (spec §7, kept not deleted).** The gate fires only when a render *materially changed* §State or §Moves (what the user actually reads); a silent pass otherwise — don't make the user re-accept an unchanged surface. When it fires: present the draft (or the preserved-existing PROJECT.md per the skip rule above). User accepts (Mode A continues) or edits (Mode B-ish — edits become ground truth, propagate back to units, anti-resurrection fires for removals). Write the accepted PROJECT.md to disk. **Headless mode:** no human to accept — write the render only where edit-detection cleared, and if §State/§Moves materially changed, leave a `render-pending-accept` flag (in `~/.core/workspaces/<id>/`) so the next startup surfaces the material change for the user's accept rather than declaring it canonical. Record op `render-project-md`.
 
 6. **Refresh the hot section (DC-85 Phase 1a).** After the accepted PROJECT.md lands, refresh the hot tier atop it. This captures the new state the user just left — the session's actual outcome, not the state at session start. Steps:
    - Call `node ${CORE_ROOT}/skills/core/scripts/hot-section.mjs candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>...` with the session-intent topics from this session.
@@ -89,11 +123,9 @@ Run `node ${CORE_ROOT}/skills/core/scripts/demote-state-narrative.mjs <project>`
 
 *On failure:* dry-run by default, so a failure costs nothing. Narrate and continue.
 
-### 3.4 Cloud-sync ghost cleanup
+### 3.4 Cloud-sync ghost cleanup — folded into `maintenance-run` (Step 2.3)
 
-macOS sync engines (iCloud, OneDrive, Dropbox) leave `<filename> 2.md` duplicates when they detect concurrent-write conflicts. Most settle as exact duplicates with identical content but pollute `check-units.mjs` output. Walk `<project>/_memories/` for any `* 2.md` file, verify it's identical to its un-suffixed original via `diff -q`, and delete the ghost if so. Surface to the user if any ghost differs from its original (rare; means a real divergence the sync engine preserved). Narrate "Cleaned N ghost duplicates" only if N > 0.
-
-*On failure:* if `diff` errors on a file, leave that ghost in place and surface it — never delete an unverified ghost.
+Verified-redundant with Step 2.3 (spec §10 delete). `maintenance-run.mjs` already walks `<project>/_memories/` for `* 2.md` ghosts, verifies byte-identity to the un-suffixed original, and removes only exact duplicates — the same content-verified-before-delete discipline. No separate ghost pass here. If `maintenance-run` surfaced a ghost that *differs* from its original (a real sync-preserved divergence), surface it to the user; never delete an unverified ghost.
 
 ### 3.5 Lifecycle proposals — archive, retire, cold-store
 
@@ -109,11 +141,9 @@ Run `node ${CORE_ROOT}/skills/core/scripts/check-units.mjs --store <project> --m
 
 *On failure:* exit 2 is the one blocking tier in this whole pass — fix before closing. If the validator itself crashes (no tier output), narrate and continue, and don't claim the store validated in Step 6.
 
-### 3.7 Index regeneration
+### 3.7 Index regeneration — folded into `maintenance-run` (Step 2.3)
 
-Re-run the generators if you see drift from Step 2; also run for any unit types changed this session.
-
-*On failure:* re-run once — the generators are idempotent. If it still fails, the old index stays on disk: stale but intact. Name it.
+Verified-redundant with Step 2.3 (spec §10 delete). `maintenance-run.mjs` regenerates both indexes + the summary index, signature-gated, whenever the unit set changed this session. No separate regen here. Only fall back to a manual `generate-*-index.mjs` if Step 2.3 was skipped (unresolved `CORE_ROOT`) — name the skip.
 
 ### 3.8 File-cap check
 
@@ -189,44 +219,24 @@ The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in 
 
 ---
 
-## Step 4 — Write the session summary
+## Step 4 — Resume stub + on-demand narrative (spec §6)
 
-`<project>/_summaries/summary-<YYYY-MM-DD>.md` (with letter suffix if today already has one).
+The old unconditional full-narrative summary is dropped — git is the corruption backup (lossy prose can't rebuild units anyway), and the durable per-session trace is the one-line MEMORY.md recent-activity entry (Step 5). What every close DOES write is cheap and high-value:
 
-The summary is a human-readable narrative of the session for the user to review later — what got done, what got decided, what's open. It's not part of how the next session orients itself. Project facts worth keeping across sessions were already promoted into PROJECT.md and `_memories/` during the session; the next bootstrap reads those, not the summary. The summary is a safety net (if the unit store ever gets corrupted, you could reconstruct from summaries) and a record for the user.
+**The resume stub** — `<project>/_summaries/summary-<YYYY-MM-DD>.md` (letter suffix if today already has one), 2–3 lines, the intent-continuity pointer that §Moves (what's queued) and the hot section (where things stand) don't carry:
 
 ```markdown
 # Session Summary — <YYYY-MM-DD>
 
-## Fresh-eyes assessment
-[Your one-paragraph honest read from Step 1.]
-
-## What was done
-[Bullet list of completed work — specific, not vague.]
-
-## Current state
-[Where the project stands right now. Mirrors PROJECT.md §State but written for a human reader.]
-
-## Decisions made
-[Any architectural, design, or priority decisions — with rationale. Should align with units written this session.]
-
-## Open work
-[Incomplete items. Specific about what's left.]
-
-## Open questions
-[Unresolved questions with any partial context already gathered.]
-
-## Active risks
-[New or escalated risks this session.]
-
-## Next session: read first
-[The 3-5 most important things the next session needs before touching anything.]
-
-## Next session: recommended start
-[Specific recommended first action.]
+## Resume here
+[2–3 lines: start here, in this order — e.g. "Mid-pull on X; the next step is Y; Z is blocked on <decision>." The thing a returning agent needs to pick up the thread that the structured surfaces don't say.]
 ```
 
-Summaries are write-only from your perspective — you don't re-read them at bootstrap. The anti-resurrection rule applies: re-reading a summary could resurrect facts the user removed from PROJECT.md after it was written. Future bootstraps load from PROJECT.md and `_memories/`; the summary stays as a human record.
+Record op `summary-stub`.
+
+**Full narrative on demand.** When the user asks for a real session writeup, build it from the transcript + git + the units written this session, using the old section set (fresh-eyes assessment, what was done, current state, decisions made, open work, open questions, active risks, read-first, recommended-start). Don't write it every close — it's a request, not a ceremony.
+
+Summaries stay write-only from your perspective — you don't re-read them at bootstrap (anti-resurrection: a summary could resurrect facts the user removed from PROJECT.md after it was written). Future bootstraps load from PROJECT.md and `_memories/`.
 
 ---
 
@@ -279,10 +289,18 @@ Narrate plainly: *"On Codex — project facts already captured in `_memories/`. 
 
 ---
 
-## Step 6 — Closing declaration
+## Step 6 — Closing declaration + mark the close complete
 
-After all steps complete, declare in plain voice. Concrete shape:
+First mark the close finished so the per-op marker says "closed" and the single-flight lock releases — this is what tells the next startup it has nothing to catch up on:
 
-> *"Session closed. Summary at `_summaries/summary-<date>.md`. PROJECT.md rendered from current units. Hygiene pass complete — N archives, M retires, no cold-stores this pass."*
+```bash
+node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs finish <project> --session <session-id>
+```
 
-If anything couldn't be completed, name it explicitly. Don't silently skip a step. Surface the blocker plainly and recommend a next move.
+(If you ran `begin` at the top, every owed op should now carry a `record` line; `finish` stamps the marker `closed`. Skip only if `begin` was refused because another close held the lock.)
+
+Then declare in plain voice. Concrete shape:
+
+> *"Session closed. Resume stub at `_summaries/summary-<date>.md`. PROJECT.md rendered from current units (edit-detection clean). Hygiene pass complete — N archives, M retires, no cold-stores this pass."*
+
+If anything couldn't be completed, name it explicitly. Don't silently skip a step. Surface the blocker plainly and recommend a next move. **Headless mode:** there's no user reading this turn — write the declaration into the resume stub instead, and leave anything that needs the user (a `render-pending-accept` flag, a Task B concern) for the next startup to raise.
