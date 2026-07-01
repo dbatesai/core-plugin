@@ -31,7 +31,7 @@
  *   node close-pass.mjs --self-test
  */
 
-import { readFileSync, existsSync, statSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -39,10 +39,15 @@ import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { runMaintenance } from './maintenance-run.mjs';
+import { logHookEvent } from '../hooks/hook-log.mjs';
 
 // A lock older than this with no live owner is stale and stealable. Generous: a real close
 // pass (claude -p re-reading a transcript) can take a couple of minutes.
 export const LOCK_STALE_MS = 10 * 60 * 1000;
+// A HARD age ceiling: past this, a lock is stealable regardless of pid liveness. Without this,
+// a SIGKILL'd runner whose pid gets recycled by any live process would strand the lock FOREVER
+// (pidAlive→true → never stale → every future close silently skips). Well past any real close.
+export const LOCK_HARD_STALE_MS = 30 * 60 * 1000;
 
 const markerPath = (store) => join(resolve(store), '_memories', '_close-marker.json');
 const lockPath = (store) => join(resolve(store), '_memories', '_close.lock');
@@ -67,7 +72,7 @@ export function inspectLock(store, now = Date.now()) {
   if (!lock) return { held: false, lock: null, stale: true }; // corrupt → treat as stale
   let ageMs = Infinity;
   try { ageMs = now - statSync(p).mtimeMs; } catch { /* gone */ }
-  const stale = ageMs > LOCK_STALE_MS && !pidAlive(lock.pid);
+  const stale = (ageMs > LOCK_STALE_MS && !pidAlive(lock.pid)) || ageMs > LOCK_HARD_STALE_MS;
   return { held: !stale, lock, stale };
 }
 
@@ -116,7 +121,14 @@ export function beginClose(store, { sessionId, ops = [], storeSignature = null, 
     store_signature: storeSignature,
     ops: {},
   };
-  atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
+  // P3: the lock is already held here — if the marker write fails, drop the lock we just took
+  // so a disk-full/permission error can't strand it (rethrow so the caller records the failure).
+  try {
+    atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
+  } catch (e) {
+    releaseLock(store);
+    throw e;
+  }
   return { ok: true, marker };
 }
 
@@ -128,9 +140,9 @@ export function recordOp(store, { op, status = 'done', note = null, now = new Da
   return marker;
 }
 
-export function finishClose(store, { sessionId = null, now = new Date().toISOString() } = {}) {
+export function finishClose(store, { sessionId = null, status = 'closed', now = new Date().toISOString() } = {}) {
   const marker = readJson(markerPath(store)) || { ops: {} };
-  marker.status = 'closed';
+  marker.status = status; // 'closed' = finalize succeeded; 'failed' = finished but /finalize failed → detectCloseState re-owes
   marker.completed_at = now;
   if (sessionId) marker.session_id = sessionId;
   atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
@@ -157,21 +169,26 @@ export function detectCloseState(store, { allOps = [], storeSignature = null, no
 
   const done = new Set(Object.entries(marker.ops || {})
     .filter(([, v]) => v && v.status === 'done').map(([k]) => k));
-
-  // A marker stuck 'in-progress' with no live lock = the close crashed mid-run.
-  const crashed = marker.status !== 'closed';
   const notDone = allOps.filter(op => !done.has(op));
 
   // Store changed since the marker → store-derived ops are owed again even if previously done.
   const sigMismatch = storeSignature != null && marker.store_signature != null
     && marker.store_signature !== storeSignature;
 
-  let owed = notDone;
-  if (sigMismatch) owed = allOps.filter(op => !done.has(op) || isStoreDerived(op));
-
-  if (crashed) return { state: 'owed', owed: owed.length ? owed : [...allOps], reason: 'crashed-mid-close' };
-  if (owed.length) return { state: 'owed', owed, reason: sigMismatch ? 'store-changed' : 'incomplete' };
-  return { state: 'closed', owed: [] };
+  // Terminal states. `closed` = the runner's finish stamped success — TRUST it (the envelope
+  // guarantees the marker, so a clean close is closed even though the runner records only a
+  // couple of the ops; re-deriving "owed" from unrecorded LLM ops would re-close every session).
+  // `failed` = finished but /finalize failed (P1 fix) — re-owe so the next startup retries.
+  if (marker.status === 'closed') {
+    if (sigMismatch) return { state: 'owed', owed: allOps.filter(isStoreDerived), reason: 'store-changed' };
+    return { state: 'closed', owed: [] };
+  }
+  if (marker.status === 'failed') {
+    return { state: 'owed', owed: notDone.length ? notDone : [...allOps], reason: 'prior-close-failed' };
+  }
+  // Anything else (status 'in-progress' with no live lock) = the close crashed mid-run.
+  const owed = sigMismatch ? allOps.filter(op => !done.has(op) || isStoreDerived(op)) : notDone;
+  return { state: 'owed', owed: owed.length ? owed : [...allOps], reason: 'crashed-mid-close' };
 }
 
 // Ops whose correctness depends on the unit store; re-owed when the store changes after close.
@@ -191,6 +208,27 @@ export function shouldSpawn(store, { didWork = false, madeDecision = false, allO
   if (didWork || madeDecision) return true;
   const det = detectCloseState(store, { allOps, storeSignature });
   return det.state === 'owed' && det.owed.length > 0;
+}
+
+/**
+ * Security gate (review 2026-06-30, HIGH): is `store` a CORE workspace we should auto-close?
+ * A generic `_memories/` dirname is NOT proof — an attacker-supplied repo can have one, and the
+ * close spawns a detached, tool-enabled `claude -p`. The trust anchor is the ~/.core/index.json
+ * registry, which an attacker can't plant from inside a project dir. Requires the canonicalized
+ * (realpath'd) store to match a registered workspace path.
+ */
+export function isRegisteredWorkspace(store, { indexPath = process.env.CORE_CLOSE_INDEX || join(homedir(), '.core', 'index.json') } = {}) {
+  let canon;
+  try { canon = realpathSync(store); } catch { canon = resolve(store); }
+  let idx;
+  try { idx = JSON.parse(readFileSync(indexPath, 'utf8')); } catch { return false; }
+  if (!Array.isArray(idx)) return false;
+  return idx.some(e => {
+    if (!e || typeof e.path !== 'string') return false;
+    let p = e.path.startsWith('~') ? join(homedir(), e.path.slice(1)) : e.path;
+    try { p = realpathSync(p); } catch { p = resolve(p); }
+    return p === canon;
+  });
 }
 
 // The full op set the close envelope is responsible for (kept in sync with close-pass-hook).
@@ -226,30 +264,68 @@ export function buildChildEnv(env = process.env) {
  */
 export function runClose(store, { now = new Date().toISOString(), spawnFinalize = defaultSpawnFinalize } = {}) {
   const sessionId = 'auto-' + now.slice(0, 19).replace(/[:T]/g, '-');
-  const begun = beginClose(store, { sessionId, ops: CLOSE_OPS, now });
+
+  // P3: beginClose acquires the lock AND writes the marker. If either throws (disk full,
+  // read-only store), make sure we never strand a lock we took, and never crash silently.
+  let begun;
+  try {
+    begun = beginClose(store, { sessionId, ops: CLOSE_OPS, now });
+  } catch (e) {
+    releaseLock(store); // in case the lock was taken but the marker write threw
+    logHookEvent({ hook: 'close-run', action: 'error', reason: 'begin-failed: ' + String(e && e.message || e).slice(0, 120), cwd: store });
+    return { ok: false, reason: 'begin-failed' };
+  }
   if (!begun.ok) return { ok: false, reason: begun.reason }; // another close holds the lock
+
+  let finalizeOk = true;
   try {
     try {
       const m = runMaintenance(store, {});
       recordOp(store, { op: 'maintenance-run', note: (m.narration || '').slice(0, 120) });
     } catch (e) {
-      recordOp(store, { op: 'maintenance-run', status: 'failed', note: String(e && e.message || e).slice(0, 120) });
+      recordOp(store, { op: 'maintenance-run', status: 'failed', note: String(e && e.message || e).slice(0, 200) });
     }
-    spawnFinalize(store);
-    recordOp(store, { op: 'summary-stub' }); // best-effort marker that the LLM half ran
+    // P1/P5: capture the finalize outcome. A no-op test stub returns undefined → treat as ok.
+    const fin = spawnFinalize(store);
+    finalizeOk = fin == null ? true : fin.ok !== false;
+    recordOp(store, {
+      op: 'finalize',
+      status: finalizeOk ? 'done' : 'failed',
+      note: finalizeOk ? null : `exit=${fin.status} signal=${fin.signal || ''} ${fin.error || ''}`.slice(0, 200),
+    });
+  } catch (e) {
+    finalizeOk = false;
+    recordOp(store, { op: 'finalize', status: 'failed', note: String(e && e.message || e).slice(0, 200) });
   } finally {
-    finishClose(store, { sessionId });
+    // P1: only stamp `closed` when finalize actually succeeded; otherwise `failed` → the next
+    // startup re-owes and retries, instead of the marker lying that the close completed.
+    finishClose(store, { sessionId, status: finalizeOk ? 'closed' : 'failed' });
+    // P7: log the OUTCOME (not just the launch) so `cat hooks-log.jsonl` reflects reality.
+    logHookEvent({ hook: 'close-run', action: finalizeOk ? 'close-complete' : 'close-failed', cwd: store });
   }
-  return { ok: true };
+  return { ok: finalizeOk };
 }
 
 function defaultSpawnFinalize(store) {
+  // P1b: append (never truncate) so a fast-failing spawn can't erase the last good log, and
+  // 0600 so project content the close echoes isn't world-readable on a shared host.
+  const logPath = join(homedir(), '.core', 'close-pass-last.log');
   let stdio = 'ignore';
+  let logFd = null;
   try {
-    const fd = openSync(join(homedir(), '.core', 'close-pass-last.log'), 'w');
-    stdio = ['ignore', fd, fd];
+    logFd = openSync(logPath, 'a');
+    try { chmodSync(logPath, 0o600); } catch { /* best-effort perms */ }
+    writeSync(logFd, `\n=== close ${new Date().toISOString()} store=${store} ===\n`);
+    stdio = ['ignore', logFd, logFd];
   } catch { /* fall back to ignored stdio */ }
-  spawnSync('claude', ['-p', '/finalize'], { cwd: resolve(store), env: buildChildEnv(process.env), stdio });
+  const r = spawnSync('claude', ['-p', '/finalize'], { cwd: resolve(store), env: buildChildEnv(process.env), stdio });
+  // P1: surface the spawn result — spawnSync does NOT throw on ENOENT / non-zero / signal.
+  const result = { ok: !r.error && r.status === 0, status: r.status, signal: r.signal, error: r.error && String(r.error.message || r.error) };
+  if (logFd != null) {
+    try { writeSync(logFd, `=== result ok=${result.ok} exit=${result.status} signal=${result.signal || ''} ${result.error || ''} ===\n`); } catch { /* ignore */ }
+    try { closeSync(logFd); } catch { /* ignore */ }
+  }
+  return result;
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────────

@@ -102,13 +102,29 @@ test('SessionEnd on a closed store logs reason=nothing-owed (no spurious spawn)'
   const store = mkdtempSync(join(tmpdir(), 'hook-log-store-'));
   mkdirSync(join(store, '_memories'), { recursive: true });
   writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"t"}');
+  const idx = join(store, 'index.json'); // register it so it passes the security gate
+  writeFileSync(idx, JSON.stringify([{ workspace_id: 't', path: store }]));
   const ops = 'maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,summary-stub,memory-refresh';
   execFileSync('node', [CLOSE_PASS, 'begin', store, '--session', 's', '--ops', ops]);
   for (const op of ops.split(',')) execFileSync('node', [CLOSE_PASS, 'record', store, '--op', op, '--status', 'done']);
   execFileSync('node', [CLOSE_PASS, 'finish', store, '--session', 's']);
-  runClose({ cwd: store, reason: 'other' }, { CORE_HOOKS_LOG_FILE: log });
+  runClose({ cwd: store, reason: 'other' }, { CORE_HOOKS_LOG_FILE: log, CORE_CLOSE_INDEX: idx });
   const events = readLog(log);
   assert.ok(events.some(e => e.hook === 'session-end' && e.reason === 'nothing-owed'),
     'a trivial closed session must log nothing-owed, not spawn');
+  rmSync(store, { recursive: true, force: true });
+});
+
+test('SessionEnd on an UNREGISTERED dir (attacker _memories/) skips — security gate', () => {
+  const log = tmpLog();
+  const store = mkdtempSync(join(tmpdir(), 'hook-log-evil-'));
+  mkdirSync(join(store, '_memories'), { recursive: true }); // looks like a CORE store but isn't registered
+  const emptyIdx = join(store, 'idx.json');
+  writeFileSync(emptyIdx, '[]');
+  runClose({ cwd: store, reason: 'other', transcript_path: '/x' }, { CORE_HOOKS_LOG_FILE: log, CORE_CLOSE_INDEX: emptyIdx });
+  const events = readLog(log);
+  assert.ok(events.some(e => e.reason === 'not-registered-workspace'),
+    'an unregistered dir must be rejected even with a _memories/ folder');
+  assert.ok(!events.some(e => e.action === 'spawn'), 'no close agent spawned for an unregistered dir');
   rmSync(store, { recursive: true, force: true });
 });

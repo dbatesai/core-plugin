@@ -33,6 +33,7 @@ function freshClosedStore() {
   const store = mkdtempSync(join(tmpdir(), 'close-hook-test-'));
   mkdirSync(join(store, '_memories'), { recursive: true });
   writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"t"}');
+  writeFileSync(join(store, 'idx.json'), JSON.stringify([{ workspace_id: 't', path: store }])); // register for the security gate
   const ops = 'maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,summary-stub,memory-refresh';
   // begin + record-all + finish → marker says closed, nothing owed.
   execFileSync('node', [CLOSE_PASS, 'begin', store, '--session', 's', '--ops', ops]);
@@ -79,7 +80,7 @@ test('not a CORE workspace: no workspace.json or _memories → no-op', () => {
 test('spawn pre-check: closed store, nothing owed, no transcript → no spawn', () => {
   const store = freshClosedStore();
   // No transcript_path → didWork false; marker is closed → nothing owed → shouldSpawn false.
-  const { out, code } = runHook({ cwd: store, reason: 'other' });
+  const { out, code } = runHook({ cwd: store, reason: 'other' }, { CORE_CLOSE_INDEX: join(store, 'idx.json') });
   assert.equal(code, 0);
   assert.equal(out.trim(), '', 'a trivial closed session must not spawn a close agent');
   rmSync(store, { recursive: true, force: true });
@@ -130,6 +131,50 @@ test('runClose: refuses when another close holds the lock (single-flight)', asyn
   cp.beginClose(store, { sessionId: 'other', ops: ['x'] }); // someone else holds the lock
   const r = cp.runClose(store, { spawnFinalize: () => { throw new Error('must not run'); } });
   assert.ok(!r.ok && r.reason === 'held', 'runClose must not run the close while another holds the lock');
+  rmSync(store, { recursive: true, force: true });
+});
+
+test('runClose: a FAILED finalize is marked "failed" (not "closed") → startup re-owes (P1)', async () => {
+  const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const store = mkdtempSync(join(tmpdir(), 'close-run-test-'));
+  mkdirSync(join(store, '_memories'), { recursive: true });
+  // simulate claude -p exiting non-zero (ENOENT / auth death / crash) — spawnSync returns, no throw
+  const r = cp.runClose(store, { spawnFinalize: () => ({ ok: false, status: 1, signal: null, error: null }) });
+  assert.ok(!r.ok, 'runClose must report failure when finalize failed');
+  const marker = JSON.parse(readFileSync(join(store, '_memories', '_close-marker.json'), 'utf8'));
+  assert.equal(marker.status, 'failed', 'a failed finalize must NOT be stamped closed — the false-success bug');
+  assert.equal(marker.ops.finalize.status, 'failed', 'the finalize op records the failure');
+  const det = cp.detectCloseState(store, { allOps: cp.CLOSE_OPS });
+  assert.equal(det.state, 'owed', 'a failed close is owed');
+  assert.equal(det.reason, 'prior-close-failed', 'and reports why');
+  assert.ok(!existsSync(join(store, '_memories', '_close.lock')), 'lock released even on failure');
+  rmSync(store, { recursive: true, force: true });
+});
+
+test('isRegisteredWorkspace: only a path in ~/.core/index.json passes (security gate)', async () => {
+  const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const good = mkdtempSync(join(tmpdir(), 'reg-ws-'));
+  const evil = mkdtempSync(join(tmpdir(), 'evil-ws-'));
+  mkdirSync(join(evil, '_memories'), { recursive: true }); // attacker plants a _memories dir
+  const idxPath = join(good, 'index.json');
+  writeFileSync(idxPath, JSON.stringify([{ workspace_id: 'g', path: good }]));
+  assert.equal(cp.isRegisteredWorkspace(good, { indexPath: idxPath }), true, 'a registered path passes');
+  assert.equal(cp.isRegisteredWorkspace(evil, { indexPath: idxPath }), false,
+    'a dir with a _memories folder but NOT in the registry must be rejected');
+  rmSync(good, { recursive: true, force: true });
+  rmSync(evil, { recursive: true, force: true });
+});
+
+test('inspectLock: a very old lock is stealable regardless of pid liveness (P2 anti-strand)', async () => {
+  const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const store = mkdtempSync(join(tmpdir(), 'lock-strand-'));
+  mkdirSync(join(store, '_memories'), { recursive: true });
+  cp.acquireLock(store, { sessionId: 's' }); // held by THIS live process (pid alive)
+  const held = cp.inspectLock(store); // now → fresh, held
+  assert.equal(held.held, true, 'a fresh lock held by a live pid is held');
+  const old = cp.inspectLock(store, Date.now() + 31 * 60 * 1000); // 31 min in the future
+  assert.equal(old.held, false, 'past the hard-stale ceiling the lock is stealable even with a live pid');
+  cp.releaseLock(store);
   rmSync(store, { recursive: true, force: true });
 });
 

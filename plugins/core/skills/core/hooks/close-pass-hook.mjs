@@ -34,7 +34,7 @@ import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { shouldSpawn } from '../scripts/close-pass.mjs';
+import { shouldSpawn, isRegisteredWorkspace } from '../scripts/close-pass.mjs';
 import { logHookEvent } from './hook-log.mjs';
 
 // The op set the close agent is responsible for. Kept in sync with the close-pass marker
@@ -48,10 +48,6 @@ const CLOSE_OPS = [
 // SessionEnd reasons that are NOT real ends — skip them. `resume` suspends for later
 // resumption; closing then is premature (startup catch-up re-detects on resume).
 const SKIP_REASONS = new Set(['resume']);
-
-function isCoreWorkspace(store) {
-  return existsSync(join(store, 'workspace.json')) || existsSync(join(store, '_memories'));
-}
 
 
 function main() {
@@ -78,9 +74,13 @@ function main() {
     return 0;
   }
 
-  const store = resolve(process.env.CORE_CLOSE_STORE || payload.cwd || process.cwd());
-  if (!isCoreWorkspace(store)) {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-core-workspace', cwd: store });
+  // Canonicalize (realpath) then require a REGISTERED CORE workspace before spawning anything.
+  // Security (review 2026-06-30, HIGH): a generic `_memories/` dir is not proof; the ~/.core
+  // registry is the trust anchor an attacker can't plant from inside a project dir.
+  let store = resolve(process.env.CORE_CLOSE_STORE || payload.cwd || process.cwd());
+  try { store = realpathSync(store); } catch { /* keep resolved */ }
+  if (!isRegisteredWorkspace(store)) {
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-registered-workspace', cwd: store });
     return 0;
   }
 
