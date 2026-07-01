@@ -101,6 +101,12 @@ test('buildChildEnv: CORE_CLOSE_USE_API_KEY=1 preserves the API key (opt-out for
   assert.equal(env.ANTHROPIC_API_KEY, 'sk-live', 'opt-out keeps the API key for users who want it');
 });
 
+test('buildChildEnv: sets CORE_CLOSE_ENVELOPE so headless /finalize knows the runner owns the marker', async () => {
+  const { buildChildEnv } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const env = buildChildEnv({});
+  assert.equal(env.CORE_CLOSE_ENVELOPE, '1', 'the envelope signal must be set so the agent does not double-run begin/finish/maintenance');
+});
+
 test('runClose: deterministic envelope writes a CLOSED marker even if the LLM half is a no-op', async () => {
   const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
   const store = mkdtempSync(join(tmpdir(), 'close-run-test-'));

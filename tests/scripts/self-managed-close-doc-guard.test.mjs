@@ -64,6 +64,22 @@ test('close hook: recursion guard + kill switch + spawn pre-check are all wired'
   assert.match(hook, /detached: true/, 'child must be detached to survive session exit');
 });
 
+test('close hook spawns the DETERMINISTIC envelope (close-pass.mjs run), NOT raw claude -p', () => {
+  // Regression guard for the 2026-06-30 finding: a headless LLM narrated a close it never
+  // marked. The hook must spawn the `run` envelope (begin/maintenance/finish guaranteed by
+  // code), never `claude -p` directly — that would put the marker back at LLM discretion.
+  const hook = read('skills', 'core', 'hooks', 'close-pass-hook.mjs');
+  assert.match(hook, /close-pass\.mjs/, 'hook must invoke close-pass.mjs');
+  assert.match(hook, /'run'|"run"/, 'hook must spawn the run envelope');
+  assert.ok(!/spawn\(\s*['"]claude['"]/.test(hook), 'hook must NOT spawn claude directly — the envelope owns that');
+});
+
+test('finalize: envelope mode tells the agent the runner owns the marker (no double-run)', () => {
+  const f = read('skills', 'finalize', 'SKILL.md');
+  assert.match(f, /CORE_CLOSE_ENVELOPE/, 'finalize must document the envelope signal');
+  assert.match(f, /runner owns/i, 'finalize must say the runner owns the marker lifecycle');
+});
+
 test('codex: the exit-hook drop names startup-catch-up as the equivalent', () => {
   const c = read('skills', 'core', 'harnesses', 'codex.md');
   assert.match(c, /close-pass/i, 'codex adapter must carry the close-pass drop');
