@@ -30,9 +30,8 @@
  * I/O: reads the SessionEnd payload as JSON on stdin (.reason, .cwd, .session_id). Always exits 0.
  */
 
-import { readFileSync, existsSync, openSync, realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { shouldSpawn } from '../scripts/close-pass.mjs';
@@ -54,20 +53,6 @@ function isCoreWorkspace(store) {
   return existsSync(join(store, 'workspace.json')) || existsSync(join(store, '_memories'));
 }
 
-/**
- * Build the env for the spawned close agent. By default strips API-key auth so the background
- * close uses the subscription/claude.ai login (an unattended close billing the user's API key
- * is a surprise cost; a dead key also shadows the subscription and kills the close). Opt back
- * in to API-key auth with CORE_CLOSE_USE_API_KEY=1. Exported for tests.
- */
-export function buildChildEnv(env = process.env) {
-  const childEnv = { ...env, CORE_CLOSE_PASS_ACTIVE: '1', CORE_CLOSE_HEADLESS: '1' };
-  if (env.CORE_CLOSE_USE_API_KEY !== '1') {
-    delete childEnv.ANTHROPIC_API_KEY;
-    delete childEnv.ANTHROPIC_AUTH_TOKEN;
-  }
-  return childEnv;
-}
 
 function main() {
   // Guard 1 — recursion: we're inside the spawned close agent's own SessionEnd. No-op.
@@ -107,26 +92,18 @@ function main() {
     return 0;
   }
 
-  // Build the child env (strips API-key auth by default — see buildChildEnv). CORE_CLOSE_PASS_ACTIVE=1
-  // trips Guard 1 in the child's own SessionEnd (no recursive spawn).
-  const childEnv = buildChildEnv(process.env);
-
-  // Capture the close agent's output to a single-overwrite debug log so the background close
-  // isn't invisible — `cat ~/.core/close-pass-last.log` shows what the last close did. The fd
-  // is inherited by the detached child and stays open after we exit.
-  let stdio = 'ignore';
+  // Spawn the DETERMINISTIC close envelope (DC-77), not raw `claude -p`. `close-pass.mjs run`
+  // guarantees the marker lifecycle (begin/finish lock + marker) and mechanical maintenance
+  // around the LLM close — the reliability spine can't be skipped by agent discretion
+  // (validation 2026-06-30 showed a headless agent narrating a close it never marked). Detached
+  // + unref() so it survives our exit; auth-strip + output log live inside `run`.
+  const runner = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'close-pass.mjs');
   try {
-    const fd = openSync(join(homedir(), '.core', 'close-pass-last.log'), 'w');
-    stdio = ['ignore', fd, fd];
-  } catch { /* can't open the log — fall back to ignored stdio, still spawn */ }
-
-  // Spawn detached + unref() so the close survives our exit (the nohup equivalent).
-  try {
-    const child = spawn('claude', ['-p', '/finalize'], { cwd: store, env: childEnv, detached: true, stdio });
+    const child = spawn('node', [runner, 'run', store], { cwd: store, env: process.env, detached: true, stdio: 'ignore' });
     child.unref();
     logHookEvent({ hook: 'session-end', action: 'spawn', reason: 'session-reason=' + (reason || 'unknown'), cwd: store });
   } catch {
-    // claude not on PATH, or spawn failed — startup catch-up covers it. Never block exit.
+    // node/runner unavailable, or spawn failed — startup catch-up covers it. Never block exit.
     logHookEvent({ hook: 'session-end', action: 'spawn-failed', cwd: store });
   }
   return 0;

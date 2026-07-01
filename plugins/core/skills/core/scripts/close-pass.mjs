@@ -33,10 +33,12 @@
 
 import { readFileSync, existsSync, statSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { runMaintenance } from './maintenance-run.mjs';
 
 // A lock older than this with no live owner is stale and stealable. Generous: a real close
 // pass (claude -p re-reading a transcript) can take a couple of minutes.
@@ -191,6 +193,65 @@ export function shouldSpawn(store, { didWork = false, madeDecision = false, allO
   return det.state === 'owed' && det.owed.length > 0;
 }
 
+// The full op set the close envelope is responsible for (kept in sync with close-pass-hook).
+export const CLOSE_OPS = [
+  'maintenance-run', 'render-project-md', 'hot-section', 'demote-moves',
+  'compact-project', 'demote-state', 'check-units', 'reflection-a', 'reflection-b',
+  'metrics', 'summary-stub', 'memory-refresh',
+];
+
+/**
+ * Build the env for the spawned `claude -p /finalize`. Strips API-key auth by default so an
+ * unattended close uses the subscription login (an automated close billing the user's API key
+ * is a surprise cost; a dead key also shadows the claude.ai login and kills the close). Opt
+ * back in with CORE_CLOSE_USE_API_KEY=1. CORE_CLOSE_ENVELOPE=1 tells /finalize the runner owns
+ * the begin/finish marker + mechanical maintenance (so the LLM does only the judgment work).
+ */
+export function buildChildEnv(env = process.env) {
+  const childEnv = { ...env, CORE_CLOSE_PASS_ACTIVE: '1', CORE_CLOSE_HEADLESS: '1', CORE_CLOSE_ENVELOPE: '1' };
+  if (env.CORE_CLOSE_USE_API_KEY !== '1') { delete childEnv.ANTHROPIC_API_KEY; delete childEnv.ANTHROPIC_AUTH_TOKEN; }
+  return childEnv;
+}
+
+/**
+ * The deterministic close envelope (DC-77): the marker lifecycle and mechanical maintenance are
+ * plumbing, NOT left to the LLM's discretion (validation 2026-06-30 showed a headless agent
+ * narrating "indexes regenerated" and "session closed" while writing neither the maintenance
+ * ledger nor the marker). Sequence: begin (lock + in-progress marker) → runMaintenance (mechanical,
+ * signature-gated) → `claude -p /finalize` (the intelligent reflection/render/summary) → finish
+ * (closed marker, lock released). Even if the LLM inside does nothing structural, the store ends
+ * in a correct `closed` state and startup catch-up won't needlessly re-run.
+ *
+ * @param {(store: object) => any} [spawnFinalize] injectable claude spawn (for tests)
+ */
+export function runClose(store, { now = new Date().toISOString(), spawnFinalize = defaultSpawnFinalize } = {}) {
+  const sessionId = 'auto-' + now.slice(0, 19).replace(/[:T]/g, '-');
+  const begun = beginClose(store, { sessionId, ops: CLOSE_OPS, now });
+  if (!begun.ok) return { ok: false, reason: begun.reason }; // another close holds the lock
+  try {
+    try {
+      const m = runMaintenance(store, {});
+      recordOp(store, { op: 'maintenance-run', note: (m.narration || '').slice(0, 120) });
+    } catch (e) {
+      recordOp(store, { op: 'maintenance-run', status: 'failed', note: String(e && e.message || e).slice(0, 120) });
+    }
+    spawnFinalize(store);
+    recordOp(store, { op: 'summary-stub' }); // best-effort marker that the LLM half ran
+  } finally {
+    finishClose(store, { sessionId });
+  }
+  return { ok: true };
+}
+
+function defaultSpawnFinalize(store) {
+  let stdio = 'ignore';
+  try {
+    const fd = openSync(join(homedir(), '.core', 'close-pass-last.log'), 'w');
+    stdio = ['ignore', fd, fd];
+  } catch { /* fall back to ignored stdio */ }
+  spawnSync('claude', ['-p', '/finalize'], { cwd: resolve(store), env: buildChildEnv(process.env), stdio });
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function parseFlags(argv) {
@@ -218,6 +279,12 @@ function main(argv) {
   const ops = typeof f.ops === 'string' ? f.ops.split(',').map(s => s.trim()).filter(Boolean) : [];
 
   switch (sub) {
+    case 'run': {
+      // The deterministic close envelope: begin -> maintenance -> claude -p /finalize -> finish.
+      const r = runClose(store, {});
+      process.stdout.write(json ? JSON.stringify(r) + '\n' : (r.ok ? 'close complete\n' : `close skipped: ${r.reason}\n`));
+      return r.ok ? 0 : 1;
+    }
     case 'detect': {
       const det = detectCloseState(store, { allOps: ops });
       process.stdout.write(json ? JSON.stringify(det) + '\n' : `${det.state}${det.owed?.length ? ' owed=' + det.owed.join(',') : ''}\n`);

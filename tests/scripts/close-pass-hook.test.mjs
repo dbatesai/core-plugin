@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
@@ -86,7 +86,7 @@ test('spawn pre-check: closed store, nothing owed, no transcript → no spawn', 
 });
 
 test('buildChildEnv: strips API-key auth by default (background close uses subscription)', async () => {
-  const { buildChildEnv } = await import('../../plugins/core/skills/core/hooks/close-pass-hook.mjs');
+  const { buildChildEnv } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
   const env = buildChildEnv({ ANTHROPIC_API_KEY: 'sk-dead', ANTHROPIC_AUTH_TOKEN: 'tok', PATH: '/bin' });
   assert.equal(env.ANTHROPIC_API_KEY, undefined, 'API key must be stripped so the dead key cannot shadow the subscription');
   assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined, 'auth token stripped too');
@@ -96,9 +96,35 @@ test('buildChildEnv: strips API-key auth by default (background close uses subsc
 });
 
 test('buildChildEnv: CORE_CLOSE_USE_API_KEY=1 preserves the API key (opt-out for API-only users)', async () => {
-  const { buildChildEnv } = await import('../../plugins/core/skills/core/hooks/close-pass-hook.mjs');
+  const { buildChildEnv } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
   const env = buildChildEnv({ ANTHROPIC_API_KEY: 'sk-live', CORE_CLOSE_USE_API_KEY: '1' });
   assert.equal(env.ANTHROPIC_API_KEY, 'sk-live', 'opt-out keeps the API key for users who want it');
+});
+
+test('runClose: deterministic envelope writes a CLOSED marker even if the LLM half is a no-op', async () => {
+  const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const store = mkdtempSync(join(tmpdir(), 'close-run-test-'));
+  mkdirSync(join(store, '_memories'), { recursive: true });
+  writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"t"}');
+  let spawned = false;
+  const r = cp.runClose(store, { spawnFinalize: () => { spawned = true; } });
+  assert.ok(r.ok, 'runClose should complete');
+  assert.ok(spawned, 'the LLM /finalize half is invoked');
+  const marker = JSON.parse(readFileSync(join(store, '_memories', '_close-marker.json'), 'utf8'));
+  assert.equal(marker.status, 'closed', 'the marker MUST be closed — the whole point vs LLM discretion');
+  assert.ok(marker.ops['maintenance-run'], 'mechanical maintenance was recorded deterministically');
+  assert.ok(!existsSync(join(store, '_memories', '_close.lock')), 'lock released on finish');
+  rmSync(store, { recursive: true, force: true });
+});
+
+test('runClose: refuses when another close holds the lock (single-flight)', async () => {
+  const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const store = mkdtempSync(join(tmpdir(), 'close-run-test-'));
+  mkdirSync(join(store, '_memories'), { recursive: true });
+  cp.beginClose(store, { sessionId: 'other', ops: ['x'] }); // someone else holds the lock
+  const r = cp.runClose(store, { spawnFinalize: () => { throw new Error('must not run'); } });
+  assert.ok(!r.ok && r.reason === 'held', 'runClose must not run the close while another holds the lock');
+  rmSync(store, { recursive: true, force: true });
 });
 
 test('always exits 0 even on garbage stdin (fail-open)', () => {
