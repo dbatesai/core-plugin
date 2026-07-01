@@ -85,6 +85,22 @@ test('spawn pre-check: closed store, nothing owed, no transcript → no spawn', 
   rmSync(store, { recursive: true, force: true });
 });
 
+test('buildChildEnv: strips API-key auth by default (background close uses subscription)', async () => {
+  const { buildChildEnv } = await import('../../plugins/core/skills/core/hooks/close-pass-hook.mjs');
+  const env = buildChildEnv({ ANTHROPIC_API_KEY: 'sk-dead', ANTHROPIC_AUTH_TOKEN: 'tok', PATH: '/bin' });
+  assert.equal(env.ANTHROPIC_API_KEY, undefined, 'API key must be stripped so the dead key cannot shadow the subscription');
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, undefined, 'auth token stripped too');
+  assert.equal(env.CORE_CLOSE_PASS_ACTIVE, '1', 'recursion guard env must be set');
+  assert.equal(env.CORE_CLOSE_HEADLESS, '1', 'headless flag must be set');
+  assert.equal(env.PATH, '/bin', 'unrelated env passes through');
+});
+
+test('buildChildEnv: CORE_CLOSE_USE_API_KEY=1 preserves the API key (opt-out for API-only users)', async () => {
+  const { buildChildEnv } = await import('../../plugins/core/skills/core/hooks/close-pass-hook.mjs');
+  const env = buildChildEnv({ ANTHROPIC_API_KEY: 'sk-live', CORE_CLOSE_USE_API_KEY: '1' });
+  assert.equal(env.ANTHROPIC_API_KEY, 'sk-live', 'opt-out keeps the API key for users who want it');
+});
+
 test('always exits 0 even on garbage stdin (fail-open)', () => {
   try {
     execFileSync('node', [HOOK], { input: 'not json at all', encoding: 'utf8',

@@ -23,11 +23,20 @@
  * never block the session opening.
  */
 
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { logHookEvent } from './hook-log.mjs';
 
 const DIRECTIVE = `CORE session protocol: this environment has the CORE project-intelligence plugin installed. Before anything else this session — before answering the user, before any other tool call — invoke the \`/core\` skill. It runs startup routing, loads cross-session project memory, and composes a readiness summary, and it self-deduplicates (it won't re-run if it already ran this session). Run \`/core\` first, then address the user's request.`;
 
 function main() {
+  // Recursion guard: the headless close agent (close-pass-hook spawns `claude -p "/finalize"`
+  // with CORE_CLOSE_PASS_ACTIVE=1) must NOT be told to run /core first — it has one job,
+  // /finalize. Without this, the close child gets the /core directive and never cleanly closes.
+  if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
+    logHookEvent({ hook: 'session-start', action: 'skip', reason: 'close-pass-child' });
+    return 0;
+  }
   if (process.env.CORE_AUTOSTART === '0') {
     logHookEvent({ hook: 'session-start', action: 'skip', reason: 'opt-out' });
     return 0;
@@ -37,4 +46,8 @@ function main() {
   return 0;
 }
 
-try { process.exit(main() || 0); } catch { process.exit(0); }
+// Only run as the hook entry — importing this module must not execute main() / process.exit().
+const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
+if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+  try { process.exit(main() || 0); } catch { process.exit(0); }
+}

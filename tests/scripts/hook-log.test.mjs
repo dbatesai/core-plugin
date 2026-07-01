@@ -76,6 +76,15 @@ test('SessionStart opt-out logs action=skip reason=opt-out', () => {
     'opting out must still log a skip so the log shows the hook ran and chose to skip');
 });
 
+test('SessionStart no-ops for the close child (CORE_CLOSE_PASS_ACTIVE=1 → no /core inject)', () => {
+  const log = tmpLog();
+  runStart({ CORE_HOOKS_LOG_FILE: log, CORE_CLOSE_PASS_ACTIVE: '1' });
+  const events = readLog(log);
+  assert.ok(events.some(e => e.action === 'skip' && e.reason === 'close-pass-child'),
+    'the headless close child must NOT be told to run /core — it has one job, /finalize');
+  assert.ok(!events.some(e => e.action === 'inject'), 'no inject for the close child');
+});
+
 test('SessionEnd recursion guard logs reason=recursion-guard (proves the child fired + was suppressed)', () => {
   const log = tmpLog();
   const store = mkdtempSync(join(tmpdir(), 'hook-log-store-'));
