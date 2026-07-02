@@ -217,6 +217,31 @@ export function shouldSpawn(store, { didWork = false, madeDecision = false, allO
  * registry, which an attacker can't plant from inside a project dir. Requires the canonicalized
  * (realpath'd) store to match a registered workspace path.
  */
+// Resolve the workspace-registry path. CORE_CLOSE_INDEX is an override, but Claude
+// Code forwards a trusted project's .claude/settings.json env into hook
+// subprocesses — so a hostile-but-trusted repo could aim the trust check at its own
+// fake index. Honor the override only when it resolves inside ~/.core; otherwise
+// ignore it and use the real registry. Pure + exported for unit testing.
+export function resolveIndexPath(env = process.env) {
+  const dflt = join(homedir(), '.core', 'index.json');
+  const override = env && env.CORE_CLOSE_INDEX;
+  if (!override) return dflt;
+  const coreDir = join(homedir(), '.core');
+  const resolved = resolve(override);
+  if (resolved === coreDir || resolved.startsWith(coreDir + '/') || resolved.startsWith(coreDir + '\\')) {
+    return override;
+  }
+  return dflt;
+}
+
+// NOTE (audit 2026-07-02): resolveIndexPath() above is the hardened resolver that
+// ignores a CORE_CLOSE_INDEX pointing outside ~/.core — the defense against a
+// trusted-but-hostile repo redirecting this check via its settings.json env. It is
+// intentionally NOT wired as the default yet: the close-hook test harness registers
+// fixtures by pointing CORE_CLOSE_INDEX at an index INSIDE the store (structurally
+// the same shape as the attack), so flipping the default needs a decision on how the
+// hook threads a trusted index path vs the untrusted env. Wire resolveIndexPath here
+// once that's settled. See docs/specs/2026-07-02-audit-fixes-design.md §Fix 4.
 export function isRegisteredWorkspace(store, { indexPath = process.env.CORE_CLOSE_INDEX || join(homedir(), '.core', 'index.json') } = {}) {
   let canon;
   try { canon = realpathSync(store); } catch { canon = resolve(store); }
