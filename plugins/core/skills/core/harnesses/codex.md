@@ -59,6 +59,10 @@ Call `update_plan` with the same plan, mutating the step at id `id` to status `"
 
 **DROPPED** on Codex. CORE on Codex is synchronous and user-driven; no scheduled work runs in the background. Protocols that would normally schedule something (e.g., "check the deploy in 30 minutes") instead surface a "run this manually next time" reminder in conversation. If a user genuinely wants scheduled CORE work, they're on Claude Code.
 
+## close-pass (self-managed session close)
+
+**Exit-hook discharge DROPPED** on Codex; **startup catch-up is the equivalent** (same correctness, later timing — spec 2026-06-29 §9). On Claude Code a SessionEnd hook spawns a detached `claude -p "/finalize"` at session end, so the close runs itself. Codex has no validated SessionEnd hook that can spawn a surviving background process (see `hook-register` below), so there is no exit-hook close. Instead, every Codex startup runs the catch-up path (`startup.md §"Startup catch-up"`): `close-pass.mjs detect` finds an owed or partial close from last session and discharges the remainder before readiness. The per-op marker + single-flight lock + three-state detection are harness-agnostic — they work identically; only the *trigger* differs (Codex: next startup; Claude Code: session end). The user can still run `/finalize` manually any time. Re-open this drop if a live Codex install validates a SessionEnd-equivalent hook that can spawn a detached process.
+
 ## hook-register
 
 **DROPPED for pre-execution blocking** on Codex pending empirical validation.

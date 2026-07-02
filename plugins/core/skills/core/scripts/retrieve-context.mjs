@@ -61,6 +61,11 @@ function scoreUnit(queryTokens, unit) {
  */
 export function retrieveContext(query, storePath, { topN = 3 } = {}) {
   const root = resolve(storePath);
+  // The per-turn hook runs in every directory the user opens. If there's no CORE
+  // store here, retrieve nothing and — critically — write nothing: generating the
+  // index would mkdir -p _memories/_lib and litter unit-summaries.json into an
+  // unrelated repo. No store, no retrieval, no side effect.
+  if (!existsSync(join(root, '_memories'))) return [];
   const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
   let index;
   if (existsSync(indexPath)) {

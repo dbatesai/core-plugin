@@ -33,6 +33,19 @@ export const VALID_STATUSES = new Set(['active', 'retired', 'archived', 'superse
 // transition the status already acknowledges.
 export const TERMINAL_STATUSES = new Set(['retired', 'archived', 'superseded']);
 
+// True when a unit's status makes it eligible for default retrieval — missing,
+// empty, or 'active'. A terminal status (retired/archived/superseded) means the
+// fact was removed or replaced and must NOT surface in the default candidate set.
+// The one shared answer to "is this fact still showable?" — applied at every read
+// site (graph-walk, rankUnits, the summary index) so the anti-resurrection rule
+// can't hold in one consumer and silently fail in another.
+export function isActiveStatus(fm) {
+  const s = fm && (fm.status === undefined || fm.status === null)
+    ? 'active'
+    : String((fm && fm.status) || '').trim().toLowerCase();
+  return s === '' || s === 'active';
+}
+
 export const VALID_TYPES = new Set([
   'decision', 'risk', 'person', 'deliverable', 'principle',
   'explainer', 'review-finding', 'observation', 'topic', 'reference',

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.10.0] — 2026-06-30
+
+### Added
+
+CORE now runs itself end to end — installing the plugin is the only step. Two new lifecycle hooks close the loop: a **SessionStart** hook makes `/core` the agent's first action of every session (you never type it), and a **SessionEnd** hook discharges the session close in the background (you never type `/finalize`). Memory bootstraps, stays current, and closes out on its own.
+
+- **Self-invoking startup.** A SessionStart hook injects a directive so the agent runs `/core` before anything else. It leans on `/core`'s own bootstrap dedup (won't re-run if it already ran this session) and re-orients after a compaction. Opt out with `CORE_AUTOSTART=0`.
+- **Self-discharging close.** A SessionEnd hook spawns a detached, recursion-guarded background close at session end; a startup catch-up backstops a missed fire (hard kill, no PATH, crash mid-run). The close runs through a **deterministic envelope** (`close-pass.mjs run`) that guarantees the marker lifecycle and mechanical maintenance around the LLM close — so the reliability spine can't be skipped by the agent. It discharges only owed work via a per-op completion marker and a single-flight lock; a crashed or failed close is detected and re-owed rather than falsely marked done. Opt out with `CORE_AUTO_CLOSE=0`.
+- **Control-surface protection.** Every PROJECT.md write is edit-gated: edit-detection runs first in every path and a between-session user edit always wins (anti-resurrection holds; a catch-up render can never clobber your edit).
+- **Close reflection.** The old fresh-eyes + summary steps became two reflection tasks on the close agent — resynthesis (capture what the session concluded) and a decision-gated perspective pass (turn the overconfidence/anti-smuggling lens on the session's own output). The session summary is now a one-line trace plus a short resume stub; full narrative on demand.
+- **Forensic visibility.** Both lifecycle hooks append one JSONL line per fire to `~/.core/hooks-log.jsonl` (override `CORE_HOOKS_LOG_FILE`) recording the decision made — `inject` / `spawn` / `skip` / `close-complete` / `close-failed` with the reason. The spawned close agent's own output is captured to `~/.core/close-pass-last.log` (append, `0600`) so the background close isn't invisible.
+- **Background close uses the subscription login by default.** The spawned close strips `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN` from its env so an unattended close doesn't surprise-bill an API key (and a dead/omitted key can't shadow the claude.ai login and kill the close). Opt back in with `CORE_CLOSE_USE_API_KEY=1`.
+
+Behavior note: this changes turn-1 and session-end behavior for every install. Both hooks are opt-out via the env vars above. On Codex (no validated SessionEnd-equivalent) the close is startup-catch-up-only — same correctness, later timing.
+
+### Security
+
+- **The background close only runs in a registered CORE workspace.** The gate that decides whether to spawn the detached, tool-enabled close agent now requires the directory to be a workspace registered in `~/.core/index.json` (canonicalized with `realpathSync`), not merely a directory that happens to contain a `_memories/` folder. This prevents an attacker-supplied repo from triggering an autonomous agent over its own files. (Found by a pre-release adversarial security review.)
+
+### Fixed
+
+- **A failed background close no longer reports success.** The close now captures the `claude -p` exit status; a failed/killed/missing-binary finalize is marked `failed` (not `closed`) so the next startup re-owes and retries it, instead of the marker falsely claiming a completed close.
+- **The single-flight lock can no longer strand forever.** A hard age ceiling makes a lock left by a `SIGKILL`'d process stealable even if its PID gets recycled, so closes can't silently stop happening. Lock acquisition and release are now transactionally coupled (a failed marker write releases the lock it took).
+- Corrected stale `project_path` documentation: the schema and fork-check comment claimed the legacy field would be dropped in v3.8.0, but that drop never shipped — it remains a tolerant-read fallback until a dedicated migration removes it.
+
+The test suite grew 739 → 771.
+
 ## [3.9.0] — 2026-06-28
 
 This release makes the memory actively work for you mid-session instead of only at startup. The headline: per-turn retrieval is now live by default — on every prompt, the most relevant stored facts are surfaced into context automatically, so the agent stops failing to recall what it already knows. It also lands self-managed mechanical maintenance (the store keeps itself current without you invoking it) and the deterministic retrieval + integrity machinery underneath. Per-turn injection is opt-out (`CORE_RETRIEVAL_HOOK=0`). The test suite grew 681 → 739.

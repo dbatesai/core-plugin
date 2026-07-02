@@ -30,6 +30,7 @@
 import { readFileSync, readdirSync, appendFileSync, realpathSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isActiveStatus } from './unit-vocab.mjs';
 
 // ---------- DC-69 constants ----------
 
@@ -446,6 +447,7 @@ export function rankUnits(memoriesDir, { sessionTopics = [], today = null, inclu
   const t = today || _todayUTC();
   const ranked = iterUnits(memoriesDir)
     .filter(u => !u.fm._load_error)
+    .filter(u => includeInvalidated || isActiveStatus(u.fm))
     .filter(u => includeInvalidated || !isInvalidated(u, t))
     .map(u => [score(u, sessionTopics, t), u]);
   ranked.sort((a, b) => b[0] - a[0]);

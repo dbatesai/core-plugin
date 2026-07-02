@@ -144,6 +144,27 @@ Run edit-detection on the files you read against `~/.core/state-cache.json`. If 
 
 Surface any genuine user edit in the readiness summary before the agenda.
 
+## Startup catch-up — discharge an owed close (spec 2026-06-29)
+
+The last session's close runs itself at session end (the SessionEnd hook spawns `claude -p "/finalize"` headless — `close-pass-hook.mjs`). But that hook can miss: a hard terminal kill never fires SessionEnd, or `claude` wasn't on PATH, or the close agent died mid-run. This is the backstop — startup detects an owed or partial close and discharges the remainder before composing readiness. It is the third discharge path; the manual command and the exit hook are the other two.
+
+**Edit-detection runs FIRST and wins (the crux the adversarial pass caught).** The catch-up runs *after* the edit-detection block above, never before. If the user edited PROJECT.md between sessions, that edit is already reconciled and anti-resurrection has fired; only then does a deferred render proceed — so a catch-up render can never clobber a user edit. This ordering is non-negotiable.
+
+Run three-state detection (skip silently if `CORE_ROOT` is unresolved or `CORE_AUTO_CLOSE=0` — the kill switch covers catch-up too):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && [ "$CORE_AUTO_CLOSE" != "0" ] && \
+node "${CORE_ROOT}/skills/core/scripts/close-pass.mjs" detect <project> \
+  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,session-summary,memory-refresh \
+  || echo "(close detect skipped)"
+```
+
+- **`closed`** — last session closed cleanly and the store is unchanged. Nothing to do; proceed to readiness.
+- **`in-progress`** — a close is running right now (a detached exit-hook agent the single-flight lock is protecting). Do NOT race it; skip catch-up and note it in readiness (*"last session's close is still finishing in the background"*).
+- **`owed`** (with the `owed=` list) — no marker, a crash mid-close, or the store changed since the close. Discharge the owed ops now, edit-detection-having-already-cleared: run only the listed ops (they map 1:1 to the `/finalize` steps), then `close-pass.mjs finish`. Keep it lean — this is catch-up, not a full re-close; the reflection tasks only re-run if `reflection-a`/`reflection-b` are in the owed list. Narrate it in one line as part of readiness (*"Last session's close didn't finish — discharged the owed maintenance (indexes, hot section) before readiness."*).
+
+A `render-pending-accept` flag in `~/.core/workspaces/<id>/` (left by a headless close that materially changed §State/§Moves) is surfaced here too: show the user the pending render for accept rather than treating it as canonical, then clear the flag.
+
 ## Load — cold-start migration
 
 The project has substantive prior content but no v2 unit store. Run the nine steps below in order. Each step is load-bearing; don't demote any into "I'll handle that later in §Moves."

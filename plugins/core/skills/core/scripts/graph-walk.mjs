@@ -31,6 +31,7 @@ import {
   loadUnit, scoreProxyRS, extractEdges, parseIsoDate, isInvalidated,
   SCORE_PRUNE_THRESHOLD,
 } from './priority.mjs';
+import { isActiveStatus } from './unit-vocab.mjs';
 
 function resolveTarget(target, memoriesDir, includeObservations = false) {
   const t = target.trim();
@@ -123,6 +124,7 @@ export function walk(seedPath, {
   // successor is reachable directly via the supersedes edge). Cold history stays
   // reachable with includeInvalidated:true (the --as-of / explicit-history case).
   let suppressedInvalidated = 0;
+  let suppressedRetired = 0;
 
   const visited = new Set([seedResolved]);
   const queue = []; // [hop, path, edgeType, sourceId, direction]
@@ -154,6 +156,13 @@ export function walk(seedPath, {
     // we don't traverse a stale fact's neighbors into the valid candidate set.
     if (!includeInvalidated && isInvalidated(unit, t)) { suppressedInvalidated++; continue; }
 
+    // Suppress terminal-status (retired/archived/superseded) units the same way —
+    // a user-deleted fact must not surface, and it isn't a gateway (its live
+    // successor is reachable directly via the supersedes edge). Retiring bumps
+    // `updated`, so without this a fresh retired unit clears the R·S prune and
+    // ranks first — the anti-resurrection rule silently failed here before.
+    if (!includeInvalidated && !isActiveStatus(unit.fm || {})) { suppressedRetired++; continue; }
+
     const rs = scoreProxyRS(unit, t);
     if (rs < pruneThreshold) continue;
 
@@ -183,7 +192,7 @@ export function walk(seedPath, {
   }
 
   results.sort((a, b) => a.hop - b.hop || b.rs_score - a.rs_score);
-  if (stats) stats.suppressed_invalidated = suppressedInvalidated;
+  if (stats) { stats.suppressed_invalidated = suppressedInvalidated; stats.suppressed_retired = suppressedRetired; }
   return results;
 }
 
