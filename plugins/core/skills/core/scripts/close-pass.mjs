@@ -306,6 +306,15 @@ export function runClose(store, { now = new Date().toISOString(), spawnFinalize 
   return { ok: finalizeOk };
 }
 
+// On Windows the `claude` CLI is a claude.cmd shim; current Node (post
+// CVE-2024-27980) throws EINVAL if spawnSync runs a .cmd without shell:true.
+// So the self-managed close needs shell on win32 — and only there (POSIX spawns
+// the real binary directly). Args stay a fixed literal array, no user input, so
+// shell mode carries no injection risk here. Pure + exported so it's unit-testable.
+export function claudeSpawnShell(platform = process.platform) {
+  return platform === 'win32';
+}
+
 function defaultSpawnFinalize(store) {
   // P1b: append (never truncate) so a fast-failing spawn can't erase the last good log, and
   // 0600 so project content the close echoes isn't world-readable on a shared host.
@@ -318,7 +327,7 @@ function defaultSpawnFinalize(store) {
     writeSync(logFd, `\n=== close ${new Date().toISOString()} store=${store} ===\n`);
     stdio = ['ignore', logFd, logFd];
   } catch { /* fall back to ignored stdio */ }
-  const r = spawnSync('claude', ['-p', '/finalize'], { cwd: resolve(store), env: buildChildEnv(process.env), stdio });
+  const r = spawnSync('claude', ['-p', '/finalize'], { cwd: resolve(store), env: buildChildEnv(process.env), stdio, shell: claudeSpawnShell() });
   // P1: surface the spawn result — spawnSync does NOT throw on ENOENT / non-zero / signal.
   const result = { ok: !r.error && r.status === 0, status: r.status, signal: r.signal, error: r.error && String(r.error.message || r.error) };
   if (logFd != null) {
