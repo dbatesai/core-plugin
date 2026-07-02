@@ -22,7 +22,7 @@
 import { readdirSync, statSync, mkdirSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadUnit } from './priority.mjs';
+import { loadUnit, isInvalidated } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const SUMMARY_MAX = 240;
@@ -94,6 +94,7 @@ function asTopicList(topics) {
 
 export function generateSummaryIndex(storePath) {
   const memoriesDir = join(resolve(storePath), '_memories');
+  const now = new Date();
   const units = [];
   let entries;
   try {
@@ -112,6 +113,10 @@ export function generateSummaryIndex(storePath) {
     try { unit = loadUnit(full); } catch { continue; }
     const fm = unit.fm || {};
     if (!isActive(fm)) continue;
+    // Also exclude units whose validity dimension is invalid as of now — the
+    // status check alone missed a `status: active` unit with a past t_invalid,
+    // which then leaked into per-turn retrieval (the read path this index feeds).
+    if (isInvalidated(unit, now)) continue;
     units.push({
       id: unit.id,
       summary: truncate(deriveSummary(unit.body || '')),
