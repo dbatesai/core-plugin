@@ -80,6 +80,40 @@ test('finalize: envelope mode tells the agent the runner owns the marker (no dou
   assert.match(f, /runner owns/i, 'finalize must say the runner owns the marker lifecycle');
 });
 
+test('finalize: full narrative summary every close, never sourced from prior summaries', () => {
+  // David 2026-07-02: the stub-only close is reversed — headless runs invisibly, so the full
+  // narrative costs the user nothing. And the 2026-07-01 close copied a stale claim out of an
+  // old summary, so the compose-from-current-state rule is load-bearing, not style.
+  const f = read('skills', 'finalize', 'SKILL.md');
+  assert.match(f, /full narrative summary/i, 'the summary must be the full narrative, not a stub');
+  assert.match(f, /every close, both modes/i, 'the summary must be written on every close in both modes');
+  assert.match(f, /never from prior summaries/i, 'summaries must not be composed from prior summaries');
+  assert.match(f, /Record op `session-summary`/, 'the summary op must be recorded under its real name');
+  assert.ok(!f.includes('summary-stub'), 'the old stub op name must be gone from finalize');
+});
+
+test('finalize: one method — envelope mode records judgment ops like a manual run', () => {
+  // The unification (David 2026-07-02): mode moves the audience, never the method. The runner
+  // owns begin/maintenance/finish; the agent records its judgment ops in BOTH modes, which is
+  // safe because the runner spawns finalize synchronously and finishes only after it returns.
+  const f = read('skills', 'finalize', 'SKILL.md');
+  assert.match(f, /record each judgment op you complete exactly as in a manual run/i,
+    'envelope mode must record per-op like manual — a headless close must not be opaque in the marker');
+  assert.match(f, /mode moves the audience, never the method/i, 'the unification rule must be stated');
+});
+
+test('the close op list has a single source: close-pass.mjs CLOSE_OPS', async () => {
+  const { CLOSE_OPS } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const opsCsv = CLOSE_OPS.join(',');
+  const hook = read('skills', 'core', 'hooks', 'close-pass-hook.mjs');
+  assert.ok(!/const CLOSE_OPS\s*=\s*\[/.test(hook), 'the hook must import CLOSE_OPS, not redefine it');
+  assert.match(hook, /CLOSE_OPS/, 'the hook must use the imported CLOSE_OPS');
+  assert.ok(read('skills', 'core', 'protocols', 'startup.md').includes(opsCsv),
+    'startup.md detect --ops must match CLOSE_OPS exactly');
+  assert.ok(read('skills', 'finalize', 'SKILL.md').includes(opsCsv),
+    'finalize SKILL.md begin --ops must match CLOSE_OPS exactly');
+});
+
 test('codex: the exit-hook drop names startup-catch-up as the equivalent', () => {
   const c = read('skills', 'core', 'harnesses', 'codex.md');
   assert.match(c, /close-pass/i, 'codex adapter must carry the close-pass drop');

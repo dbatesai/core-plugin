@@ -14,16 +14,16 @@ Execute every step in order. Don't skip.
 
 ---
 
-## Mode, incremental discharge, and the reliability spine (spec 2026-06-29)
+## One method, three entries (spec 2026-06-29; unified 2026-07-02)
 
-Finalize runs two ways. **Interactive** — the user typed `/finalize`. **Headless** — `CORE_CLOSE_HEADLESS=1` is set (the SessionEnd close hook spawned you with `claude -p "/finalize"`; `close-pass-hook.mjs`). The work is the same; what differs is that headless can't show a draft or wait for an accept, so it defers anything that needs a human (§Step 2 render-and-accept) to the next startup's incremental gate.
+Finalize is ONE method with three entry points: **interactive** — the user typed `/finalize`; **headless** — `CORE_CLOSE_HEADLESS=1` is set (the SessionEnd close hook spawned you with `claude -p "/finalize"`; `close-pass-hook.mjs`); and the **startup catch-up**, which discharges whatever a missed close left owed. Every entry runs the same steps below, the same incremental way. The only thing mode changes is what needs a human in the room: headless can't show a draft or wait for an accept, so §Step 2.5's material-change accept defers to the next startup (`render-pending-accept` flag) and the Step 6 closing declaration is written into the session summary instead of said aloud. If you find yourself doing different *work* because of the mode, that's a defect (David, 2026-07-02) — mode moves the audience, never the method.
 
 **Discharge is incremental in both modes.** Don't re-run every step unconditionally. Consult the per-op close marker and the DC-110 cadence ledger, run only what's *owed*, skip what's already current. The reliability spine is `close-pass.mjs` (spec §8), which gives a single-flight lock (no two close agents racing the same store), a per-op completion marker (a partial close is detected, not trusted), and three-state startup detection. Use it as the frame around the whole pass:
 
 ```bash
 # Begin: acquire the lock + write the in-progress marker enumerating owed ops.
 node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs begin <project> --session <session-id> \
-  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,summary-stub,memory-refresh
+  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,session-summary,memory-refresh
 # (if it prints "lock held; another close is running" — STOP; a close is already in flight)
 
 # After each op completes, record it (this is what makes a crashed close recoverable):
@@ -35,7 +35,7 @@ node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs finish <project> --session 
 
 `begin` refusing the lock is not an error — it means another close (a startup catch-up, or a second exit hook) holds it; stop silently. An op you legitimately skip as not-owed gets `--status skipped`; a failure gets `--status failed --note "..."` so startup re-owes it.
 
-**Headless envelope — the runner owns the marker + mechanical maintenance (`CORE_CLOSE_ENVELOPE=1`).** When the exit hook spawns the close, it runs `close-pass.mjs run`, which does `begin` (lock + marker), the mechanical `maintenance-run`, and `finish` *around* you — so the `closed` marker and indexes are guaranteed regardless of what you do. This is deliberate (DC-77): a headless agent narrating "session closed" while writing no marker is exactly the failure this prevents. So when `CORE_CLOSE_ENVELOPE=1` is set, do NOT touch the marker at all — no `begin`, `finish`, `record`, or `maintenance-run`; the runner owns the entire marker lifecycle and stamps `closed` when you return. Just do the judgment work (reflection Task A/B, edit-gated render, resume stub) and finish your turn. (Calling `close-pass record` here is harmless but pointless — it races the runner's own writes.) In interactive mode (no envelope var), you own the full `begin`…`finish` sequence as above.
+**Marker ownership is the one plumbing difference (`CORE_CLOSE_ENVELOPE=1`).** When the exit hook spawned you, the deterministic runner (`close-pass.mjs run`) owns the envelope: it already did `begin` (lock + in-progress marker) and the mechanical `maintenance-run` before you started, and it stamps `finish` when you return — so the `closed` marker and indexes are guaranteed even if you do nothing. This is deliberate (DC-77): validation 2026-06-30 caught a headless agent narrating "session closed" while writing no marker. So in envelope mode: skip `begin`, `finish`, and `maintenance-run` (the runner owns those — the marker already shows `maintenance-run` recorded), but **record each judgment op you complete exactly as in a manual run** (`close-pass.mjs record <project> --op <op> --status done`). That's safe and wanted: the runner waits for you synchronously, so your records land in the marker before its `finish` — and the per-op trail is what makes a crashed headless close resumable instead of opaque. In interactive mode (no envelope var), you own the full `begin` → record → `finish` sequence and run `maintenance-run` yourself at Step 2.3. Either way the marker ends up telling the same story: same ops, same records, different hands on the bookends.
 
 **The control-surface rule — every PROJECT.md write is edit-gated (spec §7).** Before any render (Step 2.4), hot-section (Step 2.6), or §Moves/§State mutation (Steps 3.1–3.3), run edit-detection against `~/.core/state-cache.json` exactly as `startup.md §"Load — returning workspace"` defines it. If the user edited PROJECT.md (outside the hot block) since CORE last wrote it, the user's edit wins: propagate it back to source units, fire anti-resurrection for removals, and do NOT clobber it with a fresh render this pass. A render only proceeds when edit-detection clears. This is non-negotiable in headless mode — there's no human to catch a bad overwrite.
 
@@ -43,10 +43,10 @@ node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs finish <project> --session 
 
 **The two reflection tasks are the heart of the close (spec §5), not ceremony.** They replace the old scattered fresh-eyes/self-eval/summary steps:
 
-- **Reflection Task A — Resynthesis (every substantive close).** Re-read the session and distill what it actually decided, concluded, or changed — separated from the meander and the paths not taken. Then ensure each is captured: graduate the units that didn't get written in-flight (Step 2.1), update PROJECT.md (edit-gated), write the resume stub (Step 4). The deterministic completeness check (every explicit request → a task or unit; every decision named in the transcript → a written unit; the citation-resolver / anticipation-gap detectors in Step 3.13) is the *floor* of this task — the mechanical guarantee under the synthesis, not a substitute for it. Record op `reflection-a`.
+- **Reflection Task A — Resynthesis (every substantive close).** Re-read the session and distill what it actually decided, concluded, or changed — separated from the meander and the paths not taken. Then ensure each is captured: graduate the units that didn't get written in-flight (Step 2.1), update PROJECT.md (edit-gated), write the session summary (Step 4). The deterministic completeness check (every explicit request → a task or unit; every decision named in the transcript → a written unit; the citation-resolver / anticipation-gap detectors in Step 3.13) is the *floor* of this task — the mechanical guarantee under the synthesis, not a substitute for it. Record op `reflection-a`.
 - **Reflection Task B — Perspective pass (when the session produced decisions/conclusions).** Turn the right critical perspective on what the session concluded, before it hardens: did we converge too fast (R-3)? did a decision get smuggled without being surfaced (R-DM-SMUGGLING)? is a conclusion overconfident or self-serving (R-1)? does anything contradict a prior decision? Load the relevant prior decision units to apply cross-time perspective. This is CORE's "challenge overconfidence" turned on the session's *own* output — the check the in-session agent does poorly because it's too close to the work. Gated: run it when the session actually produced a decision or conclusion worth critiquing (a trivial session skips it); it MAY run every N closes rather than every close if the ledger cadence shows per-session is overkill. When Task B surfaces something real, it is **not** silently absorbed — leave it for the next startup to raise (write it as an open-question unit or a `_sessions/<date>/perspective-note.md`). Record op `reflection-b`.
 
-In **headless** mode you run both reflection tasks and all EDIT-GATED writers *only where edit-detection clears*; a materially-changed §State/§Moves render that would need a human accept (Step 2.5) is written but flagged for the next startup's incremental accept gate rather than declared canonical. In **interactive** mode the human is present, so Step 2.5 runs live.
+Both reflection tasks run in both modes — the gating is session content (did the session produce anything worth distilling or critiquing), never the mode. In **headless** mode all EDIT-GATED writers proceed *only where edit-detection clears*; a materially-changed §State/§Moves render that would need a human accept (Step 2.5) is written but flagged for the next startup's incremental accept gate rather than declared canonical. In **interactive** mode the human is present, so Step 2.5 runs live.
 
 ---
 
@@ -62,7 +62,7 @@ This is Reflection Task A + Task B from the Mode section above — the heart of 
 - Did anything break or degrade that we didn't fix?
 - Is the project better than we found it?
 
-Task A (resynthesis) distills what the session concluded and ensures each conclusion is captured (graduation in Step 2.1, the resume stub in Step 4). Task B (perspective, when the session produced decisions/conclusions) turns the R-1/R-3/smuggling lens on the session's own output and leaves anything real for the next startup to raise. Write a one-paragraph honest assessment; it feeds the resume stub and, on demand, the full narrative. Record ops `reflection-a` and (when run) `reflection-b` via `close-pass.mjs record`.
+Task A (resynthesis) distills what the session concluded and ensures each conclusion is captured (graduation in Step 2.1, the session summary in Step 4). Task B (perspective, when the session produced decisions/conclusions) turns the R-1/R-3/smuggling lens on the session's own output and leaves anything real for the next startup to raise. Write a one-paragraph honest assessment; it becomes the summary's honest-assessment section. Record ops `reflection-a` and (when run) `reflection-b` via `close-pass.mjs record`.
 
 ---
 
@@ -221,24 +221,37 @@ The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in 
 
 ---
 
-## Step 4 — Resume stub + on-demand narrative (spec §6)
+## Step 4 — Session summary (full narrative, every close)
 
-The old unconditional full-narrative summary is dropped — git is the corruption backup (lossy prose can't rebuild units anyway), and the durable per-session trace is the one-line MEMORY.md recent-activity entry (Step 5). What every close DOES write is cheap and high-value:
-
-**The resume stub** — `<project>/_summaries/summary-<YYYY-MM-DD>.md` (letter suffix if today already has one), 2–3 lines, the intent-continuity pointer that §Moves (what's queued) and the hot section (where things stand) don't carry:
+Write the full narrative summary to `<project>/_summaries/summary-<YYYY-MM-DD>.md` (letter suffix if today already has one) — **every close, both modes**. The 2026-06-29 spec dropped this to a 2–3-line stub; David reversed that 2026-07-02: the close runs invisibly in the background, so the write costs the user nothing, and a durable narrative is worth more than a stub. Lead with the resume pointer (the part the next agent reads first), then the narrative:
 
 ```markdown
 # Session Summary — <YYYY-MM-DD>
 
 ## Resume here
-[2–3 lines: start here, in this order — e.g. "Mid-pull on X; the next step is Y; Z is blocked on <decision>." The thing a returning agent needs to pick up the thread that the structured surfaces don't say.]
+[2–3 lines: start here, in this order — the intent-continuity pointer that §Moves (what's queued) and the hot section (where things stand) don't carry.]
+
+## What was done
+[What the session actually accomplished vs. what it set out to do.]
+
+## Decisions made
+[Each decision with its unit id. "None" is a fine answer.]
+
+## Open work
+[In-flight work and next steps, consistent with §Moves.]
+
+## Open questions
+[Deferred decisions, unknowns, anything waiting on the user.]
+
+## Honest assessment
+[The one-paragraph Step 1 reflection — what surprised us, what degraded, whether the project is better than we found it.]
 ```
 
-Record op `summary-stub`.
+Scale the narrative to the session: a trivial session gets honest one-liners under each header, not padding. **Compose from this session's transcript, PROJECT.md, and the units written this session — never from prior summaries.** A prior summary is last session's narrative, not current state: the 2026-07-01 headless close copied a stale "WIP" claim out of an old summary and recorded it as current truth (`obs-20260702-headless-task-a-anchored-stale-summary`). That anchoring failure is why this rule exists.
 
-**Full narrative on demand.** When the user asks for a real session writeup, build it from the transcript + git + the units written this session, using the old section set (fresh-eyes assessment, what was done, current state, decisions made, open work, open questions, active risks, read-first, recommended-start). Don't write it every close — it's a request, not a ceremony.
+Record op `session-summary`.
 
-Summaries stay write-only from your perspective — you don't re-read them at bootstrap (anti-resurrection: a summary could resurrect facts the user removed from PROJECT.md after it was written). Future bootstraps load from PROJECT.md and `_memories/`.
+Summaries stay write-only from your perspective — you don't re-read them at bootstrap, and you don't source them when writing new ones (anti-resurrection cuts both ways: a summary could resurrect facts the user removed from PROJECT.md after it was written). Future bootstraps load from PROJECT.md and `_memories/`.
 
 ---
 
@@ -303,6 +316,6 @@ node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs finish <project> --session 
 
 Then declare in plain voice. Concrete shape:
 
-> *"Session closed. Resume stub at `_summaries/summary-<date>.md`. PROJECT.md rendered from current units (edit-detection clean). Hygiene pass complete — N archives, M retires, no cold-stores this pass."*
+> *"Session closed. Summary at `_summaries/summary-<date>.md`. PROJECT.md rendered from current units (edit-detection clean). Hygiene pass complete — N archives, M retires, no cold-stores this pass."*
 
-If anything couldn't be completed, name it explicitly. Don't silently skip a step. Surface the blocker plainly and recommend a next move. **Headless mode:** there's no user reading this turn — write the declaration into the resume stub instead, and leave anything that needs the user (a `render-pending-accept` flag, a Task B concern) for the next startup to raise.
+If anything couldn't be completed, name it explicitly. Don't silently skip a step. Surface the blocker plainly and recommend a next move. **Headless mode:** there's no user reading this turn — fold the declaration into the session summary's honest-assessment section instead, and leave anything that needs the user (a `render-pending-accept` flag, a Task B concern) for the next startup to raise.

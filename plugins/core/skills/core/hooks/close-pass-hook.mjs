@@ -34,16 +34,8 @@ import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { shouldSpawn, isRegisteredWorkspace } from '../scripts/close-pass.mjs';
+import { shouldSpawn, isRegisteredWorkspace, CLOSE_OPS } from '../scripts/close-pass.mjs';
 import { logHookEvent } from './hook-log.mjs';
-
-// The op set the close agent is responsible for. Kept in sync with the close-pass marker
-// (close-pass.mjs STORE_DERIVED) and what /finalize discharges headlessly.
-const CLOSE_OPS = [
-  'maintenance-run', 'render-project-md', 'hot-section', 'demote-moves',
-  'compact-project', 'demote-state', 'check-units', 'reflection-a', 'reflection-b',
-  'metrics', 'summary-stub', 'memory-refresh',
-];
 
 // SessionEnd reasons that are NOT real ends — skip them. `resume` suspends for later
 // resumption; closing then is premature (startup catch-up re-detects on resume).

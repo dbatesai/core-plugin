@@ -256,11 +256,11 @@ export function isRegisteredWorkspace(store, { indexPath = process.env.CORE_CLOS
   });
 }
 
-// The full op set the close envelope is responsible for (kept in sync with close-pass-hook).
+// The full op set the close envelope is responsible for (the hook imports this list — single source).
 export const CLOSE_OPS = [
   'maintenance-run', 'render-project-md', 'hot-section', 'demote-moves',
   'compact-project', 'demote-state', 'check-units', 'reflection-a', 'reflection-b',
-  'metrics', 'summary-stub', 'memory-refresh',
+  'metrics', 'session-summary', 'memory-refresh',
 ];
 
 /**

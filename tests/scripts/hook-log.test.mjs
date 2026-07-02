@@ -104,7 +104,7 @@ test('SessionEnd on a closed store logs reason=nothing-owed (no spurious spawn)'
   writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"t"}');
   const idx = join(store, 'index.json'); // register it so it passes the security gate
   writeFileSync(idx, JSON.stringify([{ workspace_id: 't', path: store }]));
-  const ops = 'maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,summary-stub,memory-refresh';
+  const ops = 'maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,session-summary,memory-refresh';
   execFileSync('node', [CLOSE_PASS, 'begin', store, '--session', 's', '--ops', ops]);
   for (const op of ops.split(',')) execFileSync('node', [CLOSE_PASS, 'record', store, '--op', op, '--status', 'done']);
   execFileSync('node', [CLOSE_PASS, 'finish', store, '--session', 's']);
