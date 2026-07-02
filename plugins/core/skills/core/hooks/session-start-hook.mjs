@@ -16,6 +16,13 @@
  * Opt-out: CORE_AUTOSTART=0 (mirrors CORE_RETRIEVAL_HOOK / CORE_AUTO_CLOSE). A user who wants
  * to invoke /core by hand sets it and gets no injection.
  *
+ * Wrapper seam: CORE_AUTOSTART_SKILL names the skill the directive invokes (default /core).
+ * A wrapper (e.g. BBLens) sets it to its own entry point (/bblens) and inherits this hook —
+ * one guarded mechanism instead of a duplicate wrapper-local one (Crest's 2026-07-02 request;
+ * overlay-not-fork). The value is shape-validated because project .claude/settings.json env
+ * is forwarded into hook subprocesses — an untrusted repo must not be able to inject free
+ * text into the session-start directive. Invalid shape → fall back to /core.
+ *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only. Claude Code SessionStart; Codex has a
  * different session model (harnesses/codex.md) and bootstraps via its own startup mandate.
  *
@@ -27,7 +34,18 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { logHookEvent } from './hook-log.mjs';
 
-const DIRECTIVE = `CORE session protocol: this environment has the CORE project-intelligence plugin installed. Before anything else this session — before answering the user, before any other tool call — invoke the \`/core\` skill. It runs startup routing, loads cross-session project memory, and composes a readiness summary, and it self-deduplicates (it won't re-run if it already ran this session). Run \`/core\` first, then address the user's request.`;
+// Skill-name shape: /name or /plugin:name, lowercase kebab — anything else is not a skill
+// reference and must not reach the directive (env is project-influenceable; see header).
+const SKILL_SHAPE = /^\/[a-z0-9][a-z0-9-]*(:[a-z0-9][a-z0-9-]*)?$/;
+
+export function autostartSkill(env = process.env) {
+  const v = env.CORE_AUTOSTART_SKILL;
+  return v && SKILL_SHAPE.test(v) ? v : '/core';
+}
+
+export function buildDirective(skill) {
+  return `CORE session protocol: this environment has the CORE project-intelligence plugin installed. Before anything else this session — before answering the user, before any other tool call — invoke the \`${skill}\` skill. It runs startup routing, loads cross-session project memory, and composes a readiness summary, and it self-deduplicates (it won't re-run if it already ran this session). Run \`${skill}\` first, then address the user's request.`;
+}
 
 function main() {
   // Recursion guard: the headless close agent (close-pass-hook spawns `claude -p "/finalize"`
@@ -41,8 +59,9 @@ function main() {
     logHookEvent({ hook: 'session-start', action: 'skip', reason: 'opt-out' });
     return 0;
   }
-  process.stdout.write(DIRECTIVE + '\n');
-  logHookEvent({ hook: 'session-start', action: 'inject' });
+  const skill = autostartSkill();
+  process.stdout.write(buildDirective(skill) + '\n');
+  logHookEvent({ hook: 'session-start', action: 'inject', reason: skill === '/core' ? undefined : 'skill=' + skill });
   return 0;
 }
 
