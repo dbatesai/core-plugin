@@ -57,6 +57,33 @@ function scoreUnit(queryTokens, unit) {
 }
 
 /**
+ * Full lexical ranking — every active unit that scores > 0, ranked, ids only.
+ * Same scorer as retrieveContext (title 3x + topics 2x) but WITHOUT the topN slice
+ * or edge expansion, so a caller (the Recall@K harness) can slice at any K. This is
+ * the shipped lexical arm's read path, exposed for offline measurement.
+ * @returns {string[]} ranked unit ids
+ */
+export function lexicalRankedIds(query, storePath) {
+  const root = resolve(storePath);
+  if (!existsSync(join(root, '_memories'))) return [];
+  const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
+  let index;
+  if (existsSync(indexPath)) {
+    try { index = JSON.parse(readFileSync(indexPath, 'utf8')); } catch { index = null; }
+  }
+  if (!index || !Array.isArray(index.units) || index.source_sig === undefined ||
+      index.source_sig !== computeSourceSignature(root)) {
+    index = generateSummaryIndex(root);
+  }
+  const queryTokens = tokenize(query);
+  return index.units
+    .map(u => ({ id: u.id, score: scoreUnit(queryTokens, u) }))
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    .map(s => s.id);
+}
+
+/**
  * @returns {Array<{id, summary, score}>}
  */
 export function retrieveContext(query, storePath, { topN = 3 } = {}) {
