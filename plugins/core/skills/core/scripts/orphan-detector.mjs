@@ -49,6 +49,11 @@ export const ALLOWLIST = Object.freeze({
     allowlistDate: '2026-06-09',
     reviewBy: '2026-09-09',
   },
+  'retrieval-harness.mjs': {
+    reason: 'DC-113 Tier-A T1 offline Recall@K gold harness — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and run manually for Gate 1 (CORE) + by Crest for Gate 2 (BBLens). Wire into the forthcoming stats/validation protocol (the "ways to display stats" surface) when the embedding decision resolves; until then it is a measurement utility like score-ladder.mjs.',
+    allowlistDate: '2026-07-07',
+    reviewBy: '2026-10-07',
+  },
 });
 
 // Back-compat: callers (and older trees) may still pass string-form entries.

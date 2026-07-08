@@ -29,7 +29,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateSummaryIndex } from './generate-summary-index.mjs';
 import { lexicalRankedIds } from './retrieve-context.mjs';
-import { bm25Rank, denseRank, unionRank } from './embed-index.mjs';
+import { bm25Rank, denseRank, unionRank, interleaveRanked } from './embed-index.mjs';
 
 const KS = [5, 10, 30, 100];
 const FORBIDDEN_K = 10; // depth at which a surfaced forbidden id counts as contamination
@@ -99,7 +99,8 @@ function fmt(v) { return v === null || v === undefined ? '  —  ' : v.toFixed(2
 export async function runHarness(store, goldPath) {
   const gold = JSON.parse(readFileSync(goldPath, 'utf8')).queries;
   const arms = {
-    lexical: (q) => lexicalRankedIds(q, store),
+    lexical: (q) => lexicalRankedIds(q, store),                                  // title+topics only (pre-T3 baseline)
+    live: (q) => interleaveRanked(lexicalRankedIds(q, store), bm25Rank(q, store)), // SHIPPED retriever (title ∪ body-BM25)
     bm25: (q) => bm25Rank(q, store),
     dense: (q) => denseRank(q, store),
     union: (q) => unionRank(q, store),

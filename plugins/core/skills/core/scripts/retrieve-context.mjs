@@ -27,6 +27,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { loadUnit, extractEdges } from './priority.mjs';
+import { bm25Rank, interleaveRanked } from './embed-index.mjs';
 
 // Small, conventional English stopword set — enough to stop "the/on/of" from
 // dominating overlap counts. Deliberately not exhaustive (no dependency, DC-80).
@@ -112,13 +113,27 @@ export function retrieveContext(query, storePath, { topN = 3 } = {}) {
   const byId = new Map(units.map(u => [u.id, u]));
   const queryTokens = tokenize(query);
 
-  // Lexical tier.
-  const scored = units
-    .map(u => ({ id: u.id, summary: u.summary, score: scoreUnit(queryTokens, u) }))
+  // Two lexical signals, unioned by rank. The title/topics scorer (scoreUnit) misses
+  // matches that live in the unit BODY; body BM25 catches them. Measured 2026-07-07:
+  // adding the body arm lifts recall@10 ~0.68→0.86 on CORE and rescues the abstract/value
+  // rung on every project store (DC-113 Tier-A T3 — the free, no-dependency half of the
+  // union; the dense arm is added behind the embedding gate).
+  // ponytail: bm25Rank reads unit bodies each turn — fine at hundreds of units (<100ms);
+  // precompute body tokens into the summary index if a store ever grows into the thousands.
+  const titleRanked = units
+    .map(u => ({ id: u.id, score: scoreUnit(queryTokens, u) }))
     .filter(s => s.score > 0)
-    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    .map(s => s.id);
+  let bodyRanked = [];
+  try { bodyRanked = bm25Rank(query, root); } catch { /* body arm optional; title-only fallback */ }
+  const rankedIds = interleaveRanked(titleRanked, bodyRanked);
 
-  const top = scored.slice(0, topN);
+  // Top set in union-rank order; synthetic descending score preserves order in the
+  // final sort while leaving edge-expanded units (below) ranked after.
+  const top = rankedIds.slice(0, topN).map((id, i) => ({
+    id, summary: byId.get(id)?.summary, score: rankedIds.length - i,
+  }));
 
   // One-hop edge expansion from the top lexical hits, at a 0.5x discount. Edges
   // live in the unit files, not the index — read only the top hits (bounded, cheap).

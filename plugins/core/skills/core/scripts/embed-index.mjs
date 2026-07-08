@@ -36,10 +36,28 @@ const OLLAMA_URL = process.env.CORE_OLLAMA_URL || 'http://localhost:11434';
 const EMBED_MODEL = process.env.CORE_EMBED_MODEL || 'nomic-embed-text';
 const CACHE_REL = ['_memories', '_lib', 'embed-index.json'];
 
+/**
+ * Read the active-unit index WITHOUT rewriting it. generateSummaryIndex() writes the
+ * index file as a side effect; calling it from a read path (bm25Rank on every turn)
+ * would rewrite the index each call and defeat the "retrieval stays cheap" invariant.
+ * Read the cache when present; only generate when it's missing. The live retriever
+ * regenerates-when-stale upstream, so the cache bm25 reads here is already fresh.
+ */
+function loadActiveIndex(root) {
+  const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
+  if (existsSync(indexPath)) {
+    try {
+      const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
+      if (idx && Array.isArray(idx.units)) return idx;
+    } catch { /* fall through to generate */ }
+  }
+  return generateSummaryIndex(root);
+}
+
 /** Active unit ids + bodies. Body = unit file minus YAML frontmatter. */
 export function loadActiveBodies(store) {
   const root = resolve(store);
-  const idx = generateSummaryIndex(root); // active-only, retired excluded
+  const idx = loadActiveIndex(root); // active-only, retired excluded; read-cached (no write)
   const out = [];
   for (const u of idx.units) {
     const fpath = join(root, '_memories', `${u.id}.md`);
@@ -182,23 +200,31 @@ export function bm25Rank(query, store, { k1 = 1.5, b = 0.75 } = {}) {
 }
 
 /**
- * UNION of dense and BM25 (not RRF). Interleave the two ranked lists round-robin,
- * dedup — so a unit high on either arm surfaces early. This is the measured recall floor.
+ * Round-robin interleave of N ranked id lists, dedup — so a unit high on ANY input
+ * list surfaces early. This is the UNION combiner (not RRF, which measured as hurting).
+ * Shared by unionRank (dense+bm25) and the live retriever (title + bm25-body).
  */
-export async function unionRank(query, store) {
-  const dense = await denseRank(query, store);
-  const bm25 = bm25Rank(query, store);
-  if (!dense) return bm25;           // embedder absent → BM25 alone
+export function interleaveRanked(...lists) {
   const out = [];
   const seen = new Set();
-  const maxLen = Math.max(dense.length, bm25.length);
+  const maxLen = Math.max(0, ...lists.map(l => l.length));
   for (let i = 0; i < maxLen; i++) {
-    for (const list of [dense, bm25]) {
+    for (const list of lists) {
       const id = list[i];
       if (id && !seen.has(id)) { seen.add(id); out.push(id); }
     }
   }
   return out;
+}
+
+/**
+ * UNION of dense and BM25 (not RRF). This is the measured recall floor.
+ */
+export async function unionRank(query, store) {
+  const dense = await denseRank(query, store);
+  const bm25 = bm25Rank(query, store);
+  if (!dense) return bm25;           // embedder absent → BM25 alone
+  return interleaveRanked(dense, bm25);
 }
 
 function selfTest() {
