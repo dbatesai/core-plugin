@@ -19,9 +19,14 @@
  * Wrapper seam: CORE_AUTOSTART_SKILL names the skill the directive invokes (default /core).
  * A wrapper (e.g. BBLens) sets it to its own entry point (/bblens) and inherits this hook —
  * one guarded mechanism instead of a duplicate wrapper-local one (Crest's 2026-07-02 request;
- * overlay-not-fork). The value is shape-validated because project .claude/settings.json env
- * is forwarded into hook subprocesses — an untrusted repo must not be able to inject free
- * text into the session-start directive. Invalid shape → fall back to /core.
+ * overlay-not-fork). TWO gates, because project .claude/settings.json env is forwarded into
+ * hook subprocesses: (1) shape — the value must look like /name or /plugin:name, so free
+ * text never reaches the injected directive; (2) authority — a non-default skill is honored
+ * only when the USER's ~/.claude/settings.json registers it (CORE_AUTOSTART_SKILL or the
+ * CORE_AUTOSTART_ALLOWED_SKILLS comma list). Shape is not authority: without gate 2 an
+ * untrusted repo could redirect the session's mandated first action to any installed skill
+ * (Hale 2026-07-11 §5). Wrapper install docs: register the entry point in USER settings.
+ * Either gate failing → fall back to /core (and the rejection is hook-logged).
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only. Claude Code SessionStart; Codex has a
  * different session model (harnesses/codex.md) and bootstraps via its own startup mandate.
@@ -30,17 +35,48 @@
  * never block the session opening.
  */
 
-import { realpathSync } from 'node:fs';
+import { realpathSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { logHookEvent } from './hook-log.mjs';
 
 // Skill-name shape: /name or /plugin:name, lowercase kebab — anything else is not a skill
 // reference and must not reach the directive (env is project-influenceable; see header).
 const SKILL_SHAPE = /^\/[a-z0-9][a-z0-9-]*(:[a-z0-9][a-z0-9-]*)?$/;
 
-export function autostartSkill(env = process.env) {
+/**
+ * User-scope authorization for a wrapper autostart skill. Shape alone is not
+ * authority: project .claude/settings.json env is forwarded into hook subprocesses,
+ * so an untrusted repo could otherwise redirect the session's mandated first action
+ * to ANY installed skill (Hale 2026-07-11 §5). A non-default skill is honored only
+ * when the USER's own settings file registers it — either as the same
+ * CORE_AUTOSTART_SKILL value or in a CORE_AUTOSTART_ALLOWED_SKILLS comma list.
+ * Unreadable/absent user settings → not authorized (fail closed to /core).
+ */
+export function userAuthorizedSkills(readFile = readFileSync, home = homedir()) {
+  try {
+    const settings = JSON.parse(readFile(join(home, '.claude', 'settings.json'), 'utf8'));
+    const env = settings.env || {};
+    const out = new Set();
+    if (env.CORE_AUTOSTART_SKILL) out.add(String(env.CORE_AUTOSTART_SKILL));
+    for (const s of String(env.CORE_AUTOSTART_ALLOWED_SKILLS || '').split(',')) {
+      if (s.trim()) out.add(s.trim());
+    }
+    return out;
+  } catch { return new Set(); }
+}
+
+export function autostartSkill(env = process.env, authorized = null) {
   const v = env.CORE_AUTOSTART_SKILL;
-  return v && SKILL_SHAPE.test(v) ? v : '/core';
+  if (!v || v === '/core') return '/core';
+  if (!SKILL_SHAPE.test(v)) return '/core';                       // not a skill reference
+  const allow = authorized ?? userAuthorizedSkills();
+  if (!allow.has(v)) {
+    logHookEvent({ hook: 'session-start', action: 'reject-autostart-skill', reason: 'not-user-authorized:' + v });
+    return '/core';                                               // shape ≠ authority
+  }
+  return v;
 }
 
 export function buildDirective(skill) {

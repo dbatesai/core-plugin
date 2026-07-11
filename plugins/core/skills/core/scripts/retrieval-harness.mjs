@@ -7,10 +7,15 @@
  * offline — the arm functions are the shipped read paths, so the number reflects real
  * behavior, not a more-generous simulation.
  *
- * Arms: lexical (title+topics, the pre-T3 baseline), live (the SHIPPED title ∪ body-BM25
- * union), bm25 (body only). Dense/union arms were removed with the ollama embedder per
- * DC-114 (no local models); dense measurement, if it returns, is a pinned-embedder
- * ceremony arm (DC-115), not shipped plugin code.
+ * Arms: lexical (title+topics, the pre-T3 baseline), live (productRankedIds — the SAME
+ * function retrieveContext ranks with, so this arm IS the product path, Gate-0 identity),
+ * bm25 (body only). Dense/union arms were removed with the ollama embedder per DC-114
+ * (no local models); dense measurement, if it returns, is a pinned-embedder ceremony
+ * arm (DC-115), not shipped plugin code. Note the live arm measures the product RANKING;
+ * retrieveContext's one-hop edge expansion + topN slice sit above it and are covered by
+ * unit tests (edge-bearing fixture), not by Recall@K — an edge unit isn't a gold answer.
+ * Every run emits a provenance manifest (plugin version, gold sha256, corpus signature,
+ * arm params, p50 latency) and raw per-query top-30 ranks in --json.
  *
  * Corpus-normalization (Crest's 2026-07-07 "retrieval is not corpus-portable" finding):
  * every run prints store size, K-as-fraction-of-store, and the unit-type mix, and the
@@ -27,11 +32,12 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { generateSummaryIndex } from './generate-summary-index.mjs';
-import { lexicalRankedIds } from './retrieve-context.mjs';
-import { bm25Rank, interleaveRanked } from './bm25.mjs';
+import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
+import { lexicalRankedIds, productRankedIds } from './retrieve-context.mjs';
+import { bm25Rank } from './bm25.mjs';
 
 const KS = [5, 10, 30, 100];
 const FORBIDDEN_K = 10; // depth at which a surfaced forbidden id counts as contamination
@@ -99,21 +105,52 @@ export function unitTypeMix(store) {
 function fmt(v) { return v === null || v === undefined ? '  —  ' : v.toFixed(2); }
 
 export async function runHarness(store, goldPath) {
-  const gold = JSON.parse(readFileSync(goldPath, 'utf8')).queries;
+  const goldRaw = readFileSync(goldPath, 'utf8');
+  const gold = JSON.parse(goldRaw).queries;
   const arms = {
-    lexical: (q) => lexicalRankedIds(q, store),                                  // title+topics only (pre-T3 baseline)
-    live: (q) => interleaveRanked(lexicalRankedIds(q, store), bm25Rank(q, store)), // SHIPPED retriever (title ∪ body-BM25)
+    lexical: (q) => lexicalRankedIds(q, store),   // title+topics only (pre-T3 baseline)
+    live: (q) => productRankedIds(q, store),      // THE product ranking — the same function retrieveContext ranks with (Gate-0 identity)
     bm25: (q) => bm25Rank(q, store),
   };
   const results = {};
-  for (const [name, ranker] of Object.entries(arms)) results[name] = await scoreArm(ranker, gold);
+  const rawRanks = {};   // per-arm, per-query top-30 — raw evidence, never omitted from --json
+  const latency = {};    // per-arm p50 ms over the gold queries
+  for (const [name, ranker] of Object.entries(arms)) {
+    results[name] = await scoreArm(ranker, gold);
+    const times = [];
+    rawRanks[name] = {};
+    for (const q of gold) {
+      const t0 = process.hrtime.bigint();
+      let ranked;
+      try { ranked = await ranker(q.query); } catch { ranked = null; }
+      times.push(Number(process.hrtime.bigint() - t0) / 1e6);
+      rawRanks[name][q.id] = ranked === null ? null : ranked.slice(0, 30);
+    }
+    times.sort((a, b) => a - b);
+    latency[name] = { p50_ms: +(times[Math.floor(times.length / 2)] || 0).toFixed(1) };
+  }
   const { total, mix } = unitTypeMix(store);
-  return { store: resolve(store), total, mix, nQueries: gold.length, gold, results };
+  // Provenance manifest (Gate 0): a number without these fields is not a baseline.
+  let pluginVersion = null;
+  try {
+    pluginVersion = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8')).version;
+  } catch { /* dev tree layouts vary; version stays null rather than guessed */ }
+  const manifest = {
+    plugin_version: pluginVersion,
+    entry_point: 'retrieval-harness.mjs → productRankedIds (product path)',
+    gold_path: resolve(goldPath),
+    gold_sha256: createHash('sha256').update(goldRaw).digest('hex'),
+    corpus_sig_sha256: createHash('sha256').update(computeSourceSignature(store)).digest('hex'),
+    arm_params: { bm25: { k1: 1.5, b: 0.75 } },
+  };
+  return { store: resolve(store), manifest, latency, total, mix, nQueries: gold.length, gold, rawRanks, results };
 }
 
 function renderText(out) {
   const lines = [];
   lines.push(`\nRetrieval Recall@K — ${out.store}`);
+  lines.push(`plugin: v${out.manifest.plugin_version ?? 'unresolved'} · gold sha256 ${out.manifest.gold_sha256.slice(0, 12)}… · corpus sig ${out.manifest.corpus_sig_sha256.slice(0, 12)}… · live arm = product path (productRankedIds)`);
+  lines.push(`latency p50: ${Object.entries(out.latency).map(([a, l]) => `${a} ${l.p50_ms}ms`).join(' · ')}`);
   lines.push(`store: ${out.total} active units · gold: ${out.nQueries} queries`);
   lines.push(`unit-type mix: ${Object.entries(out.mix).map(([t, n]) => `${t}:${n}`).join(' ')}`);
   lines.push(`K as fraction of store: ${KS.map(k => `${k}=${(k / out.total * 100).toFixed(0)}%`).join('  ')}  (Crest: compare a corpus to itself, not cross-corpus raw)`);
@@ -145,8 +182,9 @@ async function main(argv) {
   const jsonIdx = argv.indexOf('--json');
   if (jsonIdx >= 0) {
     const p = argv[jsonIdx + 1];
-    const { gold, ...slim } = out;
-    writeFileSync(p, JSON.stringify(slim, null, 2));
+    // Full payload on purpose: gold + rawRanks + manifest are the evidence trail —
+    // a JSON report that strips them can't be independently re-scored (Hale 2026-07-11).
+    writeFileSync(p, JSON.stringify(out, null, 2));
     process.stdout.write(`\njson: ${p}\n`);
   }
   return 0;

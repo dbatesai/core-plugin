@@ -14,9 +14,11 @@ At session start, `<project>/PROJECT.md` and `~/.core/dm-profile.md` are read. F
 
 **When to escalate:** The question references a fact or unit not visible in PROJECT.md or recently-read files.
 
-### Tier 1 — Lexical (Grep)
+### Tier 1 — Lexical
 
-`Grep` over `<project>/_memories/` for keywords, topic tags, or frontmatter fields. Optionally `Glob` to narrow file lists. Read the matched files. Sub-second on directory trees of hundreds-to-thousands of units.
+**Preferred: the shipped product retriever.** `retrieve-context.mjs` ranks every active unit — nested trees included — by title/topics overlap ∪ body BM25 (magnitudes preserved, per-arm normalized), then one-hop edge expansion; the per-turn hook injects its top matches automatically. For an explicit query: `node retrieve-context.mjs <store> "<query>" [--top N]`, or `node bm25.mjs <store> rank "<query>"` for the body arm alone. Every result carries its authority tier (canonical vs raw observation).
+
+**Manual fallback:** `Grep` over `<project>/_memories/` for keywords, topic tags, or frontmatter fields. Optionally `Glob` to narrow file lists. Read the matched files. Sub-second on directory trees of hundreds-to-thousands of units.
 
 **Standard patterns:**
 

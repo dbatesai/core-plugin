@@ -1,49 +1,39 @@
 /**
- * retrieve-context.mjs — deterministic per-turn retrieval (DC-94a).
+ * retrieve-context.mjs — deterministic per-turn retrieval (DC-94a; v3.11 product path).
  *
  * Given a query and a store, return the top-N most relevant active units as
- * {id, summary, score}. Pure lexical + one-hop edge expansion — no LLM call, so it
- * is cheap enough to run on every turn from a shell hook (Task 9). This is the
- * "retrieve the right thing" half of the north-star: the literal/lexical tier.
- * Abstract matches (value→instance) that lexical can't bridge are the Task 10
- * reasoning prototype's job; the obligation-3 ladder measures the gap between them.
+ * {id, summary, tier, score}. Model-free (DC-114) and cheap enough to run on every
+ * turn from a shell hook. This is the "retrieve the right thing" half of the
+ * north-star: the literal/lexical tier. Abstract matches (value→instance) that
+ * lexical can't bridge are the reasoning tier's job; the obligation-3 ladder
+ * measures the gap between them.
  *
- * Scoring: tokenize the query and each unit's title+topics+summary, count term
- * overlap weighted (title 3x, topics 2x, summary 1x), sort desc, take topN, then
- * one-hop edge expansion — pull the edge-targets of the top lexical hits in at a
- * 0.5x discount (they're context-adjacent even when they don't lexically match).
+ * Ranking (productRankedScores — THE product function; the measurement harness's
+ * `live` arm calls the same code): two magnitude arms — title/topics term overlap
+ * (title 3x, topics 2x) and body BM25 (bm25.mjs) — each normalized by its own max,
+ * combined per unit as the max of the two. Then one-hop edge expansion from the
+ * top hits at a 0.5x discount on the parent's normalized score, competing in the
+ * final sort (a neighbor of a strong hit can beat a weak direct hit — DC-94a).
  *
- * Reads the compact index from generate-summary-index.mjs (_lib/unit-summaries.json),
- * generating it if missing. Edge data isn't in the index, so edge expansion reads the
- * top-hit unit files directly (bounded to the top lexical hits — cheap).
+ * Reads the recursive path-bearing index via loadFreshIndex (freshness validated
+ * every call). Edge data isn't in the index, so expansion reads the top-hit unit
+ * files directly, resolved through the index's per-unit path (nested units included).
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  *
  * CLI: node retrieve-context.mjs <storePath> "<query>" [--top N]
  */
 
-import { readFileSync, existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
+import { loadFreshIndex } from './generate-summary-index.mjs';
 import { loadUnit, extractEdges } from './priority.mjs';
-import { bm25Rank, interleaveRanked } from './bm25.mjs';
+import { bm25Scores, tokenize, STOPWORDS } from './bm25.mjs';
 
-// Small, conventional English stopword set — enough to stop "the/on/of" from
-// dominating overlap counts. Deliberately not exhaustive (no dependency, DC-80).
-export const STOPWORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'for', 'with',
-  'is', 'are', 'was', 'were', 'be', 'been', 'it', 'its', 'this', 'that', 'these', 'those',
-  'as', 'by', 'from', 'into', 'about', 'our', 'we', 'i', 'you', 'he', 'she', 'they',
-  'what', 's', 'whats',
-]);
-
-export function tokenize(text) {
-  return String(text || '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(t => t && !STOPWORDS.has(t));
-}
+// The tokenizer moved to bm25.mjs (v3.11 remediation — breaks the retrieve-context ⇄
+// bm25 import cycle Hale flagged). Re-exported here so existing importers keep working.
+export { tokenize, STOPWORDS };
 
 function scoreUnit(queryTokens, unit) {
   // unit.summary doubles as the title proxy (it's the H1). topics weighted between.
@@ -67,21 +57,63 @@ function scoreUnit(queryTokens, unit) {
 export function lexicalRankedIds(query, storePath) {
   const root = resolve(storePath);
   if (!existsSync(join(root, '_memories'))) return [];
-  const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
-  let index;
-  if (existsSync(indexPath)) {
-    try { index = JSON.parse(readFileSync(indexPath, 'utf8')); } catch { index = null; }
-  }
-  if (!index || !Array.isArray(index.units) || index.source_sig === undefined ||
-      index.source_sig !== computeSourceSignature(root)) {
-    index = generateSummaryIndex(root);
-  }
+  const index = loadFreshIndex(root);
   const queryTokens = tokenize(query);
   return index.units
     .map(u => ({ id: u.id, score: scoreUnit(queryTokens, u) }))
     .filter(s => s.score > 0)
     .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
     .map(s => s.id);
+}
+
+/**
+ * productRankedScores — THE product ranking. One function, called by the live
+ * retriever (retrieveContext), the per-turn hook (through retrieveContext), and the
+ * measurement harness's `live` arm — so a harness number describes what actually
+ * ships (Gate-0 product/harness identity, Hale 2026-07-11 §2).
+ *
+ * Scoring: two lexical arms produce MAGNITUDE scores — the title/topics overlap
+ * scorer and body BM25. Each arm is normalized by its own maximum (scale-free), and
+ * a unit's combined score is the max of its normalized arm scores. Magnitudes are
+ * preserved (not flattened to rank positions) because the one-hop edge discount
+ * needs ratios: "a neighbor of a STRONG hit beats a WEAK direct hit" is only
+ * expressible when 0.5 × parent-strength can exceed another unit's strength — the
+ * v3.10 semantic the synthetic rank scores broke (Hale 2026-07-11 §3).
+ *
+ * @returns {Array<{id, tier, score}>} every unit scoring > 0 on either arm, sorted
+ *   desc by combined normalized score (ties by id), score ∈ (0, 1].
+ */
+export function productRankedScores(query, storePath, preloadedIndex = null) {
+  const root = resolve(storePath);
+  if (!existsSync(join(root, '_memories'))) return [];
+  const index = preloadedIndex || loadFreshIndex(root);
+  const queryTokens = tokenize(query);
+
+  const combined = new Map(); // id -> {id, tier, score}
+  const titleScored = index.units
+    .map(u => ({ id: u.id, tier: u.tier || 'canonical', score: scoreUnit(queryTokens, u) }))
+    .filter(s => s.score > 0);
+  const titleMax = Math.max(0, ...titleScored.map(s => s.score));
+  for (const s of titleScored) {
+    combined.set(s.id, { id: s.id, tier: s.tier, score: s.score / titleMax });
+  }
+
+  let bodyScored = [];
+  try { bodyScored = bm25Scores(query, root); } catch { /* body arm optional; title-only fallback */ }
+  const bodyMax = Math.max(0, ...bodyScored.map(s => s.score));
+  for (const s of bodyScored) {
+    const norm = s.score / bodyMax;
+    const prev = combined.get(s.id);
+    if (!prev || norm > prev.score) combined.set(s.id, { id: s.id, tier: s.tier, score: norm });
+  }
+
+  return [...combined.values()]
+    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+}
+
+/** Ranked id list of productRankedScores — the product-path arm for offline measurement. */
+export function productRankedIds(query, storePath) {
+  return productRankedScores(query, storePath).map(s => s.id);
 }
 
 /**
@@ -94,53 +126,35 @@ export function retrieveContext(query, storePath, { topN = 3 } = {}) {
   // index would mkdir -p _memories/_lib and litter unit-summaries.json into an
   // unrelated repo. No store, no retrieval, no side effect.
   if (!existsSync(join(root, '_memories'))) return [];
-  const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
-  let index;
-  if (existsSync(indexPath)) {
-    try { index = JSON.parse(readFileSync(indexPath, 'utf8')); } catch { index = null; }
-  }
-  // Regenerate when missing, corrupt, or STALE. Staleness = the source signature no
-  // longer matches the store's current units (added / deleted / edited-in-place,
-  // including a retire). Reusing a stale index lingered retired/deleted units in the
-  // retrieval surface — an anti-resurrection hole (DC-94b R1). A pre-signature index
-  // (no source_sig) is treated as stale so it gets re-stamped once.
-  if (!index || !Array.isArray(index.units) || index.source_sig === undefined ||
-      index.source_sig !== computeSourceSignature(root)) {
-    index = generateSummaryIndex(root);
-  }
+  // loadFreshIndex validates the recursive source signature on every call —
+  // missing, corrupt, or stale (added/deleted/edited/retired unit, top-level OR
+  // nested) regenerates. A stale index lingering retired units in the retrieval
+  // surface is the anti-resurrection hole (DC-94b R1).
+  const index = loadFreshIndex(root);
+  const byId = new Map(index.units.map(u => [u.id, u]));
 
-  const units = index.units;
-  const byId = new Map(units.map(u => [u.id, u]));
-  const queryTokens = tokenize(query);
+  // The product ranking: title/topics ∪ body-BM25, magnitudes preserved via
+  // per-arm max-normalization (see productRankedScores). Measured 2026-07-07,
+  // dev-set: the body arm lifts recall@10 ~0.68→0.86 on CORE and rescues the
+  // abstract/value rung (DC-113 Tier-A T3, model-free per DC-114).
+  const scored = productRankedScores(query, root, index);
 
-  // Two lexical signals, unioned by rank. The title/topics scorer (scoreUnit) misses
-  // matches that live in the unit BODY; body BM25 catches them. Measured 2026-07-07:
-  // adding the body arm lifts recall@10 ~0.68→0.86 on CORE and rescues the abstract/value
-  // rung on every project store (DC-113 Tier-A T3 — the free, no-dependency half of the
-  // union; the dense arm is added behind the embedding gate).
-  // ponytail: bm25Rank reads unit bodies each turn — fine at hundreds of units (<100ms);
-  // precompute body tokens into the summary index if a store ever grows into the thousands.
-  const titleRanked = units
-    .map(u => ({ id: u.id, score: scoreUnit(queryTokens, u) }))
-    .filter(s => s.score > 0)
-    .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
-    .map(s => s.id);
-  let bodyRanked = [];
-  try { bodyRanked = bm25Rank(query, root); } catch { /* body arm optional; title-only fallback */ }
-  const rankedIds = interleaveRanked(titleRanked, bodyRanked);
-
-  // Top set in union-rank order; synthetic descending score preserves order in the
-  // final sort while leaving edge-expanded units (below) ranked after.
-  const top = rankedIds.slice(0, topN).map((id, i) => ({
-    id, summary: byId.get(id)?.summary, score: rankedIds.length - i,
+  const top = scored.slice(0, topN).map(s => ({
+    id: s.id, summary: byId.get(s.id)?.summary, tier: s.tier, score: s.score,
   }));
 
-  // One-hop edge expansion from the top lexical hits, at a 0.5x discount. Edges
-  // live in the unit files, not the index — read only the top hits (bounded, cheap).
+  // One-hop edge expansion from the top hits, at a 0.5x discount on the parent's
+  // normalized score — so a neighbor of a strong hit COMPETES with (and can beat)
+  // weak direct hits in the final ranking, the DC-94a semantic the synthetic rank
+  // scores of the first union rewrite broke (regression caught by Hale 2026-07-11;
+  // edge-bearing fixture now guards it). Edges live in the unit files, not the
+  // index — read only the top hits (bounded, cheap), resolved via the index PATH
+  // (never `_memories/<id>.md`, which is wrong for nested units).
   const seen = new Set(top.map(t => t.id));
   const expanded = [];
   for (const hit of top) {
-    const unitPath = join(root, '_memories', `${hit.id}.md`);
+    const rel = byId.get(hit.id)?.path;
+    const unitPath = join(root, '_memories', ...(rel ? rel.split('/') : [`${hit.id}.md`]));
     if (!existsSync(unitPath)) continue;
     let edges;
     try { edges = extractEdges(loadUnit(unitPath)); } catch { continue; }
@@ -150,7 +164,7 @@ export function retrieveContext(query, storePath, { topN = 3 } = {}) {
       const target = byId.get(targetId); // only active units are in the index
       if (!target) continue;             // retired/missing target → skip (anti-resurrection)
       seen.add(targetId);
-      expanded.push({ id: target.id, summary: target.summary, score: hit.score * 0.5 });
+      expanded.push({ id: target.id, summary: target.summary, tier: target.tier, score: hit.score * 0.5 });
     }
   }
 

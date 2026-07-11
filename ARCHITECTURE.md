@@ -125,7 +125,7 @@ The full multi-agent machinery — phase structure, briefing format, monitor pat
 
 ## Hooks and visible curation
 
-The plugin ships no hooks — `plugins/core/hooks/hooks.json` is empty, and installing CORE never edits your settings. Two hooks pair well with CORE; wire either into your own `~/.claude/settings.json` (INSTALL.md §"Optional hooks" shows how):
+The plugin ships three lifecycle hooks in `plugins/core/hooks/hooks.json` — SessionStart (auto-`/core`; a wrapper entry point is honored only when registered in the user's own settings, never from a project's), UserPromptSubmit (per-turn retrieval injection, default-on, `CORE_RETRIEVAL_HOOK=0` opts out), and SessionEnd (the self-managed close). INSTALL.md §"Shipped hooks" lists each with its opt-out. Two further hooks pair well with CORE; wire either into your own `~/.claude/settings.json` (INSTALL.md §"Optional hooks" shows how):
 
 | Hook | What it does |
 |---|---|

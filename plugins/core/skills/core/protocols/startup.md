@@ -126,10 +126,10 @@ After any Tier 1+ retrieval during startup, write one retrieval-shaped row with 
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["<actual-topic-1>","<actual-topic-2>"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"<unit-id-actually-retrieved>","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200,"usefulness_outcome":"useful"}'
+node "${CORE_ROOT}/skills/core/scripts/record-retrieval-event.mjs" <project> --event-json '{"trigger":"session-start","intent_topics":["<actual-topic-1>","<actual-topic-2>"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"<unit-id-actually-retrieved>","tier":1}],"dip_back_count":0,"candidate_count":8,"selected_count":1,"edge_count":0,"retired_suppressed_count":0,"stale_suppressed_count":0,"native_memory_suppressed_count":0,"context_pack_token_estimate":1200}'
 ```
 
-Tier 0 in-context reuse does not need a retrieval row.
+Tier 0 in-context reuse does not need a retrieval row. Do NOT stamp a usefulness judgment at retrieval time — whether a retrieved unit actually helped is a later, separate fact (the offered → exposed → attributed → outcome ladder); a usefulness field filled at retrieval time is self-graded homework at the wrong instant.
 
 **Skip these surfaces at bootstrap:**
 - Session summaries in `<project>/_summaries/` (or legacy `_handoffs/` if the rename hasn't happened yet). They're narrative for the human reader. Facts worth keeping were already in PROJECT.md or the units at session close. Re-reading summaries re-anchors you on narrative framing and can resurrect user-deleted facts.
@@ -306,7 +306,7 @@ node "${CORE_ROOT}/skills/core/scripts/check-context-integrity.mjs" \
   --project <project>/PROJECT.md --project-read-lines <lines-read> || true
 ```
 
-**Per-turn retrieval (DC-94a, opt-in — Gate G2).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`) over the incoming prompt and injects the top matches. It ships **default-off**: a no-op unless `CORE_RETRIEVAL_HOOK=1`, and it is deliberately not registered in the plugin manifest. Whether per-turn injection becomes default-on (and the top-N) is David's call on the Task 11 precision evidence; until then a user opts in by wiring it as a `UserPromptSubmit` hook in their own settings (the script header documents the exact form).
+**Per-turn retrieval (DC-94a — Gate G2 resolved: default-ON, opt-out).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`, title ∪ body-BM25 over the recursive path-bearing index, one-hop edge expansion) over the incoming prompt and injects the top matches. It is **registered in the plugin manifest** (`hooks/hooks.json`, UserPromptSubmit) and ships **default-on**; opt out with `CORE_RETRIEVAL_HOOK=0` (mirrors the DC-107 metrics opt-out). Known limit (DC-111): lexical matching can inject a topical-but-irrelevant unit on an abstract query — bounded (byte-capped, advisory, fail-open).
 
 Read the output. When **any row is non-PASS**, narrate in plain voice:
 

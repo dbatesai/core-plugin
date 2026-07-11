@@ -8,6 +8,14 @@
  * Scores precision + recall against expected/forbidden unit lists
  * Writes report to <project-path>/_outputs/validation/<date>/REPORT.md
  *
+ * NOT-PRODUCT-PATH (labeled per the v3.11 evaluation contract): this simulator is
+ * its own term-density scorer with negation handling — it is NOT the shipped
+ * retriever (`retrieve-context.mjs` productRankedScores, title ∪ body-BM25). Its
+ * results are retrieval-health diagnostics; they must never be cited as product
+ * baselines or used to clear a release gate. The migration to the product ranking
+ * (which would change historical validation comparability) is a ceremony-scoped
+ * decision, deliberately not smuggled in with the v3.11 remediation.
+ *
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 

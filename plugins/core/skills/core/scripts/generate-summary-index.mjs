@@ -1,10 +1,22 @@
 /**
  * generate-summary-index.mjs — build <store>/_memories/_lib/unit-summaries.json,
- * one compact { id, summary, topics, status, updated } record per ACTIVE unit.
+ * one compact { id, path, type, tier, summary, topics, status, updated } record per
+ * ACTIVE unit, walked RECURSIVELY (v3.11 premise: index every eligible note; nested
+ * trees like observations/<YYYY-MM>/ are part of the retrieval population).
+ *
+ * Each record carries `path` (relative to _memories/, forward slashes) — consumers
+ * (bm25.mjs bodies, retrieve-context.mjs edge expansion) MUST resolve files through
+ * it and never reconstruct `_memories/<id>.md`, which is wrong for nested units.
+ * `tier` labels authority ('observation' for raw capture, 'canonical' otherwise) so
+ * retrieval results never flatten raw observations into graduated truth unlabeled
+ * (Hale 2026-07-11 §2). Tier is a label on every result; ranking policy between
+ * tiers is a ceremony question, decided on measurement, not hardcoded here.
  *
  * The shared compact index behind DC-94a retrieval (retrieve-context.mjs) and the
  * DC-94b abstract-relevance prototype (select-relevant-units.mjs). One responsibility:
- * render the index. No scoring, no retrieval — those read this file.
+ * render the index. No scoring, no retrieval — those read this file. loadFreshIndex()
+ * below is the ONE validating loader every consumer uses (freshness on every call —
+ * a stale index resurrecting a retired unit is an anti-resurrection breach).
  *
  * Parser choice (DC-94a, deviates from the build plan on purpose): the plan named
  * frontmatter-flat.mjs, but that flat parser silently DROPS multi-line `topics:` lists
@@ -19,7 +31,7 @@
  *   node generate-summary-index.mjs --store <storePath>
  */
 
-import { readdirSync, statSync, mkdirSync, realpathSync } from 'node:fs';
+import { readdirSync, statSync, mkdirSync, realpathSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadUnit, isInvalidated } from './priority.mjs';
@@ -34,30 +46,81 @@ function isCandidateName(name) {
   return name.endsWith('.md') && !name.startsWith('_') && !name.startsWith('INDEX');
 }
 
+// Directories the recursive walk descends into: anything not starting with `_`
+// (skips _lib, _validation) — same convention as the file filter.
+function isCandidateDir(name) {
+  return !name.startsWith('_');
+}
+
+/**
+ * Recursive candidate-file walk. Returns [{ rel, full, mtimeMs }] where `rel` is the
+ * path relative to _memories/ with forward slashes on every platform (the index's
+ * `path` field and the signature both use it, so the two stay in lockstep).
+ * Deterministic order (sorted per directory level).
+ */
+function walkCandidateFiles(memoriesDir) {
+  const out = [];
+  const walkDir = (dir, relPrefix) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const e of entries) {
+      if (e.isDirectory()) {
+        if (isCandidateDir(e.name)) walkDir(join(dir, e.name), relPrefix + e.name + '/');
+        continue;
+      }
+      if (!e.isFile() || !isCandidateName(e.name)) continue;
+      const full = join(dir, e.name);
+      let st;
+      try { st = statSync(full); } catch { continue; }
+      out.push({ rel: relPrefix + e.name, full, mtimeMs: st.mtimeMs });
+    }
+  };
+  walkDir(memoriesDir, '');
+  return out;
+}
+
 /**
  * computeSourceSignature — a cheap freshness fingerprint of the store's source units.
- * Sorted `name:mtimeMs` over candidate files; NO frontmatter parsing, so it's safe to
- * run on every retrieval. Changes when a unit is added, deleted, or edited in place
- * (including a retire, which bumps the file's mtime) — the three cases that must
- * invalidate the cached index. Tradeoff (DC-94b R1): a cloud-sync touch that bumps
- * mtime without a content change triggers one benign regen — cheaper than hashing
- * every file's content on every turn, and the regen is atomic + idempotent.
+ * Sorted `relpath:mtimeMs` over candidate files, RECURSIVE (a nested observation's
+ * edit must invalidate the cache exactly like a top-level unit's — a flat signature
+ * over a recursive index would go silently stale). NO frontmatter parsing, so it's
+ * safe to run on every retrieval. Changes when a unit is added, deleted, or edited
+ * in place (including a retire, which bumps the file's mtime) — the three cases that
+ * must invalidate the cached index. Tradeoff (DC-94b R1): a cloud-sync touch that
+ * bumps mtime without a content change triggers one benign regen — cheaper than
+ * hashing every file's content on every turn, and the regen is atomic + idempotent.
  * @returns {string}
  */
 export function computeSourceSignature(storePath) {
   const memoriesDir = join(resolve(storePath), '_memories');
-  let entries;
-  try { entries = readdirSync(memoriesDir); } catch { return ''; }
-  const parts = [];
-  for (const name of entries) {
-    if (!isCandidateName(name)) continue;
-    let st;
-    try { st = statSync(join(memoriesDir, name)); } catch { continue; }
-    if (!st.isFile()) continue;
-    parts.push(`${name}:${st.mtimeMs}`);
+  return walkCandidateFiles(memoriesDir).map(f => `${f.rel}:${f.mtimeMs}`).sort().join('|');
+}
+
+/**
+ * loadFreshIndex — THE validating index loader. Reads the cached index when its
+ * source_sig matches the store's current recursive signature; regenerates otherwise.
+ * Every consumer (retrieve-context, bm25, select-relevant-units, the harness) loads
+ * through this, so no public entry point can serve a stale index — the standalone
+ *-bm25Rank-resurrects-a-retired-unit defect (Hale 2026-07-11 §4) is closed here,
+ * at the loader, not per-caller.
+ */
+export function loadFreshIndex(storePath) {
+  const root = resolve(storePath);
+  const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
+  if (existsSync(indexPath)) {
+    try {
+      const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
+      if (idx && Array.isArray(idx.units) && idx.source_sig !== undefined &&
+          idx.source_sig === computeSourceSignature(root) &&
+          // A pre-v3.11 cache (no per-unit path) must regenerate once so path-driven
+          // consumers never fall back to reconstructing top-level-only locations.
+          (idx.units.length === 0 || idx.units[0].path !== undefined)) {
+        return idx;
+      }
+    } catch { /* fall through to regenerate */ }
   }
-  parts.sort();
-  return parts.join('|');
+  return generateSummaryIndex(root);
 }
 
 // First `# ` heading stripped, else first non-blank non-heading line. Mirrors
@@ -92,33 +155,40 @@ function asTopicList(topics) {
   return [String(topics)];
 }
 
+// Authority tier from the unit's declared type (fallback: filename prefix). Raw
+// capture (observations) is a lower-authority recall channel than graduated units;
+// the tier travels with every index record so no retrieval surface can flatten them.
+function authorityTier(fm, rel) {
+  const typ = String(fm.type || '').toLowerCase();
+  if (typ === 'observation') return 'observation';
+  if (!typ && /(^|\/)obs-/.test(rel)) return 'observation';
+  return 'canonical';
+}
+
 export function generateSummaryIndex(storePath) {
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
   const units = [];
-  let entries;
-  try {
-    entries = readdirSync(memoriesDir);
-  } catch {
-    entries = [];
-  }
-  for (const name of entries) {
-    if (!name.endsWith('.md')) continue;
-    if (name.startsWith('_') || name.startsWith('INDEX')) continue; // skip _lib, _validation, indexes
-    const full = join(memoriesDir, name);
-    let st;
-    try { st = statSync(full); } catch { continue; }
-    if (!st.isFile()) continue;
+  const seenIds = new Map(); // id -> rel path that claimed it (first wins, sorted walk)
+  for (const f of walkCandidateFiles(memoriesDir)) {
     let unit;
-    try { unit = loadUnit(full); } catch { continue; }
+    try { unit = loadUnit(f.full); } catch { continue; }
     const fm = unit.fm || {};
     if (!isActive(fm)) continue;
     // Also exclude units whose validity dimension is invalid as of now — the
     // status check alone missed a `status: active` unit with a past t_invalid,
     // which then leaked into per-turn retrieval (the read path this index feeds).
     if (isInvalidated(unit, now)) continue;
+    if (seenIds.has(unit.id)) {
+      process.stderr.write(`warn: duplicate unit id '${unit.id}' at ${f.rel} — first occurrence (${seenIds.get(unit.id)}) kept, this file excluded from the index\n`);
+      continue;
+    }
+    seenIds.set(unit.id, f.rel);
     units.push({
       id: unit.id,
+      path: f.rel,
+      type: String(fm.type || ''),
+      tier: authorityTier(fm, f.rel),
       summary: truncate(deriveSummary(unit.body || '')),
       topics: asTopicList(fm.topics),
       status: fm.status === undefined ? 'active' : String(fm.status),

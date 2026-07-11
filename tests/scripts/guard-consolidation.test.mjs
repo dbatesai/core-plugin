@@ -57,7 +57,9 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // bugs (one-sided canonicalization). Freeze the count; a shared isCliEntry() helper
   // is the fix.
   const n = countMatching(/import\.meta\.url/);
-  // Baseline 46 → 48 (2026-07-07): two genuinely-new DC-113 CLI tools (embed-index.mjs,
-  // retrieval-harness.mjs), not copy-paste twins. Still target one shared isCliEntry() helper.
+  // Baseline 46 → 48 (2026-07-07): two genuinely-new CLI tools, not copy-paste twins.
+  // (2026-07-11: embed-index.mjs deleted per DC-114; bm25.mjs replaced it one-for-one,
+  // so the 48 ceiling stands re-evaluated, not by accident.) Still target one shared
+  // isCliEntry() helper.
   assert.ok(n <= 48, `CLI-entry-guard occurrences grew past baseline 48 (target: one shared helper): ${n}`);
 });
