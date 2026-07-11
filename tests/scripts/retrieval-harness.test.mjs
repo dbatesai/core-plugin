@@ -8,7 +8,7 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
 const { recallAtK, firstRelevantRank } = await import(join(SCRIPTS, 'retrieval-harness.mjs'));
-const { bm25Rank, denseRank, unionRank } = await import(join(SCRIPTS, 'embed-index.mjs'));
+const { bm25Rank, interleaveRanked } = await import(join(SCRIPTS, 'bm25.mjs'));
 const { lexicalRankedIds } = await import(join(SCRIPTS, 'retrieve-context.mjs'));
 
 test('recallAtK: gold below K is a miss, at/above K is a hit', () => {
@@ -38,9 +38,9 @@ test('lexicalRankedIds: returns a ranked id list (shipped scorer, no slice)', ()
   assert.ok(r.includes('want-omega-speedmaster-on-sale-wait'));
 });
 
-test('degradation contract: no dense cache → denseRank null, unionRank falls back to bm25', async () => {
-  // The fixture has no embed-index.json cache — the embedder-absent path.
-  assert.strictEqual(await denseRank('omega speedmaster', FIXT), null, 'no cache → dense unavailable');
-  const union = await unionRank('omega speedmaster', FIXT);
-  assert.deepStrictEqual(union, bm25Rank('omega speedmaster', FIXT), 'union degrades to bm25 alone');
+test('interleaveRanked: round-robin union, dedup, order-stable (the live retriever combiner)', () => {
+  assert.deepStrictEqual(interleaveRanked(['a', 'b', 'c'], ['b', 'd']), ['a', 'b', 'd', 'c'],
+    'round-robins across lists, dedups repeats');
+  assert.deepStrictEqual(interleaveRanked([], ['x']), ['x'], 'empty list contributes nothing');
+  assert.deepStrictEqual(interleaveRanked(['x']), ['x'], 'single list passes through');
 });

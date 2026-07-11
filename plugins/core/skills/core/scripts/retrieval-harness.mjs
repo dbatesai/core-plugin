@@ -7,8 +7,10 @@
  * offline — the arm functions are the shipped read paths, so the number reflects real
  * behavior, not a more-generous simulation.
  *
- * Arms: lexical (shipped retrieve-context), bm25 (body), dense (nomic-embed), union
- * (dense+BM25). Dense/union report "unavailable" (not zero) when the embedder is absent.
+ * Arms: lexical (title+topics, the pre-T3 baseline), live (the SHIPPED title ∪ body-BM25
+ * union), bm25 (body only). Dense/union arms were removed with the ollama embedder per
+ * DC-114 (no local models); dense measurement, if it returns, is a pinned-embedder
+ * ceremony arm (DC-115), not shipped plugin code.
  *
  * Corpus-normalization (Crest's 2026-07-07 "retrieval is not corpus-portable" finding):
  * every run prints store size, K-as-fraction-of-store, and the unit-type mix, and the
@@ -29,7 +31,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateSummaryIndex } from './generate-summary-index.mjs';
 import { lexicalRankedIds } from './retrieve-context.mjs';
-import { bm25Rank, denseRank, unionRank, interleaveRanked } from './embed-index.mjs';
+import { bm25Rank, interleaveRanked } from './bm25.mjs';
 
 const KS = [5, 10, 30, 100];
 const FORBIDDEN_K = 10; // depth at which a surfaced forbidden id counts as contamination
@@ -102,8 +104,6 @@ export async function runHarness(store, goldPath) {
     lexical: (q) => lexicalRankedIds(q, store),                                  // title+topics only (pre-T3 baseline)
     live: (q) => interleaveRanked(lexicalRankedIds(q, store), bm25Rank(q, store)), // SHIPPED retriever (title ∪ body-BM25)
     bm25: (q) => bm25Rank(q, store),
-    dense: (q) => denseRank(q, store),
-    union: (q) => unionRank(q, store),
   };
   const results = {};
   for (const [name, ranker] of Object.entries(arms)) results[name] = await scoreArm(ranker, gold);
@@ -120,7 +120,7 @@ function renderText(out) {
   lines.push('');
   lines.push(`arm       R@5   R@10  R@30  R@100  MRR   forbid@${FORBIDDEN_K}`);
   for (const [name, r] of Object.entries(out.results)) {
-    if (r.unavailable) { lines.push(`${name.padEnd(9)} (embedder unavailable — dense/union need ollama)`); continue; }
+    if (r.unavailable) { lines.push(`${name.padEnd(9)} (arm unavailable)`); continue; }
     lines.push(`${name.padEnd(9)} ${fmt(r.recall[5])} ${fmt(r.recall[10])} ${fmt(r.recall[30])} ${fmt(r.recall[100])}  ${fmt(r.mrr)}  ${fmt(r.forbiddenRate)}`);
   }
   // Per-rung R@10, the rung where lexical is known to collapse.

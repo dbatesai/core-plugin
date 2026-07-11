@@ -50,7 +50,7 @@ export const ALLOWLIST = Object.freeze({
     reviewBy: '2026-09-09',
   },
   'retrieval-harness.mjs': {
-    reason: 'DC-113 Tier-A T1 offline Recall@K gold harness — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and run manually for Gate 1 (CORE) + by Crest for Gate 2 (BBLens). Wire into the forthcoming stats/validation protocol (the "ways to display stats" surface) when the embedding decision resolves; until then it is a measurement utility like score-ladder.mjs.',
+    reason: 'Offline Recall@K gold harness (DC-113 Tier-A T1; arms trimmed to model-free per DC-114) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the DC-115 measurement ceremony (Crest\'s shared harness is the BBLens twin). Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
     allowlistDate: '2026-07-07',
     reviewBy: '2026-10-07',
   },

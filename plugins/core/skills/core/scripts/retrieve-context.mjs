@@ -27,7 +27,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { loadUnit, extractEdges } from './priority.mjs';
-import { bm25Rank, interleaveRanked } from './embed-index.mjs';
+import { bm25Rank, interleaveRanked } from './bm25.mjs';
 
 // Small, conventional English stopword set — enough to stop "the/on/of" from
 // dominating overlap counts. Deliberately not exhaustive (no dependency, DC-80).

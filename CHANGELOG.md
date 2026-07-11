@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Live retriever now unions title-match with body-BM25 (`bm25.mjs`): full note bodies are searched, closing the body-blind recall gap (recall@10 0.68→0.86 on the CORE dev set; dev-grade number, re-earned under the DC-115 ceremony). Read-cached body loader keeps per-turn retrieval cheap.
+- `CORE_AUTOSTART_SKILL` seam: a wrapper plugin (e.g. BBLens) names its own autostart entry point and inherits CORE's guarded SessionStart hook (recursion guard + `CORE_AUTOSTART=0` opt-out). Default `/core`, zero behavior change.
+- Offline Recall@K measurement harness (`retrieval-harness.mjs`): scores each retrieval arm (lexical / live / bm25) on a pre-registered gold set with per-rung breakdown and forbidden-retrieval rate.
+
+### Removed
+- The dense/ollama embedding arm (`embed-index.mjs`) — never released; deleted before this release per DC-114 (CORE runs no local models). The model-free BM25 + union-combiner half it contained now lives in `bm25.mjs`. Dense measurement, if it returns, is a pinned-embedder ceremony arm, not shipped plugin code.
+
 ## [3.10.0] — 2026-06-30
 
 ### Added
