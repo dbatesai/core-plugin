@@ -21,7 +21,7 @@ const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'ne
 
 const { generateSummaryIndex, loadFreshIndex, computeSourceSignature } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
 const { bm25Rank, loadActiveBodies } = await import(pathToFileURL(join(SCRIPTS, 'bm25.mjs')).href);
-const { retrieveContext, productRankedIds, productRankedScores } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
+const { retrieveContext, productRankedIds, productRankedScores, applyTierPolicy } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
 
 // The committed fixture is NEVER touched by tests — even "read" paths write the
 // cached index (_lib/unit-summaries.json) as a side effect, which polluted the
@@ -143,6 +143,34 @@ test('cache validation covers EVERY record — a path stripped from a later reco
     assert.ok(reloaded.units.every(u => typeof u.path === 'string' && u.path.length > 0),
       'damaged cache regenerated — every record carries a path again');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('tier policy — P0 is the identity control; P1/P2/P3 each do what they claim (v2 §7)', () => {
+  // scored list: a strong observation, a near-tie canonical, a weak canonical.
+  const scored = [
+    { id: 'obs-a', tier: 'observation', score: 1.00 },
+    { id: 'dc-b', tier: 'canonical', score: 0.97 },   // within default ε=0.05 of obs-a
+    { id: 'obs-c', tier: 'observation', score: 0.90 },
+    { id: 'dc-d', tier: 'canonical', score: 0.40 },
+  ];
+  // P0: unchanged (shipped default).
+  assert.deepEqual(applyTierPolicy(scored, 'P0').map(u => u.id), ['obs-a', 'dc-b', 'obs-c', 'dc-d']);
+  // P1: canonical wins the near-tie with obs-a (0.03 ≤ 0.05); obs-c stays below dc-b.
+  assert.deepEqual(applyTierPolicy(scored, 'P1').map(u => u.id), ['dc-b', 'obs-a', 'obs-c', 'dc-d']);
+  // P2 (topN=1): no canonical in top-1 → promote the best canonical (dc-b) to slot 0.
+  assert.equal(applyTierPolicy(scored, 'P2', { topN: 1 })[0].id, 'dc-b');
+  // P2 (topN=2): dc-b already in top-2 → no change.
+  assert.deepEqual(applyTierPolicy(scored, 'P2', { topN: 2 }).map(u => u.id), ['obs-a', 'dc-b', 'obs-c', 'dc-d']);
+  // P3 (w=0.5): obs halved → dc-b 0.97, obs-a 0.50, obs-c 0.45, dc-d 0.40.
+  assert.deepEqual(applyTierPolicy(scored, 'P3', { weight: 0.5 }).map(u => u.id), ['dc-b', 'obs-a', 'obs-c', 'dc-d']);
+  // input never mutated.
+  assert.equal(scored[0].id, 'obs-a');
+});
+
+test('tier policy — default retrieveContext is byte-identical to explicit P0 (shipped behavior unchanged)', () => {
+  const a = retrieveContext('alpha subsystem rollout', STORE);
+  const b = retrieveContext('alpha subsystem rollout', STORE, { tierPolicy: 'P0' });
+  assert.deepEqual(a.map(h => h.id), b.map(h => h.id), 'P0 default is the control');
 });
 
 test('premise 4 — standalone bm25 cannot resurrect a retired unit through a stale cache', () => {

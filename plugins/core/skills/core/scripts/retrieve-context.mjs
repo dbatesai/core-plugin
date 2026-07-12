@@ -125,6 +125,55 @@ export function productRankedIds(query, storePath) {
   return productRankedScores(query, storePath).map(s => s.id);
 }
 
+/**
+ * applyTierPolicy — authority-tier ranking policy, applied to a scored list.
+ *
+ * BUILT REVERSIBLE, DEFAULT-OFF (P0). The v3.11 remediation measured that recursive
+ * coverage buries canonical answers under raw observations at the final injected
+ * context (CORE dev: 35/66 top-3 slots observations; the canonical person unit at
+ * rank 14). The joint contract v2 §7 pre-registers four policies decided BY the
+ * ceremony's final-context numbers, not by prescription. This is the mechanism they
+ * select from; nothing here activates until David rules on the ceremony evidence.
+ *
+ *   P0 — flat ranking, tier is a label only (SHIPPED default; the control).
+ *   P1 — canonical-preference tiebreak: within `epsilon` of normalized score, a
+ *        canonical unit outranks an observation.
+ *   P2 — slot reservation: if no canonical sits in the top-`topN` but a canonical
+ *        with score > 0 exists, the highest-scoring one is promoted into the last
+ *        reserved slot (topN-1).
+ *   P3 — tier weighting: observation scores × `weight`, then re-sort.
+ *
+ * @param {Array<{id,tier,score}>} scored  desc-sorted product ranking
+ * @returns {Array<{id,tier,score}>} re-ranked copy (input untouched)
+ */
+export function applyTierPolicy(scored, policy = 'P0', { topN = 3, epsilon = 0.05, weight = 0.8 } = {}) {
+  const isCanon = (u) => (u.tier || 'canonical') === 'canonical';
+  if (policy === 'P0' || !policy) return scored;
+  if (policy === 'P1') {
+    return [...scored].sort((a, b) => {
+      if (Math.abs(a.score - b.score) <= epsilon && isCanon(a) !== isCanon(b)) return isCanon(a) ? -1 : 1;
+      return b.score - a.score || a.id.localeCompare(b.id);
+    });
+  }
+  if (policy === 'P2') {
+    const out = [...scored];
+    if (!out.slice(0, topN).some(isCanon)) {
+      const bestCanonIdx = out.findIndex(u => isCanon(u) && u.score > 0);
+      if (bestCanonIdx >= topN) {
+        const [canon] = out.splice(bestCanonIdx, 1);
+        out.splice(topN - 1, 0, canon); // reserve the last top-N slot
+      }
+    }
+    return out;
+  }
+  if (policy === 'P3') {
+    return scored
+      .map(u => ({ ...u, score: isCanon(u) ? u.score : u.score * weight }))
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  }
+  return scored; // unknown policy → control (never throws in a ranking path)
+}
+
 let _lastBm25Error = null;
 
 /**
@@ -147,7 +196,7 @@ export function storeHealth(storePath) {
 /**
  * @returns {Array<{id, summary, score}>}
  */
-export function retrieveContext(query, storePath, { topN = 3 } = {}) {
+export function retrieveContext(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight } = {}) {
   const root = resolve(storePath);
   // The per-turn hook runs in every directory the user opens. If there's no CORE
   // store here, retrieve nothing and — critically — write nothing: generating the
@@ -165,7 +214,13 @@ export function retrieveContext(query, storePath, { topN = 3 } = {}) {
   // per-arm max-normalization (see productRankedScores). Measured 2026-07-07,
   // dev-set: the body arm lifts recall@10 ~0.68→0.86 on CORE and rescues the
   // abstract/value rung (DC-113 Tier-A T3, model-free per DC-114).
-  const scored = productRankedScores(query, root, index);
+  // tierPolicy defaults to 'P0' (identity) so shipped behavior is unchanged; the
+  // ceremony (joint contract v2 §7) selects an active policy from measured evidence.
+  const scored = applyTierPolicy(
+    productRankedScores(query, root, index),
+    tierPolicy,
+    { topN, ...(tierEpsilon !== undefined ? { epsilon: tierEpsilon } : {}), ...(tierWeight !== undefined ? { weight: tierWeight } : {}) },
+  );
 
   const top = scored.slice(0, topN).map(s => ({
     id: s.id, summary: byId.get(s.id)?.summary, tier: s.tier, score: s.score,
