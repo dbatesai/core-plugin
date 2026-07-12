@@ -201,12 +201,99 @@ function renderText(out) {
   return lines.join('\n');
 }
 
+/**
+ * validateGold — completeness/shape gate before any measurement (Crest 2026-07-12 #5):
+ * declared query set present, no duplicate ids, expected/forbidden are arrays. Throws
+ * loudly rather than silently skipping a malformed query.
+ */
+export function validateGold(gold) {
+  if (!Array.isArray(gold) || !gold.length) throw new Error('gold set is empty');
+  const seen = new Set();
+  for (const q of gold) {
+    if (!q.id || typeof q.id !== 'string') throw new Error('gold query missing string id');
+    if (seen.has(q.id)) throw new Error(`duplicate gold query id: ${q.id}`);
+    seen.add(q.id);
+    if (q.expected !== undefined && !Array.isArray(q.expected)) throw new Error(`${q.id}: expected must be an array`);
+    if (q.forbidden !== undefined && !Array.isArray(q.forbidden)) throw new Error(`${q.id}: forbidden must be an array`);
+  }
+  return true;
+}
+
+/**
+ * runTierPolicySweep — the CORRECTED tier-policy evaluator (Crest 2026-07-12).
+ *
+ * Measures P0-P3 on the REAL final injected context by calling the imported product
+ * function `retrieveContext(..., {tierPolicy})` — edge expansion, re-sort, topN cap
+ * and all — NOT a substrate slice (the defect in the withdrawn standalone). Bands are
+ * assigned by COUNTERFACTUAL execution (run every policy, see what actually moves the
+ * final context), not inferred from a rank interval. Multi-valued relevance is
+ * preserved by recallAtK (fractional over all expected). Product-path by construction:
+ * the tier function is imported, never hand-copied.
+ *
+ * @returns aggregate only — R@3/forbidden@3 per policy + a per-query band label. The
+ *   caller decides what leaves an approved environment; row ids stay with the caller.
+ */
+export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
+  validateGold(gold);
+  const POLICIES = [
+    ['P0', { tierPolicy: 'P0' }], ['P1', { tierPolicy: 'P1' }], ['P2', { tierPolicy: 'P2' }],
+    ['P3_w0.8', { tierPolicy: 'P3', tierWeight: 0.8 }], ['P3_w0.6', { tierPolicy: 'P3', tierWeight: 0.6 }],
+  ];
+  const finalCtx = {}; // policy -> {qid -> [ids]}
+  for (const [label, opts] of POLICIES) {
+    finalCtx[label] = {};
+    for (const q of gold) finalCtx[label][q.id] = retrieveContext(q.query, store, { topN, ...opts }).map(h => h.id);
+  }
+  const perPolicy = POLICIES.map(([label]) => {
+    let recalls = [], forbid = 0, forbidQ = 0;
+    for (const q of gold) {
+      const ctx = finalCtx[label][q.id];
+      const r = recallAtK(ctx, q.expected || [], topN);
+      if (r !== null) recalls.push(r);
+      if ((q.forbidden || []).length) { forbidQ++; if (ctx.slice(0, topN).some(id => q.forbidden.includes(id))) forbid++; }
+    }
+    const mean = recalls.length ? recalls.reduce((s, x) => s + x, 0) / recalls.length : null;
+    return { policy: label, r3: mean === null ? null : +mean.toFixed(3), n: recalls.length, forbidden3: forbidQ ? +(forbid / forbidQ).toFixed(3) : 0 };
+  });
+  // Counterfactual bands on P0 misses: RUN the policies, don't infer from rank.
+  const bands = [];
+  for (const q of gold) {
+    const g = (q.expected || [])[0];
+    if (!g) continue;
+    const p0hit = (finalCtx['P0'][q.id] || []).includes(g);
+    if (p0hit) continue;
+    const rescuer = POLICIES.slice(1).find(([label]) => (finalCtx[label][q.id] || []).includes(g));
+    let band;
+    if (rescuer) band = `tier-ordering (rescued by ${rescuer[0]})`;
+    else {
+      const inSubstrate = productRankedIds(q.query, store).includes(g);
+      band = inSubstrate ? 'deep-but-present (topN x tier coupled; no policy reaches at this topN)' : 'recall (absent from ranking; enrichment/reasoning, not tier)';
+    }
+    bands.push({ query: q.id, band }); // query id is the caller's local gold label
+  }
+  return {
+    kind: 'final-context', topN, evaluator: 'retrieveContext(tierPolicy) — imported product path',
+    perPolicy, bands,
+    counts: { queries: gold.length, scored: perPolicy[0].n },
+  };
+}
+
 async function main(argv) {
   const store = argv[0];
-  if (!store) { process.stderr.write('usage: retrieval-harness.mjs <store> [--gold <path>] [--json <outpath>]\n'); return 2; }
+  if (!store) { process.stderr.write('usage: retrieval-harness.mjs <store> [--gold <path>] [--json <outpath>] [--tier-policies]\n'); return 2; }
   const goldIdx = argv.indexOf('--gold');
   const goldPath = goldIdx >= 0 ? argv[goldIdx + 1] : join(resolve(store), '_tests', 'retrieval-gold-set.json');
   if (!existsSync(goldPath)) { process.stderr.write(`gold set not found: ${goldPath}\n`); return 1; }
+  if (argv.includes('--tier-policies')) {
+    const gold = JSON.parse(readFileSync(goldPath, 'utf8')).queries;
+    const sweep = runTierPolicySweep(resolve(store), gold);
+    process.stdout.write(`\nTier-policy sweep — ${sweep.kind} (topN=${sweep.topN}), ${sweep.evaluator}\n`);
+    process.stdout.write('policy    R@3    forbidden@3\n');
+    for (const p of sweep.perPolicy) process.stdout.write(`${p.policy.padEnd(9)} ${p.r3 ?? ' — '}   ${p.forbidden3}\n`);
+    process.stdout.write('\ncounterfactual bands (P0 misses):\n');
+    for (const b of sweep.bands) process.stdout.write(`  ${b.query}: ${b.band}\n`);
+    return 0;
+  }
   const out = await runHarness(store, goldPath);
   process.stdout.write(renderText(out) + '\n');
   const jsonIdx = argv.indexOf('--json');

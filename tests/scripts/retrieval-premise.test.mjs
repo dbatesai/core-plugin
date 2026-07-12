@@ -19,6 +19,8 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'nested-store');
 
+const { runTierPolicySweep, validateGold } = await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
+const SAFETY = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'tier-safety-store');
 const { generateSummaryIndex, loadFreshIndex, computeSourceSignature } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
 const { bm25Rank, loadActiveBodies } = await import(pathToFileURL(join(SCRIPTS, 'bm25.mjs')).href);
 const { retrieveContext, productRankedIds, productRankedScores, applyTierPolicy } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
@@ -165,6 +167,35 @@ test('tier policy — P0 is the identity control; P1/P2/P3 each do what they cla
   assert.deepEqual(applyTierPolicy(scored, 'P3', { weight: 0.5 }).map(u => u.id), ['dc-b', 'obs-a', 'obs-c', 'dc-d']);
   // input never mutated.
   assert.equal(scored[0].id, 'obs-a');
+});
+
+test('tier sweep — NON-TAUTOLOGICAL safety: no policy surfaces a retired strong-vocab unit (Crest #6)', async () => {
+  // The poison unit is RETIRED but present on disk with the strongest query vocab —
+  // it would top the ranking if it weren't excluded. Every tier policy (incl. P2's
+  // deeper slot reservation) operates on the active-only index, so it can never leak.
+  // Non-tautological: the candidate is present at the stage under test, not pre-removed.
+  const dir = mkdtempSync(join(tmpdir(), 'tier-safety-'));
+  cpSync(SAFETY, dir, { recursive: true });
+  try {
+    const gold = JSON.parse(readFileSync(join(dir, '_tests-goldset.json'), 'utf8')).queries;
+    const sweep = runTierPolicySweep(dir, gold);
+    for (const p of sweep.perPolicy) {
+      assert.equal(p.forbidden3, 0, `${p.policy} surfaced the retired poison unit — safety hole`);
+    }
+    // And directly: the retired unit is in no policy's final context.
+    const { retrieveContext } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
+    for (const policy of ['P0', 'P1', 'P2', 'P3']) {
+      const ids = retrieveContext('gateway placement', dir, { topN: 3, tierPolicy: policy }).map(h => h.id);
+      assert.ok(!ids.includes('dc-poison-retired'), `${policy} leaked the retired unit into final context`);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('validateGold — rejects duplicate ids and non-array expected (Crest #5 completeness)', () => {
+  assert.throws(() => validateGold([{ id: 'a' }, { id: 'a' }]), /duplicate/);
+  assert.throws(() => validateGold([{ id: 'a', expected: 'x' }]), /must be an array/);
+  assert.throws(() => validateGold([]), /empty/);
+  assert.ok(validateGold([{ id: 'a', expected: ['x'], forbidden: [] }]));
 });
 
 test('tier policy — default retrieveContext is byte-identical to explicit P0 (shipped behavior unchanged)', () => {
