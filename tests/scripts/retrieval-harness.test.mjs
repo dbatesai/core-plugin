@@ -8,7 +8,7 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
 const { recallAtK, firstRelevantRank } = await import(join(SCRIPTS, 'retrieval-harness.mjs'));
-const { bm25Rank, interleaveRanked } = await import(join(SCRIPTS, 'bm25.mjs'));
+const { bm25Rank } = await import(join(SCRIPTS, 'bm25.mjs'));
 const { lexicalRankedIds } = await import(join(SCRIPTS, 'retrieve-context.mjs'));
 
 test('recallAtK: gold below K is a miss, at/above K is a hit', () => {
@@ -38,9 +38,6 @@ test('lexicalRankedIds: returns a ranked id list (shipped scorer, no slice)', ()
   assert.ok(r.includes('want-omega-speedmaster-on-sale-wait'));
 });
 
-test('interleaveRanked: round-robin union, dedup, order-stable (the live retriever combiner)', () => {
-  assert.deepStrictEqual(interleaveRanked(['a', 'b', 'c'], ['b', 'd']), ['a', 'b', 'd', 'c'],
-    'round-robins across lists, dedups repeats');
-  assert.deepStrictEqual(interleaveRanked([], ['x']), ['x'], 'empty list contributes nothing');
-  assert.deepStrictEqual(interleaveRanked(['x']), ['x'], 'single list passes through');
-});
+// (interleaveRanked deleted 2026-07-11 — no production caller after the
+// normalized-magnitude ranking landed; a test kept alive for dead code would
+// document a combiner the product doesn't have.)

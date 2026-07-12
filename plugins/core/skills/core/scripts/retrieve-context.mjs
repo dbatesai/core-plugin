@@ -24,7 +24,7 @@
  * CLI: node retrieve-context.mjs <storePath> "<query>" [--top N]
  */
 
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadFreshIndex } from './generate-summary-index.mjs';
@@ -99,7 +99,16 @@ export function productRankedScores(query, storePath, preloadedIndex = null) {
   }
 
   let bodyScored = [];
-  try { bodyScored = bm25Scores(query, root); } catch { /* body arm optional; title-only fallback */ }
+  try {
+    bodyScored = bm25Scores(query, root);
+    _lastBm25Error = null;
+  } catch (err) {
+    // Fail-open (title-only) but never silent: the degradation is visible on stderr
+    // (hook logs) and via storeHealth() — a product that quietly halves its recall
+    // is a health incident, not a fallback (Hale re-review §6).
+    _lastBm25Error = String(err && err.message || err);
+    process.stderr.write(`retrieve-context: body-BM25 arm failed (${_lastBm25Error}) — degraded to title-only for this query\n`);
+  }
   const bodyMax = Math.max(0, ...bodyScored.map(s => s.score));
   for (const s of bodyScored) {
     const norm = s.score / bodyMax;
@@ -111,9 +120,28 @@ export function productRankedScores(query, storePath, preloadedIndex = null) {
     .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
 }
 
-/** Ranked id list of productRankedScores — the product-path arm for offline measurement. */
+/** Ranked id list of productRankedScores — the ranking-substrate arm for offline measurement. */
 export function productRankedIds(query, storePath) {
   return productRankedScores(query, storePath).map(s => s.id);
+}
+
+let _lastBm25Error = null;
+
+/**
+ * storeHealth — cheap, non-mutating health read for hook/UI surfaces. Reads the
+ * CACHED index only (no regeneration; call after a retrieval so it's fresh) and
+ * reports the degraded state a silent fallback would otherwise hide: duplicate-id
+ * conflicts (an observation shadowing canonical truth) and the last BM25 failure.
+ */
+export function storeHealth(storePath) {
+  const root = resolve(storePath);
+  let degraded = false, conflicts = [];
+  try {
+    const raw = JSON.parse(readFileSync(join(root, '_memories', '_lib', 'unit-summaries.json'), 'utf8'));
+    degraded = !!raw.degraded;
+    conflicts = raw.duplicate_conflicts || [];
+  } catch { /* no cache yet — nothing to report */ }
+  return { degraded, duplicate_conflicts: conflicts, bm25_error: _lastBm25Error };
 }
 
 /**

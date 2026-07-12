@@ -7,15 +7,22 @@
  * offline — the arm functions are the shipped read paths, so the number reflects real
  * behavior, not a more-generous simulation.
  *
- * Arms: lexical (title+topics, the pre-T3 baseline), live (productRankedIds — the SAME
- * function retrieveContext ranks with, so this arm IS the product path, Gate-0 identity),
- * bm25 (body only). Dense/union arms were removed with the ollama embedder per DC-114
- * (no local models); dense measurement, if it returns, is a pinned-embedder ceremony
- * arm (DC-115), not shipped plugin code. Note the live arm measures the product RANKING;
- * retrieveContext's one-hop edge expansion + topN slice sit above it and are covered by
- * unit tests (edge-bearing fixture), not by Recall@K — an edge unit isn't a gold answer.
- * Every run emits a provenance manifest (plugin version, gold sha256, corpus signature,
- * arm params, p50 latency) and raw per-query top-30 ranks in --json.
+ * Arms, labeled by what they actually measure (no arm overclaims "the product path"):
+ *   - lexical   — title+topics overlap only (the pre-T3 baseline)
+ *   - ranking   — the RANKING SUBSTRATE: productRankedIds, the function
+ *                 retrieveContext ranks with, BEFORE edge expansion and topN
+ *   - context3  — the FINAL PRODUCT CONTEXT: retrieveContext topN=3, the exact
+ *                 id set the per-turn hook injects (edges + slice included);
+ *                 only R@3 is meaningful on this arm
+ *   - bm25      — the summary+topics+body BM25 arm (NOT body-only: the loader
+ *                 prepends title/topics so the vector carries the title signal)
+ * Dense/union arms were removed with the ollama embedder per DC-114 (no local
+ * models); dense measurement, if it returns, is a pinned-embedder ceremony arm
+ * (DC-115), not shipped plugin code.
+ * One ranking pass per arm: metrics, raw ranks (through the largest reported K),
+ * and p50/p95 latency all come from the same observations. Every run emits a
+ * provenance manifest: plugin version, source commit (when in a git checkout),
+ * harness self-hash, gold sha256, content-derived corpus hash, arm params.
  *
  * Corpus-normalization (Crest's 2026-07-07 "retrieval is not corpus-portable" finding):
  * every run prints store size, K-as-fraction-of-store, and the unit-type mix, and the
@@ -36,7 +43,7 @@ import { resolve, join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
-import { lexicalRankedIds, productRankedIds } from './retrieve-context.mjs';
+import { lexicalRankedIds, productRankedIds, retrieveContext } from './retrieve-context.mjs';
 import { bm25Rank } from './bm25.mjs';
 
 const KS = [5, 10, 30, 100];
@@ -55,14 +62,90 @@ export function firstRelevantRank(ranked, expected) {
   return 0; // not found
 }
 
-/** Score one arm (a ranker: query -> ranked ids, possibly async/null) over the gold set. */
-export async function scoreArm(ranker, gold) {
+// (scoreArm — the ranker-callback scorer — was folded into scoreRankedLists below,
+// so metrics and raw evidence always come from one observation set.)
+
+export function unitTypeMix(store) {
+  const idx = generateSummaryIndex(resolve(store));
+  const mix = {};
+  for (const u of idx.units) {
+    const t = (u.id.match(/^([a-z]+)-/) || [])[1] || 'other';
+    mix[t] = (mix[t] || 0) + 1;
+  }
+  return { total: idx.units.length, mix };
+}
+
+function fmt(v) { return v === null || v === undefined ? '  —  ' : v.toFixed(2); }
+
+export async function runHarness(store, goldPath) {
+  const goldRaw = readFileSync(goldPath, 'utf8');
+  const gold = JSON.parse(goldRaw).queries;
+  const arms = {
+    lexical: (q) => lexicalRankedIds(q, store),    // title+topics only (pre-T3 baseline)
+    ranking: (q) => productRankedIds(q, store),    // RANKING SUBSTRATE — the function retrieveContext ranks with, BEFORE edge expansion/topN (not the final context)
+    context3: (q) => retrieveContext(q, store, { topN: 3 }).map(h => h.id), // FINAL product context — the exact top-3 the hook injects (edges + slice included); only R@3 is meaningful here
+    bm25: (q) => bm25Rank(q, store),               // summary+topics+body BM25 arm (not body-only — the loader prepends title/topics)
+  };
+  // ONE ranking pass per arm: metrics, raw ranks, and latency all come from the
+  // SAME observations (the re-review caught the double-run emitting raw evidence
+  // that wasn't the run the metrics were computed from).
+  const results = {};
+  const rawRanks = {};   // per-arm, per-query — through the LARGEST reported K (100)
+  const latency = {};    // per-arm p50/p95 ms over the gold queries
+  for (const [name, ranker] of Object.entries(arms)) {
+    const rankedByQuery = {};
+    const times = [];
+    for (const q of gold) {
+      const t0 = process.hrtime.bigint();
+      let ranked;
+      try { ranked = await ranker(q.query); } catch { ranked = null; }
+      times.push(Number(process.hrtime.bigint() - t0) / 1e6);
+      rankedByQuery[q.id] = ranked;
+    }
+    results[name] = scoreRankedLists(rankedByQuery, gold);
+    rawRanks[name] = Object.fromEntries(Object.entries(rankedByQuery)
+      .map(([qid, r]) => [qid, r === null ? null : r.slice(0, Math.max(...KS))]));
+    times.sort((a, b) => a - b);
+    latency[name] = {
+      p50_ms: +(times[Math.floor(times.length / 2)] || 0).toFixed(1),
+      p95_ms: +(times[Math.min(times.length - 1, Math.ceil(times.length * 0.95) - 1)] || 0).toFixed(1),
+    };
+  }
+  const { total, mix } = unitTypeMix(store);
+  // Provenance manifest (Gate 0): a number without these fields is not a baseline.
+  let pluginVersion = null;
+  try {
+    pluginVersion = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8')).version;
+  } catch { /* dev tree layouts vary; version stays null rather than guessed */ }
+  let sourceCommit = null;
+  try {
+    const { execFileSync } = await import('node:child_process');
+    sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dirname(fileURLToPath(import.meta.url)), encoding: 'utf8' }).trim();
+  } catch { /* not a git checkout (packaged install) — stays null, never guessed */ }
+  const manifest = {
+    plugin_version: pluginVersion,
+    source_commit: sourceCommit,
+    harness_sha256: createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex'),
+    entry_points: {
+      ranking: 'productRankedIds (pre-expansion ranking substrate)',
+      context3: 'retrieveContext topN=3 (the exact injected product context)',
+    },
+    gold_path: resolve(goldPath),
+    gold_sha256: createHash('sha256').update(goldRaw).digest('hex'),
+    corpus_content_sha256: createHash('sha256').update(computeSourceSignature(store)).digest('hex'), // content-derived (sha1-per-file signature), not mtime
+    arm_params: { bm25: { k1: 1.5, b: 0.75 }, context3: { topN: 3 } },
+  };
+  return { store: resolve(store), manifest, latency, total, mix, nQueries: gold.length, gold, rawRanks, results };
+}
+
+/** Score pre-computed ranked lists (one observation set for metrics AND raw evidence). */
+export function scoreRankedLists(rankedByQuery, gold) {
   const recall = Object.fromEntries(KS.map(k => [k, []]));
   let mrrSum = 0, mrrN = 0, forbiddenHits = 0, forbiddenQ = 0, unavailable = false;
   const perRung = {};
   for (const q of gold) {
-    const ranked = await ranker(q.query);
-    if (ranked === null) { unavailable = true; break; }
+    const ranked = rankedByQuery[q.id];
+    if (ranked === null || ranked === undefined) { unavailable = true; break; }
     const expected = q.expected || [];
     const forbidden = q.forbidden || [];
     for (const k of KS) {
@@ -92,65 +175,12 @@ export async function scoreArm(ranker, gold) {
   };
 }
 
-export function unitTypeMix(store) {
-  const idx = generateSummaryIndex(resolve(store));
-  const mix = {};
-  for (const u of idx.units) {
-    const t = (u.id.match(/^([a-z]+)-/) || [])[1] || 'other';
-    mix[t] = (mix[t] || 0) + 1;
-  }
-  return { total: idx.units.length, mix };
-}
-
-function fmt(v) { return v === null || v === undefined ? '  —  ' : v.toFixed(2); }
-
-export async function runHarness(store, goldPath) {
-  const goldRaw = readFileSync(goldPath, 'utf8');
-  const gold = JSON.parse(goldRaw).queries;
-  const arms = {
-    lexical: (q) => lexicalRankedIds(q, store),   // title+topics only (pre-T3 baseline)
-    live: (q) => productRankedIds(q, store),      // THE product ranking — the same function retrieveContext ranks with (Gate-0 identity)
-    bm25: (q) => bm25Rank(q, store),
-  };
-  const results = {};
-  const rawRanks = {};   // per-arm, per-query top-30 — raw evidence, never omitted from --json
-  const latency = {};    // per-arm p50 ms over the gold queries
-  for (const [name, ranker] of Object.entries(arms)) {
-    results[name] = await scoreArm(ranker, gold);
-    const times = [];
-    rawRanks[name] = {};
-    for (const q of gold) {
-      const t0 = process.hrtime.bigint();
-      let ranked;
-      try { ranked = await ranker(q.query); } catch { ranked = null; }
-      times.push(Number(process.hrtime.bigint() - t0) / 1e6);
-      rawRanks[name][q.id] = ranked === null ? null : ranked.slice(0, 30);
-    }
-    times.sort((a, b) => a - b);
-    latency[name] = { p50_ms: +(times[Math.floor(times.length / 2)] || 0).toFixed(1) };
-  }
-  const { total, mix } = unitTypeMix(store);
-  // Provenance manifest (Gate 0): a number without these fields is not a baseline.
-  let pluginVersion = null;
-  try {
-    pluginVersion = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8')).version;
-  } catch { /* dev tree layouts vary; version stays null rather than guessed */ }
-  const manifest = {
-    plugin_version: pluginVersion,
-    entry_point: 'retrieval-harness.mjs → productRankedIds (product path)',
-    gold_path: resolve(goldPath),
-    gold_sha256: createHash('sha256').update(goldRaw).digest('hex'),
-    corpus_sig_sha256: createHash('sha256').update(computeSourceSignature(store)).digest('hex'),
-    arm_params: { bm25: { k1: 1.5, b: 0.75 } },
-  };
-  return { store: resolve(store), manifest, latency, total, mix, nQueries: gold.length, gold, rawRanks, results };
-}
-
 function renderText(out) {
   const lines = [];
   lines.push(`\nRetrieval Recall@K — ${out.store}`);
-  lines.push(`plugin: v${out.manifest.plugin_version ?? 'unresolved'} · gold sha256 ${out.manifest.gold_sha256.slice(0, 12)}… · corpus sig ${out.manifest.corpus_sig_sha256.slice(0, 12)}… · live arm = product path (productRankedIds)`);
-  lines.push(`latency p50: ${Object.entries(out.latency).map(([a, l]) => `${a} ${l.p50_ms}ms`).join(' · ')}`);
+  lines.push(`plugin: v${out.manifest.plugin_version ?? 'unresolved'} · commit ${out.manifest.source_commit ? out.manifest.source_commit.slice(0, 8) : 'n/a'} · gold sha256 ${out.manifest.gold_sha256.slice(0, 12)}… · corpus content ${out.manifest.corpus_content_sha256.slice(0, 12)}…`);
+  lines.push('arms: ranking = pre-expansion substrate (productRankedIds) · context3 = FINAL injected top-3 (retrieveContext; only R@3 meaningful) · bm25 = summary+topics+body');
+  lines.push(`latency: ${Object.entries(out.latency).map(([a, l]) => `${a} p50 ${l.p50_ms}ms / p95 ${l.p95_ms}ms`).join(' · ')}`);
   lines.push(`store: ${out.total} active units · gold: ${out.nQueries} queries`);
   lines.push(`unit-type mix: ${Object.entries(out.mix).map(([t, n]) => `${t}:${n}`).join(' ')}`);
   lines.push(`K as fraction of store: ${KS.map(k => `${k}=${(k / out.total * 100).toFixed(0)}%`).join('  ')}  (Crest: compare a corpus to itself, not cross-corpus raw)`);

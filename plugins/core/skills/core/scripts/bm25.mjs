@@ -28,8 +28,6 @@
  *   - loadActiveBodies(store)         — active unit ids + tiers + bodies (index paths)
  *   - bm25Scores(query, store)        — [{id, tier, score}] sorted desc (magnitudes)
  *   - bm25Rank(query, store)          — ranked id list (ids of bm25Scores)
- *   - interleaveRanked(...lists)      — round-robin UNION combiner (not RRF,
- *     which measured as hurting)
  *
  * CLI: node bm25.mjs <storePath> rank "<query>" [--top N]
  *      node bm25.mjs --test
@@ -118,23 +116,10 @@ export function bm25Rank(query, store, opts = {}) {
   return bm25Scores(query, store, opts).map(x => x.id);
 }
 
-/**
- * Round-robin interleave of N ranked id lists, dedup — so a unit high on ANY input
- * list surfaces early. This is the UNION combiner (not RRF, which measured as hurting).
- * Rank-only view; the live retriever ranks by normalized magnitudes (retrieve-context).
- */
-export function interleaveRanked(...lists) {
-  const out = [];
-  const seen = new Set();
-  const maxLen = Math.max(0, ...lists.map(l => l.length));
-  for (let i = 0; i < maxLen; i++) {
-    for (const list of lists) {
-      const id = list[i];
-      if (id && !seen.has(id)) { seen.add(id); out.push(id); }
-    }
-  }
-  return out;
-}
+// interleaveRanked (the round-robin union combiner) was DELETED 2026-07-11: the
+// product ranking moved to normalized magnitudes (retrieve-context productRankedScores)
+// and no production caller remained — dead code documented as live is a doc lie
+// (Hale re-review §6).
 
 function selfTest() {
   // BM25: returns a ranked array when a store is supplied.
@@ -143,9 +128,6 @@ function selfTest() {
     const r = bm25Rank('embedding dependency', tmpStore);
     console.assert(Array.isArray(r), 'bm25Rank returns an array');
   }
-  // Union combiner: round-robin, dedup, order-stable.
-  const u = interleaveRanked(['a', 'b', 'c'], ['b', 'd']);
-  console.assert(JSON.stringify(u) === JSON.stringify(['a', 'b', 'd', 'c']), 'interleaveRanked round-robins and dedups');
   // Tokenizer: lowercases, splits, drops stopwords.
   console.assert(JSON.stringify(tokenize('The Alpha-Beta of it')) === JSON.stringify(['alpha', 'beta']), 'tokenize drops stopwords');
   console.log('bm25 self-test: OK');

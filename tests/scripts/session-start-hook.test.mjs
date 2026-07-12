@@ -10,18 +10,20 @@ import { autostartSkill, buildDirective, userAuthorizedSkills } from '../../plug
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'session-start-hook.mjs');
 
-// A fake user home whose ~/.claude/settings.json registers /bblens (the wrapper case).
-function fakeHome(settingsEnv) {
-  const home = mkdtempSync(join(tmpdir(), 'core-autostart-home-'));
+// An ATTACKER-controlled directory carrying its own .claude/settings.json that
+// "authorizes" a skill. Used to prove hostile HOME/USERPROFILE cannot redirect
+// the directive — the hook resolves the trusted home from the OS account
+// database (os.userInfo()), which ignores the environment (Hale's demonstrated
+// bypass, 2026-07-11 re-review §5; homedir() followed $HOME and fell for it).
+function attackerHome(settingsEnv) {
+  const home = mkdtempSync(join(tmpdir(), 'core-autostart-attacker-'));
   mkdirSync(join(home, '.claude'), { recursive: true });
   writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: settingsEnv }));
   return home;
 }
 
-const run = (env, home) => execFileSync('node', [HOOK], {
-  // HOME (POSIX) + USERPROFILE (Windows) both point at the fake home so os.homedir()
-  // resolves there on every platform.
-  env: { ...process.env, CORE_HOOKS_LOG_FILE: '/dev/null', HOME: home, USERPROFILE: home, ...env },
+const run = (env) => execFileSync('node', [HOOK], {
+  env: { ...process.env, CORE_HOOKS_LOG_FILE: '/dev/null', ...env },
   encoding: 'utf8',
 });
 
@@ -69,17 +71,23 @@ test('buildDirective names the skill at both mention points', () => {
   assert.ok(!d.includes('/core'), 'the default skill must not linger in an overridden directive');
 });
 
-test('hook subprocess: default /core; user-registered wrapper honored; unregistered rejected', () => {
-  const homeWithBblens = fakeHome({ CORE_AUTOSTART_SKILL: '/bblens' });
-  const homeEmpty = fakeHome({});
-  assert.match(run({}, homeEmpty), /`\/core`/);
-  assert.match(run({ CORE_AUTOSTART_SKILL: '/bblens' }, homeWithBblens), /`\/bblens`/);
-  // The attack path: project env names a valid installed skill the user never registered.
-  assert.match(run({ CORE_AUTOSTART_SKILL: '/my-plugin:entry' }, homeWithBblens), /`\/core`/);
+test('hook subprocess: default injects /core', () => {
+  assert.match(run({}), /`\/core`/);
+});
+
+test('ATTACK PATH (Hale re-review §5): hostile HOME/USERPROFILE + attacker settings cannot redirect the directive', () => {
+  // The project-controlled hook env points HOME and USERPROFILE at an attacker
+  // directory whose settings.json "authorizes" /my-plugin:entry, and names that
+  // skill in CORE_AUTOSTART_SKILL. Pre-fix, the hook emitted the attacker's skill
+  // as the session's mandated first action. The trusted home comes from the OS
+  // account database now, so the attacker's settings file is never read.
+  const evil = attackerHome({ CORE_AUTOSTART_SKILL: '/my-plugin:entry', CORE_AUTOSTART_ALLOWED_SKILLS: '/my-plugin:entry' });
+  const out = run({ CORE_AUTOSTART_SKILL: '/my-plugin:entry', HOME: evil, USERPROFILE: evil });
+  assert.match(out, /`\/core`/, 'directive must fall back to /core');
+  assert.ok(!out.includes('/my-plugin:entry'), 'attacker skill must not appear in the directive');
 });
 
 test('hook subprocess: recursion guard and opt-out still win over the override', () => {
-  const home = fakeHome({ CORE_AUTOSTART_SKILL: '/bblens' });
-  assert.equal(run({ CORE_AUTOSTART_SKILL: '/bblens', CORE_CLOSE_PASS_ACTIVE: '1' }, home).trim(), '');
-  assert.equal(run({ CORE_AUTOSTART_SKILL: '/bblens', CORE_AUTOSTART: '0' }, home).trim(), '');
+  assert.equal(run({ CORE_AUTOSTART_SKILL: '/bblens', CORE_CLOSE_PASS_ACTIVE: '1' }).trim(), '');
+  assert.equal(run({ CORE_AUTOSTART_SKILL: '/bblens', CORE_AUTOSTART: '0' }).trim(), '');
 });

@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,15 +23,20 @@ const { generateSummaryIndex, loadFreshIndex, computeSourceSignature } = await i
 const { bm25Rank, loadActiveBodies } = await import(join(SCRIPTS, 'bm25.mjs'));
 const { retrieveContext, productRankedIds, productRankedScores } = await import(join(SCRIPTS, 'retrieve-context.mjs'));
 
-// The committed fixture is read-only for tests; anything that mutates clones first.
+// The committed fixture is NEVER touched by tests — even "read" paths write the
+// cached index (_lib/unit-summaries.json) as a side effect, which polluted the
+// committed tree and failed in read-only checkouts (Hale re-review). Every test
+// runs against a clone; STORE is the shared clone for non-mutating tests.
 function cloneStore() {
   const dir = mkdtempSync(join(tmpdir(), 'nested-store-'));
   cpSync(FIXT, dir, { recursive: true });
   return dir;
 }
+const STORE = cloneStore();
+process.on('exit', () => { try { rmSync(STORE, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 
 test('premise 1 — recursive coverage: the index carries nested units with real paths and tiers', () => {
-  const idx = generateSummaryIndex(FIXT);
+  const idx = generateSummaryIndex(STORE);
   const nested = idx.units.find(u => u.id === 'obs-nested-note');
   assert.ok(nested, 'nested observation is in the index');
   assert.equal(nested.path, 'observations/2026-07/obs-nested-note.md', 'index carries the real relative path');
@@ -40,9 +45,9 @@ test('premise 1 — recursive coverage: the index carries nested units with real
 });
 
 test('premise 1 — a nested unit is findable by its body term through every retrieval surface', () => {
-  assert.ok(bm25Rank('quokka incident', FIXT).includes('obs-nested-note'), 'bm25 finds the nested body term');
-  assert.ok(productRankedIds('quokka incident', FIXT).includes('obs-nested-note'), 'product ranking finds it');
-  const hits = retrieveContext('quokka incident', FIXT);
+  assert.ok(bm25Rank('quokka incident', STORE).includes('obs-nested-note'), 'bm25 finds the nested body term');
+  assert.ok(productRankedIds('quokka incident', STORE).includes('obs-nested-note'), 'product ranking finds it');
+  const hits = retrieveContext('quokka incident', STORE);
   assert.ok(hits.some(h => h.id === 'obs-nested-note'), 'the live retriever surfaces it');
   assert.equal(hits.find(h => h.id === 'obs-nested-note').tier, 'observation', 'result carries its authority tier');
 });
@@ -60,13 +65,13 @@ test('premise 1 — the source signature is recursive: a nested edit invalidates
 
 test('premise 2 — product/harness identity: the live arm IS retrieveContext\'s ranking, rank for rank', () => {
   const q = 'alpha subsystem rollout';
-  const armIds = productRankedIds(q, FIXT);
-  const direct = productRankedScores(q, FIXT).map(s => s.id);
+  const armIds = productRankedIds(q, STORE);
+  const direct = productRankedScores(q, STORE).map(s => s.id);
   assert.deepEqual(armIds, direct, 'one function, two callers, identical ranking');
   // retrieveContext's direct (non-edge) hits come from the TOP of the product ranking,
   // in product order. (An edge hit may displace a weak direct hit from the final slice —
   // that's the restored one-hop semantic, not a divergence.)
-  const hits = retrieveContext(q, FIXT, { topN: 2 });
+  const hits = retrieveContext(q, STORE, { topN: 2 });
   const directHits = hits.filter(h => h.id !== 'dc-neighbor').map(h => h.id);
   assert.deepEqual(directHits, armIds.slice(0, directHits.length),
     'direct hits are the product ranking\'s prefix');
@@ -74,14 +79,70 @@ test('premise 2 — product/harness identity: the live arm IS retrieveContext\'s
 
 test('premise 3 — one-hop edge expansion survives the default topN (the v3.10.0 regression)', () => {
   // dc-strong matches all three query terms; the weak units match one. dc-neighbor
-  // shares NO vocabulary with the query and is reachable only through dc-strong's
-  // edge. Under the synthetic rank scores this unit could never rank (repro'd:
-  // v3.10 returned it at #2, the first union rewrite dropped it entirely).
-  const hits = retrieveContext('alpha subsystem rollout', FIXT);
+  // shares NO query vocabulary (guarded below — the first version of this fixture
+  // leaked "alpha query" into the body, making the test pass on the BROKEN baseline;
+  // Hale's re-review caught it) and is reachable only through dc-strong's edge.
+  // Red/green proven: these assertions FAIL at 0d00539 (neighbor absent) and pass here.
+  const neighborBody = readFileSync(join(FIXT, '_memories', 'dc-neighbor.md'), 'utf8').toLowerCase();
+  for (const term of ['alpha', 'subsystem', 'rollout']) {
+    assert.ok(!neighborBody.includes(term), `fixture self-check: neighbor must not contain query term '${term}'`);
+  }
+  const hits = retrieveContext('alpha subsystem rollout', STORE);
   const ids = hits.map(h => h.id);
-  assert.ok(ids.includes('dc-neighbor'),
-    `edge-connected neighbor must compete in the final ranking (got ${ids.join(', ')})`);
-  assert.equal(ids[0], 'dc-strong', 'the strong direct hit still leads');
+  assert.equal(ids[0], 'dc-strong', 'the strong direct hit leads');
+  assert.equal(ids[1], 'dc-neighbor',
+    `the edge neighbor of the strong hit must OUTRANK weak direct hits — the meaningful order, not mere presence (got ${ids.join(', ')})`);
+});
+
+test('premise 4b — PRESERVED-TIMESTAMP attack: a retire with its original mtime restored still invalidates (content-derived signature)', () => {
+  // Hale re-review §4: rewrote a unit as retired, restored the timestamp, and the
+  // mtime signature stayed identical — the retired unit kept ranking. The signature
+  // is content-derived now; timestamp equality can no longer certify content equality.
+  const dir = cloneStore();
+  try {
+    assert.ok(bm25Rank('quokka incident', dir).includes('obs-nested-note'), 'active unit ranks (cache built)');
+    const f = join(dir, '_memories', 'observations', '2026-07', 'obs-nested-note.md');
+    const st = statSync(f);
+    writeFileSync(f, readFileSync(f, 'utf8').replace('status: active', 'status: retired'));
+    utimesSync(f, st.atime, st.mtime); // restore the original timestamps — the attack
+    assert.ok(!bm25Rank('quokka incident', dir).includes('obs-nested-note'),
+      'retired unit with restored mtime must NOT rank — content hash sees through it');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('duplicate ids — an observation can never shadow canonical truth, and the store goes loudly degraded', () => {
+  // Hale re-review §1: first-wins let a nested observation (walks first) silently
+  // discard a canonical unit with the same id. Resolution is authority-aware now,
+  // and the conflict is recorded on the index (degraded flag) — never silent.
+  const dir = cloneStore();
+  try {
+    // A nested observation claiming dc-strong's id — walk order would pick it first.
+    writeFileSync(join(dir, '_memories', 'observations', '2026-07', 'imposter.md'),
+      ['---', 'id: dc-strong', 'type: observation', 'status: active', 'created: 2026-07-06', 'topics: [misc]', 'edges: []', '---', '', '# Imposter observation', 'Shadowing attempt body.'].join('\n'));
+    const idx = generateSummaryIndex(dir);
+    const kept = idx.units.find(u => u.id === 'dc-strong');
+    assert.equal(kept.tier, 'canonical', 'the canonical unit wins the id');
+    assert.equal(kept.path, 'dc-strong.md', 'kept record points at the canonical file');
+    assert.equal(idx.degraded, true, 'the index says loudly that the store is degraded');
+    assert.equal(idx.duplicate_conflicts.length, 1);
+    assert.ok(productRankedIds('alpha subsystem rollout', dir).includes('dc-strong'), 'canonical query still finds its unit');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('cache validation covers EVERY record — a path stripped from a later record forces regeneration', () => {
+  // Hale re-review §4: loadFreshIndex validated only units[0].path; damaging a later
+  // record left the cache accepted and the nested unit silently lost.
+  const dir = cloneStore();
+  try {
+    loadFreshIndex(dir); // build a valid cache
+    const cachePath = join(dir, '_memories', '_lib', 'unit-summaries.json');
+    const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+    delete cache.units[cache.units.length - 1].path; // damage a LATER record
+    writeFileSync(cachePath, JSON.stringify(cache));
+    const reloaded = loadFreshIndex(dir);
+    assert.ok(reloaded.units.every(u => typeof u.path === 'string' && u.path.length > 0),
+      'damaged cache regenerated — every record carries a path again');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('premise 4 — standalone bm25 cannot resurrect a retired unit through a stale cache', () => {

@@ -7,4 +7,4 @@ topics: [zeta]
 edges: []
 ---
 # Unrelated zeta constraint
-Nothing lexically shared with the alpha query lives here.
+Entirely different wording throughout this body; zero overlapping terms with the retrieval probe used by the premise tests.

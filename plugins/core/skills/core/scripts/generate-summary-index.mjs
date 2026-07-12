@@ -33,6 +33,7 @@
 
 import { readdirSync, statSync, mkdirSync, realpathSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadUnit, isInvalidated } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -81,20 +82,48 @@ function walkCandidateFiles(memoriesDir) {
 }
 
 /**
- * computeSourceSignature — a cheap freshness fingerprint of the store's source units.
- * Sorted `relpath:mtimeMs` over candidate files, RECURSIVE (a nested observation's
- * edit must invalidate the cache exactly like a top-level unit's — a flat signature
- * over a recursive index would go silently stale). NO frontmatter parsing, so it's
- * safe to run on every retrieval. Changes when a unit is added, deleted, or edited
- * in place (including a retire, which bumps the file's mtime) — the three cases that
- * must invalidate the cached index. Tradeoff (DC-94b R1): a cloud-sync touch that
- * bumps mtime without a content change triggers one benign regen — cheaper than
- * hashing every file's content on every turn, and the regen is atomic + idempotent.
+ * computeSourceSignature — a CONTENT-DERIVED freshness fingerprint of the store's
+ * source units. Sorted `relpath:sha1(content)` over candidate files, RECURSIVE.
+ * Content hashes, not mtimes, because anti-resurrection is an invariant: a unit
+ * rewritten as retired with its original timestamp restored (editor telemetry,
+ * cloud-sync restoration, deliberate tampering) MUST still invalidate the cache —
+ * Hale's re-review demonstrated the mtime version serving exactly that retired
+ * unit. Cost: reads every candidate file (~430 files ≈ a few MB) per validation —
+ * the same order of work the BM25 body pass already does per call; measured in
+ * the harness latency line, ceiling per the evaluation contract.
  * @returns {string}
  */
 export function computeSourceSignature(storePath) {
   const memoriesDir = join(resolve(storePath), '_memories');
-  return walkCandidateFiles(memoriesDir).map(f => `${f.rel}:${f.mtimeMs}`).sort().join('|');
+  const parts = [];
+  for (const f of walkCandidateFiles(memoriesDir)) {
+    let content;
+    try { content = readFileSync(f.full); } catch { continue; }
+    parts.push(`${f.rel}:${createHash('sha1').update(content).digest('hex')}`);
+  }
+  return parts.sort().join('|');
+}
+
+/**
+ * Structural validation of a cached index — EVERY record, not a sample. A cache
+ * is trustworthy only if each unit has a non-empty string id and a safe relative
+ * path (no absolute paths, no `..` traversal, forward slashes, `.md`), and ids
+ * are unique. Anything else → regenerate. (Hale re-review: validating only
+ * units[0] let a partially path-less cache serve nested units from wrong paths.)
+ */
+export function validateIndexRecords(idx) {
+  if (!idx || !Array.isArray(idx.units)) return false;
+  const seen = new Set();
+  for (const u of idx.units) {
+    if (!u || typeof u.id !== 'string' || !u.id.trim()) return false;
+    if (typeof u.path !== 'string' || !u.path.trim()) return false;
+    if (u.path.startsWith('/') || u.path.includes('\\') || /^[a-zA-Z]:/.test(u.path)) return false;
+    if (u.path.split('/').some(seg => seg === '..' || seg === '')) return false;
+    if (!u.path.endsWith('.md')) return false;
+    if (seen.has(u.id)) return false;
+    seen.add(u.id);
+  }
+  return true;
 }
 
 /**
@@ -111,11 +140,11 @@ export function loadFreshIndex(storePath) {
   if (existsSync(indexPath)) {
     try {
       const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
-      if (idx && Array.isArray(idx.units) && idx.source_sig !== undefined &&
+      if (idx && idx.source_sig !== undefined &&
           idx.source_sig === computeSourceSignature(root) &&
-          // A pre-v3.11 cache (no per-unit path) must regenerate once so path-driven
-          // consumers never fall back to reconstructing top-level-only locations.
-          (idx.units.length === 0 || idx.units[0].path !== undefined)) {
+          // Every record validated — id/path shape, path containment, uniqueness.
+          // A partially-broken cache is regenerated, never partially trusted.
+          validateIndexRecords(idx)) {
         return idx;
       }
     } catch { /* fall through to regenerate */ }
@@ -168,8 +197,10 @@ function authorityTier(fm, rel) {
 export function generateSummaryIndex(storePath) {
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
-  const units = [];
-  const seenIds = new Map(); // id -> rel path that claimed it (first wins, sorted walk)
+  // Collect ALL candidates first, then resolve duplicate ids deterministically —
+  // authority-aware, never silent-lossy (Hale re-review §1: walk-order first-wins let
+  // a nested observation shadow a canonical unit out of the index entirely).
+  const candidates = [];
   for (const f of walkCandidateFiles(memoriesDir)) {
     let unit;
     try { unit = loadUnit(f.full); } catch { continue; }
@@ -179,12 +210,7 @@ export function generateSummaryIndex(storePath) {
     // status check alone missed a `status: active` unit with a past t_invalid,
     // which then leaked into per-turn retrieval (the read path this index feeds).
     if (isInvalidated(unit, now)) continue;
-    if (seenIds.has(unit.id)) {
-      process.stderr.write(`warn: duplicate unit id '${unit.id}' at ${f.rel} — first occurrence (${seenIds.get(unit.id)}) kept, this file excluded from the index\n`);
-      continue;
-    }
-    seenIds.set(unit.id, f.rel);
-    units.push({
+    candidates.push({
       id: unit.id,
       path: f.rel,
       type: String(fm.type || ''),
@@ -195,8 +221,31 @@ export function generateSummaryIndex(storePath) {
       updated: fm.updated ? String(fm.updated).slice(0, 10) : (fm.created ? String(fm.created).slice(0, 10) : ''),
     });
   }
-  units.sort((a, b) => a.id.localeCompare(b.id));
-  const out = { count: units.length, generated: '', source_sig: computeSourceSignature(storePath), units };
+  // Duplicate resolution: canonical outranks observation (an observation must never
+  // shadow canonical truth); same-tier ties keep the lexicographically-first path.
+  // Every conflict is recorded on the index itself — the store is DEGRADED until the
+  // duplicate is fixed, and consumers (the hook, check surfaces) can say so loudly.
+  const byId = new Map();
+  const conflicts = [];
+  for (const c of candidates) {
+    const prev = byId.get(c.id);
+    if (!prev) { byId.set(c.id, c); continue; }
+    const rank = (u) => (u.tier === 'canonical' ? 0 : 1);
+    const winner = rank(c) < rank(prev) || (rank(c) === rank(prev) && c.path < prev.path) ? c : prev;
+    const loser = winner === c ? prev : c;
+    byId.set(c.id, winner);
+    conflicts.push({ id: c.id, kept: winner.path, excluded: loser.path });
+    process.stderr.write(`DUPLICATE UNIT ID '${c.id}': kept ${winner.path} (${winner.tier}), excluded ${loser.path} (${loser.tier}) — the store is degraded until this is resolved\n`);
+  }
+  const units = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
+  const out = {
+    count: units.length,
+    generated: '',
+    source_sig: computeSourceSignature(storePath),
+    degraded: conflicts.length > 0,
+    duplicate_conflicts: conflicts,
+    units,
+  };
 
   const libDir = join(memoriesDir, '_lib');
   try { mkdirSync(libDir, { recursive: true }); } catch { /* ignore */ }
@@ -208,8 +257,8 @@ function main(argv) {
   const args = argv.filter(a => a !== '--store');
   const storePath = args[0] || '.';
   const res = generateSummaryIndex(storePath);
-  console.log(`Wrote ${join(resolve(storePath), '_memories', '_lib', 'unit-summaries.json')} (${res.count} active units)`);
-  return 0;
+  console.log(`Wrote ${join(resolve(storePath), '_memories', '_lib', 'unit-summaries.json')} (${res.count} active units${res.degraded ? `; DEGRADED — ${res.duplicate_conflicts.length} duplicate-id conflict(s)` : ''})`);
+  return res.degraded ? 1 : 0; // duplicate identity fails loudly, never silently
 }
 
 // CLI entry guard (matches generate-decisions-index.mjs). CORE_DEBUG_CLI_ENTRY=1 logs both

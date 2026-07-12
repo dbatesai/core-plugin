@@ -37,9 +37,21 @@
 
 import { realpathSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
+import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { logHookEvent } from './hook-log.mjs';
+
+/**
+ * The TRUSTED user home. os.homedir() follows $HOME/$USERPROFILE — which a
+ * project-controlled hook environment can point at an attacker directory
+ * carrying its own .claude/settings.json (Hale's demonstrated bypass,
+ * 2026-07-11 re-review §5). os.userInfo() reads the OS account database
+ * (passwd on POSIX, the profile registry on Windows) and ignores the
+ * environment entirely. Unresolvable → null → nothing is authorized.
+ */
+function trustedHome() {
+  try { return userInfo().homedir || null; } catch { return null; }
+}
 
 // Skill-name shape: /name or /plugin:name, lowercase kebab — anything else is not a skill
 // reference and must not reach the directive (env is project-influenceable; see header).
@@ -54,8 +66,9 @@ const SKILL_SHAPE = /^\/[a-z0-9][a-z0-9-]*(:[a-z0-9][a-z0-9-]*)?$/;
  * CORE_AUTOSTART_SKILL value or in a CORE_AUTOSTART_ALLOWED_SKILLS comma list.
  * Unreadable/absent user settings → not authorized (fail closed to /core).
  */
-export function userAuthorizedSkills(readFile = readFileSync, home = homedir()) {
+export function userAuthorizedSkills(readFile = readFileSync, home = trustedHome()) {
   try {
+    if (!home) return new Set(); // no trusted home → nothing authorized (fail closed)
     const settings = JSON.parse(readFile(join(home, '.claude', 'settings.json'), 'utf8'));
     const env = settings.env || {};
     const out = new Set();

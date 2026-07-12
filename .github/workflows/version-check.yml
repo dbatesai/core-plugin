@@ -2,7 +2,7 @@ name: version-check
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, next]
 
 jobs:
   version-check:

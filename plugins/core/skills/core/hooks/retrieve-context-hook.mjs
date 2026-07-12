@@ -29,7 +29,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { retrieveContext } from '../scripts/retrieve-context.mjs';
+import { retrieveContext, storeHealth } from '../scripts/retrieve-context.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
@@ -56,10 +56,24 @@ async function main() {
 
   let out = 'Relevant stored context (CORE per-turn retrieval):\n';
   for (const h of hits) {
-    const line = `- ${h.id}: ${h.summary}\n`;
+    // The authority tier travels INTO the injected context — a raw observation is
+    // labeled where the agent actually reads it, not just in an internal record
+    // (Hale re-review §6: the label used to be stripped right here).
+    const tierTag = h.tier === 'observation' ? ' [observation]' : '';
+    const line = `- ${h.id}${tierTag}: ${h.summary}\n`;
     if (Buffer.byteLength(out + line, 'utf8') > OUTPUT_BYTE_CAP) break;
     out += line;
   }
+  // Degraded-store warning: duplicate unit ids mean something was excluded from
+  // the index (authority-resolved, but the store needs fixing) — say so where the
+  // user's agent can see it instead of only a generator stderr line.
+  try {
+    const health = storeHealth(store);
+    if (health.degraded) {
+      const warn = `⚠ CORE memory index degraded: ${health.duplicate_conflicts.length} duplicate unit id(s) — run generate-summary-index for detail.\n`;
+      if (Buffer.byteLength(out + warn, 'utf8') <= OUTPUT_BYTE_CAP) out += warn;
+    }
+  } catch { /* health is advisory, never blocking */ }
   process.stdout.write(out);
   return 0;
 }

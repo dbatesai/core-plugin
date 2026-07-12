@@ -50,3 +50,19 @@ test('integration: bootstrap integrity marker + hook injection coexist under a c
   assert.match(combined, /want-omega-speedmaster-on-sale-wait/);
   assert.ok(Buffer.byteLength(combined, 'utf8') <= 4096, 'startup marker + per-turn injection together stay bounded');
 });
+
+test('hook output carries the authority tier for observation hits (Hale re-review §6 — the label used to be stripped)', async () => {
+  const { mkdtempSync, cpSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const NESTED = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'nested-store');
+  const dir = mkdtempSync(join(tmpdir(), 'hook-tier-'));
+  cpSync(NESTED, dir, { recursive: true });
+  try {
+    const out = execFileSync('node', [HOOK], {
+      input: JSON.stringify({ prompt: 'quokka incident', cwd: dir }),
+      env: { ...process.env, CORE_RETRIEVAL_STORE: dir },
+      encoding: 'utf8',
+    });
+    assert.match(out, /obs-nested-note \[observation\]:/, 'observation hit is tier-labeled in the injected context');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
