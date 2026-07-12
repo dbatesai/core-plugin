@@ -13,15 +13,15 @@ import assert from 'node:assert';
 import { mkdtempSync, cpSync, readFileSync, writeFileSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'nested-store');
 
-const { generateSummaryIndex, loadFreshIndex, computeSourceSignature } = await import(join(SCRIPTS, 'generate-summary-index.mjs'));
-const { bm25Rank, loadActiveBodies } = await import(join(SCRIPTS, 'bm25.mjs'));
-const { retrieveContext, productRankedIds, productRankedScores } = await import(join(SCRIPTS, 'retrieve-context.mjs'));
+const { generateSummaryIndex, loadFreshIndex, computeSourceSignature } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
+const { bm25Rank, loadActiveBodies } = await import(pathToFileURL(join(SCRIPTS, 'bm25.mjs')).href);
+const { retrieveContext, productRankedIds, productRankedScores } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
 
 // The committed fixture is NEVER touched by tests — even "read" paths write the
 // cached index (_lib/unit-summaries.json) as a side effect, which polluted the

@@ -1,15 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
-const { recallAtK, firstRelevantRank } = await import(join(SCRIPTS, 'retrieval-harness.mjs'));
-const { bm25Rank } = await import(join(SCRIPTS, 'bm25.mjs'));
-const { lexicalRankedIds } = await import(join(SCRIPTS, 'retrieve-context.mjs'));
+const { recallAtK, firstRelevantRank } = await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
+const { bm25Rank } = await import(pathToFileURL(join(SCRIPTS, 'bm25.mjs')).href);
+const { lexicalRankedIds } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
 
 test('recallAtK: gold below K is a miss, at/above K is a hit', () => {
   const ranked = ['a', 'b', 'c', 'd', 'e', 'f'];
