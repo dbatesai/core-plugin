@@ -37,21 +37,12 @@
 
 import { realpathSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { logHookEvent } from './hook-log.mjs';
+import { trustedHome } from '../scripts/trusted-home.mjs';
 
-/**
- * The TRUSTED user home. os.homedir() follows $HOME/$USERPROFILE — which a
- * project-controlled hook environment can point at an attacker directory
- * carrying its own .claude/settings.json (Hale's demonstrated bypass,
- * 2026-07-11 re-review §5). os.userInfo() reads the OS account database
- * (passwd on POSIX, the profile registry on Windows) and ignores the
- * environment entirely. Unresolvable → null → nothing is authorized.
- */
-function trustedHome() {
-  try { return userInfo().homedir || null; } catch { return null; }
-}
+// trustedHome() (shared anchor in scripts/trusted-home.mjs): the OS-account home,
+// unspoofable by $HOME/$USERPROFILE. Unresolvable → null → nothing is authorized.
 
 // Skill-name shape: /name or /plugin:name, lowercase kebab — anything else is not a skill
 // reference and must not reach the directive (env is project-influenceable; see header).

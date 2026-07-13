@@ -32,8 +32,9 @@
  */
 
 import { readFileSync, existsSync, statSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync, chmodSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
+import { trustedHome } from './trusted-home.mjs';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -223,26 +224,28 @@ export function shouldSpawn(store, { didWork = false, madeDecision = false, allO
 // fake index. Honor the override only when it resolves inside ~/.core; otherwise
 // ignore it and use the real registry. Pure + exported for unit testing.
 export function resolveIndexPath(env = process.env) {
-  const dflt = join(homedir(), '.core', 'index.json');
+  const home = trustedHome();
+  if (!home) return null;                 // no trusted OS home → caller fails closed
+  const coreDir = join(home, '.core');
+  const dflt = join(coreDir, 'index.json');
   const override = env && env.CORE_CLOSE_INDEX;
   if (!override) return dflt;
-  const coreDir = join(homedir(), '.core');
   const resolved = resolve(override);
-  if (resolved === coreDir || resolved.startsWith(coreDir + '/') || resolved.startsWith(coreDir + '\\')) {
-    return override;
-  }
+  // Honor the override ONLY inside the trusted ~/.core — a store-local or attacker
+  // path (the shape Claude Code forwards from a project settings.json) is ignored.
+  if (resolved === coreDir || resolved.startsWith(coreDir + sep)) return override;
   return dflt;
 }
 
-// NOTE (audit 2026-07-02): resolveIndexPath() above is the hardened resolver that
-// ignores a CORE_CLOSE_INDEX pointing outside ~/.core — the defense against a
-// trusted-but-hostile repo redirecting this check via its settings.json env. It is
-// intentionally NOT wired as the default yet: the close-hook test harness registers
-// fixtures by pointing CORE_CLOSE_INDEX at an index INSIDE the store (structurally
-// the same shape as the attack), so flipping the default needs a decision on how the
-// hook threads a trusted index path vs the untrusted env. Wire resolveIndexPath here
-// once that's settled. See docs/specs/2026-07-02-audit-fixes-design.md §Fix 4.
-export function isRegisteredWorkspace(store, { indexPath = process.env.CORE_CLOSE_INDEX || join(homedir(), '.core', 'index.json') } = {}) {
+// resolveIndexPath() (above) is the hardened resolver: it bases ~/.core on the trusted
+// OS home (not the spoofable $HOME) and ignores any CORE_CLOSE_INDEX pointing outside it.
+// It is the active default here (wired 2026-07-13, close-authority spec). The explicit
+// `indexPath` option is the TRUSTED in-process channel — a caller passing it does so from
+// code, not from a project's forwarded env — which is how the tests exercise the positive
+// path. Untrusted env can no longer redirect the gate; a subprocess can't fake trustedHome().
+export function isRegisteredWorkspace(store, { indexPath = resolveIndexPath() } = {}) {
+  if (!indexPath) return false;               // no trusted registry → fail closed
+  const home = trustedHome();
   let canon;
   try { canon = realpathSync(store); } catch { canon = resolve(store); }
   let idx;
@@ -250,7 +253,9 @@ export function isRegisteredWorkspace(store, { indexPath = process.env.CORE_CLOS
   if (!Array.isArray(idx)) return false;
   return idx.some(e => {
     if (!e || typeof e.path !== 'string') return false;
-    let p = e.path.startsWith('~') ? join(homedir(), e.path.slice(1)) : e.path;
+    // `home` is guaranteed non-null here (null trustedHome fails closed at the top),
+    // so the ~ expansion never falls back to the spoofable homedir().
+    let p = e.path.startsWith('~') ? join(home, e.path.slice(1)) : e.path;
     try { p = realpathSync(p); } catch { p = resolve(p); }
     return p === canon;
   });
