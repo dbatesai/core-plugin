@@ -109,6 +109,59 @@ test('empty hits → empty pack (no header emitted for nothing)', () => {
   assert.deepEqual(pack.accepted, []);
 });
 
+test('A3 snapshot: loadSnapshot returns a content-derived id that changes only when store bytes change', async () => {
+  const { loadSnapshot } = await import(new URL('../../plugins/core/skills/core/scripts/generate-summary-index.mjs', import.meta.url).href);
+  const a = loadSnapshot(FIXT);
+  const b = loadSnapshot(FIXT);
+  assert.equal(a.snapshotId, b.snapshotId, 'same bytes → same snapshot id');
+  assert.match(a.snapshotId, /^[0-9a-f]{64}$/, 'sha256 hex');
+  assert.ok(Array.isArray(a.index.units) && a.index.units.length > 0, 'snapshot carries the loaded index');
+});
+
+test('A3 threading: bm25Scores with a preloaded snapshot index equals a standalone load', async () => {
+  const { loadSnapshot } = await import(new URL('../../plugins/core/skills/core/scripts/generate-summary-index.mjs', import.meta.url).href);
+  const { bm25Scores } = await import(new URL('../../plugins/core/skills/core/scripts/bm25.mjs', import.meta.url).href);
+  const { index } = loadSnapshot(FIXT);
+  const threaded = bm25Scores('omega speedmaster sale', FIXT, { preloadedIndex: index });
+  const standalone = bm25Scores('omega speedmaster sale', FIXT);
+  assert.deepEqual(threaded, standalone, 'one-snapshot read path scores identically on an unchanged store');
+});
+
+test('A3 trace: buildRetrievalTrace records snapshot id, stages, delivered pack, and timing — final agrees with retrieveContext', async () => {
+  const { buildRetrievalTrace } = await import(new URL('../../plugins/core/skills/core/scripts/retrieve-context.mjs', import.meta.url).href);
+  const query = 'omega speedmaster sale';
+  const trace = buildRetrievalTrace(query, FIXT, { topN: 3 });
+  assert.equal(trace.kind, 'retrieval-trace');
+  assert.equal(trace.local_only, true, 'traces are local-only; sharing goes through the aggregate exporter');
+  assert.match(trace.snapshot_id, /^[0-9a-f]{64}$/);
+  assert.ok(trace.stages.substrate.length >= trace.stages.final.length, 'substrate is the pre-slice ranking');
+  assert.deepEqual(
+    trace.stages.final.map(h => h.id),
+    retrieveContext(query, FIXT, { topN: 3 }).map(h => h.id),
+    'trace final and product final are the same pipeline',
+  );
+  assert.deepEqual(
+    trace.pack.accepted.map(a => a.id),
+    buildFinalContextPack(retrieveContext(query, FIXT, { topN: 3 })).accepted.map(a => a.id),
+    'trace pack agrees with the delivered pack',
+  );
+  assert.ok(trace.timing_ms >= 0);
+  assert.ok(trace.component_identity['retrieve-context.mjs'], 'component hash recorded');
+});
+
+test('A3 trace: storeless directory → explicit storeless trace, no crash, no writes', async () => {
+  const { buildRetrievalTrace } = await import(new URL('../../plugins/core/skills/core/scripts/retrieve-context.mjs', import.meta.url).href);
+  const { mkdtempSync, rmSync, readdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(join(tmpdir(), 'trace-storeless-'));
+  try {
+    const trace = buildRetrievalTrace('anything', dir);
+    assert.equal(trace.storeless, true);
+    assert.equal(trace.snapshot_id, null);
+    assert.deepEqual(readdirSync(dir), [], 'no side-effect writes into a store-less directory');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('A4 CLI: --pack emits the exact delivered bytes (same function, same cap, same health)', () => {
   const CLI = join(ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', 'retrieve-context.mjs');
   const query = 'omega speedmaster sale';

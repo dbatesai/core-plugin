@@ -60,9 +60,12 @@ export function tokenize(text) {
  * for nested units. Freshness is the loader's job (loadFreshIndex validates the
  * recursive source signature on every call).
  */
-export function loadActiveBodies(store) {
+export function loadActiveBodies(store, preloadedIndex = null) {
   const root = resolve(store);
-  const idx = loadFreshIndex(root); // active-only, retired excluded, sig-validated
+  // A3: a caller holding a request-scoped snapshot passes its index so every
+  // reader in the request sees the same bytes; standalone callers still get a
+  // sig-validated fresh load (active-only, retired excluded).
+  const idx = preloadedIndex || loadFreshIndex(root);
   const out = [];
   for (const u of idx.units) {
     const fpath = join(root, '_memories', ...(u.path ? u.path.split('/') : [`${u.id}.md`]));
@@ -82,8 +85,8 @@ export function loadActiveBodies(store) {
  * which retrieve-context's normalized union needs (rank positions can't express
  * "a neighbor of a STRONG hit beats a weak direct hit"). Deterministic, no dependency.
  */
-export function bm25Scores(query, store, { k1 = 1.5, b = 0.75 } = {}) {
-  const bodies = loadActiveBodies(store);
+export function bm25Scores(query, store, { k1 = 1.5, b = 0.75, preloadedIndex = null } = {}) {
+  const bodies = loadActiveBodies(store, preloadedIndex);
   const docs = bodies.map(d => ({ id: d.id, tier: d.tier, toks: tokenize(d.text) }));
   const N = docs.length || 1;
   const df = new Map();

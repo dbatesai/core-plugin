@@ -152,6 +152,21 @@ export function loadFreshIndex(storePath) {
   return generateSummaryIndex(root);
 }
 
+/**
+ * loadSnapshot — the request-scoped, content-addressed store snapshot (Train A A3).
+ * ONE load per retrieval request feeds every reader and scorer; the snapshot_id is
+ * sha256 of the index's content-derived source signature, so two requests that saw
+ * the same bytes report the same id and any store mutation changes it. Traces and
+ * evidence receipts carry this id — a retrieval number without it is not reproducible.
+ */
+export function loadSnapshot(storePath) {
+  const index = loadFreshIndex(storePath);
+  return {
+    index,
+    snapshotId: createHash('sha256').update(index.source_sig || '').digest('hex'),
+  };
+}
+
 // First `# ` heading stripped, else first non-blank non-heading line. Mirrors
 // generate-decisions-index.mjs extractSummary so the index reads the same shape.
 export function deriveSummary(body) {

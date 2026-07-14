@@ -25,9 +25,10 @@
  */
 
 import { existsSync, realpathSync, readFileSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadFreshIndex } from './generate-summary-index.mjs';
+import { createHash } from 'node:crypto';
+import { loadFreshIndex, loadSnapshot } from './generate-summary-index.mjs';
 import { loadUnit, extractEdges } from './priority.mjs';
 import { bm25Scores, tokenize, STOPWORDS } from './bm25.mjs';
 
@@ -100,7 +101,9 @@ export function productRankedScores(query, storePath, preloadedIndex = null) {
 
   let bodyScored = [];
   try {
-    bodyScored = bm25Scores(query, root);
+    // A3: the body arm reads through the SAME index as the title arm — one
+    // request, one snapshot, every reader sees the same bytes.
+    bodyScored = bm25Scores(query, root, { preloadedIndex: index });
     _lastBm25Error = null;
   } catch (err) {
     // Fail-open (title-only) but never silent: the degradation is visible on stderr
@@ -194,20 +197,18 @@ export function storeHealth(storePath) {
 }
 
 /**
- * @returns {Array<{id, summary, score}>}
+ * runRetrievalStages — the ONE retrieval pipeline, staged (A3/A4). retrieveContext
+ * returns its `final`; buildRetrievalTrace records every stage. There is exactly one
+ * implementation of the pipeline — a trace can never disagree with the product.
+ * @returns {{snapshotId, substrate, policied, top, expanded, final}}
  */
-export function retrieveContext(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight } = {}) {
-  const root = resolve(storePath);
-  // The per-turn hook runs in every directory the user opens. If there's no CORE
-  // store here, retrieve nothing and — critically — write nothing: generating the
-  // index would mkdir -p _memories/_lib and litter unit-summaries.json into an
-  // unrelated repo. No store, no retrieval, no side effect.
-  if (!existsSync(join(root, '_memories'))) return [];
-  // loadFreshIndex validates the recursive source signature on every call —
-  // missing, corrupt, or stale (added/deleted/edited/retired unit, top-level OR
-  // nested) regenerates. A stale index lingering retired units in the retrieval
-  // surface is the anti-resurrection hole (DC-94b R1).
-  const index = loadFreshIndex(root);
+function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight } = {}) {
+  // A3: ONE content-addressed snapshot per request. loadSnapshot validates the
+  // recursive source signature (missing/corrupt/stale regenerates — the DC-94b R1
+  // anti-resurrection hole stays closed at the loader) and derives snapshotId from
+  // the index's content signature; every reader below — title arm, body-BM25 arm,
+  // edge expansion — reads through this same index.
+  const { index, snapshotId } = loadSnapshot(root);
   const byId = new Map(index.units.map(u => [u.id, u]));
 
   // The product ranking: title/topics ∪ body-BM25, magnitudes preserved via
@@ -216,13 +217,14 @@ export function retrieveContext(query, storePath, { topN = 3, tierPolicy = 'P0',
   // abstract/value rung (DC-113 Tier-A T3, model-free per DC-114).
   // tierPolicy defaults to 'P0' (identity) so shipped behavior is unchanged; the
   // ceremony (joint contract v2 §7) selects an active policy from measured evidence.
-  const scored = applyTierPolicy(
-    productRankedScores(query, root, index),
+  const substrate = productRankedScores(query, root, index);
+  const policied = applyTierPolicy(
+    substrate,
     tierPolicy,
     { topN, ...(tierEpsilon !== undefined ? { epsilon: tierEpsilon } : {}), ...(tierWeight !== undefined ? { weight: tierWeight } : {}) },
   );
 
-  const top = scored.slice(0, topN).map(s => ({
+  const top = policied.slice(0, topN).map(s => ({
     id: s.id, summary: byId.get(s.id)?.summary, tier: s.tier, score: s.score,
   }));
 
@@ -251,7 +253,73 @@ export function retrieveContext(query, storePath, { topN = 3, tierPolicy = 'P0',
     }
   }
 
-  return [...top, ...expanded].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, topN);
+  const final = [...top, ...expanded].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, topN);
+  return { snapshotId, substrate, policied, top, expanded, final };
+}
+
+/**
+ * @returns {Array<{id, summary, score}>}
+ */
+export function retrieveContext(query, storePath, opts = {}) {
+  const root = resolve(storePath);
+  // The per-turn hook runs in every directory the user opens. If there's no CORE
+  // store here, retrieve nothing and — critically — write nothing: generating the
+  // index would mkdir -p _memories/_lib and litter unit-summaries.json into an
+  // unrelated repo. No store, no retrieval, no side effect.
+  if (!existsSync(join(root, '_memories'))) return [];
+  return runRetrievalStages(query, root, opts).final;
+}
+
+/**
+ * buildRetrievalTrace — LOCAL-ONLY evidence record of one retrieval request (Train A
+ * A3; Crest closure program 2026-07-12 §1). Runs the SAME staged pipeline as
+ * retrieveContext (imported, never reimplemented) and records: snapshot identity,
+ * component identities, parameters, store health, ranked substrate, policy output,
+ * expansion, the final candidates, the delivered pack (accepted/excluded/bytes), and
+ * timing. Detailed traces stay on the machine that produced them — rows in this
+ * object are project data; only the aggregate exporter (A2) produces shareable output.
+ */
+export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, byteCap = 2048 } = {}) {
+  const root = resolve(storePath);
+  const t0 = process.hrtime.bigint();
+  if (!existsSync(join(root, '_memories'))) {
+    return { kind: 'retrieval-trace', local_only: true, store: root, storeless: true,
+      query, snapshot_id: null, stages: null, pack: null, timing_ms: 0 };
+  }
+  const stages = runRetrievalStages(query, root, { topN, tierPolicy, tierEpsilon, tierWeight });
+  const health = storeHealth(root);
+  const pack = buildFinalContextPack(stages.final, { byteCap, health });
+  const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
+  const componentHash = (rel) => {
+    try {
+      return createHash('sha256')
+        .update(readFileSync(join(dirname(fileURLToPath(import.meta.url)), rel)))
+        .digest('hex');
+    } catch { return null; } // packaged layouts vary; never guessed
+  };
+  return {
+    kind: 'retrieval-trace',
+    local_only: true, // rows are project data; share only through the A2 aggregate exporter
+    store: root,
+    query,
+    snapshot_id: stages.snapshotId,
+    parameters: { topN, tierPolicy, ...(tierEpsilon !== undefined ? { tierEpsilon } : {}), ...(tierWeight !== undefined ? { tierWeight } : {}), byteCap },
+    component_identity: {
+      'retrieve-context.mjs': componentHash('./retrieve-context.mjs'),
+      'bm25.mjs': componentHash('./bm25.mjs'),
+      'generate-summary-index.mjs': componentHash('./generate-summary-index.mjs'),
+    },
+    health,
+    stages: {
+      substrate: stages.substrate,
+      policy_output: stages.policied.slice(0, Math.max(topN * 2, 10)),
+      top: stages.top,
+      expansion: stages.expanded,
+      final: stages.final,
+    },
+    pack: { accepted: pack.accepted, excluded: pack.excluded, bytes: pack.bytes, warnings: pack.warnings },
+    timing_ms: +elapsedMs.toFixed(2),
+  };
 }
 
 /**
