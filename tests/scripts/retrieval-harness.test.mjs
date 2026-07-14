@@ -77,7 +77,7 @@ test('A5 sweep: bands are per (query, gold) pair — multi-valued estimand prese
 test('A5 receipt: runHarness manifest carries product-function hashes, snapshot id, schema, and declared counts', async () => {
   const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
-  const dir = mkdtempSync(join((await import('node:os')).tmpdir(), 'a5-gold-'));
+  const dir = mkdtempSync(join(tmpdir(), 'a5-gold-'));
   const goldPath = join(dir, 'gold.json');
   writeFileSync(goldPath, JSON.stringify({ queries: [
     { id: 'q1', query: 'omega speedmaster', expected: ['want-omega-speedmaster-on-sale-wait'] },
