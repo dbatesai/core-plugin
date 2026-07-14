@@ -43,7 +43,7 @@ import { resolve, join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
-import { lexicalRankedIds, productRankedIds, retrieveContext } from './retrieve-context.mjs';
+import { lexicalRankedIds, productRankedIds, retrieveContext, buildFinalContextPack } from './retrieve-context.mjs';
 import { bm25Rank } from './bm25.mjs';
 
 const KS = [5, 10, 30, 100];
@@ -83,7 +83,10 @@ export async function runHarness(store, goldPath) {
   const arms = {
     lexical: (q) => lexicalRankedIds(q, store),    // title+topics only (pre-T3 baseline)
     ranking: (q) => productRankedIds(q, store),    // RANKING SUBSTRATE — the function retrieveContext ranks with, BEFORE edge expansion/topN (not the final context)
-    context3: (q) => retrieveContext(q, store, { topN: 3 }).map(h => h.id), // FINAL product context — the exact top-3 the hook injects (edges + slice included); only R@3 is meaningful here
+    // FINAL product context — DELIVERED identities, not selection: routed through
+    // buildFinalContextPack so the byte cap participates (Train A A4 — a hit
+    // retrieveContext selects but the cap drops is NOT counted as delivered).
+    context3: (q) => buildFinalContextPack(retrieveContext(q, store, { topN: 3 })).accepted.map(a => a.id),
     bm25: (q) => bm25Rank(q, store),               // summary+topics+body BM25 arm (not body-only — the loader prepends title/topics)
   };
   // ONE ranking pass per arm: metrics, raw ranks, and latency all come from the
@@ -128,7 +131,7 @@ export async function runHarness(store, goldPath) {
     harness_sha256: createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex'),
     entry_points: {
       ranking: 'productRankedIds (pre-expansion ranking substrate)',
-      context3: 'retrieveContext topN=3 (the exact injected product context)',
+      context3: 'buildFinalContextPack(retrieveContext topN=3).accepted (delivered identities — byte cap included)',
     },
     gold_path: resolve(goldPath),
     gold_sha256: createHash('sha256').update(goldRaw).digest('hex'),
@@ -242,7 +245,8 @@ export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
   const finalCtx = {}; // policy -> {qid -> [ids]}
   for (const [label, opts] of POLICIES) {
     finalCtx[label] = {};
-    for (const q of gold) finalCtx[label][q.id] = retrieveContext(q.query, store, { topN, ...opts }).map(h => h.id);
+    // Delivered identities (pack-accepted), not selection — same A4 routing as the context3 arm.
+    for (const q of gold) finalCtx[label][q.id] = buildFinalContextPack(retrieveContext(q.query, store, { topN, ...opts })).accepted.map(a => a.id);
   }
   const perPolicy = POLICIES.map(([label]) => {
     let recalls = [], forbid = 0, forbidQ = 0;
@@ -272,7 +276,7 @@ export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
     bands.push({ query: q.id, band }); // query id is the caller's local gold label
   }
   return {
-    kind: 'final-context', topN, evaluator: 'retrieveContext(tierPolicy) — imported product path',
+    kind: 'final-context', topN, evaluator: 'buildFinalContextPack(retrieveContext(tierPolicy)).accepted — imported product path, delivered identities',
     perPolicy, bands,
     counts: { queries: gold.length, scored: perPolicy[0].n },
   };

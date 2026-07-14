@@ -108,3 +108,33 @@ test('empty hits → empty pack (no header emitted for nothing)', () => {
   assert.equal(pack.bytes, 0);
   assert.deepEqual(pack.accepted, []);
 });
+
+test('A4 CLI: --pack emits the exact delivered bytes (same function, same cap, same health)', () => {
+  const CLI = join(ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', 'retrieve-context.mjs');
+  const query = 'omega speedmaster sale';
+  const cliOut = execFileSync('node', [CLI, FIXT, query, '--pack'], { encoding: 'utf8' });
+  const pack = buildFinalContextPack(retrieveContext(query, FIXT, { topN: 3 }), { health: storeHealth(FIXT) });
+  assert.equal(cliOut, pack.text, 'CLI --pack and the product function must emit identical bytes');
+});
+
+test('A4 harness: context3 arm reports DELIVERED identities (pack-accepted), not pre-cap selection', async () => {
+  const { runHarness } = await import(new URL('../../plugins/core/skills/core/scripts/retrieval-harness.mjs', import.meta.url).href);
+  const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const gold = { queries: [
+    { id: 'q1', query: 'omega speedmaster sale', expected: ['want-omega-speedmaster-on-sale-wait'], forbidden: [], rung: 'literal' },
+  ] };
+  const dir = mkdtempSync(join(tmpdir(), 'pack-gold-'));
+  const goldPath = join(dir, 'gold.json');
+  writeFileSync(goldPath, JSON.stringify(gold));
+  try {
+    const report = await runHarness(FIXT, goldPath);
+    for (const q of gold.queries) {
+      const delivered = buildFinalContextPack(retrieveContext(q.query, FIXT, { topN: 3 })).accepted.map(a => a.id);
+      assert.deepEqual(report.rawRanks.context3[q.id], delivered,
+        `context3 raw ranks for ${q.id} must equal pack-accepted ids`);
+    }
+    assert.match(report.manifest.entry_points.context3, /buildFinalContextPack/,
+      'manifest names the pack function as the context3 entry point');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

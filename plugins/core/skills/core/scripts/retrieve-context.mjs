@@ -305,13 +305,24 @@ export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = 
 }
 
 function main(argv) {
-  const args = argv.filter(a => a !== '--top');
+  const pack = argv.includes('--pack');
+  const args = argv.filter(a => a !== '--top' && a !== '--pack');
   const topIdx = argv.indexOf('--top');
   const topN = topIdx >= 0 ? Number(argv[topIdx + 1]) || 3 : 3;
   const storePath = args[0];
   const query = args[1] || '';
-  if (!storePath) { process.stderr.write('usage: retrieve-context.mjs <storePath> "<query>" [--top N]\n'); return 2; }
+  if (!storePath) { process.stderr.write('usage: retrieve-context.mjs <storePath> "<query>" [--top N] [--pack]\n'); return 2; }
   const hits = retrieveContext(query, storePath, { topN });
+  if (pack) {
+    // --pack emits the EXACT delivered bytes (Train A A4): same function, same cap,
+    // same health input as the installed hook — so the CLI is a truthful probe of
+    // what the agent would receive, not a debug approximation of it.
+    const built = buildFinalContextPack(hits, { health: storeHealth(storePath) });
+    if (built.text) process.stdout.write(built.text);
+    return 0;
+  }
+  // Default: human debug listing (scores visible). NOT a final-context surface —
+  // use --pack for delivered bytes.
   for (const h of hits) process.stdout.write(`[${h.score.toFixed(1)}] ${h.id} — ${h.summary}\n`);
   return 0;
 }
