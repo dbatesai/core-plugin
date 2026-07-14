@@ -42,7 +42,7 @@ import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
+import { generateSummaryIndex, computeSourceSignature, loadSnapshot } from './generate-summary-index.mjs';
 import { lexicalRankedIds, productRankedIds, retrieveContext, buildFinalContextPack } from './retrieve-context.mjs';
 import { bm25Rank } from './bm25.mjs';
 
@@ -80,6 +80,11 @@ function fmt(v) { return v === null || v === undefined ? '  —  ' : v.toFixed(2
 export async function runHarness(store, goldPath) {
   const goldRaw = readFileSync(goldPath, 'utf8');
   const gold = JSON.parse(goldRaw).queries;
+  // A5 strictness: the Recall@K instrument refuses an under-declared gold set and
+  // an unclassifiable store the same way the tier sweep does — zero silent skips.
+  validateGold(gold);
+  const snapshot = loadSnapshot(store);
+  assertKnownTiers(snapshot.index);
   const arms = {
     lexical: (q) => lexicalRankedIds(q, store),    // title+topics only (pre-T3 baseline)
     ranking: (q) => productRankedIds(q, store),    // RANKING SUBSTRATE — the function retrieveContext ranks with, BEFORE edge expansion/topN (not the final context)
@@ -125,10 +130,27 @@ export async function runHarness(store, goldPath) {
     const { execFileSync } = await import('node:child_process');
     sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dirname(fileURLToPath(import.meta.url)), encoding: 'utf8' }).trim();
   } catch { /* not a git checkout (packaged install) — stays null, never guessed */ }
+  // A5 (Crest correction #6): a receipt without hashes is not reproducible.
+  // Product-function hashes cover the three modules the pipeline runs; the
+  // built-artifact hash is null in a dev tree BY DESIGN (it names the packaged
+  // archive; the packet's freeze step supplies it — never guessed here).
+  const scriptsDir = dirname(fileURLToPath(import.meta.url));
+  const fileHash = (name) => {
+    try { return createHash('sha256').update(readFileSync(join(scriptsDir, name))).digest('hex'); }
+    catch { return null; }
+  };
   const manifest = {
+    receipt_schema: 'train-a-evaluator/1',
     plugin_version: pluginVersion,
     source_commit: sourceCommit,
     harness_sha256: createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex'),
+    product_function_sha256: {
+      'retrieve-context.mjs': fileHash('retrieve-context.mjs'),
+      'bm25.mjs': fileHash('bm25.mjs'),
+      'generate-summary-index.mjs': fileHash('generate-summary-index.mjs'),
+    },
+    built_artifact_sha256: null, // packaged-archive hash — supplied by the freeze step, never computed from a dev tree
+    snapshot_id: snapshot.snapshotId, // the content-addressed store snapshot ALL arms ran against
     entry_points: {
       ranking: 'productRankedIds (pre-expansion ranking substrate)',
       context3: 'buildFinalContextPack(retrieveContext topN=3).accepted (delivered identities — byte cap included)',
@@ -137,6 +159,11 @@ export async function runHarness(store, goldPath) {
     gold_sha256: createHash('sha256').update(goldRaw).digest('hex'),
     corpus_content_sha256: createHash('sha256').update(computeSourceSignature(store)).digest('hex'), // content-derived (sha1-per-file signature), not mtime
     arm_params: { bm25: { k1: 1.5, b: 0.75 }, context3: { topN: 3 } },
+    counts: {
+      queries: gold.length,
+      no_answer: gold.filter(q => q.no_answer === true).length,
+      declared_supports: gold.reduce((s, q) => s + (q.expected || []).length, 0),
+    },
   };
   return { store: resolve(store), manifest, latency, total, mix, nQueries: gold.length, gold, rawRanks, results };
 }
@@ -216,8 +243,40 @@ export function validateGold(gold) {
     if (!q.id || typeof q.id !== 'string') throw new Error('gold query missing string id');
     if (seen.has(q.id)) throw new Error(`duplicate gold query id: ${q.id}`);
     seen.add(q.id);
+    if (!q.query || typeof q.query !== 'string' || !q.query.trim()) throw new Error(`${q.id}: missing query text`);
     if (q.expected !== undefined && !Array.isArray(q.expected)) throw new Error(`${q.id}: expected must be an array`);
     if (q.forbidden !== undefined && !Array.isArray(q.forbidden)) throw new Error(`${q.id}: forbidden must be an array`);
+    // A5 strictness (Crest correction #2): every query DECLARES its support — at
+    // least one expected id, or an explicit no_answer:true. An empty expected with
+    // no declaration is how a gold set silently shrinks its own denominator.
+    const expected = q.expected || [];
+    if (!expected.length && q.no_answer !== true) {
+      throw new Error(`${q.id}: no expected support and not marked no_answer:true — declare the support or the absence, never neither`);
+    }
+    if (expected.length && q.no_answer === true) {
+      throw new Error(`${q.id}: no_answer:true contradicts a non-empty expected list`);
+    }
+    for (const field of ['expected', 'forbidden']) {
+      for (const v of (q[field] || [])) {
+        if (typeof v !== 'string' || !v.trim()) throw new Error(`${q.id}: ${field} entries must be non-empty strings`);
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * assertKnownTiers — evaluator-side fail-closed authority enum (A5, Crest correction
+ * #5). The PRODUCT path tolerates unknown tiers (defaults canonical — a ranking path
+ * never throws); the MEASUREMENT path must not: an unknown tier silently classified
+ * as canonical would corrupt every tier-policy number. Throws on the first unknown.
+ */
+export function assertKnownTiers(index) {
+  const VALID_TIERS = new Set(['canonical', 'observation']);
+  for (const u of index.units) {
+    if (u.tier && !VALID_TIERS.has(u.tier)) {
+      throw new Error(`unknown authority tier '${u.tier}' on unit ${u.id} — evaluator fails closed (extend the enum deliberately, don't default)`);
+    }
   }
   return true;
 }
@@ -238,6 +297,10 @@ export function validateGold(gold) {
  */
 export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
   validateGold(gold);
+  // A5 fail-closed: measurement refuses a store whose authority tiers it can't
+  // classify, and every sweep number is pinned to the snapshot it was computed on.
+  const snapshot = loadSnapshot(store);
+  assertKnownTiers(snapshot.index);
   const POLICIES = [
     ['P0', { tierPolicy: 'P0' }], ['P1', { tierPolicy: 'P1' }], ['P2', { tierPolicy: 'P2' }],
     ['P3_w0.8', { tierPolicy: 'P3', tierWeight: 0.8 }], ['P3_w0.6', { tierPolicy: 'P3', tierWeight: 0.6 }],
@@ -260,25 +323,35 @@ export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
     return { policy: label, r3: mean === null ? null : +mean.toFixed(3), n: recalls.length, forbidden3: forbidQ ? +(forbid / forbidQ).toFixed(3) : 0 };
   });
   // Counterfactual bands on P0 misses: RUN the policies, don't infer from rank.
+  // A5 (Crest correction #3): banding is per (query, gold) pair over ALL declared
+  // supports — first-support-only banding collapsed the multi-valued estimand
+  // (recallAtK is fractional over all expected; the bands must match it).
   const bands = [];
   for (const q of gold) {
-    const g = (q.expected || [])[0];
-    if (!g) continue;
-    const p0hit = (finalCtx['P0'][q.id] || []).includes(g);
-    if (p0hit) continue;
-    const rescuer = POLICIES.slice(1).find(([label]) => (finalCtx[label][q.id] || []).includes(g));
-    let band;
-    if (rescuer) band = `tier-ordering (rescued by ${rescuer[0]})`;
-    else {
-      const inSubstrate = productRankedIds(q.query, store).includes(g);
-      band = inSubstrate ? 'deep-but-present (topN x tier coupled; no policy reaches at this topN)' : 'recall (absent from ranking; enrichment/reasoning, not tier)';
+    for (const g of (q.expected || [])) {
+      const p0hit = (finalCtx['P0'][q.id] || []).includes(g);
+      if (p0hit) continue;
+      const rescuer = POLICIES.slice(1).find(([label]) => (finalCtx[label][q.id] || []).includes(g));
+      let band;
+      if (rescuer) band = `tier-ordering (rescued by ${rescuer[0]})`;
+      else {
+        const inSubstrate = productRankedIds(q.query, store).includes(g);
+        band = inSubstrate ? 'deep-but-present (topN x tier coupled; no policy reaches at this topN)' : 'recall (absent from ranking; enrichment/reasoning, not tier)';
+      }
+      bands.push({ query: q.id, gold: g, band }); // ids are the caller's local gold labels
     }
-    bands.push({ query: q.id, band }); // query id is the caller's local gold label
   }
+  const declaredSupports = gold.reduce((s, q) => s + (q.expected || []).length, 0);
   return {
     kind: 'final-context', topN, evaluator: 'buildFinalContextPack(retrieveContext(tierPolicy)).accepted — imported product path, delivered identities',
+    snapshot_id: snapshot.snapshotId,
     perPolicy, bands,
-    counts: { queries: gold.length, scored: perPolicy[0].n },
+    counts: {
+      queries: gold.length,
+      scored: perPolicy[0].n,
+      no_answer: gold.filter(q => q.no_answer === true).length,
+      declared_supports: declaredSupports,
+    },
   };
 }
 

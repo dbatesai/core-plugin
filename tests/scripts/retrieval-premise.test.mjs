@@ -191,11 +191,11 @@ test('tier sweep — NON-TAUTOLOGICAL safety: no policy surfaces a retired stron
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('validateGold — rejects duplicate ids and non-array expected (Crest #5 completeness)', () => {
-  assert.throws(() => validateGold([{ id: 'a' }, { id: 'a' }]), /duplicate/);
-  assert.throws(() => validateGold([{ id: 'a', expected: 'x' }]), /must be an array/);
+test('validateGold — rejects duplicate ids and non-array expected (Crest #5 completeness; A5-strict rows)', () => {
+  assert.throws(() => validateGold([{ id: 'a', query: 'q', expected: ['x'] }, { id: 'a', query: 'q', expected: ['x'] }]), /duplicate/);
+  assert.throws(() => validateGold([{ id: 'a', query: 'q', expected: 'x' }]), /must be an array/);
   assert.throws(() => validateGold([]), /empty/);
-  assert.ok(validateGold([{ id: 'a', expected: ['x'], forbidden: [] }]));
+  assert.ok(validateGold([{ id: 'a', query: 'q', expected: ['x'], forbidden: [] }]));
 });
 
 test('tier policy — default retrieveContext is byte-identical to explicit P0 (shipped behavior unchanged)', () => {
