@@ -278,3 +278,21 @@ jobs:
       - name: Run node test suite
         shell: bash
         run: node --test tests/scripts/*.test.mjs
+
+  packaged-install-smoke:
+    name: packaged-install smoke (installed ≠ source)
+    runs-on: ubuntu-latest
+    steps:
+      # Full history + tags: the rollback leg builds the previous release
+      # (git archive <tag>:plugins/core) and reads the new store with it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Packaged-install smoke — committed artifact, installed-path hooks, hostile env, rollback round-trip
+        shell: bash
+        run: bash tests/smoke/packaged-install-smoke.sh
