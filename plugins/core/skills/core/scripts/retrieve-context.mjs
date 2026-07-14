@@ -254,6 +254,56 @@ export function retrieveContext(query, storePath, { topN = 3, tierPolicy = 'P0',
   return [...top, ...expanded].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, topN);
 }
 
+/**
+ * buildFinalContextPack — THE final-context product function (Train A A4; Crest
+ * closure program 2026-07-12 §2). The SOLE implementation of final ordering,
+ * context budget, authority labels, warnings, formatting, and UTF-8 byte
+ * accounting for the per-turn injection. The installed hook is a thin adapter
+ * around this; the evaluator imports the same function — so a measured number
+ * describes the exact bytes the agent receives, never a pre-cap selection
+ * ("measures selection, not delivered bytes" was the named hole).
+ *
+ * Formatting is byte-identical to the pre-extraction hook: header line, one
+ * `- <id>[ [observation]]: <summary>` line per accepted hit, first line that
+ * would exceed the cap stops packing (no skip-and-continue), degraded-store
+ * warning appended only if it fits.
+ *
+ * @param {Array<{id, summary, tier, score}>} hits  ranked hits (retrieveContext output)
+ * @param {object} [opts]
+ * @param {number} [opts.byteCap=2048]  UTF-8 byte budget for the whole pack
+ * @param {{degraded, duplicate_conflicts}|null} [opts.health=null]  storeHealth() result
+ * @returns {{text: string, bytes: number,
+ *   accepted: Array<{id, tier, score}>,
+ *   excluded: Array<{id, tier, score, reason: string}>,
+ *   warnings: string[]}}
+ */
+export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = {}) {
+  const accepted = [], excluded = [], warnings = [];
+  if (!hits || !hits.length) return { text: '', bytes: 0, accepted, excluded, warnings };
+
+  let out = 'Relevant stored context (CORE per-turn retrieval):\n';
+  let capped = false;
+  for (const h of hits) {
+    const tierTag = h.tier === 'observation' ? ' [observation]' : '';
+    const line = `- ${h.id}${tierTag}: ${h.summary}\n`;
+    if (capped || Buffer.byteLength(out + line, 'utf8') > byteCap) {
+      capped = true; // first over-cap line stops packing — the shipped hook semantic
+      excluded.push({ id: h.id, tier: h.tier, score: h.score, reason: 'byte-cap' });
+      continue;
+    }
+    out += line;
+    accepted.push({ id: h.id, tier: h.tier, score: h.score });
+  }
+  if (health && health.degraded) {
+    const warn = `⚠ CORE memory index degraded: ${(health.duplicate_conflicts || []).length} duplicate unit id(s) — run generate-summary-index for detail.\n`;
+    if (Buffer.byteLength(out + warn, 'utf8') <= byteCap) {
+      out += warn;
+      warnings.push(warn.trim());
+    }
+  }
+  return { text: out, bytes: Buffer.byteLength(out, 'utf8'), accepted, excluded, warnings };
+}
+
 function main(argv) {
   const args = argv.filter(a => a !== '--top');
   const topIdx = argv.indexOf('--top');
