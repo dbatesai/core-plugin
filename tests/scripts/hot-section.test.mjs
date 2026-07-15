@@ -18,16 +18,21 @@ function setup() {
   mkdirSync(project, { recursive: true });
   mkdirSync(join(home, '.core'), { recursive: true });
   writeFileSync(join(project, 'PROJECT.md'), '# Project\n\n## What & Why\n\nThe thing.\n');
-  return { root, project, home, cachePath: join(home, '.core', 'state-cache.json') };
+  return {
+    root, project, home,
+    globalCachePath: join(home, '.core', 'state-cache.json'),
+    // Per-project cache — the write of record since the shared-write concurrency split (2026-07-14).
+    projectCachePath: join(project, '_memories', '_lib', 'state-cache.json'),
+  };
 }
 
-test('applyHotSection stamps state-cache last_written_by: hot-section for PROJECT.md', () => {
-  const { root, project, home, cachePath } = setup();
+test('applyHotSection stamps the PER-PROJECT state-cache last_written_by: hot-section', () => {
+  const { root, project, home, projectCachePath } = setup();
   try {
     applyHotSection(project, 'Right now: shipping the thing.', { now: '2026-06-06T00:00:00Z', home });
-    const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+    const cache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
     const entry = cache.files[join(project, 'PROJECT.md')];
-    assert.ok(entry, 'PROJECT.md has a state-cache entry after apply');
+    assert.ok(entry, 'PROJECT.md has a per-project state-cache entry after apply');
     assert.equal(entry.last_written_by, 'hot-section',
       'the script-driven write is recorded as CORE-authored, not a user edit');
     assert.match(entry.last_hash, /^[0-9a-f]{16}$/, 'last_hash is a 16-hex digest');
@@ -38,26 +43,46 @@ test('applyHotSection stamps state-cache last_written_by: hot-section for PROJEC
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('recordProjectMdWrite merges into an existing cache without clobbering other entries', () => {
-  const { root, project, home, cachePath } = setup();
+test('recordProjectMdWrite merges into an existing per-project cache without clobbering other entries', () => {
+  const { root, project, home, projectCachePath } = setup();
   try {
-    writeFileSync(cachePath, JSON.stringify({
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    writeFileSync(projectCachePath, JSON.stringify({
       files: { '/some/other/file.md': { last_hash: 'deadbeefdeadbeef', last_written: 'x', last_written_by: 'init' } },
     }, null, 2));
     recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-06T00:00:00Z', home });
-    const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+    const cache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
     assert.ok(cache.files['/some/other/file.md'], 'pre-existing entry preserved');
     assert.equal(cache.files['/some/other/file.md'].last_written_by, 'init', 'pre-existing entry untouched');
     assert.equal(cache.files[join(project, 'PROJECT.md')].last_written_by, 'hot-section', 'new entry added');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('recordProjectMdWrite tolerates a missing cache file (creates it)', () => {
-  const { root, project, home, cachePath } = setup();
+test('recordProjectMdWrite tolerates a missing per-project cache file (creates it)', () => {
+  const { root, project, home, projectCachePath } = setup();
   try {
     recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-06T00:00:00Z', home });
-    const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+    const cache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
     assert.equal(cache.files[join(project, 'PROJECT.md')].last_written_by, 'hot-section');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('recordProjectMdWrite prunes the file entry from the GLOBAL cache (one-release migration), preserving others', () => {
+  const { root, project, home, globalCachePath, projectCachePath } = setup();
+  try {
+    const pmPath = join(project, 'PROJECT.md');
+    writeFileSync(globalCachePath, JSON.stringify({
+      files: {
+        [pmPath]: { last_hash: 'stale00000000000', last_written: 'x', last_written_by: 'hot-section' },
+        '/another/project/PROJECT.md': { last_hash: 'aaaaaaaaaaaaaaaa', last_written: 'y', last_written_by: 'hot-section' },
+      },
+    }, null, 2));
+    recordProjectMdWrite(pmPath, { now: '2026-06-06T00:00:00Z', home });
+    const globalCache = JSON.parse(readFileSync(globalCachePath, 'utf8'));
+    assert.ok(!(pmPath in globalCache.files), 'this file\'s stale global entry pruned');
+    assert.ok(globalCache.files['/another/project/PROJECT.md'], 'other projects\' global entries preserved');
+    const projectCache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
+    assert.equal(projectCache.files[pmPath].last_written_by, 'hot-section', 'per-project stamp is the write of record');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

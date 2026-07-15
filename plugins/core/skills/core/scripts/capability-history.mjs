@@ -23,7 +23,7 @@
 
 import {
   readFileSync, writeFileSync, existsSync,
-  mkdirSync, rmSync, openSync, closeSync, statSync,
+  mkdirSync, rmSync, openSync, closeSync, statSync, renameSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
@@ -117,7 +117,16 @@ export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT
         const age = now() - statSync(lockFile).mtimeMs;
         if (age > staleMs) stale = true;
       } catch { stale = true; } // lock vanished between check and stat
-      if (stale) { try { rmSync(lockFile); } catch { /* race */ } continue; }
+      if (stale) {
+        // Rename-claim CAS (shared-write concurrency fix, 2026-07-14): a blind
+        // rm here could delete a FRESH lock another stealer just created after
+        // its own rm. Rename atomically consumes the stale file, so exactly one
+        // stealer proceeds; losers fall through to the wx retry and see the
+        // winner's fresh lock as held.
+        const claim = `${lockFile}.stale-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+        try { renameSync(lockFile, claim); rmSync(claim); } catch { /* another stealer claimed it */ }
+        continue;
+      }
       if (now() >= deadline) {
         throw new Error(`capability-history: could not acquire lock ${lockFile} within ${timeoutMs}ms`);
       }

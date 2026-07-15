@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
 import { runMaintenance } from './maintenance-run.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
 
@@ -57,51 +58,39 @@ function readJson(p) {
   try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
 }
 
-function pidAlive(pid) {
-  if (!pid || typeof pid !== 'number') return false;
-  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
-}
-
 /**
  * Is the lock currently held by a live, non-stale owner?
+ * Delegates to file-lock.mjs (extracted 2026-07-14, shared-write concurrency spec).
  * @returns {{ held: boolean, lock: object|null, stale: boolean }}
  */
 export function inspectLock(store, now = Date.now()) {
-  const p = lockPath(store);
-  if (!existsSync(p)) return { held: false, lock: null, stale: false };
-  const lock = readJson(p);
-  if (!lock) return { held: false, lock: null, stale: true }; // corrupt → treat as stale
-  let ageMs = Infinity;
-  try { ageMs = now - statSync(p).mtimeMs; } catch { /* gone */ }
-  const stale = (ageMs > LOCK_STALE_MS && !pidAlive(lock.pid)) || ageMs > LOCK_HARD_STALE_MS;
-  return { held: !stale, lock, stale };
+  return inspectFileLock(lockPath(store), { now, staleMs: LOCK_STALE_MS, hardStaleMs: LOCK_HARD_STALE_MS });
 }
 
 /**
- * Acquire the single-flight lock. Atomic 'wx' create; steals a stale lock.
- * @returns {{ ok: boolean, reason?: string, lock?: object }}
+ * Acquire the single-flight lock. Atomic 'wx' create; a stale lock is stolen via
+ * file-lock.mjs's rename-claim CAS, so two concurrent stealers can no longer both
+ * "win" (the old blind-overwrite steal allowed exactly that).
+ * @returns {{ ok: boolean, reason?: string, lock?: object, stolen?: boolean }}
  */
 export function acquireLock(store, { sessionId = null, now = Date.now() } = {}) {
-  const p = lockPath(store);
   mkdirSync(join(resolve(store), '_memories'), { recursive: true });
-  const payload = JSON.stringify({ pid: process.pid, session_id: sessionId, started_at: new Date(now).toISOString() });
-  try {
-    const fd = openSync(p, 'wx'); // fails if exists — this IS the single-flight guard
-    writeSync(fd, payload); closeSync(fd);
-    return { ok: true, lock: readJson(p) };
-  } catch (e) {
-    if (e.code !== 'EEXIST') throw e;
-    const { held, lock } = inspectLock(store, now);
-    if (held) return { ok: false, reason: 'held', lock };
-    // stale — steal it (atomic overwrite)
-    atomicWriteFileSync(p, payload);
-    return { ok: true, lock: readJson(p), stolen: true };
-  }
+  return acquireFileLock(lockPath(store), {
+    extra: { session_id: sessionId },
+    now, staleMs: LOCK_STALE_MS, hardStaleMs: LOCK_HARD_STALE_MS,
+  });
 }
 
-export function releaseLock(store) {
+/**
+ * Release the lock. With a sessionId the release is VERIFIED: a revived slow owner
+ * whose stale lock was stolen cannot delete the fresh owner's lock (session_id
+ * mismatch is a no-op). Without a sessionId (legacy callers, the operator `release`
+ * command) behavior stays the historical unconditional remove.
+ */
+export function releaseLock(store, { sessionId = null } = {}) {
   const p = lockPath(store);
-  try { rmSync(p); } catch { /* already gone */ }
+  if (sessionId) return releaseFileLock(p, null, { verify: { field: 'session_id', value: sessionId } });
+  return releaseFileLock(p, null, { force: true });
 }
 
 /**
@@ -127,7 +116,7 @@ export function beginClose(store, { sessionId, ops = [], storeSignature = null, 
   try {
     atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
   } catch (e) {
-    releaseLock(store);
+    releaseLock(store, { sessionId });
     throw e;
   }
   return { ok: true, marker };
@@ -147,7 +136,7 @@ export function finishClose(store, { sessionId = null, status = 'closed', now = 
   marker.completed_at = now;
   if (sessionId) marker.session_id = sessionId;
   atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
-  releaseLock(store);
+  releaseLock(store, { sessionId });
   return marker;
 }
 
@@ -301,7 +290,7 @@ export function runClose(store, { now = new Date().toISOString(), spawnFinalize 
   try {
     begun = beginClose(store, { sessionId, ops: CLOSE_OPS, now });
   } catch (e) {
-    releaseLock(store); // in case the lock was taken but the marker write threw
+    releaseLock(store, { sessionId }); // in case the lock was taken but the marker write threw
     logHookEvent({ hook: 'close-run', action: 'error', reason: 'begin-failed: ' + String(e && e.message || e).slice(0, 120), cwd: store });
     return { ok: false, reason: 'begin-failed' };
   }

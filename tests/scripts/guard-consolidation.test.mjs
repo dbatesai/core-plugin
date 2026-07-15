@@ -62,6 +62,9 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // so the 48 ceiling stood re-evaluated, not by accident.) 48 → 49 (2026-07-12):
   // mailbox.mjs, a genuinely-new CLI tool with its own entry point. 49 → 50
   // (2026-07-14): aggregate-receipt.mjs, the Train A A2 privacy exporter — a
-  // genuinely-new CLI tool, not a copy. Still target one shared isCliEntry() helper.
-  assert.ok(n <= 50, `CLI-entry-guard occurrences grew past baseline 50 (target: one shared helper): ${n}`);
+  // genuinely-new CLI tool, not a copy. 50 → 51 (2026-07-14, shared-write
+  // concurrency): index-registry.mjs, the sole scripted writer of index.json —
+  // a genuinely-new CLI tool (file-lock.mjs is import-only, no entry guard).
+  // Still target one shared isCliEntry() helper.
+  assert.ok(n <= 51, `CLI-entry-guard occurrences grew past baseline 51 (target: one shared helper): ${n}`);
 });
