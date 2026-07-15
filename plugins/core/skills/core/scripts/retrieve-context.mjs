@@ -185,7 +185,17 @@ let _lastBm25Error = null;
  * reports the degraded state a silent fallback would otherwise hide: duplicate-id
  * conflicts (an observation shadowing canonical truth) and the last BM25 failure.
  */
-export function storeHealth(storePath) {
+export function storeHealth(storePath, { snapshot = null } = {}) {
+  // With a snapshot, health comes from the CAPTURED index — degraded/conflicts
+  // are fields the capture already carries (round-13 audit: the cached-file read
+  // below described a possibly-different store state than the snapshot's id).
+  if (snapshot?.index) {
+    return {
+      degraded: !!snapshot.index.degraded,
+      duplicate_conflicts: snapshot.index.duplicate_conflicts || [],
+      bm25_error: _lastBm25Error,
+    };
+  }
   const root = resolve(storePath);
   let degraded = false, conflicts = [];
   try {
@@ -255,7 +265,9 @@ function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsi
   }
 
   const final = [...top, ...expanded].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)).slice(0, topN);
-  return { snapshotId, substrate, policied, top, expanded, final };
+  // `snapshot: snap` rides the return so callers (buildRetrievalTrace's health
+  // line) can consume the SAME capture instead of re-reading any store surface.
+  return { snapshotId, substrate, policied, top, expanded, final, snapshot: snap };
 }
 
 /**
@@ -289,7 +301,7 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
       query, snapshot_id: null, stages: null, pack: null, timing_ms: 0 };
   }
   const stages = runRetrievalStages(query, root, { topN, tierPolicy, tierEpsilon, tierWeight, snapshot });
-  const health = storeHealth(root);
+  const health = storeHealth(root, { snapshot: stages.snapshot }); // round 13: health from the run's own capture, never the cached file
   const pack = buildFinalContextPack(stages.final, { byteCap, health });
   const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
   const componentHash = (rel) => {

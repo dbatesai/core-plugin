@@ -170,3 +170,42 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Hale round 13: reader-by-reader fixes were masking an incomplete invariant.
+// The whole-harness proof: with ONE injected capture, the complete evaluator —
+// every arm, the sweep, every manifest field — must produce an identical
+// timing-free projection across two runs separated by an on-disk mutation storm.
+// Any store access reachable after capture, anywhere in the harness, fails this.
+test('round-13 whole-harness barrier: a mutation storm between runs cannot change ANY capture-pinned output', async () => {
+  const { runHarness, runTierPolicySweep } = await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
+  const { writeFileSync: wf, mkdtempSync: mk, rmSync: rm, readdirSync, appendFileSync } = await import('node:fs');
+  const dir = mk(join(tmpdir(), 'whole-harness-'));
+  const store = join(dir, 'store');
+  cpSync(FIXT, store, { recursive: true });
+  const goldPath = join(dir, 'gold.json');
+  wf(goldPath, JSON.stringify({ queries: [
+    { id: 'q1', query: 'omega speedmaster sale', rung: 'literal', expected: [UNIT_ID], forbidden: ['distractor-retired-rolex'] },
+  ] }));
+  const projection = (out) => JSON.stringify({
+    results: out.results, rawRanks: out.rawRanks, total: out.total, mix: out.mix,
+    snapshot_id: out.manifest.snapshot_id, corpus: out.manifest.corpus_content_sha256,
+  });
+  const sweepProjection = (s) => JSON.stringify({ perPolicy: s.perPolicy, bands: s.bands, snapshot_id: s.snapshot_id, counts: s.counts });
+  try {
+    const snapshot = loadSnapshot(store, { captureBodies: true });
+    const run1 = projection(await runHarness(store, goldPath, { snapshot }));
+    const sweep1 = sweepProjection(runTierPolicySweep(store, JSON.parse(readFileSync(goldPath, 'utf8')).queries, { snapshot }));
+    // The mutation storm: rewrite EVERY unit with ranking-poisoning content and
+    // add a brand-new unit that would rank first if any reader touched the disk.
+    const memDir = join(store, '_memories');
+    for (const f of readdirSync(memDir, { recursive: true })) {
+      if (String(f).endsWith('.md')) appendFileSync(join(memDir, String(f)), '\n\nomega speedmaster sale omega speedmaster sale\n');
+    }
+    wf(join(memDir, 'poison-new-unit.md'), '---\nid: poison-new-unit\ntype: want\nstatus: active\n---\n\nomega speedmaster sale omega speedmaster sale omega speedmaster sale\n');
+    const run2 = projection(await runHarness(store, goldPath, { snapshot }));
+    const sweep2 = sweepProjection(runTierPolicySweep(store, JSON.parse(readFileSync(goldPath, 'utf8')).queries, { snapshot }));
+    assert.equal(run2, run1, 'the full harness projection is byte-identical across the storm — zero live readers anywhere');
+    assert.equal(sweep2, sweep1, 'the full sweep projection is byte-identical across the storm');
+    assert.ok(!run2.includes('poison-new-unit'), 'the post-capture unit is invisible to every measured surface');
+  } finally { rm(dir, { recursive: true, force: true }); }
+});

@@ -42,7 +42,7 @@ import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { generateSummaryIndex, computeSourceSignature, loadSnapshot } from './generate-summary-index.mjs';
+import { loadSnapshot } from './generate-summary-index.mjs';
 import { lexicalRankedIds, productRankedIds, retrieveContext, buildFinalContextPack } from './retrieve-context.mjs';
 import { bm25Rank } from './bm25.mjs';
 
@@ -65,19 +65,21 @@ export function firstRelevantRank(ranked, expected) {
 // (scoreArm — the ranker-callback scorer — was folded into scoreRankedLists below,
 // so metrics and raw evidence always come from one observation set.)
 
-export function unitTypeMix(store) {
-  const idx = generateSummaryIndex(resolve(store));
+// Round-13 audit: this used to call generateSummaryIndex(store) — a FULL live
+// re-read of every unit AFTER the run's snapshot was minted. It now derives the
+// mix from an index object; runHarness passes its captured snapshot's index.
+export function unitTypeMix(index) {
   const mix = {};
-  for (const u of idx.units) {
+  for (const u of index.units) {
     const t = (u.id.match(/^([a-z]+)-/) || [])[1] || 'other';
     mix[t] = (mix[t] || 0) + 1;
   }
-  return { total: idx.units.length, mix };
+  return { total: index.units.length, mix };
 }
 
 function fmt(v) { return v === null || v === undefined ? '  —  ' : v.toFixed(2); }
 
-export async function runHarness(store, goldPath) {
+export async function runHarness(store, goldPath, { snapshot: injectedSnapshot = null } = {}) {
   const goldRaw = readFileSync(goldPath, 'utf8');
   const gold = JSON.parse(goldRaw).queries;
   // A5 strictness: the Recall@K instrument refuses an under-declared gold set and
@@ -86,8 +88,10 @@ export async function runHarness(store, goldPath) {
   // Blocker 2 (Hale verdict §2): ONE immutable captured corpus — index AND body
   // bytes — minted before any measurement; every arm and every policy consumes it.
   // No reader below touches live unit files after snapshot_id is computed, so a
-  // store mutation mid-run cannot change what any number describes.
-  const snapshot = loadSnapshot(store, { captureBodies: true });
+  // store mutation mid-run cannot change what any number describes. An injected
+  // snapshot (round 13) makes that a TESTABLE end-to-end property: two runs with
+  // the same capture must be identical regardless of on-disk mutation.
+  const snapshot = injectedSnapshot || loadSnapshot(store, { captureBodies: true });
   assertKnownTiers(snapshot.index);
   const arms = {
     lexical: { run: (q) => lexicalRankedIds(q, store, { snapshot }) },   // title+topics only (pre-T3 baseline)
@@ -125,7 +129,7 @@ export async function runHarness(store, goldPath) {
       p95_ms: +(times[Math.min(times.length - 1, Math.ceil(times.length * 0.95) - 1)] || 0).toFixed(1),
     };
   }
-  const { total, mix } = unitTypeMix(store);
+  const { total, mix } = unitTypeMix(snapshot.index);
   // Provenance manifest (Gate 0): a number without these fields is not a baseline.
   let pluginVersion = null;
   try {
@@ -169,7 +173,10 @@ export async function runHarness(store, goldPath) {
     },
     gold_path: resolve(goldPath),
     gold_sha256: createHash('sha256').update(goldRaw).digest('hex'),
-    corpus_content_sha256: createHash('sha256').update(computeSourceSignature(store)).digest('hex'), // content-derived (sha1-per-file signature), not mtime
+    // Definitionally equal to snapshot_id (both are sha256 of the content-derived
+    // per-file signature) — and taken FROM the capture: the old computation
+    // re-walked the live store after the snapshot was minted (round-13 audit).
+    corpus_content_sha256: snapshot.snapshotId,
     arm_params: { bm25: { k1: 1.5, b: 0.75 }, context3: { topN: 3 } },
     counts: {
       queries: gold.length,
@@ -336,13 +343,14 @@ export function assertKnownTiers(index) {
  * @returns aggregate only — R@3/forbidden@3 per policy + a per-query band label. The
  *   caller decides what leaves an approved environment; row ids stay with the caller.
  */
-export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
+export function runTierPolicySweep(store, gold, { topN = 3, snapshot: injectedSnapshot = null } = {}) {
   validateGold(gold);
   // A5 fail-closed: measurement refuses a store whose authority tiers it can't
   // classify, and every sweep number is pinned to the snapshot it was computed on.
   // Blocker 2: the snapshot is a FULL capture (index + body bytes) and every
-  // policy run below consumes it — no live reads after the id.
-  const snapshot = loadSnapshot(store, { captureBodies: true });
+  // policy run below consumes it — no live reads after the id. Injectable for
+  // the round-13 whole-harness barrier proof.
+  const snapshot = injectedSnapshot || loadSnapshot(store, { captureBodies: true });
   assertKnownTiers(snapshot.index);
   const POLICIES = [
     ['P0', { tierPolicy: 'P0' }], ['P1', { tierPolicy: 'P1' }], ['P2', { tierPolicy: 'P2' }],
@@ -378,7 +386,7 @@ export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
       let band;
       if (rescuer) band = `tier-ordering (rescued by ${rescuer[0]})`;
       else {
-        const inSubstrate = productRankedIds(q.query, store).includes(g);
+        const inSubstrate = productRankedIds(q.query, store, { snapshot }).includes(g); // round 13: Hale's fourth reader — banding must consume the sweep's own capture
         band = inSubstrate ? 'deep-but-present (topN x tier coupled; no policy reaches at this topN)' : 'recall (absent from ranking; enrichment/reasoning, not tier)';
       }
       bands.push({ query: q.id, gold: g, band }); // ids are the caller's local gold labels
