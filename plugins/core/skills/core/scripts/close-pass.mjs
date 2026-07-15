@@ -138,8 +138,17 @@ export function finishClose(store, { sessionId = null, status = 'closed', now = 
   marker.completed_at = now;
   if (sessionId) marker.session_id = sessionId;
   atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
-  releaseLock(store, { sessionId });
-  return marker;
+  const release = releaseLock(store, { sessionId });
+  // Fail closed on a real release failure (Hale round 4): a permission/I/O error
+  // used to be swallowed while the close reported success — the live lock then
+  // blocked every future close silently. Record it ON the marker so detection
+  // and forensics see it; callers get it in the return.
+  if (release && release.released === false && release.reason === 'release-failed') {
+    marker.release_error = release.error || 'release-failed';
+    try { atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n'); } catch { /* marker already closed */ }
+    logHookEvent({ hook: 'close-finish', action: 'error', reason: `lock release failed: ${marker.release_error}`, cwd: store });
+  }
+  return { ...marker, release };
 }
 
 /**
@@ -412,7 +421,11 @@ function main(argv) {
       return 0;
     }
     case 'finish': {
-      finishClose(store, { sessionId: f.session || null });
+      const fin = finishClose(store, { sessionId: f.session || null });
+      if (fin.release && fin.release.released === false && fin.release.reason === 'release-failed') {
+        process.stdout.write(`close marked closed; LOCK RELEASE FAILED (${fin.release.error}) — run 'release' once the cause clears\n`);
+        return 1;
+      }
       process.stdout.write('close marked closed; lock released\n');
       return 0;
     }
@@ -459,10 +472,12 @@ function selfTest() {
   assert(det.owed.includes('render-project-md') && det.owed.includes('metrics'), 'owed must list the unfinished ops');
   assert(!det.owed.includes('maintenance-run'), 'a recorded-done op should not be re-owed on a clean crash, got ' + det.owed);
 
-  // 6. Stale lock is stealable; a held fresh lock is not.
+  // 6. Stale lock is stealable; a held fresh lock is not. (Round-3 policy: a lock
+  // with a LIVE pid is never stealable at any age, so the steal scenario must be
+  // set up with a DEAD-pid lock only — clear our own live generation first.)
   acquireLock(store, { sessionId: 's3' });
   assert(!acquireLock(store, { sessionId: 's3b' }).ok, 'fresh lock must not be stealable');
-  // age the lock past stale by writing an old-pid lock manually
+  releaseLock(store); // force-clear the live-pid generation before planting the dead one
   atomicWriteFileSync(lockPath(store), JSON.stringify({ pid: 999999, session_id: 'dead', started_at: new Date(Date.now() - 11 * 60 * 1000).toISOString() }));
   const stolen = acquireLock(store, { sessionId: 's4', now: Date.now() + 11 * 60 * 1000 });
   assert(stolen.ok, 'stale lock (dead pid, old) must be stealable');

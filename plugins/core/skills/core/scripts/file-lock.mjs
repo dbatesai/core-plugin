@@ -227,7 +227,14 @@ export function releaseFileLock(lockPath, nonce, { verify = null, force = false 
     const ours = lock && ((nonce && lock.nonce === nonce) ||
       (verify && lock[verify.field] != null && lock[verify.field] === verify.value));
     if (ours) {
-      try { renameSync(g.path, `${g.path}.done`); } catch { /* already gone — superseded + GC'd */ }
+      try { renameSync(g.path, `${g.path}.done`); }
+      catch (e) {
+        // ENOENT only: our generation was superseded and GC'd — released in effect.
+        // Anything else (EPERM/EACCES/EIO — sync tooling, permissions, disk) means
+        // the LIVE lock file is still on disk: report failure, never false success
+        // (Hale round 4: the old blanket catch returned released:true over a live lock).
+        if (e.code !== 'ENOENT') return { released: false, reason: 'release-failed', error: e.code || String(e) };
+      }
       return { released: true };
     }
   }

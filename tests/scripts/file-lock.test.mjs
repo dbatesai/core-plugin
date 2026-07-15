@@ -286,6 +286,30 @@ test('inspectFileLock: absent is unheld; a YOUNG corrupt lock is held; an OLD co
   assert.equal(old.stale, true, 'aged-out corrupt lock is stealable');
 });
 
+// Hale round 4: the old release swallowed EVERY rename failure as "already gone"
+// and returned released:true over a live lock. Inject a real failure (read-only
+// parent dir → EACCES) and prove it fails closed. POSIX-only injection; the
+// ENOENT-tolerant branch (superseded + GC'd) is covered by the supersession test.
+test('release fails CLOSED when the tombstone rename cannot be performed — no false success', { skip: process.platform === 'win32' }, async () => {
+  const { chmodSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'rel-fail-'));
+  const lock = join(dir, 'x.lock');
+  const got = acquireFileLock(lock);
+  assert.ok(got.ok);
+  chmodSync(dir, 0o555); // read-only dir: rename inside it throws EACCES/EPERM
+  try {
+    const rel = releaseFileLock(lock, got.nonce);
+    assert.equal(rel.released, false, 'no false success over a live lock');
+    assert.equal(rel.reason, 'release-failed');
+    assert.ok(rel.error, 'the failure names its cause');
+    assert.ok(currentLockFile(lock), 'the live lock is still on disk — reported truthfully');
+  } finally {
+    chmodSync(dir, 0o755);
+    assert.ok(releaseFileLock(lock, got.nonce).released, 'release succeeds once the cause clears');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('force release removes every generation artifact', () => {
   const lock = tmpLock();
   const a = acquireFileLock(lock);
