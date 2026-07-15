@@ -204,14 +204,15 @@ export function storeHealth(storePath) {
  * @returns {{snapshotId, substrate, policied, top, expanded, final}}
  */
 function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, snapshot = null } = {}) {
-  // A3: ONE content-addressed snapshot per request. loadSnapshot validates the
-  // recursive source signature (missing/corrupt/stale regenerates — the DC-94b R1
-  // anti-resurrection hole stays closed at the loader) and derives snapshotId from
-  // the index's content signature; every reader below — title arm, body-BM25 arm,
-  // edge expansion — reads through this same index. A measurement caller passes a
-  // CAPTURED snapshot (blocker 2) so every stage consumes the same bytes across
-  // the whole run — the product path keeps its fresh per-request load.
-  const snap = snapshot || loadSnapshot(root);
+  // A3 + Hale round 11: ONE ATOMIC capture per request — id, index, AND body
+  // bytes from a single read per file (captureBodies) — whether the caller is a
+  // measurement (passes its run-scoped captured snapshot) or the product path
+  // (captures fresh per request). The earlier version passed the NULLABLE
+  // caller snapshot downstream, so the product path's body arm re-read live
+  // files while the trace carried a snapshotId minted from different bytes —
+  // Hale's round-11 "intra-request tear" finding. `snap`, never `snapshot`,
+  // flows to every reader below.
+  const snap = snapshot || loadSnapshot(root, { captureBodies: true });
   const { index, snapshotId } = snap;
   const byId = new Map(index.units.map(u => [u.id, u]));
 
@@ -221,7 +222,7 @@ function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsi
   // abstract/value rung (DC-113 Tier-A T3, model-free per DC-114).
   // tierPolicy defaults to 'P0' (identity) so shipped behavior is unchanged; the
   // ceremony (joint contract v2 §7) selects an active policy from measured evidence.
-  const substrate = productRankedScores(query, root, index, snapshot);
+  const substrate = productRankedScores(query, root, index, snap);
   const policied = applyTierPolicy(
     substrate,
     tierPolicy,

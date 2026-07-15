@@ -35,7 +35,7 @@ import { readdirSync, statSync, mkdirSync, realpathSync, readFileSync, existsSyn
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { loadUnit, isInvalidated } from './priority.mjs';
+import { isInvalidated, parseFrontmatter } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const SUMMARY_MAX = 240;
@@ -159,18 +159,20 @@ export function loadFreshIndex(storePath) {
  * the same bytes report the same id and any store mutation changes it. Traces and
  * evidence receipts carry this id — a retrieval number without it is not reproducible.
  */
-export function loadSnapshot(storePath, { captureBodies = false } = {}) {
+export function loadSnapshot(storePath, { captureBodies = false, retainRaw = false } = {}) {
+  // captureBodies → the ATOMIC capture: id, index, and bodies all derived from
+  // one read per file (captureStore). The earlier two-walk version (index walk
+  // first, body walk second) carried a TOCTOU Hale reproduced deterministically
+  // in round 11: a concurrent write between the walks let snapshot_id identify
+  // OLD bytes while the evaluator measured NEW ones. Never reintroduce a second
+  // walk here.
+  if (captureBodies) return captureStore(storePath, { retainRaw });
+  // Index-only consumers (no body reads downstream) keep the cache-validated path.
   const index = loadFreshIndex(storePath);
-  const snapshot = {
+  return {
     index,
     snapshotId: createHash('sha256').update(index.source_sig || '').digest('hex'),
   };
-  // Blocker 2 (Hale verdict §2): a measurement run captures BODY BYTES too, so no
-  // evaluator reader ever touches live files after the id is minted. The id needs
-  // no new input — source_sig is already content-derived over these same files —
-  // capture just makes every reader consume the bytes the id describes.
-  if (captureBodies) snapshot.bodies = loadUnitBodies(storePath, index);
-  return snapshot;
 }
 
 /**
@@ -236,33 +238,71 @@ function authorityTier(fm, rel) {
   return 'canonical';
 }
 
-export function generateSummaryIndex(storePath) {
+/**
+ * captureStore — THE atomic store capture (Hale round 11). Each candidate file is
+ * read from disk EXACTLY ONCE; the source signature (→ snapshotId), the index
+ * records, and the BM25 body texts are all derived from those same buffers.
+ *
+ * Why single-read is the invariant: the previous design computed the signature in
+ * one walk and read index/bodies in others — Hale's deterministic reproduction
+ * showed a concurrent write between walks makes snapshot_id identify OLD bytes
+ * while the evaluator measures NEW bytes. With one read per file, the id and the
+ * measured bytes cannot diverge for any file; a mutation mid-capture yields a
+ * mixed state whose id correctly identifies exactly those captured bytes.
+ * (Cross-file capture is still not one atomic instant — but the id is always the
+ * id OF THE BYTES USED, which is the reproducibility contract.)
+ *
+ * retainRaw keeps the raw buffers + per-file sha1s on the result so tests can
+ * assert the id↔bytes coherence directly under a concurrent-writer barrier.
+ */
+export function captureStore(storePath, { retainRaw = false } = {}) {
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
-  // Collect ALL candidates first, then resolve duplicate ids deterministically —
-  // authority-aware, never silent-lossy (Hale re-review §1: walk-order first-wins let
-  // a nested observation shadow a canonical unit out of the index entirely).
-  const candidates = [];
+
+  // ONE read per file.
+  const raws = [];
   for (const f of walkCandidateFiles(memoriesDir)) {
-    let unit;
-    try { unit = loadUnit(f.full); } catch { continue; }
-    const fm = unit.fm || {};
+    try { raws.push({ rel: f.rel, buf: readFileSync(f.full) }); } catch { /* vanished mid-walk */ }
+  }
+
+  // Identity from these exact buffers (same shape computeSourceSignature produces).
+  const fileSha1s = {};
+  const sigParts = [];
+  for (const { rel, buf } of raws) {
+    const h = createHash('sha1').update(buf).digest('hex');
+    fileSha1s[rel] = h;
+    sigParts.push(`${rel}:${h}`);
+  }
+  const source_sig = sigParts.sort().join('|');
+
+  // Index candidates from the same buffers — identical semantics to the old
+  // loadUnit path (parseFrontmatter is the same canonical parser).
+  const candidates = [];
+  const textByPath = new Map(); // winner-body derivation reads from here, never disk
+  for (const { rel, buf } of raws) {
+    const text = buf.toString('utf8');
+    let fm, body;
+    try { [fm, body] = parseFrontmatter(text); } catch { continue; }
+    fm = fm || {};
+    const id = fm.id !== undefined ? String(fm.id) : basenameNoMd(rel);
     if (!isActive(fm)) continue;
-    // Also exclude units whose validity dimension is invalid as of now — the
-    // status check alone missed a `status: active` unit with a past t_invalid,
-    // which then leaked into per-turn retrieval (the read path this index feeds).
-    if (isInvalidated(unit, now)) continue;
+    // Exclude units whose validity dimension is invalid as of now — the status
+    // check alone missed a `status: active` unit with a past t_invalid, which
+    // then leaked into per-turn retrieval (the read path this index feeds).
+    if (isInvalidated({ id, fm, body }, now)) continue;
+    textByPath.set(rel, text);
     candidates.push({
-      id: unit.id,
-      path: f.rel,
+      id,
+      path: rel,
       type: String(fm.type || ''),
-      tier: authorityTier(fm, f.rel),
-      summary: truncate(deriveSummary(unit.body || '')),
+      tier: authorityTier(fm, rel),
+      summary: truncate(deriveSummary(body || '')),
       topics: asTopicList(fm.topics),
       status: fm.status === undefined ? 'active' : String(fm.status),
       updated: fm.updated ? String(fm.updated).slice(0, 10) : (fm.created ? String(fm.created).slice(0, 10) : ''),
     });
   }
+
   // Duplicate resolution: canonical outranks observation (an observation must never
   // shadow canonical truth); same-tier ties keep the lexicographically-first path.
   // Every conflict is recorded on the index itself — the store is DEGRADED until the
@@ -280,16 +320,66 @@ export function generateSummaryIndex(storePath) {
     process.stderr.write(`DUPLICATE UNIT ID '${c.id}': kept ${winner.path} (${winner.tier}), excluded ${loser.path} (${loser.tier}) — the store is degraded until this is resolved\n`);
   }
   const units = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
-  const out = {
+  const index = {
     count: units.length,
     generated: '',
-    source_sig: computeSourceSignature(storePath),
+    source_sig,
     degraded: conflicts.length > 0,
     duplicate_conflicts: conflicts,
     units,
   };
 
-  const libDir = join(memoriesDir, '_lib');
+  // BM25 body texts for the WINNERS, from the SAME buffers (identical transform
+  // to loadUnitBodies: frontmatter stripped, summary + topics prepended).
+  const bodies = [];
+  for (const u of units) {
+    const text = textByPath.get(u.path);
+    if (text === undefined) continue;
+    const body = text.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+    const topics = (u.topics || []).join(' ');
+    bodies.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
+  }
+
+  const capture = {
+    index,
+    bodies,
+    snapshotId: createHash('sha256').update(source_sig).digest('hex'),
+  };
+  if (retainRaw) {
+    capture.raw = Object.fromEntries(raws.map(r => [r.rel, r.buf]));
+    capture.file_sha1s = fileSha1s;
+  }
+
+  // Keep the on-disk cached index current for index-only consumers (the R1
+  // anti-resurrection contract: unit-summaries.json regenerates when sources
+  // change). Written only when absent or stale so an unchanged store never
+  // rewrites (retrieval stays cheap), and written FROM the captured bytes —
+  // a write after the single read adds no TOCTOU; the file describes exactly
+  // this capture. Best-effort: a read-only store still returns a valid capture.
+  try {
+    const libPath = join(memoriesDir, '_lib', 'unit-summaries.json');
+    let cached = null;
+    try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
+    if (!cached || cached.source_sig !== source_sig) {
+      mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
+      atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
+    }
+  } catch { /* cache refresh is a convenience; the capture itself is complete */ }
+
+  return capture;
+}
+
+function basenameNoMd(rel) {
+  const name = rel.split('/').pop() || rel;
+  return name.endsWith('.md') ? name.slice(0, -3) : name;
+}
+
+export function generateSummaryIndex(storePath) {
+  // One capture — the written index's source_sig describes the exact bytes its
+  // records were derived from (the old version signature-walked the store a
+  // second time, the same multi-walk gap captureStore exists to close).
+  const out = captureStore(storePath).index;
+  const libDir = join(resolve(storePath), '_memories', '_lib');
   try { mkdirSync(libDir, { recursive: true }); } catch { /* ignore */ }
   atomicWriteFileSync(join(libDir, 'unit-summaries.json'), JSON.stringify(out, null, 2) + '\n');
   return out;
