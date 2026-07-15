@@ -35,13 +35,16 @@ test('blocker-3: two independent exports agree — git object database vs extrac
   const fromGit = manifestFromGit(REPO, HEAD, 'plugins/core');
   const dir = mkdtempSync(join(tmpdir(), 'artifact-id-'));
   try {
-    // Export mechanism B: git archive to a FILE, native tar extract — no shell,
-    // no pipe, so Windows paths survive (the bash -c pipe version broke there).
+    // Export mechanism B: git archive to a FILE, tar extract — no shell, no pipe.
+    // tar runs with cwd-RELATIVE paths: GNU tar (first on PATH in Windows CI)
+    // reads a drive-letter argument like C:\… as a remote HOSTNAME ("Cannot
+    // connect to C") — keeping every tar argument relative sidesteps the whole
+    // drive-colon class on every platform.
     const tarPath = join(dir, 'export.tar');
     const treeDir = join(dir, 'tree');
     mkdirSync(treeDir);
     execFileSync('git', ['-C', REPO, 'archive', '-o', tarPath, `${HEAD}:plugins/core`]);
-    execFileSync('tar', ['-x', '-f', tarPath, '-C', treeDir]);
+    execFileSync('tar', ['-x', '-f', 'export.tar', '-C', 'tree'], { cwd: dir });
     const fromTree = manifestFromDirectory(treeDir);
     assert.equal(fromTree.content_manifest_sha256, fromGit.content_manifest_sha256,
       'content identity agrees across two independent export mechanisms');
@@ -64,4 +67,33 @@ test('blocker-3: different subtrees yield different identities (the hash is cont
   const core = manifestFromGit(REPO, HEAD, 'plugins/core');
   const tests = manifestFromGit(REPO, HEAD, 'tests');
   assert.notEqual(core.content_manifest_sha256, tests.content_manifest_sha256);
+});
+
+// Hale round 7: prove the identity FLOWS end to end — artifact-identity output →
+// the receipt's built_artifact_sha256 — through the real CLI seam the freeze step
+// uses, with the receipt's shape validation applied to the injected value.
+test('blocker-3 end-to-end: the content-manifest identity lands in the shareable receipt intact', { skip: !HEAD }, async () => {
+  const { writeFileSync, readFileSync, rmSync: rm } = await import('node:fs');
+  const { runHarness } = await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
+  const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+  const dir = mkdtempSync(join(tmpdir(), 'id-e2e-'));
+  try {
+    const identity = artifactIdentity(REPO, HEAD, 'plugins/core');
+    const goldPath = join(dir, 'gold.json');
+    writeFileSync(goldPath, JSON.stringify({ queries: [
+      { id: 'q1', query: 'omega speedmaster', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] },
+    ] }));
+    const report = await runHarness(FIXT, goldPath);
+    const reportPath = join(dir, 'report.json');
+    writeFileSync(reportPath, JSON.stringify(report));
+    const outPath = join(dir, 'receipt.json');
+    execFileSync(process.execPath, [join(SCRIPTS, 'aggregate-receipt.mjs'), reportPath,
+      '--artifact-sha', identity.content_manifest_sha256, '--out', outPath]);
+    const receipt = JSON.parse(readFileSync(outPath, 'utf8'));
+    assert.equal(receipt.source.built_artifact_sha256, identity.content_manifest_sha256,
+      'the receipt carries the content-manifest identity, byte-identical');
+    // And a NON-manifest value (the old tar-hash ambiguity, or garbage) refuses:
+    assert.throws(() => execFileSync(process.execPath, [join(SCRIPTS, 'aggregate-receipt.mjs'), reportPath,
+      '--artifact-sha', 'not-a-sha', '--out', join(dir, 'nope.json')]), (e) => e.status === 2);
+  } finally { rm(dir, { recursive: true, force: true }); }
 });

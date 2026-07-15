@@ -251,17 +251,25 @@ export function buildAggregateReceipt(report, sweep = null) {
 function main(argv) {
   const reportPath = argv[0];
   if (!reportPath) {
-    process.stderr.write('usage: aggregate-receipt.mjs <report.json> [--sweep <sweep.json>] [--out <receipt.json>]\n');
+    process.stderr.write('usage: aggregate-receipt.mjs <report.json> [--sweep <sweep.json>] [--artifact-sha <content-manifest-sha256>] [--out <receipt.json>]\n');
     return 2;
   }
   const sweepIdx = argv.indexOf('--sweep');
   const outIdx = argv.indexOf('--out');
+  const artIdx = argv.indexOf('--artifact-sha');
   let report, sweep = null;
   try { report = JSON.parse(readFileSync(reportPath, 'utf8')); }
   catch (e) { process.stderr.write(`cannot read report: ${e.message}\n`); return 2; }
   if (sweepIdx >= 0) {
     try { sweep = JSON.parse(readFileSync(argv[sweepIdx + 1], 'utf8')); }
     catch (e) { process.stderr.write(`cannot read sweep: ${e.message}\n`); return 2; }
+  }
+  // The freeze step injects the artifact identity here — the CONTENT-MANIFEST
+  // sha256 from artifact-identity.mjs, one meaning end to end (Hale round 7).
+  // Shape validation still applies: a non-sha256 value refuses the export.
+  if (artIdx >= 0) {
+    report.manifest = report.manifest || {};
+    report.manifest.built_artifact_sha256 = argv[artIdx + 1];
   }
   let receipt;
   try { receipt = buildAggregateReceipt(report, sweep); }

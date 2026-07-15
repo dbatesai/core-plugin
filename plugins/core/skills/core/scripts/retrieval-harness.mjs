@@ -155,7 +155,13 @@ export async function runHarness(store, goldPath) {
       'bm25.mjs': fileHash('bm25.mjs'),
       'generate-summary-index.mjs': fileHash('generate-summary-index.mjs'),
     },
-    built_artifact_sha256: null, // packaged-archive hash — supplied by the freeze step, never computed from a dev tree
+    // The CONTENT-MANIFEST sha256 from artifact-identity.mjs (sorted
+    // relpath:sha256(bytes) over the frozen subtree) — ONE meaning everywhere
+    // (Hale round 7: this comment used to say "packaged-archive hash" while
+    // validation.md said content-manifest, recreating the tar-byte ambiguity).
+    // Supplied by the freeze step at the pin via aggregate-receipt's
+    // --artifact-sha; never computed from a dev tree.
+    built_artifact_sha256: null,
     snapshot_id: snapshot.snapshotId, // the content-addressed store snapshot ALL arms ran against
     entry_points: {
       ranking: 'productRankedIds (pre-expansion ranking substrate)',
