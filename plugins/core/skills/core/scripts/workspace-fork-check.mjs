@@ -24,6 +24,7 @@
 
 import { readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { mutateIndex, touchWorkspace } from './index-registry.mjs';
 import { resolve, join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -107,59 +108,70 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
   const registeredPath = idMatchPath ? canonicalPath(idMatchPath) : null;
   if (registeredPath === cwdResolved) return { action: 'no-fork', reason: 'path-match', workspace_id: localId };
 
-  const baseSlug = slugify(basename(cwdResolved));
-  const existingIds = new Set(index.map(e => e.workspace_id).filter(Boolean));
-  const newId = resolveCollision(baseSlug, existingIds);
-
   // Non-mutating detection path: configure-project --dry-run needs the fork
-  // decision without performing the multi-file mutation. Return the plan; write
-  // nothing.
+  // decision without performing the multi-file mutation. The id here is computed
+  // from the unlocked read — a plan preview, re-resolved for real inside the lock.
   if (dryRun) {
+    const existingIds = new Set(index.map(e => e.workspace_id).filter(Boolean));
+    const newId = resolveCollision(slugify(basename(cwdResolved)), existingIds);
     return { action: 'would-fork', original_id: localId, new_id: newId };
   }
 
   const nowIso = now.toISOString();
-  // Expanded absolute path (HARNESS-007): Node never expands ~, so the pointer
-  // must carry a consumer-usable path. coreDir honors --core-dir overrides.
-  const newDataPath = join(coreDir, 'workspaces', newId) + '/';
 
-  // H3: the fork mutates three surfaces. checkFork resolves PATH-MATCH (an index entry whose
-  // path == cwd) BEFORE id-match, so the index entry is what makes a fork "stick" on the next
-  // run. Write order is therefore meta-dir+manifest → index entry → local pointer (last), and
-  // every write is atomic (temp-file + rename, no torn file). The ordering enforces the
-  // invariant "an index entry always implies its meta dir exists":
+  // H3 + concurrency (2026-07-14): the fork mutates three surfaces. checkFork resolves
+  // PATH-MATCH (an index entry whose path == cwd) BEFORE id-match, so the index entry is
+  // what makes a fork "stick" on the next run. Write order is meta-dir+manifest → index
+  // entry → local pointer (last), every write atomic. The ordering enforces the invariant
+  // "an index entry always implies its meta dir exists":
   //   • crash before the index entry → pointer still names the copied-from id, no path-match →
   //     clean re-fork next session (a leftover empty meta dir is harmless litter, reused on the
   //     re-fork's same id);
   //   • crash after the index but before the pointer → path-match resolves to a fully-present
   //     (index + meta) newId; only the pointer's id is stale, and resolution doesn't depend on it.
-  // The shared index.json is atomic too, so a torn write can't break fork-detection for EVERY
-  // workspace (the prior bare writeFileSync could).
-  const newMetaDir = join(coreDir, 'workspaces', newId);
-  mkdirSync(newMetaDir, { recursive: true });
-  const newManifest = {
-    schema_version: 'v2',
-    workspace_id: newId,
-    name: pointer.name || newId,
-    path: cwdResolved,
-    created: nowIso,
-    last_active: nowIso,
-    dm_notes: `Auto-forked from ${localId} on ${nowIso} — copied workspace detected at ${cwdResolved}.`,
-  };
-  atomicWriteFileSync(join(newMetaDir, 'workspace.json'), JSON.stringify(newManifest, null, 2) + '\n');
+  //
+  // The whole read-DECIDE-write runs inside the registry lock via mutateIndex: the
+  // collision-resolved id is recomputed from the LOCKED re-read (two concurrent forks
+  // can no longer both mint "foo-2"), and a concurrent registration of this same cwd
+  // is re-checked so the second fork downgrades to no-fork instead of duplicating.
+  const forkResult = mutateIndex(coreDir, (entries) => {
+    const raced = entries.find(e => entryPath(e) && canonicalPath(entryPath(e)) === cwdResolved);
+    if (raced) {
+      return { entries, result: { action: 'no-fork', reason: 'path-match', workspace_id: raced.workspace_id } };
+    }
+    const existingIds = new Set(entries.map(e => e.workspace_id).filter(Boolean));
+    const newId = resolveCollision(slugify(basename(cwdResolved)), existingIds);
 
-  index.push({
-    name: pointer.name || newId,
-    path: cwdResolved,
-    workspace_id: newId,
-    last_active: nowIso,
+    const newMetaDir = join(coreDir, 'workspaces', newId);
+    mkdirSync(newMetaDir, { recursive: true });
+    const newManifest = {
+      schema_version: 'v2',
+      workspace_id: newId,
+      name: pointer.name || newId,
+      path: cwdResolved,
+      created: nowIso,
+      last_active: nowIso,
+      dm_notes: `Auto-forked from ${localId} on ${nowIso} — copied workspace detected at ${cwdResolved}.`,
+    };
+    atomicWriteFileSync(join(newMetaDir, 'workspace.json'), JSON.stringify(newManifest, null, 2) + '\n');
+
+    // Registry entry carries identity only; last_active now lives in the
+    // per-workspace last-active file (written below, outside the lock).
+    const entry = { name: pointer.name || newId, path: cwdResolved, workspace_id: newId };
+    return { entries: [...entries, entry], result: { action: 'forked', new_id: newId, new_meta_dir: newMetaDir } };
   });
-  atomicWriteFileSync(indexPath, JSON.stringify(index, null, 2) + '\n');
 
+  if (forkResult.action !== 'forked') return forkResult;
+  const { new_id: newId, new_meta_dir: newMetaDir } = forkResult;
+
+  touchWorkspace(coreDir, newId, nowIso);
+
+  // Expanded absolute path (HARNESS-007): Node never expands ~, so the pointer
+  // must carry a consumer-usable path. coreDir honors --core-dir overrides.
   const newPointer = {
     ...pointer,
     workspace_id: newId,
-    data_path: newDataPath,
+    data_path: join(coreDir, 'workspaces', newId) + '/',
     created: pointer.created || nowIso,
   };
   atomicWriteFileSync(localPointer, JSON.stringify(newPointer, null, 2) + '\n');

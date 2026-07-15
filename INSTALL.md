@@ -33,9 +33,19 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
 
+### Shipped hooks (installed with the plugin)
+
+Installing CORE registers three hooks via `plugins/core/hooks/hooks.json` — they are what make CORE self-running, and each has an opt-out:
+
+| Hook | What it does | Opt out |
+|---|---|---|
+| SessionStart | Injects the directive to run `/core` first, so you never type it. A wrapper entry point (`CORE_AUTOSTART_SKILL`) is honored only when registered in your own user-level `~/.claude/settings.json`, resolved from the OS account database (`os.userInfo()`), so neither a project's settings nor a hostile `HOME`/`USERPROFILE` can redirect it. | `CORE_AUTOSTART=0` |
+| UserPromptSubmit | Per-turn retrieval: injects the top matching memory units for each prompt (deterministic, byte-capped, fail-open). | `CORE_RETRIEVAL_HOOK=0` |
+| SessionEnd | Discharges the session close in the background, so you never type `/finalize`. | `CORE_AUTO_CLOSE=0` |
+
 ### Optional hooks (manual)
 
-The plugin ships no hooks — `plugins/core/hooks/hooks.json` is empty, so installing CORE never edits your settings. Two hooks pair well with CORE; add either to your own `~/.claude/settings.json` if you want them. A per-turn plain-voice reminder:
+Two further hooks pair well with CORE; add either to your own `~/.claude/settings.json` if you want them. A per-turn plain-voice reminder:
 
 ```json
 {

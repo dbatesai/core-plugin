@@ -29,3 +29,15 @@
 export function mapProjectPathToSlug(p) {
   return String(p).replace(/[/\\.:]/g, '-');
 }
+
+/**
+ * slugify — generic filename-safe slug for an arbitrary string (lowercase, non-
+ * alphanumerics collapsed to single dashes, trimmed). Lives here so slug logic stays
+ * centralized (the guard-consolidation ratchet). Distinct from mapProjectPathToSlug,
+ * which preserves path structure; this one flattens to `[a-z0-9-]`. Used by the
+ * mailbox for message filename fields (from / topic).
+ */
+export function slugify(s, fallback = 'unknown') {
+  const out = String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return out || fallback;
+}

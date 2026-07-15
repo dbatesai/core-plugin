@@ -97,21 +97,23 @@ test('SessionEnd recursion guard logs reason=recursion-guard (proves the child f
   rmSync(store, { recursive: true, force: true });
 });
 
-test('SessionEnd on a closed store logs reason=nothing-owed (no spurious spawn)', () => {
-  const log = tmpLog();
-  const store = mkdtempSync(join(tmpdir(), 'hook-log-store-'));
+// The "trivial closed session → don't spawn" decision (the nothing-owed path) is now
+// asserted IN-PROCESS via shouldSpawn. It can't be exercised through the hook subprocess
+// anymore: the hardened trust gate (trustedHome + resolveIndexPath) checks the REAL
+// ~/.core registry, which a subprocess can't redirect via env, so a temp store can never
+// reach the nothing-owed branch — it fails closed at not-registered-workspace (covered
+// by the next test). Security anchors are DI-tested in-process; see the close-authority spec.
+test('shouldSpawn: a closed store with nothing owed does not spawn (nothing-owed decision)', async () => {
+  const { shouldSpawn, CLOSE_OPS } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const store = mkdtempSync(join(tmpdir(), 'hook-log-closed-'));
   mkdirSync(join(store, '_memories'), { recursive: true });
-  writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"t"}');
-  const idx = join(store, 'index.json'); // register it so it passes the security gate
-  writeFileSync(idx, JSON.stringify([{ workspace_id: 't', path: store }]));
-  const ops = 'maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,session-summary,memory-refresh';
+  const ops = CLOSE_OPS.join(',');
   execFileSync('node', [CLOSE_PASS, 'begin', store, '--session', 's', '--ops', ops]);
-  for (const op of ops.split(',')) execFileSync('node', [CLOSE_PASS, 'record', store, '--op', op, '--status', 'done']);
+  for (const op of CLOSE_OPS) execFileSync('node', [CLOSE_PASS, 'record', store, '--op', op, '--status', 'done']);
   execFileSync('node', [CLOSE_PASS, 'finish', store, '--session', 's']);
-  runClose({ cwd: store, reason: 'other' }, { CORE_HOOKS_LOG_FILE: log, CORE_CLOSE_INDEX: idx });
-  const events = readLog(log);
-  assert.ok(events.some(e => e.hook === 'session-end' && e.reason === 'nothing-owed'),
-    'a trivial closed session must log nothing-owed, not spawn');
+  // didWork false, marker closed, nothing owed → must not spawn.
+  assert.equal(shouldSpawn(store, { didWork: false, allOps: CLOSE_OPS }), false,
+    'a trivial closed session must not spawn a close agent');
   rmSync(store, { recursive: true, force: true });
 });
 

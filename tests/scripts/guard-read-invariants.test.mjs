@@ -15,7 +15,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { walk } from '../../plugins/core/skills/core/scripts/graph-walk.mjs';
 import { rankUnits } from '../../plugins/core/skills/core/scripts/priority.mjs';
-import { retrieveContext } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
+import { retrieveContext, lexicalRankedIds, productRankedIds } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
+import { bm25Rank } from '../../plugins/core/skills/core/scripts/bm25.mjs';
+import { selectCandidates } from '../../plugins/core/skills/core/scripts/select-relevant-units.mjs';
 
 const T = new Date('2026-07-02');
 
@@ -46,10 +48,19 @@ function store() {
 }
 
 // Each reader: name -> function returning the set of surfaced unit ids for the store.
+// v3.11 enrollment (Hale 2026-07-11 §4): EVERY public retrieval entry point is here —
+// the standalone bm25 arm, the lexical/product ranked-id arms, and the reasoning-tier
+// shortlist all read the store and must hold the same two invariants. The stale-cache
+// variant seeds a cache while a unit is active, then mutates — the case the shared
+// validating loader (loadFreshIndex) closes.
 const READERS = {
   'graph-walk': ({ mem }) => new Set(walk(join(mem, 'dc-active.md'), { memoriesDir: mem, today: T }).map(r => r.unit_id)),
   'rankUnits': ({ mem }) => new Set(rankUnits(mem, { today: T }).map(([, u]) => u.id)),
   'retrieve-context': ({ dir }) => new Set(retrieveContext('widget alpha decision', dir, { topN: 9 }).map(h => h.id)),
+  'bm25Rank (standalone)': ({ dir }) => new Set(bm25Rank('widget alpha decision', dir)),
+  'lexicalRankedIds': ({ dir }) => new Set(lexicalRankedIds('widget alpha decision', dir)),
+  'productRankedIds (harness live arm)': ({ dir }) => new Set(productRankedIds('widget alpha decision', dir)),
+  'selectCandidates (reasoning shortlist)': ({ dir }) => new Set(selectCandidates('widget alpha decision', dir).map(c => c.id)),
 };
 
 for (const [name, read] of Object.entries(READERS)) {

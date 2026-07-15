@@ -22,22 +22,17 @@
  * CLI: node select-relevant-units.mjs <storePath> "<query>" [--max N]
  */
 
-import { readFileSync, existsSync, realpathSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generateSummaryIndex } from './generate-summary-index.mjs';
-import { tokenize } from './retrieve-context.mjs';
+import { loadFreshIndex } from './generate-summary-index.mjs';
+import { tokenize } from './bm25.mjs';
 
-function loadIndex(root) {
-  const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
-  if (existsSync(indexPath)) {
-    try {
-      const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
-      if (idx && Array.isArray(idx.units)) return idx;
-    } catch { /* fall through to regen */ }
-  }
-  return generateSummaryIndex(root);
-}
+// loadFreshIndex validates the recursive source signature on every call. This
+// module's old local loader accepted any parseable cache, which could serve a
+// retired unit into the reasoning-tier shortlist — same defect class as the
+// standalone-bm25 stale cache (Hale 2026-07-11 §4), closed at the shared loader.
+const loadIndex = loadFreshIndex;
 
 export function selectCandidates(query, storePath, { max = 30 } = {}) {
   const root = resolve(storePath);

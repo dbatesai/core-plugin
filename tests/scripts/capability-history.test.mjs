@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ import {
   appendRows, readHistory, canonicalRowHash, applyRetention, acquireLock,
   LOCK_RETRY_INTERVAL_MS, LOCK_TIMEOUT_MS,
 } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
+import { currentLockFile } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
 
 test('M8: appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {
   const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/capability-history.mjs', import.meta.url)), 'utf8');
@@ -158,14 +159,14 @@ test('appendRows: retention truncates when cap exceeded', () => {
 
 // --- acquireLock ---
 
-test('acquireLock: acquires and releases', () => {
+test('acquireLock: acquires and releases (generation model — live gen while held, none after)', () => {
   const home = tmpHome();
   try {
     const lf = join(home, 'test.lock');
     const release = acquireLock(lf);
-    assert.ok(existsSync(lf), 'lock file created');
+    assert.ok(currentLockFile(lf), 'a live generation exists while held');
     release();
-    assert.ok(!existsSync(lf), 'lock file removed on release');
+    assert.equal(currentLockFile(lf), null, 'no live generation after release');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
@@ -173,11 +174,59 @@ test('acquireLock: recovers a stale lock', () => {
   const home = tmpHome();
   try {
     const lf = join(home, 'stale.lock');
-    writeFileSync(lf, '0');  // pre-existing lock
-    // staleMs very small so it's immediately stale
-    const release = acquireLock(lf, { staleMs: 0 });
-    assert.ok(existsSync(lf));
+    writeFileSync(lf, '0');  // pre-existing legacy lock, unparseable owner
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lf, old, old); // aged past staleMs below
+    const release = acquireLock(lf, { staleMs: 1000 });
+    assert.ok(currentLockFile(lf), 'new owner holds the next generation');
     release();
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('acquireLock: fails closed while the recorded pid is ALIVE, even past staleMs (Hale 2026-07-15)', () => {
+  const home = tmpHome();
+  try {
+    const lf = join(home, 'live.lock');
+    // A lock held by THIS live process, aged past staleMs (2× via backdate) but
+    // safely under the 10× hard ceiling for the whole retry window.
+    writeFileSync(lf, JSON.stringify({ pid: process.pid, nonce: 'n', t: 0 }));
+    const twoStale = new Date(Date.now() - 2 * 60_000);
+    utimesSync(lf, twoStale, twoStale);
+    assert.throws(
+      () => acquireLock(lf, { timeoutMs: 80, staleMs: 60_000 }),
+      /could not acquire lock/,
+      'age alone must not steal from a live writer'
+    );
+    // Round 3 (Hale): a LIVE pid is never auto-superseded at ANY age — even far
+    // past the old hard ceiling (a suspended laptop revives and must not overlap).
+    assert.throws(
+      () => acquireLock(lf, { timeoutMs: 80, staleMs: 60_000, now: () => Date.now() + 700_000 }),
+      /could not acquire lock/,
+      'no age ceiling overrides a live pid'
+    );
+    // A DEAD pid at the same age supersedes normally.
+    writeFileSync(lf, JSON.stringify({ pid: 999999999, nonce: 'dead', t: 0 }));
+    utimesSync(lf, twoStale, twoStale);
+    const release = acquireLock(lf, { timeoutMs: 80, staleMs: 60_000 });
+    assert.ok(currentLockFile(lf), 'new owner holds the current generation');
+    release();
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('acquireLock: release is nonce-verified — a stale release closure cannot touch a successor\'s lock', () => {
+  const home = tmpHome();
+  try {
+    const lf = join(home, 'verify.lock');
+    const releaseA = acquireLock(lf);
+    releaseA(); // A releases normally...
+    const releaseB = acquireLock(lf); // ...B is the next legitimate owner.
+    const bFile = currentLockFile(lf);
+    const bBytes = readFileSync(bFile, 'utf8');
+    releaseA(); // a revived/duplicate call of A's closure must be a strict no-op
+    assert.equal(currentLockFile(lf), bFile, 'successor\'s generation survives');
+    assert.equal(readFileSync(bFile, 'utf8'), bBytes, 'byte-identical — never moved or rewritten');
+    releaseB();
+    assert.equal(currentLockFile(lf), null, 'B releases normally');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

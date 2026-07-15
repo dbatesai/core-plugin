@@ -1,0 +1,1 @@
+{ "queries": [ { "id": "s1", "query": "gateway placement", "expected": ["dc-correct"], "forbidden": ["dc-poison-retired"], "rung": "literal" } ] }

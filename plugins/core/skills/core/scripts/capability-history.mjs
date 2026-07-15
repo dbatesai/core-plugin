@@ -22,13 +22,13 @@
  */
 
 import {
-  readFileSync, writeFileSync, existsSync,
-  mkdirSync, rmSync, openSync, closeSync, statSync,
+  readFileSync, existsSync, mkdirSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { acquireFileLock, releaseFileLock } from './file-lock.mjs';
 
 export const BYTE_CAP = 512 * 1024;           // 512KB per workspace
 export const RETENTION_PER_CAPABILITY = 80;   // entries kept per capability_id on cap breach
@@ -103,26 +103,19 @@ function sleepSync(ms) {
  */
 export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT_MS, staleMs = STALE_LOCK_MS, sleep = sleepSync } = {}) {
   const deadline = now() + timeoutMs;
+  // Delegates entirely to file-lock.mjs (Hale 2026-07-15: one lock implementation,
+  // not three). Generation model: acquisition is winning the exclusive create of
+  // the next generation file; release tombstones our OWN generation only; a stale
+  // lock's owner is respected while its pid is alive (fail closed), with the 10×
+  // hard ceiling as the recycled-pid escape. This file keeps only the bounded
+  // retry/timeout loop and its injectable now/sleep test seams (MET-011).
   for (;;) {
-    try {
-      const fd = openSync(lockFile, 'wx');     // fails if exists
-      writeFileSync(fd, String(now()));
-      closeSync(fd);
-      return () => { try { rmSync(lockFile); } catch { /* already gone */ } };
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      // Lock exists — check staleness
-      let stale = false;
-      try {
-        const age = now() - statSync(lockFile).mtimeMs;
-        if (age > staleMs) stale = true;
-      } catch { stale = true; } // lock vanished between check and stat
-      if (stale) { try { rmSync(lockFile); } catch { /* race */ } continue; }
-      if (now() >= deadline) {
-        throw new Error(`capability-history: could not acquire lock ${lockFile} within ${timeoutMs}ms`);
-      }
-      sleep(Math.min(LOCK_RETRY_INTERVAL_MS, Math.max(1, deadline - now())));
+    const got = acquireFileLock(lockFile, { now: now(), staleMs, hardStaleMs: staleMs * 10 });
+    if (got.ok) return () => { releaseFileLock(lockFile, got.nonce); };
+    if (now() >= deadline) {
+      throw new Error(`capability-history: could not acquire lock ${lockFile} within ${timeoutMs}ms`);
     }
+    sleep(Math.min(LOCK_RETRY_INTERVAL_MS, Math.max(1, deadline - now())));
   }
 }
 

@@ -378,7 +378,7 @@ The user owns PROJECT.md. Manage it in whatever way best serves accuracy and tho
 
 ## Edit detection
 
-Hash-based comparison against the state cache at `~/.core/state-cache.json`:
+Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json` (single-owner — two projects closing at once can't clobber each other). A small global `~/.core/state-cache.json` remains for genuinely cross-project files (`dm-profile.md`, `topics.md`). **One-release union-read:** read both, and where the same file appears in each, the newer `last_written` wins — old-version sessions still write the global file until every install picks the release up; each per-project stamp prunes its file's global entry (under the lock), so the union converges. Cache shape, either surface:
 
 ```json
 {
@@ -407,28 +407,38 @@ When a user edit is detected → ground truth → propagate back to source-of-tr
 
 Belt-and-suspenders for tracked files: cache is primary, `git diff` is the fallback.
 
-### Single-writer assumption (shared `~/.core/` files)
+### Shared-write concurrency (the `~/.core/` write rules)
 
-`state-cache.json`, `index.json`, `dm-profile.md`, `topics.md`, and
-`workspaces/<id>/last-bootstrap.json` are shared across every session and every project. They
-assume **one writing session at a time** — there is no lock. Two concurrent Claude Code windows
-land last-write-wins, which can silently drop the other session's entries.
+Multiple agents run startup and `/finalize` at the same time (David's requirement, 2026-07-12;
+built 2026-07-14). The old "single-writer assumption" is retired. The rules, per file:
 
-Discipline, not machinery:
-
-- Write shared `~/.core/` JSON via write-temp-then-rename (the `fs-atomic.mjs` pattern, the
-  same one the fork-check uses for `index.json`) — never an in-place truncate-and-write. This
-  keeps a concurrent reader from seeing a torn file; it does not serialize writers.
-- If a shared file changed under you mid-session (content differs from what you last wrote),
-  assume a concurrent session: re-read, merge your entry into the fresh copy, narrate the
-  collision in one line. Don't overwrite the whole file from your stale in-context copy.
+- **`index.json` — NEVER hand-edit. All mutation goes through `scripts/index-registry.mjs`**
+  (`add` / `update` / `remove` via CLI or module import). The script does the full
+  read-decide-write under the nonce-CAS lock in `scripts/file-lock.mjs`, so concurrent
+  registrations and updates all survive. A freehand read-modify-write of `index.json` is a
+  protocol violation — it races the lock and silently drops other agents' writes. Reading
+  `index.json` directly stays fine (reads are safe; writes are the hazard).
+- **`last_active` is not a registry field anymore.** Stamp it with
+  `index-registry.mjs touch <workspace-id>` — it writes the per-workspace single-owner file
+  `~/.core/workspaces/<id>/last-active`. Read it per-workspace first; the `last_active` field
+  still present in old `index.json` entries is a tolerant read fallback for one release, and
+  nothing writes it.
+- **Edit-detection state-cache is per-project** (see §Edit detection above): the hot path has
+  no shared write at all. The residual global cache (cross-project files only) is written
+  under `~/.core/state-cache.lock` via `withFileLock`.
+- **`dm-profile.md`, `topics.md`** — rare, usually interactive writes. Atomic
+  write-temp-then-rename stays mandatory; if the file changed under you mid-session, re-read,
+  merge your entry into the fresh copy, and narrate the collision in one line.
+- **Lock order (deadlock prevention):** a per-project lock (e.g. the close pass's
+  `_close.lock`) is always taken BEFORE any global `~/.core/` lock, never after.
 - A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace —
   `~/.core/<wrapper>/` — and must not write `index.json`, `state-cache.json`, `dm-profile.md`,
-  or `topics.md`. Shared-surface coordination between two writers is unhandled by design.
+  or `topics.md`.
 
-Reopen condition: real locking, or a `CORE_META_ROOT` env-var redirect, gets built when an
-observed corruption is traced to a concurrent write, or when a second co-installed writer
-actually ships — the self-evolution "second writer" trip-wire, not speculation.
+Accepted residual, named: a crashed writer's lock stalls registry writes for the stale window
+(10–30 min) — availability, not data loss. And if `~/.core` lands on a virtualized/synced path
+(OneDrive Known-Folder-Move, iCloud Documents), lock rename/unlink can throw `EPERM`; the lock
+treats that as "couldn't acquire" and retries, never crashes.
 
 ---
 

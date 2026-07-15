@@ -1,7 +1,7 @@
 /**
  * target-surface-collab-files-probe.mjs — v2.6.0 target-surface capability.
  *
- * Proves that ~/Documents/Projects/files (or the configured equivalent) is
+ * Proves that ~/files (or the configured equivalent) is
  * reachable, is the expected git repo, has a known remote, and has a
  * parseable working-tree state. Called by capability-probe.mjs when the
  * descriptor declares delegate: 'capability/target-surface-collab-files-probe.mjs'.

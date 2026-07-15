@@ -29,7 +29,7 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { retrieveContext } from '../scripts/retrieve-context.mjs';
+import { retrieveContext, storeHealth, buildFinalContextPack } from '../scripts/retrieve-context.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
@@ -54,13 +54,13 @@ async function main() {
   try { hits = retrieveContext(prompt, store, { topN: TOP_N }); } catch { return 0; }
   if (!hits.length) return 0;
 
-  let out = 'Relevant stored context (CORE per-turn retrieval):\n';
-  for (const h of hits) {
-    const line = `- ${h.id}: ${h.summary}\n`;
-    if (Buffer.byteLength(out + line, 'utf8') > OUTPUT_BYTE_CAP) break;
-    out += line;
-  }
-  process.stdout.write(out);
+  // Thin adapter from here down (Train A A4): ordering, tier labels, byte cap,
+  // and the degraded warning all live in buildFinalContextPack — the sole
+  // final-pack implementation the evaluator imports too. No formatting here.
+  let health = null;
+  try { health = storeHealth(store); } catch { /* health is advisory, never blocking */ }
+  const pack = buildFinalContextPack(hits, { byteCap: OUTPUT_BYTE_CAP, health });
+  if (pack.text) process.stdout.write(pack.text);
   return 0;
 }
 

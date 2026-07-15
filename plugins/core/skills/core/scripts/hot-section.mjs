@@ -25,14 +25,15 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { resolve, join, basename } from 'node:path';
+import { resolve, join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
 import { logEvent } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { withFileLock } from './file-lock.mjs';
 
 export const HOT_BEGIN = '<!-- HOT-SECTION:BEGIN -->';
 export const HOT_END = '<!-- HOT-SECTION:END -->';
@@ -80,30 +81,58 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 }
 
-// state-cache.json is the inference-level edit-detection cache at
-// ~/.core/state-cache.json: per file, who last wrote it and a content hash.
-// applyHotSection writes PROJECT.md on CORE's behalf via a script, so the agent's
-// "I wrote it" reflex never fires for it — left unrecorded, next session's
+// The edit-detection cache records, per file, who last wrote it and a content
+// hash. applyHotSection writes PROJECT.md on CORE's behalf via a script, so the
+// agent's "I wrote it" reflex never fires for it — left unrecorded, next session's
 // edit-detection reads CORE's own hot-section render as a USER edit and misfires
 // anti-resurrection. We stamp CORE authorship here so edit-detection can tell the
 // difference. (Edit-detection ALSO excludes the marker-delimited hot block — see
 // startup.md §"Load — returning workspace"; this stamp is the corroborating record
 // and keeps `last_written_by` honest about who actually touched PROJECT.md.)
+//
+// Shared-write concurrency (2026-07-14): the stamp lands in the PER-PROJECT cache
+// at <project>/_memories/_lib/state-cache.json — a single-owner file, so two
+// projects closing at once can't clobber each other's hashes (the old global
+// ~/.core/state-cache.json write was an unlocked read-modify-write). For one
+// release, readers take the UNION of per-project + global (newer last_written
+// wins); each stamp also prunes its file's entry from the global cache under the
+// lock, so the union converges to per-project.
 export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir() } = {}) {
-  const cachePath = join(home, '.core', 'state-cache.json');
-  let cache;
-  try { cache = JSON.parse(readFileSync(cachePath, 'utf8')); } catch { cache = { files: {} }; }
-  if (!cache || typeof cache !== 'object') cache = { files: {} };
-  if (!cache.files || typeof cache.files !== 'object') cache.files = {};
-  let content = '';
-  try { content = readFileSync(projectMdPath, 'utf8'); } catch { /* fall through with empty */ }
-  cache.files[projectMdPath] = {
-    last_hash: createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16),
+  const stamp = {
+    last_hash: (() => {
+      let content = '';
+      try { content = readFileSync(projectMdPath, 'utf8'); } catch { /* empty */ }
+      return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
+    })(),
     last_written: now || nowIso(),
     last_written_by: 'hot-section',
   };
-  try { atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n'); }
-  catch { /* best-effort: a cache-write failure never blocks the synthesis */ }
+
+  // Per-project cache — the write of record. Single-owner, so no lock needed.
+  const projectCachePath = join(dirname(resolve(projectMdPath)), '_memories', '_lib', 'state-cache.json');
+  try {
+    mkdirSync(dirname(projectCachePath), { recursive: true });
+    let cache;
+    try { cache = JSON.parse(readFileSync(projectCachePath, 'utf8')); } catch { cache = { files: {} }; }
+    if (!cache || typeof cache !== 'object') cache = { files: {} };
+    if (!cache.files || typeof cache.files !== 'object') cache.files = {};
+    cache.files[projectMdPath] = stamp;
+    atomicWriteFileSync(projectCachePath, JSON.stringify(cache, null, 2) + '\n');
+  } catch { /* best-effort: a cache-write failure never blocks the synthesis */ }
+
+  // One-release migration: prune this file's entry from the global cache under
+  // the lock, so a stale global stamp can't shadow the per-project one.
+  const globalCachePath = join(home, '.core', 'state-cache.json');
+  try {
+    withFileLock(join(home, '.core', 'state-cache.lock'), () => {
+      let cache;
+      try { cache = JSON.parse(readFileSync(globalCachePath, 'utf8')); } catch { cache = null; }
+      if (cache?.files && projectMdPath in cache.files) {
+        delete cache.files[projectMdPath];
+        atomicWriteFileSync(globalCachePath, JSON.stringify(cache, null, 2) + '\n');
+      }
+    }, { retries: 3, retryDelayMs: 50 });
+  } catch { /* best-effort — a held lock just defers the prune to the next stamp */ }
 }
 
 // ---------- Public API ----------
