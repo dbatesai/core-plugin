@@ -135,6 +135,50 @@ test('race: 5 concurrent locked read-modify-writes lose no update', async () => 
   rmSync(dir, { recursive: true, force: true });
 });
 
+// Hale's advisory (2026-07-15): the earlier two-stealer test was sequential — the
+// second stealer ran after the first finished. This one holds both children at a
+// barrier and releases them at the same instant against the same stale lock.
+test('race: two SIMULTANEOUS stealers of one stale lock — exactly one wins', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'steal-race-'));
+  const lock = join(dir, 'contested.lock');
+  const go = join(dir, 'go');
+  writeFileSync(lock, JSON.stringify({ pid: 999999999, nonce: 'dead', started_at: 'x' }));
+  backdate(lock, 60 * 60 * 1000);
+  const child = `
+    import { acquireFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
+    import { existsSync } from 'node:fs';
+    while (!existsSync(${JSON.stringify(go)})) { /* barrier spin */ }
+    const got = acquireFileLock(${JSON.stringify(lock)});
+    process.exit(got.ok ? 0 : 3);
+  `;
+  const p1 = spawnAsync(['--input-type=module', '-e', child]);
+  const p2 = spawnAsync(['--input-type=module', '-e', child]);
+  await new Promise(r => setTimeout(r, 150)); // let both reach the barrier
+  writeFileSync(go, '1');
+  const [r1, r2] = await Promise.all([p1, p2]);
+  const wins = [r1, r2].filter(r => r.status === 0).length;
+  const losses = [r1, r2].filter(r => r.status === 3).length;
+  assert.equal(wins, 1, `exactly one stealer wins (got ${wins}; stderr: ${r1.stderr} ${r2.stderr})`);
+  assert.equal(losses, 1, 'the other reports the lock as contended');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// Release-vs-steal (Hale 2026-07-15): a revived owner releasing AFTER its lock was
+// stolen must leave the fresh owner's lock intact. The rename-claim release makes
+// this branch deterministic: claim, verify, restore on mismatch.
+test('release after steal: revived owner restores the fresh owner\'s lock untouched', () => {
+  const lock = tmpLock();
+  const revived = acquireFileLock(lock);      // owner A
+  releaseFileLock(lock, revived.nonce);       // simulate A's lock aging out + being stolen:
+  const fresh = acquireFileLock(lock);        // owner B now holds a fresh lock
+  const attempt = releaseFileLock(lock, revived.nonce); // A revives and releases with ITS nonce
+  assert.equal(attempt.released, false);
+  assert.equal(attempt.reason, 'not-owner');
+  const onDisk = JSON.parse(readFileSync(lock, 'utf8'));
+  assert.equal(onDisk.nonce, fresh.nonce, 'B\'s lock is back on the path, byte-identical owner');
+  assert.ok(releaseFileLock(lock, fresh.nonce).released, 'B can still release normally');
+});
+
 test('inspectFileLock: absent is unheld; a YOUNG corrupt lock is held; an OLD corrupt lock is stale', () => {
   const lock = tmpLock();
   assert.deepEqual(inspectFileLock(lock), { held: false, lock: null, stale: false });

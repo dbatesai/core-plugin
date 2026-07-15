@@ -17,7 +17,7 @@ function spawnAsync(args) {
   });
 }
 import {
-  addWorkspace, updateWorkspace, removeWorkspace, touchWorkspace, readLastActive, mutateIndex,
+  addWorkspace, updateWorkspace, removeWorkspace, touchWorkspace, readLastActive,
 } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import { checkFork } from '../../plugins/core/skills/core/scripts/workspace-fork-check.mjs';
 

@@ -29,6 +29,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { releaseFileLock, pidAlive } from './file-lock.mjs';
 
 export const BYTE_CAP = 512 * 1024;           // 512KB per workspace
 export const RETENTION_PER_CAPABILITY = 80;   // entries kept per capability_id on cap breach
@@ -103,19 +104,30 @@ function sleepSync(ms) {
  */
 export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT_MS, staleMs = STALE_LOCK_MS, sleep = sleepSync } = {}) {
   const deadline = now() + timeoutMs;
+  const nonce = `${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
   for (;;) {
     try {
       const fd = openSync(lockFile, 'wx');     // fails if exists
-      writeFileSync(fd, String(now()));
+      writeFileSync(fd, JSON.stringify({ pid: process.pid, nonce, t: now() }));
       closeSync(fd);
-      return () => { try { rmSync(lockFile); } catch { /* already gone */ } };
+      // Verified release (Hale 2026-07-15): a revived slow owner must not delete a
+      // fresh owner's lock. releaseFileLock rename-claims and checks the nonce.
+      return () => { releaseFileLock(lockFile, nonce); };
     } catch (err) {
       if (err.code !== 'EEXIST') throw err;
-      // Lock exists — check staleness
+      // Lock exists — check staleness. Fail closed while the recorded pid is alive
+      // (Hale 2026-07-15): age alone stole locks from live-but-slow writers. Legacy
+      // payloads (a bare timestamp, no pid) stay age-only; a hard ceiling (10× stale)
+      // still unsticks a recycled-pid strand.
       let stale = false;
       try {
         const age = now() - statSync(lockFile).mtimeMs;
-        if (age > staleMs) stale = true;
+        if (age > staleMs) {
+          let owner = null;
+          try { owner = JSON.parse(readFileSync(lockFile, 'utf8')); } catch { /* legacy/corrupt */ }
+          const ownerAlive = owner && typeof owner === 'object' && pidAlive(owner.pid);
+          stale = !ownerAlive || age > staleMs * 10;
+        }
       } catch { stale = true; } // lock vanished between check and stat
       if (stale) {
         // Rename-claim CAS (shared-write concurrency fix, 2026-07-14): a blind

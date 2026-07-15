@@ -82,13 +82,14 @@ The index is an array of workspace summary objects:
   {
     "workspace_id": "ws-example-project",
     "name": "Example Project",
-    "path": "/Users/<user>/Documents/Projects/example-project",
-    "last_active": "2026-03-31T14:30:00Z"
+    "path": "/Users/<user>/Documents/Projects/example-project"
   }
 ]
 ```
 
 The index provides the DM a single file to scan when prioritizing across workspaces. Operational detail lives in each workspace's `workspace.json`; project state lives in `<project>/PROJECT.md` — never read the workspace to learn what the project is about.
+
+**Writes go through `scripts/index-registry.mjs` only** (add/update/remove under the registry lock) — hand-editing `index.json` races concurrent sessions and is forbidden per `protocols/data-storage.md §Shared-write concurrency`. **Last-active is not an index field**: it lives in the per-workspace single-owner file `~/.core/workspaces/<id>/last-active` (stamped by `index-registry.mjs touch`); a `last_active` field found in an old index entry is a tolerant read fallback for one release, and nothing writes it. (The `last_active` field in each workspace's own `workspace.json` manifest above is unaffected — that file is per-workspace and single-owner.)
 
 ---
 

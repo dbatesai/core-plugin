@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -178,6 +178,42 @@ test('acquireLock: recovers a stale lock', () => {
     const release = acquireLock(lf, { staleMs: 0 });
     assert.ok(existsSync(lf));
     release();
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('acquireLock: fails closed while the recorded pid is ALIVE, even past staleMs (Hale 2026-07-15)', () => {
+  const home = tmpHome();
+  try {
+    const lf = join(home, 'live.lock');
+    // A lock held by THIS live process, aged past staleMs (2× via backdate) but
+    // safely under the 10× hard ceiling for the whole retry window.
+    writeFileSync(lf, JSON.stringify({ pid: process.pid, nonce: 'n', t: 0 }));
+    const twoStale = new Date(Date.now() - 2 * 60_000);
+    utimesSync(lf, twoStale, twoStale);
+    assert.throws(
+      () => acquireLock(lf, { timeoutMs: 80, staleMs: 60_000 }),
+      /could not acquire lock/,
+      'age alone must not steal from a live writer'
+    );
+    // Past the hard ceiling (age > staleMs*10) it steals regardless — the
+    // recycled-pid strand escape. now() far in the future simulates the age.
+    const release = acquireLock(lf, { timeoutMs: 80, staleMs: 60_000, now: () => Date.now() + 700_000 });
+    assert.ok(existsSync(lf));
+    release();
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('acquireLock: release is nonce-verified — a stale-stolen lock is not deleted by the old owner\'s release', () => {
+  const home = tmpHome();
+  try {
+    const lf = join(home, 'verify.lock');
+    const releaseA = acquireLock(lf);
+    // Simulate A's lock being stolen: replace it with B's fresh lock out-of-band.
+    rmSync(lf);
+    writeFileSync(lf, JSON.stringify({ pid: 999999999, nonce: 'b-fresh', t: Date.now() }));
+    releaseA(); // must be a no-op — B's lock survives
+    assert.ok(existsSync(lf), 'fresh owner\'s lock survives the revived owner\'s release');
+    assert.equal(JSON.parse(readFileSync(lf, 'utf8')).nonce, 'b-fresh');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

@@ -31,7 +31,7 @@
  *   node close-pass.mjs --self-test
  */
 
-import { readFileSync, existsSync, statSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync, chmodSync } from 'node:fs';
+import { readFileSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync, chmodSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { trustedHome } from './trusted-home.mjs';

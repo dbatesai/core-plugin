@@ -29,7 +29,7 @@
  */
 
 import {
-  readFileSync, writeFileSync, statSync, existsSync,
+  readFileSync, writeFileSync, statSync,
   openSync, writeSync, closeSync, linkSync,
   renameSync, rmSync, mkdirSync,
 } from 'node:fs';
@@ -161,20 +161,33 @@ export function acquireFileLock(lockPath, {
   return { ok: true, nonce, lock: confirmed, stolen: true };
 }
 
+let _relCounter = 0;
+
 /**
- * Release the lock ONLY if the on-disk nonce is ours (or matches `verify`, a
- * {field, value} pair for cross-process releases, e.g. close-pass's session_id).
+ * Release the lock ONLY if it is ours (nonce match, or `verify` — a {field, value}
+ * pair for cross-process releases, e.g. close-pass's session_id).
  * force:true skips verification — reserved for explicit operator commands.
+ *
+ * The removal is an atomic rename-claim, not verify-then-rm (Hale's release-vs-steal
+ * TOCTOU, 2026-07-15 advisory): with verify-then-rm, a hard-stale stealer can install
+ * a fresh lock between the read and the rm, and the revived owner's rm then deletes
+ * the FRESH owner's lock. Rename consumes the path atomically; we verify the claimed
+ * file and restore it if it turns out not to be ours. Named residual: if the restore
+ * collides with a brand-new acquirer (wx on the momentarily-empty path), the displaced
+ * lock stays in the graveyard as a forensic breadcrumb and we report 'restore-failed'
+ * — a three-way race inside a microsecond window, bounded by all writers being atomic.
  */
 export function releaseFileLock(lockPath, nonce, { verify = null, force = false } = {}) {
   if (force) { try { rmSync(lockPath); } catch { /* already gone */ } return { released: true }; }
-  const lock = readJson(lockPath);
-  if (!lock) return { released: false, reason: 'absent' };
-  const ours = (nonce && lock.nonce === nonce) ||
-    (verify && lock[verify.field] != null && lock[verify.field] === verify.value);
-  if (!ours) return { released: false, reason: 'not-owner' };
-  try { rmSync(lockPath); } catch { /* already gone */ }
-  return { released: true };
+  const grave = join(dirname(lockPath), `.${basename(lockPath)}.rel-${process.pid}-${++_relCounter}`);
+  try { renameSync(lockPath, grave); } catch { return { released: false, reason: 'absent' }; }
+  const claimed = readJson(grave);
+  const ours = claimed && ((nonce && claimed.nonce === nonce) ||
+    (verify && claimed[verify.field] != null && claimed[verify.field] === verify.value));
+  if (ours) { try { rmSync(grave); } catch { /* gone */ } return { released: true }; }
+  // Not ours — we are a revived owner whose lock was stolen. Put the true owner's back.
+  try { renameSync(grave, lockPath); return { released: false, reason: 'not-owner' }; }
+  catch { return { released: false, reason: 'restore-failed', grave }; }
 }
 
 function sleepSync(ms) {
