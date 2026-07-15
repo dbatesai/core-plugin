@@ -78,7 +78,7 @@ test('the sweep MEASURES the P2 risk on this fixture (forbidden@3 > 0 for P2, 0 
   const dir = freshStore();
   try {
     const gold = [{
-      id: 'lantern', query: 'lantern audit trail',
+      id: 'lantern', query: 'lantern audit trail', rung: 'literal',
       expected: ['obs-lantern-gold'],
       forbidden: ['dc-lantern-wrong', 'dc-retired-strong-beacon', 'dc-terminal-invalid-beacon'],
     }];

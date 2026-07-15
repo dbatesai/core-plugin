@@ -22,7 +22,7 @@ const { runHarness, runTierPolicySweep } =
   await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
 
 const GOLD = { queries: [
-  { id: 'q1', query: 'omega speedmaster sale', expected: ['want-omega-speedmaster-on-sale-wait'] },
+  { id: 'q1', query: 'omega speedmaster sale', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] },
 ] };
 
 async function realReportAndSweep() {

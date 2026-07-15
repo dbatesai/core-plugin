@@ -257,13 +257,35 @@ export function validateGold(gold) {
       throw new Error(`${q.id}: no_answer:true contradicts a non-empty expected list`);
     }
     for (const field of ['expected', 'forbidden']) {
-      for (const v of (q[field] || [])) {
+      const vals = q[field] || [];
+      for (const v of vals) {
         if (typeof v !== 'string' || !v.trim()) throw new Error(`${q.id}: ${field} entries must be non-empty strings`);
       }
+      // Blocker-4 fail-closed (Hale verdict §4): duplicate supports double-count a
+      // hit and silently inflate recall's numerator — refuse, don't dedupe.
+      if (new Set(vals).size !== vals.length) {
+        throw new Error(`${q.id}: duplicate ids in ${field} — evaluator refuses (dedupe the gold set deliberately)`);
+      }
+    }
+    // Blocker-4: an id in BOTH expected and forbidden makes the measurement
+    // undefined (a hit is simultaneously success and contamination). Refuse.
+    const forb = new Set(q.forbidden || []);
+    const overlap = (q.expected || []).filter(id => forb.has(id));
+    if (overlap.length) {
+      throw new Error(`${q.id}: ids in both expected and forbidden (${overlap.join(', ')}) — contradictory gold, measurement undefined`);
+    }
+    // Blocker-4: rung is a closed reporting enum. An unknown rung disappears from
+    // fixed reporting surfaces (perRung) or becomes an exporter-controlled key —
+    // both are silent. Require a declared, known rung on every query.
+    if (!GOLD_RUNGS.has(q.rung)) {
+      throw new Error(`${q.id}: rung '${q.rung ?? '(missing)'}' not in {${[...GOLD_RUNGS].join(', ')}} — evaluator fails closed (extend the enum deliberately)`);
     }
   }
   return true;
 }
+
+// The closed difficulty-rung vocabulary (header contract, line "rung ∈ …").
+export const GOLD_RUNGS = new Set(['literal', 'category', 'value', 'cross-domain']);
 
 /**
  * assertKnownTiers — evaluator-side fail-closed authority enum (A5, Crest correction
@@ -274,7 +296,14 @@ export function validateGold(gold) {
 export function assertKnownTiers(index) {
   const VALID_TIERS = new Set(['canonical', 'observation']);
   for (const u of index.units) {
-    if (u.tier && !VALID_TIERS.has(u.tier)) {
+    // Blocker-4 fail-closed (Hale verdict §4): a MISSING/empty tier must refuse
+    // like an unknown one — product code defaults missing tiers to canonical, so
+    // an unmeasured unit would silently join the highest-authority class in every
+    // tier-policy number. Absence is not a tier.
+    if (!u.tier) {
+      throw new Error(`missing authority tier on unit ${u.id} — evaluator fails closed (the product path may default; the measurement path must not)`);
+    }
+    if (!VALID_TIERS.has(u.tier)) {
       throw new Error(`unknown authority tier '${u.tier}' on unit ${u.id} — evaluator fails closed (extend the enum deliberately, don't default)`);
     }
   }

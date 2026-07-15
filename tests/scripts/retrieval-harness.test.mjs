@@ -46,23 +46,49 @@ test('lexicalRankedIds: returns a ranked id list (shipped scorer, no slice)', ()
 // ── A5 strict evaluator (Train A; Crest corrections 2026-07-12) ──
 
 test('A5 validateGold: empty expected without no_answer:true is rejected — zero silent skips', () => {
-  assert.throws(() => validateGold([{ id: 'q1', query: 'something' }]), /no_answer/);
-  assert.throws(() => validateGold([{ id: 'q1', query: 'something', expected: [] }]), /no_answer/);
-  assert.ok(validateGold([{ id: 'q1', query: 'something', no_answer: true }]), 'declared absence is valid');
-  assert.throws(() => validateGold([{ id: 'q1', query: 'something', expected: ['u1'], no_answer: true }]),
+  assert.throws(() => validateGold([{ id: 'q1', query: 'something', rung: 'literal' }]), /no_answer/);
+  assert.throws(() => validateGold([{ id: 'q1', query: 'something', rung: 'literal', expected: [] }]), /no_answer/);
+  assert.ok(validateGold([{ id: 'q1', query: 'something', rung: 'literal', no_answer: true }]), 'declared absence is valid');
+  assert.throws(() => validateGold([{ id: 'q1', query: 'something', rung: 'literal', expected: ['u1'], no_answer: true }]),
     /contradicts/, 'support + no_answer together is contradictory');
-  assert.throws(() => validateGold([{ id: 'q1', expected: ['u1'] }]), /query text/, 'query text required');
-  assert.throws(() => validateGold([{ id: 'q1', query: 'x', expected: [''] }]), /non-empty strings/);
+  assert.throws(() => validateGold([{ id: 'q1', rung: 'literal', expected: ['u1'] }]), /query text/, 'query text required');
+  assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'literal', expected: [''] }]), /non-empty strings/);
 });
 
-test('A5 assertKnownTiers: unknown authority tier fails closed in the evaluator', () => {
-  assert.ok(assertKnownTiers({ units: [{ id: 'a', tier: 'canonical' }, { id: 'b', tier: 'observation' }, { id: 'c' }] }));
+// ── Blocker 4 (Hale verdict 2026-07-14 §4): evaluator validation fails CLOSED ──
+
+test('blocker-4 validateGold: unknown or missing rung is refused (closed reporting enum)', () => {
+  assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'vibes', expected: ['u1'] }]),
+    /rung 'vibes'/, 'unknown rung refused');
+  assert.throws(() => validateGold([{ id: 'q1', query: 'x', expected: ['u1'] }]),
+    /rung '\(missing\)'/, 'missing rung refused — it would vanish from perRung reporting');
+  assert.ok(validateGold([{ id: 'q1', query: 'x', rung: 'cross-domain', expected: ['u1'] }]));
+});
+
+test('blocker-4 validateGold: duplicate supports are refused, not deduped', () => {
+  assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'literal', expected: ['u1', 'u1'] }]),
+    /duplicate ids in expected/);
+  assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'literal', expected: ['u1'], forbidden: ['f1', 'f1'] }]),
+    /duplicate ids in forbidden/);
+});
+
+test('blocker-4 validateGold: an id in both expected and forbidden is contradictory gold — refused', () => {
+  assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'literal', expected: ['u1', 'u2'], forbidden: ['u2'] }]),
+    /both expected and forbidden \(u2\)/);
+});
+
+test('A5+blocker-4 assertKnownTiers: unknown AND missing authority tiers fail closed in the evaluator', () => {
+  assert.ok(assertKnownTiers({ units: [{ id: 'a', tier: 'canonical' }, { id: 'b', tier: 'observation' }] }));
   assert.throws(() => assertKnownTiers({ units: [{ id: 'x', tier: 'mystery' }] }), /fails closed/);
+  // The exact hole Hale reproduced: a unit with NO tier used to pass silently and
+  // be defaulted canonical by product code. Absence is not a tier.
+  assert.throws(() => assertKnownTiers({ units: [{ id: 'c' }] }), /missing authority tier on unit c/);
+  assert.throws(() => assertKnownTiers({ units: [{ id: 'd', tier: '' }] }), /missing authority tier/);
 });
 
 test('A5 sweep: bands are per (query, gold) pair — multi-valued estimand preserved — and the sweep pins its snapshot', () => {
   const gold = [{
-    id: 'multi', query: 'zz-nonexistent-token-zz',
+    id: 'multi', query: 'zz-nonexistent-token-zz', rung: 'literal',
     expected: ['ghost-unit-one', 'ghost-unit-two'], // never retrievable → both must band
     forbidden: [],
   }];
@@ -80,7 +106,7 @@ test('A5 receipt: runHarness manifest carries product-function hashes, snapshot 
   const dir = mkdtempSync(join(tmpdir(), 'a5-gold-'));
   const goldPath = join(dir, 'gold.json');
   writeFileSync(goldPath, JSON.stringify({ queries: [
-    { id: 'q1', query: 'omega speedmaster', expected: ['want-omega-speedmaster-on-sale-wait'] },
+    { id: 'q1', query: 'omega speedmaster', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] },
   ] }));
   try {
     const report = await runHarness(FIXT, goldPath);
