@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.11.0] — 2026-07-15
+
 ### Added
+- **Shared-write concurrency (DC-116)** — `index-registry.mjs` is the sole scripted writer of `~/.core/index.json`, guarded by a rename-claim generation lock (no stealing from live processes at any age; verified, fail-closed release at both the owner and operator paths, with failure-injection tests); `capability-history` unified onto the shared lock; `last_active` and the edit-detection state cache moved to per-project single-owner files. Race coverage uses genuinely concurrent processes (spawn, not spawnSync).
 - **`buildFinalContextPack`** — one product function now owns the delivered per-turn context end-to-end: final ordering, authority tier labels, UTF-8 byte accounting, the byte cap, and the degraded-store warning. The installed hook is a thin adapter around it, the CLI gains `--pack` (emits the exact delivered bytes), and the measurement harness's final-context arm scores pack-accepted identities — so a measured number describes the bytes the agent actually receives, never a pre-cap selection.
 - **Request-scoped content-addressed snapshots** (`loadSnapshot`) — one index load feeds the title arm, the body-BM25 arm, and edge expansion within a retrieval request; the snapshot id (sha256 of the content-derived source signature) pins every trace and evaluator receipt to the exact store bytes measured. **`buildRetrievalTrace`** records the full local-only evidence trace of one request (snapshot id, component hashes, stages, delivered pack, timing) on the same staged pipeline the product runs.
 - **Strict evaluator** — the gold-set validator refuses under-declared queries (≥1 expected support or explicit `no_answer: true`); the evaluator fails closed on unknown authority tiers (the product path stays tolerant); counterfactual tier-policy bands are per (query, gold) pair; harness and sweep receipts carry a schema version, product-function sha256s, the snapshot id, and declared counts.
