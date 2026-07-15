@@ -130,3 +130,71 @@ test('A5 runHarness: under-declared gold set is refused before any arm runs', as
     await assert.rejects(() => runHarness(FIXT, goldPath), /no_answer/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ── Blocker 2 (Hale verdict §2): immutable captured corpus — the two falsifiers ──
+// From the evidence answer (keel--evidence-answer-immutable-corpus), with Hale's
+// round-4 correction applied: compare a DETERMINISTIC PROJECTION (ranks per arm,
+// snapshot id), never whole receipts (latency fields legitimately vary).
+
+test('blocker-2 falsifier A: mutating unit files after capture cannot change any measured rank (capture-leak test)', async () => {
+  const { mkdtempSync, cpSync, rmSync, appendFileSync, readdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
+  const { lexicalRankedIds, productRankedIds, retrieveContext, buildFinalContextPack } =
+    await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
+  const { bm25Rank } = await import(pathToFileURL(join(SCRIPTS, 'bm25.mjs')).href);
+  const dir = mkdtempSync(join(tmpdir(), 'b2-mutate-'));
+  const store = join(dir, 'store');
+  cpSync(FIXT, store, { recursive: true });
+  try {
+    const snapshot = loadSnapshot(store, { captureBodies: true });
+    assert.ok(Array.isArray(snapshot.bodies) && snapshot.bodies.length > 0, 'bodies captured');
+    const q = 'omega speedmaster sale';
+    const project = () => ({
+      lexical: lexicalRankedIds(q, store, { snapshot }),
+      ranking: productRankedIds(q, store, { snapshot }),
+      context3: buildFinalContextPack(retrieveContext(q, store, { topN: 3, snapshot })).accepted.map(a => a.id),
+      bm25: bm25Rank(q, store, { snapshot }),
+      snapshot_id: snapshot.snapshotId,
+    });
+    const before = project();
+    // Mutate EVERY unit body on disk after capture — poison that would rerank everything if read.
+    const memDir = join(store, '_memories');
+    for (const f of readdirSync(memDir, { recursive: true })) {
+      if (String(f).endsWith('.md')) appendFileSync(join(memDir, String(f)), '\n\nomega speedmaster sale omega speedmaster sale omega speedmaster sale\n');
+    }
+    const after = project();
+    assert.deepEqual(after, before, 'deterministic projection identical across on-disk mutation — the capture is leak-free');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('blocker-2 falsifier B: every arm completes against the capture with the store UNREADABLE (fs-stub equivalent)', { skip: process.platform === 'win32' }, async () => {
+  const { mkdtempSync, cpSync, rmSync, chmodSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
+  const { lexicalRankedIds, productRankedIds, retrieveContext, buildFinalContextPack } =
+    await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
+  const { bm25Rank } = await import(pathToFileURL(join(SCRIPTS, 'bm25.mjs')).href);
+  const dir = mkdtempSync(join(tmpdir(), 'b2-noread-'));
+  const store = join(dir, 'store');
+  cpSync(FIXT, store, { recursive: true });
+  const memDir = join(store, '_memories');
+  try {
+    const snapshot = loadSnapshot(store, { captureBodies: true });
+    chmodSync(memDir, 0o000); // any live read from here on throws EACCES
+    const q = 'omega speedmaster sale';
+    const outs = {
+      lexical: lexicalRankedIds(q, store, { snapshot }),
+      ranking: productRankedIds(q, store, { snapshot }),
+      context3: buildFinalContextPack(retrieveContext(q, store, { topN: 3, snapshot })).accepted.map(a => a.id),
+      bm25: bm25Rank(q, store, { snapshot }),
+    };
+    for (const [arm, ids] of Object.entries(outs)) {
+      assert.ok(Array.isArray(ids), `${arm} arm completed with zero live reads`);
+    }
+    assert.ok(outs.bm25.length > 0, 'the body arm ranked from CAPTURED bytes (would be empty/thrown on live reads)');
+  } finally {
+    chmodSync(memDir, 0o755);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

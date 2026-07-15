@@ -55,10 +55,10 @@ function scoreUnit(queryTokens, unit) {
  * the shipped lexical arm's read path, exposed for offline measurement.
  * @returns {string[]} ranked unit ids
  */
-export function lexicalRankedIds(query, storePath) {
+export function lexicalRankedIds(query, storePath, { snapshot = null } = {}) {
   const root = resolve(storePath);
-  if (!existsSync(join(root, '_memories'))) return [];
-  const index = loadFreshIndex(root);
+  if (!snapshot && !existsSync(join(root, '_memories'))) return [];
+  const index = snapshot?.index || loadFreshIndex(root);
   const queryTokens = tokenize(query);
   return index.units
     .map(u => ({ id: u.id, score: scoreUnit(queryTokens, u) }))
@@ -84,10 +84,10 @@ export function lexicalRankedIds(query, storePath) {
  * @returns {Array<{id, tier, score}>} every unit scoring > 0 on either arm, sorted
  *   desc by combined normalized score (ties by id), score ∈ (0, 1].
  */
-export function productRankedScores(query, storePath, preloadedIndex = null) {
+export function productRankedScores(query, storePath, preloadedIndex = null, snapshot = null) {
   const root = resolve(storePath);
-  if (!existsSync(join(root, '_memories'))) return [];
-  const index = preloadedIndex || loadFreshIndex(root);
+  if (!snapshot && !existsSync(join(root, '_memories'))) return [];
+  const index = snapshot?.index || preloadedIndex || loadFreshIndex(root);
   const queryTokens = tokenize(query);
 
   const combined = new Map(); // id -> {id, tier, score}
@@ -102,8 +102,9 @@ export function productRankedScores(query, storePath, preloadedIndex = null) {
   let bodyScored = [];
   try {
     // A3: the body arm reads through the SAME index as the title arm — one
-    // request, one snapshot, every reader sees the same bytes.
-    bodyScored = bm25Scores(query, root, { preloadedIndex: index });
+    // request, one snapshot, every reader sees the same bytes. With a captured
+    // snapshot (blocker 2), body BYTES come from the capture too — zero live reads.
+    bodyScored = bm25Scores(query, root, { preloadedIndex: index, snapshot });
     _lastBm25Error = null;
   } catch (err) {
     // Fail-open (title-only) but never silent: the degradation is visible on stderr
@@ -124,8 +125,8 @@ export function productRankedScores(query, storePath, preloadedIndex = null) {
 }
 
 /** Ranked id list of productRankedScores — the ranking-substrate arm for offline measurement. */
-export function productRankedIds(query, storePath) {
-  return productRankedScores(query, storePath).map(s => s.id);
+export function productRankedIds(query, storePath, { snapshot = null } = {}) {
+  return productRankedScores(query, storePath, null, snapshot).map(s => s.id);
 }
 
 /**
@@ -202,13 +203,16 @@ export function storeHealth(storePath) {
  * implementation of the pipeline — a trace can never disagree with the product.
  * @returns {{snapshotId, substrate, policied, top, expanded, final}}
  */
-function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight } = {}) {
+function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, snapshot = null } = {}) {
   // A3: ONE content-addressed snapshot per request. loadSnapshot validates the
   // recursive source signature (missing/corrupt/stale regenerates — the DC-94b R1
   // anti-resurrection hole stays closed at the loader) and derives snapshotId from
   // the index's content signature; every reader below — title arm, body-BM25 arm,
-  // edge expansion — reads through this same index.
-  const { index, snapshotId } = loadSnapshot(root);
+  // edge expansion — reads through this same index. A measurement caller passes a
+  // CAPTURED snapshot (blocker 2) so every stage consumes the same bytes across
+  // the whole run — the product path keeps its fresh per-request load.
+  const snap = snapshot || loadSnapshot(root);
+  const { index, snapshotId } = snap;
   const byId = new Map(index.units.map(u => [u.id, u]));
 
   // The product ranking: title/topics ∪ body-BM25, magnitudes preserved via
@@ -217,7 +221,7 @@ function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsi
   // abstract/value rung (DC-113 Tier-A T3, model-free per DC-114).
   // tierPolicy defaults to 'P0' (identity) so shipped behavior is unchanged; the
   // ceremony (joint contract v2 §7) selects an active policy from measured evidence.
-  const substrate = productRankedScores(query, root, index);
+  const substrate = productRankedScores(query, root, index, snapshot);
   const policied = applyTierPolicy(
     substrate,
     tierPolicy,
@@ -265,8 +269,9 @@ export function retrieveContext(query, storePath, opts = {}) {
   // The per-turn hook runs in every directory the user opens. If there's no CORE
   // store here, retrieve nothing and — critically — write nothing: generating the
   // index would mkdir -p _memories/_lib and litter unit-summaries.json into an
-  // unrelated repo. No store, no retrieval, no side effect.
-  if (!existsSync(join(root, '_memories'))) return [];
+  // unrelated repo. No store, no retrieval, no side effect. (A caller holding a
+  // captured snapshot already proved the store existed at capture time.)
+  if (!opts.snapshot && !existsSync(join(root, '_memories'))) return [];
   return runRetrievalStages(query, root, opts).final;
 }
 

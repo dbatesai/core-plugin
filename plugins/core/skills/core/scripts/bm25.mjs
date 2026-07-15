@@ -33,10 +33,10 @@
  *      node bm25.mjs --test
  */
 
-import { readFileSync, existsSync, realpathSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadFreshIndex } from './generate-summary-index.mjs';
+import { loadFreshIndex, loadUnitBodies } from './generate-summary-index.mjs';
 
 // Small, conventional English stopword set — enough to stop "the/on/of" from
 // dominating overlap counts. Deliberately not exhaustive (no dependency, DC-80).
@@ -61,32 +61,24 @@ export function tokenize(text) {
  * recursive source signature on every call).
  */
 export function loadActiveBodies(store, preloadedIndex = null) {
-  const root = resolve(store);
   // A3: a caller holding a request-scoped snapshot passes its index so every
   // reader in the request sees the same bytes; standalone callers still get a
-  // sig-validated fresh load (active-only, retired excluded).
-  const idx = preloadedIndex || loadFreshIndex(root);
-  const out = [];
-  for (const u of idx.units) {
-    const fpath = join(root, '_memories', ...(u.path ? u.path.split('/') : [`${u.id}.md`]));
-    if (!existsSync(fpath)) continue;
-    let raw;
-    try { raw = readFileSync(fpath, 'utf8'); } catch { continue; }
-    const body = raw.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
-    // Prepend the H1/summary + topics so the ranking carries the title signal too.
-    const topics = (u.topics || []).join(' ');
-    out.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
-  }
-  return out;
+  // sig-validated fresh load (active-only, retired excluded). The walk itself
+  // has ONE owner: generate-summary-index.mjs loadUnitBodies.
+  const idx = preloadedIndex || loadFreshIndex(resolve(store));
+  return loadUnitBodies(store, idx);
 }
 
 /**
  * BM25 over unit bodies. Returns [{id, tier, score}] sorted desc — magnitude scores,
  * which retrieve-context's normalized union needs (rank positions can't express
  * "a neighbor of a STRONG hit beats a weak direct hit"). Deterministic, no dependency.
+ *
+ * Blocker 2: pass `snapshot` (a loadSnapshot(..., {captureBodies:true}) result) and
+ * the ranking consumes ONLY captured bytes — zero live file reads after the id.
  */
-export function bm25Scores(query, store, { k1 = 1.5, b = 0.75, preloadedIndex = null } = {}) {
-  const bodies = loadActiveBodies(store, preloadedIndex);
+export function bm25Scores(query, store, { k1 = 1.5, b = 0.75, preloadedIndex = null, snapshot = null } = {}) {
+  const bodies = snapshot?.bodies || loadActiveBodies(store, snapshot?.index || preloadedIndex);
   const docs = bodies.map(d => ({ id: d.id, tier: d.tier, toks: tokenize(d.text) }));
   const N = docs.length || 1;
   const df = new Map();

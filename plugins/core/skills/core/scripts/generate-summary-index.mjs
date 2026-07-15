@@ -159,12 +159,39 @@ export function loadFreshIndex(storePath) {
  * the same bytes report the same id and any store mutation changes it. Traces and
  * evidence receipts carry this id — a retrieval number without it is not reproducible.
  */
-export function loadSnapshot(storePath) {
+export function loadSnapshot(storePath, { captureBodies = false } = {}) {
   const index = loadFreshIndex(storePath);
-  return {
+  const snapshot = {
     index,
     snapshotId: createHash('sha256').update(index.source_sig || '').digest('hex'),
   };
+  // Blocker 2 (Hale verdict §2): a measurement run captures BODY BYTES too, so no
+  // evaluator reader ever touches live files after the id is minted. The id needs
+  // no new input — source_sig is already content-derived over these same files —
+  // capture just makes every reader consume the bytes the id describes.
+  if (captureBodies) snapshot.bodies = loadUnitBodies(storePath, index);
+  return snapshot;
+}
+
+/**
+ * loadUnitBodies — ONE owner for the unit-body walk (bm25's loadActiveBodies
+ * delegates here). Files resolve through the index's per-unit `path` — the only
+ * correct location for nested units. Returns [{id, tier, text}] where text is
+ * summary + topics + frontmatter-stripped body.
+ */
+export function loadUnitBodies(storePath, index) {
+  const root = resolve(storePath);
+  const out = [];
+  for (const u of index.units) {
+    const fpath = join(root, '_memories', ...(u.path ? u.path.split('/') : [`${u.id}.md`]));
+    if (!existsSync(fpath)) continue;
+    let raw;
+    try { raw = readFileSync(fpath, 'utf8'); } catch { continue; }
+    const body = raw.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+    const topics = (u.topics || []).join(' ');
+    out.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
+  }
+  return out;
 }
 
 // First `# ` heading stripped, else first non-blank non-heading line. Mirrors

@@ -83,16 +83,20 @@ export async function runHarness(store, goldPath) {
   // A5 strictness: the Recall@K instrument refuses an under-declared gold set and
   // an unclassifiable store the same way the tier sweep does — zero silent skips.
   validateGold(gold);
-  const snapshot = loadSnapshot(store);
+  // Blocker 2 (Hale verdict §2): ONE immutable captured corpus — index AND body
+  // bytes — minted before any measurement; every arm and every policy consumes it.
+  // No reader below touches live unit files after snapshot_id is computed, so a
+  // store mutation mid-run cannot change what any number describes.
+  const snapshot = loadSnapshot(store, { captureBodies: true });
   assertKnownTiers(snapshot.index);
   const arms = {
-    lexical: (q) => lexicalRankedIds(q, store),    // title+topics only (pre-T3 baseline)
-    ranking: (q) => productRankedIds(q, store),    // RANKING SUBSTRATE — the function retrieveContext ranks with, BEFORE edge expansion/topN (not the final context)
+    lexical: (q) => lexicalRankedIds(q, store, { snapshot }),   // title+topics only (pre-T3 baseline)
+    ranking: (q) => productRankedIds(q, store, { snapshot }),   // RANKING SUBSTRATE — the function retrieveContext ranks with, BEFORE edge expansion/topN (not the final context)
     // FINAL product context — DELIVERED identities, not selection: routed through
     // buildFinalContextPack so the byte cap participates (Train A A4 — a hit
     // retrieveContext selects but the cap drops is NOT counted as delivered).
-    context3: (q) => buildFinalContextPack(retrieveContext(q, store, { topN: 3 })).accepted.map(a => a.id),
-    bm25: (q) => bm25Rank(q, store),               // summary+topics+body BM25 arm (not body-only — the loader prepends title/topics)
+    context3: (q) => buildFinalContextPack(retrieveContext(q, store, { topN: 3, snapshot })).accepted.map(a => a.id),
+    bm25: (q) => bm25Rank(q, store, { snapshot }),              // summary+topics+body BM25 arm (not body-only — the loader prepends title/topics)
   };
   // ONE ranking pass per arm: metrics, raw ranks, and latency all come from the
   // SAME observations (the re-review caught the double-run emitting raw evidence
@@ -328,7 +332,9 @@ export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
   validateGold(gold);
   // A5 fail-closed: measurement refuses a store whose authority tiers it can't
   // classify, and every sweep number is pinned to the snapshot it was computed on.
-  const snapshot = loadSnapshot(store);
+  // Blocker 2: the snapshot is a FULL capture (index + body bytes) and every
+  // policy run below consumes it — no live reads after the id.
+  const snapshot = loadSnapshot(store, { captureBodies: true });
   assertKnownTiers(snapshot.index);
   const POLICIES = [
     ['P0', { tierPolicy: 'P0' }], ['P1', { tierPolicy: 'P1' }], ['P2', { tierPolicy: 'P2' }],
@@ -338,7 +344,7 @@ export function runTierPolicySweep(store, gold, { topN = 3 } = {}) {
   for (const [label, opts] of POLICIES) {
     finalCtx[label] = {};
     // Delivered identities (pack-accepted), not selection — same A4 routing as the context3 arm.
-    for (const q of gold) finalCtx[label][q.id] = buildFinalContextPack(retrieveContext(q.query, store, { topN, ...opts })).accepted.map(a => a.id);
+    for (const q of gold) finalCtx[label][q.id] = buildFinalContextPack(retrieveContext(q.query, store, { topN, ...opts, snapshot })).accepted.map(a => a.id);
   }
   const perPolicy = POLICIES.map(([label]) => {
     let recalls = [], forbid = 0, forbidQ = 0;
