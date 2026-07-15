@@ -296,7 +296,12 @@ export function retrieveContext(query, storePath, opts = {}) {
 export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, byteCap = 2048, snapshot = null } = {}) {
   const root = resolve(storePath);
   const t0 = process.hrtime.bigint();
-  if (!existsSync(join(root, '_memories'))) {
+  // Storeless probe only when there is NO injected snapshot (Hale round 14): a
+  // caller holding a capture already proved the store existed at capture time,
+  // and the trace must describe the CAPTURED state even if the live store
+  // vanished afterward — an unconditional existsSync here returned `storeless`
+  // for exactly the runs whose whole point was independence from live state.
+  if (!snapshot && !existsSync(join(root, '_memories'))) {
     return { kind: 'retrieval-trace', local_only: true, store: root, storeless: true,
       query, snapshot_id: null, stages: null, pack: null, timing_ms: 0 };
   }

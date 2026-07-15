@@ -209,3 +209,26 @@ test('round-13 whole-harness barrier: a mutation storm between runs cannot chang
     assert.ok(!run2.includes('poison-new-unit'), 'the post-capture unit is invisible to every measured surface');
   } finally { rm(dir, { recursive: true, force: true }); }
 });
+
+// Hale round 14: buildRetrievalTrace ran its storeless existsSync probe BEFORE
+// honoring an injected snapshot — if the live store vanished after capture, the
+// trace returned `storeless` instead of describing the captured state, and the
+// round-13 whole-harness barrier couldn't see it (trace was outside the barrier).
+test('round-14: with an injected capture, the trace describes the CAPTURED state even when the store is GONE', async () => {
+  const { buildRetrievalTrace } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
+  const dir = mkdtempSync(join(tmpdir(), 'trace-gone-'));
+  const store = join(dir, 'store');
+  cpSync(FIXT, store, { recursive: true });
+  try {
+    const cap = loadSnapshot(store, { captureBodies: true });
+    rmSync(join(store, '_memories'), { recursive: true, force: true }); // the store VANISHES post-capture
+    const trace = buildRetrievalTrace('omega speedmaster sale', store, { topN: 3, snapshot: cap });
+    assert.equal(trace.storeless, undefined, 'not storeless — the capture is the state');
+    assert.equal(trace.snapshot_id, cap.snapshotId, 'trace carries the capture\'s id');
+    assert.ok(trace.stages.final.length > 0, 'results ranked entirely from captured bytes');
+    assert.ok(trace.pack.accepted.length > 0, 'the pack delivers from captured bytes');
+    // And WITHOUT a snapshot the storeless probe still protects the product path:
+    const bare = buildRetrievalTrace('omega speedmaster sale', store, { topN: 3 });
+    assert.equal(bare.storeless, true, 'no snapshot + no store → honest storeless report');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
