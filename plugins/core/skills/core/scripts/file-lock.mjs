@@ -217,7 +217,16 @@ export function acquireFileLock(lockPath, {
 export function releaseFileLock(lockPath, nonce, { verify = null, force = false } = {}) {
   const gens = listGenerations(lockPath);
   if (force) {
-    for (const g of gens) { try { rmSync(g.path); } catch { /* gone */ } }
+    // The operator recovery path must not lie either (Hale round 5): a removal
+    // that fails for any reason other than already-gone reports failure, naming
+    // the artifact and cause — "lock released" while the lock survives is worse
+    // than the stuck lock itself.
+    const failures = [];
+    for (const g of gens) {
+      try { rmSync(g.path); }
+      catch (e) { if (e.code !== 'ENOENT') failures.push(`${basename(g.path)}: ${e.code || e}`); }
+    }
+    if (failures.length) return { released: false, reason: 'release-failed', error: failures.join('; ') };
     return { released: true };
   }
   if (!gens.some(g => !g.done)) return { released: false, reason: 'absent' };

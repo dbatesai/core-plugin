@@ -310,6 +310,27 @@ test('release fails CLOSED when the tombstone rename cannot be performed — no 
   }
 });
 
+// Hale round 5: the operator RECOVERY path lied the same way — force release
+// swallowed removal failures and reported released:true.
+test('force release fails CLOSED when removal cannot be performed — recovery never lies', { skip: process.platform === 'win32' }, async () => {
+  const { chmodSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'force-fail-'));
+  const lock = join(dir, 'x.lock');
+  acquireFileLock(lock);
+  chmodSync(dir, 0o555);
+  try {
+    const rel = releaseFileLock(lock, null, { force: true });
+    assert.equal(rel.released, false, 'force release must not report success over a surviving lock');
+    assert.equal(rel.reason, 'release-failed');
+    assert.match(rel.error, /x\.lock/, 'names the surviving artifact');
+    assert.ok(currentLockFile(lock), 'lock still on disk, reported truthfully');
+  } finally {
+    chmodSync(dir, 0o755);
+    assert.ok(releaseFileLock(lock, null, { force: true }).released, 'recovery succeeds once the cause clears');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('force release removes every generation artifact', () => {
   const lock = tmpLock();
   const a = acquireFileLock(lock);

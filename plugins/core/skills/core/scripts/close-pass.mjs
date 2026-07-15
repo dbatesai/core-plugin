@@ -429,7 +429,15 @@ function main(argv) {
       process.stdout.write('close marked closed; lock released\n');
       return 0;
     }
-    case 'release': { releaseLock(store); process.stdout.write('lock released\n'); return 0; }
+    case 'release': {
+      const rel = releaseLock(store);
+      if (rel && rel.released === false) {
+        process.stdout.write(`LOCK RELEASE FAILED (${rel.error || rel.reason}) — the lock is still present; clear the cause and re-run\n`);
+        return 1;
+      }
+      process.stdout.write('lock released\n');
+      return 0;
+    }
     default: process.stderr.write(`unknown subcommand: ${sub}\n`); return 2;
   }
 }
