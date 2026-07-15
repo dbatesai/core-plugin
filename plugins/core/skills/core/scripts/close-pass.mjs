@@ -43,12 +43,14 @@ import { acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.m
 import { runMaintenance } from './maintenance-run.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
 
-// A lock older than this with no live owner is stale and stealable. Generous: a real close
+// A lock older than this with no live owner is stale and supersedable. Generous: a real close
 // pass (claude -p re-reading a transcript) can take a couple of minutes.
 export const LOCK_STALE_MS = 10 * 60 * 1000;
-// A HARD age ceiling: past this, a lock is stealable regardless of pid liveness. Without this,
-// a SIGKILL'd runner whose pid gets recycled by any live process would strand the lock FOREVER
-// (pidAlive→true → never stale → every future close silently skips). Well past any real close.
+// Ceiling for locks whose owner can't be identified (unreadable payload, no pid). A lock with
+// a READABLE LIVE pid is never auto-superseded at ANY age (Hale round 3, 2026-07-15): a laptop
+// suspended mid-close revives past any ceiling and would overlap its superseder. The recycled-
+// pid strand this reopens (pidAlive→true forever → closes skip) is the accepted lesser failure:
+// detect reports in-progress, startup narrates it, and `close-pass.mjs release` is the remedy.
 export const LOCK_HARD_STALE_MS = 30 * 60 * 1000;
 
 const markerPath = (store) => join(resolve(store), '_memories', '_close-marker.json');

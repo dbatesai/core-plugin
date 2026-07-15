@@ -132,15 +132,16 @@ test('withFileLock throws LOCK_HELD after retry budget on a live contended lock'
 // A revived owner whose lock was superseded cannot disturb the fresh owner at all.
 test('release after supersession: revived owner is a strict no-op on the fresh owner\'s lock', () => {
   const lock = tmpLock();
-  const a = acquireFileLock(lock);            // owner A, generation N
-  // A goes hard-stale (simulate: backdate A's live generation) and B supersedes.
-  backdate(currentLockFile(lock), 60 * 60 * 1000);
+  // Owner A: a crashed session's generation — dead pid, aged stale (a LIVE pid
+  // is never supersedable under the round-3 policy, so A is crafted dead).
+  writeFileSync(`${lock}.g1`, JSON.stringify({ pid: 999999999, nonce: 'a-nonce', gen: 1, started_at: 'x' }));
+  backdate(`${lock}.g1`, 60 * 60 * 1000);
   const b = acquireFileLock(lock);
   assert.ok(b.ok && b.stolen, 'B superseded A\'s stale generation');
   const bFile = currentLockFile(lock);
   const bBytes = readFileSync(bFile, 'utf8');
-  // A revives and releases with ITS nonce: must not touch B's generation.
-  const attempt = releaseFileLock(lock, a.nonce);
+  // A "revives" and releases with ITS nonce: must not touch B's generation.
+  const attempt = releaseFileLock(lock, 'a-nonce');
   assert.equal(attempt.released, false);
   assert.equal(attempt.reason, 'not-owner');
   assert.equal(currentLockFile(lock), bFile, 'B\'s generation is still the current lock');
@@ -220,6 +221,56 @@ test('race: two SIMULTANEOUS stealers of one stale lock — exactly one wins', a
   assert.equal(wins, 1, `exactly one stealer wins (got ${wins}; stderr: ${r1.stderr} ${r2.stderr})`);
   assert.equal(losses, 1, 'the other reports the lock as contended');
   rmSync(dir, { recursive: true, force: true });
+});
+
+// Hale's round-3 ask: a barrier-controlled A/B/C proof that C cannot enter while a
+// wrong-owner (revived A) release runs against B's live lock. In v3 A's release is
+// a read-only scan (it renames only a file whose content matched), so C must be
+// refused on every attempt and B's lock must stay byte-identical throughout.
+test('race A/B/C: C can never acquire during a revived owner\'s wrong-owner release; B\'s lock untouched', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'abc-race-'));
+  const lock = join(dir, 'abc.lock');
+  const go = join(dir, 'go');
+  // A: a superseded owner — dead-pid stale generation crafted on disk.
+  writeFileSync(`${lock}.g1`, JSON.stringify({ pid: 999999999, nonce: 'a-nonce', gen: 1, started_at: 'x' }));
+  backdate(`${lock}.g1`, 60 * 60 * 1000);
+  // B: legitimate current owner (supersedes A's stale generation).
+  const b = acquireFileLock(lock);
+  assert.ok(b.ok && b.stolen, 'B superseded A');
+  const bFile = currentLockFile(lock);
+  const bBytes = readFileSync(bFile, 'utf8');
+  // C: hammers acquire from a child process; exits 0 if it EVER gets the lock.
+  const childC = `
+    import { acquireFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
+    import { existsSync } from 'node:fs';
+    while (!existsSync(${JSON.stringify(go)})) { /* barrier spin */ }
+    for (let i = 0; i < 300; i++) {
+      if (acquireFileLock(${JSON.stringify(lock)}).ok) process.exit(0);
+    }
+    process.exit(3);
+  `;
+  const pC = spawnAsync(['--input-type=module', '-e', childC]);
+  await new Promise(r => setTimeout(r, 100));
+  writeFileSync(go, '1');
+  // Revived A releases with its stale nonce over and over while C hammers.
+  for (let i = 0; i < 300; i++) {
+    const rel = releaseFileLock(lock, 'a-nonce');
+    assert.equal(rel.released, false, 'revived A never succeeds');
+  }
+  const rC = await pC;
+  assert.equal(rC.status, 3, `C was refused on every attempt (stderr: ${rC.stderr})`);
+  assert.equal(currentLockFile(lock), bFile, 'B still holds the current generation');
+  assert.equal(readFileSync(bFile, 'utf8'), bBytes, 'B\'s lock byte-identical throughout');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a live-pid lock is NEVER auto-superseded, at any age (Hale round 3)', () => {
+  const lock = tmpLock();
+  writeFileSync(lock, JSON.stringify({ pid: process.pid, nonce: 'mine', started_at: 'x' }));
+  backdate(lock, 24 * 60 * 60 * 1000); // a full day old — far past every ceiling
+  const got = acquireFileLock(lock);
+  assert.equal(got.ok, false, 'live owner respected at any age');
+  assert.equal(got.reason, 'held');
 });
 
 test('inspectFileLock: absent is unheld; a YOUNG corrupt lock is held; an OLD corrupt lock is stale', () => {

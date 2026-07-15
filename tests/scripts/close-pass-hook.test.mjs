@@ -165,7 +165,13 @@ test('isRegisteredWorkspace: only a path in ~/.core/index.json passes (security 
   rmSync(evil, { recursive: true, force: true });
 });
 
-test('inspectLock: a very old lock is stealable regardless of pid liveness (P2 anti-strand)', async () => {
+test('inspectLock: a LIVE pid is never stealable at any age; a DEAD pid is stealable past staleMs (Hale round 3)', async () => {
+  // POLICY FLIP (2026-07-15, Hale's advisory): the old P2 anti-strand rule made a
+  // very old lock stealable regardless of pid liveness — but a laptop suspended
+  // mid-close revives past any fixed ceiling and would overlap its superseder
+  // (mutual-exclusion break, integrity). Now: live pid → held at ANY age; the
+  // recycled-pid strand this reopens is the accepted lesser failure (availability),
+  // surfaced loudly and remedied by the operator `release` command.
   const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
   const store = mkdtempSync(join(tmpdir(), 'lock-strand-'));
   mkdirSync(join(store, '_memories'), { recursive: true });
@@ -173,8 +179,8 @@ test('inspectLock: a very old lock is stealable regardless of pid liveness (P2 a
   const held = cp.inspectLock(store); // now → fresh, held
   assert.equal(held.held, true, 'a fresh lock held by a live pid is held');
   const old = cp.inspectLock(store, Date.now() + 31 * 60 * 1000); // 31 min in the future
-  assert.equal(old.held, false, 'past the hard-stale ceiling the lock is stealable even with a live pid');
-  cp.releaseLock(store);
+  assert.equal(old.held, true, 'a live pid stays held at ANY age — suspension-revival must not overlap a superseder');
+  cp.releaseLock(store, { sessionId: 's' });
   rmSync(store, { recursive: true, force: true });
 });
 

@@ -197,30 +197,36 @@ test('acquireLock: fails closed while the recorded pid is ALIVE, even past stale
       /could not acquire lock/,
       'age alone must not steal from a live writer'
     );
-    // Past the hard ceiling (age > staleMs*10) it supersedes regardless — the
-    // recycled-pid strand escape. now() far in the future simulates the age.
-    const release = acquireLock(lf, { timeoutMs: 80, staleMs: 60_000, now: () => Date.now() + 700_000 });
+    // Round 3 (Hale): a LIVE pid is never auto-superseded at ANY age — even far
+    // past the old hard ceiling (a suspended laptop revives and must not overlap).
+    assert.throws(
+      () => acquireLock(lf, { timeoutMs: 80, staleMs: 60_000, now: () => Date.now() + 700_000 }),
+      /could not acquire lock/,
+      'no age ceiling overrides a live pid'
+    );
+    // A DEAD pid at the same age supersedes normally.
+    writeFileSync(lf, JSON.stringify({ pid: 999999999, nonce: 'dead', t: 0 }));
+    utimesSync(lf, twoStale, twoStale);
+    const release = acquireLock(lf, { timeoutMs: 80, staleMs: 60_000 });
     assert.ok(currentLockFile(lf), 'new owner holds the current generation');
     release();
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('acquireLock: release is nonce-verified — a superseded owner\'s release cannot touch the fresh lock', () => {
+test('acquireLock: release is nonce-verified — a stale release closure cannot touch a successor\'s lock', () => {
   const home = tmpHome();
   try {
     const lf = join(home, 'verify.lock');
     const releaseA = acquireLock(lf);
-    // Simulate A being superseded: age A's generation to hard-stale, let B supersede.
-    const cur = currentLockFile(lf);
-    const old = new Date(Date.now() - 60 * 60_000);
-    utimesSync(cur, old, old);
-    const releaseB = acquireLock(lf, { staleMs: 1000 });
+    releaseA(); // A releases normally...
+    const releaseB = acquireLock(lf); // ...B is the next legitimate owner.
     const bFile = currentLockFile(lf);
     const bBytes = readFileSync(bFile, 'utf8');
-    releaseA(); // must be a strict no-op — B's generation untouched
-    assert.equal(currentLockFile(lf), bFile, 'fresh owner\'s generation survives');
+    releaseA(); // a revived/duplicate call of A's closure must be a strict no-op
+    assert.equal(currentLockFile(lf), bFile, 'successor\'s generation survives');
     assert.equal(readFileSync(bFile, 'utf8'), bBytes, 'byte-identical — never moved or rewritten');
     releaseB();
+    assert.equal(currentLockFile(lf), null, 'B releases normally');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

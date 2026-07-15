@@ -50,8 +50,14 @@ import { randomBytes } from 'node:crypto';
 
 // Same calibration as close-pass.mjs: generous enough for a real close pass.
 export const DEFAULT_STALE_MS = 10 * 60 * 1000;
-// Past the hard ceiling a lock is stealable regardless of pid liveness — a
-// SIGKILL'd owner whose pid got recycled must not strand the lock forever.
+// Ceiling for locks whose owner CANNOT be identified (unreadable content, no pid):
+// past this they are supersedable. For locks with a READABLE, LIVE pid there is
+// deliberately no ceiling — Hale's round-3 advisory (2026-07-15): a laptop
+// suspended mid-critical-section revives past any fixed ceiling and would overlap
+// its superseder, a mutual-exclusion break. Never steal from a live pid; the
+// recycled-pid strand this reopens is accepted as the lesser failure (availability,
+// not integrity) and surfaces as a loud LOCK_HELD error naming the pid, remedied
+// by the operator force-release.
 export const DEFAULT_HARD_STALE_MS = 30 * 60 * 1000;
 
 export function pidAlive(pid) {
@@ -119,7 +125,13 @@ export function inspectFileLock(lockPath, {
     const stale = ageMs > staleMs;
     return { held: !stale, lock: null, stale };
   }
-  const stale = (ageMs > staleMs && !pidAlive(lock.pid)) || ageMs > hardStaleMs;
+  // A lock with a recorded pid: stale only when aged AND the owner is dead.
+  // NO liveness override at any age (Hale round 3): a suspended-then-revived
+  // owner past any ceiling would overlap its superseder. A readable lock with
+  // no usable pid falls back to the hard ceiling.
+  const stale = typeof lock.pid === 'number'
+    ? (ageMs > staleMs && !pidAlive(lock.pid))
+    : ageMs > hardStaleMs;
   return { held: !stale, lock, stale };
 }
 
