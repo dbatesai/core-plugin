@@ -29,7 +29,6 @@ import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { loadFreshIndex, loadSnapshot } from './generate-summary-index.mjs';
-import { loadUnit, extractEdges } from './priority.mjs';
 import { bm25Scores, tokenize, STOPWORDS } from './bm25.mjs';
 
 // The tokenizer moved to bm25.mjs (v3.11 remediation — breaks the retrieve-context ⇄
@@ -237,17 +236,14 @@ function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsi
   // normalized score — so a neighbor of a strong hit COMPETES with (and can beat)
   // weak direct hits in the final ranking, the DC-94a semantic the synthetic rank
   // scores of the first union rewrite broke (regression caught by Hale 2026-07-11;
-  // edge-bearing fixture now guards it). Edges live in the unit files, not the
-  // index — read only the top hits (bounded, cheap), resolved via the index PATH
-  // (never `_memories/<id>.md`, which is wrong for nested units).
+  // edge-bearing fixture now guards it). Edges come FROM THE CAPTURE (Hale round
+  // 12): this stage used to re-read live unit files via loadUnit, so a concurrent
+  // edge change altered expanded/final results under an unchanged snapshot_id —
+  // the third live reader found behind the id. No filesystem access here.
   const seen = new Set(top.map(t => t.id));
   const expanded = [];
   for (const hit of top) {
-    const rel = byId.get(hit.id)?.path;
-    const unitPath = join(root, '_memories', ...(rel ? rel.split('/') : [`${hit.id}.md`]));
-    if (!existsSync(unitPath)) continue;
-    let edges;
-    try { edges = extractEdges(loadUnit(unitPath)); } catch { continue; }
+    const edges = (snap.edges && snap.edges[hit.id]) || [];
     for (const e of edges) {
       const targetId = String(e.target).replace(/\.md$/, '');
       if (seen.has(targetId)) continue;
@@ -285,14 +281,14 @@ export function retrieveContext(query, storePath, opts = {}) {
  * timing. Detailed traces stay on the machine that produced them — rows in this
  * object are project data; only the aggregate exporter (A2) produces shareable output.
  */
-export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, byteCap = 2048 } = {}) {
+export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, byteCap = 2048, snapshot = null } = {}) {
   const root = resolve(storePath);
   const t0 = process.hrtime.bigint();
   if (!existsSync(join(root, '_memories'))) {
     return { kind: 'retrieval-trace', local_only: true, store: root, storeless: true,
       query, snapshot_id: null, stages: null, pack: null, timing_ms: 0 };
   }
-  const stages = runRetrievalStages(query, root, { topN, tierPolicy, tierEpsilon, tierWeight });
+  const stages = runRetrievalStages(query, root, { topN, tierPolicy, tierEpsilon, tierWeight, snapshot });
   const health = storeHealth(root);
   const pack = buildFinalContextPack(stages.final, { byteCap, health });
   const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;

@@ -35,7 +35,7 @@ import { readdirSync, statSync, mkdirSync, realpathSync, readFileSync, existsSyn
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { isInvalidated, parseFrontmatter } from './priority.mjs';
+import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const SUMMARY_MAX = 240;
@@ -279,11 +279,13 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
   // loadUnit path (parseFrontmatter is the same canonical parser).
   const candidates = [];
   const textByPath = new Map(); // winner-body derivation reads from here, never disk
+  const fmByPath = new Map();   // winner-edge derivation reads from here, never disk
   for (const { rel, buf } of raws) {
     const text = buf.toString('utf8');
     let fm, body;
     try { [fm, body] = parseFrontmatter(text); } catch { continue; }
     fm = fm || {};
+    fmByPath.set(rel, fm);
     const id = fm.id !== undefined ? String(fm.id) : basenameNoMd(rel);
     if (!isActive(fm)) continue;
     // Exclude units whose validity dimension is invalid as of now — the status
@@ -329,20 +331,26 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     units,
   };
 
-  // BM25 body texts for the WINNERS, from the SAME buffers (identical transform
-  // to loadUnitBodies: frontmatter stripped, summary + topics prepended).
+  // BM25 body texts AND typed edges for the WINNERS, from the SAME buffers
+  // (body transform identical to loadUnitBodies: frontmatter stripped, summary +
+  // topics prepended). Edges ride the capture (Hale round 12): edge expansion
+  // used to re-read live unit files after the id was minted — a concurrent edge
+  // change altered expanded/final results under an unchanged snapshot_id.
   const bodies = [];
+  const edges = {};
   for (const u of units) {
     const text = textByPath.get(u.path);
     if (text === undefined) continue;
     const body = text.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
     const topics = (u.topics || []).join(' ');
     bodies.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
+    edges[u.id] = extractEdges({ fm: fmByPath.get(u.path) || {} });
   }
 
   const capture = {
     index,
     bodies,
+    edges,
     snapshotId: createHash('sha256').update(source_sig).digest('hex'),
   };
   if (retainRaw) {

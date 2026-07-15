@@ -103,3 +103,70 @@ test('round-11: two captures spanning a mutation mint DIFFERENT ids; identical s
       'and the new id\'s capture measures the new bytes');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// Hale round 12: edge expansion used to re-read live unit files after the id was
+// minted — a concurrent EDGE change altered expanded/final results under an
+// unchanged snapshot_id. His required proof: a barrier-controlled concurrent-edge
+// writer, with snapshot_id, expansion, final results, and the trace all agreeing
+// with the SAME captured state, every iteration.
+test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/trace always match the captured bytes', async () => {
+  const { buildRetrievalTrace } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
+  const { parseFrontmatter, extractEdges } = await import(pathToFileURL(join(SCRIPTS, 'priority.mjs')).href);
+  const dir = mkdtempSync(join(tmpdir(), 'edge-barrier-'));
+  const store = join(dir, 'store');
+  cpSync(FIXT, store, { recursive: true });
+  const unitPath = join(store, '_memories', UNIT_REL);
+  const stopFile = join(dir, 'stop');
+  // Two edge targets that exist in the fixture, alternated by the writer.
+  const targets = ['values-heritage', 'want-iconic-chronograph'];
+  const bodyOf = (t) => `---\nid: ${UNIT_ID}\ntype: want\nstatus: active\nedges:\n  - {type: cites, target: ${t}}\n---\n\nomega speedmaster on sale wait body\n`;
+
+  const writer = `
+    import { writeFileSync, renameSync, existsSync } from 'node:fs';
+    const bodies = ${JSON.stringify(targets.map(bodyOf))};
+    let i = 0;
+    while (!existsSync(${JSON.stringify(stopFile)})) {
+      const tmp = ${JSON.stringify(unitPath)} + '.tmp';
+      writeFileSync(tmp, bodies[i++ % 2]);
+      renameSync(tmp, ${JSON.stringify(unitPath)});
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    }
+  `;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000 });
+  const childDone = new Promise(res => child.on('close', res));
+  await new Promise(r => setTimeout(r, 100));
+
+  try {
+    const seenTargets = new Set();
+    for (let i = 0; i < 20; i++) {
+      const cap = loadSnapshot(store, { captureBodies: true, retainRaw: true });
+      const trace = buildRetrievalTrace('omega speedmaster on sale', store, { topN: 3, snapshot: cap });
+      assert.equal(trace.snapshot_id, cap.snapshotId, `iter ${i}: trace carries the capture's own id`);
+      // Recompute the expected edges from the RAW bytes of this same capture.
+      const raw = cap.raw[UNIT_REL].toString('utf8');
+      const [fm] = parseFrontmatter(raw);
+      const expectedTargets = new Set(extractEdges({ fm }).map(e => e.target));
+      // Every expanded hit parented on our unit must be an edge in the captured
+      // bytes — never an edge from a different (older/newer) on-disk state.
+      const expandedIds = new Set((trace.stages.expansion || []).map(x => x.id));
+      for (const t of targets) {
+        if (expandedIds.has(t)) {
+          assert.ok(expectedTargets.has(t),
+            `iter ${i}: expanded '${t}' must come from the captured edges (${[...expectedTargets].join(',')})`);
+          seenTargets.add(t);
+        }
+      }
+      // final = top ∪ expanded from the same stages object — internal consistency.
+      for (const f of trace.stages.final) {
+        assert.ok(trace.stages.top.some(t => t.id === f.id) || expandedIds.has(f.id),
+          `iter ${i}: final contains only capture-derived results`);
+      }
+    }
+    assert.ok(seenTargets.size >= 2,
+      `the edge barrier was live — expansions observed both alternating targets (${[...seenTargets].join(',')})`);
+  } finally {
+    writeFileSync(stopFile, '1');
+    await childDone;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
