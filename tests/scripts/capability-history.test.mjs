@@ -8,6 +8,7 @@ import {
   appendRows, readHistory, canonicalRowHash, applyRetention, acquireLock,
   LOCK_RETRY_INTERVAL_MS, LOCK_TIMEOUT_MS,
 } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
+import { currentLockFile } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
 
 test('M8: appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {
   const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/capability-history.mjs', import.meta.url)), 'utf8');
@@ -158,14 +159,14 @@ test('appendRows: retention truncates when cap exceeded', () => {
 
 // --- acquireLock ---
 
-test('acquireLock: acquires and releases', () => {
+test('acquireLock: acquires and releases (generation model — live gen while held, none after)', () => {
   const home = tmpHome();
   try {
     const lf = join(home, 'test.lock');
     const release = acquireLock(lf);
-    assert.ok(existsSync(lf), 'lock file created');
+    assert.ok(currentLockFile(lf), 'a live generation exists while held');
     release();
-    assert.ok(!existsSync(lf), 'lock file removed on release');
+    assert.equal(currentLockFile(lf), null, 'no live generation after release');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
@@ -173,10 +174,11 @@ test('acquireLock: recovers a stale lock', () => {
   const home = tmpHome();
   try {
     const lf = join(home, 'stale.lock');
-    writeFileSync(lf, '0');  // pre-existing lock
-    // staleMs very small so it's immediately stale
-    const release = acquireLock(lf, { staleMs: 0 });
-    assert.ok(existsSync(lf));
+    writeFileSync(lf, '0');  // pre-existing legacy lock, unparseable owner
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lf, old, old); // aged past staleMs below
+    const release = acquireLock(lf, { staleMs: 1000 });
+    assert.ok(currentLockFile(lf), 'new owner holds the next generation');
     release();
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -195,25 +197,30 @@ test('acquireLock: fails closed while the recorded pid is ALIVE, even past stale
       /could not acquire lock/,
       'age alone must not steal from a live writer'
     );
-    // Past the hard ceiling (age > staleMs*10) it steals regardless — the
+    // Past the hard ceiling (age > staleMs*10) it supersedes regardless — the
     // recycled-pid strand escape. now() far in the future simulates the age.
     const release = acquireLock(lf, { timeoutMs: 80, staleMs: 60_000, now: () => Date.now() + 700_000 });
-    assert.ok(existsSync(lf));
+    assert.ok(currentLockFile(lf), 'new owner holds the current generation');
     release();
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('acquireLock: release is nonce-verified — a stale-stolen lock is not deleted by the old owner\'s release', () => {
+test('acquireLock: release is nonce-verified — a superseded owner\'s release cannot touch the fresh lock', () => {
   const home = tmpHome();
   try {
     const lf = join(home, 'verify.lock');
     const releaseA = acquireLock(lf);
-    // Simulate A's lock being stolen: replace it with B's fresh lock out-of-band.
-    rmSync(lf);
-    writeFileSync(lf, JSON.stringify({ pid: 999999999, nonce: 'b-fresh', t: Date.now() }));
-    releaseA(); // must be a no-op — B's lock survives
-    assert.ok(existsSync(lf), 'fresh owner\'s lock survives the revived owner\'s release');
-    assert.equal(JSON.parse(readFileSync(lf, 'utf8')).nonce, 'b-fresh');
+    // Simulate A being superseded: age A's generation to hard-stale, let B supersede.
+    const cur = currentLockFile(lf);
+    const old = new Date(Date.now() - 60 * 60_000);
+    utimesSync(cur, old, old);
+    const releaseB = acquireLock(lf, { staleMs: 1000 });
+    const bFile = currentLockFile(lf);
+    const bBytes = readFileSync(bFile, 'utf8');
+    releaseA(); // must be a strict no-op — B's generation untouched
+    assert.equal(currentLockFile(lf), bFile, 'fresh owner\'s generation survives');
+    assert.equal(readFileSync(bFile, 'utf8'), bBytes, 'byte-identical — never moved or rewritten');
+    releaseB();
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

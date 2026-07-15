@@ -5,22 +5,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  acquireFileLock, releaseFileLock, inspectFileLock, withFileLock, currentLockFile,
+} from '../../plugins/core/skills/core/scripts/file-lock.mjs';
+
+const LOCK_MODULE = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/file-lock.mjs', import.meta.url));
 
 // Genuinely concurrent child processes (spawnSync would serialize the "race").
-function spawnAsync(args) {
+function spawnAsync(args, env = {}) {
   return new Promise((res) => {
-    const c = spawn(process.execPath, args, { timeout: 30000 });
+    const c = spawn(process.execPath, args, { timeout: 30000, env: { ...process.env, ...env } });
     let stdout = '', stderr = '';
     c.stdout.on('data', d => { stdout += d; });
     c.stderr.on('data', d => { stderr += d; });
     c.on('close', (status) => res({ status, stdout, stderr }));
   });
 }
-import {
-  acquireFileLock, releaseFileLock, inspectFileLock, withFileLock,
-} from '../../plugins/core/skills/core/scripts/file-lock.mjs';
-
-const LOCK_MODULE = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/file-lock.mjs', import.meta.url));
 
 function tmpLock() {
   return join(mkdtempSync(join(tmpdir(), 'file-lock-')), 'test.lock');
@@ -32,14 +32,18 @@ function backdate(p, ms) {
   utimesSync(p, t, t);
 }
 
-test('acquire/release roundtrip: lock file exists while held, gone after verified release', () => {
+test('acquire/release roundtrip: a live generation exists while held, none after release', () => {
   const lock = tmpLock();
   const got = acquireFileLock(lock);
   assert.ok(got.ok && got.nonce, 'acquired with a nonce');
-  assert.ok(existsSync(lock), 'lock file present while held');
+  assert.ok(currentLockFile(lock), 'a live generation file exists while held');
   const rel = releaseFileLock(lock, got.nonce);
   assert.ok(rel.released, 'released with own nonce');
-  assert.ok(!existsSync(lock), 'lock file gone after release');
+  assert.equal(currentLockFile(lock), null, 'no live generation after release (tombstone remains)');
+  // The tombstone preserves numbering: the next acquire gets a HIGHER generation.
+  const again = acquireFileLock(lock);
+  assert.ok(again.ok);
+  assert.ok(again.gen > got.gen, `numbering never restarts (${got.gen} then ${again.gen})`);
 });
 
 test('contended: a live fresh lock refuses a second acquirer', () => {
@@ -57,7 +61,7 @@ test('release is VERIFIED: wrong nonce is a no-op, the owner keeps the lock', ()
   const rel = releaseFileLock(lock, 'not-the-nonce');
   assert.equal(rel.released, false);
   assert.equal(rel.reason, 'not-owner');
-  assert.ok(existsSync(lock), 'lock survives a non-owner release attempt');
+  assert.ok(currentLockFile(lock), 'lock survives a non-owner release attempt');
   assert.ok(releaseFileLock(lock, got.nonce).released);
 });
 
@@ -70,15 +74,30 @@ test('release can verify by an extra payload field (cross-process, e.g. session_
   assert.ok(right.released);
 });
 
-test('stale lock (dead pid + old mtime) is stolen; the thief owns it', () => {
+test('legacy single-file lock (pre-generation format) is respected and superseded', () => {
+  const lock = tmpLock();
+  // A still-running old session's lock: bare file at the lock path, fresh, live pid.
+  writeFileSync(lock, JSON.stringify({ pid: process.pid, session_id: 's-old', started_at: 'x' }));
+  const refused = acquireFileLock(lock);
+  assert.equal(refused.ok, false, 'a fresh legacy lock is held');
+  // Once stale (dead owner), a new-format acquirer numbers itself above it.
+  writeFileSync(lock, JSON.stringify({ pid: 999999999, nonce: 'dead', started_at: 'x' }));
+  backdate(lock, 60 * 60 * 1000);
+  const got = acquireFileLock(lock);
+  assert.ok(got.ok && got.stolen, 'stale legacy lock superseded');
+  assert.ok(got.gen >= 1);
+  assert.ok(!existsSync(lock), 'inert legacy file garbage-collected by the winner');
+});
+
+test('stale lock (dead pid + old mtime) is superseded; the new owner holds the next generation', () => {
   const lock = tmpLock();
   writeFileSync(lock, JSON.stringify({ pid: 999999999, nonce: 'dead', started_at: 'x' }));
   backdate(lock, 60 * 60 * 1000); // 1h old, way past hard-stale
   const got = acquireFileLock(lock);
-  assert.ok(got.ok, 'stale lock acquired');
+  assert.ok(got.ok, 'stale lock acquired past');
   assert.ok(got.stolen, 'reported as stolen');
-  const onDisk = JSON.parse(readFileSync(lock, 'utf8'));
-  assert.equal(onDisk.nonce, got.nonce, 'thief\'s nonce is on disk');
+  const onDisk = JSON.parse(readFileSync(currentLockFile(lock), 'utf8'));
+  assert.equal(onDisk.nonce, got.nonce, 'new owner\'s nonce is on disk');
 });
 
 test('after one steal, a second would-be stealer sees a FRESH lock and is refused', () => {
@@ -88,13 +107,13 @@ test('after one steal, a second would-be stealer sees a FRESH lock and is refuse
   const first = acquireFileLock(lock);
   assert.ok(first.ok && first.stolen);
   const second = acquireFileLock(lock);
-  assert.equal(second.ok, false, 'the rename-claim consumed the stale file; the fresh lock holds');
+  assert.equal(second.ok, false, 'the winner\'s fresh generation holds');
 });
 
 test('withFileLock releases in finally even when fn throws', () => {
   const lock = tmpLock();
   assert.throws(() => withFileLock(lock, () => { throw new Error('boom'); }), /boom/);
-  assert.ok(!existsSync(lock), 'lock released despite the throw');
+  assert.equal(currentLockFile(lock), null, 'lock released despite the throw');
 });
 
 test('withFileLock throws LOCK_HELD after retry budget on a live contended lock', () => {
@@ -108,15 +127,32 @@ test('withFileLock throws LOCK_HELD after retry budget on a live contended lock'
   releaseFileLock(lock, got.nonce);
 });
 
+// The v2 design's three-process corner (Hale, 2026-07-15) is structurally gone in
+// v3: release only ever renames the caller's OWN generation file to a tombstone.
+// A revived owner whose lock was superseded cannot disturb the fresh owner at all.
+test('release after supersession: revived owner is a strict no-op on the fresh owner\'s lock', () => {
+  const lock = tmpLock();
+  const a = acquireFileLock(lock);            // owner A, generation N
+  // A goes hard-stale (simulate: backdate A's live generation) and B supersedes.
+  backdate(currentLockFile(lock), 60 * 60 * 1000);
+  const b = acquireFileLock(lock);
+  assert.ok(b.ok && b.stolen, 'B superseded A\'s stale generation');
+  const bFile = currentLockFile(lock);
+  const bBytes = readFileSync(bFile, 'utf8');
+  // A revives and releases with ITS nonce: must not touch B's generation.
+  const attempt = releaseFileLock(lock, a.nonce);
+  assert.equal(attempt.released, false);
+  assert.equal(attempt.reason, 'not-owner');
+  assert.equal(currentLockFile(lock), bFile, 'B\'s generation is still the current lock');
+  assert.equal(readFileSync(bFile, 'utf8'), bBytes, 'B\'s lock is byte-identical — never moved or rewritten');
+  assert.ok(releaseFileLock(lock, b.nonce).released, 'B releases normally');
+});
+
 // The race proof: N concurrent child processes each do a read-modify-write of a
 // shared counter file under withFileLock. Without mutual exclusion this loses
 // updates; with it, every increment survives.
-test('race: 5 concurrent locked read-modify-writes lose no update', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'file-lock-race-'));
-  const lock = join(dir, 'counter.lock');
-  const data = join(dir, 'counter.json');
-  writeFileSync(data, JSON.stringify({ writers: [] }));
-  const child = (id) => `
+function raceChild(lock, data, id) {
+  return `
     import { withFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
     import { readFileSync, writeFileSync } from 'node:fs';
     withFileLock(${JSON.stringify(lock)}, () => {
@@ -127,17 +163,40 @@ test('race: 5 concurrent locked read-modify-writes lose no update', async () => 
       writeFileSync(${JSON.stringify(data)}, JSON.stringify(d));
     }, { retries: 100, retryDelayMs: 20 });
   `;
+}
+
+test('race: 5 concurrent locked read-modify-writes lose no update', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'file-lock-race-'));
+  const lock = join(dir, 'counter.lock');
+  const data = join(dir, 'counter.json');
+  writeFileSync(data, JSON.stringify({ writers: [] }));
   const ids = ['w1', 'w2', 'w3', 'w4', 'w5'];
-  const procs = await Promise.all(ids.map(id => spawnAsync(['--input-type=module', '-e', child(id)])));
+  const procs = await Promise.all(ids.map(id => spawnAsync(['--input-type=module', '-e', raceChild(lock, data, id)])));
   for (const p of procs) assert.equal(p.status, 0, `child exited 0 (stderr: ${p.stderr})`);
   const final = JSON.parse(readFileSync(data, 'utf8'));
   assert.deepEqual([...final.writers].sort(), ids, 'all five writers survived — no lost update');
   rmSync(dir, { recursive: true, force: true });
 });
 
-// Hale's advisory (2026-07-15): the earlier two-stealer test was sequential — the
-// second stealer ran after the first finished. This one holds both children at a
-// barrier and releases them at the same instant against the same stale lock.
+// Hale's second 2026-07-15 challenge: the hard-link-unavailable fallback recreates
+// the wx+write window. The young-unreadable-is-held rule is supposed to cover it —
+// this test PROVES it under force (CORE_FILELOCK_NO_LINK=1) instead of asserting it.
+test('race: 5 concurrent locked writers under FORCED wx fallback (no hard links) lose no update', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'file-lock-nolink-'));
+  const lock = join(dir, 'counter.lock');
+  const data = join(dir, 'counter.json');
+  writeFileSync(data, JSON.stringify({ writers: [] }));
+  const ids = ['f1', 'f2', 'f3', 'f4', 'f5'];
+  const procs = await Promise.all(ids.map(id =>
+    spawnAsync(['--input-type=module', '-e', raceChild(lock, data, id)], { CORE_FILELOCK_NO_LINK: '1' })));
+  for (const p of procs) assert.equal(p.status, 0, `child exited 0 (stderr: ${p.stderr})`);
+  const final = JSON.parse(readFileSync(data, 'utf8'));
+  assert.deepEqual([...final.writers].sort(), ids, 'fallback path holds mutual exclusion');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// Hale's earlier advisory: hold both children at a barrier and release them at the
+// same instant against the same stale lock — a sequential "race" proves nothing.
 test('race: two SIMULTANEOUS stealers of one stale lock — exactly one wins', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'steal-race-'));
   const lock = join(dir, 'contested.lock');
@@ -163,22 +222,6 @@ test('race: two SIMULTANEOUS stealers of one stale lock — exactly one wins', a
   rmSync(dir, { recursive: true, force: true });
 });
 
-// Release-vs-steal (Hale 2026-07-15): a revived owner releasing AFTER its lock was
-// stolen must leave the fresh owner's lock intact. The rename-claim release makes
-// this branch deterministic: claim, verify, restore on mismatch.
-test('release after steal: revived owner restores the fresh owner\'s lock untouched', () => {
-  const lock = tmpLock();
-  const revived = acquireFileLock(lock);      // owner A
-  releaseFileLock(lock, revived.nonce);       // simulate A's lock aging out + being stolen:
-  const fresh = acquireFileLock(lock);        // owner B now holds a fresh lock
-  const attempt = releaseFileLock(lock, revived.nonce); // A revives and releases with ITS nonce
-  assert.equal(attempt.released, false);
-  assert.equal(attempt.reason, 'not-owner');
-  const onDisk = JSON.parse(readFileSync(lock, 'utf8'));
-  assert.equal(onDisk.nonce, fresh.nonce, 'B\'s lock is back on the path, byte-identical owner');
-  assert.ok(releaseFileLock(lock, fresh.nonce).released, 'B can still release normally');
-});
-
 test('inspectFileLock: absent is unheld; a YOUNG corrupt lock is held; an OLD corrupt lock is stale', () => {
   const lock = tmpLock();
   assert.deepEqual(inspectFileLock(lock), { held: false, lock: null, stale: false });
@@ -190,4 +233,16 @@ test('inspectFileLock: absent is unheld; a YOUNG corrupt lock is held; an OLD co
   const old = inspectFileLock(lock);
   assert.equal(old.held, false);
   assert.equal(old.stale, true, 'aged-out corrupt lock is stealable');
+});
+
+test('force release removes every generation artifact', () => {
+  const lock = tmpLock();
+  const a = acquireFileLock(lock);
+  releaseFileLock(lock, a.nonce);          // leaves a tombstone
+  acquireFileLock(lock);                    // live generation
+  const rel = releaseFileLock(lock, null, { force: true });
+  assert.ok(rel.released);
+  assert.equal(currentLockFile(lock), null);
+  const fresh = acquireFileLock(lock);
+  assert.ok(fresh.ok, 'lock is cleanly acquirable after force release');
 });

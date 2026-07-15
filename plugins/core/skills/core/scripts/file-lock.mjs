@@ -1,35 +1,47 @@
 /**
- * file-lock.mjs — generalized advisory file lock with nonce-CAS steal + verified release.
+ * file-lock.mjs — generalized advisory file lock: generation files + verified release.
  *
- * Extracted from close-pass.mjs's single-flight lock (2026-07-14, shared-write
- * concurrency spec) and hardened against the two defects the adversarial pass
- * proved in the original:
+ * Third design iteration (2026-07-14/15, shared-write concurrency spec + Hale's
+ * advisory passes), each driven by a proven defect in the previous one:
  *
- *   1. Two-stealer race: the old steal path was a plain atomic overwrite, so two
- *      agents inspecting the same stale lock could BOTH "win". Here the steal's
- *      claim is a rename of the stale file to a per-stealer graveyard name —
- *      rename is atomic and consumes the source, so exactly one stealer's rename
- *      succeeds; the loser gets ENOENT and reports the lock as contended. The
- *      winner then wx-creates fresh (wx still guards against a brand-new acquirer
- *      slipping in), and re-reads to confirm its nonce survived.
- *   2. Unverified release: the old release was an unconditional rm, so a revived
- *      slow owner could delete a FRESH owner's lock. releaseFileLock verifies the
- *      on-disk nonce is its own before removing; mismatch is a no-op.
+ *   v1 (close-pass original): steal = blind atomic overwrite → two stealers could
+ *      both "win"; release = unconditional rm → a revived slow owner deleted a
+ *      fresh owner's lock.
+ *   v2 (rename-claim): steal consumed the stale file atomically (one winner), and
+ *      release verified ownership — but release-verify-then-remove kept a TOCTOU,
+ *      and the rename-claim + restore repair had an irreducible three-process
+ *      corner: a revived releaser could displace a fresh owner's lock while a
+ *      third writer claimed the exposed path (Hale, 2026-07-15).
+ *   v3 (this file): GENERATION LOCKS eliminate that corner structurally. The lock
+ *      is a family of files `<lockPath>.g<N>` plus `.g<N>.done` tombstones:
  *
- * Locks are advisory and same-machine (~/.core is per-machine; if the meta root
- * ever lands on a synced/virtualized path, rename/unlink can throw EPERM under
- * OneDrive/AV — those are caught and reported as "couldn't acquire", never a crash).
+ *        - Acquire: target = (highest N over ALL generation artifacts, live or
+ *          done) + 1, taken only when no live generation is fresh. Creating
+ *          `<lockPath>.g<target>` exclusively IS the mutex — two acquirers that
+ *          race compute the same target and the filesystem picks one winner.
+ *        - Release: rename YOUR OWN generation file to its `.done` tombstone.
+ *          No process ever moves, deletes, or restores another owner's lock, so
+ *          the v2 corner cannot occur. The tombstone preserves the numbering:
+ *          a later acquirer still computes max+1, so numbers never restart and a
+ *          delete-then-lower-recreate split-brain is impossible.
+ *        - Steal: nothing to steal — a stale live generation is simply left
+ *          behind; the new owner creates the NEXT generation and garbage-collects
+ *          artifacts below it (safe: they are inert once a higher live gen exists).
  *
- * Callers with more than one lock follow the total order: per-project lock
- * (e.g. close-pass's _close.lock) BEFORE any global ~/.core lock. Locks are
- * non-reentrant — acquiring a path this process already holds self-refuses like
- * any other contention.
+ * Lock-file creation is atomic (write temp, hard-link into place) so no reader
+ * ever sees a created-but-empty lock; on filesystems without hard links the
+ * wx-create fallback is covered by the young-unreadable-is-held rule below
+ * (proven by the forced-fallback race test, not asserted).
+ *
+ * Locks are advisory and same-machine. EPERM under sync/AV tooling reads as
+ * "couldn't acquire, retry", never a crash. Callers with more than one lock
+ * follow the total order: per-project lock BEFORE any global ~/.core lock.
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only, node:* imports only.
  */
 
 import {
-  readFileSync, writeFileSync, statSync,
+  readFileSync, writeFileSync, statSync, readdirSync,
   openSync, writeSync, closeSync, linkSync,
   renameSync, rmSync, mkdirSync,
 } from 'node:fs';
@@ -55,23 +67,55 @@ function newNonce() {
   return randomBytes(12).toString('hex');
 }
 
+// ---------- generation bookkeeping ----------
+
+/** All generation artifacts for a lock: [{n, done, path}], unsorted. */
+function listGenerations(lockPath) {
+  const dir = dirname(lockPath);
+  const base = basename(lockPath);
+  let names;
+  try { names = readdirSync(dir); } catch { return []; }
+  const out = [];
+  for (const name of names) {
+    // Legacy single-file lock (pre-generation format, e.g. a 3.10.0 session's
+    // _close.lock): treated as generation 0 so a still-running old session's
+    // lock is respected, its staleness judged by the same rules, and the first
+    // new-format acquirer numbers itself above it. One-release compat shim.
+    if (name === base) { out.push({ n: 0, done: false, path: join(dir, name) }); continue; }
+    if (!name.startsWith(base + '.g')) continue;
+    const m = name.slice(base.length).match(/^\.g(\d+)(\.done)?$/);
+    if (m) out.push({ n: Number(m[1]), done: !!m[2], path: join(dir, name) });
+  }
+  return out;
+}
+
+/** The current live generation file (highest live N), or null. */
+export function currentLockFile(lockPath) {
+  const live = listGenerations(lockPath).filter(g => !g.done);
+  if (!live.length) return null;
+  live.sort((a, b) => b.n - a.n);
+  return live[0].path;
+}
+
 /**
- * Inspect a lock file. { held, lock, stale } — held means a live, non-stale owner.
+ * Inspect the lock. { held, lock, stale } — held means a live, non-stale owner
+ * of the current generation.
  */
 export function inspectFileLock(lockPath, {
   now = Date.now(),
   staleMs = DEFAULT_STALE_MS,
   hardStaleMs = DEFAULT_HARD_STALE_MS,
 } = {}) {
+  const cur = currentLockFile(lockPath);
+  if (!cur) return { held: false, lock: null, stale: false };
   let ageMs = Infinity;
-  try { ageMs = now - statSync(lockPath).mtimeMs; } catch { return { held: false, lock: null, stale: false }; }
-  const lock = readJson(lockPath);
+  try { ageMs = now - statSync(cur).mtimeMs; } catch { return { held: false, lock: null, stale: false }; }
+  const lock = readJson(cur);
   if (!lock) {
-    // Unreadable content. Our own writers create locks atomically (temp + link),
-    // so a YOUNG unreadable lock is an outside writer mid-flight or real
-    // corruption — treat as held until it ages out; never steal a fresh file.
-    // (The race test proved the old corrupt→stale-immediately rule let a reader
-    // that caught a half-written lock steal a FRESH one.)
+    // Unreadable content. Our writers create locks atomically (temp + link), so a
+    // YOUNG unreadable lock is an outside/fallback writer mid-flight — held until
+    // it ages out; never treat a fresh file as stealable. (The v2 race test proved
+    // corrupt→stale-immediately lets a reader steal a half-written fresh lock.)
     const stale = ageMs > staleMs;
     return { held: !stale, lock: null, stale };
   }
@@ -80,35 +124,35 @@ export function inspectFileLock(lockPath, {
 }
 
 /**
- * Create the lock file with its payload ATOMICALLY. openSync('wx') + writeSync
- * has a window where the path exists with empty content — a concurrent inspector
- * reads "corrupt" and may steal a lock that was just legitimately created. A
- * hard link from a fully-written temp file fails EEXIST exactly like 'wx' but
- * the content is complete the instant the path exists. Filesystems without hard
- * links (exFAT shares) fall back to the wx window — rare, and the young-corrupt
- * rule above covers it.
+ * Create `path` with `payload` ATOMICALLY and EXCLUSIVELY. Hard link from a
+ * fully-written temp file fails EEXIST exactly like 'wx' but the content is
+ * complete the instant the path exists. Filesystems without hard links (and the
+ * CORE_FILELOCK_NO_LINK=1 test seam) fall back to wx-create — the young-
+ * unreadable-is-held rule in inspectFileLock covers that window (race-tested).
  */
-function wxCreate(lockPath, payload, nonce) {
-  const tmp = join(dirname(lockPath), `.${basename(lockPath)}.new-${nonce}`);
-  writeFileSync(tmp, payload);
-  try {
-    linkSync(tmp, lockPath); // fails EEXIST — this IS the mutex
-  } catch (e) {
-    if (e.code === 'EEXIST' || e.code === 'ENOENT') { try { rmSync(tmp); } catch { /* gone */ } throw e; }
-    // No hard-link support: fall back to the wx create.
-    try { rmSync(tmp); } catch { /* gone */ }
-    const fd = openSync(lockPath, 'wx');
-    writeSync(fd, payload);
-    closeSync(fd);
-    return;
+function exclusiveCreate(path, payload, nonce) {
+  if (!process.env.CORE_FILELOCK_NO_LINK) {
+    const tmp = join(dirname(path), `.${basename(path)}.new-${nonce}`);
+    writeFileSync(tmp, payload);
+    try {
+      linkSync(tmp, path); // fails EEXIST — this IS the mutex
+      try { rmSync(tmp); } catch { /* gone */ }
+      return;
+    } catch (e) {
+      try { rmSync(tmp); } catch { /* gone */ }
+      if (e.code === 'EEXIST' || e.code === 'ENOENT') throw e;
+      // fall through: no hard-link support on this filesystem
+    }
   }
-  try { rmSync(tmp); } catch { /* gone */ }
+  const fd = openSync(path, 'wx');
+  writeSync(fd, payload);
+  closeSync(fd);
 }
 
 /**
- * Acquire the lock. Returns { ok, nonce, lock, stolen? } or { ok:false, reason, lock? }.
- * `extra` fields (e.g. session_id) are merged into the lock payload for callers
- * whose release happens in a different process (they verify by their own field).
+ * Acquire the lock. Returns { ok, nonce, gen, lock, stolen? } or
+ * { ok:false, reason, lock? }. `extra` fields (e.g. session_id) are merged into
+ * the payload for callers whose release happens in a different process.
  */
 export function acquireFileLock(lockPath, {
   extra = {},
@@ -118,76 +162,64 @@ export function acquireFileLock(lockPath, {
 } = {}) {
   mkdirSync(dirname(lockPath), { recursive: true });
   const nonce = newNonce();
+
+  const gens = listGenerations(lockPath);
+  const maxN = gens.reduce((m, g) => Math.max(m, g.n), 0);
+  const { held, lock, stale } = inspectFileLock(lockPath, { now, staleMs, hardStaleMs });
+  if (held) return { ok: false, reason: 'held', lock };
+
+  // Target the next generation. The tombstone convention makes maxN monotonic —
+  // numbering never restarts, so two racers always compute the SAME target and
+  // the exclusive create picks exactly one winner.
+  const target = maxN + 1;
   const payload = JSON.stringify({
     ...extra,
     pid: process.pid,
     nonce,
+    gen: target,
     started_at: new Date(now).toISOString(),
   });
   try {
-    wxCreate(lockPath, payload, nonce);
-    return { ok: true, nonce, lock: readJson(lockPath) };
-  } catch (e) {
-    if (e.code !== 'EEXIST') throw e;
-  }
-
-  const { held, lock } = inspectFileLock(lockPath, { now, staleMs, hardStaleMs });
-  if (held) return { ok: false, reason: 'held', lock };
-
-  // Stale — steal via rename-claim CAS. Rename consumes the stale file atomically,
-  // so of N concurrent stealers exactly one proceeds past this line.
-  const graveyard = join(dirname(lockPath), `.${basename(lockPath)}.stale-${nonce}`);
-  try {
-    renameSync(lockPath, graveyard);
+    exclusiveCreate(join(dirname(lockPath), `${basename(lockPath)}.g${target}`), payload, nonce);
   } catch {
-    // ENOENT: another stealer claimed it first. EPERM/EACCES (AV/sync holding the
-    // file on Windows): can't safely steal. Either way: not acquired, retryable.
-    return { ok: false, reason: 'steal-lost', lock };
+    // EEXIST: another acquirer won this generation (fresh — report held).
+    // EPERM/other (sync/AV): couldn't acquire safely. Either way: retryable.
+    return { ok: false, reason: stale ? 'steal-lost' : 'create-lost', lock: readJson(currentLockFile(lockPath) || '') };
   }
-  try { rmSync(graveyard); } catch { /* best-effort */ }
-
-  try {
-    wxCreate(lockPath, payload, nonce);
-  } catch {
-    // A fresh acquirer slipped in between our rename and create — they own it.
-    return { ok: false, reason: 'steal-lost', lock: readJson(lockPath) };
+  // Winner. Garbage-collect inert artifacts below us (stale live gens + old
+  // tombstones). Safe: our live generation preserves the numbering max, and a
+  // superseded owner's release of a GC'd file is a harmless no-op.
+  for (const g of listGenerations(lockPath)) {
+    if (g.n < target) { try { rmSync(g.path); } catch { /* gone */ } }
   }
-  // Belt-and-braces: confirm our nonce survived (defends against any writer that
-  // bypasses wx semantics, e.g. a legacy blind-overwrite steal still in the wild).
-  const confirmed = readJson(lockPath);
-  if (!confirmed || confirmed.nonce !== nonce) {
-    return { ok: false, reason: 'steal-lost', lock: confirmed };
-  }
-  return { ok: true, nonce, lock: confirmed, stolen: true };
+  return { ok: true, nonce, gen: target, lock: readJson(join(dirname(lockPath), `${basename(lockPath)}.g${target}`)), stolen: stale };
 }
 
-let _relCounter = 0;
-
 /**
- * Release the lock ONLY if it is ours (nonce match, or `verify` — a {field, value}
- * pair for cross-process releases, e.g. close-pass's session_id).
- * force:true skips verification — reserved for explicit operator commands.
- *
- * The removal is an atomic rename-claim, not verify-then-rm (Hale's release-vs-steal
- * TOCTOU, 2026-07-15 advisory): with verify-then-rm, a hard-stale stealer can install
- * a fresh lock between the read and the rm, and the revived owner's rm then deletes
- * the FRESH owner's lock. Rename consumes the path atomically; we verify the claimed
- * file and restore it if it turns out not to be ours. Named residual: if the restore
- * collides with a brand-new acquirer (wx on the momentarily-empty path), the displaced
- * lock stays in the graveyard as a forensic breadcrumb and we report 'restore-failed'
- * — a three-way race inside a microsecond window, bounded by all writers being atomic.
+ * Release the lock ONLY if a generation file is ours (nonce match, or `verify` —
+ * a {field, value} pair for cross-process releases, e.g. close-pass's session_id).
+ * Releasing = renaming OUR OWN generation file to its `.done` tombstone — we
+ * never touch another owner's file, which is what eliminates the v2 three-process
+ * corner. force:true removes every generation artifact (operator command).
  */
 export function releaseFileLock(lockPath, nonce, { verify = null, force = false } = {}) {
-  if (force) { try { rmSync(lockPath); } catch { /* already gone */ } return { released: true }; }
-  const grave = join(dirname(lockPath), `.${basename(lockPath)}.rel-${process.pid}-${++_relCounter}`);
-  try { renameSync(lockPath, grave); } catch { return { released: false, reason: 'absent' }; }
-  const claimed = readJson(grave);
-  const ours = claimed && ((nonce && claimed.nonce === nonce) ||
-    (verify && claimed[verify.field] != null && claimed[verify.field] === verify.value));
-  if (ours) { try { rmSync(grave); } catch { /* gone */ } return { released: true }; }
-  // Not ours — we are a revived owner whose lock was stolen. Put the true owner's back.
-  try { renameSync(grave, lockPath); return { released: false, reason: 'not-owner' }; }
-  catch { return { released: false, reason: 'restore-failed', grave }; }
+  const gens = listGenerations(lockPath);
+  if (force) {
+    for (const g of gens) { try { rmSync(g.path); } catch { /* gone */ } }
+    return { released: true };
+  }
+  if (!gens.some(g => !g.done)) return { released: false, reason: 'absent' };
+  for (const g of gens) {
+    if (g.done) continue;
+    const lock = readJson(g.path);
+    const ours = lock && ((nonce && lock.nonce === nonce) ||
+      (verify && lock[verify.field] != null && lock[verify.field] === verify.value));
+    if (ours) {
+      try { renameSync(g.path, `${g.path}.done`); } catch { /* already gone — superseded + GC'd */ }
+      return { released: true };
+    }
+  }
+  return { released: false, reason: 'not-owner' };
 }
 
 function sleepSync(ms) {
