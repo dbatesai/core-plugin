@@ -198,3 +198,36 @@ test('blocker-2 falsifier B: every arm completes against the capture with the st
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── Hale close path §6: byteCap binds absolutely; context3 reports at its real depth ──
+
+test('close-path-6: a byteCap below the pack header delivers an EMPTY pack, never bytes > byteCap', async () => {
+  const { buildFinalContextPack } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
+  const hits = [{ id: 'u1', tier: 'canonical', score: 1, summary: 'something' }];
+  const pack = buildFinalContextPack(hits, { byteCap: 20 }); // header alone is ~51 bytes
+  assert.equal(pack.bytes, 0, 'nothing delivered');
+  assert.equal(pack.text, '');
+  assert.ok(pack.bytes <= 20, 'the cap binds absolutely');
+  assert.equal(pack.excluded.length, 1, 'every hit excluded, visibly');
+  assert.match(pack.warnings[0], /below the \d+-byte pack header/);
+  // And a normal cap still packs (the constraint is named, not trigger-happy).
+  const ok = buildFinalContextPack(hits, { byteCap: 2048 });
+  assert.equal(ok.accepted.length, 1);
+});
+
+test('close-path-6: the context3 arm reports R@3 only — a 3-item delivered context is never labeled R@5+', async () => {
+  const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(join(tmpdir(), 'k3-'));
+  const goldPath = join(dir, 'gold.json');
+  writeFileSync(goldPath, JSON.stringify({ queries: [
+    { id: 'q1', query: 'omega speedmaster', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] },
+  ] }));
+  try {
+    const report = await runHarness(FIXT, goldPath);
+    assert.deepEqual(Object.keys(report.results.context3.recall), ['3'],
+      'context3 recall keys are exactly {3}');
+    assert.ok(Object.keys(report.results.bm25.recall).includes('10'),
+      'unbounded arms keep the full K ladder');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

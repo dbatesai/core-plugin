@@ -30,14 +30,19 @@ function gitHead() {
 }
 const HEAD = gitHead();
 
-test('blocker-3: two independent exports agree — git object database vs extracted archive', { skip: !HEAD }, () => {
+test('blocker-3: two independent exports agree — git object database vs extracted archive', { skip: !HEAD }, async () => {
+  const { mkdirSync } = await import('node:fs');
   const fromGit = manifestFromGit(REPO, HEAD, 'plugins/core');
   const dir = mkdtempSync(join(tmpdir(), 'artifact-id-'));
   try {
-    // Export mechanism B: git archive → extract → hash the filesystem tree.
-    execFileSync('bash', ['-c',
-      `git -C ${JSON.stringify(REPO)} archive ${HEAD}:plugins/core | tar -x -C ${JSON.stringify(dir)}`]);
-    const fromTree = manifestFromDirectory(dir);
+    // Export mechanism B: git archive to a FILE, native tar extract — no shell,
+    // no pipe, so Windows paths survive (the bash -c pipe version broke there).
+    const tarPath = join(dir, 'export.tar');
+    const treeDir = join(dir, 'tree');
+    mkdirSync(treeDir);
+    execFileSync('git', ['-C', REPO, 'archive', '-o', tarPath, `${HEAD}:plugins/core`]);
+    execFileSync('tar', ['-x', '-f', tarPath, '-C', treeDir]);
+    const fromTree = manifestFromDirectory(treeDir);
     assert.equal(fromTree.content_manifest_sha256, fromGit.content_manifest_sha256,
       'content identity agrees across two independent export mechanisms');
     assert.equal(fromTree.file_count, fromGit.file_count);

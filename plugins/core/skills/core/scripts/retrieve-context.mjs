@@ -354,7 +354,18 @@ export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = 
   const accepted = [], excluded = [], warnings = [];
   if (!hits || !hits.length) return { text: '', bytes: 0, accepted, excluded, warnings };
 
-  let out = 'Relevant stored context (CORE per-turn retrieval):\n';
+  const HEADER = 'Relevant stored context (CORE per-turn retrieval):\n';
+  // Contract fix (Hale close path §6): the cap binds ABSOLUTELY. A cap smaller
+  // than the header used to return bytes > byteCap in violation of the pack's
+  // own contract; now it delivers an empty pack, every hit excluded, and the
+  // constraint named in warnings.
+  if (Buffer.byteLength(HEADER, 'utf8') > byteCap) {
+    for (const h of hits) excluded.push({ id: h.id, tier: h.tier, score: h.score, reason: 'byte-cap' });
+    warnings.push(`byteCap ${byteCap} is below the ${Buffer.byteLength(HEADER, 'utf8')}-byte pack header — nothing delivered`);
+    return { text: '', bytes: 0, accepted, excluded, warnings };
+  }
+
+  let out = HEADER;
   let capped = false;
   for (const h of hits) {
     const tierTag = h.tier === 'observation' ? ' [observation]' : '';

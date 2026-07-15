@@ -90,13 +90,15 @@ export async function runHarness(store, goldPath) {
   const snapshot = loadSnapshot(store, { captureBodies: true });
   assertKnownTiers(snapshot.index);
   const arms = {
-    lexical: (q) => lexicalRankedIds(q, store, { snapshot }),   // title+topics only (pre-T3 baseline)
-    ranking: (q) => productRankedIds(q, store, { snapshot }),   // RANKING SUBSTRATE — the function retrieveContext ranks with, BEFORE edge expansion/topN (not the final context)
+    lexical: { run: (q) => lexicalRankedIds(q, store, { snapshot }) },   // title+topics only (pre-T3 baseline)
+    ranking: { run: (q) => productRankedIds(q, store, { snapshot }) },   // RANKING SUBSTRATE — the function retrieveContext ranks with, BEFORE edge expansion/topN (not the final context)
     // FINAL product context — DELIVERED identities, not selection: routed through
     // buildFinalContextPack so the byte cap participates (Train A A4 — a hit
     // retrieveContext selects but the cap drops is NOT counted as delivered).
-    context3: (q) => buildFinalContextPack(retrieveContext(q, store, { topN: 3, snapshot })).accepted.map(a => a.id),
-    bm25: (q) => bm25Rank(q, store, { snapshot }),              // summary+topics+body BM25 arm (not body-only — the loader prepends title/topics)
+    // Reported at K=3 ONLY (Hale close path §6): the delivered list is at most
+    // three items, so R@5/R@10/… on it would relabel R@3 as deeper recall.
+    context3: { run: (q) => buildFinalContextPack(retrieveContext(q, store, { topN: 3, snapshot })).accepted.map(a => a.id), ks: [3] },
+    bm25: { run: (q) => bm25Rank(q, store, { snapshot }) },              // summary+topics+body BM25 arm (not body-only — the loader prepends title/topics)
   };
   // ONE ranking pass per arm: metrics, raw ranks, and latency all come from the
   // SAME observations (the re-review caught the double-run emitting raw evidence
@@ -104,17 +106,17 @@ export async function runHarness(store, goldPath) {
   const results = {};
   const rawRanks = {};   // per-arm, per-query — through the LARGEST reported K (100)
   const latency = {};    // per-arm p50/p95 ms over the gold queries
-  for (const [name, ranker] of Object.entries(arms)) {
+  for (const [name, arm] of Object.entries(arms)) {
     const rankedByQuery = {};
     const times = [];
     for (const q of gold) {
       const t0 = process.hrtime.bigint();
       let ranked;
-      try { ranked = await ranker(q.query); } catch { ranked = null; }
+      try { ranked = await arm.run(q.query); } catch { ranked = null; }
       times.push(Number(process.hrtime.bigint() - t0) / 1e6);
       rankedByQuery[q.id] = ranked;
     }
-    results[name] = scoreRankedLists(rankedByQuery, gold);
+    results[name] = scoreRankedLists(rankedByQuery, gold, arm.ks || KS);
     rawRanks[name] = Object.fromEntries(Object.entries(rankedByQuery)
       .map(([qid, r]) => [qid, r === null ? null : r.slice(0, Math.max(...KS))]));
     times.sort((a, b) => a - b);
@@ -173,8 +175,8 @@ export async function runHarness(store, goldPath) {
 }
 
 /** Score pre-computed ranked lists (one observation set for metrics AND raw evidence). */
-export function scoreRankedLists(rankedByQuery, gold) {
-  const recall = Object.fromEntries(KS.map(k => [k, []]));
+export function scoreRankedLists(rankedByQuery, gold, ks = KS) {
+  const recall = Object.fromEntries(ks.map(k => [k, []]));
   let mrrSum = 0, mrrN = 0, forbiddenHits = 0, forbiddenQ = 0, unavailable = false;
   const perRung = {};
   for (const q of gold) {
@@ -182,11 +184,11 @@ export function scoreRankedLists(rankedByQuery, gold) {
     if (ranked === null || ranked === undefined) { unavailable = true; break; }
     const expected = q.expected || [];
     const forbidden = q.forbidden || [];
-    for (const k of KS) {
+    for (const k of ks) {
       const r = recallAtK(ranked, expected, k);
       if (r !== null) {
         recall[k].push(r);
-        (perRung[q.rung] ||= Object.fromEntries(KS.map(kk => [kk, []])))[k].push(r);
+        (perRung[q.rung] ||= Object.fromEntries(ks.map(kk => [kk, []])))[k].push(r);
       }
     }
     const fr = firstRelevantRank(ranked, expected);
@@ -198,9 +200,9 @@ export function scoreRankedLists(rankedByQuery, gold) {
   }
   if (unavailable) return { unavailable: true };
   const mean = (a) => a.length ? a.reduce((s, x) => s + x, 0) / a.length : null;
-  const recallMean = Object.fromEntries(KS.map(k => [k, mean(recall[k])]));
+  const recallMean = Object.fromEntries(ks.map(k => [k, mean(recall[k])]));
   const rungMean = {};
-  for (const [rung, byK] of Object.entries(perRung)) rungMean[rung] = Object.fromEntries(KS.map(k => [k, mean(byK[k])]));
+  for (const [rung, byK] of Object.entries(perRung)) rungMean[rung] = Object.fromEntries(ks.map(k => [k, mean(byK[k])]));
   return {
     recall: recallMean,
     mrr: mrrN ? mrrSum / mrrN : null,
