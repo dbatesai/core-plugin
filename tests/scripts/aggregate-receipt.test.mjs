@@ -16,7 +16,7 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
-const { buildAggregateReceipt, refusalScan, collectForbiddenStrings } =
+const { buildAggregateReceipt, refusalScan, collectForbiddenStrings, validateReceiptShape, isPathShaped } =
   await import(pathToFileURL(join(SCRIPTS, 'aggregate-receipt.mjs')).href);
 const { runHarness, runTierPolicySweep } =
   await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
@@ -114,4 +114,81 @@ test('A2 CLI: writes a receipt from a report file; refusal is exit 2', async () 
     assert.throws(() => execFileSync('node', [CLI, badPath, '--out', join(dir, 'nope.json')], { encoding: 'utf8' }),
       (e) => e.status === 2);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── Blocker 1 (Hale verdict 2026-07-14 §1): hostile-path battery + closed shapes ──
+// His exact reproductions: rung '/private/tmp/secret-project' accepted and emitted;
+// direct construction emitted '/etc/shadow' and '/var/db/private'. Every form in
+// his required battery is a negative test here.
+
+async function cleanReportAndSweep() {
+  const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dir = mkdtempSync(join(tmpdir(), 'b1-'));
+  const goldPath = join(dir, 'gold.json');
+  writeFileSync(goldPath, JSON.stringify(GOLD));
+  const report = await runHarness(FIXT, goldPath);
+  const sweep = runTierPolicySweep(FIXT, GOLD.queries);
+  rmSync(dir, { recursive: true, force: true });
+  return { report, sweep };
+}
+
+test('blocker-1: Hale\'s exact repro — a path-shaped RUNG key refuses the export', async () => {
+  const { report } = await cleanReportAndSweep();
+  const poisoned = JSON.parse(JSON.stringify(report));
+  for (const r of Object.values(poisoned.results)) {
+    if (r.perRung) r.perRung['/private/tmp/secret-project'] = { 5: 1, 10: 1, 30: 1, 100: 1 };
+  }
+  assert.throws(() => buildAggregateReceipt(poisoned), /REFUSED/);
+});
+
+test('blocker-1: path-shaped scalar fields refuse (sha slots cannot carry /etc/shadow or /var/db/private)', async () => {
+  const { report } = await cleanReportAndSweep();
+  for (const poison of ['/etc/shadow', '/var/db/private']) {
+    const p = JSON.parse(JSON.stringify(report));
+    p.manifest.built_artifact_sha256 = poison;
+    assert.throws(() => buildAggregateReceipt(p), /REFUSED/, `scalar poison ${poison} must refuse`);
+  }
+});
+
+test('blocker-1: the full hostile-path battery is path-shaped; benign receipt strings are not', () => {
+  const hostile = [
+    '/private/tmp/secret-project', '/tmp/x', '/etc/shadow', '/var/db/private',
+    '/Volumes/backup/store', '\\\\server\\share\\file', 'C:\\Users\\x', '~/projects/core',
+    'see /etc/passwd for details', 'data at \\\\nas01\\vault',
+  ];
+  for (const h of hostile) assert.ok(isPathShaped(h), `${h} must read as path-shaped`);
+  const benign = ['train-a-aggregate-receipt/1', 'lexical', 'cross-domain', 'tier-ordering (rescued by P1)', 'P3_w0.8'];
+  for (const b of benign) assert.ok(!isPathShaped(b), `${b} must NOT read as path-shaped`);
+});
+
+test('blocker-1: path-shaped band and mix keys refuse via shape validation', async () => {
+  const { report, sweep } = await cleanReportAndSweep();
+  const badMix = JSON.parse(JSON.stringify(report));
+  badMix.mix['/Volumes/exfil'] = 3;
+  assert.throws(() => buildAggregateReceipt(badMix), /REFUSED/);
+  const badSweep = JSON.parse(JSON.stringify(sweep));
+  badSweep.bands.push({ query: 'q1', gold: 'g', band: '/var/db/private' });
+  assert.throws(() => buildAggregateReceipt(report, badSweep), /REFUSED/);
+});
+
+test('blocker-1: non-shape scalars refuse (a sentence in a version, a bogus policy, an out-of-range rate)', async () => {
+  const { report, sweep } = await cleanReportAndSweep();
+  const badVersion = JSON.parse(JSON.stringify(report));
+  badVersion.manifest.plugin_version = 'not a version at all with spaces';
+  assert.throws(() => buildAggregateReceipt(badVersion), /plugin_version/);
+  const badPolicy = JSON.parse(JSON.stringify(sweep));
+  badPolicy.perPolicy.push({ policy: 'Pwned policy', r3: 0.5, n: 1, forbidden3: 0 });
+  assert.throws(() => buildAggregateReceipt(report, badPolicy), /policy/);
+  const badRate = JSON.parse(JSON.stringify(report));
+  const firstArm = Object.keys(badRate.results)[0];
+  badRate.results[firstArm].mrr = 7;
+  assert.throws(() => buildAggregateReceipt(badRate), /mrr/);
+});
+
+test('blocker-1: a clean report + sweep still exports (shape validation is not a tautology)', async () => {
+  const { report, sweep } = await cleanReportAndSweep();
+  const receipt = buildAggregateReceipt(report, sweep);
+  assert.ok(validateReceiptShape(receipt));
+  assert.equal(receipt.receipt_schema, 'train-a-aggregate-receipt/1');
 });

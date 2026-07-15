@@ -55,6 +55,35 @@ export function collectForbiddenStrings(report, sweep = null) {
   return out;
 }
 
+// Any string that IS or CONTAINS a filesystem path, across the supported path
+// forms (blocker 1, Hale verdict §1 battery): absolute POSIX (/tmp, /etc, /var,
+// /private/tmp, /Users, /Volumes, …), home shorthand, Windows drive letters,
+// and UNC (\\server\share). Leading-anchored OR embedded after a delimiter.
+const PATH_SHAPED = new RegExp(
+  '^(?:/|~[/\\\\]|[A-Za-z]:[/\\\\]|\\\\\\\\)' +                 // starts like a path
+  '|(?:^|[\\s"\'(=,])(?:/(?:private|tmp|etc|var|Users|home|Volumes|opt|usr|srv|mnt|media)\\b|\\\\\\\\[A-Za-z0-9])' // or embeds one
+);
+
+/** True when a receipt KEY or string VALUE is path-shaped in any supported form. */
+export function isPathShaped(s) {
+  return typeof s === 'string' && PATH_SHAPED.test(s);
+}
+
+/** Walk every key and string value of the receipt; throw on the first path-shaped one. */
+function refusePathShapes(node, at = 'receipt') {
+  if (typeof node === 'string') {
+    if (isPathShaped(node)) throw new Error(`aggregate-receipt REFUSED: receipt contains a filesystem path (value at ${at}: "${node.slice(0, 60)}")`);
+    return;
+  }
+  if (Array.isArray(node)) { node.forEach((v, i) => refusePathShapes(v, `${at}[${i}]`)); return; }
+  if (node && typeof node === 'object') {
+    for (const [k, v] of Object.entries(node)) {
+      if (isPathShaped(k)) throw new Error(`aggregate-receipt REFUSED: receipt contains a filesystem path (KEY at ${at}: "${k.slice(0, 60)}")`);
+      refusePathShapes(v, `${at}.${k}`);
+    }
+  }
+}
+
 /** refusalScan — throws if any forbidden fragment (or an absolute path) appears in the receipt. */
 export function refusalScan(receipt, forbidden) {
   const json = JSON.stringify(receipt);
@@ -64,9 +93,92 @@ export function refusalScan(receipt, forbidden) {
       throw new Error(`aggregate-receipt REFUSED: receipt contains a local fragment (${frag.slice(0, 40)}…) — rows stay local, aggregates travel`);
     }
   }
-  // Generic path refusal: no absolute POSIX/Windows path or home shorthand leaves.
+  // Path refusal across supported path forms, on every key and string value —
+  // not a JSON-blob regex (blocker 1: dynamic keys were where paths leaked).
+  refusePathShapes(receipt);
+  // Belt: the original blob regex stays as a second, independent net.
   if (/"[^"]*(?:\/Users\/|\/home\/|[A-Za-z]:\\|~\/)/.test(json)) {
     throw new Error('aggregate-receipt REFUSED: receipt contains a filesystem path');
+  }
+  return true;
+}
+
+// ---------- blocker 1: closed enums + scalar shapes (Hale verdict §1) ----------
+
+const SHA256_RE = /^[0-9a-f]{64}$/;
+const COMMIT_RE = /^[0-9a-f]{7,40}$/;
+const VERSION_RE = /^[0-9A-Za-z.+-]{1,40}$/;
+const SCHEMA_RE = /^[a-z0-9-]+\/\d+$/;           // e.g. train-a-aggregate-receipt/1
+const ARM_RE = /^[a-z][a-z0-9_]{0,24}$/;          // lexical | ranking | context3 | bm25 | future arms
+const POLICY_RE = /^P\d(?:_w[0-9.]{1,6})?$/;      // P0..P2, P3_w0.8 …
+const MIX_KEY_RE = /^[a-z]{1,24}$/;               // unit-id prefixes are alpha-only ('other' fallback)
+const RUNGS = new Set(['literal', 'category', 'value', 'cross-domain']);
+// Bands are short prose labels — closed by SHAPE (bounded charset; real labels
+// carry '/', ',', '_', '.' as in "enrichment/reasoning" and "P3_w0.8") — plus the
+// isPathShaped guard below, which is what actually excludes filesystem paths.
+const BAND_RE = /^[a-zA-Z0-9@ ().;,_/-]{1,90}$/;
+
+const fail = (field, got) => { throw new Error(`aggregate-receipt REFUSED: ${field} fails its closed shape (got ${JSON.stringify(String(got)).slice(0, 60)})`); };
+const shape = (field, v, re) => { if (v !== null && !(typeof v === 'string' && re.test(v))) fail(field, v); };
+const num01 = (field, v) => { if (v !== null && !(typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1)) fail(field, v); };
+const count = (field, v) => { if (v !== null && !(Number.isInteger(v) && v >= 0)) fail(field, v); };
+const nonneg = (field, v) => { if (v !== null && v !== undefined && !(typeof v === 'number' && Number.isFinite(v) && v >= 0)) fail(field, v); };
+
+/**
+ * validateReceiptShape — every field of the finished receipt against closed enums
+ * and scalar shapes. The whitelist constructor bounds WHICH fields exist; this
+ * bounds their CONTENT, so poisoned report values (a path in a rung key, a
+ * sentence in a sha field) refuse instead of riding a legitimate field out.
+ */
+export function validateReceiptShape(receipt) {
+  const s = receipt.source;
+  shape('source.plugin_version', s.plugin_version, VERSION_RE);
+  shape('source.source_commit', s.source_commit, COMMIT_RE);
+  shape('source.harness_sha256', s.harness_sha256, SHA256_RE);
+  for (const [k, v] of Object.entries(s.product_function_sha256)) shape(`source.product_function_sha256[${k}]`, v, SHA256_RE);
+  shape('source.built_artifact_sha256', s.built_artifact_sha256, SHA256_RE);
+  shape('source.snapshot_id', s.snapshot_id, SHA256_RE);
+  shape('source.gold_sha256', s.gold_sha256, SHA256_RE);
+  shape('source.corpus_content_sha256', s.corpus_content_sha256, SHA256_RE);
+  shape('source.receipt_schema_of_source', s.receipt_schema_of_source, SCHEMA_RE);
+
+  count('corpus.total_units', receipt.corpus.total_units);
+  for (const [k, v] of Object.entries(receipt.corpus.unit_type_counts)) {
+    if (!MIX_KEY_RE.test(k)) fail('corpus.unit_type_counts key', k);
+    count(`corpus.unit_type_counts[${k}]`, v);
+  }
+
+  const e = receipt.evaluation;
+  count('evaluation.queries', e.queries); count('evaluation.no_answer', e.no_answer); count('evaluation.declared_supports', e.declared_supports);
+  for (const [arm, l] of Object.entries(e.latency_ms)) {
+    if (!ARM_RE.test(arm)) fail('evaluation.latency_ms arm', arm);
+    nonneg(`latency_ms[${arm}].p50`, l.p50); nonneg(`latency_ms[${arm}].p95`, l.p95);
+  }
+  for (const [arm, r] of Object.entries(e.arms)) {
+    if (!ARM_RE.test(arm)) fail('evaluation.arms arm', arm);
+    if (r.unavailable) continue;
+    for (const [k, v] of Object.entries(r.recall)) { if (!/^\d{1,3}$/.test(k)) fail('recall K', k); num01(`arms[${arm}].recall[${k}]`, v); }
+    num01(`arms[${arm}].mrr`, r.mrr); num01(`arms[${arm}].forbidden_rate`, r.forbidden_rate);
+    for (const [rung, byK] of Object.entries(r.per_rung_recall)) {
+      if (!RUNGS.has(rung)) fail('per_rung_recall rung', rung); // Hale's exact repro: a path accepted as a rung key
+      for (const [k, v] of Object.entries(byK)) { if (!/^\d{1,3}$/.test(k)) fail('per-rung K', k); num01(`per_rung_recall[${rung}][${k}]`, v); }
+    }
+  }
+
+  const t = receipt.tier_sweep;
+  if (t) {
+    shape('tier_sweep.snapshot_id', t.snapshot_id, SHA256_RE);
+    count('tier_sweep.top_n', t.top_n);
+    for (const p of t.per_policy) {
+      if (!POLICY_RE.test(p.policy)) fail('tier_sweep policy', p.policy);
+      num01(`per_policy[${p.policy}].r3`, p.r3); count(`per_policy[${p.policy}].n`, p.n); num01(`per_policy[${p.policy}].forbidden3`, p.forbidden3);
+    }
+    for (const [band, n] of Object.entries(t.band_histogram)) {
+      if (!BAND_RE.test(band) || isPathShaped(band)) fail('band_histogram band', band);
+      count(`band_histogram[${band}]`, n);
+    }
+    count('tier_sweep.counts.queries', t.counts.queries); count('tier_sweep.counts.scored', t.counts.scored);
+    count('tier_sweep.counts.no_answer', t.counts.no_answer); count('tier_sweep.counts.declared_supports', t.counts.declared_supports);
   }
   return true;
 }
@@ -131,7 +243,8 @@ export function buildAggregateReceipt(report, sweep = null) {
       },
     } : null,
   };
-  refusalScan(receipt, collectForbiddenStrings(report, sweep));
+  validateReceiptShape(receipt);                              // blocker 1: closed enums + scalar shapes first
+  refusalScan(receipt, collectForbiddenStrings(report, sweep)); // then the reconstruction-vocabulary + path scan
   return receipt;
 }
 
