@@ -1,0 +1,136 @@
+/**
+ * artifact-identity.mjs — deterministic release-artifact identity (Train A
+ * blocker 3, Hale verdict §3 + close path §4).
+ *
+ * The defect this replaces: the packet's archive SHA came from
+ * `git archive <sha>:plugins/core | shasum`, and tar embeds invocation-time
+ * metadata — same content, different bytes every run. An identity nobody can
+ * reproduce is not an identity.
+ *
+ * Two identities, both content-only, both reproducible from a clean clone:
+ *
+ *   1. tree_oid — the Git tree object id of the subtree at the commit
+ *      (`git rev-parse <ref>:<subdir>`). Commit-anchored, byte-exact, and
+ *      verifiable by anyone with the repository in one command.
+ *   2. content_manifest_sha256 — sha256 over the sorted manifest
+ *      `<relpath>:<sha256(file bytes)>` of every file in the subtree. Computable
+ *      WITHOUT git from any export of the tree (an extracted archive, a
+ *      packaged install), so the identity survives across export mechanisms —
+ *      which is exactly Hale's bar: two clean INDEPENDENT exports must agree.
+ *
+ * The freeze step publishes both plus the exact reproduction commands; the
+ * packet's `built_artifact_sha256` slot carries the content manifest hash.
+ *
+ * Per DC-77 ships with the plugin; per DC-80 .mjs only. Uses `git` via
+ * execFileSync for the repo-side computation only; the directory-side
+ * computation (`fromDirectory`) is pure filesystem.
+ *
+ * CLI:
+ *   node artifact-identity.mjs <repo> <ref> [--subdir plugins/core] [--json]
+ *   node artifact-identity.mjs --dir <extracted-tree> [--json]
+ */
+
+import { execFileSync } from 'node:child_process';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+
+function git(repo, args) {
+  return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+}
+
+/** The Git tree object id of <ref>:<subdir> — one-command verification for anyone with the repo. */
+export function treeOid(repo, ref, subdir) {
+  return git(repo, ['rev-parse', `${ref}:${subdir}`]).trim();
+}
+
+function manifestHash(entries) {
+  // entries: [{relpath (forward slashes), hash}] — sorted by relpath, joined LF.
+  const manifest = entries
+    .sort((a, b) => (a.relpath < b.relpath ? -1 : a.relpath > b.relpath ? 1 : 0))
+    .map(e => `${e.relpath}:${e.hash}`)
+    .join('\n');
+  return { content_manifest_sha256: sha256(manifest), file_count: entries.length };
+}
+
+/** Content manifest computed FROM THE GIT OBJECT DATABASE (no working tree, no tar). */
+export function manifestFromGit(repo, ref, subdir) {
+  const listing = git(repo, ['ls-tree', '-r', '-z', `${ref}:${subdir}`]);
+  const entries = [];
+  for (const rec of listing.split('\0')) {
+    if (!rec) continue;
+    // "<mode> <type> <oid>\t<path>"
+    const tab = rec.indexOf('\t');
+    const [, type, oid] = rec.slice(0, tab).split(/\s+/);
+    if (type !== 'blob') continue;
+    const relpath = rec.slice(tab + 1);
+    const content = execFileSync('git', ['-C', repo, 'cat-file', 'blob', oid], { maxBuffer: 64 * 1024 * 1024 });
+    entries.push({ relpath, hash: sha256(content) });
+  }
+  return manifestHash(entries);
+}
+
+/** Content manifest computed FROM A FILESYSTEM TREE (an extracted archive, a packaged install). */
+export function manifestFromDirectory(dir) {
+  const root = realpathSync(dir);
+  const entries = [];
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) entries.push({ relpath: relative(root, p).split(sep).join('/'), hash: sha256(readFileSync(p)) });
+    }
+  };
+  walk(root);
+  return manifestHash(entries);
+}
+
+/** Full identity block for a frozen candidate — what the packet publishes. */
+export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
+  const oid = treeOid(repo, ref, subdir);
+  const { content_manifest_sha256, file_count } = manifestFromGit(repo, ref, subdir);
+  return {
+    ref,
+    subdir,
+    tree_oid: oid,
+    content_manifest_sha256,
+    file_count,
+    reproduce: {
+      tree_oid: `git rev-parse ${ref}:${subdir}`,
+      content_manifest: `node artifact-identity.mjs <repo> ${ref} --subdir ${subdir}`,
+      from_any_export: 'node artifact-identity.mjs --dir <extracted-tree>',
+    },
+  };
+}
+
+function main(argv) {
+  const dirIdx = argv.indexOf('--dir');
+  const json = argv.includes('--json');
+  if (dirIdx >= 0) {
+    const out = manifestFromDirectory(argv[dirIdx + 1]);
+    process.stdout.write(json ? JSON.stringify(out, null, 2) + '\n'
+      : `content_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\n`);
+    return 0;
+  }
+  const [repo, ref] = argv.filter(a => !a.startsWith('--') && a !== argv[argv.indexOf('--subdir') + 1]);
+  if (!repo || !ref) {
+    process.stderr.write('usage: artifact-identity.mjs <repo> <ref> [--subdir plugins/core] [--json] | --dir <tree>\n');
+    return 2;
+  }
+  const subIdx = argv.indexOf('--subdir');
+  const subdir = subIdx >= 0 ? argv[subIdx + 1] : 'plugins/core';
+  let out;
+  try { out = artifactIdentity(repo, ref, subdir); }
+  catch (e) { process.stderr.write(`artifact-identity: ${e.message}\n`); return 1; }
+  process.stdout.write(json ? JSON.stringify(out, null, 2) + '\n'
+    : `tree_oid ${out.tree_oid}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\nreproduce: ${out.reproduce.tree_oid}\n`);
+  return 0;
+}
+
+const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
+if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+  process.exit(main(process.argv.slice(2)));
+}

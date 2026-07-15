@@ -60,6 +60,10 @@ function readIndex(coreDir) {
 export function mutateIndex(coreDir, mutator) {
   const dir = coreDir || defaultCoreDir();
   mkdirSync(dir, { recursive: true });
+  // Registry writes are rare, short, and must-succeed: give contention a patient
+  // (still bounded, still loud) 8s budget rather than the 2s default — under full
+  // CPU load (test suites, parallel session startups) 2s produced spurious
+  // LOCK_HELD failures from writers that would have succeeded moments later.
   return withFileLock(lockPath(dir), () => {
     const entries = readIndex(dir);
     const out = mutator(entries);
@@ -67,7 +71,7 @@ export function mutateIndex(coreDir, mutator) {
     const result = Array.isArray(out) ? undefined : out.result;
     atomicWriteFileSync(indexPath(dir), JSON.stringify(next, null, 2) + '\n');
     return result;
-  });
+  }, { retries: 80, retryDelayMs: 100 });
 }
 
 export function addWorkspace(coreDir, entry) {
