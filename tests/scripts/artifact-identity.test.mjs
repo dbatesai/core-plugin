@@ -19,7 +19,7 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-const { treeOid, manifestFromGit, manifestFromDirectory, artifactIdentity } =
+const { treeOid, manifestFromGit, manifestFromDirectory, artifactIdentity, diffManifests } =
   await import(pathToFileURL(join(SCRIPTS, 'artifact-identity.mjs')).href);
 
 // Skip everywhere git or repo history isn't available (a packaged install running
@@ -43,11 +43,18 @@ test('blocker-3: two independent exports agree — git object database vs extrac
     const tarPath = join(dir, 'export.tar');
     const treeDir = join(dir, 'tree');
     mkdirSync(treeDir);
-    execFileSync('git', ['-C', REPO, 'archive', '-o', tarPath, `${HEAD}:plugins/core`]);
+    // -c core.autocrlf=false pins a BYTE-PRESERVING export: on Windows (autocrlf
+    // configured) git archive otherwise converts text files to CRLF, and the
+    // extracted bytes genuinely differ from the committed blobs. The packet's
+    // reproduction command pins the same flag for the same reason.
+    execFileSync('git', ['-C', REPO, '-c', 'core.autocrlf=false', 'archive', '-o', tarPath, `${HEAD}:plugins/core`]);
     execFileSync('tar', ['-x', '-f', 'export.tar', '-C', 'tree'], { cwd: dir });
     const fromTree = manifestFromDirectory(treeDir);
+    // On divergence, name the first differing file + counts (Hale round 8):
+    // two unequal hashes alone can't be root-caused from a CI log.
+    const diff = diffManifests(fromGit, fromTree);
     assert.equal(fromTree.content_manifest_sha256, fromGit.content_manifest_sha256,
-      'content identity agrees across two independent export mechanisms');
+      `content identity must agree across two independent export mechanisms — counts git=${fromGit.file_count} tree=${fromTree.file_count}, first divergence: ${JSON.stringify(diff)}`);
     assert.equal(fromTree.file_count, fromGit.file_count);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

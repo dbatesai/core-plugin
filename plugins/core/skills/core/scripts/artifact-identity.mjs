@@ -49,11 +49,28 @@ export function treeOid(repo, ref, subdir) {
 
 function manifestHash(entries) {
   // entries: [{relpath (forward slashes), hash}] — sorted by relpath, joined LF.
-  const manifest = entries
-    .sort((a, b) => (a.relpath < b.relpath ? -1 : a.relpath > b.relpath ? 1 : 0))
-    .map(e => `${e.relpath}:${e.hash}`)
-    .join('\n');
-  return { content_manifest_sha256: sha256(manifest), file_count: entries.length };
+  const sorted = entries.sort((a, b) => (a.relpath < b.relpath ? -1 : a.relpath > b.relpath ? 1 : 0));
+  const manifest = sorted.map(e => `${e.relpath}:${e.hash}`).join('\n');
+  // entries ship in the result so a divergence between two exports can name the
+  // first differing file instead of just two unequal hashes (Hale round 8).
+  return { content_manifest_sha256: sha256(manifest), file_count: sorted.length, entries: sorted };
+}
+
+/**
+ * diffManifests — first divergence between two manifest results, for diagnostics:
+ * files present in one but not the other, or the first relpath whose hash differs.
+ * Returns null when identical.
+ */
+export function diffManifests(a, b) {
+  const byPath = new Map(a.entries.map(e => [e.relpath, e.hash]));
+  for (const e of b.entries) {
+    if (!byPath.has(e.relpath)) return { relpath: e.relpath, in: 'b-only' };
+    if (byPath.get(e.relpath) !== e.hash) return { relpath: e.relpath, hashA: byPath.get(e.relpath), hashB: e.hash };
+    byPath.delete(e.relpath);
+  }
+  const leftover = byPath.keys().next();
+  if (!leftover.done) return { relpath: leftover.value, in: 'a-only' };
+  return null;
 }
 
 /** Content manifest computed FROM THE GIT OBJECT DATABASE (no working tree, no tar). */
@@ -101,7 +118,10 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
     reproduce: {
       tree_oid: `git rev-parse ${ref}:${subdir}`,
       content_manifest: `node artifact-identity.mjs <repo> ${ref} --subdir ${subdir}`,
-      from_any_export: 'node artifact-identity.mjs --dir <extracted-tree>',
+      // The export MUST be byte-preserving: on an autocrlf-configured machine
+      // (Windows default) a bare `git archive` converts text files to CRLF and
+      // the manifest genuinely differs from the committed blobs.
+      from_any_export: `git -c core.autocrlf=false archive -o export.tar ${ref}:${subdir} && tar -x -f export.tar -C <dir> && node artifact-identity.mjs --dir <dir>`,
     },
   };
 }
