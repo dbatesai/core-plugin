@@ -51,7 +51,7 @@ A **delivery workspace** is the agent's **operational meta** about **source data
     "/Users/<user>/Documents/Projects/example-project/_sessions/2026-03-15",
     "/Users/<user>/Documents/Projects/example-project/_sessions/2026-03-28"
   ],
-  "agent_notes": "User prefers concrete examples over abstract framings. Push back hard on scope creep. Cross-reference with the design doc at docs/architecture.md when discussing structural choices."
+  "dm_notes": "User prefers concrete examples over abstract framings. Push back hard on scope creep. Cross-reference with the design doc at docs/architecture.md when discussing structural choices."
 }
 ```
 
@@ -96,7 +96,7 @@ The index provides the agent a single file to scan when prioritizing across work
 ## Design Notes
 
 - **Operational meta only.** The workspace records how work has been done on the project, not what the project is about. Project state lives in `<project>/PROJECT.md` — including any risk assessment, decisions, action items, and people involved. The workspace schema does not duplicate or override them.
-- **`agent_notes` is free-form.** Agent scratch space for operational observations. No structure imposed. Use it for cross-session hunches, user interaction patterns, agent-side process observations — never for facts that belong in `PROJECT.md`.
+- **`dm_notes` is free-form.** Agent scratch space for operational observations. No structure imposed. Use it for cross-session hunches, user interaction patterns, agent-side process observations — never for facts that belong in `PROJECT.md`.
 - **Session logs are referenced, not contained.** Session logs live at `<project>/_sessions/YYYY-MM-DD/`. The workspace points to them via `session_log_refs`; logs are not stored inside the workspace.
 - **No `delivery_risk` field.** Risk is a project fact. It lives in `PROJECT.md §Decisions & Risks`. The agent reads from `PROJECT.md` — the workspace does not carry redundant state.
 - **No Delivery Plan.** Task breakdowns, phase sequencing, and next-session priorities are tracked in `PROJECT.md §Moves`, not in a separate Delivery Plan artifact.
