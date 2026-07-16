@@ -184,7 +184,7 @@ The values are about **epistemic strength**, not about whether the fact is "true
 
 **Social signals do not upgrade confidence.** Reactions (👍, ❤️), read receipts, thread presence, view counts, and similar weak-confirmation signals do not upgrade a Pattern 4 `inferred` finding to `sourced`. They're too ambiguous — a reaction may mean "I agree," "I saw this," "this is funny," or be reflexive. Explicit verbal confirmation in the same source (someone says "yes" or "confirmed" or explicitly acknowledges the proposed agreement) is the minimum bar for upgrading `inferred` to `sourced`.
 
-**Context (formality, channel type) does not modulate confidence.** A commitment extracted from free-text content is `inferred` regardless of whether it was said in a formal meeting or a casual DM. The pattern governs, not the channel's perceived seriousness. The reasoning chain from text to commitment is the same chain in either setting; the formality of the venue doesn't shorten the chain.
+**Context (formality, channel type) does not modulate confidence.** A commitment extracted from free-text content is `inferred` regardless of whether it was said in a formal meeting or a casual direct message. The pattern governs, not the channel's perceived seriousness. The reasoning chain from text to commitment is the same chain in either setting; the formality of the venue doesn't shorten the chain.
 
 **The source's `confidence-default` and the pattern conflict:** the pattern wins. The default is a starting point; the pattern is the structurally-grounded judgment. The override mechanism (`confidence-overrides` in the source registration) is for when a source has structural signals the pattern catalog doesn't yet cover — capture as an override, surface for catalog expansion.
 

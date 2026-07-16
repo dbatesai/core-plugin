@@ -11,7 +11,7 @@
  *
  * Labeling strategy: labels-by-disagreement. Dispatch N independent labeling agents
  * (via analysis.md), adjudicate disagreements, use agreed turns as the gold set.
- * The script provides the mechanics; the DM orchestrates labeling when enough turns
+ * The script provides the mechanics; the agent orchestrates labeling when enough turns
  * accumulate. Until then, the machinery exists and the state is honestly PROVISIONAL.
  *
  * HONESTY GATE: precision is computed from imported labels only — never from the
@@ -310,7 +310,7 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
 // ============================================================
 
 /**
- * How close is the calibration pool to the minimum? Useful for the DM to know
+ * How close is the calibration pool to the minimum? Useful for the agent to know
  * when to launch the labeling pass.
  */
 export function readinessReport({ project, home = homedir(), workspaceId }) {

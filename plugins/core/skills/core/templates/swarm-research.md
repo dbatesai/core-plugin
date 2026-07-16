@@ -9,7 +9,7 @@ Multi-source investigation, comparison, and fact-finding. Use this shape when th
 - 1 Fact-Checker — verifies claims, sources, and provenance independently
 - No Guard needed (read-only swarm)
 
-Hardware budget caps the roster — see `protocols/execution.md`. Default at constrained budget: 2 researchers + 1 synthesizer with the DM playing fact-checker.
+Hardware budget caps the roster — see `protocols/execution.md`. Default at constrained budget: 2 researchers + 1 synthesizer with the lead agent playing fact-checker.
 
 ## Phasing
 

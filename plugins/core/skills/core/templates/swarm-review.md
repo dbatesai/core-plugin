@@ -32,4 +32,4 @@ A healthy review swarm kills 70-80% of initial proposals — the adversarial loo
 
 ## Output
 
-Per `schemas/output.md` — prioritized findings (MUST FIX / SHOULD FIX / CONSIDER) with confidence levels from each agent's Heaviest Factors, convergent findings highlighted with their diversity basis, full agent reports as evidence, the DM's reflective synthesis on top.
+Per `schemas/output.md` — prioritized findings (MUST FIX / SHOULD FIX / CONSIDER) with confidence levels from each agent's Heaviest Factors, convergent findings highlighted with their diversity basis, full agent reports as evidence, the lead agent's reflective synthesis on top.

@@ -2,7 +2,7 @@
 
 The output structure every adversarial and generative agent returns, regardless of task type, team composition, or phase. No fields may be omitted — even when a field has nothing to report, the agent must explicitly state that (e.g., "No position changes during this execution"). The Quality Sentinel measures against standards rather than argues, so it returns the specialized variant at the bottom of this file instead.
 
-The DM must process all eight fields when synthesizing results. Ignoring fields — particularly Persuasion Log, Mind Changes, Lingering Concerns, or Minority Views — defeats the adversarial quality signal CORE is designed to produce.
+The lead agent must process all eight fields when synthesizing results. Ignoring fields — particularly Persuasion Log, Mind Changes, Lingering Concerns, or Minority Views — defeats the adversarial quality signal CORE is designed to produce.
 
 ---
 
@@ -16,8 +16,8 @@ The DM must process all eight fields when synthesizing results. Ignoring fields 
 | 4 | **Persuasion Log** | array | Record of position changes caused by other agents. Each entry: who persuaded, what claim they made, how the position shifted, from-to summary. If no changes: "No position changes during this execution" — explicit statement required, empty array is not acceptable. |
 | 5 | **Mind Changes** | array | Intra-agent reconsiderations — moments where the agent changed its own mind during execution, independent of other agents. Each entry: initial position, trigger (what caused reconsideration), revised position, optional confidence delta. |
 | 6 | **Unanswered Questions** | array | Questions the agent couldn't resolve. For each: the question, what data/access would answer it, how the answer might change the result. |
-| 7 | **Lingering Concerns** | array | The DM's own reservations about the result — positions the DM holds even after the swarm has reached consensus. The DM must not discard these — they travel with the output and inform future work. |
-| 8 | **Minority Views** | array | Named, attributed positions from specific agents that were heard, understood, and not incorporated into the consensus result. Each entry: agent name, the position held, and why it wasn't adopted. Distinct from Lingering Concerns (which are the DM's reservations). Do not conflate. If no minority positions exist: "No minority views during this execution" — explicit statement required, empty array is not acceptable. |
+| 7 | **Lingering Concerns** | array | The lead agent's own reservations about the result — positions the lead agent holds even after the swarm has reached consensus. The lead agent must not discard these — they travel with the output and inform future work. |
+| 8 | **Minority Views** | array | Named, attributed positions from specific agents that were heard, understood, and not incorporated into the consensus result. Each entry: agent name, the position held, and why it wasn't adopted. Distinct from Lingering Concerns (which are the lead agent's reservations). Do not conflate. If no minority positions exist: "No minority views during this execution" — explicit statement required, empty array is not acceptable. |
 
 ---
 
@@ -28,7 +28,7 @@ Field 1 is what single-pass analysis produces. Fields 4–8 are where CORE's adv
 - **Persuasion Log** — Traceable chain of reasoning changes across agents. Shows exactly which argument changed which agent's mind and why. The most distinctive CORE innovation.
 - **Mind Changes** — Measures analytical depth. Persuasion Log tracks inter-agent influence; Mind Changes tracks intra-agent reasoning. Both are quality signals.
 - **Unanswered Questions** — A gift to future sessions. Tells the next agent exactly where to dig.
-- **Lingering Concerns** — The DM's intellectual honesty. These are the DM's own reservations held even after full swarm analysis — not agent positions, not unresolved questions, but the DM's personal dissent or caution that stays on record.
+- **Lingering Concerns** — The lead agent's intellectual honesty. These are the lead agent's own reservations held even after full swarm analysis — not agent positions, not unresolved questions, but the lead agent's personal dissent or caution that stays on record.
 - **Minority Views** — Agent intellectual honesty. The named, attributed positions that lost the consensus vote but were substantive enough to record. The raw data already exists in session logs — this field surfaces it explicitly. Example: "Minority View (Sentinel): The migration approach is sound under current load but carries brittleness risk at 10× scale. Heard; not adopted because near-term timelines don't require it."
 
 ---
@@ -36,9 +36,9 @@ Field 1 is what single-pass analysis produces. Fields 4–8 are where CORE's adv
 ## Enforcement
 
 - No fields may be omitted from any standard agent output. The Quality Sentinel's measurement variant below defines its own required sections.
-- The DM must process all eight fields during synthesis: reading, weighing, and incorporating into the synthesized result or explicitly noting why a concern was set aside.
-- DM synthesis warrants extended thinking — see the gate table in `agents/base-protocol.md` §"Extended thinking — when to use it".
-- Fields 7 and 8 are distinct and must not be conflated: Lingering Concerns are DM reservations; Minority Views are agent positions. Both travel with the output.
+- The lead agent must process all eight fields during synthesis: reading, weighing, and incorporating into the synthesized result or explicitly noting why a concern was set aside.
+- Lead-agent synthesis warrants extended thinking — see the gate table in `agents/base-protocol.md` §"Extended thinking — when to use it".
+- Fields 7 and 8 are distinct and must not be conflated: Lingering Concerns are lead-agent reservations; Minority Views are agent positions. Both travel with the output.
 
 ---
 
@@ -65,7 +65,7 @@ Unanswered Questions:
 - [Question]. Would need [data/access] to resolve. Could change [aspect of result].
 
 Lingering Concerns:
-- [DM reservation that survives the process — the DM's own dissent or caution]
+- [lead-agent reservation that survives the process — the lead agent's own dissent or caution]
 
 Minority Views:
 - [Agent name]: [Position held]. [Why it wasn't adopted into consensus].

@@ -14,11 +14,11 @@ Three surfaces, three responsibilities. Don't mix them.
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed per DC-74 so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
-- **DM operational meta** — `~/.core/` — your operational layer across projects. `dm-profile.md` is your cross-project home. `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
+- **Agent operational meta** — `~/.core/` — your operational layer across projects. `dm-profile.md` is your cross-project home. `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
 
 - **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
 
-The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's DM meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
+The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's agent meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
 
 There's a fourth surface that isn't CORE's to own but that CORE reads from: **harness-local recall** — Claude Code's `~/.claude/projects/*/memory/MEMORY.md`, Codex's `~/.codex/memories/`, equivalents in future harnesses. CORE treats this as scratch cache, never authoritative. See `dc-86-harness-local-memory-recall` for the principle and the `save-recall-note` adapter verb (resolved per `harnesses/<name>.md`) for the explicit-save mechanism. The trigger for invoking explicit-save — what user phrases mean "save this" to a given user — is install-level configuration in the user's `AGENTS.md`, not CORE prose.
 
@@ -575,7 +575,7 @@ Always read frontmatter to confirm a unit's status before relying on it; the fil
 
 ## Make the placement choice visible
 
-Before any non-exempt Write or Edit on a project-context, DM-meta, or skill-product artifact, narrate the placement choice in user-visible chat. The user should see where you're writing, what kind of surface it is, why that surface (especially if another reasonable surface exists), and what naming convention you're following. This isn't an approval gate — announce and proceed. The point is that placement decisions don't get smuggled past the user.
+Before any non-exempt Write or Edit on a project-context, agent-meta, or skill-product artifact, narrate the placement choice in user-visible chat. The user should see where you're writing, what kind of surface it is, why that surface (especially if another reasonable surface exists), and what naming convention you're following. This isn't an approval gate — announce and proceed. The point is that placement decisions don't get smuggled past the user.
 
 A natural-prose version is fine — *"Writing the swarm synthesis to `_outputs/<date>/<topic>/SYNTHESIS.md` as the per-topic output artifact; standard naming convention for swarm outputs."* A harness hook may inject a structured-format reminder on these writes (the CORE author's install wires one; most installs won't have it); that reminder is fine as machine-generated context, but your own voice in the chat is plain prose.
 
@@ -625,7 +625,7 @@ Three rings, one read at runtime.
 └── .claude/                       ← harness config + scripts
 ```
 
-**DM operational ring** — `~/.core/`
+**Agent operational ring** — `~/.core/`
 
 ```
 ~/.core/
@@ -650,7 +650,7 @@ Read-only at runtime. Writes require `intent: skill-edit` declaration.
 
 Removed in v2 (was present in v1, no longer applies):
 
-- The `routing sheet` as a 7-rule table for every write classification — replaced by surface-based routing (project / DM meta / skill product) with the PWD mechanic at the boundary.
+- The `routing sheet` as a 7-rule table for every write classification — replaced by surface-based routing (project / agent meta / skill product) with the PWD mechanic at the boundary.
 - The `file-shape classifier` and `auto-compaction strategy` — replaced by `protocols/hygiene.md` (three verbs: archive / retire / cold-store). Hygiene handles all compaction, retire, and archive operations.
 - Cowork capability-routing — Cowork is not a v2 target harness. The skill works on Claude Code Desktop's Code tab; future-Cowork support is its own design exercise.
 

@@ -1,12 +1,12 @@
 # CORE Retrieval Protocol (v2.0)
 
-How the DM (and Explore subagents acting on its behalf) gets information from the project's memory into context. Per DC-67/68/69.
+How the agent (and Explore subagents acting on its behalf) gets information from the project's memory into context. Per DC-67/68/69.
 
 ---
 
 ## The four tiers
 
-The DM checks these in order and stops as soon as the answer is sufficient. Escalation saves tokens — cheaper tiers run first.
+The agent checks these in order and stops as soon as the answer is sufficient. Escalation saves tokens — cheaper tiers run first.
 
 ### Tier 0 — Already loaded
 
@@ -84,7 +84,7 @@ The subagent runs its own Read + Grep + reasoning loop. It can follow edges or d
 
 The LLM reasoning inside the subagent IS the semantic layer. No precomputed embeddings. No vector store. The subagent handles synonymy, polysemy, negation, and context-dependent meaning in ways a vector similarity score cannot.
 
-**Degraded mode — no subagent tool available:** Some harnesses defer or omit the Agent/subagent tool, and it can be unavailable at retrieval time. Don't silently skip Tier 3 — run the same semantic pass inline: the DM performs an expanded Grep + Read loop over all topic-matched units (start from the Tier 1 lexical hits, widen the search terms with synonyms and adjacent vocabulary, read each candidate in full) and synthesizes the answer itself with file-path citations. Log the event with `tier_reached: 3` and `result: "degraded"` — or `result: "miss"` if nothing was found, since the event schema requires `miss` on an empty Tier 3 result — so retrieval-quality analysis can tell a true subagent pass from the inline fallback.
+**Degraded mode — no subagent tool available:** Some harnesses defer or omit the Agent/subagent tool, and it can be unavailable at retrieval time. Don't silently skip Tier 3 — run the same semantic pass inline: the agent performs an expanded Grep + Read loop over all topic-matched units (start from the Tier 1 lexical hits, widen the search terms with synonyms and adjacent vocabulary, read each candidate in full) and synthesizes the answer itself with file-path citations. Log the event with `tier_reached: 3` and `result: "degraded"` — or `result: "miss"` if nothing was found, since the event schema requires `miss` on an empty Tier 3 result — so retrieval-quality analysis can tell a true subagent pass from the inline fallback.
 
 **Cost discipline:** Tier 3 invocations cost tokens. Reserve for questions Tier 1+2 actually failed on. Every Tier 3 event — hit or miss — lands in the per-project retrieval log (`<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`) per the §Logging section below. The hygiene trip-wire check reads that log via `analyze-retrieval-quality.mjs` and detects repeated failures across sessions (per DC-67 trip-wire #3: documented repeated Explore-miss pattern earns a vector store).
 
