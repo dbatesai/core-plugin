@@ -17,6 +17,7 @@ export const VALID_TRIGGERS = new Set([
   'mid-conversation',
   'subagent',
   'refresh-context',
+  'per-turn-hook', // the canonical product-emitted event: retrieve-context-hook writes one per turn (2026-07-17)
 ]);
 
 const NON_NEGATIVE_INTEGER_FIELDS = [

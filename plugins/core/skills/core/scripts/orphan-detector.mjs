@@ -185,7 +185,12 @@ export function formatReport(r) {
     for (const s of r.orphanScripts) L.push(`  ✖ script  ${s}`);
     for (const p of r.orphanProtocols) L.push(`  ✖ protocol ${p} — not in the SKILL.md protocol index, so it never loads`);
   } else {
-    L.push('No un-allowlisted orphans. Every shipped mechanism is reachable.');
+    // Scope-honest closing line (Hale audit e1490d4 finding 2): this detector
+    // proves FILE-level reachability minus the allowlist — it does not check
+    // function-level wiring inside reachable files, and allowlisted entries are
+    // deliberate exceptions, not reachable mechanisms.
+    const allow = (r.allowlisted && r.allowlisted.length) || 0;
+    L.push(`No un-allowlisted orphans. File-level reachability holds${allow ? ` (${allow} allowlisted exception${allow === 1 ? '' : 's'} carried, each with a reason above)` : ''}; function-level wiring is not checked here.`);
   }
   return L.join('\n');
 }

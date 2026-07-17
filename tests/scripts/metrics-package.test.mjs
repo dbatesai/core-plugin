@@ -29,6 +29,8 @@ function makeFixtureProject(root, { plant = true } = {}) {
   mkdirSync(sessions, { recursive: true });
   writeFileSync(join(sessions, 'retrieval-log.jsonl'), [
     JSON.stringify({ kind: 'retrieval', ts: '2026-07-01T10:00:00Z', intent_topics: plant ? [PLANT_TOPIC] : ['a'], tier_reached: 1, units_retrieved: [{ id: 'dc-1-linked', tier: 1 }], dip_back_count: 0, candidate_count: 8, selected_count: 2, retired_suppressed_count: 1, stale_suppressed_count: 0, native_memory_suppressed_count: 0 }),
+    JSON.stringify({ kind: 'retrieval', ts: '2026-07-01T10:20:00Z', intent_topics: ['a2'], tier_reached: 1, units_retrieved: [{ id: 'dc-1-linked', tier: 1 }], dip_back_count: 0, candidate_count: 8, selected_count: 1 }),
+    JSON.stringify({ kind: 'retrieval', ts: '2026-07-01T10:40:00Z', intent_topics: ['a3'], tier_reached: 1, units_retrieved: [{ id: 'dc-1-linked', tier: 1 }], dip_back_count: 0, candidate_count: 8, selected_count: 1 }),
     JSON.stringify({ kind: 'retrieval', ts: '2026-07-01T11:00:00Z', intent_topics: ['b'], tier_reached: 3, result: 'miss', units_retrieved: [], dip_back_count: 1, candidate_count: 12, selected_count: 0 }),
   ].join('\n') + '\n');
   writeFileSync(join(sessions, 'hygiene-log.jsonl'), JSON.stringify({ ts: '2026-07-01T12:00:00Z', kind: 'demote-moves', demoted: 3 }) + '\n');
@@ -74,9 +76,12 @@ test('package never contains planted names, paths, topics, or raw unit ids', () 
     for (const tripwire of [PLANT_NAME, PLANT_PATH, PLANT_TOPIC, 'plantedusr', 'dc-1-linked', 'fixture-ws-alpha', home]) {
       assert.ok(!text.includes(tripwire), `tripwire must not appear: ${tripwire}`);
     }
-    // and the stats themselves are real: 2 events, 1 miss, tier histogram present
-    assert.match(text, /"events": 2/);
+    // and the stats themselves are real: 4 events, 1 miss, tier histogram present
+    assert.match(text, /"events": 4/);
     assert.match(text, /"misses": 1/);
+    // ranking suppressed below the population floor (3 active units < 50)
+    assert.match(text, /"top_retrieved_units": \[\]/);
+    assert.match(text, /population below 50 active units/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -95,7 +100,7 @@ test('pseudonyms are stable under one salt and rotate when the salt is deleted',
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('orphan rate counts active units only; archived orphans excluded', () => {
+test('orphan rate counts active units only; archived orphans excluded; small cells suppressed', () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-census-'));
   try {
     const project = makeFixtureProject(root, { plant: false });
@@ -105,6 +110,31 @@ test('orphan rate counts active units only; archived orphans excluded', () => {
     assert.equal(census.units_active, 3);
     assert.equal(census.orphans, 1, 'only the active orphan counts');
     assert.equal(census.orphan_rate, 0.333);
+    // histogram cells under k=3 fold into the suppressed aggregate (decision:1, risk:1)
+    assert.equal(census.by_type.decision, undefined, 'small cell suppressed');
+    assert.ok(census.by_type.suppressed && census.by_type.suppressed.k === 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('per-turn hook emits the canonical retrieval event from the product path', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-hook-'));
+  try {
+    const project = makeFixtureProject(root, { plant: false });
+    const hook = join(import.meta.dirname, '..', '..', 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
+    const res = spawnSync(process.execPath, [hook], {
+      encoding: 'utf8',
+      input: JSON.stringify({ prompt: 'linked decision risk', cwd: project }),
+      env: { ...process.env, CORE_RETRIEVAL_STORE: project },
+    });
+    assert.equal(res.status, 0, `hook exits clean: ${res.stderr}`);
+    const logs = readdirSync(join(project, '_sessions'));
+    const todayDir = logs.find(d => /^\d{4}-\d{2}-\d{2}$/.test(d) && existsSync(join(project, '_sessions', d, 'retrieval-log.jsonl')) && d !== '2026-07-01');
+    assert.ok(todayDir, 'a retrieval-log row landed under today\'s session dir');
+    const rows = readFileSync(join(project, '_sessions', todayDir, 'retrieval-log.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+    const evt = rows.find(r => r.trigger === 'per-turn-hook');
+    assert.ok(evt, 'canonical per-turn-hook event written by the product path');
+    assert.equal(evt.kind, 'retrieval');
+    assert.ok(Number.isInteger(evt.candidate_count));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -187,11 +217,12 @@ test('retrieval stats aggregate tiers, suppression, and pseudonymized top units'
     const seal = makeSeal('feedcafefeedcafe');
     const stats = retrievalStats(project, seal);
     assert.equal(stats.available, true);
+    assert.equal(stats._trust, 'proxy', 'retrieval corpus labeled proxy, not direct');
     const day = stats.days['2026-07-01'];
-    assert.equal(day.events, 2);
-    assert.deepEqual(day.tiers, { 1: 1, 3: 1 });
+    assert.equal(day.events, 4);
+    assert.deepEqual(day.tiers, { 1: 3, 3: 1 });
     assert.equal(day.suppressed.retired, 1);
-    assert.equal(stats.top_retrieved_units.length, 1);
+    assert.equal(stats.top_retrieved_units.length, 1, 'unit with 3 retrievals clears the count floor');
     assert.match(stats.top_retrieved_units[0].unit, /^unit-[0-9a-f]{12}$/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

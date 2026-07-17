@@ -55,6 +55,22 @@ const UNIT_TYPES = ['decision', 'risk', 'observation', 'person', 'reference', 'p
 const UNIT_STATUSES = ['active', 'retired', 'archived', 'superseded', 'draft'];
 const EDGE_TYPES = ['cites', 'depends-on', 'supersedes', 'supersedes-claim', 'refines', 'amends', 'conflicts-with', 'references-topic'];
 const RECOGNITION_STATES = ['rec-fail-tier-0', 'rec-fail-tier-1', 'rec-partial', 'rec-full', 'capture-only', 'no-recognition-target', 'unclassified'];
+// Code-owned enums for every remaining string source (Hale audit e1490d4 finding 7:
+// a shape check like kebab-case is NOT a privacy boundary — user-derived values can
+// be kebab-shaped. Only these exact values pass; everything else folds to 'other').
+const HYGIENE_KINDS = ['compact-project', 'demote-moves', 'demote-moves-large-batch', 'demote-state', 'demote-state-large-batch', 'project-md-over-cap', 'maintenance-run'];
+const MAINTENANCE_OPS = ['decisions-index', 'risks-index', 'summary-index'];
+const CAPABILITY_IDS = ['plugin-root-resolution', 'target-surface-collab-files', 'auto-memory-injection', 'anti-anchoring-mechanism', 'instruction-surface-resolution', 'memory-visible-in-agent-context', 'memory-accessed'];
+// Committed trust vocabulary (proven-live / direct / proxy / provisional) — the
+// same enum /metrics uses; a separate basis string explains, never upgrades.
+const TRUST = { PROVEN_LIVE: 'proven-live', DIRECT: 'direct', PROXY: 'proxy', PROVISIONAL: 'provisional' };
+// k-anonymity-style small-cell threshold for histograms keyed by open-ended
+// dimensions (months); cells under k fold into a suppressed aggregate.
+const SMALL_CELL_K = 3;
+// Per-unit rankings only ship from stores large enough that a row can't
+// fingerprint a specific unit's identity by position.
+const RANKING_MIN_POPULATION = 50;
+const RANKING_MIN_COUNT = 3;
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -64,11 +80,17 @@ function fold(value, whitelist) {
   return whitelist.includes(value) ? value : 'other';
 }
 
-// Vocabulary guard: a string survives only if it already looks like fixed CORE
-// vocabulary (kebab/dotted identifier). Anything else folds to 'other' WHOLE —
-// stripping characters could let user vocabulary partially survive.
-function safeVocab(value, max = 40) {
-  return (typeof value === 'string' && /^[a-z0-9][a-z0-9.-]*$/i.test(value)) ? value.slice(0, max) : 'other';
+// Small-cell suppression: cells with 0 < count < k fold into one aggregate so a
+// rare category can't fingerprint the store across packages (Hale finding 6).
+function suppressSmallCells(hist, k = SMALL_CELL_K) {
+  const out = {};
+  let suppressedCells = 0; let suppressedTotal = 0;
+  for (const [key, count] of Object.entries(hist)) {
+    if (count > 0 && count < k) { suppressedCells += 1; suppressedTotal += count; }
+    else out[key] = count;
+  }
+  if (suppressedCells) out.suppressed = { cells: suppressedCells, total: suppressedTotal, k };
+  return out;
 }
 
 function readJsonlSafe(file) {
@@ -127,7 +149,8 @@ function listSessionLogs(projectDir, logName) {
 
 export function retrievalStats(projectDir, seal) {
   const logs = listSessionLogs(projectDir, 'retrieval-log.jsonl');
-  if (!logs.length) return { available: false, reason: 'no retrieval-log.jsonl under _sessions/', _trust: 'direct (event log)' };
+  const trust = { _trust: TRUST.PROXY, _trust_basis: 'event log with mixed provenance: agent-recorded rows plus (from 2026-07-17) product-emitted per-turn-hook rows; label upgrades to direct when the corpus is fully product-emitted' };
+  if (!logs.length) return { available: false, reason: 'no retrieval-log.jsonl under _sessions/', ...trust };
   const days = {};
   const unitFreq = new Map();
   let badLines = 0;
@@ -172,11 +195,14 @@ export function retrievalStats(projectDir, seal) {
       suppressed: day.suppressed,
     };
   }
+  // Rankings ship only above the population/count floors — set by the caller
+  // (collectProject) which knows the store size; raw frequency map stays internal.
   const topUnits = [...unitFreq.entries()]
+    .filter(([, n]) => n >= RANKING_MIN_COUNT)
     .sort((a, b) => b[1] - a[1]).slice(0, 25)
     .map(([id, n]) => ({ unit: seal('unit', id), retrievals: n }));
   return {
-    available: true, _trust: 'direct (event log)', days, totals,
+    available: true, ...trust, days, totals,
     escalation_rate: totals.events ? round3(totals.escalations / totals.events) : null,
     dip_back_rate: totals.events ? round3(totals.dip_backs / totals.events) : null,
     top_retrieved_units: topUnits, malformed_lines: badLines,
@@ -185,7 +211,7 @@ export function retrievalStats(projectDir, seal) {
 
 export function hygieneStats(projectDir) {
   const logs = listSessionLogs(projectDir, 'hygiene-log.jsonl');
-  if (!logs.length) return { available: false, reason: 'no hygiene-log.jsonl under _sessions/', _trust: 'direct (op log)' };
+  if (!logs.length) return { available: false, reason: 'no hygiene-log.jsonl under _sessions/', _trust: TRUST.DIRECT, _trust_basis: 'script-written op log' };
   const days = {};
   const demoteBatches = [];
   let overCap = 0;
@@ -193,19 +219,19 @@ export function hygieneStats(projectDir) {
     const { rows } = readJsonlSafe(file);
     const ops = {};
     for (const r of rows) {
-      const kind = safeVocab(r.kind);
+      const kind = fold(String(r.kind || 'other'), HYGIENE_KINDS);
       ops[kind] = (ops[kind] || 0) + 1;
       if (kind === 'demote-moves' && num(r.demoted) != null) demoteBatches.push(r.demoted);
       if (kind === 'project-md-over-cap') overCap += 1;
     }
     days[date] = { ops };
   }
-  return { available: true, _trust: 'direct (op log)', days, demote_batches: demoteBatches, over_cap_events: overCap };
+  return { available: true, _trust: TRUST.DIRECT, _trust_basis: 'script-written op log', days, demote_batches: demoteBatches, over_cap_events: overCap };
 }
 
 export function storeCensus(projectDir) {
   const store = join(projectDir, '_memories');
-  if (!existsSync(store)) return { available: false, reason: 'no _memories/ unit store', _trust: 'direct (store walk)' };
+  if (!existsSync(store)) return { available: false, reason: 'no _memories/ unit store', _trust: TRUST.DIRECT, _trust_basis: 'store walk' };
   const unitFiles = [];
   const walk = (dir) => {
     for (const name of readdirSync(dir)) {
@@ -258,21 +284,21 @@ export function storeCensus(projectDir) {
   }
   const active = activeIds.size;
   return {
-    available: true, _trust: 'direct (store walk)',
-    units_total: ids.size, units_active: active, by_type: byType, by_status: byStatus,
-    edges_by_type: edgesByType,
+    available: true, _trust: TRUST.DIRECT, _trust_basis: 'store walk',
+    units_total: ids.size, units_active: active, by_type: suppressSmallCells(byType), by_status: suppressSmallCells(byStatus),
+    edges_by_type: suppressSmallCells(edgesByType),
     edges_total: Object.values(edgesByType).reduce((a, b) => a + b, 0),
     orphans, orphan_rate: active ? round3(orphans / active) : null,
     link_density: active ? round3(linked / active) : null,
-    created_by_month: createdByMonth,
+    created_by_month: suppressSmallCells(createdByMonth),
   };
 }
 
 export function validatorStats(projectDir) {
   const checker = join(scriptDir, 'check-units.mjs');
-  if (!existsSync(checker)) return { available: false, reason: 'check-units.mjs not found beside this script', _trust: 'direct (validator run)' };
+  if (!existsSync(checker)) return { available: false, reason: 'check-units.mjs not found beside this script', _trust: TRUST.DIRECT, _trust_basis: 'validator run' };
   const res = spawnSync(process.execPath, [checker, '--store', projectDir, '--integrity'], { encoding: 'utf8', timeout: 120_000 });
-  if (res.error || res.stdout == null) return { available: false, reason: 'check-units run failed', _trust: 'direct (validator run)' };
+  if (res.error || res.stdout == null) return { available: false, reason: 'check-units run failed', _trust: TRUST.DIRECT, _trust_basis: 'validator run' };
   const out = res.stdout;
   const summary = out.match(/PASS:\s*(\d+)\s+WARN:\s*(\d+)\s+FAIL:\s*(\d+)/);
   const byCheck = {};
@@ -280,7 +306,7 @@ export function validatorStats(projectDir) {
     byCheck[m[1]] = (byCheck[m[1]] || 0) + 1;
   }
   return {
-    available: true, _trust: 'direct (validator run)',
+    available: true, _trust: TRUST.DIRECT, _trust_basis: 'validator run',
     pass: summary ? +summary[1] : null, warn: summary ? +summary[2] : null, fail: summary ? +summary[3] : null,
     warns_by_check: byCheck, exit_code: res.status,
   };
@@ -288,17 +314,17 @@ export function validatorStats(projectDir) {
 
 export function projectMdStats(projectDir) {
   const p = join(projectDir, 'PROJECT.md');
-  if (!existsSync(p)) return { available: false, reason: 'no PROJECT.md', _trust: 'direct (file stat)' };
+  if (!existsSync(p)) return { available: false, reason: 'no PROJECT.md', _trust: TRUST.DIRECT, _trust_basis: 'file stat' };
   const bytes = statSync(p).size;
   return {
-    available: true, _trust: 'direct (file stat)', bytes,
+    available: true, _trust: TRUST.DIRECT, _trust_basis: 'file stat', bytes,
     estimated_tokens: Math.round(bytes * 0.30),
     over_soft_cap: bytes > 70 * 1024,
   };
 }
 
 export function maintenanceStats(projectDir) {
-  const out = { available: false, reason: 'no _maintenance-state.json or _pm-state.json', _trust: 'direct (state file)' };
+  const out = { available: false, reason: 'no _maintenance-state.json or _pm-state.json', _trust: TRUST.DIRECT, _trust_basis: 'state file' };
   const mPath = join(projectDir, '_memories', '_maintenance-state.json');
   const pmPath = join(projectDir, '_memories', '_pm-state.json');
   const ops = {};
@@ -307,7 +333,7 @@ export function maintenanceStats(projectDir) {
     try {
       const j = JSON.parse(readFileSync(mPath, 'utf8'));
       for (const [name, v] of Object.entries(j.ops || {})) {
-        ops[safeVocab(name)] = { run_count: num(v.run_count), last_run: isoDay(v.last_run) };
+        ops[fold(String(name), MAINTENANCE_OPS)] = { run_count: num(v.run_count), last_run: isoDay(v.last_run) };
       }
       any = true;
     } catch { /* fall through to availability */ }
@@ -317,15 +343,15 @@ export function maintenanceStats(projectDir) {
     try { pmLastRun = isoDay(JSON.parse(readFileSync(pmPath, 'utf8')).last_run); any = true; } catch { /* ignore */ }
   }
   if (!any) return out;
-  return { available: true, _trust: 'direct (state file)', ops, pm_last_run: pmLastRun };
+  return { available: true, _trust: TRUST.DIRECT, _trust_basis: 'state file', ops, pm_last_run: pmLastRun };
 }
 
 export function workspaceMetrics(home, workspaceId) {
-  if (!workspaceId) return { available: false, reason: 'no workspace.json pointer (project not registered)', _trust: 'direct (metrics layer)' };
+  if (!workspaceId) return { available: false, reason: 'no workspace.json pointer (project not registered)', _trust: TRUST.DIRECT, _trust_basis: 'metrics layer' };
   const wsDir = join(home, '.core', 'workspaces', workspaceId);
-  if (!existsSync(wsDir)) return { available: false, reason: 'workspace meta dir absent', _trust: 'direct (metrics layer)' };
+  if (!existsSync(wsDir)) return { available: false, reason: 'workspace meta dir absent', _trust: TRUST.DIRECT, _trust_basis: 'metrics layer' };
 
-  const recognition = { available: false, reason: 'no classified turn files', days: {} };
+  const recognition = { available: false, reason: 'no classified turn files', _trust: TRUST.PROVISIONAL, _trust_basis: 'classifier has not cleared its calibration gate — trends only, never levels', days: {} };
   const clsDir = join(wsDir, 'metrics', 'classified');
   if (existsSync(clsDir)) {
     for (const f of readdirSync(clsDir).sort()) {
@@ -353,7 +379,7 @@ export function workspaceMetrics(home, workspaceId) {
         available: true,
         labels_count: num(j.labels_count ?? j.label_count ?? j.labels) ?? null,
         cleared: j.cleared === true,
-        classifier_version: safeVocab(j.classifier_version, 20),
+        classifier_version: (typeof j.classifier_version === 'string' && /^\d+\.\d+\.\d+$/.test(j.classifier_version)) ? j.classifier_version : null,
       };
     } catch { calibration = { available: false, reason: 'calibration-state.json unparseable' }; }
   }
@@ -365,7 +391,7 @@ export function workspaceMetrics(home, workspaceId) {
     const byCap = {};
     for (const r of rows) {
       const row = r.row || r;
-      const id = safeVocab(row.capability_id, 60);
+      const id = fold(String(row.capability_id || 'other'), CAPABILITY_IDS);
       if (id === 'other') continue;
       const raw = JSON.stringify(row);
       const verdict = /"DEGRADED"/.test(raw) ? 'degraded' : (/"PASS"/.test(raw) ? 'pass' : 'other');
@@ -373,13 +399,10 @@ export function workspaceMetrics(home, workspaceId) {
       byCap[id][verdict] += 1;
       byCap[id].last = verdict;
     }
-    if (Object.keys(byCap).length) capability = { available: true, by_capability: byCap, snapshots: rows.length };
+    if (Object.keys(byCap).length) capability = { available: true, _trust: TRUST.DIRECT, _trust_basis: 'probe history', by_capability: byCap, snapshots: rows.length };
   }
 
-  return {
-    available: true, _trust: 'recognition: provisional (classifier uncalibrated); capability: direct (probe history)',
-    recognition, calibration, capability,
-  };
+  return { available: true, recognition, calibration, capability };
 }
 
 // ---------- headline, deltas, flags ----------
@@ -531,6 +554,14 @@ export function collectProject(projectDir, { home, seal }) {
     'maintenance': maintenanceStats(projectDir),
     'workspace-metrics': workspaceMetrics(home, workspaceId),
   };
+  // Population gate on per-unit rankings (Hale finding 6): below the floor a
+  // ranking row can fingerprint a specific unit across packages.
+  const census = blocks['store-census'];
+  const retrieval = blocks['retrieval-stats'];
+  if (retrieval?.available && (!census?.available || (census.units_active || 0) < RANKING_MIN_POPULATION)) {
+    retrieval.top_retrieved_units = [];
+    retrieval.top_retrieved_units_suppressed = `population below ${RANKING_MIN_POPULATION} active units`;
+  }
   const hl = headline(blocks);
   const flags = computeFlags(blocks, hl);
   return { pseudonym, blocks, headline: hl, flags };
@@ -626,6 +657,7 @@ export function runPackage(argv, { homeOverride } = {}) {
     mode: flagsIn.all ? 'all-projects' : 'single-project',
     plugin,
     pseudonym_note: 'Ids are HMAC pseudonyms from a local salt that never ships; stable per install. Deleting ~/.core/metrics-package-salt rotates them.',
+    residual_risk: 'Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across packages from one install (rotate the salt to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.',
     salt_rotated_this_run: saltCreated,
     coverage,
   };

@@ -336,7 +336,10 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
       expansion: stages.expanded,
       final: stages.final,
     },
-    pack: { accepted: pack.accepted, excluded: pack.excluded, bytes: pack.bytes, warnings: pack.warnings },
+    // `text` rides the trace so a single pipeline run can serve BOTH the injection
+    // (the hook prints it) and the evidence record — the per-turn hook is this
+    // function's production caller (Hale audit e1490d4 finding 1, closed 2026-07-17).
+    pack: { accepted: pack.accepted, excluded: pack.excluded, bytes: pack.bytes, warnings: pack.warnings, text: pack.text },
     timing_ms: +elapsedMs.toFixed(2),
   };
 }

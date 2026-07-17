@@ -28,8 +28,11 @@
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  */
 
-import { readFileSync } from 'node:fs';
-import { retrieveContext, storeHealth, buildFinalContextPack } from '../scripts/retrieve-context.mjs';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
+import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
+import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
@@ -49,18 +52,52 @@ async function main() {
   if (!prompt.trim()) return 0;
 
   const store = process.env.CORE_RETRIEVAL_STORE || payload.cwd || process.cwd();
+  if (!existsSync(join(store, '_memories'))) return 0;
 
-  let hits = [];
-  try { hits = retrieveContext(prompt, store, { topN: TOP_N }); } catch { return 0; }
-  if (!hits.length) return 0;
+  // ONE pipeline run serves both jobs (2026-07-17, closes Hale audit finding 1 +
+  // finding 4 on e1490d4): buildRetrievalTrace runs the same staged pipeline as
+  // retrieveContext and carries the delivered pack — the hook injects pack.text
+  // and emits the canonical per-turn retrieval event from the same run, so the
+  // telemetry corpus is product-emitted, not agent-behavior-dependent.
+  let trace = null;
+  try { trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap: OUTPUT_BYTE_CAP }); } catch { return 0; }
+  if (!trace || trace.storeless || !trace.stages) return 0;
 
-  // Thin adapter from here down (Train A A4): ordering, tier labels, byte cap,
-  // and the degraded warning all live in buildFinalContextPack — the sole
-  // final-pack implementation the evaluator imports too. No formatting here.
-  let health = null;
-  try { health = storeHealth(store); } catch { /* health is advisory, never blocking */ }
-  const pack = buildFinalContextPack(hits, { byteCap: OUTPUT_BYTE_CAP, health });
-  if (pack.text) process.stdout.write(pack.text);
+  const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
+
+  // Canonical per-turn product event — always on when metrics capture is on
+  // (DC-107 default-ON, opt-out). Fail-open: a telemetry failure must never
+  // block or degrade the user's turn.
+  try {
+    if (metricsEnabled({ project: store })) {
+      const clampTier = (t) => Math.min(3, Math.max(1, Number.isInteger(t) ? t : 1));
+      const tiers = final.map((h) => clampTier(h.tier));
+      const tierReached = tiers.length ? Math.max(...tiers) : 3;
+      recordRetrievalEvent(store, {
+        trigger: 'per-turn-hook',
+        intent_topics: ['per-turn'], // the prompt itself is not restated into the log row
+        tier_reached: tiers.length ? tierReached : 3,
+        escalation_path: tiers.length ? [...new Set([1, tierReached])].sort() : [1, 2, 3],
+        units_retrieved: final.map((h) => ({ id: String(h.id), tier: clampTier(h.tier) })),
+        ...(final.length === 0 ? { result: 'miss' } : {}),
+        dip_back_count: 0,
+        candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : final.length,
+        selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : final.length,
+        context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
+      });
+    }
+  } catch { /* fail-open by contract */ }
+
+  // Full trace persistence is opt-in (CORE_RETRIEVAL_TRACE=1): the trace is a
+  // deep diagnostic with per-stage payloads; the EVENT above is the always-on
+  // canonical record. Local-only either way.
+  try {
+    if (process.env.CORE_RETRIEVAL_TRACE === '1' && metricsEnabled({ project: store })) {
+      logEvent(store, 'retrieval-trace.jsonl', trace);
+    }
+  } catch { /* fail-open by contract */ }
+
+  if (trace.pack && trace.pack.text) process.stdout.write(trace.pack.text);
   return 0;
 }
 

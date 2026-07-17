@@ -23,14 +23,14 @@ export function buildReportMd({ manifest, projects }) {
   lines.push('');
   lines.push(`Generated ${manifest.generated_at} · mode: ${manifest.mode} · plugin ${manifest.plugin ? `v${manifest.plugin.version}${manifest.plugin.build ? ` build ${manifest.plugin.build}` : ''}` : 'unknown'} · schema ${manifest.schema_version}`);
   lines.push('');
-  lines.push('This package exists for one purpose: feedback for refining CORE. Every value is a number, date, fixed CORE vocabulary, or a salted pseudonym — real project content never enters it. Pseudonyms are stable per install (delete `~/.core/metrics-package-salt` to rotate them). Trust labels: `direct` = computed from an event log or store walk; `provisional` = the classifier behind it has not cleared calibration — read trends, not levels.');
+  lines.push('This package exists for one purpose: feedback for refining CORE. Every value is a number, date, fixed CORE vocabulary, or a salted pseudonym — free text is dropped at generation, never copied. Residual risk is minimized, not zero: stable pseudonyms link the same anonymous project across packages from one install (delete `~/.core/metrics-package-salt` to sever); small cells are suppressed at k=3; per-unit rankings gate on store population. Trust labels use the committed vocabulary — `proven-live` / `direct` / `proxy` / `provisional` — with a basis note per block: retrieval stats are `proxy` until the corpus is fully product-emitted; recognition stays `provisional` until the classifier clears calibration (read trends, not levels).');
   lines.push('');
   for (const proj of projects) {
     lines.push(`## ${proj.pseudonym}`);
     lines.push('');
     const h = proj.headline;
     lines.push(`- **Store:** ${numOr(h.units_total)} units, ${numOr(h.edges_total)} edges · link density ${pct(h.link_density)} · orphan rate ${pct(h.orphan_rate)} *(direct)*`);
-    lines.push(`- **Retrieval:** ${numOr(h.retrieval_events_total)} logged events · escalation past lexical ${pct(h.escalation_rate)} · dip-back rate ${pct(h.dip_back_rate)} · ${numOr(h.miss_total, '0')} misses *(direct)*`);
+    lines.push(`- **Retrieval:** ${numOr(h.retrieval_events_total)} logged events · escalation past lexical ${pct(h.escalation_rate)} · dip-back rate ${pct(h.dip_back_rate)} · ${numOr(h.miss_total, '0')} misses *(proxy — corpus not yet fully product-emitted)*`);
     lines.push(`- **Validator:** ${numOr(h.warn_total)} warnings, ${numOr(h.fail_total, '0')} failures *(direct)*`);
     lines.push(`- **Recognition:** latest rec-fail rate ${pct(h.recfail_latest_rate)} *(provisional — uncalibrated classifier)*`);
     lines.push(`- **PROJECT.md:** ${h.project_md_bytes != null ? `${Math.round(h.project_md_bytes / 1024)}KB` : '—'}`);
@@ -163,7 +163,7 @@ export function buildReportHtml({ manifest, projects }) {
       tile(numOr(h.units_total), 'units in store', 'direct'),
       tile(pct(h.link_density), 'link density', 'direct'),
       tile(pct(h.orphan_rate), 'orphan rate', 'direct'),
-      tile(pct(h.escalation_rate), 'retrieval escalation', 'direct'),
+      tile(pct(h.escalation_rate), 'retrieval escalation', 'proxy'),
       tile(pct(h.recfail_latest_rate), 'latest rec-fail', 'provisional'),
       tile(numOr(h.warn_total), 'validator warnings', 'direct'),
     ].join('');
@@ -217,6 +217,6 @@ export function buildReportHtml({ manifest, projects }) {
 <h1>CORE memory-efficacy package</h1>
 <div class="sub">Generated ${esc(manifest.generated_at)} · ${esc(manifest.mode)} · plugin ${manifest.plugin ? `v${esc(manifest.plugin.version)}` : 'unknown'} · anonymized: pseudonyms + aggregates only</div>
 ${sections}
-<div class="note">Every value is a number, date, fixed CORE vocabulary, or salted pseudonym. Trust labels: direct = event log / store walk; provisional = classifier not yet calibrated (read trends, not levels). Machine-readable blocks: projects/&lt;pseudonym&gt;/*.json.</div>
+<div class="note">Every value is a number, date, fixed CORE vocabulary, or salted pseudonym; free text is dropped at generation. Residual risk minimized, not zero — see manifest.json. Trust labels (committed vocabulary): direct = event log / store walk; proxy = behavior-dependent corpus; provisional = classifier not yet calibrated (read trends, not levels). Machine-readable blocks: projects/&lt;pseudonym&gt;/*.json.</div>
 </div></body>`;
 }

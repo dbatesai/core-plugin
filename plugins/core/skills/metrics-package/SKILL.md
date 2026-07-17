@@ -10,7 +10,7 @@ allowed-tools:
 
 # `/metrics-package`
 
-Produce the anonymized memory-efficacy package: a zip on the user's Desktop containing retrieval, recognition, store-health, hygiene, and capability statistics — numbers, dates, fixed CORE vocabulary, and salted pseudonyms only. Its one purpose is feedback for refining CORE. It is safe to share across strict data boundaries because real project content never enters it by construction.
+Produce the anonymized memory-efficacy package: a zip on the user's Desktop containing retrieval, recognition, store-health, hygiene, and capability statistics — numbers, dates, fixed CORE vocabulary, and salted pseudonyms only. Its one purpose is feedback for refining CORE. It is built to be shareable across strict data boundaries: real project content never enters it by construction, small cells are suppressed, per-unit rankings gate on store population — and the residual risks that remain (stable pseudonyms link packages from one install; daily counts could correlate with visible activity) are named honestly in the package's own manifest rather than claimed away.
 
 **The script is the only writer.** `scripts/metrics-package.mjs` (in the core skill's `scripts/` directory) computes every byte of the package and runs a fail-closed leakage scan before shipping. Never assemble, edit, or "fix up" package contents by hand — the anonymization boundary is prescriptive code (DC-77), and a hand-patched package voids it.
 
@@ -42,7 +42,7 @@ node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" <project-dir-or---al
 - **No Desktop directory:** the script already fell back to the home directory — read the printed path and name the actual landing spot; don't assume Desktop.
 - **Zip tool unavailable:** the script ships a plain folder instead and says why — relay that, don't treat it as failure.
 - **Salt file deleted since the last package:** pseudonyms rotated; the manifest records it (`salt_rotated_this_run`) — mention that older packages are no longer comparable.
-- **User asks to include real names, bodies, paths, or to "de-anonymize just this once":** decline and explain — the package's entire value is that it's shareable without trust; a de-anonymized variant is just a data export CORE deliberately doesn't produce. Produce the standard package instead.
+- **User asks to include real names, bodies, paths, or to "de-anonymize just this once":** decline and explain — the package's entire value is that it can cross data boundaries its raw sources can't; a de-anonymized variant is just a data export CORE deliberately doesn't produce. Produce the standard package instead.
 
 ## What's inside (for "what's actually IN the zip?")
 
