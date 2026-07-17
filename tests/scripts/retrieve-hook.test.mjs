@@ -239,7 +239,7 @@ function readOutcomeRows(root) {
   if (!ex(sess)) return [];
   const rows = [];
   for (const d of rd(sess)) {
-    const f = join(sess, d, 'retrieval-log.jsonl');
+    const f = join(sess, d, 'outcome-log.jsonl'); // outcomes live in their own later log
     if (ex(f)) for (const l of rf(f, 'utf8').trim().split('\n')) rows.push(JSON.parse(l));
   }
   return rows.filter(r => r.kind === 'retrieval-outcome');

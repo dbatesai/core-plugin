@@ -166,10 +166,12 @@ export async function main() {
       // — and the pending record is persisted only after the retrieval row
       // write is proven below.
       const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
+      // Runtime-resolved harness, never a hard-coded fallback (Hale Codex
+      // adapter note): unknown runtime => no outcome identity => no rows.
       const harness = process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDECODE ? 'claude-code'
-        : (process.env.CODEX_SESSION_ID || process.env.CODEX_PLUGIN_ROOT ? 'codex' : 'claude-code');
+        : (process.env.CODEX_SESSION_ID || process.env.CODEX_PLUGIN_ROOT ? 'codex' : null);
       const queryTermsEarly = tokenize(prompt).slice(0, 8);
-      const pendingFile = sessionId
+      const pendingFile = sessionId && harness
         ? join(store, '_memories', '_lib', `pending-retrieval-${harness}-${sessionId.slice(0, 24)}.json`)
         : null;
       if (pendingFile) {

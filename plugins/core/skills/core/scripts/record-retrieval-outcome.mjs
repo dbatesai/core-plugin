@@ -17,6 +17,22 @@ export function outcomeLockPath(projectDir) {
   return join(projectDir, '_sessions', '.retrieval-outcome.lock');
 }
 
+function outcomeRows(projectDir) {
+  const sessions = join(projectDir, '_sessions');
+  if (!existsSync(sessions)) return [];
+  const rows = [];
+  for (const date of readdirSync(sessions).sort()) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const file = join(sessions, date, 'outcome-log.jsonl');
+    if (!existsSync(file)) continue;
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try { rows.push(JSON.parse(line)); } catch { /* malformed evidence is not a match */ }
+    }
+  }
+  return rows;
+}
+
 function retrievalRows(projectDir) {
   const sessions = join(projectDir, '_sessions');
   if (!existsSync(sessions)) return [];
@@ -85,10 +101,12 @@ export function recordRetrievalOutcome(projectDir, input, opts = {}) {
     const rows = retrievalRows(projectDir);
     const bases = rows.filter(row => row.kind === 'retrieval' && row.retrieval_id === record.retrieval_id);
     if (bases.length !== 1) throw new Error(`retrieval_id must identify exactly one retrieval; found ${bases.length}`);
-    if (rows.some(row => row.kind === 'retrieval-outcome' && row.retrieval_id === record.retrieval_id)) {
+    if (outcomeRows(projectDir).some(row => row.kind === 'retrieval-outcome' && row.retrieval_id === record.retrieval_id)) {
       throw new Error(`retrieval ${record.retrieval_id} already has an outcome`);
     }
-    const writeOutcome = logEvent(projectDir, 'retrieval-log.jsonl', record, opts) || { legacy: false, otel: false, reason: 'no-outcome' };
+    // SEPARATE later outcome log (Hale stop-note, 2026-07-17): outcome rows
+    // never enter the append-only retrieval log they judge.
+    const writeOutcome = logEvent(projectDir, 'outcome-log.jsonl', record, opts) || { legacy: false, otel: false, reason: 'no-outcome' };
     return { record, written: writeOutcome.legacy === true, write_outcome: writeOutcome };
   } finally {
     releaseFileLock(outcomeLockPath(projectDir), lock.nonce);
@@ -107,7 +125,11 @@ export function main(argv) {
     const result = recordRetrievalOutcome(projectDir, {
       retrieval_id: flags.get('retrieval-id'),
       usefulness_outcome: flags.get('outcome'),
-      evidence_kind: flags.get('evidence-kind'),
+      evidence_authority: flags.get('evidence-authority'),
+      harness: flags.get('harness'),
+      session_id: flags.get('session-id'),
+      answer_turn_id: flags.get('answer-turn-id'),
+      producer_version: flags.get('producer-version'),
       note: flags.get('note'),
     });
     process.stdout.write(`${JSON.stringify({ written: result.written, write_outcome: result.write_outcome })}\n`);

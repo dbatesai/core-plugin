@@ -281,3 +281,27 @@ test('retrieval stats join outcome rows by retrieval_id without counting them as
     });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('separate-log outcomes join by authority: conflict at equal authority resolves unknown; unknown never in denominators', async () => {
+  const { retrievalStats, makeSeal } = await import('../../plugins/core/skills/core/scripts/metrics-package.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'mp-sep-join-'));
+  try {
+    const sess = join(root, '_sessions', '2026-07-17');
+    mkdirSync(sess, { recursive: true });
+    writeFileSync(join(sess, 'retrieval-log.jsonl'), [
+      JSON.stringify({ kind: 'retrieval', ts: '2026-07-17T01:00:00Z', retrieval_id: 'r-1', intent_topics: ['a'], tier_reached: 1, escalation_path: [1], units_retrieved: [{ id: 'u1', tier: 1 }] }),
+      JSON.stringify({ kind: 'retrieval', ts: '2026-07-17T01:10:00Z', retrieval_id: 'r-2', intent_topics: ['b'], tier_reached: 1, escalation_path: [1], units_retrieved: [{ id: 'u1', tier: 1 }] }),
+    ].join('\n') + '\n');
+    writeFileSync(join(sess, 'outcome-log.jsonl'), [
+      // r-1: weak automatic unknown FIRST, then stronger user-confirmed useful — stronger evidence must win (never first-row-wins)
+      JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'unknown', evidence_authority: 'unobservable' }),
+      JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'useful', evidence_authority: 'user-confirmed' }),
+      // r-2: equal-authority conflict — resolves to unknown, which never enters a denominator
+      JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'r-2', usefulness_outcome: 'useful', evidence_authority: 'agent-attribution' }),
+      JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'r-2', usefulness_outcome: 'miss', evidence_authority: 'agent-attribution' }),
+    ].join('\n') + '\n');
+    const stats = retrievalStats(root, makeSeal('cafe'.repeat(8)));
+    const day = stats.days['2026-07-17'];
+    assert.deepEqual(day.outcomes, { useful: 1 }, 'stronger evidence wins r-1; r-2 conflict resolves unknown and stays out of denominators');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

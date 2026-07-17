@@ -24,9 +24,13 @@ test('writes one evidence-qualified outcome for an existing retrieval', () => {
     assert.deepEqual(result.record, {
       kind: 'retrieval-outcome', schema_version: '1.1.0', retrieval_id: 'r-1', usefulness_outcome: 'partial', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1',
     });
-    const rows = readFileSync(join(project, '_sessions', '2026-07-17', 'retrieval-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
-    assert.equal(rows.length, 2);
-    assert.deepEqual(rows[1], { ts: '2026-07-17T03:00:00Z', ...result.record });
+    // Outcomes live in a SEPARATE later log (Hale stop-note): the retrieval
+    // log they judge stays untouched.
+    const baseRows = readFileSync(join(project, '_sessions', '2026-07-17', 'retrieval-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(baseRows.length, 1, 'retrieval log untouched');
+    const rows = readFileSync(join(project, '_sessions', '2026-07-17', 'outcome-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0], { ts: '2026-07-17T03:00:00Z', ...result.record });
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 

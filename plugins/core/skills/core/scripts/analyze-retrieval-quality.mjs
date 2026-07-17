@@ -70,13 +70,15 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
     const date = _parseSessionDate(name);
     if (!date) continue;
     if (cutoff && date < cutoff) continue;
-    const logPath = join(sessionsDir, name, 'retrieval-log.jsonl');
-    let raw;
-    try { raw = readFileSync(logPath, 'utf8'); } catch { continue; }
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try { events.push(JSON.parse(trimmed)); } catch { /* malformed line — skip */ }
+    for (const logName of ['retrieval-log.jsonl', 'outcome-log.jsonl']) {
+      const logPath = join(sessionsDir, name, logName);
+      let raw;
+      try { raw = readFileSync(logPath, 'utf8'); } catch { continue; }
+      for (const line of raw.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try { events.push(JSON.parse(trimmed)); } catch { /* malformed line — skip */ }
+      }
     }
   }
   return events;

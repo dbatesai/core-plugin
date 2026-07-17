@@ -116,7 +116,7 @@ test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 
 Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics-package`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
 
-One difference from Claude Code worth knowing: Codex runs no hook layer for CORE, so write-safety guards there rest on the agent's own discipline rather than harness enforcement (`harnesses/codex.md §hook-register` has the detail and the reopen conditions).
+One difference from Claude Code worth knowing: Codex CLI 0.144.5+ supports plugin-bundled lifecycle hooks (SessionStart proven live 2026-07-17; the per-turn UserPromptSubmit hook is bundled but not yet proven compatible on Codex — payload mapping under validation), and plugin hooks are skipped until their definition is explicitly trusted. Until the per-turn path is proven, write-safety guards on Codex rest on the agent's own discipline (`harnesses/codex.md §hook-register` has the detail and the reopen conditions).
 
 If a previous install used a different marketplace name (say `local-core` from a hand-rolled shim), remove it first: `codex plugin remove core@local-core`, then `codex plugin marketplace remove local-core`.
 

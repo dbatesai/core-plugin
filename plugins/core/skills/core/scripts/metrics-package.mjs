@@ -248,6 +248,13 @@ export function retrievalStats(projectDir, seal) {
     badLines += bad;
     for (const row of rows) entries.push({ date, row });
   }
+  // Outcomes live in the SEPARATE later outcome-log (Hale stop-note): read
+  // them alongside retrieval rows so the join sees both sides.
+  for (const { date, file } of listSessionLogs(projectDir, 'outcome-log.jsonl')) {
+    const { rows, bad } = readJsonlSafe(file);
+    badLines += bad;
+    for (const row of rows) entries.push({ date, row });
+  }
 
   // Outcomes are later rows, joined to exactly one product retrieval by the
   // immutable retrieval_id. They never count as additional retrieval events.
