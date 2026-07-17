@@ -30,12 +30,12 @@
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  */
 
-import { readFileSync, existsSync, realpathSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, realpathSync, statSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
-import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
+import { recordRetrievalEvent, recordOutcomeEvent } from '../scripts/record-retrieval-event.mjs';
 import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
@@ -43,6 +43,16 @@ import { logHookEvent } from './hook-log.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
+
+// Producer identity for outcome rows — read from the plugin manifest so the
+// version can never fork from the shipped identity; 'unknown' is honest when
+// the manifest is unreadable (packaged layouts vary).
+const PRODUCER_VERSION = (() => {
+  try {
+    const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+    return String(manifest.version || 'unknown');
+  } catch { return 'unknown'; }
+})();
 
 // Typed operational receipt (Hale minimal path, 2026-07-17): ONE terminal
 // hook-log row per eligible invocation — early exits included — on the SHARED
@@ -144,6 +154,42 @@ export async function main() {
       retrievalId = randomUUID();
       const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
       const queryTerms = tokenize(prompt).slice(0, 8);
+
+      // PRODUCTION ANSWER-OUTCOME WRITER (Hale acceptance, 2026-07-17): this
+      // invocation runs strictly AFTER the previous turn's answer, so it is the
+      // real post-answer product path that closes the PREVIOUS retrieval's
+      // outcome — a separate row keyed by that retrieval_id, never a mutation
+      // of the append-only retrieval log. Evidence is conservative field
+      // telemetry: a high-overlap re-ask marks a weak 'corrective-retry'
+      // (delivered memory didn't settle it); everything else is honest
+      // 'unknown'/unobservable — the product cannot see answer quality, and
+      // missing is neither neutral nor success. The frozen blinded experiment
+      // remains the causal-efficacy authority.
+      try {
+        const stateFile = join(store, '_memories', '_lib', 'last-retrieval.json');
+        let prev = null;
+        try { prev = JSON.parse(readFileSync(stateFile, 'utf8')); } catch { prev = null; }
+        if (prev && prev.retrieval_id && prev.session_id === (payload.session_id || null)) {
+          const prevTerms = new Set(prev.query_terms || []);
+          const overlap = queryTerms.length ? queryTerms.filter((t) => prevTerms.has(t)).length / queryTerms.length : 0;
+          const retry = overlap >= 0.6 && queryTerms.length >= 3;
+          recordOutcomeEvent(store, {
+            retrieval_id: prev.retrieval_id,
+            usefulness_outcome: retry ? (prev.had_hits ? 'noisy' : 'miss') : 'unknown',
+            evidence_authority: retry ? 'corrective-retry' : 'unobservable',
+            harness: 'claude-code',
+            producer_version: PRODUCER_VERSION,
+          }, { sessionId: payload.session_id || undefined });
+        }
+        mkdirSync(join(store, '_memories', '_lib'), { recursive: true });
+        writeFileSync(stateFile, JSON.stringify({
+          retrieval_id: retrievalId,
+          session_id: payload.session_id || null,
+          query_terms: queryTerms,
+          had_hits: final.length > 0,
+        }));
+      } catch { /* outcome telemetry is fail-open; the receipt below still lands */ }
+
       const out = recordRetrievalEvent(store, {
         trigger: 'per-turn-hook',
         mechanism: 'model-free-substrate', // names what actually ran: rank/policy/edge pipeline — Tier 1 only, never 2 or 3

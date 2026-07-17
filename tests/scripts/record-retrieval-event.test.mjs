@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -167,4 +167,39 @@ test('MET-010: normalizeRetrievalEvent sanitizes unit ids and topics', () => {
   });
   assert.equal(r.intent_topics[0], 'memory-arch');
   assert.equal(r.units_retrieved[0].id, 'dc-1-evil');
+});
+
+// ---- Outcome rows: Hale acceptance invariants (2026-07-17) ----
+const { normalizeOutcomeEvent, recordOutcomeEvent, OUTCOME_VOCABULARY } = await import(
+  new URL('../../plugins/core/skills/core/scripts/record-retrieval-event.mjs', import.meta.url).href
+);
+
+test('outcome schema: missing harness/producer_version fail; unknown vocab fails', () => {
+  const base = { retrieval_id: 'r-1', usefulness_outcome: 'unknown', evidence_authority: 'unobservable', harness: 'claude-code', producer_version: '3.12.0' };
+  assert.doesNotThrow(() => normalizeOutcomeEvent(base));
+  assert.throws(() => normalizeOutcomeEvent({ ...base, harness: undefined }), /harness/);
+  assert.throws(() => normalizeOutcomeEvent({ ...base, producer_version: undefined }), /producer_version/);
+  assert.throws(() => normalizeOutcomeEvent({ ...base, usefulness_outcome: 'helped-a-lot' }), /usefulness_outcome/);
+  assert.throws(() => normalizeOutcomeEvent({ ...base, evidence_authority: 'vibes' }), /evidence_authority/);
+});
+
+test('outcome schema: a non-unknown outcome cannot claim unobservable evidence', () => {
+  assert.throws(() => normalizeOutcomeEvent({
+    retrieval_id: 'r-1', usefulness_outcome: 'useful', evidence_authority: 'unobservable',
+    harness: 'claude-code', producer_version: '3.12.0',
+  }), /cannot be unobservable/);
+});
+
+test('outcome rows are separate post-answer rows — never written into the retrieval log', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'outcome-sep-'));
+  try {
+    mkdirSync(join(dir, '_memories'), { recursive: true });
+    recordOutcomeEvent(dir, { retrieval_id: 'r-42', usefulness_outcome: 'unknown', evidence_authority: 'unobservable', harness: 'claude-code', producer_version: '3.12.0' }, { today: '2026-07-17' });
+    const sess = join(dir, '_sessions', '2026-07-17');
+    assert.ok(existsSync(join(sess, 'outcome-log.jsonl')), 'outcome row lands in its own log');
+    assert.ok(!existsSync(join(sess, 'retrieval-log.jsonl')), 'the retrieval log is untouched');
+    const row = JSON.parse(readFileSync(join(sess, 'outcome-log.jsonl'), 'utf8').trim());
+    assert.equal(row.kind, 'retrieval-outcome');
+    assert.equal(row.retrieval_id, 'r-42');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

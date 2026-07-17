@@ -137,6 +137,51 @@ export function recordRetrievalEvent(projectDir, event, opts = {}) {
   return { record, written: outcome.legacy === true, write_outcome: outcome };
 }
 
+// ---------- answer-outcome rows (Hale acceptance invariants, 2026-07-17) ----------
+// A usefulness outcome is a SEPARATE post-answer row keyed by the exact
+// retrieval_id — the retrieval log is append-only and written BEFORE the
+// answer, so mutating it later is not a valid mechanism. Field telemetry only:
+// the frozen experiment's blinded scorer remains the causal-efficacy authority.
+
+export const OUTCOME_VOCABULARY = ['useful', 'partial', 'noisy', 'miss', 'unknown'];
+// Evidence authority is carried SEPARATELY from the outcome — agent attribution
+// is weak evidence and is never silently promoted to causal truth.
+export const OUTCOME_EVIDENCE_AUTHORITY = ['user-confirmed', 'objective-task-success', 'corrective-retry', 'agent-attribution', 'unobservable'];
+
+export function normalizeOutcomeEvent(event) {
+  if (!isPlainObject(event)) fail('outcome event', 'must be an object');
+  requireString(event.retrieval_id, 'retrieval_id');
+  if (!OUTCOME_VOCABULARY.includes(event.usefulness_outcome)) {
+    fail('usefulness_outcome', `must be one of ${OUTCOME_VOCABULARY.join(', ')}`);
+  }
+  if (!OUTCOME_EVIDENCE_AUTHORITY.includes(event.evidence_authority)) {
+    fail('evidence_authority', `must be one of ${OUTCOME_EVIDENCE_AUTHORITY.join(', ')}`);
+  }
+  // Default-to-unknown honesty: an outcome stronger than 'unknown' requires an
+  // evidence authority stronger than 'unobservable'.
+  if (event.usefulness_outcome !== 'unknown' && event.evidence_authority === 'unobservable') {
+    fail('evidence_authority', 'a non-unknown outcome cannot be unobservable');
+  }
+  requireString(event.harness, 'harness');
+  requireString(event.producer_version, 'producer_version');
+  if (event.answer_id !== undefined) requireString(event.answer_id, 'answer_id');
+  return {
+    kind: 'retrieval-outcome',
+    retrieval_id: sanitizeAttributeValue(event.retrieval_id.trim(), { maxLen: 80 }),
+    usefulness_outcome: event.usefulness_outcome,
+    evidence_authority: event.evidence_authority,
+    harness: sanitizeAttributeValue(event.harness.trim(), { maxLen: 40 }),
+    producer_version: sanitizeAttributeValue(event.producer_version.trim(), { maxLen: 20 }),
+    ...(event.answer_id ? { answer_id: sanitizeAttributeValue(event.answer_id.trim(), { maxLen: 80 }) } : {}),
+  };
+}
+
+export function recordOutcomeEvent(projectDir, event, opts = {}) {
+  const record = normalizeOutcomeEvent(event);
+  const outcome = logEvent(projectDir, 'outcome-log.jsonl', record, opts) || { legacy: false, otel: false, reason: 'no-outcome' };
+  return { record, written: outcome.legacy === true, write_outcome: outcome };
+}
+
 function parseArgs(argv) {
   const out = { flags: new Map(), positionals: [] };
   let i = 0;
