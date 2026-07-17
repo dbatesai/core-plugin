@@ -40,3 +40,15 @@ test('deterministic — same query, same ordered ids', () => {
   const b = selectCandidates('omega speedmaster', FIXT, { max: 30 }).map(c => c.id);
   assert.deepEqual(a, b);
 });
+
+test('DC-117: default shortlist width is 100 (ratified 2026-07-15)', () => {
+  // The promotion evidence: 12/12 blind-reasoning whenever the gold was in the
+  // shortlist; every miss belonged to the old 30-row width. Guard the default.
+  const wide = selectCandidates('watch', FIXT);
+  const capped = selectCandidates('watch', FIXT, { max: 3 });
+  assert.ok(capped.length <= 3);
+  // fixture store is smaller than 100, so the default returns ALL active units
+  const all = selectCandidates('completely unrelated query zzz', FIXT);
+  assert.deepEqual(new Set(wide.map(c => c.id)), new Set(all.map(c => c.id)),
+    'default width covers the whole small store (recall move)');
+});

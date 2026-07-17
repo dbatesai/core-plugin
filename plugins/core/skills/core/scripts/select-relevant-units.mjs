@@ -14,8 +14,13 @@
  * fewer active units than `max`, return all active — for a small store the right
  * recall move is "give the reasoner everything active." Retired units never appear.
  *
- * GATE G3: this ships as a flagged prototype scaffold + measured evidence. Whether the
- * reasoning tier becomes default retrieval infrastructure is David's call on the numbers.
+ * GATE G3 RESOLVED (DC-117, David ratified 2026-07-15; wired 2026-07-17): the reasoning
+ * tier ships as SELECTIVE ESCALATION — the first move of the Tier 3 procedure in
+ * references/retrieval.md, before any Explore subagent. The shortlist default is 100
+ * (raised from the prototype's 30 on the held-out evidence: blind reasoning went 12/12
+ * whenever the gold unit was IN the shortlist; every miss was the 30-row shortlist's,
+ * and full-width shortlists recovered all of them). The everyday path stays
+ * deterministic (DC-115) — this runs only when Tier 1+2 fail.
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  *
@@ -34,7 +39,7 @@ import { tokenize } from './bm25.mjs';
 // standalone-bm25 stale cache (Hale 2026-07-11 §4), closed at the shared loader.
 const loadIndex = loadFreshIndex;
 
-export function selectCandidates(query, storePath, { max = 30 } = {}) {
+export function selectCandidates(query, storePath, { max = 100 } = {}) {
   const root = resolve(storePath);
   const units = loadIndex(root).units; // index already excludes retired/non-active
   const shape = (u) => ({ id: u.id, summary: u.summary, topics: u.topics || [] });
@@ -62,9 +67,11 @@ export function selectCandidates(query, storePath, { max = 30 } = {}) {
 }
 
 function main(argv) {
-  const args = argv.filter(a => a !== '--max');
   const maxIdx = argv.indexOf('--max');
-  const max = maxIdx >= 0 ? Number(argv[maxIdx + 1]) || 30 : 30;
+  // Filter out --max AND its value (the c5 defect class: leaving the flag's
+  // value in the positional list breaks flag-first invocation orders).
+  const args = argv.filter((a, i) => a !== '--max' && !(maxIdx >= 0 && i === maxIdx + 1));
+  const max = maxIdx >= 0 ? Number(argv[maxIdx + 1]) || 100 : 100;
   const storePath = args[0];
   const query = args[1] || '';
   if (!storePath) { process.stderr.write('usage: select-relevant-units.mjs <storePath> "<query>" [--max N]\n'); return 2; }
