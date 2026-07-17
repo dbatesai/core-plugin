@@ -240,10 +240,33 @@ test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked teleme
 });
 
 // ---- Strengthened production outcome caller (Hale freeze-rejection corrections) ----
+// Root-caused 2026-07-17 (the real explanation for Hale's reproduced failures
+// and the GitHub CI failures, superseding an earlier partial diagnosis): the
+// hook resolves harness identity from CLAUDECODE / CLAUDE_CODE_SESSION_ID /
+// CODEX_SESSION_ID / CODEX_PLUGIN_ROOT in its process env. A test invoked via
+// `execFileSync('node', ..., { env: { ...process.env, ... } })` inherits
+// whatever the AMBIENT shell running `node --test` happens to have set —
+// which is 'claude-code' on a developer's machine running inside Claude
+// Code (false-positive pass), null on a clean CI runner (harness never
+// resolves, pendingOutcomePath returns null, the whole mechanism silently
+// no-ops — 0 rows where 1 expected), and 'codex' inside a Codex sandbox
+// (mismatches the test's hardcoded 'claude-code' assertion). Strip the four
+// ambient signal vars and set the harness this test suite actually means to
+// exercise explicitly, so results are identical everywhere `node --test`
+// runs — never a function of who/where invoked it.
 function runHookWithSession(prompt, root, sessionId, env = {}) {
   return execFileSync('node', [HOOK], {
     input: JSON.stringify({ prompt, cwd: root, ...(sessionId ? { session_id: sessionId } : {}) }),
-    env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_RETRIEVAL_STORE: root, CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
+    env: {
+      ...process.env,
+      // Strip ambient harness signals the invoking shell may carry, then set
+      // the ONE this suite means to exercise — CLAUDE_CODE_SESSION_ID stays
+      // unset since the hook only checks CLAUDECODE for Claude Code identity.
+      CLAUDE_CODE_SESSION_ID: undefined, CODEX_SESSION_ID: undefined, CODEX_PLUGIN_ROOT: undefined,
+      CLAUDECODE: '1',
+      CORE_METRICS_ENABLED: '1', CORE_RETRIEVAL_STORE: root, CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
+      ...env,
+    },
     encoding: 'utf8',
   });
 }
