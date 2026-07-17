@@ -51,23 +51,35 @@ jobs:
       - name: hooks.json entries conform to the hook schema
         run: |
           node -e '
-            const h = JSON.parse(require("fs").readFileSync("plugins/core/hooks/hooks.json","utf8"));
+            const fs = require("fs");
+            // Both harness hook manifests: Claude Codes hooks/hooks.json AND
+            // Codex hooks/hooks-codex.json (added 2026-07-17, loop iteration
+            // 11 — this check previously hardcoded only the Claude file, so
+            // the new Codex manifest had zero CI schema coverage. Caught by
+            // self-audit, not by Hale — fixed before he had to find it too).
+            const FILES = ["plugins/core/hooks/hooks.json", "plugins/core/hooks/hooks-codex.json"];
             const KNOWN = ["UserPromptSubmit","PreToolUse","PostToolUse","SessionStart","SessionEnd",
                            "PostCompact","PreCompact","Stop","SubagentStop","Notification"];
-            const hooks = (h && h.hooks) || {};
             let failed = 0;
-            for (const [event, entries] of Object.entries(hooks)) {
-              if (!KNOWN.includes(event)) { console.error("unrecognized hook event: " + event); failed = 1; }
-              if (!Array.isArray(entries)) { console.error("hook event " + event + " is not an array"); failed = 1; continue; }
-              for (const entry of entries) {
-                const cmds = entry.hooks || [];
-                if (!Array.isArray(cmds) || cmds.length === 0 || cmds.some(c => c.type !== "command" || !c.command)) {
-                  console.error("hook entry under " + event + " missing type:\"command\" + command"); failed = 1;
+            let totalEvents = 0;
+            for (const file of FILES) {
+              if (!fs.existsSync(file)) { console.error("missing hook manifest: " + file); failed = 1; continue; }
+              const h = JSON.parse(fs.readFileSync(file, "utf8"));
+              const hooks = (h && h.hooks) || {};
+              totalEvents += Object.keys(hooks).length;
+              for (const [event, entries] of Object.entries(hooks)) {
+                if (!KNOWN.includes(event)) { console.error(file + ": unrecognized hook event: " + event); failed = 1; }
+                if (!Array.isArray(entries)) { console.error(file + ": hook event " + event + " is not an array"); failed = 1; continue; }
+                for (const entry of entries) {
+                  const cmds = entry.hooks || [];
+                  if (!Array.isArray(cmds) || cmds.length === 0 || cmds.some(c => c.type !== "command" || !c.command)) {
+                    console.error(file + ": hook entry under " + event + " missing type:\"command\" + command"); failed = 1;
+                  }
                 }
               }
             }
             if (failed) process.exit(1);
-            console.log("hooks.json schema ok (" + Object.keys(hooks).length + " event(s) registered)");
+            console.log("hooks.json + hooks-codex.json schema ok (" + totalEvents + " event(s) registered across " + FILES.length + " manifest(s))");
           '
 
       - name: plugin.json has required fields
