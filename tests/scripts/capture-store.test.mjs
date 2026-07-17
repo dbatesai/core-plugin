@@ -82,9 +82,8 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
       const expectedSigEntry = `${UNIT_REL}:${createHash('sha1').update(raw).digest('hex')}`;
       assert.ok(cap.index.source_sig.includes(expectedSigEntry),
         `capture ${i}: source_sig carries the sha1 of the exact bytes read`);
-      assert.equal(cap.snapshotId, createHash('sha256')
-        .update(`${cap.index.source_sig}|enrichment:${cap.enrichments.digest}`).digest('hex'),
-        'snapshotId is derived from the source signature plus valid enrichment identity');
+      assert.equal(cap.snapshotId, createHash('sha256').update(cap.index.source_sig).digest('hex'),
+        'snapshotId is derived from that same signature');
       if (rawEpoch) sawEpochs.add(rawEpoch);
     }
     assert.ok(sawEpochs.size >= 2,
