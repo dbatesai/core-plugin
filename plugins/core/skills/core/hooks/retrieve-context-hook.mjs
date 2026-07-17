@@ -40,10 +40,25 @@ import { logHookEvent } from './hook-log.mjs';
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
 
+// Typed operational receipt (Hale minimal path, 2026-07-17): ONE terminal
+// hook-log row per eligible invocation — early exits included — on the SHARED
+// {hook, action, reason} contract (never a second dialect like `kind:`).
+// Closed vocabularies; an unknown code is coerced to failed/pipeline-error
+// rather than emitted (tests assert every path lands in-vocabulary).
+export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
+export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'event-write-failed', 'trace-write-failed'];
+
+function receipt(action, reason, extra = {}) {
+  const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
+  const r = RETRIEVAL_REASONS.includes(reason) ? reason : 'pipeline-error';
+  try { logHookEvent({ hook: 'retrieve-context', action: a, reason: r, ...extra }); } catch { /* fail-open: observability never blocks the turn */ }
+  return 0;
+}
+
 async function main() {
   // Default-ON, opt-out gate (G2 shipped on, 2026-06-28). Runs unless explicitly
   // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the DC-107 metrics opt-out).
-  if (process.env.CORE_RETRIEVAL_HOOK === '0') return 0;
+  if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
 
   let payload = {};
   // Read stdin synchronously via fd 0 (works under execFileSync's input pipe).
@@ -52,10 +67,10 @@ async function main() {
   if (raw.trim()) { try { payload = JSON.parse(raw); } catch { payload = {}; } }
 
   const prompt = String(payload.prompt || '');
-  if (!prompt.trim()) return 0;
+  if (!prompt.trim()) return receipt('skip', 'empty-prompt');
 
   const store = process.env.CORE_RETRIEVAL_STORE || payload.cwd || process.cwd();
-  if (!existsSync(join(store, '_memories'))) return 0;
+  if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { cwd: store });
 
   // ONE pipeline run serves both jobs (2026-07-17, closes Hale audit finding 1 +
   // finding 4 on e1490d4): buildRetrievalTrace runs the same staged pipeline as
@@ -63,10 +78,14 @@ async function main() {
   // and emits the canonical per-turn retrieval event from the same run, so the
   // telemetry corpus is product-emitted, not agent-behavior-dependent.
   let trace = null;
-  try { trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap: OUTPUT_BYTE_CAP }); } catch { return 0; }
-  if (!trace || trace.storeless || !trace.stages) return 0;
+  try { trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap: OUTPUT_BYTE_CAP }); } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
+  if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
+  // Telemetry outcome for the single terminal receipt (priority: pipeline
+  // failure > event-write > trace-write > opt-out > ok).
+  let telemetryReason = 'ok';
+  let retrievalId = null;
 
   // Canonical per-turn product event — always on when metrics capture is on
   // (DC-107 default-ON, opt-out). Fail-open: a telemetry failure must never
@@ -83,7 +102,9 @@ async function main() {
   // result is `no-hit` at the tier actually reached — never a fabricated
   // 1→2→3 `miss`.
   try {
-    if (metricsEnabled({ project: store })) {
+    if (!metricsEnabled({ project: store })) {
+      telemetryReason = 'metrics-opt-out'; // hook-log is the authoritative receipt; no retrieval row is faked
+    } else {
       // Ladder semantics (Hale, round 2 of this correction): the shipped product
       // retriever — INCLUDING its built-in one-hop edge expansion — is Tier 1 by
       // the protocol's own definition; Tier 2 is the separate 2–3-hop graph-walk
@@ -93,7 +114,7 @@ async function main() {
       // corrected mapping made routine expansion hits read as Tier-2 escalation —
       // the same causal-evidence defect under a different mapping).
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
-      const retrievalId = randomUUID();
+      retrievalId = randomUUID();
       const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
       const queryTerms = tokenize(prompt).slice(0, 8);
       const out = recordRetrievalEvent(store, {
@@ -109,29 +130,33 @@ async function main() {
         selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
       }, { sessionId: payload.session_id || undefined });
-      if (!out.written) {
-        try { logHookEvent({ hook: 'retrieve-context', kind: 'telemetry-write-failed', reason: out.write_outcome.reason || 'unknown', store }); } catch { /* last resort: stay silent */ }
-      }
+      if (!out.written) telemetryReason = 'event-write-failed';
       // The persisted trace carries the SAME retrieval_id so the event, the
       // trace, and any future answer-outcome row join on one key.
       trace.retrieval_id = retrievalId;
+
+      // Full trace persistence is opt-in (CORE_RETRIEVAL_TRACE=1): the trace is
+      // a deep diagnostic with per-stage payloads; the EVENT above is the
+      // always-on canonical record. Local-only either way.
+      if (process.env.CORE_RETRIEVAL_TRACE === '1') {
+        try {
+          const traceOut = logEvent(store, 'retrieval-trace.jsonl', trace);
+          if (telemetryReason === 'ok' && (!traceOut || traceOut.legacy !== true)) telemetryReason = 'trace-write-failed';
+        } catch { if (telemetryReason === 'ok') telemetryReason = 'trace-write-failed'; }
+      }
     }
-  } catch (err) {
-    // fail-open by contract — but observable, never silent
-    try { logHookEvent({ hook: 'retrieve-context', kind: 'telemetry-error', reason: String(err && err.message).slice(0, 120), store }); } catch { /* last resort */ }
+  } catch {
+    telemetryReason = 'pipeline-error'; // fail-open by contract — surfaced in the terminal receipt below
   }
 
-  // Full trace persistence is opt-in (CORE_RETRIEVAL_TRACE=1): the trace is a
-  // deep diagnostic with per-stage payloads; the EVENT above is the always-on
-  // canonical record. Local-only either way.
-  try {
-    if (process.env.CORE_RETRIEVAL_TRACE === '1' && metricsEnabled({ project: store })) {
-      logEvent(store, 'retrieval-trace.jsonl', trace);
-    }
-  } catch { /* fail-open by contract */ }
+  const injected = Boolean(trace.pack && trace.pack.text);
+  if (injected) process.stdout.write(trace.pack.text);
 
-  if (trace.pack && trace.pack.text) process.stdout.write(trace.pack.text);
-  return 0;
+  // The single terminal operational row for this invocation: what happened to
+  // the user-facing injection (action) and what happened to telemetry (reason).
+  const action = injected ? 'delivered' : (telemetryReason === 'ok' || telemetryReason === 'metrics-opt-out' ? 'skip' : 'failed');
+  const reason = !injected && final.length === 0 && (telemetryReason === 'ok') ? 'no-hit' : telemetryReason;
+  return receipt(action, reason, { cwd: store, ...(retrievalId ? { retrieval_id: retrievalId } : {}) });
 }
 
 main().then((code) => process.exit(code || 0)).catch(() => process.exit(0));
