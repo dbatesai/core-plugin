@@ -60,7 +60,11 @@ function readAllPackageText(dir) {
 function extractZip(zipPath, dest) {
   mkdirSync(dest, { recursive: true });
   const res = spawnSync('tar', ['-x', '-f', zipPath, '-C', dest], { encoding: 'utf8' });
-  assert.equal(res.status, 0, 'zip extracts');
+  // Diagnostic-only addition (2026-07-17): the pre-existing Windows-only failure
+  // here has always reported bare "128 !== 0" with no reason captured. This
+  // carries tar's own stderr into the assertion message so the NEXT Windows CI
+  // run names the real cause instead of leaving it a standing unknown.
+  assert.equal(res.status, 0, `zip extracts (status=${res.status}, error=${res.error?.message || 'none'}, stderr=${JSON.stringify(res.stderr)})`);
   return dest;
 }
 
@@ -71,7 +75,11 @@ test('package never contains planted names, paths, topics, or raw unit ids', () 
     const project = makeFixtureProject(root, { plant: true });
     const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
     assert.ok(!result.error, `no fatal error: ${result.error}`);
-    assert.equal(result.shipped.kind, 'zip');
+    // Diagnostic-only addition (2026-07-17): a pre-existing Windows-only failure
+    // here has always reported a bare 'folder' !== 'zip' with the underlying
+    // zipStaging() failure reason discarded. Surfacing it so the NEXT
+    // Windows CI run names the real tar failure instead of leaving it unknown.
+    assert.equal(result.shipped.kind, 'zip', `shipped=${JSON.stringify(result.shipped)}`);
     const text = readAllPackageText(extractZip(result.shipped.path, join(root, 'x')));
     for (const tripwire of [PLANT_NAME, PLANT_PATH, PLANT_TOPIC, 'plantedusr', 'dc-1-linked', 'fixture-ws-alpha', home]) {
       assert.ok(!text.includes(tripwire), `tripwire must not appear: ${tripwire}`);
