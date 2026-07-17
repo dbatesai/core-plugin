@@ -218,21 +218,27 @@ export function eventToOtelSpan(event, { ts, sessionId } = {}) {
   };
 }
 
+// Returns a write outcome — {legacy, otel, reason?} — so producers can tell a
+// delivered event from a silently-swallowed one (Hale live-hook audit,
+// 2026-07-17: "the writer reports a normalized record even if both writes
+// silently fail"). Still best-effort: never throws, never blocks the host.
 export function logEvent(projectDir, filename, event, { today, now, sessionId, workspaceId } = {}) {
-  if (!existsSync(projectDir)) return;
+  const outcome = { legacy: false, otel: false };
+  if (!existsSync(projectDir)) { outcome.reason = 'project-dir-missing'; return outcome; }
   const date = today || todayUTC();
   const sessionDir = join(projectDir, '_sessions', date);
   try {
     mkdirSync(sessionDir, { recursive: true });
-  } catch { return; }
+  } catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
   const ts = now || new Date().toISOString();
   const record = { ts, ...event };
 
-  // 1. Legacy write (unchanged — existing analyzers depend on this exact shape).
+  // 1. Legacy write (unchanged shape — existing analyzers depend on it).
   try {
     appendFileSync(join(sessionDir, filename), JSON.stringify(record) + '\n');
+    outcome.legacy = true;
   } catch {
-    // Don't crash hosts on disk errors — emit is best-effort by design.
+    outcome.reason = 'legacy-append-failed'; // best-effort by design — reported, not thrown
   }
 
   // 2. OTel-format dual-write per spec §17.7 transition path.
@@ -240,8 +246,7 @@ export function logEvent(projectDir, filename, event, { today, now, sessionId, w
   //    AppData redirect that metrics-init.mjs pinned at scaffold time.
   //    Session id resolves via resolveSessionId() — Claude Code, then Codex,
   //    then sentinel (RC Turn evt-c97d).
-  //    Best-effort, never blocks or throws. Failure here doesn't affect
-  //    the legacy write above (already succeeded).
+  //    Best-effort, never blocks or throws.
   try {
     const sid = resolveSessionId({ explicit: sessionId });
     const storageBase = resolveStoragePath(projectDir, { workspaceId });
@@ -249,7 +254,9 @@ export function logEvent(projectDir, filename, event, { today, now, sessionId, w
     mkdirSync(tracesDir, { recursive: true });
     const span = eventToOtelSpan(event, { ts, sessionId: sid });
     appendFileSync(join(tracesDir, `${sid}.jsonl`), JSON.stringify(span) + '\n');
+    outcome.otel = true;
   } catch {
-    // Silent — dual-write is opt-in transition substrate; legacy path is authoritative.
+    // Silent — dual-write is transition substrate; legacy path is authoritative.
   }
+  return outcome;
 }

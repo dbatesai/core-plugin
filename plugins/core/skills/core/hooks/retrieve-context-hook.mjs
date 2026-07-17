@@ -30,9 +30,12 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
+import { tokenize } from '../scripts/bm25.mjs';
+import { logHookEvent } from './hook-log.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
@@ -67,26 +70,46 @@ async function main() {
 
   // Canonical per-turn product event — always on when metrics capture is on
   // (DC-107 default-ON, opt-out). Fail-open: a telemetry failure must never
-  // block or degrade the user's turn.
+  // block the user's turn — but it must be OBSERVABLE, so failures land in the
+  // hook log instead of vanishing (Hale live-hook audit, 2026-07-17).
+  //
+  // Every field is an OBSERVED value from this run's stages — never a constant,
+  // never a reinterpreted field. In particular: the ladder tier of a hit is
+  // derived from WHICH STAGE produced it (in stages.top => Tier 1 lexical; added
+  // by edge expansion => Tier 2). `h.tier` on trace hits is the unit AUTHORITY
+  // tier (canonical/observation) and must never be coerced into a ladder tier —
+  // that exact coercion shipped in a2cab1b and fabricated tier telemetry.
+  // This pipeline is the model-free substrate: it never runs Tier 3, so an empty
+  // result is `no-hit` at the tier actually reached — never a fabricated
+  // 1→2→3 `miss`.
   try {
     if (metricsEnabled({ project: store })) {
-      const clampTier = (t) => Math.min(3, Math.max(1, Number.isInteger(t) ? t : 1));
-      const tiers = final.map((h) => clampTier(h.tier));
-      const tierReached = tiers.length ? Math.max(...tiers) : 3;
-      recordRetrievalEvent(store, {
+      const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
+      const units = final.map((h) => ({ id: String(h.id), tier: topIds.has(String(h.id)) ? 1 : 2 }));
+      const expansionRan = Array.isArray(trace.stages.expansion);
+      const tierReached = units.some((u) => u.tier === 2) ? 2 : (units.length ? 1 : (expansionRan ? 2 : 1));
+      const queryTerms = tokenize(prompt).slice(0, 8);
+      const out = recordRetrievalEvent(store, {
         trigger: 'per-turn-hook',
-        intent_topics: ['per-turn'], // the prompt itself is not restated into the log row
-        tier_reached: tiers.length ? tierReached : 3,
-        escalation_path: tiers.length ? [...new Set([1, tierReached])].sort() : [1, 2, 3],
-        units_retrieved: final.map((h) => ({ id: String(h.id), tier: clampTier(h.tier) })),
-        ...(final.length === 0 ? { result: 'miss' } : {}),
-        dip_back_count: 0,
-        candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : final.length,
-        selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : final.length,
+        mechanism: 'model-free-substrate', // names what actually ran: rank/policy/edge pipeline, no Tier-3 reasoning
+        retrieval_id: randomUUID(),
+        intent_topics: queryTerms.length ? queryTerms : ['empty-after-tokenize'],
+        tier_reached: tierReached,
+        escalation_path: tierReached === 2 ? [1, 2] : [1],
+        units_retrieved: units,
+        ...(units.length === 0 ? { result: 'no-hit' } : {}),
+        candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
+        selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
-      });
+      }, { sessionId: payload.session_id || undefined });
+      if (!out.written) {
+        try { logHookEvent({ hook: 'retrieve-context', kind: 'telemetry-write-failed', reason: out.write_outcome.reason || 'unknown', store }); } catch { /* last resort: stay silent */ }
+      }
     }
-  } catch { /* fail-open by contract */ }
+  } catch (err) {
+    // fail-open by contract — but observable, never silent
+    try { logHookEvent({ hook: 'retrieve-context', kind: 'telemetry-error', reason: String(err && err.message).slice(0, 120), store }); } catch { /* last resort */ }
+  }
 
   // Full trace persistence is opt-in (CORE_RETRIEVAL_TRACE=1): the trace is a
   // deep diagnostic with per-stage payloads; the EVENT above is the always-on

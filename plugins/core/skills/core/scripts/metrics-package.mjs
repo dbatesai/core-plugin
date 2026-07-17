@@ -54,7 +54,10 @@ const HISTORY_DIR = 'metrics-package-history';
 const UNIT_TYPES = ['decision', 'risk', 'observation', 'person', 'reference', 'principle', 'value', 'explainer', 'review-finding', 'open-question', 'premise', 'episode'];
 const UNIT_STATUSES = ['active', 'retired', 'archived', 'superseded', 'draft'];
 const EDGE_TYPES = ['cites', 'depends-on', 'supersedes', 'supersedes-claim', 'refines', 'amends', 'conflicts-with', 'references-topic'];
-const RECOGNITION_STATES = ['rec-fail-tier-0', 'rec-fail-tier-1', 'rec-partial', 'rec-full', 'capture-only', 'no-recognition-target', 'unclassified'];
+// The classifier's ACTUAL state vocabulary (classify-turns.mjs is the producer —
+// Hale's 2026-07-17 audit caught the previous invented list collapsing 5 of 6
+// canonical states to 'other').
+const RECOGNITION_STATES = ['rec-fail-tier-0', 'rec-fail-tier-1-3-trigger', 'tier-0-win', 'tier-1-3-win', 'capture-miss', 'mechanics-failure'];
 // Code-owned enums for every remaining string source (Hale audit e1490d4 finding 7:
 // a shape check like kebab-case is NOT a privacy boundary — user-derived values can
 // be kebab-shaped. Only these exact values pass; everything else folds to 'other').
@@ -173,6 +176,13 @@ export function retrievalStats(projectDir, seal) {
       }
       day.dip_backs += num(r.dip_back_count) || 0;
       if (r.result === 'miss') { day.misses += 1; totals.misses += 1; }
+      if (r.result === 'no-hit') { day.no_hits = (day.no_hits || 0) + 1; totals.no_hits = (totals.no_hits || 0) + 1; }
+      if (r.usefulness_outcome !== undefined) {
+        day.outcomes = day.outcomes || {};
+        const o = fold(String(r.usefulness_outcome), ['helped', 'hurt', 'neutral', 'unknown']);
+        day.outcomes[o] = (day.outcomes[o] || 0) + 1;
+        totals.outcome_rows = (totals.outcome_rows || 0) + 1;
+      }
       if (num(r.candidate_count) != null && num(r.selected_count) != null) {
         day.candidates_sum += r.candidate_count;
         day.selected_sum += r.selected_count;
@@ -205,6 +215,10 @@ export function retrievalStats(projectDir, seal) {
     available: true, ...trust, days, totals,
     escalation_rate: totals.events ? round3(totals.escalations / totals.events) : null,
     dip_back_rate: totals.events ? round3(totals.dip_backs / totals.events) : null,
+    // Answer-level outcome coverage — the join rate Hale asked for: how many
+    // rows carry a usefulness_outcome at all. Honest zero until outcome
+    // sampling ships; the denominator makes the gap visible instead of silent.
+    outcome_coverage: { rows_with_outcome: totals.outcome_rows || 0, total_rows: totals.events, rate: totals.events ? round3((totals.outcome_rows || 0) / totals.events) : null },
     top_retrieved_units: topUnits, malformed_lines: badLines,
   };
 }
@@ -289,7 +303,18 @@ export function storeCensus(projectDir) {
     edges_by_type: suppressSmallCells(edgesByType),
     edges_total: Object.values(edgesByType).reduce((a, b) => a + b, 0),
     orphans, orphan_rate: active ? round3(orphans / active) : null,
-    link_density: active ? round3(linked / active) : null,
+    // NOT 1-orphan_rate (Hale caught the earlier redundant stat): edges per
+    // active unit measures graph richness; the active-to-active fraction
+    // measures how much of the edge mass is traversable among live units.
+    edges_per_active_unit: active ? round3(Object.values(edgesByType).reduce((a, b) => a + b, 0) / active) : null,
+    // Honest name for what the maps can actually measure: the share of edge
+    // TARGETS that are active units (a low value = the graph points at dead
+    // weight and Tier-2 walks land on retired/archived nodes).
+    edge_targets_active_fraction: (() => {
+      let activeTargets = 0; let allTargets = 0;
+      for (const [target, n] of incoming) { allTargets += n; if (activeIds.has(target)) activeTargets += n; }
+      return allTargets ? round3(activeTargets / allTargets) : null;
+    })(),
     created_by_month: suppressSmallCells(createdByMonth),
   };
 }
@@ -375,10 +400,14 @@ export function workspaceMetrics(home, workspaceId) {
   if (existsSync(calPath)) {
     try {
       const j = JSON.parse(readFileSync(calPath, 'utf8'));
+      // Field names match the producer (calibrate-classifier.mjs writes
+      // labeled_count / is_calibrated — Hale's audit caught the earlier
+      // labels_count / cleared misread returning permanent nulls).
       calibration = {
         available: true,
-        labels_count: num(j.labels_count ?? j.label_count ?? j.labels) ?? null,
-        cleared: j.cleared === true,
+        labeled_count: num(j.labeled_count) ?? null,
+        is_calibrated: j.is_calibrated === true,
+        provisional: j.provisional !== false,
         classifier_version: (typeof j.classifier_version === 'string' && /^\d+\.\d+\.\d+$/.test(j.classifier_version)) ? j.classifier_version : null,
       };
     } catch { calibration = { available: false, reason: 'calibration-state.json unparseable' }; }
@@ -420,7 +449,7 @@ export function headline(blocks) {
   if (c?.available) {
     h.units_total = c.units_total;
     h.orphan_rate = c.orphan_rate;
-    h.link_density = c.link_density;
+    h.edges_per_active_unit = c.edges_per_active_unit;
     h.edges_total = c.edges_total;
   }
   const v = blocks['validator'];
@@ -431,8 +460,11 @@ export function headline(blocks) {
   if (w?.available && w.recognition?.available) {
     const days = Object.keys(w.recognition.days).sort();
     const last = days.length ? w.recognition.days[days[days.length - 1]] : null;
+    // Denominator floor (Hale: never headline a rate from three provisional
+    // turns) — below 20 turns the rate ships as null with the sample size.
     if (last && last.turns) {
-      h.recfail_latest_rate = round3((last.states['rec-fail-tier-0'] || 0) / last.turns);
+      h.recfail_latest_sample = last.turns;
+      h.recfail_latest_rate = last.turns >= 20 ? round3((last.states['rec-fail-tier-0'] || 0) / last.turns) : null;
     }
   }
   return h;
@@ -456,8 +488,15 @@ export function computeDeltas(home, projectPseudonym, current) {
       if (num(v) != null && prev != null) deltas.changes[k] = round3(v - prev);
     }
   }
-  appendFileSync(file, JSON.stringify({ generated_at: new Date().toISOString(), ...current }) + '\n');
   return deltas;
+}
+
+// Called ONLY after the leak scan passed and the artifact shipped — an aborted
+// package never advances the delta baseline.
+export function appendHistory(home, projectPseudonym, current) {
+  const dir = join(home, '.core', HISTORY_DIR);
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(join(dir, `${projectPseudonym}.jsonl`), JSON.stringify({ generated_at: new Date().toISOString(), ...current }) + '\n');
 }
 
 export function computeFlags(blocks, hl) {
@@ -508,7 +547,7 @@ export function buildLeakPatterns({ home, projectDirs, indexEntries }) {
   return {
     words: [...words],
     paths: [...paths].filter(Boolean),
-    shapes: [/\/(Users|home)\/[A-Za-z]/, /\\Users\\[A-Za-z]/, /[A-Za-z]:\\\\?Users/],
+    shapes: [/\/(Users|home)\/[A-Za-z]/, /\\Users\\[A-Za-z]/, /[A-Za-z]:\\\\?Users/, /\/Volumes\//, /\\\\[A-Za-z0-9.$_-]+\\/, /file:\/\//i],
   };
 }
 
@@ -636,17 +675,31 @@ export function runPackage(argv, { homeOverride } = {}) {
   }
   if (!projects.length) return { exit: 2, error: 'no project could be collected', coverage };
 
-  // deltas (per project, from local history)
+  // Deltas are computed READ-ONLY here; the history append happens only after
+  // the package actually ships (Hale: history was advancing before leakage
+  // validation — an aborted run must not consume a history slot).
   for (const proj of projects) {
     proj.deltas = computeDeltas(home, proj.pseudonym, proj.headline);
   }
 
-  // plugin identity from the manifest (fixed vocabulary)
+  // Generator identity — honest provenance (Hale: a source-tree run must not
+  // identify itself as the released build). The manifest version is reported
+  // AS the manifest's claim; `generator` records where this code actually ran
+  // from, and the source SHA is captured when the tree is a git checkout.
   let plugin = null;
   try {
     const manifest = JSON.parse(readFileSync(join(scriptDir, '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
-    plugin = { version: manifest.version, build: manifest.build || null };
+    plugin = { manifest_version: manifest.version, manifest_build: manifest.build || null };
   } catch { plugin = null; }
+  const generator = (() => {
+    const isInstalledCache = /[\\/]plugins[\\/]cache[\\/]/.test(scriptDir);
+    const out = { ran_from: isInstalledCache ? 'installed-cache' : 'source-tree', source_sha: null };
+    if (!isInstalledCache) {
+      const r = spawnSync('git', ['-C', scriptDir, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 10_000 });
+      if (r.status === 0) out.source_sha = (r.stdout || '').trim().slice(0, 12) || null;
+    }
+    return out;
+  })();
 
   // stage
   const staging = mkdtempSync(join(tmpdir(), 'core-metrics-package-'));
@@ -656,6 +709,7 @@ export function runPackage(argv, { homeOverride } = {}) {
     generated_at: generatedAt,
     mode: flagsIn.all ? 'all-projects' : 'single-project',
     plugin,
+    generator,
     pseudonym_note: 'Ids are HMAC pseudonyms from a local salt that never ships; stable per install. Deleting ~/.core/metrics-package-salt rotates them.',
     residual_risk: 'Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across packages from one install (rotate the salt to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.',
     salt_rotated_this_run: saltCreated,
@@ -700,8 +754,18 @@ export function runPackage(argv, { homeOverride } = {}) {
     rmSync(staging, { recursive: true, force: true });
     shipped = { kind: 'folder', path: folder, reason: zip.reason };
   }
+  // Ship succeeded — NOW the delta baseline may advance (never on abort).
+  for (const proj of projects) {
+    try { appendHistory(home, proj.pseudonym, proj.headline); } catch { /* history is best-effort */ }
+  }
+
+  // Partial detection descends one level: a workspace-metrics block whose
+  // recognition/calibration/capability sub-blocks are unavailable is partial
+  // coverage too (Hale: nested missing sources must force partial status).
+  const blockPartial = (b) => b && (b.available === false
+    || Object.values(b).some((v) => v && typeof v === 'object' && v.available === false));
   const partial = coverage.some(c => !c.available)
-    || projects.some(p => Object.values(p.blocks).some(b => b && b.available === false));
+    || projects.some(p => Object.values(p.blocks).some(blockPartial));
   return {
     exit: partial ? 1 : 0, shipped, coverage, desktop_fallback: !flagsIn.out && !existsSync(join(home, 'Desktop')),
     projects: projects.map(p => ({ project: p.pseudonym, flags: p.flags, headline: p.headline })),

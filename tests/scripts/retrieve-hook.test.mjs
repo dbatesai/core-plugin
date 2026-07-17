@@ -71,3 +71,83 @@ test('hook output carries the authority tier for observation hits (Hale re-revie
     assert.match(out, /obs-nested-note \[observation\]:/, 'observation hit is tier-labeled in the injected context');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---- Per-turn event semantics (Hale live-hook audit, 2026-07-17) ----
+// Every field must be an OBSERVED value: ladder tier from the producing stage
+// (never the unit authority tier), no fabricated escalation on empty results,
+// observed query terms, correlation id, and an OBSERVABLE write outcome.
+import { mkdtempSync, rmSync, writeFileSync as wf, readFileSync as rf, readdirSync as rd, existsSync as ex, mkdirSync as mkd } from 'node:fs';
+import { tmpdir } from 'node:os';
+
+function makeStore(root) {
+  const store = join(root, '_memories');
+  mkd(store, { recursive: true });
+  wf(join(root, 'PROJECT.md'), '# T\n');
+  wf(join(store, 'dc-1-widget.md'), '---\nid: dc-1-widget\ntype: decision\nstatus: active\ncreated: 2026-07-01\ntopics:\n  - widget\n---\n\nWidget decision body.\n');
+  wf(join(store, 'risk-1-widget.md'), '---\nid: risk-1-widget\ntype: risk\nstatus: active\ncreated: 2026-07-02\ntopics:\n  - widget\n---\n\nWidget risk body.\n');
+  return root;
+}
+
+function readEventRows(root) {
+  const sess = join(root, '_sessions');
+  if (!ex(sess)) return [];
+  const rows = [];
+  for (const d of rd(sess)) {
+    const f = join(sess, d, 'retrieval-log.jsonl');
+    if (ex(f)) for (const l of rf(f, 'utf8').trim().split('\n')) rows.push(JSON.parse(l));
+  }
+  return rows.filter(r => r.trigger === 'per-turn-hook');
+}
+
+test('hit event: ladder tier from producing stage, observed terms, correlation present', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-hit-')));
+  try {
+    runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1' });
+    const [evt] = readEventRows(root);
+    assert.ok(evt, 'event written');
+    assert.equal(evt.mechanism, 'model-free-substrate');
+    assert.ok(typeof evt.retrieval_id === 'string' && evt.retrieval_id.length >= 8, 'correlation id present');
+    assert.ok(evt.intent_topics.includes('widget'), 'observed query terms, not a constant');
+    for (const u of evt.units_retrieved) {
+      assert.ok(u.tier === 1 || u.tier === 2, `ladder tier 1/2, never authority strings: ${u.tier}`);
+    }
+    assert.ok(evt.tier_reached <= 2, 'model-free pipeline never claims Tier 3');
+    assert.notDeepEqual(evt.escalation_path, [1, 2, 3], 'no fabricated full-ladder path');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('empty result is an honest no-hit at the tier actually run — never a fabricated Tier-3 miss', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-nohit-')));
+  try {
+    runHook('zzqx unmatchable quark', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1' });
+    const rows = readEventRows(root);
+    if (rows.length) { // an empty final set may still inject nothing yet log honestly
+      const evt = rows[0];
+      assert.equal(evt.result, 'no-hit');
+      assert.ok(evt.tier_reached <= 2, 'tier reflects stages that ran');
+      assert.notDeepEqual(evt.escalation_path, [1, 2, 3]);
+      assert.equal(evt.units_retrieved.length, 0);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('metrics opt-out means zero telemetry rows', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-optout-')));
+  try {
+    runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '0' });
+    assert.equal(readEventRows(root).length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('telemetry write failure is observable in the hook log, and the turn is never blocked', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-wfail-')));
+  const logFile = join(root, 'hooks-log.jsonl');
+  try {
+    // Force the legacy write path to fail: _sessions exists as a FILE.
+    wf(join(root, '_sessions'), 'not a directory');
+    const out = runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: logFile });
+    assert.ok(typeof out === 'string', 'hook exited cleanly (fail-open)');
+    assert.ok(ex(logFile), 'failure surfaced in the hook log');
+    assert.match(rf(logFile, 'utf8'), /telemetry-write-failed|telemetry-error/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

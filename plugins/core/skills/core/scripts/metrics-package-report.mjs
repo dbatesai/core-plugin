@@ -21,7 +21,7 @@ export function buildReportMd({ manifest, projects }) {
   const lines = [];
   lines.push('# CORE memory-efficacy package');
   lines.push('');
-  lines.push(`Generated ${manifest.generated_at} · mode: ${manifest.mode} · plugin ${manifest.plugin ? `v${manifest.plugin.version}${manifest.plugin.build ? ` build ${manifest.plugin.build}` : ''}` : 'unknown'} · schema ${manifest.schema_version}`);
+  lines.push(`Generated ${manifest.generated_at} · mode: ${manifest.mode} · generator ${manifest.generator ? manifest.generator.ran_from + (manifest.generator.source_sha ? ' @ ' + manifest.generator.source_sha : '') : 'unknown'} (manifest claims ${manifest.plugin ? 'v' + manifest.plugin.manifest_version : 'unknown'}) · schema ${manifest.schema_version}`);
   lines.push('');
   lines.push('This package exists for one purpose: feedback for refining CORE. Every value is a number, date, fixed CORE vocabulary, or a salted pseudonym — free text is dropped at generation, never copied. Residual risk is minimized, not zero: stable pseudonyms link the same anonymous project across packages from one install (delete `~/.core/metrics-package-salt` to sever); small cells are suppressed at k=3; per-unit rankings gate on store population. Trust labels use the committed vocabulary — `proven-live` / `direct` / `proxy` / `provisional` — with a basis note per block: retrieval stats are `proxy` until the corpus is fully product-emitted; recognition stays `provisional` until the classifier clears calibration (read trends, not levels).');
   lines.push('');
@@ -29,10 +29,10 @@ export function buildReportMd({ manifest, projects }) {
     lines.push(`## ${proj.pseudonym}`);
     lines.push('');
     const h = proj.headline;
-    lines.push(`- **Store:** ${numOr(h.units_total)} units, ${numOr(h.edges_total)} edges · link density ${pct(h.link_density)} · orphan rate ${pct(h.orphan_rate)} *(direct)*`);
+    lines.push(`- **Store:** ${numOr(h.units_total)} units, ${numOr(h.edges_total)} edges · ${numOr(h.edges_per_active_unit)} edges/active unit · orphan rate ${pct(h.orphan_rate)} *(direct)*`);
     lines.push(`- **Retrieval:** ${numOr(h.retrieval_events_total)} logged events · escalation past lexical ${pct(h.escalation_rate)} · dip-back rate ${pct(h.dip_back_rate)} · ${numOr(h.miss_total, '0')} misses *(proxy — corpus not yet fully product-emitted)*`);
     lines.push(`- **Validator:** ${numOr(h.warn_total)} warnings, ${numOr(h.fail_total, '0')} failures *(direct)*`);
-    lines.push(`- **Recognition:** latest rec-fail rate ${pct(h.recfail_latest_rate)} *(provisional — uncalibrated classifier)*`);
+    lines.push(`- **Recognition:** latest rec-fail rate ${h.recfail_latest_rate != null ? pct(h.recfail_latest_rate) : `withheld (sample ${numOr(h.recfail_latest_sample, '0')} turns < 20 floor)`} *(provisional — uncalibrated classifier)*`);
     lines.push(`- **PROJECT.md:** ${h.project_md_bytes != null ? `${Math.round(h.project_md_bytes / 1024)}KB` : '—'}`);
     lines.push('');
     if (proj.deltas?.available) {
@@ -161,10 +161,10 @@ export function buildReportHtml({ manifest, projects }) {
     const h = proj.headline;
     const tiles = [
       tile(numOr(h.units_total), 'units in store', 'direct'),
-      tile(pct(h.link_density), 'link density', 'direct'),
+      tile(numOr(h.edges_per_active_unit), 'edges / active unit', 'direct'),
       tile(pct(h.orphan_rate), 'orphan rate', 'direct'),
       tile(pct(h.escalation_rate), 'retrieval escalation', 'proxy'),
-      tile(pct(h.recfail_latest_rate), 'latest rec-fail', 'provisional'),
+      tile(h.recfail_latest_rate != null ? pct(h.recfail_latest_rate) : 'n<20', 'latest rec-fail', 'provisional'),
       tile(numOr(h.warn_total), 'validator warnings', 'direct'),
     ].join('');
 
@@ -215,7 +215,7 @@ export function buildReportHtml({ manifest, projects }) {
 <style>${CSS}</style>
 <body><div class="viz-root">
 <h1>CORE memory-efficacy package</h1>
-<div class="sub">Generated ${esc(manifest.generated_at)} · ${esc(manifest.mode)} · plugin ${manifest.plugin ? `v${esc(manifest.plugin.version)}` : 'unknown'} · anonymized: pseudonyms + aggregates only</div>
+<div class="sub">Generated ${esc(manifest.generated_at)} · ${esc(manifest.mode)} · generator ${manifest.generator ? esc(manifest.generator.ran_from) : 'unknown'} (manifest v${manifest.plugin ? esc(manifest.plugin.manifest_version) : '?'}) · anonymized: pseudonyms + aggregates only</div>
 ${sections}
 <div class="note">Every value is a number, date, fixed CORE vocabulary, or salted pseudonym; free text is dropped at generation. Residual risk minimized, not zero — see manifest.json. Trust labels (committed vocabulary): direct = event log / store walk; proxy = behavior-dependent corpus; provisional = classifier not yet calibrated (read trends, not levels). Machine-readable blocks: projects/&lt;pseudonym&gt;/*.json.</div>
 </div></body>`;
