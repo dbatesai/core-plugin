@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
@@ -16,6 +16,14 @@ function runHook(prompt, env) {
     // pointed at a COMMITTED fixture store must never write telemetry into it
     // (that exact pollution shipped in a2cab1b and was cleaned up same night).
     // Tests that assert the telemetry write opt back in against temp stores.
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', ...env },
+    encoding: 'utf8',
+  });
+}
+
+function runHookProcess(prompt, env) {
+  return spawnSync('node', [HOOK], {
+    input: JSON.stringify({ prompt }),
     env: { ...process.env, CORE_METRICS_ENABLED: '0', ...env },
     encoding: 'utf8',
   });
@@ -120,7 +128,10 @@ test('hit event: ladder tier from producing stage, observed terms, correlation p
 test('empty result is an honest no-hit at the tier actually run — never a fabricated Tier-3 miss', () => {
   const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-nohit-')));
   try {
-    runHook('zzqx unmatchable quark', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1' });
+    const out = runHook('zzqx unmatchable quark', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1' });
+    assert.match(out, /CORE reasoning escalation required/);
+    assert.match(out, /inspect all 1 shard\(s\) covering 2 active units/);
+    assert.ok(Buffer.byteLength(out, 'utf8') <= 2048, 'reasoning directive stays inside the hook cap');
     const rows = readEventRows(root);
     if (rows.length) { // an empty final set may still inject nothing yet log honestly
       const evt = rows[0];
@@ -154,13 +165,20 @@ test('telemetry write failure is observable in the hook log, and the turn is nev
 });
 
 // ---- Typed operational receipt: one terminal row per invocation, closed vocabulary ----
-test('every hook branch emits exactly one in-vocabulary {action, reason} receipt', () => {
+test('every hook branch emits exactly one in-vocabulary {action, reason} receipt', async () => {
   const branches = [
     { name: 'retrieval-opt-out', env: { CORE_RETRIEVAL_HOOK: '0' }, prompt: 'widget', expect: { action: 'skip', reason: 'retrieval-opt-out' }, needStore: false },
     { name: 'empty-prompt', env: {}, prompt: '   ', expect: { action: 'skip', reason: 'empty-prompt' }, needStore: false },
     { name: 'store-absent', env: {}, prompt: 'widget', expect: { action: 'skip', reason: 'store-absent' }, storeless: true },
     { name: 'delivered-ok', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'ok' } },
     { name: 'metrics-opt-out', env: { CORE_METRICS_ENABLED: '0' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'metrics-opt-out' } },
+    { name: 'pipeline-error', env: {}, prompt: 'widget', expect: { action: 'failed', reason: 'pipeline-error' }, directReceipt: true, needStore: false },
+    { name: 'store-unavailable', env: {}, prompt: 'widget', expect: { action: 'skip', reason: 'store-unavailable' }, needStore: false, setup: (root) => { wf(join(root, '_memories'), 'not a directory'); } },
+    { name: 'no-hit', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'zzqx unmatchable quark', expect: { action: 'delivered', reason: 'no-hit' } },
+    { name: 'delivery-failed', env: { CORE_RETRIEVAL_BYTE_CAP: '0' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'delivery-failed' } },
+    { name: 'event-write-failed', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'event-write-failed' }, setup: (root) => { wf(join(root, '_sessions'), 'not a directory'); } },
+    { name: 'trace-write-failed', env: { CORE_METRICS_ENABLED: '1', CORE_RETRIEVAL_TRACE: '1' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'trace-write-failed' }, setup: (root) => { const d = join(root, '_sessions', new Date().toISOString().slice(0, 10)); mkd(join(d, 'retrieval-trace.jsonl'), { recursive: true }); } },
+    { name: 'hook-log-write-failed', env: {}, prompt: 'widget decision', expect: { action: 'failed', reason: 'hook-log-write-failed' }, breakHookLog: true },
   ];
   for (const b of branches) {
     const root = mkdtempSync(join(tmpdir(), `rh-recpt-${b.name}-`));
@@ -169,8 +187,26 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       let store = root;
       if (b.storeless) { mkd(join(root, 'empty'), { recursive: true }); store = join(root, 'empty'); }
       else if (b.needStore !== false) makeStore(root);
-      runHook(b.prompt, { ...b.env, CORE_RETRIEVAL_STORE: store, CORE_HOOKS_LOG_FILE: logFile });
-      const rows = rf(logFile, 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(r => r.hook === 'retrieve-context');
+      if (b.setup) b.setup(root);
+      const effectiveLog = b.breakHookLog ? join(root, 'blocked', 'hooks-log.jsonl') : logFile;
+      if (b.breakHookLog) wf(join(root, 'blocked'), 'not a directory');
+      let run;
+      if (b.directReceipt) {
+        const prior = process.env.CORE_HOOKS_LOG_FILE;
+        process.env.CORE_HOOKS_LOG_FILE = effectiveLog;
+        try {
+          const { receipt } = await import('../../plugins/core/skills/core/hooks/retrieve-context-hook.mjs');
+          receipt('failed', 'pipeline-error', { cwd: store });
+          run = { stderr: '' };
+        } finally {
+          if (prior === undefined) delete process.env.CORE_HOOKS_LOG_FILE;
+          else process.env.CORE_HOOKS_LOG_FILE = prior;
+        }
+      } else {
+        run = runHookProcess(b.prompt, { ...b.env, CORE_RETRIEVAL_STORE: store, CORE_HOOKS_LOG_FILE: effectiveLog });
+      }
+      const rawRows = ex(logFile) ? rf(logFile, 'utf8') : run.stderr;
+      const rows = rawRows.trim().split('\n').map(l => JSON.parse(l)).filter(r => r.hook === 'retrieve-context');
       assert.equal(rows.length, 1, `${b.name}: exactly one terminal row`);
       assert.equal(rows[0].action, b.expect.action, `${b.name}: action`);
       assert.equal(rows[0].reason, b.expect.reason, `${b.name}: reason`);

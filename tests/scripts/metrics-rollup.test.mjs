@@ -10,7 +10,7 @@ test('M5: a calibrated workspace with no turns must not mislabel the signal PROV
   withClassified({}, ({ home, project }) => {
     const metaDir = join(home, '.core', 'workspaces', WID, 'metrics');
     writeFileSync(join(metaDir, 'calibration-state.json'),
-      JSON.stringify({ is_calibrated: true, classifier_version: CLASSIFIER_VERSION }));
+      JSON.stringify({ is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION }));
     const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, true, 'calibration state read as calibrated');
     assert.doesNotMatch(r.signal, /PROVISIONAL/, 'the no-turns signal must not claim provisional once calibrated');
@@ -86,7 +86,7 @@ test('readOrientSignal returns null when no signal has been written', () => {
 
 // ---- Calibration gate (Phase 3): PROVISIONAL clears only when calibrated AND version-matched ----
 
-import { CLASSIFIER_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
 function writeCalState(home, state) {
   const dir = join(home, '.core', 'workspaces', WID, 'metrics');
@@ -96,7 +96,7 @@ function writeCalState(home, state) {
 
 test('rollup drops PROVISIONAL when calibration is cleared at the current classifier version', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, overall_precision: 0.82 });
+    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, overall_precision: 0.82 });
     const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, true);
     assert.doesNotMatch(r.signal, /PROVISIONAL/, 'calibrated signal drops the tag');
@@ -109,6 +109,15 @@ test('rollup keeps PROVISIONAL when calibration was run against a stale classifi
     const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, false, 'version mismatch ⇒ treat as uncalibrated');
     assert.match(r.signal, /PROVISIONAL/, 'stale-version calibration cannot clear the tag');
+  });
+});
+
+test('rollup keeps PROVISIONAL when calibration was run against a stale proxy version', () => {
+  withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
+    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION - 1 });
+    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    assert.equal(r.calibrated, false);
+    assert.match(r.signal, /PROVISIONAL/);
   });
 });
 

@@ -118,6 +118,90 @@ function isoDay(s) {
 
 function round3(x) { return x == null ? null : Math.round(x * 1000) / 1000; }
 
+function weekStart(day) {
+  const d = new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  const mondayOffset = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - mondayOffset);
+  return d.toISOString().slice(0, 10);
+}
+
+function addCounts(target, source) {
+  for (const [key, value] of Object.entries(source || {})) {
+    if (num(value) != null) target[key] = (target[key] || 0) + value;
+  }
+}
+
+function weeklyRetrieval(days) {
+  const weeks = {};
+  for (const [day, row] of Object.entries(days || {})) {
+    const week = weekStart(day);
+    if (!week) continue;
+    const out = weeks[week] ||= {
+      events: 0, tiers: {}, escalations: 0, dip_backs: 0,
+      dipback_observed_rows: 0, misses: 0, no_hits: 0, suppressed: {},
+    };
+    for (const key of ['events', 'escalations', 'dip_backs', 'dipback_observed_rows', 'misses', 'no_hits']) {
+      out[key] += num(row[key]) || 0;
+    }
+    addCounts(out.tiers, row.tiers);
+    addCounts(out.suppressed, row.suppressed);
+    if (row.outcomes) { out.outcomes ||= {}; addCounts(out.outcomes, row.outcomes); }
+  }
+  return weeks;
+}
+
+function weeklyHygiene(days) {
+  const weeks = {};
+  for (const [day, row] of Object.entries(days || {})) {
+    const week = weekStart(day);
+    if (!week) continue;
+    const out = weeks[week] ||= { ops: {} };
+    addCounts(out.ops, row.ops);
+  }
+  return weeks;
+}
+
+function weeklyRecognition(days) {
+  const weeks = {};
+  for (const [day, row] of Object.entries(days || {})) {
+    const week = weekStart(day);
+    if (!week) continue;
+    const out = weeks[week] ||= { turns: 0, states: {}, provisional_count: 0 };
+    out.turns += num(row.turns) || 0;
+    out.provisional_count += num(row.provisional_count) || 0;
+    addCounts(out.states, row.states);
+  }
+  for (const row of Object.values(weeks)) {
+    row.provisional_share = row.turns ? round3(row.provisional_count / row.turns) : null;
+    delete row.provisional_count;
+  }
+  return weeks;
+}
+
+export function projectForShare(blocks) {
+  const out = { ...blocks };
+  const retrieval = blocks['retrieval-stats'];
+  if (retrieval?.available) {
+    const { days, ...rest } = retrieval;
+    out['retrieval-stats'] = { ...rest, weeks: weeklyRetrieval(days) };
+  }
+  const hygiene = blocks['hygiene-stats'];
+  if (hygiene?.available) {
+    const { days, ...rest } = hygiene;
+    out['hygiene-stats'] = { ...rest, weeks: weeklyHygiene(days) };
+  }
+  const workspace = blocks['workspace-metrics'];
+  if (workspace?.available && workspace.recognition?.available) {
+    const { days, ...recognition } = workspace.recognition;
+    out['workspace-metrics'] = {
+      ...workspace,
+      recognition: { ...recognition, weeks: weeklyRecognition(days) },
+    };
+  }
+  return out;
+}
+
 // ---------- pseudonymization ----------
 
 export function loadOrCreateSalt(coreDir) {
@@ -408,7 +492,12 @@ export function workspaceMetrics(home, workspaceId) {
         states[s] = (states[s] || 0) + 1;
         if (r.provisional) provisional += 1;
       }
-      recognition.days[day] = { turns: rows.length, states, provisional_share: rows.length ? round3(provisional / rows.length) : null };
+      recognition.days[day] = {
+        turns: rows.length,
+        states,
+        provisional_count: provisional,
+        provisional_share: rows.length ? round3(provisional / rows.length) : null,
+      };
     }
     if (Object.keys(recognition.days).length) { recognition.available = true; delete recognition.reason; }
   }
@@ -427,6 +516,20 @@ export function workspaceMetrics(home, workspaceId) {
         is_calibrated: j.is_calibrated === true,
         provisional: j.provisional !== false,
         classifier_version: (typeof j.classifier_version === 'string' && /^\d+\.\d+\.\d+$/.test(j.classifier_version)) ? j.classifier_version : null,
+        proxy_version: Number.isInteger(j.proxy_version) ? j.proxy_version : null,
+        by_harness: Object.fromEntries(['claude-code', 'codex'].map((harness) => {
+          const row = j.by_harness?.[harness];
+          return [harness, row ? {
+            is_calibrated: row.is_calibrated === true,
+            labeled_count: num(row.labeled_count),
+            min_labeled: num(row.min_labeled),
+            overall_precision: num(row.overall_precision),
+            coverage_complete: row.coverage_complete === true,
+            per_class_pass: row.per_class_pass === true,
+            blinded: row.blinded === true,
+            provenance_complete: row.provenance_complete === true,
+          } : { is_calibrated: false }];
+        })),
       };
     } catch { calibration = { available: false, reason: 'calibration-state.json unparseable' }; }
   }
@@ -603,7 +706,7 @@ export function collectProject(projectDir, { home, seal }) {
     try { workspaceId = JSON.parse(readFileSync(wsPointer, 'utf8')).workspace_id || null; } catch { workspaceId = null; }
   }
   const pseudonym = seal('project', workspaceId || basename(projectDir));
-  const blocks = {
+  const localBlocks = {
     'retrieval-stats': retrievalStats(projectDir, seal),
     'hygiene-stats': hygieneStats(projectDir),
     'store-census': storeCensus(projectDir),
@@ -614,14 +717,15 @@ export function collectProject(projectDir, { home, seal }) {
   };
   // Population gate on per-unit rankings (Hale finding 6): below the floor a
   // ranking row can fingerprint a specific unit across packages.
-  const census = blocks['store-census'];
-  const retrieval = blocks['retrieval-stats'];
+  const census = localBlocks['store-census'];
+  const retrieval = localBlocks['retrieval-stats'];
   if (retrieval?.available && (!census?.available || (census.units_active || 0) < RANKING_MIN_POPULATION)) {
     retrieval.top_retrieved_units = [];
     retrieval.top_retrieved_units_suppressed = `population below ${RANKING_MIN_POPULATION} active units`;
   }
-  const hl = headline(blocks);
-  const flags = computeFlags(blocks, hl);
+  const hl = headline(localBlocks);
+  const flags = computeFlags(localBlocks, hl);
+  const blocks = projectForShare(localBlocks);
   return { pseudonym, blocks, headline: hl, flags };
 }
 

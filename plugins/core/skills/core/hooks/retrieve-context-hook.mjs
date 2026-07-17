@@ -13,9 +13,11 @@
  * opt-out). Rationale: a default-off, manually-wired hook is invisible machinery no real
  * user would enable — the north-star ("never fail to retrieve") is only served if it's
  * actually live, and only then can the metrics layer measure whether injection helps.
- * Known limit (DC-111): lexical matching can inject a topical-but-irrelevant unit on an
- * abstract query (O1 noise) — bounded (byte-capped, advisory, fail-open) and the reasoning
- * tier is the sequenced de-noiser. To opt out:
+ * A zero-hit lexical result injects a bounded Tier 3 directive that tells the active model
+ * to inspect every exhaustive reasoning shard. Known limit (DC-111): when lexical matching
+ * returns topical-but-irrelevant context, only the active model can judge insufficiency and
+ * follow the same Tier 3 protocol; the model-free hook cannot decide semantic relevance.
+ * To opt out:
  *
  *   // ~/.claude/settings.json  (or set the env var)
  *   CORE_RETRIEVAL_HOOK=0
@@ -28,13 +30,15 @@
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
+import { selectCandidates } from '../scripts/select-relevant-units.mjs';
 import { logHookEvent } from './hook-log.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
@@ -46,16 +50,33 @@ const TOP_N = 3;
 // Closed vocabularies; an unknown code is coerced to failed/pipeline-error
 // rather than emitted (tests assert every path lands in-vocabulary).
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
-export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'event-write-failed', 'trace-write-failed'];
+export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'trace-write-failed', 'hook-log-write-failed'];
 
-function receipt(action, reason, extra = {}) {
+export function receipt(action, reason, extra = {}) {
   const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
   const r = RETRIEVAL_REASONS.includes(reason) ? reason : 'pipeline-error';
-  try { logHookEvent({ hook: 'retrieve-context', action: a, reason: r, ...extra }); } catch { /* fail-open: observability never blocks the turn */ }
+  try {
+    const out = logHookEvent({ hook: 'retrieve-context', action: a, reason: r, ...extra });
+    if (!out?.written) {
+      // stderr is the last-resort operational surface. Never print to stdout:
+      // stdout is injected into the user's context by the hook protocol.
+      process.stderr.write(`${JSON.stringify({
+        ts: new Date().toISOString(),
+        hook: 'retrieve-context',
+        action: 'failed',
+        reason: 'hook-log-write-failed',
+        intended_action: a,
+        intended_reason: r,
+        error_code: out?.error_code || 'hook-log-write-failed',
+      })}\n`);
+    }
+  } catch {
+    // Preserve fail-open behavior even if the fallback surface itself fails.
+  }
   return 0;
 }
 
-async function main() {
+export async function main() {
   // Default-ON, opt-out gate (G2 shipped on, 2026-06-28). Runs unless explicitly
   // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the DC-107 metrics opt-out).
   if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
@@ -71,6 +92,9 @@ async function main() {
 
   const store = process.env.CORE_RETRIEVAL_STORE || payload.cwd || process.cwd();
   if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { cwd: store });
+  try {
+    if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { cwd: store });
+  } catch { return receipt('skip', 'store-unavailable', { cwd: store }); }
 
   // ONE pipeline run serves both jobs (2026-07-17, closes Hale audit finding 1 +
   // finding 4 on e1490d4): buildRetrievalTrace runs the same staged pipeline as
@@ -78,7 +102,10 @@ async function main() {
   // and emits the canonical per-turn retrieval event from the same run, so the
   // telemetry corpus is product-emitted, not agent-behavior-dependent.
   let trace = null;
-  try { trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap: OUTPUT_BYTE_CAP }); } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
+  const configuredCap = Number(process.env.CORE_RETRIEVAL_BYTE_CAP);
+  const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
+    ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
+  try { trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap }); } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
   if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
@@ -149,14 +176,48 @@ async function main() {
     telemetryReason = 'pipeline-error'; // fail-open by contract — surfaced in the terminal receipt below
   }
 
-  const injected = Boolean(trace.pack && trace.pack.text);
-  if (injected) process.stdout.write(trace.pack.text);
+  let reasoningDirective = '';
+  if (final.length === 0) {
+    try {
+      const shards = selectCandidates(prompt, store, { shardSize: 80 });
+      if (shards.length) {
+        const unitsTotal = shards[0].units_total;
+        reasoningDirective = `CORE reasoning escalation required: Tier 1 found no lexical context. Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
+      }
+    } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
+  }
+
+  const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
+  if (trace.pack && trace.pack.text) process.stdout.write(trace.pack.text);
+  else if (reasoningDirective) process.stdout.write(reasoningDirective.slice(0, OUTPUT_BYTE_CAP));
 
   // The single terminal operational row for this invocation: what happened to
   // the user-facing injection (action) and what happened to telemetry (reason).
-  const action = injected ? 'delivered' : (telemetryReason === 'ok' || telemetryReason === 'metrics-opt-out' ? 'skip' : 'failed');
-  const reason = !injected && final.length === 0 && (telemetryReason === 'ok') ? 'no-hit' : telemetryReason;
-  return receipt(action, reason, { cwd: store, ...(retrievalId ? { retrieval_id: retrievalId } : {}) });
+  let action;
+  let reason;
+  if (reasoningDirective) {
+    action = 'delivered';
+    reason = 'no-hit';
+  } else if (injected) {
+    action = 'delivered';
+    reason = telemetryReason;
+  } else if (final.length === 0) {
+    action = telemetryReason === 'ok' || telemetryReason === 'metrics-opt-out' ? 'skip' : 'failed';
+    reason = telemetryReason === 'ok' ? 'no-hit' : telemetryReason;
+  } else {
+    // Selection succeeded but the byte-capped product delivered no context.
+    // This is never skip/ok: it is a user-visible delivery failure.
+    action = 'failed';
+    reason = 'delivery-failed';
+  }
+  return receipt(action, reason, {
+    cwd: store,
+    ...(reason !== telemetryReason ? { telemetry_reason: telemetryReason } : {}),
+    ...(retrievalId ? { retrieval_id: retrievalId } : {}),
+  });
 }
 
-main().then((code) => process.exit(code || 0)).catch(() => process.exit(0));
+const _canon = (path) => { try { return realpathSync(path); } catch { return path; } };
+if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+  main().then((code) => process.exit(code || 0)).catch(() => process.exit(0));
+}

@@ -85,6 +85,39 @@ test('package never contains planted names, paths, topics, or raw unit ids', () 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('share artifact projects local daily telemetry to weekly-only blocks and reports', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-weekly-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root, { plant: false });
+    const secondWeek = join(project, '_sessions', '2026-07-08');
+    mkdirSync(secondWeek, { recursive: true });
+    writeFileSync(join(secondWeek, 'retrieval-log.jsonl'), `${JSON.stringify({ kind: 'retrieval', tier_reached: 1, dip_back_count: 0 })}\n`);
+    writeFileSync(join(secondWeek, 'hygiene-log.jsonl'), `${JSON.stringify({ kind: 'maintenance-run' })}\n`);
+    const classified = join(home, '.core', 'workspaces', 'fixture-ws-alpha', 'metrics', 'classified');
+    mkdirSync(classified, { recursive: true });
+    writeFileSync(join(classified, '2026-07-01.jsonl'), `${JSON.stringify({ state: 'tier-0-win', provisional: true })}\n`);
+    writeFileSync(join(classified, '2026-07-08.jsonl'), `${JSON.stringify({ state: 'rec-fail-tier-0', provisional: false })}\n`);
+    const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
+    const extracted = extractZip(result.shipped.path, join(root, 'x'));
+    const projectDir = join(extracted, 'projects', readdirSync(join(extracted, 'projects'))[0]);
+    const retrieval = JSON.parse(readFileSync(join(projectDir, 'retrieval-stats.json'), 'utf8'));
+    const hygiene = JSON.parse(readFileSync(join(projectDir, 'hygiene-stats.json'), 'utf8'));
+    const workspace = JSON.parse(readFileSync(join(projectDir, 'workspace-metrics.json'), 'utf8'));
+    const report = readFileSync(join(extracted, 'report.html'), 'utf8');
+
+    assert.equal(retrieval.days, undefined, 'exact daily retrieval vectors stay local');
+    assert.equal(hygiene.days, undefined, 'exact daily hygiene vectors stay local');
+    assert.equal(workspace.recognition.days, undefined, 'exact daily recognition vectors stay local');
+    assert.equal(retrieval.weeks['2026-06-29'].events, 4);
+    assert.equal(hygiene.weeks['2026-06-29'].ops['demote-moves'], 1);
+    assert.equal(workspace.recognition.weeks['2026-06-29'].turns, 1);
+    assert.equal(workspace.recognition.weeks['2026-06-29'].provisional_share, 1);
+    assert.match(report, /per week/i);
+    assert.doesNotMatch(report, /per day/i);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('pseudonyms are stable under one salt and rotate when the salt is deleted', () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-salt-'));
   try {

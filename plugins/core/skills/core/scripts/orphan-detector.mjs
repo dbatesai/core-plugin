@@ -37,11 +37,6 @@ export const ALLOWLIST = Object.freeze({
   // select-relevant-units.mjs left this allowlist 2026-07-17: DC-117 resolved
   // Gate G3 and references/retrieval.md §Tier 3 step 1 now names it on the
   // product path (shortlist --max 100 before any Explore subagent).
-  'score-ladder.mjs': {
-    reason: 'DC-94b obligation-3 acceptance scorer — the measurement contract, consumed by the obligation3-ladder test and the eval reports. Gate G3 resolved 2026-07-17 (DC-117 wired the reasoning tier), but the scorer belongs to the MEASUREMENT path, not runtime; it leaves this list when the stats/validation surface lands and imports it (same condition as retrieval-harness.mjs).',
-    allowlistDate: '2026-06-27',
-    reviewBy: '2026-09-27',
-  },
   'instruction-surface-adapter.mjs': {
     reason: 'Deliberately-staged v3.0 instruction-surface system (dry-run core; --apply is David-gated + content-generation not implemented). Activation is tied to the pending "does the contract→generator system still earn its complexity at N=2 surfaces" decision (PROJECT.md §State). Wire or retire when that decides.',
     allowlistDate: '2026-06-09',

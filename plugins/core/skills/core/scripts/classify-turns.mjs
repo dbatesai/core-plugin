@@ -31,7 +31,7 @@
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
  */
 
-import { readFileSync, readdirSync, appendFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, appendFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -118,7 +118,8 @@ export function extractAskedTerm(text) {
  * @param {object} turn  { userText, toolEvents, assistantText }
  * @param {object} ctx   { isInContext(term), isOnDisk(term) }
  */
-export function classifyTurn(turn, { isInContext, isOnDisk }) {
+export function classifyTurn(turn, ctx) {
+  const { isInContext, isOnDisk } = ctx;
   const { userText = '', toolEvents = [], assistantText = '' } = turn;
   const ladder = isLadderWalk(toolEvents);
 
@@ -132,17 +133,19 @@ export function classifyTurn(turn, { isInContext, isOnDisk }) {
   const inContext = term ? !!isInContext(term) : false;
   const onDisk = term ? !!isOnDisk(term) : false;
 
-  if (inContext) return { state: 'rec-fail-tier-0', evidence: { term, found: 'context' } };
+  const contextExcerpt = ctx.contextEvidence?.(term) || null;
+  const diskExcerpt = ctx.diskEvidence?.(term) || null;
+  if (inContext) return { state: 'rec-fail-tier-0', evidence: { term, found: 'context', context_excerpt: contextExcerpt } };
   if (onDisk) {
-    if (!ladder) return { state: 'rec-fail-tier-1-3-trigger', evidence: { term, found: 'disk', ladder_walk: false } };
+    if (!ladder) return { state: 'rec-fail-tier-1-3-trigger', evidence: { term, found: 'disk', ladder_walk: false, disk_excerpt: diskExcerpt } };
     // M6: mechanics-failure is defined as "agent walked the ladder; it came back EMPTY anyway"
     // — so it requires the ladder to have surfaced nothing. The dead ladderReturnedContent
     // discriminator is the test. If the ladder walked AND returned content but the agent still
     // asked, the mechanism worked — the content was effectively in context for this turn — so
     // that's a tier-0-grade recognition failure, not a mechanics failure.
     return ladderReturnedContent(toolEvents)
-      ? { state: 'rec-fail-tier-0', evidence: { term, found: 'context-via-ladder', ladder_walk: true } }
-      : { state: 'mechanics-failure', evidence: { term, found: 'disk', ladder_walk: true, ladder_empty: true } };
+      ? { state: 'rec-fail-tier-0', evidence: { term, found: 'context-via-ladder', ladder_walk: true, context_excerpt: contextExcerpt } }
+      : { state: 'mechanics-failure', evidence: { term, found: 'disk', ladder_walk: true, ladder_empty: true, disk_excerpt: diskExcerpt } };
   }
   return { state: 'capture-miss', evidence: { term, found: 'nowhere' } };
 }
@@ -165,7 +168,15 @@ export function pairTurns(events) {
 }
 
 export function classifyTurns(events, ctx) {
-  return pairTurns(events).map((turn, i) => ({ turnIdx: i, ...classifyTurn(turn, ctx) }));
+  return pairTurns(events).map((turn, i) => ({
+    turnIdx: i,
+    ...classifyTurn(turn, ctx),
+    turn_evidence: {
+      user_text: turn.userText,
+      assistant_text: turn.assistantText.trim(),
+      tool_events: turn.toolEvents.map((event) => event.text || ''),
+    },
+  }));
 }
 
 export function summarize(classified) {
@@ -200,9 +211,17 @@ export function buildPredicates(project, { events = [] } = {}) {
   const contextBlob = injected.join('\n').toLowerCase();
   // PROJECT.md always counts as on-disk (it IS reachable by the ladder).
   const diskBlob = (listDiskTerms(project) + '\n' + safeRead(join(project, 'PROJECT.md'))).toLowerCase();
+  const excerpt = (blob, term) => {
+    const needle = String(term || '').toLowerCase();
+    const at = needle ? blob.indexOf(needle) : -1;
+    if (at < 0) return null;
+    return blob.slice(Math.max(0, at - 120), Math.min(blob.length, at + needle.length + 120));
+  };
   return {
     isInContext: (term) => containsTerm(contextBlob, term),
     isOnDisk: (term) => containsTerm(diskBlob, term),
+    contextEvidence: (term) => excerpt(contextBlob, term),
+    diskEvidence: (term) => excerpt(diskBlob, term),
   };
 }
 
@@ -261,17 +280,21 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
     schema_version: '1.0.0',
     classifier_version: CLASSIFIER_VERSION,
     proxy_version: PROXY_VERSION, // DC-94a: versions the in-context proxy so calibration invalidates across proxy changes
+    harness,
     provisional: true, // honesty gate — not evidence-grade until calibration
     session_id: sid,
     turn_idx: c.turnIdx,
     state: c.state,
     evidence: c.evidence,
+    turn_evidence: c.turn_evidence,
   }));
   // Write to the operational-meta classified store (derived, regeneratable; §17.6).
   try {
     const dir = join(operationalMetricsDir(wid, { home }), 'classified');
     mkdirSync(dir, { recursive: true });
-    for (const r of records) appendFileSync(join(dir, `${date}.jsonl`), JSON.stringify(r) + '\n');
+    const file = join(dir, `${date}.jsonl`);
+    for (const r of records) appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 });
+    chmodSync(file, 0o600);
   } catch { /* best-effort */ }
   return { status: 'OK', provisional: true, workspace_id: wid, transcript_resolution: t.meta.transcript_resolution, ...summarize(classified), records };
 }

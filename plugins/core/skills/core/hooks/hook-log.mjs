@@ -30,5 +30,11 @@ export function logHookEvent(entry) {
     const file = hookLogPath();
     try { mkdirSync(dirname(file), { recursive: true }); } catch { /* dir exists or unwritable */ }
     appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
-  } catch { /* a logger must never break the hook it instruments */ }
+    return { written: true };
+  } catch (error) {
+    // Fail-open for the hook, but never lie that the authoritative receipt
+    // exists. Only a closed error code crosses this boundary; messages can
+    // contain local paths.
+    return { written: false, error_code: typeof error?.code === 'string' ? error.code : 'hook-log-write-failed' };
+  }
 }

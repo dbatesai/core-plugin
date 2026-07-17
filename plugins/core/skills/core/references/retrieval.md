@@ -78,13 +78,13 @@ A branch terminates when ANY of these are true:
 
 ### Tier 3 — Reasoning escalation (shortlist first, subagent second)
 
-**Step 1 — reason over a recall shortlist (DC-117, ratified 2026-07-15; the default first move).** Run the deterministic shortlist builder and reason over its output in-context:
+**Step 1 — reason over exhaustive bounded shards (DC-117, ratified 2026-07-15; scale repair 2026-07-17).** The per-turn hook automatically injects this escalation when Tier 1 returns no lexical context. When Tier 1 returns context that still does not answer the question, the active model must escalate here itself; a model-free hook cannot judge semantic sufficiency. Start at shard zero:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/select-relevant-units.mjs" <project> "<the question>" --max 100
+node "${CORE_ROOT}/skills/core/scripts/select-relevant-units.mjs" <project> "<the question>" --shard 0 --shard-size 80
 ```
 
-The shortlist is recall-oriented on purpose — it errs toward including the right unit even when lexical scoring ranks it near zero (the value→instance leap: "heritage" → El Primero). Read the returned id/topics/summary rows, reason with world knowledge about which units actually bear on the question, then Read those units in full and answer. The held-out evidence behind this promotion: blind reasoning resolved 12 of 12 queries whenever the gold unit was in its shortlist — every miss was the old 30-row shortlist's, which is why the width is 100. The everyday path stays deterministic (DC-115); this step runs only when Tiers 1+2 have actually failed. Scale caveat (2026-07-05 audit): the 100-row width is a small-store ceiling — above ~100 active units a fixed cap fails as the recall knob; the full-body-substrate candidate generation and blinded >100-unit evaluation are in progress before this step is called complete.
+The first line reports `Reasoning shard X/Y`, `units_scanned`, and `units_total`. Run every shard from `0` through `Y-1`; do not stop after the first plausible candidate. The order is recall-oriented: the shipped full-body product ranking comes first, followed by every unmatched active unit in deterministic id order, so the union of all shards covers the entire active corpus exactly once. Reason with world knowledge over each shard's id/topics/summary rows, Read the genuinely relevant units in full, then answer. This keeps query-time code model-free while using the already-active Claude/Codex model for the value-to-instance bridge (for example, "heritage" → El Primero). Log Tier 3 only after the reasoning pass actually runs; the hook's directive alone remains an honest Tier 1 no-hit.
 
 **Step 2 — Explore subagent (when the shortlist read doesn't resolve it).** Spawn an Explore subagent (or general-purpose subagent) with a natural-language prompt: *"Read through `<project>/_memories/` and find everything relevant to <question>. The user wants to understand <goal>. Return a synthesis with citations to the specific files you used."*
 

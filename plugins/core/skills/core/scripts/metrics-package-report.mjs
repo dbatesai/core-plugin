@@ -177,14 +177,14 @@ export function buildReportHtml({ manifest, projects }) {
     let eventsLine = '';
     if (r?.available) {
       const tierTotals = {};
-      for (const d of Object.values(r.days)) {
+      for (const d of Object.values(r.weeks)) {
         for (const [t, n] of Object.entries(d.tiers || {})) tierTotals[t] = (tierTotals[t] || 0) + n;
       }
       tierChart = barChart('Retrieval tier distribution (all logged events)',
         Object.keys(tierTotals).sort().map(t => ({ label: `Tier ${t}`, value: tierTotals[t] })), { ordinal: true });
-      const dayKeys = Object.keys(r.days).sort();
-      eventsLine = lineChart('Retrieval events per day',
-        dayKeys.map(d => ({ label: d, value: r.days[d].events })));
+      const weekKeys = Object.keys(r.weeks).sort();
+      eventsLine = lineChart('Retrieval events per week',
+        weekKeys.map(week => ({ label: week, value: r.weeks[week].events })));
     }
 
     const v = proj.blocks['validator'];
@@ -196,9 +196,9 @@ export function buildReportHtml({ manifest, projects }) {
     const w = proj.blocks['workspace-metrics'];
     let recLine = '';
     if (w?.available && w.recognition?.available) {
-      const dayKeys = Object.keys(w.recognition.days).sort();
-      recLine = lineChart('rec-fail-tier-0 turns per day (PROVISIONAL — uncalibrated)',
-        dayKeys.map(d => ({ label: d, value: (w.recognition.days[d].states['rec-fail-tier-0'] || 0) })));
+      const weekKeys = Object.keys(w.recognition.weeks).sort();
+      recLine = lineChart('rec-fail-tier-0 turns per week (PROVISIONAL — uncalibrated)',
+        weekKeys.map(week => ({ label: week, value: (w.recognition.weeks[week].states['rec-fail-tier-0'] || 0) })));
     }
 
     const deltas = proj.deltas?.available
