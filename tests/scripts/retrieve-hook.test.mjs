@@ -11,7 +11,12 @@ const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'ob
 function runHook(prompt, env) {
   return execFileSync('node', [HOOK], {
     input: JSON.stringify({ prompt }),
-    env: { ...process.env, ...env },
+    // Metrics hard-off by default: the hook emits the canonical per-turn
+    // retrieval event + OTel span when metrics are on (2026-07-17), and a test
+    // pointed at a COMMITTED fixture store must never write telemetry into it
+    // (that exact pollution shipped in a2cab1b and was cleaned up same night).
+    // Tests that assert the telemetry write opt back in against temp stores.
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', ...env },
     encoding: 'utf8',
   });
 }

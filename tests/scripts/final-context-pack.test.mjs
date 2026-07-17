@@ -24,7 +24,7 @@ test('A4 equivalence: hook subprocess output === pack function output, byte-exac
   const prompt = 'omega speedmaster sale';
   const hookOut = execFileSync('node', [HOOK], {
     input: JSON.stringify({ prompt }),
-    env: { ...process.env, CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT },
+    env: { ...process.env, CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT, CORE_METRICS_ENABLED: '0' },
     encoding: 'utf8',
   });
   const hits = retrieveContext(prompt, FIXT, { topN: 3 });
