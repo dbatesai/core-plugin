@@ -109,10 +109,11 @@ test('hit event: ladder tier from producing stage, observed terms, correlation p
     assert.ok(typeof evt.retrieval_id === 'string' && evt.retrieval_id.length >= 8, 'correlation id present');
     assert.ok(evt.intent_topics.includes('widget'), 'observed query terms, not a constant');
     for (const u of evt.units_retrieved) {
-      assert.ok(u.tier === 1 || u.tier === 2, `ladder tier 1/2, never authority strings: ${u.tier}`);
+      assert.equal(u.tier, 1, 'the product retriever (incl. one-hop expansion) IS Tier 1 by protocol definition');
+      assert.ok(['ranked', 'one-hop-expansion'].includes(u.source_stage), 'intra-tier provenance rides source_stage, never the ladder tier');
     }
-    assert.ok(evt.tier_reached <= 2, 'model-free pipeline never claims Tier 3');
-    assert.notDeepEqual(evt.escalation_path, [1, 2, 3], 'no fabricated full-ladder path');
+    assert.equal(evt.tier_reached, 1, 'model-free pipeline reports Tier 1 only');
+    assert.deepEqual(evt.escalation_path, [1], 'no fabricated escalation');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -124,8 +125,8 @@ test('empty result is an honest no-hit at the tier actually run — never a fabr
     if (rows.length) { // an empty final set may still inject nothing yet log honestly
       const evt = rows[0];
       assert.equal(evt.result, 'no-hit');
-      assert.ok(evt.tier_reached <= 2, 'tier reflects stages that ran');
-      assert.notDeepEqual(evt.escalation_path, [1, 2, 3]);
+      assert.equal(evt.tier_reached, 1, 'no-hit at Tier 1 — the only tier this mechanism runs');
+      assert.deepEqual(evt.escalation_path, [1]);
       assert.equal(evt.units_retrieved.length, 0);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }

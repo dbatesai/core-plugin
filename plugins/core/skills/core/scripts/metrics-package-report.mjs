@@ -30,7 +30,7 @@ export function buildReportMd({ manifest, projects }) {
     lines.push('');
     const h = proj.headline;
     lines.push(`- **Store:** ${numOr(h.units_total)} units, ${numOr(h.edges_total)} edges · ${numOr(h.edges_per_active_unit)} edges/active unit · orphan rate ${pct(h.orphan_rate)} *(direct)*`);
-    lines.push(`- **Retrieval:** ${numOr(h.retrieval_events_total)} logged events · escalation past lexical ${pct(h.escalation_rate)} · dip-back rate ${pct(h.dip_back_rate)} · ${numOr(h.miss_total, '0')} misses *(proxy — corpus not yet fully product-emitted)*`);
+    lines.push(`- **Retrieval:** ${numOr(h.retrieval_events_total)} logged events · escalation past lexical ${pct(h.escalation_rate)} · dip-back rate ${h.dip_back_rate != null ? pct(h.dip_back_rate) : `unobserved (0/${numOr(h.retrieval_events_total,'0')} rows carry the field)`} · ${numOr(h.miss_total, '0')} misses *(proxy — corpus not yet fully product-emitted)*`);
     lines.push(`- **Validator:** ${numOr(h.warn_total)} warnings, ${numOr(h.fail_total, '0')} failures *(direct)*`);
     lines.push(`- **Recognition:** latest rec-fail rate ${h.recfail_latest_rate != null ? pct(h.recfail_latest_rate) : `withheld (sample ${numOr(h.recfail_latest_sample, '0')} turns < 20 floor)`} *(provisional — uncalibrated classifier)*`);
     lines.push(`- **PROJECT.md:** ${h.project_md_bytes != null ? `${Math.round(h.project_md_bytes / 1024)}KB` : '—'}`);

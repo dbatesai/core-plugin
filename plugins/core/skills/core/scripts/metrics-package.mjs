@@ -179,9 +179,18 @@ export function retrievalStats(projectDir, seal) {
       if (r.result === 'no-hit') { day.no_hits = (day.no_hits || 0) + 1; totals.no_hits = (totals.no_hits || 0) + 1; }
       if (r.usefulness_outcome !== undefined) {
         day.outcomes = day.outcomes || {};
-        const o = fold(String(r.usefulness_outcome), ['helped', 'hurt', 'neutral', 'unknown']);
+        // The PRODUCER contract's vocabulary (references/retrieval.md scoring
+        // slots: useful/partial/noisy/miss) — aggregating a different set folded
+        // every known row to 'other' (Hale WIP review). helped/hurt/neutral is
+        // the future causal target; it arrives with a real outcome producer and
+        // a migration mapping, never as a consumer-only rename.
+        const o = fold(String(r.usefulness_outcome), ['useful', 'partial', 'noisy', 'miss']);
         day.outcomes[o] = (day.outcomes[o] || 0) + 1;
         totals.outcome_rows = (totals.outcome_rows || 0) + 1;
+      }
+      if (num(r.dip_back_count) != null) {
+        day.dipback_observed = (day.dipback_observed || 0) + 1;
+        totals.dipback_observed = (totals.dipback_observed || 0) + 1;
       }
       if (num(r.candidate_count) != null && num(r.selected_count) != null) {
         day.candidates_sum += r.candidate_count;
@@ -199,7 +208,9 @@ export function retrievalStats(projectDir, seal) {
     totals.dip_backs += day.dip_backs;
     days[date] = {
       events: day.events, tiers: day.tiers, escalations: day.escalations,
-      dip_backs: day.dip_backs, misses: day.misses,
+      dip_backs: day.dip_backs, dipback_observed_rows: day.dipback_observed || 0,
+      misses: day.misses, no_hits: day.no_hits || 0,
+      ...(day.outcomes ? { outcomes: day.outcomes } : {}),
       mean_candidates: day.counted ? round3(day.candidates_sum / day.counted) : null,
       mean_selected: day.counted ? round3(day.selected_sum / day.counted) : null,
       suppressed: day.suppressed,
@@ -214,7 +225,14 @@ export function retrievalStats(projectDir, seal) {
   return {
     available: true, ...trust, days, totals,
     escalation_rate: totals.events ? round3(totals.escalations / totals.events) : null,
-    dip_back_rate: totals.events ? round3(totals.dip_backs / totals.events) : null,
+    // Unknown-aware (Hale: missing is not "no dip-back"): the rate divides by
+    // rows that OBSERVED the field; rows that omitted it are counted as
+    // coverage, never as zeros.
+    dip_back: {
+      observed_rows: totals.dipback_observed || 0,
+      total_rows: totals.events,
+      rate: (totals.dipback_observed || 0) > 0 ? round3(totals.dip_backs / totals.dipback_observed) : null,
+    },
     // Answer-level outcome coverage — the join rate Hale asked for: how many
     // rows carry a usefulness_outcome at all. Honest zero until outcome
     // sampling ships; the denominator makes the gap visible instead of silent.
@@ -442,7 +460,8 @@ export function headline(blocks) {
   if (r?.available) {
     h.retrieval_events_total = r.totals.events;
     h.escalation_rate = r.escalation_rate;
-    h.dip_back_rate = r.dip_back_rate;
+    h.dip_back_rate = r.dip_back ? r.dip_back.rate : null;
+    h.dip_back_observed = r.dip_back ? r.dip_back.observed_rows : 0;
     h.miss_total = r.totals.misses;
   }
   const c = blocks['store-census'];

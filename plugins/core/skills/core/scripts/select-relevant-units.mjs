@@ -14,13 +14,15 @@
  * fewer active units than `max`, return all active — for a small store the right
  * recall move is "give the reasoner everything active." Retired units never appear.
  *
- * GATE G3 RESOLVED (DC-117, David ratified 2026-07-15; wired 2026-07-17): the reasoning
- * tier ships as SELECTIVE ESCALATION — the first move of the Tier 3 procedure in
- * references/retrieval.md, before any Explore subagent. The shortlist default is 100
- * (raised from the prototype's 30 on the held-out evidence: blind reasoning went 12/12
- * whenever the gold unit was IN the shortlist; every miss was the 30-row shortlist's,
- * and full-width shortlists recovered all of them). The everyday path stays
- * deterministic (DC-115) — this runs only when Tier 1+2 fail.
+ * GATE G3: promotion RATIFIED (DC-117, 2026-07-15) but the implementation is
+ * IN PROGRESS, not complete (Hale audit 2026-07-17): the 2026-07-05 scale audit
+ * showed a fixed row cap fails above ~100 units (gold rank grows with corpus
+ * size), so max=100 is a SMALL-STORE CEILING, not the general recall policy;
+ * the DC-115-binding candidate generation (full-body ranked substrate +
+ * enrichment signal, deterministic thin-trigger) and the blinded >100-unit
+ * helps/hurts experiment are owed before any "wired/resolved" claim. The
+ * protocol names this script at Tier 3 step 1; that wiring stands, the
+ * completion claim does not.
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  *

@@ -56,6 +56,11 @@ function normalizeUnit(unit, idx) {
   if (unit.score !== undefined && (typeof unit.score !== 'number' || Number.isNaN(unit.score))) {
     fail(`units_retrieved[${idx}].score`, 'must be a number when present');
   }
+  // Closed intra-tier provenance (2026-07-17): which stage of the Tier-1 product
+  // pipeline produced the hit. NEVER encoded in the ladder tier.
+  if (unit.source_stage !== undefined && !['ranked', 'one-hop-expansion'].includes(unit.source_stage)) {
+    fail(`units_retrieved[${idx}].source_stage`, 'must be ranked or one-hop-expansion');
+  }
   return { ...unit, id: sanitizeAttributeValue(unit.id.trim(), { maxLen: 200 }) };
 }
 
@@ -172,13 +177,16 @@ export function main(argv) {
     process.stderr.write(`error: retrieval event JSON is required: ${err.message}\n`);
     return 2;
   }
-  recordRetrievalEvent(projectDir, event, {
+  const out = recordRetrievalEvent(projectDir, event, {
     today: args.flags.get('today'),
     now: args.flags.get('now'),
     sessionId: args.flags.get('session-id'),
     workspaceId: args.flags.get('workspace-id'),
   });
-  return 0;
+  // Machine-readable delivery receipt: normalization succeeding is NOT delivery
+  // (Hale, 2026-07-17). Automation gets exit 1 + the outcome on a write failure.
+  process.stdout.write(JSON.stringify({ written: out.written, write_outcome: out.write_outcome }) + '\n');
+  return out.written ? 0 : 1;
 }
 
 const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };

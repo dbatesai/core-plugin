@@ -84,18 +84,25 @@ async function main() {
   // 1→2→3 `miss`.
   try {
     if (metricsEnabled({ project: store })) {
+      // Ladder semantics (Hale, round 2 of this correction): the shipped product
+      // retriever — INCLUDING its built-in one-hop edge expansion — is Tier 1 by
+      // the protocol's own definition; Tier 2 is the separate 2–3-hop graph-walk
+      // path, which this pipeline never runs. So every event from this mechanism
+      // is tier_reached 1, and hit provenance rides a separate closed
+      // `source_stage` field instead of overloading the ladder tier (the first
+      // corrected mapping made routine expansion hits read as Tier-2 escalation —
+      // the same causal-evidence defect under a different mapping).
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
-      const units = final.map((h) => ({ id: String(h.id), tier: topIds.has(String(h.id)) ? 1 : 2 }));
-      const expansionRan = Array.isArray(trace.stages.expansion);
-      const tierReached = units.some((u) => u.tier === 2) ? 2 : (units.length ? 1 : (expansionRan ? 2 : 1));
+      const retrievalId = randomUUID();
+      const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
       const queryTerms = tokenize(prompt).slice(0, 8);
       const out = recordRetrievalEvent(store, {
         trigger: 'per-turn-hook',
-        mechanism: 'model-free-substrate', // names what actually ran: rank/policy/edge pipeline, no Tier-3 reasoning
-        retrieval_id: randomUUID(),
+        mechanism: 'model-free-substrate', // names what actually ran: rank/policy/edge pipeline — Tier 1 only, never 2 or 3
+        retrieval_id: retrievalId,
         intent_topics: queryTerms.length ? queryTerms : ['empty-after-tokenize'],
-        tier_reached: tierReached,
-        escalation_path: tierReached === 2 ? [1, 2] : [1],
+        tier_reached: 1,
+        escalation_path: [1],
         units_retrieved: units,
         ...(units.length === 0 ? { result: 'no-hit' } : {}),
         candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
@@ -105,6 +112,9 @@ async function main() {
       if (!out.written) {
         try { logHookEvent({ hook: 'retrieve-context', kind: 'telemetry-write-failed', reason: out.write_outcome.reason || 'unknown', store }); } catch { /* last resort: stay silent */ }
       }
+      // The persisted trace carries the SAME retrieval_id so the event, the
+      // trace, and any future answer-outcome row join on one key.
+      trace.retrieval_id = retrievalId;
     }
   } catch (err) {
     // fail-open by contract — but observable, never silent
