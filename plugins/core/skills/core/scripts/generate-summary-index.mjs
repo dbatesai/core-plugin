@@ -37,6 +37,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { loadValidEnrichments } from './enrichment-sidecar.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -267,10 +268,12 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
 
   // Identity from these exact buffers (same shape computeSourceSignature produces).
   const fileSha1s = {};
+  const sourceSha256ByPath = {};
   const sigParts = [];
   for (const { rel, buf } of raws) {
     const h = createHash('sha1').update(buf).digest('hex');
     fileSha1s[rel] = h;
+    sourceSha256ByPath[rel] = createHash('sha256').update(buf).digest('hex');
     sigParts.push(`${rel}:${h}`);
   }
   const source_sig = sigParts.sort().join('|');
@@ -347,11 +350,18 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     edges[u.id] = extractEdges({ fm: fmByPath.get(u.path) || {} });
   }
 
+  // Enrichment is derived, separately weighted state. Only records whose
+  // content hash matches the captured source bytes participate. Its digest is
+  // part of the product snapshot identity so a retrieval result can never
+  // change under an unchanged snapshot id.
+  const enrichments = loadValidEnrichments(storePath, index, sourceSha256ByPath);
   const capture = {
     index,
     bodies,
     edges,
-    snapshotId: createHash('sha256').update(source_sig).digest('hex'),
+    enrichments,
+    source_sha256_by_path: sourceSha256ByPath,
+    snapshotId: createHash('sha256').update(`${source_sig}|enrichment:${enrichments.digest}`).digest('hex'),
   };
   if (retainRaw) {
     capture.raw = Object.fromEntries(raws.map(r => [r.rel, r.buf]));

@@ -259,3 +259,25 @@ test('retrieval stats aggregate tiers, suppression, and pseudonymized top units'
     assert.match(stats.top_retrieved_units[0].unit, /^unit-[0-9a-f]{12}$/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('retrieval stats join outcome rows by retrieval_id without counting them as retrievals', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-outcome-'));
+  try {
+    const project = makeFixtureProject(root, { plant: false });
+    const file = join(project, '_sessions', '2026-07-01', 'retrieval-log.jsonl');
+    const baseRows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    baseRows[0].retrieval_id = 'retrieval-1';
+    writeFileSync(file, `${baseRows.map(row => JSON.stringify(row)).join('\n')}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'retrieval-1', usefulness_outcome: 'useful', evidence_kind: 'user-confirmed' })}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'orphan', usefulness_outcome: 'miss', evidence_kind: 'agent-judgment' })}\n`);
+
+    const stats = retrievalStats(project, makeSeal('feedcafefeedcafe'));
+    assert.equal(stats.totals.events, 4, 'outcome rows are not retrieval events');
+    assert.deepEqual(stats.days['2026-07-01'].outcomes, { useful: 1 });
+    assert.deepEqual(stats.outcome_coverage, {
+      eligible_retrieval_rows: 1,
+      joined_outcome_rows: 1,
+      orphan_outcome_rows: 1,
+      duplicate_outcome_rows: 0,
+      rate: 1,
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

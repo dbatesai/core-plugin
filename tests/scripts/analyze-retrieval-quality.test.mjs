@@ -74,7 +74,39 @@ test('empty events array yields a zero report and the no-events message', () => 
   const report = buildReport([]);
   assert.equal(report.total_events, 0);
   assert.equal(report.retrieval_events, 0);
+  assert.deepEqual(report.receipt, {
+    checked: '0 retrieval events in analyzed window',
+    safe: null,
+    impact: 'effectiveness unknown: no retrieval evidence',
+    action: 'collect-retrieval-evidence',
+    user_action: 'Use CORE normally, then run this analyzer again after retrieval events exist.',
+  });
   assert.match(formatReport(report), /No retrieval events found/);
+});
+
+test('five-field receipt stays unknown without answer outcomes and asks for evidence', () => {
+  const report = buildReport([
+    { ts: '2026-07-17T03:00:00Z', kind: 'retrieval', retrieval_id: 'r-1', tier_reached: 1, units_retrieved: [{ id: 'dc-x' }] },
+  ]);
+  assert.deepEqual(Object.keys(report.receipt), ['checked', 'safe', 'impact', 'action', 'user_action']);
+  assert.equal(report.receipt.safe, null, 'telemetry alone cannot prove answer safety');
+  assert.match(report.receipt.checked, /1 retrieval event/);
+  assert.match(report.receipt.impact, /outcome unknown/i);
+  assert.equal(report.receipt.action, 'collect-answer-outcomes');
+  assert.match(report.receipt.user_action, /record.*outcome/i);
+  assert.match(formatReport(report), /Safe: unknown/i);
+});
+
+test('five-field receipt reports observed outcome problems without claiming global safety', () => {
+  const report = buildReport([
+    { ts: '2026-07-17T03:00:00Z', kind: 'retrieval', retrieval_id: 'r-1', tier_reached: 1, units_retrieved: [{ id: 'dc-x' }] },
+    { ts: '2026-07-17T03:01:00Z', kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'noisy', evidence_kind: 'user-confirmed' },
+  ]);
+  assert.equal(report.receipt.safe, false);
+  assert.match(report.receipt.checked, /1 of 1 answer outcome/);
+  assert.match(report.receipt.impact, /noisy/i);
+  assert.equal(report.receipt.action, 'inspect-harmful-outcomes');
+  assert.match(report.receipt.user_action, /retrieval r-1/i);
 });
 
 // Characterization: `units_retrieved` makes the row retrieval-shaped even with no

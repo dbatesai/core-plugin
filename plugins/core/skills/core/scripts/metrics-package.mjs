@@ -242,9 +242,37 @@ export function retrievalStats(projectDir, seal) {
   const unitFreq = new Map();
   let badLines = 0;
   const totals = { events: 0, dip_backs: 0, misses: 0, escalations: 0 };
+  const entries = [];
   for (const { date, file } of logs) {
     const { rows, bad } = readJsonlSafe(file);
     badLines += bad;
+    for (const row of rows) entries.push({ date, row });
+  }
+
+  // Outcomes are later rows, joined to exactly one product retrieval by the
+  // immutable retrieval_id. They never count as additional retrieval events.
+  const baseById = new Map();
+  for (const entry of entries) {
+    const r = entry.row;
+    if ((r.kind && r.kind !== 'retrieval') || typeof r.retrieval_id !== 'string' || !r.retrieval_id.trim()) continue;
+    const id = r.retrieval_id.trim();
+    const matches = baseById.get(id) || [];
+    matches.push(entry);
+    baseById.set(id, matches);
+  }
+  const outcomesById = new Map();
+  let orphanOutcomeRows = 0;
+  let duplicateOutcomeRows = 0;
+  for (const { row: r } of entries) {
+    if (r.kind !== 'retrieval-outcome') continue;
+    const id = typeof r.retrieval_id === 'string' ? r.retrieval_id.trim() : '';
+    if (!id || baseById.get(id)?.length !== 1) { orphanOutcomeRows += 1; continue; }
+    if (outcomesById.has(id)) { duplicateOutcomeRows += 1; continue; }
+    outcomesById.set(id, fold(String(r.usefulness_outcome), ['useful', 'partial', 'noisy', 'miss']));
+  }
+
+  for (const { date, file } of logs) {
+    const rows = entries.filter(entry => entry.date === date).map(entry => entry.row);
     const day = {
       events: 0, tiers: {}, escalations: 0, dip_backs: 0, misses: 0,
       candidates_sum: 0, selected_sum: 0, counted: 0,
@@ -261,15 +289,11 @@ export function retrievalStats(projectDir, seal) {
       day.dip_backs += num(r.dip_back_count) || 0;
       if (r.result === 'miss') { day.misses += 1; totals.misses += 1; }
       if (r.result === 'no-hit') { day.no_hits = (day.no_hits || 0) + 1; totals.no_hits = (totals.no_hits || 0) + 1; }
-      if (r.usefulness_outcome !== undefined) {
+      const retrievalId = typeof r.retrieval_id === 'string' ? r.retrieval_id.trim() : '';
+      const joinedOutcome = retrievalId && baseById.get(retrievalId)?.length === 1 ? outcomesById.get(retrievalId) : undefined;
+      if (joinedOutcome !== undefined) {
         day.outcomes = day.outcomes || {};
-        // The PRODUCER contract's vocabulary (references/retrieval.md scoring
-        // slots: useful/partial/noisy/miss) — aggregating a different set folded
-        // every known row to 'other' (Hale WIP review). helped/hurt/neutral is
-        // the future causal target; it arrives with a real outcome producer and
-        // a migration mapping, never as a consumer-only rename.
-        const o = fold(String(r.usefulness_outcome), ['useful', 'partial', 'noisy', 'miss']);
-        day.outcomes[o] = (day.outcomes[o] || 0) + 1;
+        day.outcomes[joinedOutcome] = (day.outcomes[joinedOutcome] || 0) + 1;
         totals.outcome_rows = (totals.outcome_rows || 0) + 1;
       }
       if (num(r.dip_back_count) != null) {
@@ -306,6 +330,7 @@ export function retrievalStats(projectDir, seal) {
     .filter(([, n]) => n >= RANKING_MIN_COUNT)
     .sort((a, b) => b[1] - a[1]).slice(0, 25)
     .map(([id, n]) => ({ unit: seal('unit', id), retrievals: n }));
+  const eligibleOutcomeRows = [...baseById.values()].filter(rows => rows.length === 1).length;
   return {
     available: true, ...trust, days, totals,
     escalation_rate: totals.events ? round3(totals.escalations / totals.events) : null,
@@ -317,10 +342,13 @@ export function retrievalStats(projectDir, seal) {
       total_rows: totals.events,
       rate: (totals.dipback_observed || 0) > 0 ? round3(totals.dip_backs / totals.dipback_observed) : null,
     },
-    // Answer-level outcome coverage — the join rate Hale asked for: how many
-    // rows carry a usefulness_outcome at all. Honest zero until outcome
-    // sampling ships; the denominator makes the gap visible instead of silent.
-    outcome_coverage: { rows_with_outcome: totals.outcome_rows || 0, total_rows: totals.events, rate: totals.events ? round3((totals.outcome_rows || 0) / totals.events) : null },
+    outcome_coverage: {
+      eligible_retrieval_rows: eligibleOutcomeRows,
+      joined_outcome_rows: totals.outcome_rows || 0,
+      orphan_outcome_rows: orphanOutcomeRows,
+      duplicate_outcome_rows: duplicateOutcomeRows,
+      rate: eligibleOutcomeRows ? round3((totals.outcome_rows || 0) / eligibleOutcomeRows) : null,
+    },
     top_retrieved_units: topUnits, malformed_lines: badLines,
   };
 }

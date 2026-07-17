@@ -197,6 +197,21 @@ Edges live in unit frontmatter as `{type, target, note?}` triples. The committed
 
 The rest — `cites`, `refines`, `amends`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
 
+### Governed write-time enrichment
+
+After every unit create or edit, enrichment is due. This is derived search state, not authored truth: a cloud agent from a **different model family** than the answering model reads only the saved unit and proposes aliases, paraphrases, and likely future questions. Never copy the authored body or hidden evaluation queries into the enrichment payload, and never let the answering model enrich its own evaluation corpus.
+
+Write the result through the governed CLI, not by editing the sidecar directly:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/enrichment-sidecar.mjs" <project> <path-relative-to-_memories> \
+  --input <json-file> --writer-family <family> --answer-family <family>
+```
+
+The JSON input carries `aliases`, `paraphrases`, and `likely_questions` arrays. The CLI rejects same-family provenance, keys the record to the source file's SHA-256, stores it separately at `_memories/_lib/enrichment-sidecar.json`, and writes owner-only. Retrieval scores valid enrichment as its own lower-weight arm; it never mixes generated phrases into the unit body. An edit changes the source hash immediately, so stale enrichment becomes ineligible before re-enrichment runs.
+
+If this harness cannot dispatch a different-family agent, do not improvise or reuse stale enrichment. Leave the unit safely unenriched, name the pending count in the readiness/close receipt, and let a compatible harness perform the pass. A missing enrichment is a measurable recall limitation; same-family enrichment is invalid evidence.
+
 **Wikilinks** (`[[unit-id]]`) in the body are permitted as a secondary, organic edge form. Hygiene's reconciliation pass promotes durable wikilinks to typed edges (default type: `cites`) when they appear in citation-style contexts — the procedure is `protocols/hygiene.md` §"Wikilink promotion".
 
 ---

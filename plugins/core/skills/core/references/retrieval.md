@@ -145,7 +145,7 @@ Substitute the harness-resolved plugin root (`CORE_ROOT` or `CODEX_PLUGIN_ROOT`)
   "stale_suppressed_count": 0,
   "native_memory_suppressed_count": 0,
   "context_pack_token_estimate": 620,
-  "usefulness_outcome": "useful"
+  "retrieval_id": "retrieval-unique-id"
 }
 ```
 
@@ -155,7 +155,21 @@ Substitute the harness-resolved plugin root (`CORE_ROOT` or `CODEX_PLUGIN_ROOT`)
 - `candidate_count` / `selected_count`: how much candidate material surfaced vs. entered the context pack.
 - `retired_suppressed_count`, `stale_suppressed_count`, `native_memory_suppressed_count`: suppression signals that prove irrelevant or wrong-surface memory did not enter the pack.
 - `context_pack_token_estimate`: estimated payload size after selection and suppression.
-- `usefulness_outcome`: later judgment (`useful`, `partial`, `noisy`, `miss`, or similarly plain label) after the answer path is known.
+- `retrieval_id`: immutable correlation id. It lets a later, evidence-qualified answer outcome join to exactly one retrieval without rewriting the original event.
+
+After the answer, record an outcome only when evidence exists:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/record-retrieval-outcome.mjs <project> \
+  --retrieval-id <id> --outcome useful \
+  --evidence-kind user-confirmed
+```
+
+The closed outcome vocabulary is `useful`, `partial`, `noisy`, or `miss`.
+Evidence strength is explicit: `user-confirmed` is strongest, `answer-citation`
+is next, and `agent-judgment` is provisional. With no evidence, leave the
+outcome unknown; never coerce missing evidence to `useful`. The writer rejects
+unknown, ambiguous, duplicate, and relabeled retrieval ids.
 
 For Tier 2 walks, log the seed unit and the result set together as one event (one JSONL line). For Tier 3 misses (Explore returned no relevant answer), set `units_retrieved: []`, `tier_reached: 3`, and add `"result": "miss"`. The DC-67 trip-wire — repeated Tier 3 misses on similar queries — now runs per-project against this log via `scripts/analyze-retrieval-quality.mjs`.
 
