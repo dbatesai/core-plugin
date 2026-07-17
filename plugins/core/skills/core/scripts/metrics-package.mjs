@@ -240,7 +240,6 @@ export function retrievalStats(projectDir, seal) {
   if (!logs.length) return { available: false, reason: 'no retrieval-log.jsonl under _sessions/', ...trust };
   const days = {};
   const unitFreq = new Map();
-  const idSet = new Set(); // retrieval_ids for the outcome join — internal, stripped before staging
   let badLines = 0;
   const totals = { events: 0, dip_backs: 0, misses: 0, escalations: 0 };
   for (const { date, file } of logs) {
@@ -254,7 +253,6 @@ export function retrievalStats(projectDir, seal) {
     for (const r of rows) {
       if (r.kind && r.kind !== 'retrieval') continue;
       day.events += 1;
-      if (typeof r.retrieval_id === 'string') idSet.add(r.retrieval_id);
       const tier = num(r.tier_reached);
       if (tier != null) {
         day.tiers[String(tier)] = (day.tiers[String(tier)] || 0) + 1;
@@ -324,50 +322,6 @@ export function retrievalStats(projectDir, seal) {
     // sampling ships; the denominator makes the gap visible instead of silent.
     outcome_coverage: { rows_with_outcome: totals.outcome_rows || 0, total_rows: totals.events, rate: totals.events ? round3((totals.outcome_rows || 0) / totals.events) : null },
     top_retrieved_units: topUnits, malformed_lines: badLines,
-    _retrieval_ids: idSet, // stripped by collectProject before staging
-  };
-}
-
-// Outcome join (Hale acceptance invariant 5): outcomes are SEPARATE post-answer
-// rows in outcome-log.jsonl keyed by retrieval_id. The consumer joins on that
-// key, keeps the FIRST terminal outcome per retrieval (later duplicates are
-// rejected and counted), reports join coverage, and excludes 'unknown' rows
-// from useful/harm denominators while keeping them in coverage — unknown is
-// neither neutral nor success.
-export function outcomeJoin(projectDir, retrievalIds) {
-  const logs = listSessionLogs(projectDir, 'outcome-log.jsonl');
-  const trust = { _trust: TRUST.PROXY, _trust_basis: 'field telemetry; the frozen blinded experiment is the causal-efficacy authority' };
-  if (!logs.length) return { available: false, reason: 'no outcome-log.jsonl under _sessions/', ...trust };
-  const firstById = new Map();
-  let duplicatesRejected = 0;
-  let malformed = 0;
-  for (const { file } of logs) {
-    const { rows, bad } = readJsonlSafe(file);
-    malformed += bad;
-    for (const r of rows) {
-      if (r.kind !== 'retrieval-outcome' || typeof r.retrieval_id !== 'string') { malformed += 1; continue; }
-      if (firstById.has(r.retrieval_id)) { duplicatesRejected += 1; continue; }
-      firstById.set(r.retrieval_id, r);
-    }
-  }
-  const byOutcome = {}; const byAuthority = {};
-  let joined = 0; let unknownRows = 0;
-  for (const [id, r] of firstById) {
-    if (retrievalIds && retrievalIds.has(id)) joined += 1;
-    const a = fold(String(r.evidence_authority), ['user-confirmed', 'objective-task-success', 'corrective-retry', 'agent-attribution', 'unobservable']);
-    byAuthority[a] = (byAuthority[a] || 0) + 1;
-    const o = fold(String(r.usefulness_outcome), ['useful', 'partial', 'noisy', 'miss', 'unknown']);
-    if (o === 'unknown') { unknownRows += 1; continue; } // coverage only — never a denominator
-    byOutcome[o] = (byOutcome[o] || 0) + 1;
-  }
-  const observed = Object.values(byOutcome).reduce((x, y) => x + y, 0);
-  return {
-    available: true, ...trust,
-    outcome_rows: firstById.size, duplicates_rejected: duplicatesRejected, malformed_rows: malformed,
-    join: { joined_rows: joined, retrieval_rows: retrievalIds ? retrievalIds.size : null, coverage: retrievalIds && retrievalIds.size ? round3(joined / retrievalIds.size) : null },
-    unknown_rows: unknownRows,
-    observed_outcomes: { denominator: observed, by_outcome: byOutcome },
-    by_evidence_authority: byAuthority,
   };
 }
 
@@ -752,12 +706,8 @@ export function collectProject(projectDir, { home, seal }) {
     try { workspaceId = JSON.parse(readFileSync(wsPointer, 'utf8')).workspace_id || null; } catch { workspaceId = null; }
   }
   const pseudonym = seal('project', workspaceId || basename(projectDir));
-  const retrievalBlock = retrievalStats(projectDir, seal);
-  const retrievalIds = retrievalBlock._retrieval_ids || null;
-  delete retrievalBlock._retrieval_ids; // internal join key set — never staged
   const localBlocks = {
-    'retrieval-stats': retrievalBlock,
-    'outcome-join': outcomeJoin(projectDir, retrievalIds),
+    'retrieval-stats': retrievalStats(projectDir, seal),
     'hygiene-stats': hygieneStats(projectDir),
     'store-census': storeCensus(projectDir),
     'validator': validatorStats(projectDir),

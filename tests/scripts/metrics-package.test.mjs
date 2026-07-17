@@ -259,26 +259,3 @@ test('retrieval stats aggregate tiers, suppression, and pseudonymized top units'
     assert.match(stats.top_retrieved_units[0].unit, /^unit-[0-9a-f]{12}$/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
-
-test('outcome join: dedupes duplicate terminals, excludes unknown from denominators, reports coverage', async () => {
-  const { outcomeJoin } = await import('../../plugins/core/skills/core/scripts/metrics-package.mjs');
-  const root = mkdtempSync(join(tmpdir(), 'mp-join-'));
-  try {
-    const sess = join(root, '_sessions', '2026-07-17');
-    mkdirSync(sess, { recursive: true });
-    writeFileSync(join(sess, 'outcome-log.jsonl'), [
-      JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'useful', evidence_authority: 'corrective-retry' }),
-      JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'miss', evidence_authority: 'agent-attribution' }), // duplicate terminal — rejected
-      JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'r-2', usefulness_outcome: 'unknown', evidence_authority: 'unobservable' }),
-      JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'r-orphan', usefulness_outcome: 'noisy', evidence_authority: 'agent-attribution' }),
-    ].join('\n') + '\n');
-    const jr = outcomeJoin(root, new Set(['r-1', 'r-2', 'r-3']));
-    assert.equal(jr.duplicates_rejected, 1, 'second terminal for r-1 rejected');
-    assert.equal(jr.unknown_rows, 1, 'unknown kept in coverage');
-    assert.equal(jr.observed_outcomes.denominator, 2, 'unknown NEVER in the useful/harm denominator');
-    assert.equal(jr.join.joined_rows, 2, 'r-orphan does not join');
-    assert.equal(jr.join.coverage, 0.667);
-    assert.equal(jr.by_evidence_authority['agent-attribution'], 1, 'authority carried separately — never promoted');
-    assert.equal(jr._trust, 'proxy', 'field telemetry, not causal truth');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
