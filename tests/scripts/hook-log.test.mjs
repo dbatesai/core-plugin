@@ -22,8 +22,14 @@ function tmpLog() {
   return join(mkdtempSync(join(tmpdir(), 'hook-log-')), 'hooks-log.jsonl');
 }
 
+// Isolate every hook test log by construction (Hale audit, 2026-07-17, fresh
+// re-audit of 246a77a): every current call site here happens to pass
+// CORE_HOOKS_LOG_FILE explicitly, but the helpers themselves had no default —
+// one call a future test author forgets to annotate silently writes into the
+// real machine-wide ~/.core/hooks-log.jsonl. Default here, so "isolated" is
+// the only way to call these, not a convention every caller has to remember.
 function runStart(env) {
-  try { execFileSync('node', [START_HOOK], { input: '{}', env: { ...process.env, ...env }, encoding: 'utf8' }); }
+  try { execFileSync('node', [START_HOOK], { input: '{}', env: { ...process.env, CORE_HOOKS_LOG_FILE: tmpLog(), ...env }, encoding: 'utf8' }); }
   catch { /* hook exits 0; ignore */ }
 }
 
@@ -31,7 +37,7 @@ function runClose(payload, env) {
   try {
     execFileSync('node', [CLOSE_HOOK], {
       input: JSON.stringify(payload),
-      env: { ...process.env, CORE_CLOSE_STORE: payload.cwd || '', ...env },
+      env: { ...process.env, CORE_CLOSE_STORE: payload.cwd || '', CORE_HOOKS_LOG_FILE: tmpLog(), ...env },
       encoding: 'utf8',
     });
   } catch { /* hook exits 0; ignore */ }

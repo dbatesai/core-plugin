@@ -87,7 +87,7 @@ test('hook output carries the authority tier for observation hits (Hale re-revie
   try {
     const out = execFileSync('node', [HOOK], {
       input: JSON.stringify({ prompt: 'quokka incident', cwd: dir }),
-      env: { ...process.env, CORE_RETRIEVAL_STORE: dir },
+      env: { ...process.env, CORE_RETRIEVAL_STORE: dir, CORE_HOOKS_LOG_FILE: isolatedHooksLog() },
       encoding: 'utf8',
     });
     assert.match(out, /obs-nested-note \[observation\]:/, 'observation hit is tier-labeled in the injected context');
