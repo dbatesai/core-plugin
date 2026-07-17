@@ -90,20 +90,29 @@ export function computeDipBackRates(events) {
   for (const ev of events) {
     const units = Array.isArray(ev.units_retrieved) ? ev.units_retrieved : null;
     if (!units || !units.length) continue;
-    const dipped = (ev.dip_back_count || 0) > 0;
+    // Unknown-aware (2026-07-17): rows that OMITTED dip_back_count (the per-turn
+    // hook cannot observe dip-backs) leave both numerator and denominator —
+    // missing is not "no dip-back". Observed coverage rides each row.
+    const observed = Number.isInteger(ev.dip_back_count);
+    const dipped = observed && ev.dip_back_count > 0;
     for (const u of units) {
       if (!u || !u.id) continue;
-      const rec = byUnit.get(u.id) || { unit_id: u.id, retrievals: 0, dip_backs: 0 };
+      const rec = byUnit.get(u.id) || { unit_id: u.id, retrievals: 0, dip_backs: 0, dipback_observed: 0 };
       rec.retrievals += 1;
+      if (observed) rec.dipback_observed += 1;
       if (dipped) rec.dip_backs += 1;
       byUnit.set(u.id, rec);
     }
   }
   const rows = [];
   for (const rec of byUnit.values()) {
-    rows.push({ unit_id: rec.unit_id, retrievals: rec.retrievals, rate: rec.dip_backs / rec.retrievals });
+    rows.push({
+      unit_id: rec.unit_id, retrievals: rec.retrievals,
+      dipback_observed: rec.dipback_observed,
+      rate: rec.dipback_observed > 0 ? rec.dip_backs / rec.dipback_observed : null,
+    });
   }
-  rows.sort((a, b) => b.rate - a.rate || b.retrievals - a.retrievals || a.unit_id.localeCompare(b.unit_id));
+  rows.sort((a, b) => ((b.rate ?? -1) - (a.rate ?? -1)) || b.retrievals - a.retrievals || a.unit_id.localeCompare(b.unit_id));
   return rows;
 }
 

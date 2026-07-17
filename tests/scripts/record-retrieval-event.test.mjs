@@ -62,7 +62,7 @@ test('recordRetrievalEvent writes retrieval proof visible to analyzer and OTel',
     assert.equal(report.telemetry_only_events, 0);
     assert.equal(report.tier_distribution.t2.count, 1);
     assert.deepEqual(report.dip_back_rates, [
-      { unit_id: 'dc-retrieval-path', retrievals: 1, rate: 1 },
+      { unit_id: 'dc-retrieval-path', retrievals: 1, dipback_observed: 1, rate: 1 },
     ]);
 
     const trace = readFileSync(join(root, '_metrics', 'traces', 'session-1.jsonl'), 'utf8')

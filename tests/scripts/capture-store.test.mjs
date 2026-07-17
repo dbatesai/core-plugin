@@ -37,7 +37,11 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
   const stopFile = join(dir, 'stop');
 
   // Writer child: atomically rewrites the unit body with an incrementing epoch
-  // marker as fast as it can, until the stop file appears.
+  // marker as fast as it can, until the stop file appears. It signals 'ready'
+  // over IPC after its FIRST completed atomic rename — a fixed sleep cannot
+  // prove the writer is live under full-suite CPU pressure (the 100ms sleep
+  // made this barrier proof nondeterministic; Hale's watchdog caught 0-epoch
+  // runs, 2026-07-17).
   const writer = `
     import { writeFileSync, renameSync, existsSync } from 'node:fs';
     const fm = ${JSON.stringify(fm)};
@@ -47,14 +51,19 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
       const tmp = ${JSON.stringify(unitPath)} + '.tmp';
       writeFileSync(tmp, fm + 'omega speedmaster epoch-' + epoch + ' body\\n');
       renameSync(tmp, ${JSON.stringify(unitPath)});
+      if (epoch === 1 && process.send) process.send('ready');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
     }
   `;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000 });
+  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   let childErr = '';
   child.stderr.on('data', d => { childErr += d; });
   const childDone = new Promise(res => child.on('close', res));
-  await new Promise(r => setTimeout(r, 100)); // let the writer start mutating
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('writer never signaled ready')), 15000);
+    child.on('message', (m) => { if (m === 'ready') { clearTimeout(t); res(); } });
+    child.on('close', () => { clearTimeout(t); rej(new Error(`writer exited before ready: ${childErr}`)); });
+  });
 
   try {
     let sawEpochs = new Set();
@@ -121,6 +130,8 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
   const targets = ['values-heritage', 'want-iconic-chronograph'];
   const bodyOf = (t) => `---\nid: ${UNIT_ID}\ntype: want\nstatus: active\nedges:\n  - {type: cites, target: ${t}}\n---\n\nomega speedmaster on sale wait body\n`;
 
+  // Same IPC ready-handshake as round-11: 'ready' after the FIRST completed
+  // atomic rename; a fixed sleep is not proof the writer is live (2026-07-17).
   const writer = `
     import { writeFileSync, renameSync, existsSync } from 'node:fs';
     const bodies = ${JSON.stringify(targets.map(bodyOf))};
@@ -129,12 +140,19 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
       const tmp = ${JSON.stringify(unitPath)} + '.tmp';
       writeFileSync(tmp, bodies[i++ % 2]);
       renameSync(tmp, ${JSON.stringify(unitPath)});
+      if (i === 1 && process.send) process.send('ready');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
     }
   `;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000 });
+  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  let childErr2 = '';
+  child.stderr.on('data', d => { childErr2 += d; });
   const childDone = new Promise(res => child.on('close', res));
-  await new Promise(r => setTimeout(r, 100));
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('edge writer never signaled ready')), 15000);
+    child.on('message', (m) => { if (m === 'ready') { clearTimeout(t); res(); } });
+    child.on('close', () => { clearTimeout(t); rej(new Error(`edge writer exited before ready: ${childErr2}`)); });
+  });
 
   try {
     const seenTargets = new Set();
