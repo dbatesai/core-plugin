@@ -27,9 +27,15 @@
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  *
- * I/O: reads the Stop payload as JSON on stdin (session_id, prompt_id or turn_id, cwd). Emits
- * nothing to stdout (Stop hook output is not injected into context the way UserPromptSubmit's
- * is — this hook's only product is the outcome-log row + the hook-log receipt). Always exits 0.
+ * I/O: reads the Stop payload as JSON on stdin (session_id, prompt_id or turn_id, cwd). Always
+ * writes `{}` to stdout on exit 0 — Codex's Stop contract requires valid JSON there ("Plain text
+ * output is invalid for this event"; empty stdout shipped here originally, a real contract
+ * violation Hale's fresh audit caught). An empty object carries no `decision` field, which both
+ * harnesses treat as "let the turn proceed, no intervention" — Claude Code's own contract
+ * explicitly permits this shape too, not just tolerates it. Stop hook output is not injected
+ * into context the way UserPromptSubmit's is; this hook's real product is the outcome-log row +
+ * the hook-log receipt, and the stdout JSON is a contract formality, never read for content by
+ * anything in this codebase. Always exits 0.
  */
 
 import { readFileSync, existsSync, realpathSync, rmSync } from 'node:fs';
@@ -53,6 +59,15 @@ export function receipt(action, reason, extra = {}) {
       })}\n`);
     }
   } catch { /* preserve fail-open even if the fallback surface fails */ }
+  // Codex's Stop contract requires valid JSON on stdout for every exit-0 —
+  // "Plain text output is invalid for this event" (developers.openai.com/codex/hooks,
+  // confirmed 2026-07-17, Hale's fresh-audit catch: empty stdout shipped here
+  // originally, silently violating that contract). An empty object carries no
+  // `decision` field, which both harnesses treat as "allow the turn to
+  // proceed, no intervention" — Claude Code's own Stop contract explicitly
+  // permits "exit 0 without any JSON at all" OR omitting `decision`, so this
+  // is compatible there too, not just tolerated.
+  try { process.stdout.write('{}\n'); } catch { /* stdout write failure must never crash a fail-open hook */ }
   return 0;
 }
 

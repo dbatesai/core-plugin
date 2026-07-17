@@ -38,7 +38,6 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/core/hooks/answer-close-hook.mjs\"",
-            "async": true,
             "timeout": 10
           }
         ]
