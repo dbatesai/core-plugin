@@ -29,7 +29,9 @@ import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { loadFreshIndex, loadSnapshot } from './generate-summary-index.mjs';
-import { bm25Scores, tokenize, STOPWORDS } from './bm25.mjs';
+import { bm25DocumentScores, bm25Scores, tokenize, STOPWORDS } from './bm25.mjs';
+
+export const ENRICHMENT_WEIGHT = 0.6;
 
 // The tokenizer moved to bm25.mjs (v3.11 remediation — breaks the retrieve-context ⇄
 // bm25 import cycle Hale flagged). Re-exported here so existing importers keep working.
@@ -86,7 +88,11 @@ export function lexicalRankedIds(query, storePath, { snapshot = null } = {}) {
 export function productRankedScores(query, storePath, preloadedIndex = null, snapshot = null) {
   const root = resolve(storePath);
   if (!snapshot && !existsSync(join(root, '_memories'))) return [];
-  const index = snapshot?.index || preloadedIndex || loadFreshIndex(root);
+  // The product ranking always owns a content-addressed capture when its caller
+  // did not supply one. Enrichment is part of that identity and may not be read
+  // from a different instant than bodies/edges.
+  const snap = snapshot || loadSnapshot(root, { captureBodies: true });
+  const index = snap.index || preloadedIndex || loadFreshIndex(root);
   const queryTokens = tokenize(query);
 
   const combined = new Map(); // id -> {id, tier, score}
@@ -103,7 +109,7 @@ export function productRankedScores(query, storePath, preloadedIndex = null, sna
     // A3: the body arm reads through the SAME index as the title arm — one
     // request, one snapshot, every reader sees the same bytes. With a captured
     // snapshot (blocker 2), body BYTES come from the capture too — zero live reads.
-    bodyScored = bm25Scores(query, root, { preloadedIndex: index, snapshot });
+    bodyScored = bm25Scores(query, root, { preloadedIndex: index, snapshot: snap });
     _lastBm25Error = null;
   } catch (err) {
     // Fail-open (title-only) but never silent: the degradation is visible on stderr
@@ -115,6 +121,17 @@ export function productRankedScores(query, storePath, preloadedIndex = null, sna
   const bodyMax = Math.max(0, ...bodyScored.map(s => s.score));
   for (const s of bodyScored) {
     const norm = s.score / bodyMax;
+    const prev = combined.get(s.id);
+    if (!prev || norm > prev.score) combined.set(s.id, { id: s.id, tier: s.tier, score: norm });
+  }
+
+  // DC-114/DC-115: write-time enrichment is a distinct, lower-weight arm. It
+  // never contaminates authored body text, and stale/same-family records were
+  // already excluded by the captured sidecar loader.
+  const enrichmentScored = bm25DocumentScores(query, snap.enrichments?.documents || []);
+  const enrichmentMax = Math.max(0, ...enrichmentScored.map((s) => s.score));
+  for (const s of enrichmentScored) {
+    const norm = (s.score / enrichmentMax) * ENRICHMENT_WEIGHT;
     const prev = combined.get(s.id);
     if (!prev || norm > prev.score) combined.set(s.id, { id: s.id, tier: s.tier, score: norm });
   }
@@ -327,6 +344,7 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
       'retrieve-context.mjs': componentHash('./retrieve-context.mjs'),
       'bm25.mjs': componentHash('./bm25.mjs'),
       'generate-summary-index.mjs': componentHash('./generate-summary-index.mjs'),
+      'enrichment-sidecar.mjs': componentHash('./enrichment-sidecar.mjs'),
     },
     health,
     stages: {

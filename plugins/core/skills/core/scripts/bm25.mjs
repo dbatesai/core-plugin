@@ -79,7 +79,12 @@ export function loadActiveBodies(store, preloadedIndex = null) {
  */
 export function bm25Scores(query, store, { k1 = 1.5, b = 0.75, preloadedIndex = null, snapshot = null } = {}) {
   const bodies = snapshot?.bodies || loadActiveBodies(store, snapshot?.index || preloadedIndex);
-  const docs = bodies.map(d => ({ id: d.id, tier: d.tier, toks: tokenize(d.text) }));
+  return bm25DocumentScores(query, bodies, { k1, b });
+}
+
+/** Score an already-captured document arm without touching the filesystem. */
+export function bm25DocumentScores(query, documents, { k1 = 1.5, b = 0.75 } = {}) {
+  const docs = (documents || []).map(d => ({ id: d.id, tier: d.tier, toks: tokenize(d.text) }));
   const N = docs.length || 1;
   const df = new Map();
   let totalLen = 0;
