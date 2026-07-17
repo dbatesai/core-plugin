@@ -30,12 +30,13 @@
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  */
 
-import { readFileSync, existsSync, realpathSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, realpathSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
+import { recordRetrievalOutcome } from '../scripts/record-retrieval-outcome.mjs';
 import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
@@ -43,6 +44,16 @@ import { logHookEvent } from './hook-log.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
+
+// Producer identity for outcome rows — read from the plugin manifest so the
+// version can never fork from the shipped identity; 'unknown' is honest when
+// the manifest is unreadable (packaged layouts vary).
+const PRODUCER_VERSION = (() => {
+  try {
+    const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+    return String(manifest.version || 'unknown');
+  } catch { return 'unknown'; }
+})();
 
 // Typed operational receipt (Hale minimal path, 2026-07-17): ONE terminal
 // hook-log row per eligible invocation — early exits included — on the SHARED
@@ -113,6 +124,7 @@ export async function main() {
   // failure > event-write > trace-write > opt-out > ok).
   let telemetryReason = 'ok';
   let retrievalId = null;
+  let outcomeNote = null; // bounded note when the post-answer outcome close failed
 
   // Canonical per-turn product event — always on when metrics capture is on
   // (DC-107 default-ON, opt-out). Fail-open: a telemetry failure must never
@@ -142,6 +154,50 @@ export async function main() {
       // the same causal-evidence defect under a different mapping).
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
       retrievalId = randomUUID();
+
+      // PRODUCTION POST-ANSWER OUTCOME CALLER (Hale's required path, freeze
+      // rejection 2026-07-17: the good mechanism from 303df39 + the nine
+      // corrections). This invocation runs strictly AFTER the previous turn's
+      // answer, so it closes the PREVIOUS retrieval's outcome via the
+      // strengthened writer. Corrections applied: harness detected from
+      // runtime, pending state keyed by harness + resolved NON-NULL session
+      // (no aliasing; no session → no pending, no outcome), overlap is a
+      // provisional SIGNAL only — the outcome stays 'unknown' until calibrated
+      // — and the pending record is persisted only after the retrieval row
+      // write is proven below.
+      const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
+      const harness = process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDECODE ? 'claude-code'
+        : (process.env.CODEX_SESSION_ID || process.env.CODEX_PLUGIN_ROOT ? 'codex' : 'claude-code');
+      const queryTermsEarly = tokenize(prompt).slice(0, 8);
+      const pendingFile = sessionId
+        ? join(store, '_memories', '_lib', `pending-retrieval-${harness}-${sessionId.slice(0, 24)}.json`)
+        : null;
+      if (pendingFile) {
+        try {
+          let prev = null;
+          try { prev = JSON.parse(readFileSync(pendingFile, 'utf8')); } catch { prev = null; }
+          if (prev && prev.retrieval_id && prev.session_id === sessionId && prev.harness === harness) {
+            const prevTerms = new Set(prev.query_terms || []);
+            const overlap = queryTermsEarly.length ? queryTermsEarly.filter((t) => prevTerms.has(t)).length / queryTermsEarly.length : 0;
+            const retryShaped = overlap >= 0.6 && queryTermsEarly.length >= 3;
+            recordRetrievalOutcome(store, {
+              retrieval_id: prev.retrieval_id,
+              usefulness_outcome: 'unknown', // provisional signals never become harmful outcomes before calibration
+              evidence_authority: retryShaped ? 'corrective-retry' : 'unobservable',
+              signal_overlap: overlap,
+              harness,
+              session_id: sessionId,
+              answer_turn_id: prev.retrieval_id,
+              producer_version: PRODUCER_VERSION,
+            }, { sessionId });
+            try { rmSync(pendingFile, { force: true }); } catch { /* consumed */ }
+          }
+        } catch (err) {
+          // Never a second operational row (one terminal row per invocation);
+          // the failure rides the terminal receipt as a bounded note.
+          outcomeNote = String(err && err.message).slice(0, 80);
+        }
+      }
       const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
       const queryTerms = tokenize(prompt).slice(0, 8);
       const out = recordRetrievalEvent(store, {
@@ -158,6 +214,24 @@ export async function main() {
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
+      // Persist the pending marker ONLY after the retrieval row write is
+      // PROVEN (correction 2: an unproven retrieval must never become the
+      // base of a future outcome row). Atomic temp+rename; keyed per
+      // harness+session, so concurrent sessions never alias (correction 1).
+      if (out.written && pendingFile) {
+        try {
+          mkdirSync(dirname(pendingFile), { recursive: true });
+          const tmp = `${pendingFile}.tmp`;
+          writeFileSync(tmp, JSON.stringify({
+            retrieval_id: retrievalId,
+            session_id: sessionId,
+            harness,
+            query_terms: queryTermsEarly,
+            had_hits: final.length > 0,
+          }));
+          renameSync(tmp, pendingFile);
+        } catch { /* pending is best-effort; a missed close is an unknown, never a fabrication */ }
+      }
       // The persisted trace carries the SAME retrieval_id so the event, the
       // trace, and any future answer-outcome row join on one key.
       trace.retrieval_id = retrievalId;
@@ -214,6 +288,7 @@ export async function main() {
     cwd: store,
     ...(reason !== telemetryReason ? { telemetry_reason: telemetryReason } : {}),
     ...(retrievalId ? { retrieval_id: retrievalId } : {}),
+    ...(outcomeNote ? { outcome_close_note: outcomeNote } : {}),
   });
 }
 

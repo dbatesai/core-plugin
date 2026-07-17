@@ -260,15 +260,37 @@ export function retrievalStats(projectDir, seal) {
     matches.push(entry);
     baseById.set(id, matches);
   }
-  const outcomesById = new Map();
+  // Outcome resolution (Hale corrections 5–7, 2026-07-17): only JOINED rows
+  // aggregate; orphans are surfaced as counts only. Multiple rows per
+  // retrieval resolve by explicit evidence AUTHORITY — never first-row-wins,
+  // so an automatic 'unknown' can never permanently block later stronger
+  // evidence — and equal-authority conflicting outcomes resolve to 'unknown'.
+  // 'unknown' itself never enters usefulness denominators (coverage only).
+  const AUTHORITY_RANK = { 'user-confirmed': 4, 'objective-task-success': 3, 'corrective-retry': 2, 'agent-attribution': 1, 'unobservable': 0 };
+  const outcomeRowsById = new Map();
   let orphanOutcomeRows = 0;
   let duplicateOutcomeRows = 0;
   for (const { row: r } of entries) {
     if (r.kind !== 'retrieval-outcome') continue;
     const id = typeof r.retrieval_id === 'string' ? r.retrieval_id.trim() : '';
     if (!id || baseById.get(id)?.length !== 1) { orphanOutcomeRows += 1; continue; }
-    if (outcomesById.has(id)) { duplicateOutcomeRows += 1; continue; }
-    outcomesById.set(id, fold(String(r.usefulness_outcome), ['useful', 'partial', 'noisy', 'miss']));
+    const rows = outcomeRowsById.get(id) || [];
+    if (rows.length) duplicateOutcomeRows += 1;
+    rows.push(r);
+    outcomeRowsById.set(id, rows);
+  }
+  const outcomesById = new Map();
+  const unknownOutcomeIds = new Set();
+  for (const [id, rows] of outcomeRowsById) {
+    const ranked = rows.map((r) => ({
+      outcome: fold(String(r.usefulness_outcome), ['useful', 'partial', 'noisy', 'miss', 'unknown']),
+      rank: AUTHORITY_RANK[String(r.evidence_authority)] ?? 0,
+    })).sort((a, b) => b.rank - a.rank);
+    const top = ranked.filter((x) => x.rank === ranked[0].rank);
+    const distinct = new Set(top.map((x) => x.outcome));
+    const resolved = distinct.size === 1 ? top[0].outcome : 'unknown';
+    if (resolved === 'unknown') { unknownOutcomeIds.add(id); continue; } // coverage, never a denominator
+    outcomesById.set(id, resolved);
   }
 
   for (const { date, file } of logs) {

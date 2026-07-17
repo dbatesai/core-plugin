@@ -224,3 +224,64 @@ test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked teleme
     assert.match(rf(logFile, 'utf8'), /"reason":"metrics-opt-out"/, 'hook-log is the authoritative receipt');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---- Strengthened production outcome caller (Hale freeze-rejection corrections) ----
+function runHookWithSession(prompt, root, sessionId) {
+  return execFileSync('node', [HOOK], {
+    input: JSON.stringify({ prompt, cwd: root, ...(sessionId ? { session_id: sessionId } : {}) }),
+    env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_RETRIEVAL_STORE: root },
+    encoding: 'utf8',
+  });
+}
+
+function readOutcomeRows(root) {
+  const sess = join(root, '_sessions');
+  if (!ex(sess)) return [];
+  const rows = [];
+  for (const d of rd(sess)) {
+    const f = join(sess, d, 'retrieval-log.jsonl');
+    if (ex(f)) for (const l of rf(f, 'utf8').trim().split('\n')) rows.push(JSON.parse(l));
+  }
+  return rows.filter(r => r.kind === 'retrieval-outcome');
+}
+
+test('post-answer caller: next same-session invocation closes the previous retrieval as UNKNOWN with full identity', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-oc1-')));
+  try {
+    runHookWithSession('widget decision', root, 'sess-A');
+    runHookWithSession('entirely different topic now', root, 'sess-A');
+    const rows = readOutcomeRows(root);
+    assert.equal(rows.length, 1, 'exactly one outcome row for the closed retrieval');
+    const row = rows[0];
+    assert.equal(row.usefulness_outcome, 'unknown', 'overlap is a provisional signal — never a harmful outcome before calibration');
+    assert.ok(['corrective-retry', 'unobservable'].includes(row.evidence_authority));
+    assert.equal(row.harness, 'claude-code');
+    assert.equal(row.session_id, 'sess-A');
+    assert.ok(row.answer_turn_id && row.producer_version && row.schema_version, 'identity fields required');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('post-answer caller: no session identity means NO pending state and NO outcome row (no aliasing)', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-oc2-')));
+  try {
+    runHookWithSession('widget decision', root, null);
+    runHookWithSession('widget decision again', root, null);
+    assert.equal(readOutcomeRows(root).length, 0, 'null session never aliases into an outcome');
+    const lib = join(root, '_memories', '_lib');
+    const pendings = ex(lib) ? rd(lib).filter(f => f.startsWith('pending-retrieval-')) : [];
+    assert.equal(pendings.length, 0, 'no pending marker without a resolved session');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('post-answer caller: different sessions never close each other (keyed pending state)', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-oc3-')));
+  try {
+    runHookWithSession('widget decision', root, 'sess-A');
+    runHookWithSession('widget decision', root, 'sess-B');
+    assert.equal(readOutcomeRows(root).length, 0, 'sess-B must not close sess-A\'s retrieval');
+    runHookWithSession('another topic', root, 'sess-A');
+    const rows = readOutcomeRows(root);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].session_id, 'sess-A');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

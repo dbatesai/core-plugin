@@ -218,10 +218,14 @@ export function buildUserReceipt(events) {
       user_action: 'Record an evidence-qualified answer outcome after each retrieval-backed answer.',
     };
   }
+  // NEVER `safe: true` from answer telemetry alone (Hale strengthened audit,
+  // 2026-07-17 item 2): outcome rows say nothing about privacy or
+  // anti-resurrection state, and field telemetry is not a safety proof. The
+  // strongest claim this receipt can honestly make is "no observed harm."
   return {
     checked: `${observed} of ${eligible} answer outcomes checked`,
-    safe: true,
-    impact: 'no noisy or missed outcomes observed in the analyzed window',
+    safe: null,
+    impact: 'no noisy or missed outcomes observed in the analyzed window (no-harm-observed is not a global safety claim)',
     action: 'none',
     user_action: 'No immediate action; continue collecting outcomes and recheck trends.',
   };
