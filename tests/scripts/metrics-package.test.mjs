@@ -154,10 +154,13 @@ test('per-turn hook emits the canonical retrieval event from the product path', 
   try {
     const project = makeFixtureProject(root, { plant: false });
     const hook = join(import.meta.dirname, '..', '..', 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
+    // Isolate the hook test log (Hale audit, 2026-07-17) — default
+    // ~/.core/hooks-log.jsonl is a real machine-wide file, not a test fixture.
+    const hooksLog = join(mkdtempSync(join(tmpdir(), 'mp-hook-log-')), 'hooks-log.jsonl');
     const res = spawnSync(process.execPath, [hook], {
       encoding: 'utf8',
       input: JSON.stringify({ prompt: 'linked decision risk', cwd: project }),
-      env: { ...process.env, CORE_RETRIEVAL_STORE: project },
+      env: { ...process.env, CORE_RETRIEVAL_STORE: project, CORE_HOOKS_LOG_FILE: hooksLog },
     });
     assert.equal(res.status, 0, `hook exits clean: ${res.stderr}`);
     const logs = readdirSync(join(project, '_sessions'));

@@ -44,6 +44,7 @@ import { fileURLToPath } from 'node:url';
 import { loadUnit } from './priority.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
+import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'metrics-package-salt';
@@ -267,13 +268,14 @@ export function retrievalStats(projectDir, seal) {
     matches.push(entry);
     baseById.set(id, matches);
   }
-  // Outcome resolution (Hale corrections 5–7, 2026-07-17): only JOINED rows
-  // aggregate; orphans are surfaced as counts only. Multiple rows per
-  // retrieval resolve by explicit evidence AUTHORITY — never first-row-wins,
-  // so an automatic 'unknown' can never permanently block later stronger
-  // evidence — and equal-authority conflicting outcomes resolve to 'unknown'.
-  // 'unknown' itself never enters usefulness denominators (coverage only).
-  const AUTHORITY_RANK = { 'user-confirmed': 4, 'objective-task-success': 3, 'corrective-retry': 2, 'agent-attribution': 1, 'unobservable': 0 };
+  // Outcome resolution (Hale corrections 5–7, 2026-07-17, sharpened in the
+  // 2026-07-17 HOLD audit: "share one authority resolver across consumers").
+  // Only JOINED rows aggregate; orphans are surfaced as counts only. Multiple
+  // rows per retrieval resolve through resolveOutcomeAuthority() — the SAME
+  // function analyze-retrieval-quality.mjs uses — never first-row-wins, so an
+  // automatic 'unknown' can never permanently block later stronger evidence,
+  // and both consumers agree on which outcome is authoritative for the same
+  // retrieval. 'unknown' itself never enters usefulness denominators.
   const outcomeRowsById = new Map();
   let orphanOutcomeRows = 0;
   let duplicateOutcomeRows = 0;
@@ -289,18 +291,12 @@ export function retrievalStats(projectDir, seal) {
   const outcomesById = new Map();
   const unknownOutcomeIds = new Set();
   for (const [id, rows] of outcomeRowsById) {
-    const ranked = rows.map((r) => ({
-      outcome: fold(String(r.usefulness_outcome), ['useful', 'partial', 'noisy', 'miss', 'unknown']),
-      rank: AUTHORITY_RANK[String(r.evidence_authority)] ?? 0,
-    })).sort((a, b) => b.rank - a.rank);
-    const top = ranked.filter((x) => x.rank === ranked[0].rank);
-    const distinct = new Set(top.map((x) => x.outcome));
-    const resolved = distinct.size === 1 ? top[0].outcome : 'unknown';
-    if (resolved === 'unknown') { unknownOutcomeIds.add(id); continue; } // coverage, never a denominator
+    const resolved = resolveOutcomeAuthority(rows);
+    if (!resolved || resolved === 'unknown') { unknownOutcomeIds.add(id); continue; } // coverage, never a denominator
     outcomesById.set(id, resolved);
   }
 
-  for (const { date, file } of logs) {
+  for (const { date } of logs) {
     const rows = entries.filter(entry => entry.date === date).map(entry => entry.row);
     const day = {
       events: 0, tiers: {}, escalations: 0, dip_backs: 0, misses: 0,

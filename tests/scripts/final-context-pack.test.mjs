@@ -12,6 +12,8 @@ import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK = join(ROOT, 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
@@ -22,9 +24,12 @@ const { buildFinalContextPack, retrieveContext, storeHealth } =
 
 test('A4 equivalence: hook subprocess output === pack function output, byte-exact, on the same fixture', () => {
   const prompt = 'omega speedmaster sale';
+  // Isolate the hook test log (Hale audit, 2026-07-17) — default
+  // ~/.core/hooks-log.jsonl is a real machine-wide file, not a test fixture.
+  const hooksLog = join(mkdtempSync(join(tmpdir(), 'a4-hook-log-')), 'hooks-log.jsonl');
   const hookOut = execFileSync('node', [HOOK], {
     input: JSON.stringify({ prompt }),
-    env: { ...process.env, CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT, CORE_METRICS_ENABLED: '0' },
+    env: { ...process.env, CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: hooksLog },
     encoding: 'utf8',
   });
   const hits = retrieveContext(prompt, FIXT, { topN: 3 });

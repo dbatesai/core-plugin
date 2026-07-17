@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
-import { recordRetrievalOutcome } from '../scripts/record-retrieval-outcome.mjs';
+import { recordRetrievalOutcome, pendingOutcomePath } from '../scripts/record-retrieval-outcome.mjs';
 import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
@@ -125,6 +125,11 @@ export async function main() {
   let telemetryReason = 'ok';
   let retrievalId = null;
   let outcomeNote = null; // bounded note when the post-answer outcome close failed
+  // Deferred-write inputs for the NEW pending marker (Hale audit, 2026-07-17,
+  // hazard: "creates pending state before delivery"). The marker must only be
+  // persisted once this turn's context is actually confirmed delivered to the
+  // user — captured here, written after the stdout.write below.
+  let pendingWrite = null;
 
   // Canonical per-turn product event — always on when metrics capture is on
   // (DC-107 default-ON, opt-out). Fail-open: a telemetry failure must never
@@ -155,25 +160,27 @@ export async function main() {
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
       retrievalId = randomUUID();
 
-      // PRODUCTION POST-ANSWER OUTCOME CALLER (Hale's required path, freeze
-      // rejection 2026-07-17: the good mechanism from 303df39 + the nine
-      // corrections). This invocation runs strictly AFTER the previous turn's
-      // answer, so it closes the PREVIOUS retrieval's outcome via the
-      // strengthened writer. Corrections applied: harness detected from
-      // runtime, pending state keyed by harness + resolved NON-NULL session
-      // (no aliasing; no session → no pending, no outcome), overlap is a
-      // provisional SIGNAL only — the outcome stays 'unknown' until calibrated
-      // — and the pending record is persisted only after the retrieval row
-      // write is proven below.
+      // FALLBACK inferred-closure path (Hale's 303df39 mechanism + the nine
+      // freeze-rejection corrections, kept as the Codex path — Codex has no
+      // validated Stop-equivalent hook, per harnesses/codex.md §hook-register).
+      // On Claude Code this is superseded by answer-close-hook.mjs (the Stop
+      // hook), which fires on a REAL post-answer event with the harness's own
+      // prompt_id; this path only ever infers closure from the NEXT prompt
+      // arriving, which is sequencing, not post-answer observation (Hale
+      // audit, 2026-07-17) — so on Claude Code the Stop hook normally clears
+      // the pending marker first and this block finds nothing to close.
+      // Corrections applied: harness detected from runtime, pending state
+      // keyed by harness + resolved NON-NULL session (no aliasing; no session
+      // -> no pending, no outcome), overlap is a provisional SIGNAL only — the
+      // outcome stays 'unknown' until calibrated — and the pending record is
+      // persisted only after the retrieval row write is proven below.
       const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
       // Runtime-resolved harness, never a hard-coded fallback (Hale Codex
       // adapter note): unknown runtime => no outcome identity => no rows.
       const harness = process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDECODE ? 'claude-code'
         : (process.env.CODEX_SESSION_ID || process.env.CODEX_PLUGIN_ROOT ? 'codex' : null);
       const queryTermsEarly = tokenize(prompt).slice(0, 8);
-      const pendingFile = sessionId && harness
-        ? join(store, '_memories', '_lib', `pending-retrieval-${harness}-${sessionId.slice(0, 24)}.json`)
-        : null;
+      const pendingFile = pendingOutcomePath(store, harness, sessionId);
       if (pendingFile) {
         try {
           let prev = null;
@@ -182,17 +189,32 @@ export async function main() {
             const prevTerms = new Set(prev.query_terms || []);
             const overlap = queryTermsEarly.length ? queryTermsEarly.filter((t) => prevTerms.has(t)).length / queryTermsEarly.length : 0;
             const retryShaped = overlap >= 0.6 && queryTermsEarly.length >= 3;
-            recordRetrievalOutcome(store, {
+            // Hale audit, 2026-07-17: reusing retrieval_id AS the answer_turn_id
+            // fabricates identity — the two are different concepts (which
+            // retrieval ran vs. which answer turn closed it). This inferred
+            // path still has no real per-turn id to offer, so it generates a
+            // fresh one rather than aliasing — honest about being synthetic,
+            // never a copy dressed up as an observation.
+            const closeResult = recordRetrievalOutcome(store, {
               retrieval_id: prev.retrieval_id,
               usefulness_outcome: 'unknown', // provisional signals never become harmful outcomes before calibration
               evidence_authority: retryShaped ? 'corrective-retry' : 'unobservable',
               signal_overlap: overlap,
               harness,
               session_id: sessionId,
-              answer_turn_id: prev.retrieval_id,
+              answer_turn_id: randomUUID(),
               producer_version: PRODUCER_VERSION,
             }, { sessionId });
-            try { rmSync(pendingFile, { force: true }); } catch { /* consumed */ }
+            // Delete only once the outcome row is CONFIRMED written (Hale
+            // audit, 2026-07-17, hazard: "deletes pending evidence without
+            // confirmed outcome persistence") — a failed/fail-open write must
+            // never destroy the only record that this retrieval is still
+            // open, or the evidence is lost for good.
+            if (closeResult.written) {
+              try { rmSync(pendingFile, { force: true }); } catch { /* consumed */ }
+            } else {
+              outcomeNote = 'outcome-close-not-persisted';
+            }
           }
         } catch (err) {
           // Never a second operational row (one terminal row per invocation);
@@ -216,23 +238,27 @@ export async function main() {
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
-      // Persist the pending marker ONLY after the retrieval row write is
-      // PROVEN (correction 2: an unproven retrieval must never become the
-      // base of a future outcome row). Atomic temp+rename; keyed per
-      // harness+session, so concurrent sessions never alias (correction 1).
+      // Stage the pending-marker write for AFTER delivery is confirmed below
+      // (Hale audit, 2026-07-17, hazard: "creates pending state before
+      // delivery") — writing it here, before this turn's context has even
+      // reached stdout, would let a crash between here and the stdout.write
+      // leave a marker for a retrieval the user never actually saw. Still
+      // gated on the retrieval row write being PROVEN (correction 2: an
+      // unproven retrieval must never become the base of a future outcome
+      // row) and keyed per harness+session so concurrent sessions never alias
+      // (correction 1).
       if (out.written && pendingFile) {
-        try {
-          mkdirSync(dirname(pendingFile), { recursive: true });
-          const tmp = `${pendingFile}.tmp`;
-          writeFileSync(tmp, JSON.stringify({
+        pendingWrite = {
+          path: pendingFile,
+          content: JSON.stringify({
             retrieval_id: retrievalId,
             session_id: sessionId,
             harness,
+            prompt_id: typeof payload.prompt_id === 'string' && payload.prompt_id.trim() ? payload.prompt_id.trim() : null,
             query_terms: queryTermsEarly,
             had_hits: final.length > 0,
-          }));
-          renameSync(tmp, pendingFile);
-        } catch { /* pending is best-effort; a missed close is an unknown, never a fabrication */ }
+          }),
+        };
       }
       // The persisted trace carries the SAME retrieval_id so the event, the
       // trace, and any future answer-outcome row join on one key.
@@ -266,6 +292,19 @@ export async function main() {
   const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
   if (trace.pack && trace.pack.text) process.stdout.write(trace.pack.text);
   else if (reasoningDirective) process.stdout.write(reasoningDirective.slice(0, OUTPUT_BYTE_CAP));
+
+  // NOW persist the pending marker — after delivery, never before (Hale
+  // audit, 2026-07-17). Only when something was actually injected: a marker
+  // for a retrieval whose context never reached the user has no honest
+  // "delivered" state to close later. Atomic temp+rename.
+  if (injected && pendingWrite) {
+    try {
+      mkdirSync(dirname(pendingWrite.path), { recursive: true });
+      const tmp = `${pendingWrite.path}.tmp`;
+      writeFileSync(tmp, pendingWrite.content);
+      renameSync(tmp, pendingWrite.path);
+    } catch { /* pending is best-effort; a missed close is an unknown, never a fabrication */ }
+  }
 
   // The single terminal operational row for this invocation: what happened to
   // the user-facing injection (action) and what happened to telemetry (reason).

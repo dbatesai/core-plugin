@@ -121,6 +121,30 @@ test('a retrieval row missing tier_reached does not crash the tier distribution 
   assert.equal(report.tier_distribution.t1.count, 1, 'missing tier defaults to the T1 bucket');
 });
 
+test('multiple outcome rows for one retrieval resolve by authority, not first-wins (shared resolver, Hale audit 2026-07-17)', () => {
+  // An automatic low-authority 'unknown' close lands first, then a real
+  // user-confirmed 'noisy' arrives later. Keeping "first" would report
+  // safe:null forever; the shared resolver used here is the same one
+  // metrics-package.mjs uses, so the two consumers can never disagree.
+  const report = buildReport([
+    { ts: '2026-07-17T03:00:00Z', kind: 'retrieval', retrieval_id: 'r-1', tier_reached: 1, units_retrieved: [{ id: 'dc-x' }] },
+    { ts: '2026-07-17T03:01:00Z', kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'unknown', evidence_authority: 'unobservable' },
+    { ts: '2026-07-17T03:05:00Z', kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'noisy', evidence_authority: 'user-confirmed' },
+  ]);
+  assert.equal(report.receipt.safe, false, 'the later, stronger-authority outcome is the one that resolves — never the first row');
+  assert.equal(report.receipt.action, 'inspect-harmful-outcomes');
+});
+
+test('equal-authority disagreeing outcomes resolve to unknown, not first-wins', () => {
+  const report = buildReport([
+    { ts: '2026-07-17T03:00:00Z', kind: 'retrieval', retrieval_id: 'r-1', tier_reached: 1, units_retrieved: [{ id: 'dc-x' }] },
+    { ts: '2026-07-17T03:01:00Z', kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'useful', evidence_authority: 'agent-attribution' },
+    { ts: '2026-07-17T03:02:00Z', kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'miss', evidence_authority: 'agent-attribution' },
+  ]);
+  assert.equal(report.receipt.safe, null, 'a resolved unknown asks for more evidence rather than claiming either side');
+  assert.equal(report.receipt.action, 'collect-answer-outcomes');
+});
+
 test('MET-015: report header says calendar days and names the T1 exclusion rule', () => {
   const report = buildReport([
     { ts: '2026-06-09T10:00:00Z', tier_reached: 1, units_retrieved: [{ id: 'u1' }], intent_topics: ['x'], escalation_path: [1] },

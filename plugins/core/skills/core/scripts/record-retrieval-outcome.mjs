@@ -17,20 +17,38 @@ export function outcomeLockPath(projectDir) {
   return join(projectDir, '_sessions', '.retrieval-outcome.lock');
 }
 
-function outcomeRows(projectDir) {
-  const sessions = join(projectDir, '_sessions');
-  if (!existsSync(sessions)) return [];
-  const rows = [];
-  for (const date of readdirSync(sessions).sort()) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-    const file = join(sessions, date, 'outcome-log.jsonl');
-    if (!existsSync(file)) continue;
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (!line.trim()) continue;
-      try { rows.push(JSON.parse(line)); } catch { /* malformed evidence is not a match */ }
-    }
-  }
-  return rows;
+// Filename-safe (Hale audit, 2026-07-17, hazard: unsanitized session id in a
+// filename): a session id is harness-controlled input, not guaranteed
+// path-safe. Anything outside this allowlist collapses to '_' before it ever
+// reaches the filesystem — no path separators, no traversal, no platform-
+// illegal characters can escape the intended directory.
+export function sanitizeForFilename(value, maxLen = 24) {
+  return String(value || '').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, maxLen);
+}
+
+export function pendingOutcomePath(projectDir, harness, sessionId) {
+  if (!harness || !sessionId) return null;
+  return join(projectDir, '_memories', '_lib', `pending-retrieval-${sanitizeForFilename(harness, 20)}-${sanitizeForFilename(sessionId)}.json`);
+}
+
+// Shared authority resolver (Hale audit, 2026-07-17: "share one authority
+// resolver across consumers"). Every consumer that folds multiple outcome
+// rows for one retrieval_id down to a single resolved outcome must go
+// through this — analyze-retrieval-quality.mjs and metrics-package.mjs both
+// do. Highest evidence_authority wins; a tie among top-ranked rows that
+// disagree resolves to 'unknown' rather than picking arbitrarily.
+export const AUTHORITY_RANK = { 'user-confirmed': 4, 'objective-task-success': 3, 'corrective-retry': 2, 'agent-attribution': 1, 'unobservable': 0 };
+
+export function resolveOutcomeAuthority(rows) {
+  if (!rows || !rows.length) return null;
+  const ranked = rows
+    .filter((r) => r && USEFULNESS_OUTCOMES.has(r.usefulness_outcome))
+    .map((r) => ({ outcome: r.usefulness_outcome, rank: AUTHORITY_RANK[String(r.evidence_authority)] ?? 0 }));
+  if (!ranked.length) return null;
+  ranked.sort((a, b) => b.rank - a.rank);
+  const top = ranked.filter((r) => r.rank === ranked[0].rank);
+  const distinct = new Set(top.map((r) => r.outcome));
+  return distinct.size === 1 ? top[0].outcome : 'unknown';
 }
 
 function retrievalRows(projectDir) {
@@ -101,11 +119,16 @@ export function recordRetrievalOutcome(projectDir, input, opts = {}) {
     const rows = retrievalRows(projectDir);
     const bases = rows.filter(row => row.kind === 'retrieval' && row.retrieval_id === record.retrieval_id);
     if (bases.length !== 1) throw new Error(`retrieval_id must identify exactly one retrieval; found ${bases.length}`);
-    if (outcomeRows(projectDir).some(row => row.kind === 'retrieval-outcome' && row.retrieval_id === record.retrieval_id)) {
-      throw new Error(`retrieval ${record.retrieval_id} already has an outcome`);
-    }
-    // SEPARATE later outcome log (Hale stop-note, 2026-07-17): outcome rows
-    // never enter the append-only retrieval log they judge.
+    // A second (or Nth) outcome row for the same retrieval_id is EXPECTED, not
+    // an error (Hale audit, 2026-07-17, hazard: "an automatic unknown blocks
+    // stronger later evidence"). The auto-close path writes 'unknown' the
+    // moment closure is inferred; real evidence — a user confirmation, a
+    // corrective retry — can arrive after that and must still be recordable.
+    // Consumers resolve multiple rows via resolveOutcomeAuthority() above, so
+    // rejecting the append here would make that resolver permanently dead
+    // code on the live write path. SEPARATE later outcome log (Hale
+    // stop-note, 2026-07-17): outcome rows never enter the append-only
+    // retrieval log they judge.
     const writeOutcome = logEvent(projectDir, 'outcome-log.jsonl', record, opts) || { legacy: false, otel: false, reason: 'no-outcome' };
     return { record, written: writeOutcome.legacy === true, write_outcome: writeOutcome };
   } finally {

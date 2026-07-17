@@ -3,10 +3,24 @@ import assert from 'node:assert';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+// mkdtempSync / tmpdir used by isolatedHooksLog() below are imported later in
+// this file (line ~100) — ES module imports are hoisted, so the binding is
+// available at call time regardless of textual position.
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+
+// Isolate every hook test log (Hale audit, 2026-07-17): a subprocess hook run
+// that doesn't override CORE_HOOKS_LOG_FILE defaults to the real machine-wide
+// ~/.core/hooks-log.jsonl (hook-log.mjs's default path) — tests writing there
+// pollute the developer's real log and, under a sandboxed/CI HOME or
+// concurrent test runs, can behave differently across environments. Every
+// call gets its own fresh temp path unless the test explicitly needs a
+// specific one (those pass CORE_HOOKS_LOG_FILE in `env`, which wins here).
+function isolatedHooksLog() {
+  return join(mkdtempSync(join(tmpdir(), 'retrieve-hook-log-')), 'hooks-log.jsonl');
+}
 
 function runHook(prompt, env) {
   return execFileSync('node', [HOOK], {
@@ -16,7 +30,7 @@ function runHook(prompt, env) {
     // pointed at a COMMITTED fixture store must never write telemetry into it
     // (that exact pollution shipped in a2cab1b and was cleaned up same night).
     // Tests that assert the telemetry write opt back in against temp stores.
-    env: { ...process.env, CORE_METRICS_ENABLED: '0', ...env },
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
     encoding: 'utf8',
   });
 }
@@ -24,7 +38,7 @@ function runHook(prompt, env) {
 function runHookProcess(prompt, env) {
   return spawnSync('node', [HOOK], {
     input: JSON.stringify({ prompt }),
-    env: { ...process.env, CORE_METRICS_ENABLED: '0', ...env },
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
     encoding: 'utf8',
   });
 }
@@ -226,10 +240,10 @@ test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked teleme
 });
 
 // ---- Strengthened production outcome caller (Hale freeze-rejection corrections) ----
-function runHookWithSession(prompt, root, sessionId) {
+function runHookWithSession(prompt, root, sessionId, env = {}) {
   return execFileSync('node', [HOOK], {
     input: JSON.stringify({ prompt, cwd: root, ...(sessionId ? { session_id: sessionId } : {}) }),
-    env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_RETRIEVAL_STORE: root },
+    env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_RETRIEVAL_STORE: root, CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
     encoding: 'utf8',
   });
 }
@@ -258,6 +272,67 @@ test('post-answer caller: next same-session invocation closes the previous retri
     assert.equal(row.harness, 'claude-code');
     assert.equal(row.session_id, 'sess-A');
     assert.ok(row.answer_turn_id && row.producer_version && row.schema_version, 'identity fields required');
+    assert.notEqual(row.answer_turn_id, row.retrieval_id, 'Hale audit 2026-07-17: answer_turn_id must never alias retrieval_id — they are different concepts');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('pending marker is written only AFTER delivery is confirmed — a failed delivery leaves no marker', () => {
+  // Hale audit, 2026-07-17, hazard: "creates pending state before delivery."
+  // CORE_RETRIEVAL_BYTE_CAP=0 forces the delivery-failed branch (selection
+  // succeeds, byte-capped output delivers nothing) — before the fix, the
+  // pending marker was written unconditionally once the retrieval row landed,
+  // regardless of whether anything actually reached the user.
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-deferred-')));
+  try {
+    runHookWithSession('widget decision', root, 'sess-defer', { CORE_RETRIEVAL_BYTE_CAP: '0' });
+    const lib = join(root, '_memories', '_lib');
+    const pendings = ex(lib) ? rd(lib).filter(f => f.startsWith('pending-retrieval-')) : [];
+    assert.equal(pendings.length, 0, 'no pending marker for content that never reached the user');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('pending marker is written after a successful delivery (positive control for the deferred-write test above)', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-deferred-ok-')));
+  try {
+    runHookWithSession('widget decision', root, 'sess-defer-ok');
+    const lib = join(root, '_memories', '_lib');
+    const pendings = ex(lib) ? rd(lib).filter(f => f.startsWith('pending-retrieval-')) : [];
+    assert.equal(pendings.length, 1, 'a genuinely delivered turn does leave a pending marker for the next close');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a hostile session id in the payload never escapes _memories/_lib as a filename', () => {
+  // Hale audit, 2026-07-17, hazard: "unsanitized session id in a filename."
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-sanitize-')));
+  try {
+    runHookWithSession('widget decision', root, '../../../../etc/passwd');
+    const lib = join(root, '_memories', '_lib');
+    assert.ok(ex(lib), 'the pending marker landed inside _lib, not escaped elsewhere');
+    const entries = rd(lib).filter(f => f.startsWith('pending-retrieval-'));
+    assert.equal(entries.length, 1);
+    assert.doesNotMatch(entries[0], /\.\./, 'no traversal sequence in the actual filename on disk');
+    // Nothing was written outside the project root by the traversal attempt.
+    assert.ok(!ex(join(root, '..', '..', '..', '..', 'etc', 'passwd-pending-retrieval-claude-code.json')));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a failed outcome write never deletes the pending marker (evidence survives to retry)', () => {
+  // Hale audit, 2026-07-17, hazard: "deletes pending evidence without
+  // confirmed outcome persistence." Force the outcome-log write to fail by
+  // making today's session directory a file instead of a directory, so
+  // logEvent cannot create outcome-log.jsonl underneath it.
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-nodelete-')));
+  try {
+    runHookWithSession('widget decision', root, 'sess-nodelete');
+    const lib = join(root, '_memories', '_lib');
+    const before = rd(lib).filter(f => f.startsWith('pending-retrieval-'));
+    assert.equal(before.length, 1, 'precondition: a pending marker exists to close');
+    const today = new Date().toISOString().slice(0, 10);
+    rmSync(join(root, '_sessions', today), { recursive: true, force: true });
+    wf(join(root, '_sessions', today), 'not a directory'); // outcome-log write will fail
+    runHookWithSession('entirely different topic now', root, 'sess-nodelete');
+    const after = rd(lib).filter(f => f.startsWith('pending-retrieval-'));
+    assert.equal(after.length, 1, 'the pending marker survives an unconfirmed/failed outcome write — evidence is never destroyed on a guess');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

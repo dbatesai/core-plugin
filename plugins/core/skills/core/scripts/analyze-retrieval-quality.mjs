@@ -23,6 +23,7 @@
 import { readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
 
 export const DEFAULT_SINCE_DAYS = 30;
 export const TOP_DIP_BACK = 10;
@@ -174,13 +175,28 @@ function outcomeEvidence(events) {
     rows.push(ev);
     byId.set(id, rows);
   }
-  const outcomes = new Map();
+  // Multiple outcome rows per retrieval_id resolve via the SAME authority
+  // resolver metrics-package.mjs uses (Hale audit, 2026-07-17: "share one
+  // authority resolver across consumers" — the two consumers must never
+  // disagree about which outcome is authoritative for the same retrieval).
+  // Previously this kept whichever row appeared first, ignoring
+  // evidence_authority entirely — an automatic 'unknown' could never be
+  // displaced by stronger evidence that arrived later.
+  const outcomeRowsById = new Map();
   for (const ev of events) {
     if (ev?.kind !== 'retrieval-outcome' || typeof ev.retrieval_id !== 'string') continue;
     const id = ev.retrieval_id.trim();
-    if (!id || byId.get(id)?.length !== 1 || outcomes.has(id)) continue;
-    if (!['useful', 'partial', 'noisy', 'miss'].includes(ev.usefulness_outcome)) continue;
-    outcomes.set(id, ev.usefulness_outcome);
+    if (!id || byId.get(id)?.length !== 1) continue;
+    const rows = outcomeRowsById.get(id) || [];
+    rows.push(ev);
+    outcomeRowsById.set(id, rows);
+  }
+  const outcomes = new Map();
+  for (const [id, rows] of outcomeRowsById) {
+    const resolved = resolveOutcomeAuthority(rows);
+    // 'unknown' (explicit or tie-resolved) is coverage, never a denominator —
+    // matches metrics-package.mjs's outcomesById semantics exactly.
+    if (resolved && resolved !== 'unknown') outcomes.set(id, resolved);
   }
   const eligibleIds = [...byId.entries()].filter(([, rows]) => rows.length === 1).map(([id]) => id);
   const harmfulIds = eligibleIds.filter(id => ['noisy', 'miss'].includes(outcomes.get(id)));
