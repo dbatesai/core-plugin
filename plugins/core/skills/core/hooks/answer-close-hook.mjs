@@ -7,15 +7,19 @@
  * by inferring "the answer must be done" from the NEXT prompt arriving — sequencing, not
  * post-answer observation — and it fabricated identity by reusing retrieval_id AS the
  * answer_turn_id. Both are now fixed by wiring a REAL adapter: Stop fires once, right after
- * Claude's response completes (never per-tool-call, never per-turn like UserPromptSubmit would
- * be) — a genuine post-answer event — and Claude Code's Stop payload carries `prompt_id`, the
- * harness's own identifier for the turn that just finished. That's the real per-harness answer-
- * turn identity Hale asked for; nothing here infers or aliases it.
+ * the assistant's response completes (never per-tool-call, never per-turn like
+ * UserPromptSubmit would be) — a genuine post-answer event — and the harness's own Stop
+ * payload carries the real per-turn identity: Claude Code's `prompt_id`, Codex's `turn_id`
+ * (developers.openai.com/codex/hooks#stop — confirmed 2026-07-17, Hale's fresh-audit correction:
+ * the earlier "Codex has no Stop-equivalent" framing was stale, not true). Nothing here infers
+ * or aliases identity on either harness.
  *
- * Codex has no validated Stop-equivalent (harnesses/codex.md §hook-register is DROPPED pending
- * empirical validation), so this hook is Claude-Code-only. On Codex the fallback inferred-
- * closure path inside retrieve-context-hook.mjs remains the only mechanism — an explicitly
- * named drop, not a silent gap. Re-open when a live Codex install validates a Stop-equivalent.
+ * Codex support: this same file handles both harnesses. Which one is active for a given
+ * invocation is set EXPLICITLY by the entry wrapper — answer-close-hook.mjs itself for Claude
+ * Code (hooks.json Stop), answer-close-hook-codex.mjs for Codex (hooks-codex.json Stop) — via
+ * CORE_HOOK_HARNESS, never inferred from ambient env vars. See harnesses/codex.md §hook-register
+ * for the Codex-side registration and its still-open evidence gate (install + trust + a real
+ * two-turn proof, which needs a live Codex install this repo doesn't have).
  *
  * Fail-open by contract: a Stop hook must never block or alter the assistant's turn. Every
  * failure swallows to exit 0; the pending marker (and thus the missed close) is picked up by
@@ -23,9 +27,9 @@
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  *
- * I/O: reads the Stop payload as JSON on stdin (session_id, prompt_id, cwd). Emits nothing to
- * stdout (Stop hook output is not injected into context the way UserPromptSubmit's is — this
- * hook's only product is the outcome-log row + the hook-log receipt). Always exits 0.
+ * I/O: reads the Stop payload as JSON on stdin (session_id, prompt_id or turn_id, cwd). Emits
+ * nothing to stdout (Stop hook output is not injected into context the way UserPromptSubmit's
+ * is — this hook's only product is the outcome-log row + the hook-log receipt). Always exits 0.
  */
 
 import { readFileSync, existsSync, realpathSync, rmSync } from 'node:fs';
@@ -72,10 +76,11 @@ export function main() {
   const store = process.env.CORE_RETRIEVAL_STORE || payload.cwd || process.cwd();
   if (!existsSync(store)) return receipt('skip', 'no-pending', { cwd: store });
 
-  // This hook only ever runs where Claude Code wired it (hooks.json Stop), so
-  // harness is definitionally 'claude-code' — no inference needed, unlike the
-  // fallback path which has to guess from env vars.
-  const harness = 'claude-code';
+  // Explicit, never inferred (Hale audit, 2026-07-17 fresh round): the entry
+  // wrapper sets CORE_HOOK_HARNESS before calling main(). Default to
+  // 'claude-code' when unset — this file's OWN direct hooks.json registration
+  // never sets it, so existing Claude Code installs keep working unchanged.
+  const harness = process.env.CORE_HOOK_HARNESS === 'codex' ? 'codex' : 'claude-code';
   const pendingFile = pendingOutcomePath(store, harness, sessionId);
   if (!pendingFile || !existsSync(pendingFile)) return receipt('skip', 'no-pending', { cwd: store });
 
@@ -85,13 +90,17 @@ export function main() {
     return receipt('skip', 'session-mismatch', { cwd: store });
   }
 
-  // The real per-harness answer-turn identity: Claude Code's own prompt_id for
-  // the turn that just finished (Stop fires once the answer is complete, so
-  // this is a genuine post-answer observation, not an inference from the next
-  // prompt arriving). Fall back to a freshly-generated id — never an alias of
-  // retrieval_id — when prompt_id isn't available (older Claude Code builds).
-  const promptId = typeof payload.prompt_id === 'string' && payload.prompt_id.trim() ? payload.prompt_id.trim() : null;
-  const answerTurnId = promptId || randomUUID();
+  // The real per-harness answer-turn identity: Claude Code's prompt_id, or
+  // Codex's turn_id (developers.openai.com/codex/hooks#stop — "Codex-specific
+  // extension. Active Codex turn id", confirmed 2026-07-17) — whichever field
+  // THIS harness's Stop payload actually carries. Stop fires once the answer
+  // is complete, so this is a genuine post-answer observation, not an
+  // inference from the next prompt arriving. Fall back to a freshly-generated
+  // id — never an alias of retrieval_id — only when the harness-native field
+  // is absent (older builds, or an undocumented payload shape).
+  const nativeTurnField = harness === 'codex' ? payload.turn_id : payload.prompt_id;
+  const nativeTurnId = typeof nativeTurnField === 'string' && nativeTurnField.trim() ? nativeTurnField.trim() : null;
+  const answerTurnId = nativeTurnId || randomUUID();
 
   try {
     const closeResult = recordRetrievalOutcome(store, {

@@ -19,6 +19,7 @@
     "claude-code"
   ],
   "skills": "./skills/",
+  "hooks": "./hooks/hooks-codex.json",
   "interface": {
     "displayName": "CORE",
     "shortDescription": "Project intelligence with a critic baked in",

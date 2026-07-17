@@ -161,23 +161,31 @@ export async function main() {
       retrievalId = randomUUID();
 
       // FALLBACK inferred-closure path (Hale's 303df39 mechanism + the nine
-      // freeze-rejection corrections, kept as the Codex path — Codex has no
-      // validated Stop-equivalent hook, per harnesses/codex.md §hook-register).
-      // On Claude Code this is superseded by answer-close-hook.mjs (the Stop
-      // hook), which fires on a REAL post-answer event with the harness's own
-      // prompt_id; this path only ever infers closure from the NEXT prompt
+      // freeze-rejection corrections). Superseded on BOTH harnesses now by a
+      // real Stop hook (answer-close-hook.mjs / answer-close-hook-codex.mjs)
+      // that fires on a genuine post-answer event with the harness's own turn
+      // identity; this path only ever infers closure from the NEXT prompt
       // arriving, which is sequencing, not post-answer observation (Hale
-      // audit, 2026-07-17) — so on Claude Code the Stop hook normally clears
-      // the pending marker first and this block finds nothing to close.
+      // audit, 2026-07-17) — so normally the real Stop hook clears the
+      // pending marker first and this block finds nothing to close. Kept as
+      // defense-in-depth for a session where the Stop hook didn't fire
+      // (missed trust review, older harness build, hook crash upstream).
       // Corrections applied: harness detected from runtime, pending state
       // keyed by harness + resolved NON-NULL session (no aliasing; no session
       // -> no pending, no outcome), overlap is a provisional SIGNAL only — the
       // outcome stays 'unknown' until calibrated — and the pending record is
       // persisted only after the retrieval row write is proven below.
       const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
-      // Runtime-resolved harness, never a hard-coded fallback (Hale Codex
-      // adapter note): unknown runtime => no outcome identity => no rows.
-      const harness = process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDECODE ? 'claude-code'
+      // Harness resolution (Hale audit, 2026-07-17 fresh round): CORE_HOOK_HARNESS
+      // is the EXPLICIT, authoritative signal — set by the harness-specific
+      // wrapper entry file (retrieve-context-hook-codex.mjs sets it to 'codex'
+      // before calling main()), never inferred. The ambient env-var fallback
+      // below is undocumented Codex behavior (Hale's own words) — kept ONLY
+      // for direct/manual invocation that bypasses the wrapper, never trusted
+      // as the primary signal.
+      const harness = process.env.CORE_HOOK_HARNESS === 'codex' ? 'codex'
+        : process.env.CORE_HOOK_HARNESS === 'claude-code' ? 'claude-code'
+        : process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDECODE ? 'claude-code'
         : (process.env.CODEX_SESSION_ID || process.env.CODEX_PLUGIN_ROOT ? 'codex' : null);
       const queryTermsEarly = tokenize(prompt).slice(0, 8);
       const pendingFile = pendingOutcomePath(store, harness, sessionId);
