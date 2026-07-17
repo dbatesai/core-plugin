@@ -32,6 +32,7 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/register-sources` | Point CORE at outside data that should feed the project's memory. |
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
+| `/metrics-package` | Export an anonymized memory-efficacy statistics package (zip on your Desktop) — feedback data for improving CORE; contains no real project content. |
 
 ### Shipped hooks (installed with the plugin)
 
@@ -113,7 +114,7 @@ test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
 test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 ```
 
-Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
+Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics-package`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
 
 One difference from Claude Code worth knowing: Codex runs no hook layer for CORE, so write-safety guards there rest on the agent's own discipline rather than harness enforcement (`harnesses/codex.md §hook-register` has the detail and the reopen conditions).
 

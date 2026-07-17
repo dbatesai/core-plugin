@@ -67,6 +67,8 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // a genuinely-new CLI tool (file-lock.mjs is import-only, no entry guard).
   // 51 → 52 (2026-07-14, Train A blocker 3): artifact-identity.mjs, the
   // deterministic release-artifact identity CLI — genuinely new, not a copy.
-  // Still target one shared isCliEntry() helper.
-  assert.ok(n <= 52, `CLI-entry-guard occurrences grew past baseline 52 (target: one shared helper): ${n}`);
+  // 52 → 53 (2026-07-16): metrics-package.mjs, the anonymized memory-efficacy
+  // feedback-package CLI — genuinely new (metrics-package-report.mjs is
+  // import-only, no entry guard). Still target one shared isCliEntry() helper.
+  assert.ok(n <= 53, `CLI-entry-guard occurrences grew past baseline 53 (target: one shared helper): ${n}`);
 });
