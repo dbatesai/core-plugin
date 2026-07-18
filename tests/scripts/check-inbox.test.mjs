@@ -11,7 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(__dirname, '../../plugins/core/skills/core/scripts/check-inbox.mjs');
 
 // import() needs a file:// URL — a bare drive-letter path throws ERR_UNSUPPORTED_ESM_URL_SCHEME on Windows.
-const { parseInboxBlocks, checkInbox } = await import(pathToFileURL(SCRIPT).href);
+const { parseInboxBlocks, checkInbox, hasSourceAnchor } = await import(pathToFileURL(SCRIPT).href);
 
 function makeProject({ inbox, units = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'check-inbox-'));
@@ -134,6 +134,60 @@ test('missing or empty inbox.md exits 0', () => {
   const dir = makeProject({});
   const out = execFileSync(process.execPath, [SCRIPT, dir], { encoding: 'utf8' });
   assert.match(out, /no inbox/i);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// Crest's FM-1 report (2026-07-16): a unit graduated 'sourced' off a transcript that
+// was never actually read, flattening a hedged statement into a settled fact. P1 fix:
+// 'sourced' must carry a verbatim quote or a locator into the cited source.
+const SOURCED_BLOCK = VALID_B_BLOCK.replace('confidence-level: inferred', 'confidence-level: sourced');
+
+test('hasSourceAnchor recognizes quotes, locators, and dates; rejects bare prose', () => {
+  assert.equal(hasSourceAnchor('She said "we would need to try to escalate this."'), true);
+  assert.equal(hasSourceAnchor('> a blockquoted line from the transcript'), true);
+  assert.equal(hasSourceAnchor('discussed around the 14:32 mark'), true);
+  assert.equal(hasSourceAnchor('see p. 4 for the detail'), true);
+  assert.equal(hasSourceAnchor('per §3 of the doc'), true);
+  assert.equal(hasSourceAnchor('flagged in msg-id 4471'), true);
+  assert.equal(hasSourceAnchor('raised in message #12'), true);
+  assert.equal(hasSourceAnchor('on 2026-06-09 the owner shifted the line'), true);
+  assert.equal(hasSourceAnchor('The budget owner shifted the line to infra.'), false);
+  assert.equal(hasSourceAnchor(''), false);
+});
+
+test("confidence-level: sourced without a quote or locator is a WARN sourced-without-anchor", () => {
+  const dir = makeProject({ inbox: SOURCED_BLOCK });
+  const report = checkInbox(dir);
+  assert.equal(report.some((r) => r.level === 'WARN' && r.check === 'sourced-without-anchor'), true);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('confidence-level: sourced with a verbatim quote in the body draws no WARN', () => {
+  const withQuote = SOURCED_BLOCK.replace(
+    'Budget owner shifted the Q3 line to infra. Mentioned in the weekly sync thread.',
+    'Budget owner said: "we are shifting the Q3 line to infra."',
+  );
+  const dir = makeProject({ inbox: withQuote });
+  const report = checkInbox(dir);
+  assert.equal(report.some((r) => r.check === 'sourced-without-anchor'), false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('confidence-level: sourced with a transcript timestamp locator draws no WARN', () => {
+  const withLocator = SOURCED_BLOCK.replace(
+    'Budget owner shifted the Q3 line to infra. Mentioned in the weekly sync thread.',
+    'Budget owner shifted the Q3 line to infra, discussed at 10:42 in the weekly sync.',
+  );
+  const dir = makeProject({ inbox: withLocator });
+  const report = checkInbox(dir);
+  assert.equal(report.some((r) => r.check === 'sourced-without-anchor'), false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('confidence-level: inferred without an anchor draws no WARN (only sourced is gated)', () => {
+  const dir = makeProject({ inbox: VALID_B_BLOCK });
+  const report = checkInbox(dir);
+  assert.equal(report.some((r) => r.check === 'sourced-without-anchor'), false);
   rmSync(dir, { recursive: true, force: true });
 });
 

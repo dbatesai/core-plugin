@@ -20,6 +20,8 @@
  *   WARN judgment-on-b    — judgment-needed on a Mode B block (B is routine confirmation)
  *   WARN id-collision     — id already names a unit in the project store
  *   WARN empty-body       — frontmatter with no body prose
+ *   WARN sourced-without-anchor — confidence-level: sourced but the body has no verbatim
+ *                           quote or source locator (timestamp, page/section, msg-id/date)
  *   INFO untagged-block   — frontmatter block without `mode` (legacy classify path)
  *
  * Per DC-77 the script ships with the plugin. Per DC-80 Node.js (.mjs) only.
@@ -39,6 +41,27 @@ export const VALID_MODES = new Set(['B', 'C']);
 export const VALID_CONFIDENCE = new Set(['sourced', 'inferred', 'reconstructed']);
 export const REQUIRED_BLOCK_FIELDS = ['id', 'type', 'status', 'source', 'extracted-at', 'confidence-level'];
 export const GRADUATION_ONLY_FIELDS = ['stability-class'];
+
+// A verbatim quoted span (curly or straight quotes, 8+ chars) or a locator into the
+// cited source: transcript timestamp, doc page/section, chat msg-id, or a date.
+const SOURCE_ANCHOR_PATTERNS = [
+  /"[^"]{8,}"/,
+  /“[^”]{8,}”/,
+  /^\s*>/m,
+  /\b\d{1,2}:\d{2}(:\d{2})?\b/,
+  /\bp{1,2}\.\s*\d+\b/i,
+  /§\s*\d+/,
+  /\bline\s+\d+\b/i,
+  /\bmsg[-_]?id\b/i,
+  /\bmessage\s*#?\d+\b/i,
+  /\b\d{4}-\d{2}-\d{2}\b/,
+];
+
+/** True if the body carries a verbatim quote or a locator into the cited source. */
+export function hasSourceAnchor(body) {
+  const text = String(body || '');
+  return SOURCE_ANCHOR_PATTERNS.some((re) => re.test(text));
+}
 
 /** Parse inbox.md into { fm, body, line } blocks. Flat key: value frontmatter only. */
 export function parseInboxBlocks(content) {
@@ -125,6 +148,8 @@ export function checkInbox(projectDir) {
     const conf = String(b.fm['confidence-level'] || '').trim().toLowerCase();
     if (conf && !VALID_CONFIDENCE.has(conf)) {
       report.push({ level: 'FAIL', check: 'confidence-value', block_id: bid, detail: `confidence-level '${b.fm['confidence-level']}' not in: ${[...VALID_CONFIDENCE].join(', ')}` });
+    } else if (conf === 'sourced' && !hasSourceAnchor(b.body)) {
+      report.push({ level: 'WARN', check: 'sourced-without-anchor', block_id: bid, detail: "confidence-level: sourced but no verbatim quote or source locator (timestamp, page/section, msg-id, date) in the body — add one or drop to 'inferred'" });
     }
 
     for (const fld of GRADUATION_ONLY_FIELDS) {
