@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
   buildLeakPatterns, leakScanDir,
@@ -162,12 +163,15 @@ test('orphan rate counts active units only; archived orphans excluded; small cel
 
 test('per-turn hook emits the canonical retrieval event from the product path', () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-hook-'));
+  // Rooted under ~/.core (D1 fix, 2026-07-18): os.tmpdir() no longer qualifies
+  // for CORE_HOOKS_LOG_FILE — declared outside try so finally can clean it up.
+  const hooksLogDir = mkdtempSync(join(trustedTestTmpRoot(), 'mp-hook-log-'));
   try {
     const project = makeFixtureProject(root, { plant: false });
     const hook = join(import.meta.dirname, '..', '..', 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
     // Isolate the hook test log (Hale audit, 2026-07-17) — default
     // ~/.core/hooks-log.jsonl is a real machine-wide file, not a test fixture.
-    const hooksLog = join(mkdtempSync(join(tmpdir(), 'mp-hook-log-')), 'hooks-log.jsonl');
+    const hooksLog = join(hooksLogDir, 'hooks-log.jsonl');
     const res = spawnSync(process.execPath, [hook], {
       encoding: 'utf8',
       input: JSON.stringify({ prompt: 'linked decision risk', cwd: project }),
@@ -182,7 +186,7 @@ test('per-turn hook emits the canonical retrieval event from the product path', 
     assert.ok(evt, 'canonical per-turn-hook event written by the product path');
     assert.equal(evt.kind, 'retrieval');
     assert.ok(Number.isInteger(evt.candidate_count));
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(hooksLogDir, { recursive: true, force: true }); }
 });
 
 test('missing sources emit available:false blocks, run stays exit 1 not a crash', () => {

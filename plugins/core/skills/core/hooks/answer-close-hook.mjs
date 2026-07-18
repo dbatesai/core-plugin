@@ -43,6 +43,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { recordRetrievalOutcome, pendingOutcomePath } from '../scripts/record-retrieval-outcome.mjs';
 import { logHookEvent } from './hook-log.mjs';
+import { trustedOverride } from '../scripts/trusted-env-override.mjs';
 
 export const CLOSE_ACTIONS = ['skip', 'closed', 'failed'];
 export const CLOSE_REASONS = ['ok', 'no-pending', 'no-session', 'session-mismatch', 'not-persisted', 'pipeline-error', 'hook-log-write-failed'];
@@ -88,7 +89,7 @@ export function main() {
   const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
   if (!sessionId) return receipt('skip', 'no-session');
 
-  const store = process.env.CORE_RETRIEVAL_STORE || payload.cwd || process.cwd();
+  const store = trustedOverride('CORE_RETRIEVAL_STORE') || payload.cwd || process.cwd();
   if (!existsSync(store)) return receipt('skip', 'no-pending', { cwd: store });
 
   // Explicit, never inferred (Hale audit, 2026-07-17 fresh round): the entry

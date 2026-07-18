@@ -3,14 +3,19 @@ import assert from 'node:assert';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, linkFixtureUnderTrustedRoot } from './trusted-test-tmp.mjs';
 // mkdtempSync / rmSync used by isolatedHooksLog() below are imported later in
 // this file (line ~100) — ES module imports are hoisted, so the binding is
 // available at call time regardless of textual position.
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// D1 fix, 2026-07-18: CORE_RETRIEVAL_STORE only honors overrides inside the
+// trusted ~/.core now, so the committed fixture (outside it) can't be used
+// directly — symlinked in instead (resolve() sees the trusted link path;
+// fs reads through it reach the real, unmodified fixture). Link removed below.
+const FIXT = linkFixtureUnderTrustedRoot(join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store'));
+after(() => { rmSync(FIXT, { force: true }); });
 
 // Isolate every hook test log (Hale audit, 2026-07-17): a subprocess hook run
 // that doesn't override CORE_HOOKS_LOG_FILE defaults to the real machine-wide
@@ -131,7 +136,7 @@ function readEventRows(root) {
 }
 
 test('hit event: ladder tier from producing stage, observed terms, correlation present', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-hit-')));
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-hit-')));
   try {
     runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1' });
     const [evt] = readEventRows(root);
@@ -149,7 +154,7 @@ test('hit event: ladder tier from producing stage, observed terms, correlation p
 });
 
 test('empty result is an honest no-hit at the tier actually run — never a fabricated Tier-3 miss', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-nohit-')));
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-nohit-')));
   try {
     const out = runHook('zzqx unmatchable quark', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1' });
     assert.match(out, /CORE reasoning escalation required/);
@@ -167,7 +172,7 @@ test('empty result is an honest no-hit at the tier actually run — never a fabr
 });
 
 test('metrics opt-out means zero telemetry rows', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-optout-')));
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-')));
   try {
     runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '0' });
     assert.equal(readEventRows(root).length, 0);
@@ -175,7 +180,7 @@ test('metrics opt-out means zero telemetry rows', () => {
 });
 
 test('telemetry write failure is observable in the hook log, and the turn is never blocked', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-wfail-')));
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-wfail-')));
   // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so the
   // log can no longer live alongside the (os.tmpdir()-rooted) store fixture.
   const logFile = isolatedHooksLog();
@@ -213,7 +218,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
     { name: 'hook-log-write-failed', env: {}, prompt: 'widget decision', expect: { action: 'failed', reason: 'hook-log-write-failed' }, breakHookLog: true },
   ];
   for (const b of branches) {
-    const root = mkdtempSync(join(tmpdir(), `rh-recpt-${b.name}-`));
+    const root = mkdtempSync(join(trustedTestTmpRoot(), `rh-recpt-${b.name}-`));
     // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so
     // the log can no longer live alongside the (os.tmpdir()-rooted) store
     // fixture — isolatedHooksLog() is rooted correctly and self-tracks cleanup.
@@ -263,7 +268,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
 });
 
 test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked telemetry)', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-recpt-optout2-')));
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-recpt-optout2-')));
   // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now.
   const logFile = isolatedHooksLog();
   try {

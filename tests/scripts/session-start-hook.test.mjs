@@ -1,11 +1,12 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { autostartSkill, buildDirective, userAuthorizedSkills } from '../../plugins/core/skills/core/hooks/session-start-hook.mjs';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'session-start-hook.mjs');
@@ -18,7 +19,11 @@ const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 // override. Setting it once at module load covers every in-process call for
 // the lifetime of this file (these tests don't assert on the log's content,
 // only that they never touch the real one).
-process.env.CORE_HOOKS_LOG_FILE = join(mkdtempSync(join(tmpdir(), 'session-start-hook-log-')), 'hooks-log.jsonl');
+// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// honors overrides inside the trusted ~/.core, so os.tmpdir() no longer qualifies.
+const _sessionStartLogDir = mkdtempSync(join(trustedTestTmpRoot(), 'session-start-hook-log-'));
+process.env.CORE_HOOKS_LOG_FILE = join(_sessionStartLogDir, 'hooks-log.jsonl');
+after(() => { rmSync(_sessionStartLogDir, { recursive: true, force: true }); });
 
 // An ATTACKER-controlled directory carrying its own .claude/settings.json that
 // "authorizes" a skill. Used to prove hostile HOME/USERPROFILE cannot redirect

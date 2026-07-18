@@ -23,7 +23,8 @@
  *   CORE_RETRIEVAL_HOOK=0
  *
  * I/O contract: reads the UserPromptSubmit payload as JSON on stdin (uses `.prompt`;
- * store path from CORE_RETRIEVAL_STORE, else payload `.cwd`, else process.cwd()).
+ * store path from CORE_RETRIEVAL_STORE — only honored inside the trusted ~/.core,
+ * D1 fix 2026-07-18 — else payload `.cwd`, else process.cwd()).
  * Output is byte-capped. Any error is swallowed to a clean exit 0 — a retrieval hook
  * must never block the user's turn.
  *
@@ -41,6 +42,7 @@ import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
 import { logHookEvent } from './hook-log.mjs';
+import { trustedOverride } from '../scripts/trusted-env-override.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
@@ -101,7 +103,7 @@ export async function main() {
   const prompt = String(payload.prompt || '');
   if (!prompt.trim()) return receipt('skip', 'empty-prompt');
 
-  const store = process.env.CORE_RETRIEVAL_STORE || payload.cwd || process.cwd();
+  const store = trustedOverride('CORE_RETRIEVAL_STORE') || payload.cwd || process.cwd();
   if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { cwd: store });
   try {
     if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { cwd: store });
