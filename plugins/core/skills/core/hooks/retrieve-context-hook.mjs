@@ -116,7 +116,16 @@ export async function main() {
   const configuredCap = Number(process.env.CORE_RETRIEVAL_BYTE_CAP);
   const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
     ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
-  try { trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap }); } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
+  try {
+    // Test-only fault seam (2026-07-18, Hale-authorized: prove a GENUINE
+    // uncaught exception through the real subprocess path reaches this catch
+    // and still exits 0 — the prior coverage only ever called receipt()
+    // directly, which proves the logging contract but not that a real crash
+    // gets caught at all). Same pattern as CORE_FILELOCK_NO_LINK: an explicit,
+    // self-documenting test seam, never read in normal operation.
+    if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
+    trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
+  } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
   if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];

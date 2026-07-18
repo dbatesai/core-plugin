@@ -187,6 +187,13 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
     { name: 'delivered-ok', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'ok' } },
     { name: 'metrics-opt-out', env: { CORE_METRICS_ENABLED: '0' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'metrics-opt-out' } },
     { name: 'pipeline-error', env: {}, prompt: 'widget', expect: { action: 'failed', reason: 'pipeline-error' }, directReceipt: true, needStore: false },
+    // 2026-07-18, Hale-authorized: the branch above only ever calls receipt()
+    // directly, proving the logging contract but never that a GENUINE uncaught
+    // exception through the real subprocess pipeline actually reaches the
+    // catch and still exits 0. This one forces buildRetrievalTrace to throw
+    // via the explicit CORE_TEST_FORCE_PIPELINE_ERROR seam and runs the real
+    // subprocess end to end — fail-open proven, not assumed.
+    { name: 'pipeline-error-genuine-crash', env: { CORE_TEST_FORCE_PIPELINE_ERROR: '1' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
     { name: 'store-unavailable', env: {}, prompt: 'widget', expect: { action: 'skip', reason: 'store-unavailable' }, needStore: false, setup: (root) => { wf(join(root, '_memories'), 'not a directory'); } },
     { name: 'no-hit', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'zzqx unmatchable quark', expect: { action: 'delivered', reason: 'no-hit' } },
     { name: 'delivery-failed', env: { CORE_RETRIEVAL_BYTE_CAP: '0' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'delivery-failed' } },
@@ -219,6 +226,11 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       } else {
         run = runHookProcess(b.prompt, { ...b.env, CORE_RETRIEVAL_STORE: store, CORE_HOOKS_LOG_FILE: effectiveLog });
       }
+      // Fail-open proof for every REAL subprocess branch (not directReceipt,
+      // which never launches a process): the hook contract is exit 0 always,
+      // crash or not. Checked explicitly now rather than assumed from the
+      // process merely producing output.
+      if (!b.directReceipt) assert.equal(run.status, 0, `${b.name}: hook always exits 0 (fail-open), even on a genuine pipeline crash`);
       const rawRows = ex(logFile) ? rf(logFile, 'utf8') : run.stderr;
       const rows = rawRows.trim().split('\n').map(l => JSON.parse(l)).filter(r => r.hook === 'retrieve-context');
       assert.equal(rows.length, 1, `${b.name}: exactly one terminal row`);
