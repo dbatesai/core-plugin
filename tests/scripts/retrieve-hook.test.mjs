@@ -1,9 +1,10 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-// mkdtempSync / tmpdir used by isolatedHooksLog() below are imported later in
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+// mkdtempSync / rmSync used by isolatedHooksLog() below are imported later in
 // this file (line ~100) — ES module imports are hoisted, so the binding is
 // available at call time regardless of textual position.
 
@@ -18,9 +19,17 @@ const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'ob
 // concurrent test runs, can behave differently across environments. Every
 // call gets its own fresh temp path unless the test explicitly needs a
 // specific one (those pass CORE_HOOKS_LOG_FILE in `env`, which wins here).
+// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// honors overrides inside the trusted ~/.core, so os.tmpdir() no longer
+// qualifies. Unlike os.tmpdir(), ~/.core isn't auto-cleaned — every created
+// dir is tracked and removed in the after() below.
+const _isolatedLogDirs = [];
 function isolatedHooksLog() {
-  return join(mkdtempSync(join(tmpdir(), 'retrieve-hook-log-')), 'hooks-log.jsonl');
+  const dir = mkdtempSync(join(trustedTestTmpRoot(), 'retrieve-hook-log-'));
+  _isolatedLogDirs.push(dir);
+  return join(dir, 'hooks-log.jsonl');
 }
+after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
 function runHook(prompt, env) {
   return execFileSync('node', [HOOK], {
@@ -167,7 +176,9 @@ test('metrics opt-out means zero telemetry rows', () => {
 
 test('telemetry write failure is observable in the hook log, and the turn is never blocked', () => {
   const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-wfail-')));
-  const logFile = join(root, 'hooks-log.jsonl');
+  // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so the
+  // log can no longer live alongside the (os.tmpdir()-rooted) store fixture.
+  const logFile = isolatedHooksLog();
   try {
     // Force the legacy write path to fail: _sessions exists as a FILE.
     wf(join(root, '_sessions'), 'not a directory');
@@ -203,14 +214,21 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
   ];
   for (const b of branches) {
     const root = mkdtempSync(join(tmpdir(), `rh-recpt-${b.name}-`));
-    const logFile = join(root, 'hooks-log.jsonl');
+    // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so
+    // the log can no longer live alongside the (os.tmpdir()-rooted) store
+    // fixture — isolatedHooksLog() is rooted correctly and self-tracks cleanup.
+    const logFile = isolatedHooksLog();
     try {
       let store = root;
       if (b.storeless) { mkd(join(root, 'empty'), { recursive: true }); store = join(root, 'empty'); }
       else if (b.needStore !== false) makeStore(root);
       if (b.setup) b.setup(root);
-      const effectiveLog = b.breakHookLog ? join(root, 'blocked', 'hooks-log.jsonl') : logFile;
-      if (b.breakHookLog) wf(join(root, 'blocked'), 'not a directory');
+      // breakHookLog needs an unwritable path that still resolves inside the
+      // trusted ~/.core (else the D1 gate silently substitutes the real
+      // default instead of hitting the write failure this branch tests for).
+      const blockedParent = join(trustedTestTmpRoot(), `rh-blocked-${b.name}`);
+      const effectiveLog = b.breakHookLog ? join(blockedParent, 'hooks-log.jsonl') : logFile;
+      if (b.breakHookLog) wf(blockedParent, 'not a directory');
       let run;
       if (b.directReceipt) {
         const prior = process.env.CORE_HOOKS_LOG_FILE;
@@ -237,13 +255,17 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       assert.equal(rows[0].action, b.expect.action, `${b.name}: action`);
       assert.equal(rows[0].reason, b.expect.reason, `${b.name}: reason`);
       assert.ok(['skip', 'delivered', 'failed'].includes(rows[0].action), `${b.name}: action in closed vocabulary`);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      if (b.breakHookLog) rmSync(join(trustedTestTmpRoot(), `rh-blocked-${b.name}`), { force: true });
+    }
   }
 });
 
 test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked telemetry)', () => {
   const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-recpt-optout2-')));
-  const logFile = join(root, 'hooks-log.jsonl');
+  // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now.
+  const logFile = isolatedHooksLog();
   try {
     runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: logFile });
     assert.equal(readEventRows(root).length, 0, 'no retrieval row when metrics are off');

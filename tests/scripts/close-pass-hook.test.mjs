@@ -1,10 +1,11 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'close-pass-hook.mjs');
@@ -15,9 +16,16 @@ const CLOSE_PASS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 // audit of 246a77a after the first isolation pass missed this file): a
 // subprocess hook run that doesn't override CORE_HOOKS_LOG_FILE defaults to
 // the real machine-wide ~/.core/hooks-log.jsonl.
+// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
+// isn't auto-cleaned — every created dir is tracked and removed below.
+const _isolatedLogDirs = [];
 function isolatedHooksLog() {
-  return join(mkdtempSync(join(tmpdir(), 'close-pass-hook-log-')), 'hooks-log.jsonl');
+  const dir = mkdtempSync(join(trustedTestTmpRoot(), 'close-pass-hook-log-'));
+  _isolatedLogDirs.push(dir);
+  return join(dir, 'hooks-log.jsonl');
 }
+after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
 // SEPARATE leak (found on Hale's fresh audit): several tests below call
 // close-pass.mjs's runClose/beginClose IN-PROCESS via dynamic import — not a

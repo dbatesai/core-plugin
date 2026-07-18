@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -6,6 +6,7 @@ import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { pendingOutcomePath } from '../../plugins/core/skills/core/scripts/record-retrieval-outcome.mjs';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'answer-close-hook.mjs');
@@ -25,9 +26,16 @@ function fixture() {
   return project;
 }
 
+// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
+// isn't auto-cleaned — every created dir is tracked and removed below.
+const _isolatedLogDirs = [];
 function isolatedHooksLog() {
-  return join(mkdtempSync(join(tmpdir(), 'answer-close-hook-log-')), 'hooks-log.jsonl');
+  const dir = mkdtempSync(join(trustedTestTmpRoot(), 'answer-close-hook-log-'));
+  _isolatedLogDirs.push(dir);
+  return join(dir, 'hooks-log.jsonl');
 }
+after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
 function writePending(project, overrides = {}) {
   const path = pendingOutcomePath(project, 'claude-code', overrides.session_id || 's-test-1');

@@ -1,10 +1,11 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
 // Codex-shaped product-path tests (Hale's fresh audit, 2026-07-17, second
 // round: "add Codex-shaped UserPromptSubmit/Stop product-path tests"). These
@@ -20,9 +21,16 @@ const HOOKS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const RETRIEVE_HOOK = join(HOOKS_DIR, 'retrieve-context-hook-codex.mjs');
 const ANSWER_HOOK = join(HOOKS_DIR, 'answer-close-hook-codex.mjs');
 
+// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
+// isn't auto-cleaned — every created dir is tracked and removed below.
+const _isolatedLogDirs = [];
 function isolatedHooksLog() {
-  return join(mkdtempSync(join(tmpdir(), 'codex-hook-log-')), 'hooks-log.jsonl');
+  const dir = mkdtempSync(join(trustedTestTmpRoot(), 'codex-hook-log-'));
+  _isolatedLogDirs.push(dir);
+  return join(dir, 'hooks-log.jsonl');
 }
+after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
 function makeStore(root) {
   const store = join(root, '_memories');
