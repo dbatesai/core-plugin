@@ -231,7 +231,12 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       // breakHookLog needs an unwritable path that still resolves inside the
       // trusted ~/.core (else the D1 gate silently substitutes the real
       // default instead of hitting the write failure this branch tests for).
-      const blockedParent = join(trustedTestTmpRoot(), `rh-blocked-${b.name}`);
+      // Nested under `root` (already mkdtemp-unique) rather than a fixed
+      // name under the shared trusted-tmp root -- a fixed name collided
+      // under concurrent self-invocation (5 copies of this file at once
+      // all racing on the same path), a real EISDIR failure found while
+      // investigating a concurrency report, 2026-07-18.
+      const blockedParent = join(root, 'rh-blocked');
       const effectiveLog = b.breakHookLog ? join(blockedParent, 'hooks-log.jsonl') : logFile;
       if (b.breakHookLog) wf(blockedParent, 'not a directory');
       let run;
@@ -262,7 +267,6 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       assert.ok(['skip', 'delivered', 'failed'].includes(rows[0].action), `${b.name}: action in closed vocabulary`);
     } finally {
       rmSync(root, { recursive: true, force: true });
-      if (b.breakHookLog) rmSync(join(trustedTestTmpRoot(), `rh-blocked-${b.name}`), { force: true });
     }
   }
 });
