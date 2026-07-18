@@ -784,10 +784,25 @@ export function collectProject(projectDir, { home, seal }) {
 
 // ---------- zip ----------
 
+// Relative archive path (David-approved fix, corrected 2026-07-18 after the
+// first attempt failed local verification): on windows-latest, tar parses a
+// Windows drive-letter path's colon (e.g. C:\Users\...\out.zip) passed to -f
+// as its remote host:path syntax and exits 128 ("Cannot connect to C: resolve
+// failed") — confirmed from live CI stderr, not inferred. The first fix
+// attempt added --force-local to disable that, but macOS/Linux bsdtar (the
+// same libarchive-based tar that ships on Windows too) does not recognize
+// that flag at all ("Option --force-local is not supported" — confirmed by
+// direct local invocation before this fix shipped, unlike the first attempt).
+// The portable fix instead avoids the ambiguous colon entirely: run tar with
+// destZip's directory as the process cwd and pass only its basename to -f, so
+// -f never contains a drive letter. -C's argument for the source tree stays
+// absolute and is unaffected by the process cwd change.
 export function zipStaging(stagingDir, destZip) {
-  const res = spawnSync('tar', ['-a', '-c', '-f', destZip, '-C', stagingDir, '.'], { encoding: 'utf8', timeout: 120_000 });
+  const destDir = dirname(destZip);
+  const destBase = basename(destZip);
+  const res = spawnSync('tar', ['-a', '-c', '-f', destBase, '-C', stagingDir, '.'], { cwd: destDir, encoding: 'utf8', timeout: 120_000 });
   if (res.error || res.status !== 0 || !existsSync(destZip)) return { ok: false, reason: res.error ? String(res.error.message) : `tar exit ${res.status}` };
-  const list = spawnSync('tar', ['-t', '-f', destZip], { encoding: 'utf8', timeout: 60_000 });
+  const list = spawnSync('tar', ['-t', '-f', destBase], { cwd: destDir, encoding: 'utf8', timeout: 60_000 });
   if (list.status !== 0 || !/manifest\.json/.test(list.stdout || '')) return { ok: false, reason: 'zip verification failed (manifest.json not listed)' };
   return { ok: true };
 }

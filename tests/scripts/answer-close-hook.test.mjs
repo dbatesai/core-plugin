@@ -10,9 +10,16 @@ import { pendingOutcomePath } from '../../plugins/core/skills/core/scripts/recor
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'answer-close-hook.mjs');
 
+// Hale's catch (2026-07-18): the writer derives the session date from the real
+// clock (log-event.mjs: `new Date().toISOString().slice(0, 10)`), so a
+// hardcoded fixture date breaks on every UTC rollover. Derive it the same way
+// the code under test does, not a fresh hardcode that just moves the same bug
+// to the next midnight.
+const TODAY_UTC = new Date().toISOString().slice(0, 10);
+
 function fixture() {
   const project = mkdtempSync(join(tmpdir(), 'answer-close-'));
-  const session = join(project, '_sessions', '2026-07-17');
+  const session = join(project, '_sessions', TODAY_UTC);
   mkdirSync(session, { recursive: true });
   writeFileSync(join(session, 'retrieval-log.jsonl'), `${JSON.stringify({ kind: 'retrieval', retrieval_id: 'r-1', tier_reached: 1 })}\n`);
   return project;
@@ -46,7 +53,7 @@ test('closes a pending retrieval using the real prompt_id as answer_turn_id, del
     const pendingPath = writePending(project);
     runHook({ session_id: 's-test-1', prompt_id: 'real-prompt-uuid-123', cwd: project });
     assert.equal(existsSync(pendingPath), false, 'pending marker consumed on confirmed close');
-    const rows = readFileSync(join(project, '_sessions', '2026-07-17', 'outcome-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    const rows = readFileSync(join(project, '_sessions', TODAY_UTC, 'outcome-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].retrieval_id, 'r-1');
     assert.equal(rows[0].answer_turn_id, 'real-prompt-uuid-123', 'the harness-provided prompt_id is the real identity — never an alias of retrieval_id');
@@ -61,7 +68,7 @@ test('falls back to a freshly-generated turn id (never retrieval_id) when prompt
   try {
     writePending(project);
     runHook({ session_id: 's-test-1', cwd: project });
-    const rows = readFileSync(join(project, '_sessions', '2026-07-17', 'outcome-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    const rows = readFileSync(join(project, '_sessions', TODAY_UTC, 'outcome-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(rows.length, 1);
     assert.notEqual(rows[0].answer_turn_id, rows[0].retrieval_id, 'fallback id must never alias retrieval_id');
     assert.match(rows[0].answer_turn_id, /^[0-9a-f-]{36}$/i, 'fallback is a fresh UUID, not a copy of anything');
@@ -73,7 +80,7 @@ test('no pending marker: skips cleanly, writes no outcome row', () => {
   try {
     const out = runHook({ session_id: 's-test-1', cwd: project });
     assert.equal(out.trim(), '{}', 'Stop hook never injects text, but always emits valid JSON on exit 0 (Codex contract requirement)');
-    assert.equal(existsSync(join(project, '_sessions', '2026-07-17', 'outcome-log.jsonl')), false);
+    assert.equal(existsSync(join(project, '_sessions', TODAY_UTC, 'outcome-log.jsonl')), false);
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 
