@@ -52,12 +52,18 @@ const TOP_N = 3;
 // Producer identity for outcome rows — read from the plugin manifest so the
 // version can never fork from the shipped identity; 'unknown' is honest when
 // the manifest is unreadable (packaged layouts vary).
-const PRODUCER_VERSION = (() => {
+const PRODUCER_MANIFEST = (() => {
   try {
-    const manifest = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
-    return String(manifest.version || 'unknown');
-  } catch { return 'unknown'; }
+    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+  } catch { return {}; }
 })();
+const PRODUCER_VERSION = String(PRODUCER_MANIFEST.version || 'unknown');
+// producer_sha (2026-07-18): producer_version alone can't distinguish which
+// exact commit produced a row -- 'unknown' is honest for every build that
+// isn't release-stamped (a --scope local dev install, or a manifest predating
+// this field). See docs/specs/2026-07-18-self-identifying-build-sha.md for
+// the stamping mechanism this reads.
+const PRODUCER_SHA = String(PRODUCER_MANIFEST.git_sha || 'unknown');
 
 // Typed operational receipt (Hale minimal path, 2026-07-17): ONE terminal
 // hook-log row per eligible invocation — early exits included — on the SHARED
@@ -225,6 +231,7 @@ export async function main() {
               session_id: sessionId,
               answer_turn_id: randomUUID(),
               producer_version: PRODUCER_VERSION,
+              producer_sha: PRODUCER_SHA,
             }, { sessionId });
             // Delete only once the outcome row is CONFIRMED written (Hale
             // audit, 2026-07-17, hazard: "deletes pending evidence without

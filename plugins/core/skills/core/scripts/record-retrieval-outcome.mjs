@@ -92,9 +92,17 @@ export function normalizeRetrievalOutcome(input) {
   const sessionId = requireStr(input.session_id, 'session_id');
   const answerTurnId = requireStr(input.answer_turn_id, 'answer_turn_id');
   const producerVersion = requireStr(input.producer_version, 'producer_version');
+  // producer_sha (2026-07-18): producer_version alone can't distinguish which
+  // exact commit produced a row -- five recent SHAs all shipped the same
+  // semver string. 'unknown' is the honest default when the manifest carries
+  // no git_sha (unstamped builds, --scope local dev installs) rather than a
+  // guessed or omitted value -- same 'unknown is first-class' philosophy as
+  // usefulness_outcome above. Required, not optional, so no call site can
+  // silently skip stating it.
+  const producerSha = requireStr(input.producer_sha, 'producer_sha');
   return {
     kind: 'retrieval-outcome',
-    schema_version: '1.1.0',
+    schema_version: '1.2.0',
     retrieval_id: sanitizeAttributeValue(retrievalId, { maxLen: 200 }),
     usefulness_outcome: input.usefulness_outcome,
     evidence_authority: input.evidence_authority,
@@ -102,6 +110,7 @@ export function normalizeRetrievalOutcome(input) {
     session_id: sanitizeAttributeValue(sessionId, { maxLen: 80 }),
     answer_turn_id: sanitizeAttributeValue(answerTurnId, { maxLen: 80 }),
     producer_version: sanitizeAttributeValue(producerVersion, { maxLen: 24 }),
+    producer_sha: sanitizeAttributeValue(producerSha, { maxLen: 44 }),
     ...(typeof input.signal_overlap === 'number' && Number.isFinite(input.signal_overlap)
       ? { signal_overlap: Math.round(input.signal_overlap * 1000) / 1000 } // observed provisional signal, never an outcome by itself
       : {}),
@@ -153,6 +162,7 @@ export function main(argv) {
       session_id: flags.get('session-id'),
       answer_turn_id: flags.get('answer-turn-id'),
       producer_version: flags.get('producer-version'),
+      producer_sha: flags.get('producer-sha'),
       note: flags.get('note'),
     });
     process.stdout.write(`${JSON.stringify({ written: result.written, write_outcome: result.write_outcome })}\n`);

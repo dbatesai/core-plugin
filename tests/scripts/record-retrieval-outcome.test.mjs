@@ -18,11 +18,11 @@ test('writes one evidence-qualified outcome for an existing retrieval', () => {
   const project = fixture();
   try {
     const result = recordRetrievalOutcome(project, {
-      retrieval_id: 'r-1', usefulness_outcome: 'partial', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1',
+      retrieval_id: 'r-1', usefulness_outcome: 'partial', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1', producer_sha: 'deadbeef',
     }, { today: '2026-07-17', now: '2026-07-17T03:00:00Z' });
     assert.equal(result.written, true);
     assert.deepEqual(result.record, {
-      kind: 'retrieval-outcome', schema_version: '1.1.0', retrieval_id: 'r-1', usefulness_outcome: 'partial', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1',
+      kind: 'retrieval-outcome', schema_version: '1.2.0', retrieval_id: 'r-1', usefulness_outcome: 'partial', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1', producer_sha: 'deadbeef',
     });
     // Outcomes live in a SEPARATE later log (Hale stop-note): the retrieval
     // log they judge stays untouched.
@@ -34,11 +34,36 @@ test('writes one evidence-qualified outcome for an existing retrieval', () => {
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 
+// producer_sha, 2026-07-18: required like producer_version -- a caller can't
+// silently omit stating which exact build produced a row. 'unknown' is a
+// valid VALUE (the honest default for unstamped builds) but an absent FIELD
+// is a caller bug, same distinction the honesty coupling above enforces for
+// usefulness_outcome/evidence_authority.
+test('rejects a missing producer_sha without writing', () => {
+  const project = fixture();
+  try {
+    assert.throws(() => recordRetrievalOutcome(project, {
+      retrieval_id: 'r-1', usefulness_outcome: 'partial', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1',
+    }), /producer_sha must be a non-empty string/i);
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test("accepts the literal value 'unknown' as a valid, honest producer_sha", () => {
+  const project = fixture();
+  try {
+    const result = recordRetrievalOutcome(project, {
+      retrieval_id: 'r-1', usefulness_outcome: 'partial', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1', producer_sha: 'unknown',
+    }, { today: '2026-07-17', now: '2026-07-17T03:00:00Z' });
+    assert.equal(result.written, true);
+    assert.equal(result.record.producer_sha, 'unknown');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
 test('rejects unknown retrieval ids without writing', () => {
   const project = fixture();
   try {
     assert.throws(() => recordRetrievalOutcome(project, {
-      retrieval_id: 'missing', usefulness_outcome: 'useful', evidence_authority: 'agent-attribution', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1',
+      retrieval_id: 'missing', usefulness_outcome: 'useful', evidence_authority: 'agent-attribution', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1', producer_sha: 'deadbeef',
     }), /exactly one retrieval/i);
     const rows = readFileSync(join(project, '_sessions', '2026-07-17', 'retrieval-log.jsonl'), 'utf8').trim().split('\n');
     assert.equal(rows.length, 1);
@@ -53,11 +78,11 @@ test('permits a stronger later outcome to be appended (does not throw)', () => {
   const project = fixture();
   try {
     const first = recordRetrievalOutcome(project, {
-      retrieval_id: 'r-1', usefulness_outcome: 'unknown', evidence_authority: 'unobservable', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1',
+      retrieval_id: 'r-1', usefulness_outcome: 'unknown', evidence_authority: 'unobservable', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1', producer_sha: 'deadbeef',
     }, { today: '2026-07-17' });
     assert.equal(first.written, true);
     const second = recordRetrievalOutcome(project, {
-      retrieval_id: 'r-1', usefulness_outcome: 'miss', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-2', producer_version: '3.12.0-rc.1',
+      retrieval_id: 'r-1', usefulness_outcome: 'miss', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-2', producer_version: '3.12.0-rc.1', producer_sha: 'deadbeef',
     }, { today: '2026-07-17' });
     assert.equal(second.written, true);
     const rows = readFileSync(join(project, '_sessions', '2026-07-17', 'outcome-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
@@ -100,7 +125,7 @@ test('rejects invalid closed-vocabulary values', () => {
   const project = fixture();
   try {
     assert.throws(() => recordRetrievalOutcome(project, {
-      retrieval_id: 'r-1', usefulness_outcome: 'great', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1',
+      retrieval_id: 'r-1', usefulness_outcome: 'great', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1', producer_sha: 'deadbeef',
     }), /usefulness_outcome/i);
     assert.throws(() => recordRetrievalOutcome(project, {
       retrieval_id: 'r-1', usefulness_outcome: 'useful', evidence_kind: 'guess',
@@ -114,7 +139,7 @@ test('fails closed while another outcome writer owns the scan-and-append lock', 
     const lock = acquireFileLock(outcomeLockPath(project));
     assert.equal(lock.ok, true);
     assert.throws(() => recordRetrievalOutcome(project, {
-      retrieval_id: 'r-1', usefulness_outcome: 'useful', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1',
+      retrieval_id: 'r-1', usefulness_outcome: 'useful', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1', producer_sha: 'deadbeef',
     }), /writer is locked/i);
     const rows = readFileSync(join(project, '_sessions', '2026-07-17', 'retrieval-log.jsonl'), 'utf8').trim().split('\n');
     assert.equal(rows.length, 1);

@@ -71,12 +71,11 @@ export function receipt(action, reason, extra = {}) {
   return 0;
 }
 
-function readManifestVersion() {
+function readProducerManifest() {
   try {
     const path = fileURLToPath(new URL('../../../.claude-plugin/plugin.json', import.meta.url));
-    const manifest = JSON.parse(readFileSync(path, 'utf8'));
-    return String(manifest.version || 'unknown');
-  } catch { return 'unknown'; }
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch { return {}; }
 }
 
 export function main() {
@@ -118,6 +117,7 @@ export function main() {
   const answerTurnId = nativeTurnId || randomUUID();
 
   try {
+    const manifest = readProducerManifest();
     const closeResult = recordRetrievalOutcome(store, {
       retrieval_id: prev.retrieval_id,
       // Stop tells us the answer happened; it still can't tell us whether the
@@ -130,7 +130,8 @@ export function main() {
       harness,
       session_id: sessionId,
       answer_turn_id: answerTurnId,
-      producer_version: readManifestVersion(),
+      producer_version: String(manifest.version || 'unknown'),
+      producer_sha: String(manifest.git_sha || 'unknown'),
     }, { sessionId });
     if (closeResult.written) {
       try { rmSync(pendingFile, { force: true }); } catch { /* consumed */ }
