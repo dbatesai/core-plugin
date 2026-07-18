@@ -3,19 +3,19 @@ import assert from 'node:assert';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { trustedTestTmpRoot, linkFixtureUnderTrustedRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 // mkdtempSync / rmSync used by isolatedHooksLog() below are imported later in
 // this file (line ~100) — ES module imports are hoisted, so the binding is
 // available at call time regardless of textual position.
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
-// D1 fix, 2026-07-18: CORE_RETRIEVAL_STORE only honors overrides inside the
-// trusted ~/.core now, so the committed fixture (outside it) can't be used
-// directly — symlinked in instead (resolve() sees the trusted link path;
-// fs reads through it reach the real, unmodified fixture). Link removed below.
-const FIXT = linkFixtureUnderTrustedRoot(join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store'));
-after(() => { rmSync(FIXT, { force: true }); });
+// D1 fix, 2026-07-18, second pass: CORE_RETRIEVAL_STORE was removed from the
+// product hooks entirely (Hale + Antigravity: no legitimate production use,
+// and its trust check was lexical-only — symlink-bypassable). Tests now pass
+// the store via `cwd` in the JSON payload, the same trusted channel the real
+// harness always used — no env var, no symlink workaround needed anymore.
+const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
 // Isolate every hook test log (Hale audit, 2026-07-17): a subprocess hook run
 // that doesn't override CORE_HOOKS_LOG_FILE defaults to the real machine-wide
@@ -36,9 +36,9 @@ function isolatedHooksLog() {
 }
 after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
-function runHook(prompt, env) {
+function runHook(prompt, env, cwd = FIXT) {
   return execFileSync('node', [HOOK], {
-    input: JSON.stringify({ prompt }),
+    input: JSON.stringify({ prompt, cwd }),
     // Metrics hard-off by default: the hook emits the canonical per-turn
     // retrieval event + OTel span when metrics are on (2026-07-17), and a test
     // pointed at a COMMITTED fixture store must never write telemetry into it
@@ -49,43 +49,43 @@ function runHook(prompt, env) {
   });
 }
 
-function runHookProcess(prompt, env) {
+function runHookProcess(prompt, env, cwd = FIXT) {
   return spawnSync('node', [HOOK], {
-    input: JSON.stringify({ prompt }),
+    input: JSON.stringify({ prompt, cwd }),
     env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
     encoding: 'utf8',
   });
 }
 
 test('default ON: flag unset → injects (shipped on, opt-out — G2 resolved)', () => {
-  const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '', CORE_RETRIEVAL_STORE: FIXT });
+  const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '' });
   assert.match(out, /want-omega-speedmaster-on-sale-wait/, 'default-on hook injects with no flag set');
 });
 
 test('opt-out: CORE_RETRIEVAL_HOOK=0 → no output, exit 0', () => {
-  const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '0', CORE_RETRIEVAL_STORE: FIXT });
+  const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '0' });
   assert.equal(out.trim(), '', 'hook must be a no-op when explicitly opted out with =0');
 });
 
 test('flag ON: injects summaries for a known query', () => {
-  const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT });
+  const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '1' });
   assert.match(out, /want-omega-speedmaster-on-sale-wait/, 'the literal-match want should be injected');
 });
 
 test('flag ON but empty query → no crash, exit 0', () => {
-  const out = runHook('', { CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT });
+  const out = runHook('', { CORE_RETRIEVAL_HOOK: '1' });
   assert.equal(typeof out, 'string');
 });
 
 test('output is byte-capped', () => {
-  const out = runHook('watch chronograph omega speedmaster heritage agenda', { CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT });
+  const out = runHook('watch chronograph omega speedmaster heritage agenda', { CORE_RETRIEVAL_HOOK: '1' });
   assert.ok(Buffer.byteLength(out, 'utf8') <= 2048, 'injected context must stay within the byte cap');
 });
 
 test('integration: bootstrap integrity marker + hook injection coexist under a combined cap', async () => {
   const { checkContextIntegrity } = await import('../../plugins/core/skills/core/scripts/check-context-integrity.mjs');
   const marker = checkContextIntegrity({ memoryBytes: 1000, projectTotalLines: 100, projectReadLines: 100 }).marker;
-  const injected = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT });
+  const injected = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '1' });
   const combined = marker + '\n' + injected;
   assert.match(combined, /CONTEXT-COMPLETE/);
   assert.match(combined, /want-omega-speedmaster-on-sale-wait/);
@@ -101,7 +101,7 @@ test('hook output carries the authority tier for observation hits (Hale re-revie
   try {
     const out = execFileSync('node', [HOOK], {
       input: JSON.stringify({ prompt: 'quokka incident', cwd: dir }),
-      env: { ...process.env, CORE_RETRIEVAL_STORE: dir, CORE_HOOKS_LOG_FILE: isolatedHooksLog() },
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog() },
       encoding: 'utf8',
     });
     assert.match(out, /obs-nested-note \[observation\]:/, 'observation hit is tier-labeled in the injected context');
@@ -138,7 +138,7 @@ function readEventRows(root) {
 test('hit event: ladder tier from producing stage, observed terms, correlation present', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-hit-')));
   try {
-    runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1' });
+    runHook('widget decision', { CORE_METRICS_ENABLED: '1' }, root);
     const [evt] = readEventRows(root);
     assert.ok(evt, 'event written');
     assert.equal(evt.mechanism, 'model-free-substrate');
@@ -156,7 +156,7 @@ test('hit event: ladder tier from producing stage, observed terms, correlation p
 test('empty result is an honest no-hit at the tier actually run — never a fabricated Tier-3 miss', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-nohit-')));
   try {
-    const out = runHook('zzqx unmatchable quark', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1' });
+    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1' }, root);
     assert.match(out, /CORE reasoning escalation required/);
     assert.match(out, /inspect all 1 shard\(s\) covering 2 active units/);
     assert.ok(Buffer.byteLength(out, 'utf8') <= 2048, 'reasoning directive stays inside the hook cap');
@@ -174,7 +174,7 @@ test('empty result is an honest no-hit at the tier actually run — never a fabr
 test('metrics opt-out means zero telemetry rows', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-')));
   try {
-    runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '0' });
+    runHook('widget decision', { CORE_METRICS_ENABLED: '0' }, root);
     assert.equal(readEventRows(root).length, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -187,7 +187,7 @@ test('telemetry write failure is observable in the hook log, and the turn is nev
   try {
     // Force the legacy write path to fail: _sessions exists as a FILE.
     wf(join(root, '_sessions'), 'not a directory');
-    const out = runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: logFile });
+    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: logFile }, root);
     assert.ok(typeof out === 'string', 'hook exited cleanly (fail-open)');
     assert.ok(ex(logFile), 'failure surfaced in the hook log');
     assert.match(rf(logFile, 'utf8'), /"reason":"event-write-failed"/);
@@ -247,7 +247,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
           else process.env.CORE_HOOKS_LOG_FILE = prior;
         }
       } else {
-        run = runHookProcess(b.prompt, { ...b.env, CORE_RETRIEVAL_STORE: store, CORE_HOOKS_LOG_FILE: effectiveLog });
+        run = runHookProcess(b.prompt, { ...b.env, CORE_HOOKS_LOG_FILE: effectiveLog }, store);
       }
       // Fail-open proof for every REAL subprocess branch (not directReceipt,
       // which never launches a process): the hook contract is exit 0 always,
@@ -272,7 +272,7 @@ test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked teleme
   // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now.
   const logFile = isolatedHooksLog();
   try {
-    runHook('widget decision', { CORE_RETRIEVAL_STORE: root, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: logFile });
+    runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: logFile }, root);
     assert.equal(readEventRows(root).length, 0, 'no retrieval row when metrics are off');
     assert.match(rf(logFile, 'utf8'), /"reason":"metrics-opt-out"/, 'hook-log is the authoritative receipt');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -303,7 +303,7 @@ function runHookWithSession(prompt, root, sessionId, env = {}) {
       // unset since the hook only checks CLAUDECODE for Claude Code identity.
       CLAUDE_CODE_SESSION_ID: undefined, CODEX_SESSION_ID: undefined, CODEX_PLUGIN_ROOT: undefined,
       CLAUDECODE: '1',
-      CORE_METRICS_ENABLED: '1', CORE_RETRIEVAL_STORE: root, CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
+      CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
       ...env,
     },
     encoding: 'utf8',

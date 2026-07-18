@@ -17,10 +17,19 @@
  * override when it resolves inside the trusted ~/.core (via trustedHome(), not the spoofable
  * os.homedir()), otherwise ignore it and use the real default.
  *
+ * D1 second pass (Hale + Antigravity, 2026-07-18): the lexical resolveHookLogPath() check
+ * alone is a CWE-22-shaped gap — path.resolve() never dereferences symlinks, so a symlink
+ * placed under ~/.core pointing outside it would pass the string check while appendFileSync
+ * writes through it to the real outside target. resolveHookLogPath() stays lexical-only and
+ * pure (existing test contract), but logHookEvent() below re-checks the CANONICAL directory
+ * with realpathSync() right after mkdirSync guarantees it exists — the only point a symlink
+ * check can run without a spurious ENOENT — and refuses to write if the realpath escapes
+ * ~/.core (or isn't a /dev/null / tmpdir fallback path).
+ *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  */
 
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { trustedHome } from '../scripts/trusted-home.mjs';
@@ -58,7 +67,20 @@ export function hookLogPath() {
 export function logHookEvent(entry) {
   try {
     const file = hookLogPath();
-    try { mkdirSync(dirname(file), { recursive: true }); } catch { /* dir exists or unwritable */ }
+    if (file !== '/dev/null') {
+      const dir = dirname(file);
+      try { mkdirSync(dir, { recursive: true }); } catch { /* dir exists or unwritable */ }
+      // Canonical re-check (D1 second pass): the directory is guaranteed to exist now,
+      // so realpathSync can't throw ENOENT here — dereferences any symlink and confirms
+      // the TRUE target still lands inside a trusted root, closing the lexical-only gap.
+      const home = trustedHome();
+      const coreDir = home ? join(home, '.core') : null;
+      const trustedRoots = [coreDir, join(tmpdir(), '.core')].filter(Boolean);
+      let realDir;
+      try { realDir = realpathSync(dir); } catch { realDir = null; }
+      const canonicalOk = realDir !== null && trustedRoots.some(root => realDir === root || realDir.startsWith(root + sep));
+      if (!canonicalOk) return { written: false, error_code: 'hook-log-untrusted-target' };
+    }
     appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
     return { written: true };
   } catch (error) {

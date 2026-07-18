@@ -47,11 +47,6 @@ export const ALLOWLIST = Object.freeze({
     allowlistDate: '2026-07-07',
     reviewBy: '2026-10-07',
   },
-  'trusted-env-override.mjs': {
-    reason: 'D1 security fix (2026-07-18): genuinely wired — imported by hooks/retrieve-context-hook.mjs, hooks/answer-close-hook.mjs, hooks/close-pass-hook.mjs. This detector\'s transitive closure only walks scripts/*.mjs import chains, never hooks/*.mjs, so a scripts/ utility imported ONLY from hooks/ is structurally invisible to it (trusted-home.mjs escapes this only because it happens to also be imported by scripts/close-pass.mjs). Real detector gap, not neglect — allowlisted rather than scope-creeping the security fix into fixing the detector\'s own reach.',
-    allowlistDate: '2026-07-18',
-    reviewBy: '2026-10-18',
-  },
 });
 
 // Back-compat: callers (and older trees) may still pass string-form entries.

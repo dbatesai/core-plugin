@@ -3,10 +3,10 @@ import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
-import { resolveHookLogPath } from '../../plugins/core/skills/core/hooks/hook-log.mjs';
+import { resolveHookLogPath, logHookEvent } from '../../plugins/core/skills/core/hooks/hook-log.mjs';
 
 const HOOKS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks');
@@ -46,7 +46,7 @@ function runClose(payload, env) {
   try {
     execFileSync('node', [CLOSE_HOOK], {
       input: JSON.stringify(payload),
-      env: { ...process.env, CORE_CLOSE_STORE: payload.cwd || '', CORE_HOOKS_LOG_FILE: tmpLog(), ...env },
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: tmpLog(), ...env },
       encoding: 'utf8',
     });
   } catch { /* hook exits 0; ignore */ }
@@ -169,4 +169,34 @@ test('resolveHookLogPath: /dev/null is always honored (the documented silence af
 
 test('resolveHookLogPath: no env var falls back to the default', () => {
   assert.equal(resolveHookLogPath({}), join(homedir(), '.core', 'hooks-log.jsonl'));
+});
+
+// D1 second pass (Hale + Antigravity, 2026-07-18): resolveHookLogPath()'s
+// lexical check alone is a CWE-22-shaped gap — a symlink placed under the
+// trusted ~/.core pointing outside it passes the string check while writes
+// go through it to the real outside target. logHookEvent()'s canonical
+// re-check (realpathSync after mkdir) is the actual defense; this proves it
+// refuses the write rather than following the link, using a real symlink,
+// not a hypothetical.
+test('logHookEvent: a symlink under ~/.core pointing outside it is refused, not followed', () => {
+  const outsideDir = mkdtempSync(join(tmpdir(), 'hook-log-outside-'));
+  const linkDir = join(trustedTestTmpRoot(), `escape-link-${Date.now()}`);
+  symlinkSync(outsideDir, linkDir, 'dir');
+  const targetFile = join(linkDir, 'hooks-log.jsonl');
+  try {
+    const prior = process.env.CORE_HOOKS_LOG_FILE;
+    process.env.CORE_HOOKS_LOG_FILE = targetFile;
+    try {
+      const result = logHookEvent({ hook: 'test', action: 'skip' });
+      assert.equal(result.written, false, 'a symlinked escape must be refused, not written through');
+      assert.equal(result.error_code, 'hook-log-untrusted-target');
+      assert.ok(!existsSync(join(outsideDir, 'hooks-log.jsonl')), 'the real outside target must never receive the write');
+    } finally {
+      if (prior === undefined) delete process.env.CORE_HOOKS_LOG_FILE;
+      else process.env.CORE_HOOKS_LOG_FILE = prior;
+    }
+  } finally {
+    rmSync(linkDir, { force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+  }
 });

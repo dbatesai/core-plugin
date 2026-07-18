@@ -44,7 +44,7 @@ function runHook(payload, env = {}) {
   try {
     const out = execFileSync('node', [HOOK], {
       input: JSON.stringify(payload),
-      env: { ...process.env, CORE_CLOSE_STORE: payload.cwd || '', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
       encoding: 'utf8',
     });
     return { out, code: 0 };
