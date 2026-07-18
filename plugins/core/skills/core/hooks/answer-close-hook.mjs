@@ -18,8 +18,9 @@
  * invocation is set EXPLICITLY by the entry wrapper — answer-close-hook.mjs itself for Claude
  * Code (hooks.json Stop), answer-close-hook-codex.mjs for Codex (hooks-codex.json Stop) — via
  * CORE_HOOK_HARNESS, never inferred from ambient env vars. See harnesses/codex.md §hook-register
- * for the Codex-side registration and its still-open evidence gate (install + trust + a real
- * two-turn proof, which needs a live Codex install this repo doesn't have).
+ * for the Codex-side registration. Install + trust + a real two-turn proof landed 2026-07-18
+ * at exact SHA 8e941de6 (two independent proof bundles) -- re-proof owed at each subsequent
+ * candidate, not a standing gap.
  *
  * Fail-open by contract: a Stop hook must never block or alter the assistant's turn. Every
  * failure swallows to exit 0; the pending marker (and thus the missed close) is picked up by

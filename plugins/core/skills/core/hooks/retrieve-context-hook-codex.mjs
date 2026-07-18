@@ -8,10 +8,10 @@
  * prefix syntax, so this works identically on POSIX and Windows (per DC-80, .mjs only).
  *
  * Registered on Codex's UserPromptSubmit event via hooks-codex.json. See
- * harnesses/codex.md §hook-register for the registration + its open evidence gate: this file's
- * correctness against the DOCUMENTED Codex contract is checked by this repo's tests, but
- * "installed, trusted, and exercised on a real Codex session" is not — that needs a live install
- * this repo doesn't have.
+ * harnesses/codex.md §hook-register for the registration. This file's correctness against the
+ * DOCUMENTED Codex contract is checked by this repo's tests, AND "installed, trusted, and
+ * exercised on a real Codex session" is proven -- 2026-07-18, exact SHA 8e941de6, two independent
+ * hashed proof bundles. Re-proof owed at each subsequent candidate, not a standing gap.
  */
 process.env.CORE_HOOK_HARNESS = 'codex';
 const { main } = await import('./retrieve-context-hook.mjs');
