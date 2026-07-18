@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
@@ -59,11 +59,14 @@ function readAllPackageText(dir) {
 
 function extractZip(zipPath, dest) {
   mkdirSync(dest, { recursive: true });
-  const res = spawnSync('tar', ['-x', '-f', zipPath, '-C', dest], { encoding: 'utf8' });
-  // Diagnostic-only addition (2026-07-17): the pre-existing Windows-only failure
-  // here has always reported bare "128 !== 0" with no reason captured. This
-  // carries tar's own stderr into the assertion message so the NEXT Windows CI
-  // run names the real cause instead of leaving it a standing unknown.
+  // Same fix as zipStaging() in the product code (2026-07-18): a Windows
+  // drive-letter path passed to -f gets parsed as tar's remote host:path
+  // syntax. Run with zipPath's directory as cwd, pass only its basename to
+  // -f. Confirmed via live CI this was the exact remaining cause after the
+  // product-side create fix landed -- the create step started succeeding,
+  // and this helper's own absolute-path extract call was the only thing
+  // still failing.
+  const res = spawnSync('tar', ['-x', '-f', basename(zipPath), '-C', dest], { cwd: dirname(zipPath), encoding: 'utf8' });
   assert.equal(res.status, 0, `zip extracts (status=${res.status}, error=${res.error?.message || 'none'}, stderr=${JSON.stringify(res.stderr)})`);
   return dest;
 }
