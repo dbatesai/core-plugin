@@ -68,10 +68,20 @@ export function firstRelevantRank(ranked, expected) {
 // Round-13 audit: this used to call generateSummaryIndex(store) — a FULL live
 // re-read of every unit AFTER the run's snapshot was minted. It now derives the
 // mix from an index object; runHarness passes its captured snapshot's index.
+//
+// K09 (Hale's audit, 2026-07-16): this used to derive the type key from the
+// unit ID's leading alpha run (id.match(/^([a-z]+)-/)) rather than the unit's
+// actual `type:` frontmatter field. A project's own id-naming convention is
+// project-specific vocabulary — a bespoke prefix leaks straight through this
+// "generic CORE vocabulary" mix into the shareable aggregate receipt (the
+// whitelist/refusal-scan boundary aggregate-receipt.mjs exists to enforce),
+// since MIX_KEY_RE there only checks shape (lowercase, <=24 chars), not
+// membership in the actual closed CORE type set. Fixed at the source: use the
+// real `type` field the index already carries, closed CORE vocabulary only.
 export function unitTypeMix(index) {
   const mix = {};
   for (const u of index.units) {
-    const t = (u.id.match(/^([a-z]+)-/) || [])[1] || 'other';
+    const t = u.type && u.type.trim() ? u.type.trim() : 'other';
     mix[t] = (mix[t] || 0) + 1;
   }
   return { total: index.units.length, mix };

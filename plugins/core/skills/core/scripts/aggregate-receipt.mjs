@@ -59,9 +59,19 @@ export function collectForbiddenStrings(report, sweep = null) {
 // forms (blocker 1, Hale verdict §1 battery): absolute POSIX (/tmp, /etc, /var,
 // /private/tmp, /Users, /Volumes, …), home shorthand, Windows drive letters,
 // and UNC (\\server\share). Leading-anchored OR embedded after a delimiter.
+//
+// K09 (Hale's audit, 2026-07-16): two real bypasses in the embedded-path branch.
+// (1) The boundary-character class before an embedded path didn't include ':',
+// so "path:/Users/dbates/x" (a very common separator — "note:", "file:",
+// "location:") slipped through undetected. (2) The embedded alternatives only
+// covered POSIX well-known roots and UNC (\\server) — an embedded (non-leading)
+// Windows drive-letter path like "see C:\Users\dbates\x" was never checked at
+// all; the drive-letter form was only tested at the string's very start. Both
+// fixed: ':' added to the boundary class, and the embedded drive-letter form
+// added as its own alternative alongside the POSIX-root and UNC ones.
 const PATH_SHAPED = new RegExp(
   '^(?:/|~[/\\\\]|[A-Za-z]:[/\\\\]|\\\\\\\\)' +                 // starts like a path
-  '|(?:^|[\\s"\'(=,])(?:/(?:private|tmp|etc|var|Users|home|Volumes|opt|usr|srv|mnt|media)\\b|\\\\\\\\[A-Za-z0-9])' // or embeds one
+  '|(?:^|[\\s"\'(=,:])(?:/(?:private|tmp|etc|var|Users|home|Volumes|opt|usr|srv|mnt|media)\\b|\\\\\\\\[A-Za-z0-9]|[A-Za-z]:[/\\\\])' // or embeds one (POSIX root, UNC, or a drive letter)
 );
 
 /** True when a receipt KEY or string VALUE is path-shaped in any supported form. */
@@ -111,7 +121,19 @@ const VERSION_RE = /^[0-9A-Za-z.+-]{1,40}$/;
 const SCHEMA_RE = /^[a-z0-9-]+\/\d+$/;           // e.g. train-a-aggregate-receipt/1
 const ARM_RE = /^[a-z][a-z0-9_]{0,24}$/;          // lexical | ranking | context3 | bm25 | future arms
 const POLICY_RE = /^P\d(?:_w[0-9.]{1,6})?$/;      // P0..P2, P3_w0.8 …
-const MIX_KEY_RE = /^[a-z]{1,24}$/;               // unit-id prefixes are alpha-only ('other' fallback)
+// K09 (Hale's audit, 2026-07-16): this used to be a pure SHAPE check
+// (lowercase, <=24 chars), so any arbitrary lowercase word passed — including
+// a project-specific id-naming prefix, which is exactly what leaked before the
+// root-cause fix in retrieval-harness.mjs's unitTypeMix (it now emits the real
+// `type` field, not an id-prefix guess). This is the second belt: even if some
+// other producer ever feeds unit_type_counts again, only CORE's actual closed
+// type vocabulary (priority.mjs's TYPE_TO_SECTION) plus 'other' is accepted —
+// project-specific vocabulary refuses here too, not just at the source.
+const KNOWN_UNIT_TYPES = new Set([
+  'decision', 'risk', 'person', 'deliverable', 'principle', 'explainer',
+  'review-finding', 'observation', 'topic', 'reference', 'feedback', 'memory', 'other',
+]);
+const MIX_KEY_RE = /^[a-z][a-z-]{0,23}$/;         // shape check; KNOWN_UNIT_TYPES is the real closed-set gate below
 const RUNGS = new Set(['literal', 'category', 'value', 'cross-domain']);
 // Bands are short prose labels — closed by SHAPE (bounded charset; real labels
 // carry '/', ',', '_', '.' as in "enrichment/reasoning" and "P3_w0.8") — plus the
@@ -144,7 +166,7 @@ export function validateReceiptShape(receipt) {
 
   count('corpus.total_units', receipt.corpus.total_units);
   for (const [k, v] of Object.entries(receipt.corpus.unit_type_counts)) {
-    if (!MIX_KEY_RE.test(k)) fail('corpus.unit_type_counts key', k);
+    if (!MIX_KEY_RE.test(k) || !KNOWN_UNIT_TYPES.has(k)) fail('corpus.unit_type_counts key', k);
     count(`corpus.unit_type_counts[${k}]`, v);
   }
 
