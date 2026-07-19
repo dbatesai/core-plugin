@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateSummaryIndex } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
+import { generateSummaryIndex, loadFreshIndex, computeSourceSignature } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
 
 function fixtureStore() {
   const root = mkdtempSync(join(tmpdir(), 'core-idx-'));
@@ -56,4 +56,69 @@ test('missing status is treated as active', () => {
     '---\nid: dc-3-nostatus\ntype: decision\ntopics:\n  - retrieval\n---\n\n# DC-3 — No status\n\nBody.');
   const res = generateSummaryIndex(root);
   assert.ok(res.units.map(u => u.id).includes('dc-3-nostatus'));
+});
+
+// K04 (Hale's audit, 2026-07-16): anti-resurrection was not structural — the
+// cache staleness check was pure content-hash (source_sig), so a unit whose
+// t_invalid date arrives with zero byte changes anywhere in the store kept
+// serving from a stale cache indefinitely. Fixed by baking next_invalidation_at
+// into the index at generation time and having loadFreshIndex force a
+// regenerate once `now` reaches it, independent of content hashing.
+test('K04: stale cache past its own next_invalidation_at regenerates and excludes the now-invalid unit, even though byte content is unchanged', () => {
+  const root = mkdtempSync(join(tmpdir(), 'core-idx-k04-'));
+  const mem = join(root, '_memories');
+  const lib = join(mem, '_lib');
+  mkdirSync(lib, { recursive: true });
+  // A unit whose fact expired yesterday, but whose record status is still
+  // 'active' (the two dimensions are independent — this is a real, valid shape).
+  writeFileSync(join(mem, 'dc-4-expired.md'),
+    '---\nid: dc-4-expired\ntype: decision\nstatus: active\nt_invalid: 2000-01-01\ntopics:\n  - retrieval\n---\n\n# DC-4 — Expired fact\n\nMust not resurrect.');
+  writeFileSync(join(mem, 'dc-5-alive.md'),
+    '---\nid: dc-5-alive\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-5 — Still valid\n\nBody.');
+
+  // Hand-write a stale cache simulating one written BEFORE 2000-01-01 arrived:
+  // source_sig genuinely matches the current on-disk bytes (a content-hash
+  // check alone would treat this cache as fresh), but next_invalidation_at
+  // is in the past relative to the real clock, and the stale cache's own
+  // units array still lists the now-expired unit as valid — exactly what a
+  // byte-only staleness check would keep serving forever.
+  const staleIndex = {
+    count: 2,
+    generated: '',
+    source_sig: computeSourceSignature(root),
+    next_invalidation_at: '2000-01-01',
+    degraded: false,
+    duplicate_conflicts: [],
+    units: [
+      { id: 'dc-4-expired', path: 'dc-4-expired.md', type: 'decision', tier: 'canonical', summary: 'Expired fact', topics: ['retrieval'], status: 'active', updated: '2000-01-01' },
+      { id: 'dc-5-alive', path: 'dc-5-alive.md', type: 'decision', tier: 'canonical', summary: 'Still valid', topics: ['retrieval'], status: 'active', updated: '2000-01-01' },
+    ],
+  };
+  writeFileSync(join(lib, 'unit-summaries.json'), JSON.stringify(staleIndex, null, 2));
+
+  const res = loadFreshIndex(root);
+  const ids = res.units.map(u => u.id);
+  assert.ok(!ids.includes('dc-4-expired'), 'a unit past its own t_invalid must not resurrect from a byte-unchanged stale cache');
+  assert.ok(ids.includes('dc-5-alive'), 'a still-valid unit must survive the forced regenerate');
+});
+
+test('K04 control: an index with no next_invalidation_at (nothing time-bound) is still served from cache on a byte match', () => {
+  const root = mkdtempSync(join(tmpdir(), 'core-idx-k04-control-'));
+  const mem = join(root, '_memories');
+  const lib = join(mem, '_lib');
+  mkdirSync(lib, { recursive: true });
+  writeFileSync(join(mem, 'dc-6-plain.md'),
+    '---\nid: dc-6-plain\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-6 — Plain\n\nBody.');
+  const cached = {
+    count: 1,
+    generated: '',
+    source_sig: computeSourceSignature(root),
+    next_invalidation_at: null,
+    degraded: false,
+    duplicate_conflicts: [],
+    units: [{ id: 'dc-6-plain', path: 'dc-6-plain.md', type: 'decision', tier: 'canonical', summary: 'SENTINEL-FROM-CACHE', topics: ['retrieval'], status: 'active', updated: '2000-01-01' }],
+  };
+  writeFileSync(join(lib, 'unit-summaries.json'), JSON.stringify(cached, null, 2));
+  const res = loadFreshIndex(root);
+  assert.equal(res.units[0].summary, 'SENTINEL-FROM-CACHE', 'a cache with no time bound and a byte match must be served as-is, not regenerated');
 });

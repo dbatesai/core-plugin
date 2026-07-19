@@ -141,7 +141,15 @@ export function loadFreshIndex(storePath) {
   if (existsSync(indexPath)) {
     try {
       const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
-      if (idx && idx.source_sig !== undefined &&
+      // K04 (Hale's audit): source_sig is a pure content hash — it only changes
+      // when file BYTES change, so a unit valid at generation time but past its
+      // own t_invalid date now would keep serving from cache forever if nothing
+      // else in the store happens to be edited. next_invalidation_at is the
+      // earliest such date baked in at generation time; once `now` reaches it,
+      // the cache is stale regardless of whether any byte has moved.
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const timeStale = idx && idx.next_invalidation_at && todayIso >= idx.next_invalidation_at;
+      if (idx && !timeStale && idx.source_sig !== undefined &&
           idx.source_sig === computeSourceSignature(root) &&
           // Every record validated — id/path shape, path containment, uniqueness.
           // A partially-broken cache is regenerated, never partially trusted.
@@ -259,6 +267,7 @@ function authorityTier(fm, rel) {
 export function captureStore(storePath, { retainRaw = false } = {}) {
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
+  let nextInvalidationAt = null; // K04: earliest still-future t_invalid among included candidates
 
   // ONE read per file.
   const raws = [];
@@ -295,6 +304,17 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     // check alone missed a `status: active` unit with a past t_invalid, which
     // then leaked into per-turn retrieval (the read path this index feeds).
     if (isInvalidated({ id, fm, body }, now)) continue;
+    // K04 (Hale's audit, 2026-07-16): the cache staleness check in loadFreshIndex
+    // is byte-only (source_sig, a content hash) — it never re-fires just because
+    // calendar time passed, so a unit included here as valid (t_invalid in the
+    // future) silently keeps serving as valid past its own t_invalid date if no
+    // file's bytes change in the meantime. Track the earliest such date so the
+    // loader can force a regenerate once `now` reaches it, independent of content
+    // hashing — anti-resurrection needs to be time-aware, not just byte-aware.
+    if (fm.t_invalid && /^\d{4}-\d{2}-\d{2}/.test(String(fm.t_invalid))) {
+      const iv = String(fm.t_invalid).slice(0, 10);
+      if (!nextInvalidationAt || iv < nextInvalidationAt) nextInvalidationAt = iv;
+    }
     textByPath.set(rel, text);
     candidates.push({
       id,
@@ -329,6 +349,7 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     count: units.length,
     generated: '',
     source_sig,
+    next_invalidation_at: nextInvalidationAt, // K04: forces a regenerate at this date even if bytes are unchanged
     degraded: conflicts.length > 0,
     duplicate_conflicts: conflicts,
     units,
