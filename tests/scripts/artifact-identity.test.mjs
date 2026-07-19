@@ -128,11 +128,15 @@ test('K17: directory-mode identity self-describes its mode and records the direc
   const treeDir = join(dir, 'tree');
   mkdirSync(treeDir, { recursive: true });
   try {
-    execFileSync('git', ['-C', REPO, 'archive', HEAD, 'plugins/core', '-o', join(dir, 'e.tar')]);
-    // Windows-latest tar parses a `C:...` -f argument as SSH-style remote-host
-    // syntax (the exact bug metrics-package.mjs's zipStaging() already fixed
-    // once): cwd into the archive's own directory and pass only the basename.
-    execFileSync('tar', ['-x', '-f', 'e.tar', '-C', treeDir], { cwd: dir });
+    // Windows-latest tar parses ANY argument shaped like `C:...` as SSH-style
+    // remote-host syntax (the exact bug metrics-package.mjs's zipStaging()
+    // already fixed once) -- this applies to -C, not just -f. Mirror the
+    // file's own pre-existing working test (line ~51): cwd into `dir` and
+    // pass relative names ('e.tar', 'tree') to every tar argument, never an
+    // absolute Windows path. -c core.autocrlf=false pins byte-preservation on
+    // an autocrlf-configured Windows runner, same reason as the sibling test.
+    execFileSync('git', ['-C', REPO, '-c', 'core.autocrlf=false', 'archive', '-o', join(dir, 'e.tar'), `${HEAD}:plugins/core`]);
+    execFileSync('tar', ['-x', '-f', 'e.tar', '-C', 'tree'], { cwd: dir });
     const out = directoryIdentity(treeDir);
     assert.equal(out.mode, 'directory');
     assert.equal(out.dir, realpathSync(treeDir), 'the exact (canonicalized) directory used must be recorded, not just the hash');
@@ -150,8 +154,8 @@ test('K17: CLI --dir output prints the mode, not just the hash', { skip: !HEAD }
   const treeDir = join(dir, 'tree');
   mkdirSync(treeDir, { recursive: true });
   try {
-    execFileSync('git', ['-C', REPO, 'archive', HEAD, 'plugins/core', '-o', join(dir, 'e.tar')]);
-    execFileSync('tar', ['-x', '-f', 'e.tar', '-C', treeDir], { cwd: dir });
+    execFileSync('git', ['-C', REPO, '-c', 'core.autocrlf=false', 'archive', '-o', join(dir, 'e.tar'), `${HEAD}:plugins/core`]);
+    execFileSync('tar', ['-x', '-f', 'e.tar', '-C', 'tree'], { cwd: dir });
     const out = execFileSync(process.execPath, [join(SCRIPTS, 'artifact-identity.mjs'), '--dir', treeDir], { encoding: 'utf8' });
     assert.match(out, /^mode directory$/m, 'the human-readable --dir output must name its own mode');
     const json = execFileSync(process.execPath, [join(SCRIPTS, 'artifact-identity.mjs'), '--dir', treeDir, '--json'], { encoding: 'utf8' });
