@@ -95,7 +95,7 @@ export function normalizeRetrievalOutcome(input) {
   // producer_sha (2026-07-18): producer_version alone can't distinguish which
   // exact commit produced a row -- five recent SHAs all shipped the same
   // semver string. 'unknown' is the honest default when the manifest carries
-  // no git_sha (unstamped builds, --scope local dev installs) rather than a
+  // no source_sha (unstamped builds, --scope local dev installs) rather than a
   // guessed or omitted value -- same 'unknown is first-class' philosophy as
   // usefulness_outcome above. Required, not optional, so no call site can
   // silently skip stating it.

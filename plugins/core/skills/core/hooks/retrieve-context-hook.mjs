@@ -61,9 +61,12 @@ const PRODUCER_VERSION = String(PRODUCER_MANIFEST.version || 'unknown');
 // producer_sha (2026-07-18): producer_version alone can't distinguish which
 // exact commit produced a row -- 'unknown' is honest for every build that
 // isn't release-stamped (a --scope local dev install, or a manifest predating
-// this field). See docs/specs/2026-07-18-self-identifying-build-sha.md for
-// the stamping mechanism this reads.
-const PRODUCER_SHA = String(PRODUCER_MANIFEST.git_sha || 'unknown');
+// this field). Reads manifest.source_sha -- named 'source', not 'git', per
+// Hale's review: it names the commit this release PACKAGES (the version-bump
+// commit's own parent), not the tagged release commit's own SHA -- those are
+// two different identities and the field name says which one this is. See
+// docs/specs/2026-07-18-self-identifying-build-sha.md.
+const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 
 // Typed operational receipt (Hale minimal path, 2026-07-17): ONE terminal
 // hook-log row per eligible invocation — early exits included — on the SHARED

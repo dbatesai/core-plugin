@@ -338,7 +338,7 @@ test('post-answer caller: next same-session invocation closes the previous retri
     assert.equal(row.harness, 'claude-code');
     assert.equal(row.session_id, 'sess-A');
     assert.ok(row.answer_turn_id && row.producer_version && row.schema_version, 'identity fields required');
-    assert.equal(row.producer_sha, 'unknown', 'the real manifest carries no git_sha yet -- honest default, not a guessed value');
+    assert.equal(row.producer_sha, 'unknown', 'the real manifest carries no source_sha yet -- honest default, not a guessed value');
     assert.notEqual(row.answer_turn_id, row.retrieval_id, 'Hale audit 2026-07-17: answer_turn_id must never alias retrieval_id — they are different concepts');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

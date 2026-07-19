@@ -132,7 +132,7 @@ export function main() {
       session_id: sessionId,
       answer_turn_id: answerTurnId,
       producer_version: String(manifest.version || 'unknown'),
-      producer_sha: String(manifest.git_sha || 'unknown'),
+      producer_sha: String(manifest.source_sha || 'unknown'),
     }, { sessionId });
     if (closeResult.written) {
       try { rmSync(pendingFile, { force: true }); } catch { /* consumed */ }
