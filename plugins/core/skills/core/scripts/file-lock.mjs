@@ -218,12 +218,21 @@ export function acquireFileLock(lockPath, {
   const gens = listGenerations(lockPath);
   const maxN = gens.reduce((m, g) => Math.max(m, g.n), 0);
   const { held, lock, stale } = inspectFromGenerations(gens, { now, staleMs, hardStaleMs });
-  if (held) return { ok: false, reason: 'held', lock };
 
   // Test-only seam (K12 regression coverage): widen the snapshot-to-create
   // window deterministically so the stale-target race can be reproduced
   // without depending on real scheduler timing. Never set outside tests.
+  // CORE_FILELOCK_TEST_SIGNAL_FILE is written the instant the snapshot above
+  // is taken (before the held check, before the sleep) — a real happens-before
+  // a test can block on, rather than a second process racing to start at
+  // roughly the same wall-clock moment (which flaked on a loaded Windows
+  // runner: a shared start barrier alone doesn't guarantee WHICH process's
+  // first listGenerations() read happens first).
   const testDelayMs = Number(process.env.CORE_FILELOCK_TEST_DELAY_MS || 0);
+  if (testDelayMs > 0 && process.env.CORE_FILELOCK_TEST_SIGNAL_FILE) {
+    try { writeFileSync(process.env.CORE_FILELOCK_TEST_SIGNAL_FILE, String(process.pid)); } catch { /* best effort */ }
+  }
+  if (held) return { ok: false, reason: 'held', lock };
   if (testDelayMs > 0) sleepSync(testDelayMs);
 
   // Target the next generation. The tombstone convention makes maxN monotonic —

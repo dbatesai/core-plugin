@@ -316,11 +316,17 @@ test('race A/B/C: C can never acquire during a revived owner\'s wrong-owner rele
 test('K12: a stale maxN snapshot is caught post-win and backed off, never silently resurrected', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'file-lock-k12-'));
   const lock = join(dir, 'stale-target.lock');
-  const go = join(dir, 'go');
+  const snapshotTaken = join(dir, 'snapshot-taken');
+  // A shared "go" start barrier alone doesn't guarantee WHICH process's first
+  // listGenerations() read happens first — that flaked on a loaded Windows CI
+  // runner (both processes start at roughly the same wall-clock moment, but
+  // "roughly" isn't a happens-before guarantee). Instead: the slow child signals
+  // the INSTANT its snapshot is taken (CORE_FILELOCK_TEST_SIGNAL_FILE, written
+  // inside acquireFileLock before the held check or the sleep); the fast child
+  // waits on that exact signal before it does anything. That's a real
+  // happens-before, not a timing coincidence.
   const slowChild = `
     import { acquireFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
-    import { existsSync } from 'node:fs';
-    while (!existsSync(${JSON.stringify(go)})) { /* barrier spin */ }
     const got = acquireFileLock(${JSON.stringify(lock)});
     process.stdout.write(JSON.stringify(got));
     process.exit(got.ok ? 0 : (got.reason === 'stale-target' ? 9 : 1));
@@ -328,17 +334,16 @@ test('K12: a stale maxN snapshot is caught post-win and backed off, never silent
   const fastChild = `
     import { acquireFileLock, releaseFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
     import { existsSync } from 'node:fs';
-    while (!existsSync(${JSON.stringify(go)})) { /* barrier spin */ }
+    while (!existsSync(${JSON.stringify(snapshotTaken)})) { /* wait for the slow child's snapshot to be taken */ }
     let got;
     for (let i = 0; i < 500 && !(got = acquireFileLock(${JSON.stringify(lock)})).ok; i++) { /* spin for the create race */ }
     if (!got || !got.ok) process.exit(2);
     const rel = releaseFileLock(${JSON.stringify(lock)}, got.nonce);
     process.exit(rel.released ? 0 : 3);
   `;
-  const slow = spawnAsync(['--input-type=module', '-e', slowChild], { CORE_FILELOCK_TEST_DELAY_MS: '500' });
+  const slow = spawnAsync(['--input-type=module', '-e', slowChild],
+    { CORE_FILELOCK_TEST_DELAY_MS: '1500', CORE_FILELOCK_TEST_SIGNAL_FILE: snapshotTaken });
   const fast = spawnAsync(['--input-type=module', '-e', fastChild]);
-  await new Promise(r => setTimeout(r, 100)); // let both reach the barrier
-  writeFileSync(go, '1');
   const [slowResult, fastResult] = await Promise.all([slow, fast]);
   assert.equal(fastResult.status, 0, `fast child completed a clean acquire+release cycle inside the delayed child's window (stderr: ${fastResult.stderr})`);
   assert.equal(slowResult.status, 9, `delayed child detected the stale target and backed off instead of resurrecting a used generation number (stdout: ${slowResult.stdout}, stderr: ${slowResult.stderr})`);
