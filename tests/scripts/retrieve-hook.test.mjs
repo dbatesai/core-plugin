@@ -10,6 +10,15 @@ import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
+// Same manifest path + fallback the hook itself reads (retrieve-context-hook.mjs
+// PRODUCER_SHA) -- read dynamically rather than hardcode 'unknown', since a real
+// release cut legitimately stamps a real source_sha into this repo's own manifest.
+const EXPECTED_PRODUCER_SHA = (() => {
+  try {
+    const m = JSON.parse(rf(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', '.claude-plugin', 'plugin.json'), 'utf8'));
+    return String(m.source_sha || 'unknown');
+  } catch { return 'unknown'; }
+})();
 // D1 fix, 2026-07-18, second pass: CORE_RETRIEVAL_STORE was removed from the
 // product hooks entirely (Hale + Antigravity: no legitimate production use,
 // and its trust check was lexical-only — symlink-bypassable). Tests now pass
@@ -338,7 +347,7 @@ test('post-answer caller: next same-session invocation closes the previous retri
     assert.equal(row.harness, 'claude-code');
     assert.equal(row.session_id, 'sess-A');
     assert.ok(row.answer_turn_id && row.producer_version && row.schema_version, 'identity fields required');
-    assert.equal(row.producer_sha, 'unknown', 'the real manifest carries no source_sha yet -- honest default, not a guessed value');
+    assert.equal(row.producer_sha, EXPECTED_PRODUCER_SHA, 'must echo whatever this repo\'s own manifest.source_sha currently says -- "unknown" pre-release, the real SHA once a release has stamped one');
     assert.notEqual(row.answer_turn_id, row.retrieval_id, 'Hale audit 2026-07-17: answer_turn_id must never alias retrieval_id — they are different concepts');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
