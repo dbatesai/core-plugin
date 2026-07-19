@@ -20,7 +20,7 @@ For each memory entry, assess four things:
 
 Then act using one of these verbs, which map to the canonical model in `protocols/hygiene.md`: **graduate** (observation proved true across sessions → a permanent unit), **merge** (duplicate entries → one entry), **archive** (was useful, no longer relevant → `_memories/archive/` with a note; never autonomous on a user-authored unit), **retire** (wrong, superseded, or now captured in code/docs → frontmatter `status: retired`, **body preserved** for forensic value, anti-resurrection rule applies — you do not silently remove the unit), **update** (mostly right, needs correction). Literal file deletion is only ever for orphan **index entries** or non-unit scratch files — never a canonical unit; a unit that's "wrong" gets retired, not deleted.
 
-Also review the `dm_notes` field in each workspace's `workspace.json`. More than ~10 one-liner self-corrections → consolidate into a brief paragraph summarizing recurring patterns.
+Also review the `agent_notes` field in each workspace's `workspace.json` (older manifests carry it as `dm_notes` — same field). More than ~10 one-liner self-corrections → consolidate into a brief paragraph summarizing recurring patterns.
 
 ## Phase 3: Reconciliation
 

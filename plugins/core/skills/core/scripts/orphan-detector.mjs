@@ -34,16 +34,9 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
-  'select-relevant-units.mjs': {
-    reason: 'Deliberately-staged DC-94b abstract-relevance prototype scaffold (the recall-oriented candidate shortlist). Consumed by its test and the Task 10 agent experiment; the reasoning selection step is agent-run, not script-wired. Gate G3 — promoting the reasoning tier to default retrieval infrastructure is David\'s call on the measured evidence (_outputs/2026-06-27/obligation3-prototype-results.md). Remove this entry if/when G3 wires the reasoning tier into a skill path.',
-    allowlistDate: '2026-06-27',
-    reviewBy: '2026-09-27',
-  },
-  'score-ladder.mjs': {
-    reason: 'Deliberately-staged DC-94b obligation-3 acceptance scorer. Consumed by the obligation3-ladder test now and by the Task 10 prototype + Task 12 build report; it is the measurement contract, not runtime-wired into a skill. Remove from allowlist if/when abstract-relevance retrieval is promoted to infrastructure (Gate G3) and the scorer joins a wired path; until then it stays a test/measurement utility.',
-    allowlistDate: '2026-06-27',
-    reviewBy: '2026-09-27',
-  },
+  // select-relevant-units.mjs left this allowlist 2026-07-17: DC-117 resolved
+  // Gate G3 and references/retrieval.md §Tier 3 step 1 now names it on the
+  // product path (shortlist --max 100 before any Explore subagent).
   'instruction-surface-adapter.mjs': {
     reason: 'Deliberately-staged v3.0 instruction-surface system (dry-run core; --apply is David-gated + content-generation not implemented). Activation is tied to the pending "does the contract→generator system still earn its complexity at N=2 surfaces" decision (PROJECT.md §State). Wire or retire when that decides.',
     allowlistDate: '2026-06-09',
@@ -185,7 +178,12 @@ export function formatReport(r) {
     for (const s of r.orphanScripts) L.push(`  ✖ script  ${s}`);
     for (const p of r.orphanProtocols) L.push(`  ✖ protocol ${p} — not in the SKILL.md protocol index, so it never loads`);
   } else {
-    L.push('No un-allowlisted orphans. Every shipped mechanism is reachable.');
+    // Scope-honest closing line (Hale audit e1490d4 finding 2): this detector
+    // proves FILE-level reachability minus the allowlist — it does not check
+    // function-level wiring inside reachable files, and allowlisted entries are
+    // deliberate exceptions, not reachable mechanisms.
+    const allow = (r.allowlisted && r.allowlisted.length) || 0;
+    L.push(`No un-allowlisted orphans. File-level reachability holds${allow ? ` (${allow} allowlisted exception${allow === 1 ? '' : 's'} carried, each with a reason above)` : ''}; function-level wiring is not checked here.`);
   }
   return L.join('\n');
 }

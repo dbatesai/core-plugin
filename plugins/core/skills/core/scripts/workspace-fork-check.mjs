@@ -151,7 +151,7 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
       path: cwdResolved,
       created: nowIso,
       last_active: nowIso,
-      dm_notes: `Auto-forked from ${localId} on ${nowIso} — copied workspace detected at ${cwdResolved}.`,
+      agent_notes: `Auto-forked from ${localId} on ${nowIso} — copied workspace detected at ${cwdResolved}.`,
     };
     atomicWriteFileSync(join(newMetaDir, 'workspace.json'), JSON.stringify(newManifest, null, 2) + '\n');
 

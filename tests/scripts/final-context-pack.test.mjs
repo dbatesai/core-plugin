@@ -7,24 +7,37 @@
  * tests all call it; accepted identities and exact output bytes agree on
  * synthetic fixtures.
  */
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK = join(ROOT, 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// D1 fix, 2026-07-18, second pass: CORE_RETRIEVAL_STORE was removed from the
+// product hook entirely — the subprocess call below passes the store via
+// `cwd` in the JSON payload instead, no symlink workaround needed anymore.
+const _createdDirs = [];
+after(() => { for (const d of _createdDirs) rmSync(d, { recursive: true, force: true }); });
 
 const { buildFinalContextPack, retrieveContext, storeHealth } =
   await import(new URL('../../plugins/core/skills/core/scripts/retrieve-context.mjs', import.meta.url).href);
 
 test('A4 equivalence: hook subprocess output === pack function output, byte-exact, on the same fixture', () => {
   const prompt = 'omega speedmaster sale';
+  // Isolate the hook test log (Hale audit, 2026-07-17) — default
+  // ~/.core/hooks-log.jsonl is a real machine-wide file, not a test fixture.
+  // Rooted under ~/.core (D1 fix, 2026-07-18): os.tmpdir() no longer qualifies.
+  const hooksLogDir = mkdtempSync(join(trustedTestTmpRoot(), 'a4-hook-log-'));
+  _createdDirs.push(hooksLogDir);
+  const hooksLog = join(hooksLogDir, 'hooks-log.jsonl');
   const hookOut = execFileSync('node', [HOOK], {
-    input: JSON.stringify({ prompt }),
-    env: { ...process.env, CORE_RETRIEVAL_HOOK: '1', CORE_RETRIEVAL_STORE: FIXT },
+    input: JSON.stringify({ prompt, cwd: FIXT }),
+    env: { ...process.env, CORE_RETRIEVAL_HOOK: '1', CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: hooksLog },
     encoding: 'utf8',
   });
   const hits = retrieveContext(prompt, FIXT, { topN: 3 });

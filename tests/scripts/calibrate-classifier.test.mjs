@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   computePrecision, emptyCalibrationState, readCalibrationState, writeCalibrationState,
   collectClassifiedTurns, stratifiedSample, exportWorksheet, importLabels,
   PRECISION_THRESHOLD, MIN_LABELED, resolveMinLabeled, MIN_LABELED_FLOOR,
+  CANONICAL_STATES,
 } from '../../plugins/core/skills/core/scripts/calibrate-classifier.mjs';
 
 // --- M7: per-class coverage gate ---
@@ -18,14 +19,11 @@ test('M7: computePrecision flags a gold state the heuristic never predicted as u
   ];
   const p = computePrecision(turns);
   assert.equal(p.coverage_complete, false, 'a never-predicted gold state leaves coverage incomplete');
-  assert.deepEqual(p.unmeasured_gold_states, ['capture-miss']);
+  assert.ok(p.unmeasured_gold_states.includes('capture-miss'));
 });
 
 test('M7: computePrecision reports complete coverage when every gold state is predicted', () => {
-  const turns = [
-    { heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' },
-    { heuristic_state: 'capture-miss', gold_state: 'capture-miss' },
-  ];
+  const turns = CANONICAL_STATES.map((state) => ({ heuristic_state: state, gold_state: state }));
   const p = computePrecision(turns);
   assert.equal(p.coverage_complete, true);
   assert.deepEqual(p.unmeasured_gold_states, []);
@@ -37,8 +35,14 @@ test('M7: the gate does NOT clear at high precision while a gold state sits unme
     // 100 labeled turns: 95 correct tier-0-win (precision 0.95) + 5 where gold=capture-miss
     // but the heuristic always said tier-0-win. capture-miss is a gold state never predicted.
     const rows = [];
-    for (let i = 0; i < 95; i++) rows.push({ heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' });
-    for (let i = 0; i < 5; i++) rows.push({ heuristic_state: 'tier-0-win', gold_state: 'capture-miss' });
+    for (let i = 0; i < 95; i++) rows.push({
+      turn_id: `win-${i}`, harness: 'codex', classifier_version: '0.3.0', proxy_version: 2,
+      heuristic_state: 'tier-0-win', gold_state: 'tier-0-win',
+    });
+    for (let i = 0; i < 5; i++) rows.push({
+      turn_id: `miss-${i}`, harness: 'codex', classifier_version: '0.3.0', proxy_version: 2,
+      heuristic_state: 'tier-0-win', gold_state: 'capture-miss',
+    });
     const wf = join(dir, 'worksheet.jsonl');
     writeFileSync(wf, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
     const res = importLabels({ worksheetFile: wf, metaDir: dir });
@@ -50,6 +54,20 @@ test('M7: the gate does NOT clear at high precision while a gold state sits unme
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('terminal gate requires every canonical state and exposes recall plus uncertainty', () => {
+  const turns = CANONICAL_STATES.flatMap((state) => Array.from({ length: 12 }, (_, i) => ({
+    turn_id: `${state}-${i}`,
+    heuristic_state: state,
+    gold_state: state,
+  })));
+  const p = computePrecision(turns);
+  assert.equal(p.coverage_complete, true);
+  assert.deepEqual(p.unmeasured_gold_states, []);
+  assert.equal(p.recall_by_state['capture-miss'], 1);
+  assert.ok(p.uncertainty_by_state['capture-miss'].precision.lower < 1);
+  assert.ok(p.uncertainty_by_state['capture-miss'].precision.lower > 0);
+});
+
 // ---------------------------------------------------------------- helpers ---
 
 function withTmp(fn) {
@@ -59,10 +77,36 @@ function withTmp(fn) {
 
 function makeClassifiedJSONL(turns) {
   return turns.map((t) => JSON.stringify({
-    schema_version: '1.0.0', classifier_version: '0.1.0', provisional: true,
+    schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+    harness: t.harness || 'codex', provisional: true,
     session_id: t.session_id || 'sess-1', turn_idx: t.turn_idx ?? 0,
     state: t.state, evidence: t.evidence || {},
+    turn_evidence: t.turn_evidence || { user_text: 'user turn', assistant_text: 'assistant answer', tool_events: [] },
   })).join('\n') + '\n';
+}
+
+function writeBlindLabels(dir, { harness = 'codex', perState = 17, goldFor } = {}) {
+  const classifiedDir = join(dir, 'classified');
+  mkdirSync(classifiedDir);
+  const turns = CANONICAL_STATES.flatMap((state) => Array.from({ length: perState }, (_, i) => ({
+    state, session_id: `${state}-${i}`, turn_idx: 0, harness,
+  })));
+  writeFileSync(join(classifiedDir, '2026-06-01.jsonl'), makeClassifiedJSONL(turns));
+  const result = exportWorksheet({
+    project: dir, harness, classifiedDir, calibrationDir: join(dir, 'calibration'), count: turns.length,
+    today: '2026-06-01',
+  });
+  const envelope = JSON.parse(readFileSync(result.predictions_path, 'utf8'));
+  const rows = readFileSync(result.jsonl_path, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
+  for (const row of rows) {
+    const predicted = envelope.predictions[row.turn_id];
+    row.gold_state = goldFor ? goldFor(predicted) : predicted;
+    row.labelers = ['labeler-a', 'labeler-b'];
+    row.adjudicated_by = 'adjudicator-c';
+    row.confidence = 'high';
+  }
+  writeFileSync(result.jsonl_path, rows.map(JSON.stringify).join('\n') + '\n');
+  return result;
 }
 
 // ============================================================
@@ -135,7 +179,10 @@ test('readCalibrationState returns empty state when file missing', () => {
 
 test('writeCalibrationState + readCalibrationState round-trip', () => {
   withTmp((dir) => {
-    const state = { schema_version: '1.0.0', is_calibrated: true, provisional: false, labeled_count: 150, overall_precision: 0.82 };
+    const state = {
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+      is_calibrated: true, provisional: false, labeled_count: 150, overall_precision: 0.82,
+    };
     writeCalibrationState(dir, state);
     const back = readCalibrationState(dir);
     assert.equal(back.is_calibrated, true);
@@ -219,6 +266,29 @@ test('exportWorksheet writes JSONL + markdown when turns exist', () => {
   });
 });
 
+test('worksheet is self-contained for labeling but keeps predictions blind', () => {
+  withTmp((dir) => {
+    const cd = join(dir, 'classified');
+    mkdirSync(cd);
+    writeFileSync(join(cd, '2026-06-01.jsonl'), `${JSON.stringify({
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+      harness: 'codex', session_id: 's', turn_idx: 1, state: 'tier-0-win',
+      evidence: { ladder_walk: false },
+      turn_evidence: { user_text: 'What changed?', assistant_text: 'The decision changed.', tool_events: [] },
+    })}\n`);
+    const r = exportWorksheet({ project: dir, harness: 'codex', classifiedDir: cd, calibrationDir: join(dir, 'cal') });
+    const row = JSON.parse(readFileSync(r.jsonl_path, 'utf8').trim());
+    const guide = readFileSync(r.md_path, 'utf8');
+    assert.equal(row.heuristic_state, undefined, 'prediction is absent from the labeling surface');
+    assert.equal(row.user_text, 'What changed?');
+    assert.equal(row.assistant_text, 'The decision changed.');
+    assert.ok(existsSync(r.predictions_path), 'sealed prediction companion exists for post-label import');
+    assert.equal(statSync(r.jsonl_path).mode & 0o777, 0o600, 'raw turn worksheet is owner-only');
+    assert.equal(statSync(r.predictions_path).mode & 0o777, 0o600, 'sealed predictions are owner-only');
+    assert.doesNotMatch(guide, /read `heuristic_state`.*set `gold_state`/is);
+  });
+});
+
 test('M7: re-running exportWorksheet the same day overwrites, never accumulates duplicate rows', () => {
   withTmp((dir) => {
     const cd = join(dir, 'classified');
@@ -259,13 +329,8 @@ test('importLabels returns EMPTY when all gold_state are null', () => {
 
 test('importLabels computes precision and writes calibration-state.json', () => {
   withTmp((dir) => {
-    const f = join(dir, 'worksheet.jsonl');
-    // Write MIN_LABELED perfectly-labeled turns to clear both gates.
-    const lines = Array.from({ length: MIN_LABELED }, (_, _i) =>
-      JSON.stringify({ heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' }),
-    ).join('\n') + '\n';
-    writeFileSync(f, lines);
-    const r = importLabels({ worksheetFile: f, metaDir: dir });
+    const exported = writeBlindLabels(dir);
+    const r = importLabels({ worksheetFile: exported.jsonl_path, metaDir: dir });
     assert.equal(r.status, 'OK');
     assert.equal(r.is_calibrated, true);
     assert.equal(r.provisional, false);
@@ -276,13 +341,8 @@ test('importLabels computes precision and writes calibration-state.json', () => 
 
 test('importLabels stays provisional when labeled_count < MIN_LABELED', () => {
   withTmp((dir) => {
-    const f = join(dir, 'worksheet.jsonl');
-    // Only 10 labeled turns — below the 100 minimum.
-    const lines = Array.from({ length: 10 }, () =>
-      JSON.stringify({ heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' }),
-    ).join('\n') + '\n';
-    writeFileSync(f, lines);
-    const r = importLabels({ worksheetFile: f, metaDir: dir });
+    const exported = writeBlindLabels(dir, { perState: 1 });
+    const r = importLabels({ worksheetFile: exported.jsonl_path, metaDir: dir });
     assert.equal(r.status, 'OK');
     assert.equal(r.is_calibrated, false, 'not calibrated: too few labels');
     assert.equal(r.provisional, true);
@@ -291,15 +351,54 @@ test('importLabels stays provisional when labeled_count < MIN_LABELED', () => {
 
 test('importLabels stays provisional when precision < threshold despite enough labels', () => {
   withTmp((dir) => {
-    const f = join(dir, 'worksheet.jsonl');
-    // MIN_LABELED turns, all wrong → precision 0.
-    const lines = Array.from({ length: MIN_LABELED }, () =>
-      JSON.stringify({ heuristic_state: 'rec-fail-tier-0', gold_state: 'tier-0-win' }),
-    ).join('\n') + '\n';
-    writeFileSync(f, lines);
-    const r = importLabels({ worksheetFile: f, metaDir: dir });
+    const rotate = (state) => CANONICAL_STATES[(CANONICAL_STATES.indexOf(state) + 1) % CANONICAL_STATES.length];
+    const exported = writeBlindLabels(dir, { goldFor: rotate });
+    const r = importLabels({ worksheetFile: exported.jsonl_path, metaDir: dir });
     assert.equal(r.status, 'OK');
     assert.equal(r.is_calibrated, false, 'not calibrated: precision below threshold');
+  });
+});
+
+test('duplicate turn ids never count toward the evidence floor', () => {
+  withTmp((dir) => {
+    const f = join(dir, 'worksheet.jsonl');
+    const rows = Array.from({ length: MIN_LABELED }, () => ({
+      turn_id: 'same-turn', harness: 'codex', classifier_version: '0.3.0', proxy_version: 2,
+      heuristic_state: 'tier-0-win', gold_state: 'tier-0-win',
+    }));
+    writeFileSync(f, rows.map(JSON.stringify).join('\n') + '\n');
+    const r = importLabels({ worksheetFile: f, metaDir: dir });
+    assert.equal(r.labeled_count, 1);
+    assert.equal(r.is_calibrated, false);
+    assert.equal(r.duplicate_turn_ids, MIN_LABELED - 1);
+  });
+});
+
+test('mixed harness labels are refused instead of pooled', () => {
+  withTmp((dir) => {
+    const f = join(dir, 'worksheet.jsonl');
+    writeFileSync(f, [
+      { turn_id: 'c', harness: 'codex', heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' },
+      { turn_id: 'a', harness: 'claude-code', heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' },
+    ].map(JSON.stringify).join('\n') + '\n');
+    const r = importLabels({ worksheetFile: f, metaDir: dir });
+    assert.equal(r.status, 'ERROR');
+    assert.match(r.message, /one harness/i);
+  });
+});
+
+test('state write failure cannot return OK', () => {
+  withTmp((dir) => {
+    const f = join(dir, 'worksheet.jsonl');
+    writeFileSync(f, `${JSON.stringify({
+      turn_id: 'x', harness: 'codex', classifier_version: '0.3.0', proxy_version: 2,
+      heuristic_state: 'tier-0-win', gold_state: 'tier-0-win',
+    })}\n`);
+    const blocked = join(dir, 'not-a-directory');
+    writeFileSync(blocked, 'file');
+    const r = importLabels({ worksheetFile: f, metaDir: blocked, minLabeled: 1 });
+    assert.equal(r.status, 'ERROR');
+    assert.match(r.message, /state write/i);
   });
 });
 
@@ -313,11 +412,19 @@ test('MET-002: resolveMinLabeled defaults to 100 with no workspace.json', () => 
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('MET-002: resolveMinLabeled honors workspace.json calibration_min_labeled at or above the floor', () => {
+test('workspace calibration_min_labeled cannot lower the terminal floor', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cal-min2-'));
   try {
     writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ workspace_id: 'w', calibration_min_labeled: 40 }));
-    assert.equal(resolveMinLabeled(dir), 40);
+    assert.equal(resolveMinLabeled(dir), MIN_LABELED);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('terminal evidence floor cannot be lowered by workspace configuration', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cal-floor-'));
+  try {
+    writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ calibration_min_labeled: 30 }));
+    assert.equal(resolveMinLabeled(dir), MIN_LABELED);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -328,25 +435,23 @@ test('MET-002: resolveMinLabeled rejects values below the floor and non-integers
     assert.equal(resolveMinLabeled(dir), 100, 'below MIN_LABELED_FLOOR → default');
     writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ calibration_min_labeled: '50' }));
     assert.equal(resolveMinLabeled(dir), 100, 'string → default');
-    assert.ok(MIN_LABELED_FLOOR >= 30, 'floor stays statistically meaningful');
+    assert.ok(MIN_LABELED_FLOOR >= 100, 'floor cannot undercut the terminal evidence contract');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('MET-002: importLabels clears the gate at a configured lower threshold and records it', () => {
+test('importLabels refuses to clear at a caller-supplied lower threshold', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cal-imp-'));
   try {
     const ws = join(dir, 'worksheet.jsonl');
-    // 30 labeled rows, all correct, spanning two states → full coverage of gold states.
-    const rows = [];
-    for (let i = 0; i < 30; i++) {
-      const s = i % 2 === 0 ? 'tier-0-win' : 'rec-fail-tier-0';
-      rows.push(JSON.stringify({ turn_id: `s-${i}`, heuristic_state: s, gold_state: s }));
-    }
-    writeFileSync(ws, rows.join('\n') + '\n');
+    const rows = CANONICAL_STATES.flatMap((state) => Array.from({ length: 5 }, (_, i) => ({
+      turn_id: `${state}-${i}`, harness: 'codex', classifier_version: '0.3.0', proxy_version: 2,
+      heuristic_state: state, gold_state: state,
+    })));
+    writeFileSync(ws, rows.map(JSON.stringify).join('\n') + '\n');
     const metaDir = join(dir, 'meta');
     const r = importLabels({ worksheetFile: ws, metaDir, minLabeled: 30 });
     assert.equal(r.status, 'OK');
-    assert.equal(r.is_calibrated, true, '30 labeled turns clear a 30-turn gate at 100% precision');
-    assert.equal(r.min_labeled, 30, 'the threshold used is recorded in the state for honesty');
+    assert.equal(r.is_calibrated, false, '30 labels cannot clear the 100-turn terminal gate');
+    assert.equal(r.min_labeled, MIN_LABELED, 'the enforced floor is recorded');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

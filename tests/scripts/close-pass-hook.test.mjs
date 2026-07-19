@@ -1,15 +1,41 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'close-pass-hook.mjs');
 const CLOSE_PASS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');
+
+// Isolate every hook test log (Hale audit, 2026-07-17, re-flagged on a fresh
+// audit of 246a77a after the first isolation pass missed this file): a
+// subprocess hook run that doesn't override CORE_HOOKS_LOG_FILE defaults to
+// the real machine-wide ~/.core/hooks-log.jsonl.
+// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
+// isn't auto-cleaned — every created dir is tracked and removed below.
+const _isolatedLogDirs = [];
+function isolatedHooksLog() {
+  const dir = mkdtempSync(join(trustedTestTmpRoot(), 'close-pass-hook-log-'));
+  _isolatedLogDirs.push(dir);
+  return join(dir, 'hooks-log.jsonl');
+}
+after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
+
+// SEPARATE leak (found on Hale's fresh audit): several tests below call
+// close-pass.mjs's runClose/beginClose IN-PROCESS via dynamic import — not a
+// subprocess — so the execFileSync-level CORE_HOOKS_LOG_FILE override above
+// never applies to them. logHookEvent() inside close-pass.mjs reads
+// process.env.CORE_HOOKS_LOG_FILE from THIS test-runner process directly.
+// Setting it once at module load (this file's tests don't assert on the
+// log's content, only that they never touch the real one) covers every
+// in-process call for the lifetime of this file.
+process.env.CORE_HOOKS_LOG_FILE = isolatedHooksLog();
 
 // Run the hook with a SessionEnd payload. Returns {out, code}. The hook always exits 0
 // (fail-open), and in every case tested here a guard returns BEFORE the claude spawn, so
@@ -18,7 +44,7 @@ function runHook(payload, env = {}) {
   try {
     const out = execFileSync('node', [HOOK], {
       input: JSON.stringify(payload),
-      env: { ...process.env, CORE_CLOSE_STORE: payload.cwd || '', ...env },
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
       encoding: 'utf8',
     });
     return { out, code: 0 };
@@ -187,7 +213,7 @@ test('inspectLock: a LIVE pid is never stealable at any age; a DEAD pid is steal
 test('always exits 0 even on garbage stdin (fail-open)', () => {
   try {
     execFileSync('node', [HOOK], { input: 'not json at all', encoding: 'utf8',
-      env: { ...process.env, CORE_CLOSE_PASS_ACTIVE: '1' } });
+      env: { ...process.env, CORE_CLOSE_PASS_ACTIVE: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog() } });
   } catch (e) {
     assert.fail('hook must never throw on bad input: ' + e.message);
   }

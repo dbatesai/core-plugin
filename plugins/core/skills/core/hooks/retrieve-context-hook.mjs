@@ -13,31 +13,97 @@
  * opt-out). Rationale: a default-off, manually-wired hook is invisible machinery no real
  * user would enable — the north-star ("never fail to retrieve") is only served if it's
  * actually live, and only then can the metrics layer measure whether injection helps.
- * Known limit (DC-111): lexical matching can inject a topical-but-irrelevant unit on an
- * abstract query (O1 noise) — bounded (byte-capped, advisory, fail-open) and the reasoning
- * tier is the sequenced de-noiser. To opt out:
+ * A zero-hit lexical result injects a bounded Tier 3 directive that tells the active model
+ * to inspect every exhaustive reasoning shard. Known limit (DC-111): when lexical matching
+ * returns topical-but-irrelevant context, only the active model can judge insufficiency and
+ * follow the same Tier 3 protocol; the model-free hook cannot decide semantic relevance.
+ * To opt out:
  *
  *   // ~/.claude/settings.json  (or set the env var)
  *   CORE_RETRIEVAL_HOOK=0
  *
  * I/O contract: reads the UserPromptSubmit payload as JSON on stdin (uses `.prompt`;
- * store path from CORE_RETRIEVAL_STORE, else payload `.cwd`, else process.cwd()).
+ * store path from payload `.cwd`, else process.cwd() — CORE_RETRIEVAL_STORE was
+ * removed entirely, D1 fix 2026-07-18, second pass: no legitimate production use
+ * ever set it, and its trust check was lexical-only, bypassable via a symlink
+ * placed under ~/.core, so deleting the override closes the class rather than
+ * further hardening a boundary that's proven leaky).
  * Output is byte-capped. Any error is swallowed to a clean exit 0 — a retrieval hook
  * must never block the user's turn.
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  */
 
-import { readFileSync } from 'node:fs';
-import { retrieveContext, storeHealth, buildFinalContextPack } from '../scripts/retrieve-context.mjs';
+import { readFileSync, existsSync, realpathSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
+import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
+import { recordRetrievalOutcome, pendingOutcomePath } from '../scripts/record-retrieval-outcome.mjs';
+import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
+import { tokenize } from '../scripts/bm25.mjs';
+import { selectCandidates } from '../scripts/select-relevant-units.mjs';
+import { logHookEvent } from './hook-log.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
 
-async function main() {
+// Producer identity for outcome rows — read from the plugin manifest so the
+// version can never fork from the shipped identity; 'unknown' is honest when
+// the manifest is unreadable (packaged layouts vary).
+const PRODUCER_MANIFEST = (() => {
+  try {
+    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+  } catch { return {}; }
+})();
+const PRODUCER_VERSION = String(PRODUCER_MANIFEST.version || 'unknown');
+// producer_sha (2026-07-18): producer_version alone can't distinguish which
+// exact commit produced a row -- 'unknown' is honest for every build that
+// isn't release-stamped (a --scope local dev install, or a manifest predating
+// this field). Reads manifest.source_sha -- named 'source', not 'git', per
+// Hale's review: it names the commit this release PACKAGES (the version-bump
+// commit's own parent), not the tagged release commit's own SHA -- those are
+// two different identities and the field name says which one this is. See
+// docs/specs/2026-07-18-self-identifying-build-sha.md.
+const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
+
+// Typed operational receipt (Hale minimal path, 2026-07-17): ONE terminal
+// hook-log row per eligible invocation — early exits included — on the SHARED
+// {hook, action, reason} contract (never a second dialect like `kind:`).
+// Closed vocabularies; an unknown code is coerced to failed/pipeline-error
+// rather than emitted (tests assert every path lands in-vocabulary).
+export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
+export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'trace-write-failed', 'hook-log-write-failed'];
+
+export function receipt(action, reason, extra = {}) {
+  const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
+  const r = RETRIEVAL_REASONS.includes(reason) ? reason : 'pipeline-error';
+  try {
+    const out = logHookEvent({ hook: 'retrieve-context', action: a, reason: r, ...extra });
+    if (!out?.written) {
+      // stderr is the last-resort operational surface. Never print to stdout:
+      // stdout is injected into the user's context by the hook protocol.
+      process.stderr.write(`${JSON.stringify({
+        ts: new Date().toISOString(),
+        hook: 'retrieve-context',
+        action: 'failed',
+        reason: 'hook-log-write-failed',
+        intended_action: a,
+        intended_reason: r,
+        error_code: out?.error_code || 'hook-log-write-failed',
+      })}\n`);
+    }
+  } catch {
+    // Preserve fail-open behavior even if the fallback surface itself fails.
+  }
+  return 0;
+}
+
+export async function main() {
   // Default-ON, opt-out gate (G2 shipped on, 2026-06-28). Runs unless explicitly
   // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the DC-107 metrics opt-out).
-  if (process.env.CORE_RETRIEVAL_HOOK === '0') return 0;
+  if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
 
   let payload = {};
   // Read stdin synchronously via fd 0 (works under execFileSync's input pipe).
@@ -46,22 +112,259 @@ async function main() {
   if (raw.trim()) { try { payload = JSON.parse(raw); } catch { payload = {}; } }
 
   const prompt = String(payload.prompt || '');
-  if (!prompt.trim()) return 0;
+  if (!prompt.trim()) return receipt('skip', 'empty-prompt');
 
-  const store = process.env.CORE_RETRIEVAL_STORE || payload.cwd || process.cwd();
+  const store = payload.cwd || process.cwd();
+  if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { cwd: store });
+  try {
+    if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { cwd: store });
+  } catch { return receipt('skip', 'store-unavailable', { cwd: store }); }
 
-  let hits = [];
-  try { hits = retrieveContext(prompt, store, { topN: TOP_N }); } catch { return 0; }
-  if (!hits.length) return 0;
+  // ONE pipeline run serves both jobs (2026-07-17, closes Hale audit finding 1 +
+  // finding 4 on e1490d4): buildRetrievalTrace runs the same staged pipeline as
+  // retrieveContext and carries the delivered pack — the hook injects pack.text
+  // and emits the canonical per-turn retrieval event from the same run, so the
+  // telemetry corpus is product-emitted, not agent-behavior-dependent.
+  let trace = null;
+  const configuredCap = Number(process.env.CORE_RETRIEVAL_BYTE_CAP);
+  const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
+    ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
+  try {
+    // Test-only fault seam (2026-07-18, Hale-authorized: prove a GENUINE
+    // uncaught exception through the real subprocess path reaches this catch
+    // and still exits 0 — the prior coverage only ever called receipt()
+    // directly, which proves the logging contract but not that a real crash
+    // gets caught at all). Same pattern as CORE_FILELOCK_NO_LINK: an explicit,
+    // self-documenting test seam, never read in normal operation.
+    if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
+    trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
+  } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
+  if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
 
-  // Thin adapter from here down (Train A A4): ordering, tier labels, byte cap,
-  // and the degraded warning all live in buildFinalContextPack — the sole
-  // final-pack implementation the evaluator imports too. No formatting here.
-  let health = null;
-  try { health = storeHealth(store); } catch { /* health is advisory, never blocking */ }
-  const pack = buildFinalContextPack(hits, { byteCap: OUTPUT_BYTE_CAP, health });
-  if (pack.text) process.stdout.write(pack.text);
-  return 0;
+  const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
+  // Telemetry outcome for the single terminal receipt (priority: pipeline
+  // failure > event-write > trace-write > opt-out > ok).
+  let telemetryReason = 'ok';
+  let retrievalId = null;
+  let outcomeNote = null; // bounded note when the post-answer outcome close failed
+  // Deferred-write inputs for the NEW pending marker (Hale audit, 2026-07-17,
+  // hazard: "creates pending state before delivery"). The marker must only be
+  // persisted once this turn's context is actually confirmed delivered to the
+  // user — captured here, written after the stdout.write below.
+  let pendingWrite = null;
+
+  // Canonical per-turn product event — always on when metrics capture is on
+  // (DC-107 default-ON, opt-out). Fail-open: a telemetry failure must never
+  // block the user's turn — but it must be OBSERVABLE, so failures land in the
+  // hook log instead of vanishing (Hale live-hook audit, 2026-07-17).
+  //
+  // Every field is an OBSERVED value from this run's stages — never a constant,
+  // never a reinterpreted field. In particular: the ladder tier of a hit is
+  // derived from WHICH STAGE produced it (in stages.top => Tier 1 lexical; added
+  // by edge expansion => Tier 2). `h.tier` on trace hits is the unit AUTHORITY
+  // tier (canonical/observation) and must never be coerced into a ladder tier —
+  // that exact coercion shipped in a2cab1b and fabricated tier telemetry.
+  // This pipeline is the model-free substrate: it never runs Tier 3, so an empty
+  // result is `no-hit` at the tier actually reached — never a fabricated
+  // 1→2→3 `miss`.
+  try {
+    if (!metricsEnabled({ project: store })) {
+      telemetryReason = 'metrics-opt-out'; // hook-log is the authoritative receipt; no retrieval row is faked
+    } else {
+      // Ladder semantics (Hale, round 2 of this correction): the shipped product
+      // retriever — INCLUDING its built-in one-hop edge expansion — is Tier 1 by
+      // the protocol's own definition; Tier 2 is the separate 2–3-hop graph-walk
+      // path, which this pipeline never runs. So every event from this mechanism
+      // is tier_reached 1, and hit provenance rides a separate closed
+      // `source_stage` field instead of overloading the ladder tier (the first
+      // corrected mapping made routine expansion hits read as Tier-2 escalation —
+      // the same causal-evidence defect under a different mapping).
+      const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
+      retrievalId = randomUUID();
+
+      // FALLBACK inferred-closure path (Hale's 303df39 mechanism + the nine
+      // freeze-rejection corrections). Superseded on BOTH harnesses now by a
+      // real Stop hook (answer-close-hook.mjs / answer-close-hook-codex.mjs)
+      // that fires on a genuine post-answer event with the harness's own turn
+      // identity; this path only ever infers closure from the NEXT prompt
+      // arriving, which is sequencing, not post-answer observation (Hale
+      // audit, 2026-07-17) — so normally the real Stop hook clears the
+      // pending marker first and this block finds nothing to close. Kept as
+      // defense-in-depth for a session where the Stop hook didn't fire
+      // (missed trust review, older harness build, hook crash upstream).
+      // Corrections applied: harness detected from runtime, pending state
+      // keyed by harness + resolved NON-NULL session (no aliasing; no session
+      // -> no pending, no outcome), overlap is a provisional SIGNAL only — the
+      // outcome stays 'unknown' until calibrated — and the pending record is
+      // persisted only after the retrieval row write is proven below.
+      const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
+      // Harness resolution (Hale audit, 2026-07-17 fresh round): CORE_HOOK_HARNESS
+      // is the EXPLICIT, authoritative signal — set by the harness-specific
+      // wrapper entry file (retrieve-context-hook-codex.mjs sets it to 'codex'
+      // before calling main()), never inferred. The ambient env-var fallback
+      // below is undocumented Codex behavior (Hale's own words) — kept ONLY
+      // for direct/manual invocation that bypasses the wrapper, never trusted
+      // as the primary signal.
+      const harness = process.env.CORE_HOOK_HARNESS === 'codex' ? 'codex'
+        : process.env.CORE_HOOK_HARNESS === 'claude-code' ? 'claude-code'
+        : process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDECODE ? 'claude-code'
+        : (process.env.CODEX_SESSION_ID || process.env.CODEX_PLUGIN_ROOT ? 'codex' : null);
+      const queryTermsEarly = tokenize(prompt).slice(0, 8);
+      const pendingFile = pendingOutcomePath(store, harness, sessionId);
+      if (pendingFile) {
+        try {
+          let prev = null;
+          try { prev = JSON.parse(readFileSync(pendingFile, 'utf8')); } catch { prev = null; }
+          if (prev && prev.retrieval_id && prev.session_id === sessionId && prev.harness === harness) {
+            const prevTerms = new Set(prev.query_terms || []);
+            const overlap = queryTermsEarly.length ? queryTermsEarly.filter((t) => prevTerms.has(t)).length / queryTermsEarly.length : 0;
+            const retryShaped = overlap >= 0.6 && queryTermsEarly.length >= 3;
+            // Hale audit, 2026-07-17: reusing retrieval_id AS the answer_turn_id
+            // fabricates identity — the two are different concepts (which
+            // retrieval ran vs. which answer turn closed it). This inferred
+            // path still has no real per-turn id to offer, so it generates a
+            // fresh one rather than aliasing — honest about being synthetic,
+            // never a copy dressed up as an observation.
+            const closeResult = recordRetrievalOutcome(store, {
+              retrieval_id: prev.retrieval_id,
+              usefulness_outcome: 'unknown', // provisional signals never become harmful outcomes before calibration
+              evidence_authority: retryShaped ? 'corrective-retry' : 'unobservable',
+              signal_overlap: overlap,
+              harness,
+              session_id: sessionId,
+              answer_turn_id: randomUUID(),
+              producer_version: PRODUCER_VERSION,
+              producer_sha: PRODUCER_SHA,
+            }, { sessionId });
+            // Delete only once the outcome row is CONFIRMED written (Hale
+            // audit, 2026-07-17, hazard: "deletes pending evidence without
+            // confirmed outcome persistence") — a failed/fail-open write must
+            // never destroy the only record that this retrieval is still
+            // open, or the evidence is lost for good.
+            if (closeResult.written) {
+              try { rmSync(pendingFile, { force: true }); } catch { /* consumed */ }
+            } else {
+              outcomeNote = 'outcome-close-not-persisted';
+            }
+          }
+        } catch (err) {
+          // Never a second operational row (one terminal row per invocation);
+          // the failure rides the terminal receipt as a bounded note.
+          outcomeNote = String(err && err.message).slice(0, 80);
+        }
+      }
+      const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
+      const queryTerms = tokenize(prompt).slice(0, 8);
+      const out = recordRetrievalEvent(store, {
+        trigger: 'per-turn-hook',
+        mechanism: 'model-free-substrate', // names what actually ran: rank/policy/edge pipeline — Tier 1 only, never 2 or 3
+        retrieval_id: retrievalId,
+        intent_topics: queryTerms.length ? queryTerms : ['empty-after-tokenize'],
+        tier_reached: 1,
+        escalation_path: [1],
+        units_retrieved: units,
+        ...(units.length === 0 ? { result: 'no-hit' } : {}),
+        candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
+        selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
+        context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
+      }, { sessionId: payload.session_id || undefined });
+      if (!out.written) telemetryReason = 'event-write-failed';
+      // Stage the pending-marker write for AFTER delivery is confirmed below
+      // (Hale audit, 2026-07-17, hazard: "creates pending state before
+      // delivery") — writing it here, before this turn's context has even
+      // reached stdout, would let a crash between here and the stdout.write
+      // leave a marker for a retrieval the user never actually saw. Still
+      // gated on the retrieval row write being PROVEN (correction 2: an
+      // unproven retrieval must never become the base of a future outcome
+      // row) and keyed per harness+session so concurrent sessions never alias
+      // (correction 1).
+      if (out.written && pendingFile) {
+        pendingWrite = {
+          path: pendingFile,
+          content: JSON.stringify({
+            retrieval_id: retrievalId,
+            session_id: sessionId,
+            harness,
+            prompt_id: typeof payload.prompt_id === 'string' && payload.prompt_id.trim() ? payload.prompt_id.trim() : null,
+            query_terms: queryTermsEarly,
+            had_hits: final.length > 0,
+          }),
+        };
+      }
+      // The persisted trace carries the SAME retrieval_id so the event, the
+      // trace, and any future answer-outcome row join on one key.
+      trace.retrieval_id = retrievalId;
+
+      // Full trace persistence is opt-in (CORE_RETRIEVAL_TRACE=1): the trace is
+      // a deep diagnostic with per-stage payloads; the EVENT above is the
+      // always-on canonical record. Local-only either way.
+      if (process.env.CORE_RETRIEVAL_TRACE === '1') {
+        try {
+          const traceOut = logEvent(store, 'retrieval-trace.jsonl', trace);
+          if (telemetryReason === 'ok' && (!traceOut || traceOut.legacy !== true)) telemetryReason = 'trace-write-failed';
+        } catch { if (telemetryReason === 'ok') telemetryReason = 'trace-write-failed'; }
+      }
+    }
+  } catch {
+    telemetryReason = 'pipeline-error'; // fail-open by contract — surfaced in the terminal receipt below
+  }
+
+  let reasoningDirective = '';
+  if (final.length === 0) {
+    try {
+      const shards = selectCandidates(prompt, store, { shardSize: 80 });
+      if (shards.length) {
+        const unitsTotal = shards[0].units_total;
+        reasoningDirective = `CORE reasoning escalation required: Tier 1 found no lexical context. Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
+      }
+    } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
+  }
+
+  const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
+  if (trace.pack && trace.pack.text) process.stdout.write(trace.pack.text);
+  else if (reasoningDirective) process.stdout.write(reasoningDirective.slice(0, OUTPUT_BYTE_CAP));
+
+  // NOW persist the pending marker — after delivery, never before (Hale
+  // audit, 2026-07-17). Only when something was actually injected: a marker
+  // for a retrieval whose context never reached the user has no honest
+  // "delivered" state to close later. Atomic temp+rename.
+  if (injected && pendingWrite) {
+    try {
+      mkdirSync(dirname(pendingWrite.path), { recursive: true });
+      const tmp = `${pendingWrite.path}.tmp`;
+      writeFileSync(tmp, pendingWrite.content);
+      renameSync(tmp, pendingWrite.path);
+    } catch { /* pending is best-effort; a missed close is an unknown, never a fabrication */ }
+  }
+
+  // The single terminal operational row for this invocation: what happened to
+  // the user-facing injection (action) and what happened to telemetry (reason).
+  let action;
+  let reason;
+  if (reasoningDirective) {
+    action = 'delivered';
+    reason = 'no-hit';
+  } else if (injected) {
+    action = 'delivered';
+    reason = telemetryReason;
+  } else if (final.length === 0) {
+    action = telemetryReason === 'ok' || telemetryReason === 'metrics-opt-out' ? 'skip' : 'failed';
+    reason = telemetryReason === 'ok' ? 'no-hit' : telemetryReason;
+  } else {
+    // Selection succeeded but the byte-capped product delivered no context.
+    // This is never skip/ok: it is a user-visible delivery failure.
+    action = 'failed';
+    reason = 'delivery-failed';
+  }
+  return receipt(action, reason, {
+    cwd: store,
+    ...(reason !== telemetryReason ? { telemetry_reason: telemetryReason } : {}),
+    ...(retrievalId ? { retrieval_id: retrievalId } : {}),
+    ...(outcomeNote ? { outcome_close_note: outcomeNote } : {}),
+  });
 }
 
-main().then((code) => process.exit(code || 0)).catch(() => process.exit(0));
+const _canon = (path) => { try { return realpathSync(path); } catch { return path; } };
+if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+  main().then((code) => process.exit(code || 0)).catch(() => process.exit(0));
+}

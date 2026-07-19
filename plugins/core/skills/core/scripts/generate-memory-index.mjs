@@ -17,7 +17,9 @@
  * Usage:
  *   node generate-memory-index.mjs <project>/_memories \
  *        --memory-md <path-to-MEMORY.md> \
- *        [--top N] [--today YYYY-MM-DD]
+ *        [--top N] [--today YYYY-MM-DD] [--dry-run]
+ *
+ * --dry-run: compute what would change but write nothing.
  */
 
 import { readFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
@@ -186,6 +188,7 @@ export function main(argv) {
   let memoryMdPath = null;
   let topN = 30;
   let todayArg = null;
+  let dryRun = false;
 
   let topRaw = null;
   for (let i = 0; i < argv.length; i++) {
@@ -193,6 +196,7 @@ export function main(argv) {
     if (a === '--memory-md') memoryMdPath = argv[++i];
     else if (a === '--top') topRaw = argv[++i];
     else if (a === '--today') todayArg = argv[++i];
+    else if (a === '--dry-run') dryRun = true;
     else if (!a.startsWith('--')) memoriesDirArg = a;
   }
 
@@ -253,6 +257,11 @@ export function main(argv) {
 
   if (newText === oldText) {
     process.stderr.write(`No change: priority block already current (${topN} units, ${today.toISOString().slice(0, 10)})\n`);
+    return 0;
+  }
+
+  if (dryRun) {
+    process.stderr.write(`Dry run: would rewrite priority block in ${memoryMdPath} (${topN} units) — nothing written\n`);
     return 0;
   }
 

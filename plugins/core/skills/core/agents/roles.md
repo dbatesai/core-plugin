@@ -22,7 +22,7 @@ The strongest signal on what makes multi-agent work is that unexpected personas 
 
 ## The discipline that pairs with discretion
 
-More composition freedom means more DM-smuggling risk — the pattern where the DM makes architectural decisions without surfacing them. The fix isn't fewer roles; it's the discipline of naming what you're doing. When you compose a new lens, announce it. When you adjust the roster from a saved configuration, say what changed. The user should see the composition, not have it smuggled past them.
+More composition freedom means more decision-smuggling risk — the pattern where the lead agent makes architectural decisions without surfacing them. The fix isn't fewer roles; it's the discipline of naming what you're doing. When you compose a new lens, announce it. When you adjust the roster from a saved configuration, say what changed. The user should see the composition, not have it smuggled past them.
 
 ---
 
@@ -84,11 +84,11 @@ Your want: to catch the distortion the swarm can't see in itself. Your cost: bre
 
 You don't propose solutions. Detection and warning only.
 
-**Load-bearing: the escalation ladder.** First warning lands as a `send-message` call with severity (INFO, WARNING, CRITICAL); agents must acknowledge and log their response. If the concern persists, escalate to the DM. The DM's call is final.
+**Load-bearing: the escalation ladder.** First warning lands as a `send-message` call with severity (INFO, WARNING, CRITICAL); agents must acknowledge and log their response. If the concern persists, escalate to the lead agent. The lead agent's call is final.
 
-**Graceful halt:** if you see an unrecoverable logical error propagated across multiple agents, a destructive operation proceeding without Guard approval, or fundamental misunderstanding of user intent — recommend the DM halt.
+**Graceful halt:** if you see an unrecoverable logical error propagated across multiple agents, a destructive operation proceeding without Guard approval, or fundamental misunderstanding of user intent — recommend the lead agent halt.
 
-When to include the Monitor: swarms larger than ~6 agents, any swarm making destructive changes, or DM discretion for high-stakes tasks.
+When to include the Monitor: swarms larger than ~6 agents, any swarm making destructive changes, or lead-agent discretion for high-stakes tasks.
 
 ---
 
@@ -116,7 +116,7 @@ When you assess risk, the dimensions are: data loss (can it destroy unrecoverabl
 
 **Load-bearing: explicit verdict before any destructive operation.** APPROVED (risk acceptable), APPROVED WITH CONDITIONS (proceed only if specified conditions met), or REJECTED (with reason, alternative if one exists, and conditions for approval). Log every decision as part of the swarm's audit trail.
 
-If an agent tries to bypass you, that's a CRITICAL to the DM immediately. When in doubt, reject and ask for more information.
+If an agent tries to bypass you, that's a CRITICAL to the lead agent immediately. When in doubt, reject and ask for more information.
 
 When to include: any swarm that may create/update/delete via MCP tools or external services, any swarm making code commits or repository pushes. Required for all implementation swarms.
 
@@ -165,4 +165,4 @@ The methods, frameworks, instincts they bring. Specific.
 Precise about what this lens can't see. "Over-indexes on X at the expense of Y" beats "may have blind spots."
 ```
 
-The DM reads `~/.core/agents/` during team composition and uses saved configurations as seed material. A saved configuration is a validated pattern, not a persistent identity — every session is composed fresh.
+The lead agent reads `~/.core/agents/` during team composition and uses saved configurations as seed material. A saved configuration is a validated pattern, not a persistent identity — every session is composed fresh.

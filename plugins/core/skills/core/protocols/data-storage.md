@@ -14,11 +14,11 @@ Three surfaces, three responsibilities. Don't mix them.
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed per DC-74 so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
-- **DM operational meta** — `~/.core/` — your operational layer across projects. `dm-profile.md` is your cross-project home. `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
+- **Agent operational meta** — `~/.core/` — your operational layer across projects. `dm-profile.md` is your cross-project home. `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
 
 - **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
 
-The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's DM meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
+The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's agent meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
 
 There's a fourth surface that isn't CORE's to own but that CORE reads from: **harness-local recall** — Claude Code's `~/.claude/projects/*/memory/MEMORY.md`, Codex's `~/.codex/memories/`, equivalents in future harnesses. CORE treats this as scratch cache, never authoritative. See `dc-86-harness-local-memory-recall` for the principle and the `save-recall-note` adapter verb (resolved per `harnesses/<name>.md`) for the explicit-save mechanism. The trigger for invoking explicit-save — what user phrases mean "save this" to a given user — is install-level configuration in the user's `AGENTS.md`, not CORE prose.
 
@@ -196,6 +196,21 @@ Edges live in unit frontmatter as `{type, target, note?}` triples. The committed
 **Eager vs lazy writes.** Three types you write the moment you commit the unit, because retrieval and hygiene depend on them right away: `supersedes`, `depends-on`, `conflicts-with`. Inverse edges (`superseded-by`, `depended-on-by`) are eager for these too — written at the same time on the target unit.
 
 The rest — `cites`, `refines`, `amends`, `references-person`, `references-topic` — are eager when the relationship is clear at write time, lazy otherwise. Memory hygiene's reconciliation pass catches implicit ones missed at write time.
+
+### Governed write-time enrichment
+
+After every unit create or edit, enrichment is due. This is derived search state, not authored truth: a cloud agent from a **different model family** than the answering model reads only the saved unit and proposes aliases, paraphrases, and likely future questions. Never copy the authored body or hidden evaluation queries into the enrichment payload, and never let the answering model enrich its own evaluation corpus.
+
+Write the result through the governed CLI, not by editing the sidecar directly:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/enrichment-sidecar.mjs" <project> <path-relative-to-_memories> \
+  --input <json-file> --writer-family <family> --answer-family <family>
+```
+
+The JSON input carries `aliases`, `paraphrases`, and `likely_questions` arrays. The CLI rejects same-family provenance, keys the record to the source file's SHA-256, stores it separately at `_memories/_lib/enrichment-sidecar.json`, and writes owner-only. Retrieval scores valid enrichment as its own lower-weight arm; it never mixes generated phrases into the unit body. An edit changes the source hash immediately, so stale enrichment becomes ineligible before re-enrichment runs.
+
+If this harness cannot dispatch a different-family agent, do not improvise or reuse stale enrichment. Leave the unit safely unenriched, name the pending count in the readiness/close receipt, and let a compatible harness perform the pass. A missing enrichment is a measurable recall limitation; same-family enrichment is invalid evidence.
 
 **Wikilinks** (`[[unit-id]]`) in the body are permitted as a secondary, organic edge form. Hygiene's reconciliation pass promotes durable wikilinks to typed edges (default type: `cites`) when they appear in citation-style contexts — the procedure is `protocols/hygiene.md` §"Wikilink promotion".
 
@@ -575,7 +590,7 @@ Always read frontmatter to confirm a unit's status before relying on it; the fil
 
 ## Make the placement choice visible
 
-Before any non-exempt Write or Edit on a project-context, DM-meta, or skill-product artifact, narrate the placement choice in user-visible chat. The user should see where you're writing, what kind of surface it is, why that surface (especially if another reasonable surface exists), and what naming convention you're following. This isn't an approval gate — announce and proceed. The point is that placement decisions don't get smuggled past the user.
+Before any non-exempt Write or Edit on a project-context, agent-meta, or skill-product artifact, narrate the placement choice in user-visible chat. The user should see where you're writing, what kind of surface it is, why that surface (especially if another reasonable surface exists), and what naming convention you're following. This isn't an approval gate — announce and proceed. The point is that placement decisions don't get smuggled past the user.
 
 A natural-prose version is fine — *"Writing the swarm synthesis to `_outputs/<date>/<topic>/SYNTHESIS.md` as the per-topic output artifact; standard naming convention for swarm outputs."* A harness hook may inject a structured-format reminder on these writes (the CORE author's install wires one; most installs won't have it); that reminder is fine as machine-generated context, but your own voice in the chat is plain prose.
 
@@ -625,7 +640,7 @@ Three rings, one read at runtime.
 └── .claude/                       ← harness config + scripts
 ```
 
-**DM operational ring** — `~/.core/`
+**Agent operational ring** — `~/.core/`
 
 ```
 ~/.core/
@@ -650,7 +665,7 @@ Read-only at runtime. Writes require `intent: skill-edit` declaration.
 
 Removed in v2 (was present in v1, no longer applies):
 
-- The `routing sheet` as a 7-rule table for every write classification — replaced by surface-based routing (project / DM meta / skill product) with the PWD mechanic at the boundary.
+- The `routing sheet` as a 7-rule table for every write classification — replaced by surface-based routing (project / agent meta / skill product) with the PWD mechanic at the boundary.
 - The `file-shape classifier` and `auto-compaction strategy` — replaced by `protocols/hygiene.md` (three verbs: archive / retire / cold-store). Hygiene handles all compaction, retire, and archive operations.
 - Cowork capability-routing — Cowork is not a v2 target harness. The skill works on Claude Code Desktop's Code tab; future-Cowork support is its own design exercise.
 

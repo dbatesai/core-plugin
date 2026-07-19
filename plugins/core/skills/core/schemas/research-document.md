@@ -90,4 +90,4 @@ Three more sections are common but not required — include each when the resear
 }
 ```
 
-The index is the discovery surface — the DM reads it to find prior research on a topic before running a new investigation.
+The index is the discovery surface — the agent reads it to find prior research on a topic before running a new investigation.

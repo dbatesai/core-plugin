@@ -135,12 +135,16 @@ function main(argv) {
       : `content_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\n`);
     return 0;
   }
-  const [repo, ref] = argv.filter(a => !a.startsWith('--') && a !== argv[argv.indexOf('--subdir') + 1]);
+  const subIdx = argv.indexOf('--subdir');
+  // Positionals = non-flag args that are not --subdir's value. The old filter
+  // compared each arg against argv[indexOf('--subdir') + 1]; with NO --subdir
+  // that is argv[0] — silently dropping the repo argument, so the documented
+  // two-arg form always printed usage (proof-bundle case c5 caught it, 2026-07-17).
+  const [repo, ref] = argv.filter((a, i) => !a.startsWith('--') && !(subIdx >= 0 && i === subIdx + 1));
   if (!repo || !ref) {
     process.stderr.write('usage: artifact-identity.mjs <repo> <ref> [--subdir plugins/core] [--json] | --dir <tree>\n');
     return 2;
   }
-  const subIdx = argv.indexOf('--subdir');
   const subdir = subIdx >= 0 ? argv[subIdx + 1] : 'plugins/core';
   let out;
   try { out = artifactIdentity(repo, ref, subdir); }

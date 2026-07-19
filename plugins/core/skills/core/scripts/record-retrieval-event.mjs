@@ -17,6 +17,7 @@ export const VALID_TRIGGERS = new Set([
   'mid-conversation',
   'subagent',
   'refresh-context',
+  'per-turn-hook', // the canonical product-emitted event: retrieve-context-hook writes one per turn (2026-07-17)
 ]);
 
 const NON_NEGATIVE_INTEGER_FIELDS = [
@@ -54,6 +55,11 @@ function normalizeUnit(unit, idx) {
   }
   if (unit.score !== undefined && (typeof unit.score !== 'number' || Number.isNaN(unit.score))) {
     fail(`units_retrieved[${idx}].score`, 'must be a number when present');
+  }
+  // Closed intra-tier provenance (2026-07-17): which stage of the Tier-1 product
+  // pipeline produced the hit. NEVER encoded in the ladder tier.
+  if (unit.source_stage !== undefined && !['ranked', 'one-hop-expansion'].includes(unit.source_stage)) {
+    fail(`units_retrieved[${idx}].source_stage`, 'must be ranked or one-hop-expansion');
   }
   return { ...unit, id: sanitizeAttributeValue(unit.id.trim(), { maxLen: 200 }) };
 }
@@ -94,21 +100,41 @@ export function normalizeRetrievalEvent(event) {
     fail('units_retrieved', 'must be an array');
   }
   const unitsRetrieved = event.units_retrieved.map(normalizeUnit);
-  if (unitsRetrieved.length === 0 && !(event.tier_reached === 3 && event.result === 'miss')) {
-    fail('result', 'must be "miss" when Tier 3 retrieval returns no units');
+  if (unitsRetrieved.length === 0) {
+    // Two honest empty-result shapes (Hale live-hook audit 2026-07-17 — a
+    // no-hit must never fabricate a Tier-3 escalation that didn't run):
+    //  - a full-ladder Tier 3 search that found nothing  -> result 'miss'
+    //  - the per-turn hook's model-free pipeline (tiers 1-2 only) finding
+    //    nothing, with NO escalation attempted             -> result 'no-hit'
+    const tier3Miss = event.tier_reached === 3 && event.result === 'miss';
+    const hookNoHit = event.trigger === 'per-turn-hook' && event.result === 'no-hit' && event.tier_reached <= 2;
+    if (!tier3Miss && !hookNoHit) {
+      fail('result', 'empty units require Tier-3 "miss" or per-turn-hook "no-hit" at tier <= 2');
+    }
   }
 
   for (const field of NON_NEGATIVE_INTEGER_FIELDS) {
     if (event[field] !== undefined) requireNonNegativeInteger(event[field], field);
   }
 
+  // Optional producer-honesty fields (2026-07-17): `mechanism` names what
+  // actually ran (closed enum — never free text), `retrieval_id` correlates
+  // the row with traces and downstream outcome sampling.
+  if (event.mechanism !== undefined && !['model-free-substrate', 'reasoning-shortlist', 'explore-subagent', 'inline-degraded'].includes(event.mechanism)) {
+    fail('mechanism', 'must be one of the closed mechanism vocabulary');
+  }
+  if (event.retrieval_id !== undefined) requireString(event.retrieval_id, 'retrieval_id');
+
   return { ...event, kind: 'retrieval', intent_topics: intentTopics, escalation_path: escalationPath, units_retrieved: unitsRetrieved };
 }
 
+// Returns { record, written, write_outcome } — `written` is the authoritative
+// legacy-row delivery; callers that need delivery evidence must check it
+// rather than trusting the normalized record's existence (Hale, 2026-07-17).
 export function recordRetrievalEvent(projectDir, event, opts = {}) {
   const record = normalizeRetrievalEvent(event);
-  logEvent(projectDir, 'retrieval-log.jsonl', record, opts);
-  return record;
+  const outcome = logEvent(projectDir, 'retrieval-log.jsonl', record, opts) || { legacy: false, otel: false, reason: 'no-outcome' };
+  return { record, written: outcome.legacy === true, write_outcome: outcome };
 }
 
 function parseArgs(argv) {
@@ -151,13 +177,16 @@ export function main(argv) {
     process.stderr.write(`error: retrieval event JSON is required: ${err.message}\n`);
     return 2;
   }
-  recordRetrievalEvent(projectDir, event, {
+  const out = recordRetrievalEvent(projectDir, event, {
     today: args.flags.get('today'),
     now: args.flags.get('now'),
     sessionId: args.flags.get('session-id'),
     workspaceId: args.flags.get('workspace-id'),
   });
-  return 0;
+  // Machine-readable delivery receipt: normalization succeeding is NOT delivery
+  // (Hale, 2026-07-17). Automation gets exit 1 + the outcome on a write failure.
+  process.stdout.write(JSON.stringify({ written: out.written, write_outcome: out.write_outcome }) + '\n');
+  return out.written ? 0 : 1;
 }
 
 const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };

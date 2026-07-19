@@ -1,10 +1,12 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
+import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { resolveHookLogPath, logHookEvent } from '../../plugins/core/skills/core/hooks/hook-log.mjs';
 
 const HOOKS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks');
@@ -18,12 +20,25 @@ function readLog(file) {
   return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
 }
 
+// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
+// isn't auto-cleaned — every created dir is tracked and removed below.
+const _isolatedLogDirs = [];
 function tmpLog() {
-  return join(mkdtempSync(join(tmpdir(), 'hook-log-')), 'hooks-log.jsonl');
+  const dir = mkdtempSync(join(trustedTestTmpRoot(), 'hook-log-'));
+  _isolatedLogDirs.push(dir);
+  return join(dir, 'hooks-log.jsonl');
 }
+after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
+// Isolate every hook test log by construction (Hale audit, 2026-07-17, fresh
+// re-audit of 246a77a): every current call site here happens to pass
+// CORE_HOOKS_LOG_FILE explicitly, but the helpers themselves had no default —
+// one call a future test author forgets to annotate silently writes into the
+// real machine-wide ~/.core/hooks-log.jsonl. Default here, so "isolated" is
+// the only way to call these, not a convention every caller has to remember.
 function runStart(env) {
-  try { execFileSync('node', [START_HOOK], { input: '{}', env: { ...process.env, ...env }, encoding: 'utf8' }); }
+  try { execFileSync('node', [START_HOOK], { input: '{}', env: { ...process.env, CORE_HOOKS_LOG_FILE: tmpLog(), ...env }, encoding: 'utf8' }); }
   catch { /* hook exits 0; ignore */ }
 }
 
@@ -31,7 +46,7 @@ function runClose(payload, env) {
   try {
     execFileSync('node', [CLOSE_HOOK], {
       input: JSON.stringify(payload),
-      env: { ...process.env, CORE_CLOSE_STORE: payload.cwd || '', ...env },
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: tmpLog(), ...env },
       encoding: 'utf8',
     });
   } catch { /* hook exits 0; ignore */ }
@@ -129,4 +144,59 @@ test('SessionEnd on an UNREGISTERED dir (attacker _memories/) skips — security
     'an unregistered dir must be rejected even with a _memories/ folder');
   assert.ok(!events.some(e => e.action === 'spawn'), 'no close agent spawned for an unregistered dir');
   rmSync(store, { recursive: true, force: true });
+});
+
+// D1 (Crest, 2026-07-16 / Keel, 2026-07-18): CORE_HOOKS_LOG_FILE was read
+// unconditionally, an arbitrary-file-append primitive reachable via a hostile
+// project's forwarded settings.json env. Same fix shape and same test shape
+// as close-index-path-validation.test.mjs's resolveIndexPath coverage.
+test('resolveHookLogPath: a project-forwarded path outside ~/.core is ignored', () => {
+  const home = homedir();
+  const dflt = join(home, '.core', 'hooks-log.jsonl');
+  assert.equal(resolveHookLogPath({ CORE_HOOKS_LOG_FILE: '/tmp/evil-repo/.fake-log.jsonl' }), dflt);
+  assert.equal(resolveHookLogPath({ CORE_HOOKS_LOG_FILE: './.fake-log.jsonl' }), dflt);
+  assert.equal(resolveHookLogPath({ CORE_HOOKS_LOG_FILE: join(home, 'Documents', 'x', 'log.jsonl') }), dflt);
+});
+
+test('resolveHookLogPath: a path under ~/.core is honored', () => {
+  const ok = join(homedir(), '.core', 'custom-hooks-log.jsonl');
+  assert.equal(resolveHookLogPath({ CORE_HOOKS_LOG_FILE: ok }), ok);
+});
+
+test('resolveHookLogPath: /dev/null is always honored (the documented silence affordance)', () => {
+  assert.equal(resolveHookLogPath({ CORE_HOOKS_LOG_FILE: '/dev/null' }), '/dev/null');
+});
+
+test('resolveHookLogPath: no env var falls back to the default', () => {
+  assert.equal(resolveHookLogPath({}), join(homedir(), '.core', 'hooks-log.jsonl'));
+});
+
+// D1 second pass (Hale + Antigravity, 2026-07-18): resolveHookLogPath()'s
+// lexical check alone is a CWE-22-shaped gap — a symlink placed under the
+// trusted ~/.core pointing outside it passes the string check while writes
+// go through it to the real outside target. logHookEvent()'s canonical
+// re-check (realpathSync after mkdir) is the actual defense; this proves it
+// refuses the write rather than following the link, using a real symlink,
+// not a hypothetical.
+test('logHookEvent: a symlink under ~/.core pointing outside it is refused, not followed', () => {
+  const outsideDir = mkdtempSync(join(tmpdir(), 'hook-log-outside-'));
+  const linkDir = join(trustedTestTmpRoot(), `escape-link-${Date.now()}`);
+  symlinkSync(outsideDir, linkDir, 'dir');
+  const targetFile = join(linkDir, 'hooks-log.jsonl');
+  try {
+    const prior = process.env.CORE_HOOKS_LOG_FILE;
+    process.env.CORE_HOOKS_LOG_FILE = targetFile;
+    try {
+      const result = logHookEvent({ hook: 'test', action: 'skip' });
+      assert.equal(result.written, false, 'a symlinked escape must be refused, not written through');
+      assert.equal(result.error_code, 'hook-log-untrusted-target');
+      assert.ok(!existsSync(join(outsideDir, 'hooks-log.jsonl')), 'the real outside target must never receive the write');
+    } finally {
+      if (prior === undefined) delete process.env.CORE_HOOKS_LOG_FILE;
+      else process.env.CORE_HOOKS_LOG_FILE = prior;
+    }
+  } finally {
+    rmSync(linkDir, { force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+  }
 });

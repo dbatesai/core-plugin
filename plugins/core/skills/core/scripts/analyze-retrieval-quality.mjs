@@ -23,6 +23,7 @@
 import { readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
 
 export const DEFAULT_SINCE_DAYS = 30;
 export const TOP_DIP_BACK = 10;
@@ -70,13 +71,15 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
     const date = _parseSessionDate(name);
     if (!date) continue;
     if (cutoff && date < cutoff) continue;
-    const logPath = join(sessionsDir, name, 'retrieval-log.jsonl');
-    let raw;
-    try { raw = readFileSync(logPath, 'utf8'); } catch { continue; }
-    for (const line of raw.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try { events.push(JSON.parse(trimmed)); } catch { /* malformed line — skip */ }
+    for (const logName of ['retrieval-log.jsonl', 'outcome-log.jsonl']) {
+      const logPath = join(sessionsDir, name, logName);
+      let raw;
+      try { raw = readFileSync(logPath, 'utf8'); } catch { continue; }
+      for (const line of raw.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try { events.push(JSON.parse(trimmed)); } catch { /* malformed line — skip */ }
+      }
     }
   }
   return events;
@@ -90,20 +93,29 @@ export function computeDipBackRates(events) {
   for (const ev of events) {
     const units = Array.isArray(ev.units_retrieved) ? ev.units_retrieved : null;
     if (!units || !units.length) continue;
-    const dipped = (ev.dip_back_count || 0) > 0;
+    // Unknown-aware (2026-07-17): rows that OMITTED dip_back_count (the per-turn
+    // hook cannot observe dip-backs) leave both numerator and denominator —
+    // missing is not "no dip-back". Observed coverage rides each row.
+    const observed = Number.isInteger(ev.dip_back_count);
+    const dipped = observed && ev.dip_back_count > 0;
     for (const u of units) {
       if (!u || !u.id) continue;
-      const rec = byUnit.get(u.id) || { unit_id: u.id, retrievals: 0, dip_backs: 0 };
+      const rec = byUnit.get(u.id) || { unit_id: u.id, retrievals: 0, dip_backs: 0, dipback_observed: 0 };
       rec.retrievals += 1;
+      if (observed) rec.dipback_observed += 1;
       if (dipped) rec.dip_backs += 1;
       byUnit.set(u.id, rec);
     }
   }
   const rows = [];
   for (const rec of byUnit.values()) {
-    rows.push({ unit_id: rec.unit_id, retrievals: rec.retrievals, rate: rec.dip_backs / rec.retrievals });
+    rows.push({
+      unit_id: rec.unit_id, retrievals: rec.retrievals,
+      dipback_observed: rec.dipback_observed,
+      rate: rec.dipback_observed > 0 ? rec.dip_backs / rec.dipback_observed : null,
+    });
   }
-  rows.sort((a, b) => b.rate - a.rate || b.retrievals - a.retrievals || a.unit_id.localeCompare(b.unit_id));
+  rows.sort((a, b) => ((b.rate ?? -1) - (a.rate ?? -1)) || b.retrievals - a.retrievals || a.unit_id.localeCompare(b.unit_id));
   return rows;
 }
 
@@ -154,6 +166,89 @@ export function computeTierDistribution(events) {
   };
 }
 
+function outcomeEvidence(events) {
+  const retrievals = events.filter(ev => isRetrievalShapedEvent(ev) && typeof ev.retrieval_id === 'string' && ev.retrieval_id.trim());
+  const byId = new Map();
+  for (const ev of retrievals) {
+    const id = ev.retrieval_id.trim();
+    const rows = byId.get(id) || [];
+    rows.push(ev);
+    byId.set(id, rows);
+  }
+  // Multiple outcome rows per retrieval_id resolve via the SAME authority
+  // resolver metrics-package.mjs uses (Hale audit, 2026-07-17: "share one
+  // authority resolver across consumers" — the two consumers must never
+  // disagree about which outcome is authoritative for the same retrieval).
+  // Previously this kept whichever row appeared first, ignoring
+  // evidence_authority entirely — an automatic 'unknown' could never be
+  // displaced by stronger evidence that arrived later.
+  const outcomeRowsById = new Map();
+  for (const ev of events) {
+    if (ev?.kind !== 'retrieval-outcome' || typeof ev.retrieval_id !== 'string') continue;
+    const id = ev.retrieval_id.trim();
+    if (!id || byId.get(id)?.length !== 1) continue;
+    const rows = outcomeRowsById.get(id) || [];
+    rows.push(ev);
+    outcomeRowsById.set(id, rows);
+  }
+  const outcomes = new Map();
+  for (const [id, rows] of outcomeRowsById) {
+    const resolved = resolveOutcomeAuthority(rows);
+    // 'unknown' (explicit or tie-resolved) is coverage, never a denominator —
+    // matches metrics-package.mjs's outcomesById semantics exactly.
+    if (resolved && resolved !== 'unknown') outcomes.set(id, resolved);
+  }
+  const eligibleIds = [...byId.entries()].filter(([, rows]) => rows.length === 1).map(([id]) => id);
+  const harmfulIds = eligibleIds.filter(id => ['noisy', 'miss'].includes(outcomes.get(id)));
+  return { eligibleIds, outcomes, harmfulIds };
+}
+
+export function buildUserReceipt(events) {
+  const retrievalCount = events.filter(isRetrievalShapedEvent).length;
+  if (retrievalCount === 0) {
+    return {
+      checked: '0 retrieval events in analyzed window',
+      safe: null,
+      impact: 'effectiveness unknown: no retrieval evidence',
+      action: 'collect-retrieval-evidence',
+      user_action: 'Use CORE normally, then run this analyzer again after retrieval events exist.',
+    };
+  }
+
+  const { eligibleIds, outcomes, harmfulIds } = outcomeEvidence(events);
+  const observed = outcomes.size;
+  const eligible = eligibleIds.length;
+  if (harmfulIds.length > 0) {
+    return {
+      checked: `${observed} of ${eligible} answer outcomes checked`,
+      safe: false,
+      impact: `${harmfulIds.length} observed answer outcome(s) were noisy or missed`,
+      action: 'inspect-harmful-outcomes',
+      user_action: `Inspect retrieval ${harmfulIds[0]} and correct the memory or retrieval policy before trusting similar answers.`,
+    };
+  }
+  if (eligible === 0 || observed < eligible) {
+    return {
+      checked: `${observed} of ${eligible} answer outcomes checked across ${retrievalCount} retrieval event(s)`,
+      safe: null,
+      impact: 'answer outcome unknown for one or more retrievals',
+      action: 'collect-answer-outcomes',
+      user_action: 'Record an evidence-qualified answer outcome after each retrieval-backed answer.',
+    };
+  }
+  // NEVER `safe: true` from answer telemetry alone (Hale strengthened audit,
+  // 2026-07-17 item 2): outcome rows say nothing about privacy or
+  // anti-resurrection state, and field telemetry is not a safety proof. The
+  // strongest claim this receipt can honestly make is "no observed harm."
+  return {
+    checked: `${observed} of ${eligible} answer outcomes checked`,
+    safe: null,
+    impact: 'no noisy or missed outcomes observed in the analyzed window (no-harm-observed is not a global safety claim)',
+    action: 'none',
+    user_action: 'No immediate action; continue collecting outcomes and recheck trends.',
+  };
+}
+
 // ---------- Report assembly ----------
 
 export function buildReport(events) {
@@ -176,12 +271,13 @@ export function buildReport(events) {
     tier_distribution: computeTierDistribution(retrievalEvents),
     dip_back_rates: computeDipBackRates(retrievalEvents).slice(0, TOP_DIP_BACK),
     tier_escalation: computeTierEscalation(retrievalEvents).slice(0, TOP_ESCALATION),
+    receipt: buildUserReceipt(events),
   };
 }
 
 export function formatReport(report) {
   if (!report.total_events) {
-    return 'No retrieval events found in the analyzed window.';
+    return `No retrieval events found in the analyzed window.\nChecked: ${report.receipt.checked}\nSafe: unknown\nImpact: ${report.receipt.impact}\nAction: ${report.receipt.action}\nUser action: ${report.receipt.user_action}`;
   }
   const td = report.tier_distribution;
   const pct = v => `${Math.round(v * 100)}%`;
@@ -190,6 +286,11 @@ export function formatReport(report) {
   const telemetryOnlyEvents = report.telemetry_only_events ?? 0;
   lines.push(`Calendar days with events: ${report.sessions} | Total events: ${report.total_events}`);
   lines.push(`Retrieval-shaped events: ${retrievalEvents} | telemetry-only rows: ${telemetryOnlyEvents}`);
+  lines.push(`Checked: ${report.receipt.checked}`);
+  lines.push(`Safe: ${report.receipt.safe === null ? 'unknown' : report.receipt.safe}`);
+  lines.push(`Impact: ${report.receipt.impact}`);
+  lines.push(`Action: ${report.receipt.action}`);
+  lines.push(`User action: ${report.receipt.user_action}`);
   if (telemetryOnlyEvents > 0) {
     lines.push('Telemetry-only rows are not retrieval proof.');
   }

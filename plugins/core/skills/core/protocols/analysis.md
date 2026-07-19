@@ -62,7 +62,7 @@ Five phases. Each has a clear transition criterion. Don't advance unless the cri
 | **1 Independent framing** | Each agent frames the task in isolation; Critic writes predictions to the timestamped `critic-predictions.md` (see anti-anchoring enforcement) before reading anyone else | ≥80% of agents have broadcast their independent position |
 | **2 Cross-pollination** | Agents share findings; Critic reads Generators; surprise lenses surface | All agents have read and acknowledged others' findings |
 | **3 Adversarial pressure** | Critic challenges Generators with evidence; Generators defend or update; persuasion-log entries land | Diminishing returns for 2+ exchanges, OR convergence-watch trips |
-| **4 Synthesis + deep audit** | DM composes synthesis; deep audit gate runs (see the deep-audit-gate section below); accept or reject | Deep audit passes the four named failure modes |
+| **4 Synthesis + deep audit** | The lead agent composes synthesis; deep audit gate runs (see the deep-audit-gate section below); accept or reject | Deep audit passes the four named failure modes |
 
 Phase transitions are decisions, not timers. If Phase 3 produces flat agreement after one round, that's a convergence-watch trip — see the monitor-pattern section below.
 
@@ -112,7 +112,7 @@ Monitor's escalation ladder:
 | Level | Trigger | Action | Required response |
 |---|---|---|---|
 | First warning | Monitor flags a concern | Warning broadcast to team | Agents acknowledge; decide whether to change course |
-| Second flag | Same concern persists | Monitor escalates to DM | DM evaluates; the call is final |
+| Second flag | Same concern persists | Monitor escalates to the lead agent | the lead agent evaluates; the call is final |
 
 Monitor is a peer in the communication mesh, not a passive observer. It can challenge, request evidence, and demand recalibration.
 
@@ -168,7 +168,7 @@ Multi-agent is one tool, not the product. If single-pass works, use single-pass.
 
 ## Briefing structure
 
-The briefing is what gets injected into each agent's prompt at spawn time. It's the durable artifact the team reads at start and the DM re-reads during monitoring.
+The briefing is what gets injected into each agent's prompt at spawn time. It's the durable artifact the team reads at start and the lead agent re-reads during monitoring.
 
 Minimum viable briefing — every swarm:
 
@@ -184,7 +184,7 @@ Structured packet for moderate/complex tasks — add:
 | `dependencies` | What this task depends on |
 | `stakeholder_context` | Who cares about this task and why |
 | `constraints` | Boundaries the swarm must respect |
-| `dm_perspective` | Nuance, judgment calls, contextual concerns |
+| `lead_agent_perspective` | Nuance, judgment calls, contextual concerns |
 | `what_matters_most` | The single most important thing to get right |
 | `what_could_go_wrong` | Likeliest failure mode |
 

@@ -17,7 +17,7 @@ import { walk } from '../../plugins/core/skills/core/scripts/graph-walk.mjs';
 import { rankUnits } from '../../plugins/core/skills/core/scripts/priority.mjs';
 import { retrieveContext, lexicalRankedIds, productRankedIds } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 import { bm25Rank } from '../../plugins/core/skills/core/scripts/bm25.mjs';
-import { selectCandidates } from '../../plugins/core/skills/core/scripts/select-relevant-units.mjs';
+import { selectCandidateShards } from '../../plugins/core/skills/core/scripts/select-relevant-units.mjs';
 
 const T = new Date('2026-07-02');
 
@@ -60,7 +60,7 @@ const READERS = {
   'bm25Rank (standalone)': ({ dir }) => new Set(bm25Rank('widget alpha decision', dir)),
   'lexicalRankedIds': ({ dir }) => new Set(lexicalRankedIds('widget alpha decision', dir)),
   'productRankedIds (harness live arm)': ({ dir }) => new Set(productRankedIds('widget alpha decision', dir)),
-  'selectCandidates (reasoning shortlist)': ({ dir }) => new Set(selectCandidates('widget alpha decision', dir).map(c => c.id)),
+  'selectCandidateShards (reasoning shortlist)': ({ dir }) => new Set(selectCandidateShards('widget alpha decision', dir).flatMap((shard) => shard.candidates.map(c => c.id))),
 };
 
 for (const [name, read] of Object.entries(READERS)) {

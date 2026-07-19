@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
-import { CLASSIFIER_VERSION } from './classify-turns.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION } from './classify-turns.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
 
@@ -39,7 +39,8 @@ function readCalibrationState(metaDir) {
   if (!existsSync(f)) return { is_calibrated: false, provisional: true };
   let s;
   try { s = JSON.parse(readFileSync(f, 'utf8')); } catch { return { is_calibrated: false, provisional: true }; }
-  if (s.is_calibrated && s.classifier_version !== CLASSIFIER_VERSION) {
+  if (s.is_calibrated
+      && (s.classifier_version !== CLASSIFIER_VERSION || s.proxy_version !== PROXY_VERSION)) {
     return { ...s, is_calibrated: false, provisional: true, version_mismatch: true };
   }
   return s;

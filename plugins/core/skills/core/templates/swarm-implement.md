@@ -9,7 +9,7 @@ Execute code changes, write deliverables, or modify external systems. Implementa
 ### Single-File Changes
 
 - **1 Editor** + **1 Validator**
-- The DM plays Guard role for bounded, well-specified changes
+- The lead agent plays Guard role for bounded, well-specified changes
 - Best for: applying a known change list to a single file
 
 ### Multi-File Changes
@@ -20,17 +20,17 @@ Execute code changes, write deliverables, or modify external systems. Implementa
 
 ## Guard
 
-REQUIRED for all write operations. The Guard reviews and approves any MCP tool calls, destructive operations, or external system modifications. For single-file bounded changes, the DM can serve as Guard. For multi-file or high-risk changes, a dedicated Guard agent is mandatory.
+REQUIRED for all write operations. The Guard reviews and approves any MCP tool calls, destructive operations, or external system modifications. For single-file bounded changes, the lead agent can serve as Guard. For multi-file or high-risk changes, a dedicated Guard agent is mandatory.
 
-## DM Intervention
+## Lead-agent intervention
 
-The DM is running this swarm in its own context — there is no second orchestrator. The DM intervenes directly via `send-message`, phase restarts, or a halt when the swarm drifts, a risk condition triggers, or an implementation deviates from the change manifest. These are course-correction tools, not levers for second-guessing normal role execution. Every intervention is logged.
+The lead agent is running this swarm in its own context — there is no second orchestrator. The lead agent intervenes directly via `send-message`, phase restarts, or a halt when the swarm drifts, a risk condition triggers, or an implementation deviates from the change manifest. These are course-correction tools, not levers for second-guessing normal role execution. Every intervention is logged.
 
 ## Phases
 
 ### Phase 1: Plan
 
-The DM translates review synthesis (or user instructions) into an explicit, ordered change manifest. This manifest must include:
+The lead agent translates review synthesis (or user instructions) into an explicit, ordered change manifest. This manifest must include:
 - Specific file paths and line references
 - Exact text to add, modify, or remove
 - Before/after examples where helpful
@@ -56,11 +56,11 @@ The validator reads files ONLY after the completion signal arrives. It checks ev
 
 ### Phase 5: Guard Approval
 
-For any MCP tool calls, destructive operations, or external system writes, the Guard reviews the specific operation, assesses risk, and either approves or blocks. The Guard has veto power. If the Guard blocks, the DM must resolve the concern before proceeding.
+For any MCP tool calls, destructive operations, or external system writes, the Guard reviews the specific operation, assesses risk, and either approves or blocks. The Guard has veto power. If the Guard blocks, the lead agent must resolve the concern before proceeding.
 
 ### Phase 6: Commit
 
-The DM commits the changes or delivers the final output. This includes:
+The lead agent commits the changes or delivers the final output. This includes:
 - Git commit (if code changes)
 - File persistence (if deliverables)
 - User notification with summary of what changed

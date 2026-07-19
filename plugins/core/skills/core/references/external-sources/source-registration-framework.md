@@ -334,7 +334,7 @@ The orchestration skill writes a structured log of every source pull. This enabl
 ~/.core/workspaces/<id>/source-pull-log.jsonl
 ```
 
-Workspace-meta layer, not project layer. The log is monitoring data (DM operational meta), not project context the user reads or edits. It belongs alongside `state-cache.json`, `last-bootstrap.json`, etc.
+Workspace-meta layer, not project layer. The log is monitoring data (agent operational meta), not project context the user reads or edits. It belongs alongside `state-cache.json`, `last-bootstrap.json`, etc.
 
 This location also survives project repository operations (archive/restore, fork, rename) — project-folder logs become fragile against these operations.
 

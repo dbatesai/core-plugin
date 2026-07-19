@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -173,10 +173,15 @@ test('DC-94a: each classified record is stamped with proxy_version', () => {
       JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: a }] } }),
     ].join('\n') + '\n';
     writeFileSync(join(dir, 'sess-pv.jsonl'), turn('hello', 'The answer is 42.'));
-    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-pv', workspaceId: 'ct-pv-ws', env: {} });
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-pv', workspaceId: 'ct-pv-ws', today: '2026-06-01', env: {} });
     assert.equal(r.status, 'OK');
     assert.ok(r.records.length >= 1);
     assert.equal(r.records[0].proxy_version, PROXY_VERSION, 'record carries the proxy version so calibration can invalidate across a proxy change');
+    assert.equal(r.records[0].harness, 'claude-code', 'calibration never pools anonymous harness rows');
+    assert.equal(r.records[0].turn_evidence.user_text, 'hello');
+    assert.equal(r.records[0].turn_evidence.assistant_text, 'The answer is 42.');
+    const classifiedFile = join(home, '.core', 'workspaces', 'ct-pv-ws', 'metrics', 'classified', '2026-06-01.jsonl');
+    assert.equal(statSync(classifiedFile).mode & 0o777, 0o600, 'raw calibration evidence is owner-only');
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });

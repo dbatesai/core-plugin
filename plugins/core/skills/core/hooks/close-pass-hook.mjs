@@ -69,7 +69,7 @@ function main() {
   // Canonicalize (realpath) then require a REGISTERED CORE workspace before spawning anything.
   // Security (review 2026-06-30, HIGH): a generic `_memories/` dir is not proof; the ~/.core
   // registry is the trust anchor an attacker can't plant from inside a project dir.
-  let store = resolve(process.env.CORE_CLOSE_STORE || payload.cwd || process.cwd());
+  let store = resolve(payload.cwd || process.cwd());
   try { store = realpathSync(store); } catch { /* keep resolved */ }
   if (!isRegisteredWorkspace(store)) {
     logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-registered-workspace', cwd: store });

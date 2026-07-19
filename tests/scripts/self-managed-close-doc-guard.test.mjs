@@ -35,12 +35,21 @@ test('finalize: reflection Task A + Task B are both present', () => {
   assert.match(f, /Reflection Task B/i, 'Task B (perspective) must be present');
 });
 
-test('hooks.json: SessionEnd registers the close hook (NOT Stop — per-turn would mis-fire)', () => {
+test('hooks.json: SessionEnd registers the close hook (NOT Stop — per-turn would mis-fire the heavy close)', () => {
   const h = JSON.parse(read('hooks', 'hooks.json'));
   assert.ok(h.hooks.SessionEnd, 'SessionEnd hook must be registered');
-  assert.ok(!h.hooks.Stop, 'must NOT be a Stop hook — Stop fires every turn, not once per session');
   const cmd = JSON.stringify(h.hooks.SessionEnd);
   assert.match(cmd, /close-pass-hook\.mjs/, 'SessionEnd must point at close-pass-hook.mjs');
+  // The heavy self-managed close (close-pass-hook.mjs -> /finalize) must never
+  // be wired to Stop — Stop fires every turn, not once per session, and
+  // running a full close on every turn would be a correctness disaster. A
+  // SEPARATE, lightweight Stop hook (answer-close-hook.mjs, the real
+  // post-answer outcome closer per Hale's 2026-07-17 HOLD audit) is fine —
+  // this guard is specifically against close-pass ending up there, not
+  // against Stop ever being used for anything.
+  if (h.hooks.Stop) {
+    assert.doesNotMatch(JSON.stringify(h.hooks.Stop), /close-pass-hook\.mjs/, 'close-pass-hook.mjs must never be registered on Stop');
+  }
 });
 
 test('hooks.json: SessionStart auto-invokes /core (the front half of self-running)', () => {

@@ -108,6 +108,30 @@ test('H1: MEMORY.md write routes through atomicWriteFileSync, not a bare write',
   assert.doesNotMatch(SRC, /\bwriteFileSync\(memoryMdPath/, 'no bare writeFileSync on the irreplaceable MEMORY.md surface');
 });
 
+test('--dry-run computes the change but writes nothing (was previously a documented no-op flag)', () => {
+  const { dir, memMd } = scratchMemoryMd();
+  try {
+    writeFileSync(join(dir, '_memories', 'dc-fresh.md'),
+      '---\nid: dc-fresh\ntype: decision\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\ntopics: [a]\n---\n\n# fresh unit\n');
+    const before = readFileSync(memMd, 'utf8');
+    const code = quietStderr(() => main([join(dir, '_memories'), '--memory-md', memMd, '--dry-run']));
+    assert.equal(code, 0);
+    assert.equal(readFileSync(memMd, 'utf8'), before, '--dry-run must not write to MEMORY.md');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('without --dry-run, the same change actually writes (control for the test above)', () => {
+  const { dir, memMd } = scratchMemoryMd();
+  try {
+    writeFileSync(join(dir, '_memories', 'dc-fresh.md'),
+      '---\nid: dc-fresh\ntype: decision\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\ntopics: [a]\n---\n\n# fresh unit\n');
+    const before = readFileSync(memMd, 'utf8');
+    const code = quietStderr(() => main([join(dir, '_memories'), '--memory-md', memMd]));
+    assert.equal(code, 0);
+    assert.notEqual(readFileSync(memMd, 'utf8'), before, 'a real (non-dry) run must actually write the new block');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('MEM-020: splice ends with exactly one trailing newline when the section is last', () => {
   const md = '# idx\n\n## Top project units (refreshed 2026-06-01)\n\n- [a](a.md) — one';
   const out = spliceSection(md, '## Top project units (refreshed 2026-06-09)\n\n- [b](b.md) — two\n');

@@ -104,3 +104,9 @@ test('blocker-3 end-to-end: the content-manifest identity lands in the shareable
       '--artifact-sha', 'not-a-sha', '--out', join(dir, 'nope.json')]), (e) => e.status === 2);
   } finally { rm(dir, { recursive: true, force: true }); }
 });
+
+test('CLI two-arg form works without --subdir (c5 regression, 2026-07-17)', () => {
+  const out = execFileSync(process.execPath,
+    [join(SCRIPTS, 'artifact-identity.mjs'), REPO, 'HEAD'], { encoding: 'utf8' });
+  assert.match(out, /content_manifest_sha256/);
+});
