@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`/export-obsidian`** — a new companion utility that exports the current project's memory store as an Obsidian-browsable vault (and OKF v0.1-draft-conformant bundle): a read-only projection with generated markdown-link edges, retired units and retired-target edges filtered, built from one atomic snapshot of the store. Export-only — the live store is never touched.
+- **`CORE_REASONING_ARM`** — a test-only environment-variable control (`automatic`/`deterministic-only`/`always-on`) that lets the memory-efficacy pilot force which reasoning-escalation behavior runs on a given trial. `automatic` (the default, whether set explicitly or left unset) stays byte-identical to previously shipped behavior.
+
+### Fixed
+- **Five real defects found in an independent audit**, each with a regression test: anti-resurrection wasn't fully structural (a cache staleness check was byte-only, so a unit past its own expiration date could keep serving from a stale cache); the aggregate-receipt privacy scanner had two path-refusal bypasses and could leak a project-specific identifier prefix through its "generic vocabulary" boundary; a lock-release failure could go completely unsurfaced; the mailbox's archive step could silently overwrite an already-archived message with the same name; the artifact-identity CLI's directory-export mode didn't record which computation method produced its output.
+
 ### Docs
 - Corrected two v3.12.0 release-note inaccuracies found in post-release review (Hale, 2026-07-19): the `producer_sha` scope claim below now says "recorded retrieval-outcome row" (the actual scope) instead of "telemetry row"; the Codex manifest's companion-utilities count and list are now consistent with the Claude manifest (six, including `/metrics-package`). The immutable `v3.12.0` tag is unchanged — these are forward corrections on `next`.
 
