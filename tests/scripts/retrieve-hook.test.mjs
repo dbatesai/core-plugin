@@ -238,6 +238,34 @@ test('metrics opt-out means zero telemetry rows', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// Hale catch (2026-07-19, second review pass): the directive_fired ordering
+// fix moved directive construction inside the metricsEnabled() branch, which
+// meant CORE_METRICS_ENABLED=0 silently suppressed the Tier 3 escalation
+// directive itself -- not just its telemetry row. Opting out of telemetry
+// must never change what the user's turn actually receives. These two prove
+// the delivered directive is independent of the metrics flag; none of the
+// tests above this point combined metrics-off with a case that should still
+// escalate, which is exactly why this regression shipped once already.
+
+test('metrics-off automatic zero-hit still escalates (telemetry opt-out must not suppress retrieval behavior)', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-zerohit-')));
+  try {
+    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '0' }, root);
+    assert.match(out, /CORE reasoning escalation required/, 'the directive must still fire with metrics off');
+    assert.equal(readEventRows(root).length, 0, 'no telemetry row, but the delivered content is unaffected');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('metrics-off CORE_REASONING_ARM=always-on still forces the directive', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-alwayson-')));
+  try {
+    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_REASONING_ARM: 'always-on' }, root);
+    assert.match(out, /widget/i, 'real hit content still delivered');
+    assert.match(out, /CORE reasoning escalation required/, 'always-on must still force the directive with metrics off');
+    assert.equal(readEventRows(root).length, 0, 'no telemetry row, but the delivered content is unaffected');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('telemetry write failure is observable in the hook log, and the turn is never blocked', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-wfail-')));
   // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so the

@@ -178,7 +178,30 @@ export async function main() {
   let telemetryReason = 'ok';
   let retrievalId = null;
   let outcomeNote = null; // bounded note when the post-answer outcome close failed
-  let reasoningDirective = ''; // declared here, not inside the try below, so it's still visible after the catch
+  let reasoningDirective = '';
+  // Built unconditionally, BEFORE the metrics-gated block below and BEFORE the
+  // event record inside it (second Hale catch, 2026-07-19): the first fix
+  // moved this construction inside the `metricsEnabled()` branch so the
+  // recorded directive_fired field could reflect the real outcome -- but that
+  // put actual DELIVERED CONTENT behind a telemetry-only gate. With
+  // CORE_METRICS_ENABLED=0, automatic zero-hit escalation and always-on
+  // delivery silently stopped firing at all -- opting out of telemetry must
+  // never change what the user's turn actually receives. Building it here,
+  // unconditionally, fixes that while still keeping it ahead of the event
+  // record (which lives inside the metrics branch and reads this value) so
+  // directive_fired still reflects the real constructed outcome, not intent.
+  if (shouldEmitDirective) {
+    try {
+      const shards = selectCandidates(prompt, store, { shardSize: 80 });
+      if (shards.length) {
+        const unitsTotal = shards[0].units_total;
+        const why = zeroHit
+          ? 'Tier 1 found no lexical context.'
+          : `CORE_REASONING_ARM=${requestedArm} forces escalation regardless of Tier 1 result.`;
+        reasoningDirective = `CORE reasoning escalation required: ${why} Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
+      }
+    } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
+  }
   // Deferred-write inputs for the NEW pending marker (Hale audit, 2026-07-17,
   // hazard: "creates pending state before delivery"). The marker must only be
   // persisted once this turn's context is actually confirmed delivered to the
@@ -285,27 +308,6 @@ export async function main() {
           outcomeNote = String(err && err.message).slice(0, 80);
         }
       }
-      // Built here, BEFORE the event record below (Hale catch, 2026-07-19):
-      // recording directive_fired from the shouldEmitDirective PREDICATE, not
-      // the actual constructed string, meant a trial where selectCandidates
-      // threw (fail-open, directive silently stays '') would still log
-      // directive_fired:true -- requested and actual could disagree with no
-      // way to tell from the row alone, exactly the contamination risk Hale
-      // named. Moving construction here lets the recorded field reflect what
-      // was actually built, not merely requested.
-      if (shouldEmitDirective) {
-        try {
-          const shards = selectCandidates(prompt, store, { shardSize: 80 });
-          if (shards.length) {
-            const unitsTotal = shards[0].units_total;
-            const why = zeroHit
-              ? 'Tier 1 found no lexical context.'
-              : `CORE_REASONING_ARM=${requestedArm} forces escalation regardless of Tier 1 result.`;
-            reasoningDirective = `CORE reasoning escalation required: ${why} Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
-          }
-        } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
-      }
-
       const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
       const queryTerms = tokenize(prompt).slice(0, 8);
       const out = recordRetrievalEvent(store, {
