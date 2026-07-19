@@ -19,7 +19,7 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-const { treeOid, manifestFromGit, manifestFromDirectory, artifactIdentity, diffManifests } =
+const { treeOid, manifestFromGit, manifestFromDirectory, artifactIdentity, directoryIdentity, diffManifests } =
   await import(pathToFileURL(join(SCRIPTS, 'artifact-identity.mjs')).href);
 
 // Skip everywhere git or repo history isn't available (a packaged install running
@@ -109,4 +109,49 @@ test('CLI two-arg form works without --subdir (c5 regression, 2026-07-17)', () =
   const out = execFileSync(process.execPath,
     [join(SCRIPTS, 'artifact-identity.mjs'), REPO, 'HEAD'], { encoding: 'utf8' });
   assert.match(out, /content_manifest_sha256/);
+});
+
+// K17 (Hale's audit, 2026-07-16): "mode-blind" — a --dir export's output carried
+// no field naming which computation path produced it (git object database vs
+// filesystem tree) and no record of which directory, unlike git-mode's
+// self-describing ref/subdir/tree_oid. A saved JSON blob from one mode couldn't
+// be told apart from the other except by which fields happened to be absent.
+test('K17: git-mode identity self-describes its mode', { skip: !HEAD }, () => {
+  const out = artifactIdentity(REPO, HEAD, 'plugins/core');
+  assert.equal(out.mode, 'git');
+  assert.equal(out.ref, HEAD);
+});
+
+test('K17: directory-mode identity self-describes its mode and records the directory', { skip: !HEAD }, async () => {
+  const { mkdtempSync: mktmp, mkdirSync, rmSync: rm, realpathSync } = await import('node:fs');
+  const dir = mktmp(join(tmpdir(), 'ai-k17-'));
+  const treeDir = join(dir, 'tree');
+  mkdirSync(treeDir, { recursive: true });
+  try {
+    execFileSync('git', ['-C', REPO, 'archive', HEAD, 'plugins/core', '-o', join(dir, 'e.tar')]);
+    execFileSync('tar', ['-x', '-f', join(dir, 'e.tar'), '-C', treeDir]);
+    const out = directoryIdentity(treeDir);
+    assert.equal(out.mode, 'directory');
+    assert.equal(out.dir, realpathSync(treeDir), 'the exact (canonicalized) directory used must be recorded, not just the hash');
+    assert.match(out.content_manifest_sha256, /^[0-9a-f]{64}$/);
+    // The two modes must never be shape-ambiguous: a consumer reading `mode`
+    // alone must be able to tell which computation path produced this blob.
+    const gitOut = artifactIdentity(REPO, HEAD, 'plugins/core');
+    assert.notEqual(out.mode, gitOut.mode);
+  } finally { rm(dir, { recursive: true, force: true }); }
+});
+
+test('K17: CLI --dir output prints the mode, not just the hash', { skip: !HEAD }, async () => {
+  const { mkdtempSync: mktmp, mkdirSync, rmSync: rm } = await import('node:fs');
+  const dir = mktmp(join(tmpdir(), 'ai-k17-cli-'));
+  const treeDir = join(dir, 'tree');
+  mkdirSync(treeDir, { recursive: true });
+  try {
+    execFileSync('git', ['-C', REPO, 'archive', HEAD, 'plugins/core', '-o', join(dir, 'e.tar')]);
+    execFileSync('tar', ['-x', '-f', join(dir, 'e.tar'), '-C', treeDir]);
+    const out = execFileSync(process.execPath, [join(SCRIPTS, 'artifact-identity.mjs'), '--dir', treeDir], { encoding: 'utf8' });
+    assert.match(out, /^mode directory$/m, 'the human-readable --dir output must name its own mode');
+    const json = execFileSync(process.execPath, [join(SCRIPTS, 'artifact-identity.mjs'), '--dir', treeDir, '--json'], { encoding: 'utf8' });
+    assert.equal(JSON.parse(json).mode, 'directory');
+  } finally { rm(dir, { recursive: true, force: true }); }
 });

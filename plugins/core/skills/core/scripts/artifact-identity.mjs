@@ -110,6 +110,7 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
   const oid = treeOid(repo, ref, subdir);
   const { content_manifest_sha256, file_count } = manifestFromGit(repo, ref, subdir);
   return {
+    mode: 'git', // K17 (Hale's audit, 2026-07-16): mode-blind — see directoryIdentity below
     ref,
     subdir,
     tree_oid: oid,
@@ -126,13 +127,40 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
   };
 }
 
+/**
+ * K17 (Hale's audit, 2026-07-16): "mode-blind" — the CLI's --dir output was a
+ * bare manifestHash() result ({content_manifest_sha256, file_count, entries}),
+ * with no field naming which computation path produced it and no record of
+ * WHICH directory. artifactIdentity's git-mode output has ref/subdir/tree_oid
+ * self-describing it; the directory-mode output had no equivalent — a saved
+ * JSON blob from one mode was indistinguishable in shape from the other only
+ * by which fields happened to be absent, not by an explicit self-description.
+ * This is exactly wrong for an identity mechanism whose whole point (per the
+ * module docstring) is that two INDEPENDENT exports must be provably
+ * comparable and auditable after the fact, not just numerically equal.
+ * Mirrors artifactIdentity's shape so both modes are symmetric and explicit.
+ */
+export function directoryIdentity(dir) {
+  const root = realpathSync(dir);
+  const { content_manifest_sha256, file_count } = manifestFromDirectory(dir);
+  return {
+    mode: 'directory',
+    dir: root,
+    content_manifest_sha256,
+    file_count,
+    reproduce: {
+      content_manifest: `node artifact-identity.mjs --dir ${root}`,
+    },
+  };
+}
+
 function main(argv) {
   const dirIdx = argv.indexOf('--dir');
   const json = argv.includes('--json');
   if (dirIdx >= 0) {
-    const out = manifestFromDirectory(argv[dirIdx + 1]);
+    const out = directoryIdentity(argv[dirIdx + 1]);
     process.stdout.write(json ? JSON.stringify(out, null, 2) + '\n'
-      : `content_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\n`);
+      : `mode ${out.mode}\ndir ${out.dir}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\n`);
     return 0;
   }
   const subIdx = argv.indexOf('--subdir');
@@ -150,7 +178,7 @@ function main(argv) {
   try { out = artifactIdentity(repo, ref, subdir); }
   catch (e) { process.stderr.write(`artifact-identity: ${e.message}\n`); return 1; }
   process.stdout.write(json ? JSON.stringify(out, null, 2) + '\n'
-    : `tree_oid ${out.tree_oid}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\nreproduce: ${out.reproduce.tree_oid}\n`);
+    : `mode ${out.mode}\ntree_oid ${out.tree_oid}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\nreproduce: ${out.reproduce.tree_oid}\n`);
   return 0;
 }
 
