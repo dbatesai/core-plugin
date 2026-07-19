@@ -141,13 +141,40 @@ export function readMessage(projectPath, file) {
   return readFileSync(full, 'utf8');
 }
 
+// K16 (Hale's audit, 2026-07-16): archiveMessage renamed straight onto
+// `join(archiveDir, basename(file))` with no collision check — a bare
+// filesystem rename onto an existing path silently REPLACES it. The inbox's
+// own collision guard (atomicCreate, below) only scopes to the inbox
+// directory, never to archive/, so two distinct messages that happen to slug
+// to the same <from>--<topic>--<date> basename (one already archived, a
+// second one posted and archived later) would silently destroy the first
+// archived message on the second archive — a real loss of comms history,
+// exactly the kind of thing this channel exists to preserve. Fixed:
+// disambiguate the destination the same way atomicCreate disambiguates the
+// inbox, never overwrite an existing archived file.
+// Atomic move via link-then-unlink (same technique atomicCreate uses below):
+// linkSync fails EEXIST rather than silently replacing, closing the TOCTOU
+// gap a check-then-renameSync would leave open under concurrent archiving.
+function moveNonColliding(src, dir, filename) {
+  const dot = filename.lastIndexOf('.');
+  const base = dot > 0 ? filename.slice(0, dot) : filename;
+  const ext = dot > 0 ? filename.slice(dot) : '';
+  for (let i = 0; i < 1000; i++) {
+    const candidate = i === 0 ? filename : `${base}-${i + 1}${ext}`;
+    try { linkSync(src, join(dir, candidate)); unlinkSync(src); return candidate; }
+    catch (e) { if (e.code !== 'EEXIST') throw e; }
+  }
+  throw new Error(`archiveMessage: too many filename collisions in ${dir} for ${filename}`);
+}
+
 /** Move a message to archive/ (mark read). Idempotent: already-archived/absent → no-op. */
 export function archiveMessage(projectPath, file) {
   const proj = resolve(projectPath);
   const src = join(mailboxDir(proj), basename(file));
   if (!existsSync(src)) return false; // already archived or never existed
-  mkdirSync(archiveDir(proj), { recursive: true });
-  renameSync(src, join(archiveDir(proj), basename(file)));
+  const dir = archiveDir(proj);
+  mkdirSync(dir, { recursive: true });
+  moveNonColliding(src, dir, basename(file));
   return true;
 }
 
