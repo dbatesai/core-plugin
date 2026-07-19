@@ -21,6 +21,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { truncate as sharedTruncate } from './text-truncate.mjs';
 
 export const RISK_NUMERIC = /^risk-(\d+)-.+\.md$/;
 export const RISK_NAMED = /^risk-([a-z][a-z0-9-]*)\.md$/;
@@ -56,9 +57,12 @@ export function bestDate(fm) {
   return 'unknown';
 }
 
+// Independent review, 2026-07-19: a hand-duplicated copy of the surrogate-
+// splitting truncate() bug fixed in generate-summary-index.mjs — see
+// text-truncate.mjs for why this collapsed to a shared helper instead of a
+// second local fix.
 export function truncate(text, maxLen = SUMMARY_MAX) {
-  if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen - 1).trimEnd() + '…';
+  return sharedTruncate(text, maxLen);
 }
 
 export function buildIndex(memoriesDir) {

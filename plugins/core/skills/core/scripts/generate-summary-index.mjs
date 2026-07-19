@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadValidEnrichments } from './enrichment-sidecar.mjs';
+import { truncate as sharedTruncate } from './text-truncate.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -221,22 +222,14 @@ export function deriveSummary(body) {
 
 // Found while regression-testing the K-series UTF-8 byte-cap fix (retrieve-
 // context-hook.mjs), 2026-07-19: this is the actual source of the corruption
-// that fix's test caught. `.slice(0, maxLen - 1)` counts UTF-16 code units;
-// an astral character (many emoji, CJK extension characters) is a surrogate
-// PAIR — two code units — and a cut landing between them orphans the high
-// surrogate. That lone surrogate survives as a valid JS string but is not
-// valid Unicode text, and gets replaced with U+FFFD when later serialized to
-// UTF-8 (stdout, a file write). Same class of defect as the hook's byte-cap
-// bug, different truncation site.
+// that fix's test caught (`.slice(0, maxLen - 1)` counted UTF-16 code units
+// and could orphan a surrogate pair). An independent review the same day
+// found two more hand-duplicated copies of this exact bug
+// (generate-decisions-index.mjs, generate-risks-index.mjs) that a same-file
+// fix here didn't reach — collapsed all three into text-truncate.mjs so
+// there's no second copy left to drift.
 export function truncate(text, maxLen = SUMMARY_MAX) {
-  const t = String(text ?? '');
-  if (t.length <= maxLen) return t;
-  let end = maxLen - 1;
-  // Never split a surrogate pair: if the code unit just before the cut is a
-  // high surrogate (0xD800-0xDBFF), its low-surrogate partner sits AT `end`
-  // and would be excluded — back off one more so the whole pair drops together.
-  if (end > 0 && t.charCodeAt(end - 1) >= 0xD800 && t.charCodeAt(end - 1) <= 0xDBFF) end--;
-  return t.slice(0, end).trimEnd() + '…';
+  return sharedTruncate(text, maxLen);
 }
 
 // Active = status missing or literally 'active'. Anything else (retired, archived,
