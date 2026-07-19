@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.12.0] — 2026-07-18
+
+### Added
+- **Reasoning-tier retrieval (DC-117)** — the retrieval path can selectively escalate to a deeper reasoning tier instead of running one-size-fits-all; shipped and tested, no calibrated measurement yet of its effect on retrieval quality.
+- **Self-identifying build provenance (`source_sha`)** — `/cut-release` now stamps the exact source commit a release packages into both plugin manifests, and every telemetry row can carry the matching `producer_sha`. This release is the first to carry a real (non-`"unknown"`) value.
+- **Governed outcome-tracking core** — write-time enrichment, a terminal correctness stack, and a production outcome-writer for retrieval/answer outcomes. Schema-valid and covered by hostile-negative and fault-injection tests; not yet exercised on an installed artifact in production — that proof is the next step now that a real `source_sha` exists to anchor it.
+
+### Changed
+- **"Delivery Manager"/"DM" retired (DC-119)** — user-facing skill prose now says "agent" ("lead agent" in swarm contexts) throughout. Internal machine identifiers (`dm-profile.md`, `dm_notes`) are unchanged, pending a separate per-project identity rework.
+
+### Fixed
+- **Security (D1)** — `CORE_HOOKS_LOG_FILE`, `CORE_RETRIEVAL_STORE`, and `CORE_CLOSE_STORE` can no longer be used to redirect telemetry writes outside the trusted `~/.core` boundary; the two store variables were removed outright, the log-file variable hardened against symlink bypass.
+- A concurrency-related test-isolation bug in the retrieve-hook test suite (a shared fixture path collided under concurrent invocation).
+- A Windows-only tar-extraction bug in the test harness.
+
 ## [3.11.0] — 2026-07-15
 
 ### Added
