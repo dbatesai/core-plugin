@@ -278,9 +278,40 @@ export function withFileLock(lockPath, fn, {
     }
     sleepSync(retryDelayMs);
   }
+  // K12 (Hale's audit, 2026-07-16): this used to be `try { return fn(); }
+  // finally { releaseFileLock(...); }` — releaseFileLock's return value was
+  // discarded entirely. releaseFileLock already does the work of honestly
+  // reporting a real failure ({released:false, reason, error} — EPERM/EACCES/
+  // a generation another process claimed), but nothing ever read it, so a
+  // failed release was indistinguishable from a successful one to every caller.
+  // Fixed: a release failure is never silent now. If fn() succeeded, the
+  // release failure becomes the loud signal (a real thrown error — "report
+  // failure, never false success", the same rule releaseFileLock itself
+  // already follows). If fn() threw, its error is still what propagates
+  // (a lock-release problem must never mask the real failure that already
+  // happened), but the release failure is attached to it and logged loudly
+  // rather than dropped.
+  let result, threw = false, caught;
   try {
-    return fn();
-  } finally {
-    releaseFileLock(lockPath, got.nonce);
+    result = fn();
+  } catch (e) {
+    threw = true;
+    caught = e;
   }
+  const rel = releaseFileLock(lockPath, got.nonce);
+  if (!rel.released) {
+    const detail = `${lockPath} (reason: ${rel.reason}${rel.error ? `, error: ${rel.error}` : ''}) — lock may still be live on disk`;
+    if (threw) {
+      try { if (caught && typeof caught === 'object') caught.lockReleaseFailure = rel; } catch { /* caught may be frozen/non-object */ }
+      process.stderr.write(`withFileLock: lock release failed for ${detail} (masked by an in-flight error from fn(): ${caught && caught.message ? caught.message : caught})\n`);
+    } else {
+      const err = new Error(`withFileLock: lock release failed for ${detail}`);
+      err.code = 'LOCK_RELEASE_FAILED';
+      err.lockPath = lockPath;
+      err.releaseResult = rel;
+      throw err;
+    }
+  }
+  if (threw) throw caught;
+  return result;
 }

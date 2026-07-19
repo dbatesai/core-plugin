@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, utimesSync, rmSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -125,6 +125,48 @@ test('withFileLock throws LOCK_HELD after retry budget on a live contended lock'
     (e) => e.code === 'LOCK_HELD'
   );
   releaseFileLock(lock, got.nonce);
+});
+
+// K12 (Hale's audit, 2026-07-16): the finally block used to discard
+// releaseFileLock's return value entirely, so a real release failure (another
+// process already superseded/GC'd the generation, a filesystem error) was
+// indistinguishable from success to every caller.
+test('K12: a genuine release failure is never silent when fn() succeeds — it becomes the thrown error', () => {
+  const lock = tmpLock();
+  assert.throws(
+    () => withFileLock(lock, () => {
+      // Simulate another process superseding/GC'ing our generation while we
+      // still hold it (renaming to .done is exactly what a real release does)
+      // — by the time withFileLock's own release runs, the generation is gone.
+      const live = currentLockFile(lock);
+      
+      renameSync(live, `${live}.done`);
+      return 'fn-succeeded';
+    }),
+    (e) => e.code === 'LOCK_RELEASE_FAILED' && e.lockPath === lock && e.releaseResult && e.releaseResult.released === false,
+    'a release failure after a successful fn() must surface as a real thrown error, not silent success',
+  );
+});
+
+test('K12: a real fn() error still propagates (unmasked) even when release also fails, with the release failure attached', () => {
+  const lock = tmpLock();
+  assert.throws(
+    () => withFileLock(lock, () => {
+      const live = currentLockFile(lock);
+      
+      renameSync(live, `${live}.done`);
+      throw new Error('the-real-failure');
+    }),
+    (e) => e.message === 'the-real-failure' && e.lockReleaseFailure && e.lockReleaseFailure.released === false,
+    'fn()\'s real error must still be what propagates — a lock-release problem must never mask it',
+  );
+});
+
+test('K12 control: a clean release (fn succeeds, release succeeds) still returns fn\'s value with no throw', () => {
+  const lock = tmpLock();
+  const result = withFileLock(lock, () => 'clean-result');
+  assert.equal(result, 'clean-result');
+  assert.equal(currentLockFile(lock), null, 'lock genuinely released on the happy path');
 });
 
 // The v2 design's three-process corner (Hale, 2026-07-15) is structurally gone in
