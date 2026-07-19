@@ -5,14 +5,16 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { findOrphans, formatReport, ALLOWLIST } from '../../plugins/core/skills/core/scripts/orphan-detector.mjs';
 
-// Build a throwaway plugin tree: <root>/skills/core/{SKILL.md,scripts,protocols}.
+// Build a throwaway plugin tree: <root>/skills/core/{SKILL.md,scripts,hooks,protocols}.
 function withPlugin(fn) {
   const root = mkdtempSync(join(tmpdir(), 'orphan-'));
   const core = join(root, 'skills', 'core');
   const scripts = join(core, 'scripts');
   const probes = join(scripts, 'capability');
+  const hooks = join(core, 'hooks');
   const protocols = join(core, 'protocols');
-  for (const d of [scripts, probes, protocols, join(core, 'schemas')]) mkdirSync(d, { recursive: true });
+  const manifestDir = join(root, 'hooks'); // sibling of skills/, the real hooks.json location
+  for (const d of [scripts, probes, hooks, protocols, join(core, 'schemas'), manifestDir]) mkdirSync(d, { recursive: true });
 
   // SKILL.md indexes only good-protocol.md, and names wired.mjs in prose.
   writeFileSync(join(core, 'SKILL.md'),
@@ -30,7 +32,17 @@ function withPlugin(fn) {
   writeFileSync(join(core, 'schemas', 'descriptor.json'),
     JSON.stringify({ caps: [{ delegate: 'capability/a-probe.mjs' }] }, null, 2));
 
-  try { return fn({ root, scripts, protocols }); }
+  // Logged gap, fixed 2026-07-19: a real hook entry point (registered in
+  // hooks.json, NOT skill prose) that imports a scripts/ utility ONLY from
+  // that hook — nothing in scripts/ ever touches it.
+  writeFileSync(join(manifestDir, 'hooks.json'),
+    JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/core/hooks/a-hook.mjs"' }] }] } }, null, 2));
+  writeFileSync(join(hooks, 'a-hook.mjs'), "import { u } from '../scripts/hook-only-util.mjs';\nexport const run = u;\n");
+  writeFileSync(join(scripts, 'hook-only-util.mjs'), 'export const u = 1;\n');
+  // A hook file registered nowhere and imported by nothing — a genuine hook-level orphan.
+  writeFileSync(join(hooks, 'orphan-hook.mjs'), 'export const deadCode = 1;\n');
+
+  try { return fn({ root, scripts, hooks, protocols }); }
   finally { rmSync(root, { recursive: true, force: true }); }
 }
 
@@ -57,6 +69,27 @@ test('findOrphans: a probe reached only via a .json delegate is wired (not a fal
     const r = findOrphans({ coreRoot: root, allowlist: ALLOW });
     assert.ok(!r.orphanScripts.some((s) => s.endsWith('a-probe.mjs')),
       'a-probe.mjs is reached via the descriptor delegate — must not be flagged');
+  });
+});
+
+// Logged gap, fixed 2026-07-19 (Antigravity's catch, 2026-07-18): hook files
+// were entirely absent from the scan, so a scripts/ utility imported ONLY
+// from a hook was structurally invisible to the import closure.
+test('findOrphans: a hook registered in hooks.json wires in the scripts/ utility it ONLY imports', () => {
+  withPlugin(({ root }) => {
+    const r = findOrphans({ coreRoot: root, allowlist: ALLOW });
+    assert.ok(!r.orphanScripts.some((s) => s.includes('hooks') && s.endsWith('a-hook.mjs')),
+      'a-hook.mjs is registered directly in hooks.json');
+    assert.ok(!r.orphanScripts.some((s) => s.endsWith('hook-only-util.mjs')),
+      'hook-only-util.mjs is reached ONLY via the hook import chain — the exact defect that was invisible before the fix');
+  });
+});
+
+test('findOrphans: a hook file registered nowhere and imported by nothing is flagged (genuine hook-level dead code)', () => {
+  withPlugin(({ root }) => {
+    const r = findOrphans({ coreRoot: root, allowlist: ALLOW });
+    assert.ok(r.orphanScripts.some((s) => s.endsWith('orphan-hook.mjs')),
+      'a hook file with no manifest registration and no importer must be flagged, not silently ignored');
   });
 });
 
