@@ -306,6 +306,49 @@ test('race A/B/C: C can never acquire during a revived owner\'s wrong-owner rele
   rmSync(dir, { recursive: true, force: true });
 });
 
+// K12 (Hale's re-audit, 2026-07-19): a delayed acquirer's maxN snapshot can go
+// stale mid-acquisition — a full concurrent acquire+release cycle completing
+// entirely inside the snapshot-to-create window used to resurrect an already-
+// retired generation number instead of a fresh one, corrupting the numbering
+// invariant and producing later 'not-owner' release failures (1/8, 2/10 under
+// load). CORE_FILELOCK_TEST_DELAY_MS widens that window deterministically so
+// this is reproduced on demand rather than left to scheduler luck.
+test('K12: a stale maxN snapshot is caught post-win and backed off, never silently resurrected', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'file-lock-k12-'));
+  const lock = join(dir, 'stale-target.lock');
+  const go = join(dir, 'go');
+  const slowChild = `
+    import { acquireFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
+    import { existsSync } from 'node:fs';
+    while (!existsSync(${JSON.stringify(go)})) { /* barrier spin */ }
+    const got = acquireFileLock(${JSON.stringify(lock)});
+    process.stdout.write(JSON.stringify(got));
+    process.exit(got.ok ? 0 : (got.reason === 'stale-target' ? 9 : 1));
+  `;
+  const fastChild = `
+    import { acquireFileLock, releaseFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
+    import { existsSync } from 'node:fs';
+    while (!existsSync(${JSON.stringify(go)})) { /* barrier spin */ }
+    let got;
+    for (let i = 0; i < 500 && !(got = acquireFileLock(${JSON.stringify(lock)})).ok; i++) { /* spin for the create race */ }
+    if (!got || !got.ok) process.exit(2);
+    const rel = releaseFileLock(${JSON.stringify(lock)}, got.nonce);
+    process.exit(rel.released ? 0 : 3);
+  `;
+  const slow = spawnAsync(['--input-type=module', '-e', slowChild], { CORE_FILELOCK_TEST_DELAY_MS: '500' });
+  const fast = spawnAsync(['--input-type=module', '-e', fastChild]);
+  await new Promise(r => setTimeout(r, 100)); // let both reach the barrier
+  writeFileSync(go, '1');
+  const [slowResult, fastResult] = await Promise.all([slow, fast]);
+  assert.equal(fastResult.status, 0, `fast child completed a clean acquire+release cycle inside the delayed child's window (stderr: ${fastResult.stderr})`);
+  assert.equal(slowResult.status, 9, `delayed child detected the stale target and backed off instead of resurrecting a used generation number (stdout: ${slowResult.stdout}, stderr: ${slowResult.stderr})`);
+  // Once backed off, a normal retry must succeed cleanly at a fresh, non-colliding generation — proving the numbering invariant survived.
+  const retry = acquireFileLock(lock);
+  assert.ok(retry.ok, 'a clean retry after the backoff succeeds');
+  assert.ok(retry.gen > 1, `retry lands on a generation strictly above the completed one (got gen ${retry.gen})`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('a live-pid lock is NEVER auto-superseded, at any age (Hale round 3)', () => {
   const lock = tmpLock();
   writeFileSync(lock, JSON.stringify({ pid: process.pid, nonce: 'mine', started_at: 'x' }));

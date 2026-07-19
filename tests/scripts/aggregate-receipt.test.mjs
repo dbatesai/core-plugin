@@ -20,6 +20,7 @@ const { buildAggregateReceipt, refusalScan, collectForbiddenStrings, validateRec
   await import(pathToFileURL(join(SCRIPTS, 'aggregate-receipt.mjs')).href);
 const { runHarness, runTierPolicySweep } =
   await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
+const { VALID_TYPES } = await import(pathToFileURL(join(SCRIPTS, 'unit-vocab.mjs')).href);
 
 const GOLD = { queries: [
   { id: 'q1', query: 'omega speedmaster sale', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] },
@@ -127,11 +128,20 @@ test('K09: unit_type_counts only accepts CORE\'s closed type vocabulary, not an 
   assert.throws(() => buildAggregateReceipt(poisoned), /REFUSED.*unit_type_counts/s);
 });
 
-test('K09: unit_type_counts accepts every real closed-vocabulary type plus "other"', async () => {
+// K09 re-audit (Hale, 2026-07-19): the prior version of this test hardcoded its
+// own copy of the type list, so it passed even after the source's own copy
+// silently omitted real types (open-question, premise) -- the test proved the
+// implementation agreed with itself, not with CORE's actual vocabulary. Fixed
+// by driving the positive case from the same VALID_TYPES import the source
+// now uses, so a future canonical type can never silently become unexportable
+// again without this test catching it.
+test('K09: unit_type_counts accepts every real closed-vocabulary type (driven from VALID_TYPES itself) plus "other"', async () => {
   const { report } = await realReportAndSweep();
-  const clean = { ...report, mix: { decision: 1, risk: 1, person: 1, deliverable: 1, principle: 1, explainer: 1, 'review-finding': 1, observation: 1, topic: 1, reference: 1, feedback: 1, memory: 1, other: 1 } };
+  const mix = Object.fromEntries([...VALID_TYPES, 'other'].map(t => [t, 1]));
+  const clean = { ...report, mix };
   const receipt = buildAggregateReceipt(clean);
-  assert.equal(Object.keys(receipt.corpus.unit_type_counts).length, 13);
+  assert.equal(Object.keys(receipt.corpus.unit_type_counts).length, VALID_TYPES.size + 1);
+  for (const t of VALID_TYPES) assert.ok(t in receipt.corpus.unit_type_counts, `${t} must be exportable`);
 });
 
 test('K09: unitTypeMix derives from the real type field, not an id-prefix guess', async () => {

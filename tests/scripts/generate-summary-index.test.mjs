@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateSummaryIndex, loadFreshIndex, computeSourceSignature } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
+import { generateSummaryIndex, loadFreshIndex, computeSourceSignature, truncate, SUMMARY_MAX } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
 
 function fixtureStore() {
   const root = mkdtempSync(join(tmpdir(), 'core-idx-'));
@@ -30,6 +30,31 @@ test('summary is the H1 line stripped', () => {
   const u = res.units.find(x => x.id === 'dc-1-alpha');
   assert.match(u.summary, /Alpha decision/);
   assert.ok(!u.summary.startsWith('#'), 'leading # must be stripped');
+});
+
+// Found regression-testing the K-series UTF-8 byte-cap fix, 2026-07-19: a cut
+// landing between the two UTF-16 code units of a surrogate pair (any astral
+// character — most emoji, CJK extension characters) orphaned the high
+// surrogate, which serializes as a U+FFFD replacement character wherever the
+// truncated summary later gets written as UTF-8 (the retrieval hook's stdout,
+// PROJECT.md renders, etc). A run of emoji straddling the maxLen boundary is
+// the deterministic way to force the cut onto an actual pair boundary.
+test('truncate() never orphans a UTF-16 surrogate pair (astral characters, e.g. emoji)', () => {
+  const emoji = '🎯'.repeat(SUMMARY_MAX); // each is one surrogate pair (2 code units) — guarantees a mid-pair cut somewhere
+  const out = truncate(emoji, SUMMARY_MAX);
+  assert.ok(!out.includes('�'), 'no lone-surrogate replacement character in the JS string itself');
+  assert.ok(!Buffer.from(out, 'utf8').toString('utf8').includes('�'), 'round-tripping through UTF-8 bytes must not surface a replacement character either');
+  // Re-encode to confirm every code unit in the result pairs correctly (no dangling high/low surrogate at the very end).
+  const last = out.codePointAt(out.length - 1);
+  assert.ok(last !== undefined, 'the result decodes to a full, well-formed sequence of code points');
+});
+
+test('truncate() is a no-op under the max and appends an ellipsis only when it actually cuts', () => {
+  assert.equal(truncate('short', SUMMARY_MAX), 'short');
+  const long = 'x'.repeat(SUMMARY_MAX + 50);
+  const out = truncate(long, SUMMARY_MAX);
+  assert.ok(out.endsWith('…'), 'a genuinely truncated string gets the ellipsis marker');
+  assert.ok(out.length <= SUMMARY_MAX, 'stays within the requested bound');
 });
 
 test('topics survive as a list (canonical parser, not flat)', () => {

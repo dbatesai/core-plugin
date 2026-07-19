@@ -173,10 +173,17 @@ export function writeOkfExport(projectDir, outDir) {
   // GENERATED Related link resolves to an exported file. Hand-authored body links are
   // deliberately NOT validated — OKF requires broken links be tolerated, and prose may
   // legitimately cite paths outside the bundle (or literal example syntax).
+  //
+  // Found while completing the OKF test suite, 2026-07-19: `type:\s*\S+` used
+  // \s (which matches newlines) between the colon and the required non-empty
+  // value, so `type:\n status: active` — an EMPTY type immediately followed by
+  // the next YAML key — matched anyway, treating "status" as if it were the
+  // type's value. [ \t]* (no \n) keeps the required value on the type line
+  // itself, so a genuinely empty type is correctly caught as non-conformant.
   let invalid = 0;
   for (const rel of outputs.keys()) {
     const written = readFileSync(join(tmpDir, ...rel.split('/')), 'utf8');
-    if (!/^---\n[\s\S]*?\ntype:\s*\S+/m.test(written.slice(0, 2000))) { invalid++; continue; }
+    if (!/^---\r?\n[\s\S]*?^type:[ \t]*\S/m.test(written.slice(0, 2000))) { invalid++; continue; }
     for (const target of generatedLinks.get(rel) || []) {
       if (!existsSync(join(tmpDir, ...target.split('/')))) { invalid++; break; }
     }

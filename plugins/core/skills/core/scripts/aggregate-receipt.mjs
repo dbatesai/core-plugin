@@ -29,6 +29,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { VALID_TYPES } from './unit-vocab.mjs';
 
 /**
  * collectForbiddenStrings — the reconstruction vocabulary of a local report:
@@ -121,18 +122,19 @@ const VERSION_RE = /^[0-9A-Za-z.+-]{1,40}$/;
 const SCHEMA_RE = /^[a-z0-9-]+\/\d+$/;           // e.g. train-a-aggregate-receipt/1
 const ARM_RE = /^[a-z][a-z0-9_]{0,24}$/;          // lexical | ranking | context3 | bm25 | future arms
 const POLICY_RE = /^P\d(?:_w[0-9.]{1,6})?$/;      // P0..P2, P3_w0.8 …
-// K09 (Hale's audit, 2026-07-16): this used to be a pure SHAPE check
-// (lowercase, <=24 chars), so any arbitrary lowercase word passed — including
-// a project-specific id-naming prefix, which is exactly what leaked before the
-// root-cause fix in retrieval-harness.mjs's unitTypeMix (it now emits the real
-// `type` field, not an id-prefix guess). This is the second belt: even if some
-// other producer ever feeds unit_type_counts again, only CORE's actual closed
-// type vocabulary (priority.mjs's TYPE_TO_SECTION) plus 'other' is accepted —
-// project-specific vocabulary refuses here too, not just at the source.
-const KNOWN_UNIT_TYPES = new Set([
-  'decision', 'risk', 'person', 'deliverable', 'principle', 'explainer',
-  'review-finding', 'observation', 'topic', 'reference', 'feedback', 'memory', 'other',
-]);
+// K09 (Hale's audit, 2026-07-16, re-audited 2026-07-19): this used to be a pure
+// SHAPE check (lowercase, <=24 chars), so any arbitrary lowercase word passed —
+// including a project-specific id-naming prefix, which is exactly what leaked
+// before the root-cause fix in retrieval-harness.mjs's unitTypeMix (it now
+// emits the real `type` field, not an id-prefix guess). The first version of
+// this closed-set gate fixed that leak but introduced a NEW defect Hale's
+// re-audit caught: it was a second, hand-written copy of the type vocabulary
+// that silently omitted real canonical types (`open-question`, `premise`) —
+// the positive test passed only because it validated the implementation
+// against itself, not against CORE's actual vocabulary. Fixed by importing
+// the one real source of truth (`unit-vocab.mjs`'s `VALID_TYPES`) and adding
+// only the receipt-specific `other` fallback — no second canonical list.
+const KNOWN_UNIT_TYPES = new Set([...VALID_TYPES, 'other']);
 const MIX_KEY_RE = /^[a-z][a-z-]{0,23}$/;         // shape check; KNOWN_UNIT_TYPES is the real closed-set gate below
 const RUNGS = new Set(['literal', 'category', 'value', 'cross-domain']);
 // Bands are short prose labels — closed by SHAPE (bounded charset; real labels

@@ -219,9 +219,24 @@ export function deriveSummary(body) {
   return '';
 }
 
-function truncate(text, maxLen = SUMMARY_MAX) {
+// Found while regression-testing the K-series UTF-8 byte-cap fix (retrieve-
+// context-hook.mjs), 2026-07-19: this is the actual source of the corruption
+// that fix's test caught. `.slice(0, maxLen - 1)` counts UTF-16 code units;
+// an astral character (many emoji, CJK extension characters) is a surrogate
+// PAIR — two code units — and a cut landing between them orphans the high
+// surrogate. That lone surrogate survives as a valid JS string but is not
+// valid Unicode text, and gets replaced with U+FFFD when later serialized to
+// UTF-8 (stdout, a file write). Same class of defect as the hook's byte-cap
+// bug, different truncation site.
+export function truncate(text, maxLen = SUMMARY_MAX) {
   const t = String(text ?? '');
-  return t.length <= maxLen ? t : t.slice(0, maxLen - 1).trimEnd() + '…';
+  if (t.length <= maxLen) return t;
+  let end = maxLen - 1;
+  // Never split a surrogate pair: if the code unit just before the cut is a
+  // high surrogate (0xD800-0xDBFF), its low-surrogate partner sits AT `end`
+  // and would be excluded — back off one more so the whole pair drops together.
+  if (end > 0 && t.charCodeAt(end - 1) >= 0xD800 && t.charCodeAt(end - 1) <= 0xDBFF) end--;
+  return t.slice(0, end).trimEnd() + '…';
 }
 
 // Active = status missing or literally 'active'. Anything else (retired, archived,

@@ -161,3 +161,146 @@ test('CLI usage error on a directory with no _memories/', async () => {
   assert.throws(() => execFileSync(process.execPath, [join(SCRIPTS, 'render-okf-export.mjs'), notAStore], { encoding: 'utf8' }),
     (e) => e.status === 2);
 });
+
+// ── Additional coverage against Hale's explicit verification list
+// (core-codex/_outputs/2026-07-14/hale-okf-obsidian-projection-review.md
+// §"Verification required before build approval"), 2026-07-19 — the original
+// 14 tests covered anti-resurrection, scaffolding exclusion, orphans, link
+// density, the write refusals, and the CLI, but not: nested paths, a target
+// that never existed (vs. retired), deterministic byte-identical reruns,
+// stale-file cleanup on a source change, atomic rollback on a validation
+// failure, isolation from source mutation after the snapshot is taken, the
+// pinned OKF conformance rules themselves, and Obsidian-resolvable link paths
+// across subdirectories.
+
+function nestedFixtureStore() {
+  const root = mkdtempSync(join(tmpdir(), 'okf-nested-'));
+  const mem = join(root, '_memories');
+  mkdirSync(join(mem, 'observations', '2026-07'), { recursive: true });
+  writeFileSync(join(mem, 'dc-1-root.md'),
+    '---\nid: dc-1-root\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: obs-nested\n---\n\n# DC-1 — Root\n\nBody.');
+  writeFileSync(join(mem, 'observations', '2026-07', 'obs-nested.md'),
+    '---\nid: obs-nested\ntype: observation\nstatus: active\nedges:\n  - type: cites\n    target: dc-1-root\n---\n\n# Nested observation\n\nBody.');
+  return root;
+}
+
+test('nested units (e.g. observations/<YYYY-MM>/) export with their directory structure and cross-level links resolve', () => {
+  const root = nestedFixtureStore();
+  const { outputs } = renderOkfExport(root);
+  assert.ok(outputs.has('observations/2026-07/obs-nested.md'), 'the nested unit keeps its real relative path, not a flattened id');
+  const rootDoc = outputs.get('dc-1-root.md');
+  assert.match(rootDoc, /\]\(observations\/2026-07\/obs-nested\.md\)/, 'a root-level unit links DOWN into the nested path correctly');
+  const nestedDoc = outputs.get('observations/2026-07/obs-nested.md');
+  assert.match(nestedDoc, /\]\(\.\.\/\.\.\/dc-1-root\.md\)/, 'a nested unit links UP to a root-level target with a correct relative ../.. path');
+});
+
+test('writeOkfExport: nested cross-level links are byte-verified to resolve on disk (Obsidian/OKF path resolution)', () => {
+  const root = nestedFixtureStore();
+  const outDir = join(root, '_okf-export');
+  writeOkfExport(root, outDir);
+  const rootDoc = readFileSync(join(outDir, 'dc-1-root.md'), 'utf8');
+  const m = rootDoc.match(/\]\(([^)]+)\)/);
+  assert.ok(m, 'a generated link is present');
+  assert.ok(existsSync(join(dirname(join(outDir, 'dc-1-root.md')), m[1])), 'the relative link target actually exists on disk from the referring file\'s own directory — exactly how Obsidian/OKF resolve a markdown path link');
+});
+
+test('an edge to a target id that never existed is filtered exactly like a retired target (missing vs. retired share the same safe path)', () => {
+  const root = fixtureStore();
+  writeFileSync(join(root, '_memories', 'dc-5-dangling.md'),
+    '---\nid: dc-5-dangling\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-999-never-existed\n---\n\n# DC-5\n\nBody.');
+  const { outputs, manifest } = renderOkfExport(root);
+  const doc = outputs.get('dc-5-dangling.md');
+  assert.ok(!doc.includes('## Related'), 'a unit whose only edge targets a nonexistent id gets no Related block at all');
+  assert.equal(manifest.counts.edges_filtered_inactive_or_external, 2, 'both the retired-target edge (fixture) and the never-existed target are counted as filtered');
+});
+
+test('deterministic reruns are byte-identical, not just non-throwing (same source, two full renders)', () => {
+  const root = fixtureStore();
+  const first = renderOkfExport(root);
+  const second = renderOkfExport(root);
+  assert.deepEqual([...first.outputs.entries()].sort(), [...second.outputs.entries()].sort(),
+    'two renders of an unchanged store must produce byte-identical output per file, not merely the same file set');
+  assert.equal(first.manifest.snapshot_id, second.manifest.snapshot_id, 'the content-derived snapshot id is stable across reruns of unchanged source');
+});
+
+test('a stale file from a prior export is removed when the source unit disappears (retirement) before the next run', () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  writeOkfExport(root, outDir);
+  assert.ok(existsSync(join(outDir, 'dc-4-orphan.md')), 'sanity: the first run exported the orphan unit');
+  // Retire the unit between runs — this is the "stale prior export" case Hale named:
+  // the second run must not leave dc-4-orphan.md behind from the first run.
+  writeFileSync(join(root, '_memories', 'dc-4-orphan.md'),
+    '---\nid: dc-4-orphan\ntype: observation\nstatus: retired\n---\n\n# DC-4 — No edges\n\nBody.');
+  writeOkfExport(root, outDir);
+  assert.ok(!existsSync(join(outDir, 'dc-4-orphan.md')), 'a unit retired between runs must not survive as a stale file in the regenerated export');
+});
+
+test('a leftover tmp directory from a different pid does not block or corrupt a fresh export (own-pid-only cleanup)', () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  // Simulate a crashed prior run's leftover temp dir under a DIFFERENT pid —
+  // writeOkfExport only ever rmSync's its OWN `${outDir}.tmp-${process.pid}`.
+  const staleTmp = `${outDir}.tmp-999999999`;
+  mkdirSync(staleTmp, { recursive: true });
+  writeFileSync(join(staleTmp, 'junk.md'), 'leftover from a crashed run');
+  const manifest = writeOkfExport(root, outDir);
+  assert.equal(manifest.counts.exported_units, 3, 'a fresh run succeeds normally regardless of an unrelated stale tmp dir');
+  assert.ok(existsSync(join(outDir, MANIFEST_NAME)), 'the real export landed');
+  rmSync(staleTmp, { recursive: true, force: true });
+});
+
+test('a post-write validation failure rolls back atomically — the prior good export is left untouched, never partially overwritten', () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  const goodManifest = writeOkfExport(root, outDir);
+  const goodAlpha = readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8');
+  // Introduce a unit with an empty `type:` — renderOkfExport still exports it
+  // (it only warns), but writeOkfExport's own post-write conformance check
+  // (parseable frontmatter with a NON-EMPTY type) must catch it and abort
+  // before the swap, per the "validate the temp dir, then atomically swap"
+  // contract — a real failure here must never partially clobber outDir.
+  writeFileSync(join(root, '_memories', 'dc-6-bad-type.md'),
+    '---\nid: dc-6-bad-type\ntype:\nstatus: active\n---\n\n# DC-6\n\nBody.');
+  assert.throws(() => writeOkfExport(root, outDir), (e) => e.code === 'POST_WRITE_VALIDATION_FAILED');
+  assert.equal(readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8'), goodAlpha, 'the previously-written good export must survive a failed subsequent write untouched');
+  assert.equal(readFileSync(join(outDir, MANIFEST_NAME), 'utf8'), JSON.stringify(goodManifest, null, 2) + '\n', 'the manifest from the last GOOD write is still what\'s on disk');
+});
+
+test('renderOkfExport output is captured by value at call time — mutating source files afterward cannot retroactively change an already-returned result', () => {
+  const root = fixtureStore();
+  const { outputs } = renderOkfExport(root);
+  const before = outputs.get('dc-1-alpha.md');
+  // Mutate the live source AFTER the snapshot was captured and returned.
+  writeFileSync(join(root, '_memories', 'dc-1-alpha.md'),
+    '---\nid: dc-1-alpha\ntype: decision\nstatus: active\n---\n\n# DC-1 — MUTATED AFTER SNAPSHOT\n\nThis must not appear in the already-returned outputs.');
+  assert.equal(outputs.get('dc-1-alpha.md'), before, 'the already-returned outputs map holds captured bytes, not a live re-read of the source file');
+});
+
+test('OKF v0.1-draft conformance: every exported file has parseable frontmatter with a non-empty type, and unknown frontmatter keys are tolerated', () => {
+  const root = fixtureStore();
+  // An unknown/custom frontmatter key (an OKF/Obsidian "extra property") must
+  // survive the export untouched — OKF v0.1 explicitly tolerates unknown fields.
+  writeFileSync(join(root, '_memories', 'dc-7-extra-field.md'),
+    '---\nid: dc-7-extra-field\ntype: decision\nstatus: active\nsome_custom_wrapper_field: whatever-a-downstream-tool-wants\n---\n\n# DC-7\n\nBody.');
+  const outDir = join(root, '_okf-export');
+  writeOkfExport(root, outDir);
+  for (const name of ['dc-1-alpha.md', 'dc-2-beta.md', 'dc-4-orphan.md', 'dc-7-extra-field.md']) {
+    const text = readFileSync(join(outDir, name), 'utf8');
+    assert.match(text, /^---\n[\s\S]*?\ntype:\s*\S+/, `${name} must have parseable frontmatter with a non-empty type — the entire OKF v0.1-draft conformance bar`);
+  }
+  const extra = readFileSync(join(outDir, 'dc-7-extra-field.md'), 'utf8');
+  assert.match(extra, /some_custom_wrapper_field: whatever-a-downstream-tool-wants/, 'an unknown frontmatter key must be tolerated (passed through), not stripped or rejected');
+});
+
+test('OKF v0.1-draft conformance: a hand-authored broken link in body prose is tolerated, never validated or rejected (only GENERATED links are checked)', () => {
+  const root = fixtureStore();
+  writeFileSync(join(root, '_memories', 'dc-8-broken-link.md'),
+    '---\nid: dc-8-broken-link\ntype: decision\nstatus: active\n---\n\n# DC-8\n\nSee [this thing](does-not-exist-anywhere.md) for context.');
+  const outDir = join(root, '_okf-export');
+  const manifest = writeOkfExport(root, outDir); // must NOT throw — OKF requires broken links be tolerated
+  assert.ok(existsSync(join(outDir, 'dc-8-broken-link.md')));
+  assert.equal(manifest.counts.exported_units, 4);
+  const text = readFileSync(join(outDir, 'dc-8-broken-link.md'), 'utf8');
+  assert.match(text, /does-not-exist-anywhere\.md/, 'the hand-authored broken link is preserved as-is, not stripped or "fixed"');
+});

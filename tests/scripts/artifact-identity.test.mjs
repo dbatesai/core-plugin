@@ -116,14 +116,20 @@ test('CLI two-arg form works without --subdir (c5 regression, 2026-07-17)', () =
 // filesystem tree) and no record of which directory, unlike git-mode's
 // self-describing ref/subdir/tree_oid. A saved JSON blob from one mode couldn't
 // be told apart from the other except by which fields happened to be absent.
+//
+// Re-audited 2026-07-19: the first fix's `dir` field (the canonicalized
+// absolute local path) fails CORE's own refusal-scan boundary — a
+// machine-local path is not content identity and must never appear in a
+// publishable identity block. `mode` alone is now the self-describing field;
+// `dir` must be ABSENT and the reproduce command must stay location-neutral.
 test('K17: git-mode identity self-describes its mode', { skip: !HEAD }, () => {
   const out = artifactIdentity(REPO, HEAD, 'plugins/core');
   assert.equal(out.mode, 'git');
   assert.equal(out.ref, HEAD);
 });
 
-test('K17: directory-mode identity self-describes its mode and records the directory', { skip: !HEAD }, async () => {
-  const { mkdtempSync: mktmp, mkdirSync, rmSync: rm, realpathSync } = await import('node:fs');
+test('K17: directory-mode identity self-describes its mode without leaking the local path', { skip: !HEAD }, async () => {
+  const { mkdtempSync: mktmp, mkdirSync, rmSync: rm } = await import('node:fs');
   const dir = mktmp(join(tmpdir(), 'ai-k17-'));
   const treeDir = join(dir, 'tree');
   mkdirSync(treeDir, { recursive: true });
@@ -139,8 +145,10 @@ test('K17: directory-mode identity self-describes its mode and records the direc
     execFileSync('tar', ['-x', '-f', 'e.tar', '-C', 'tree'], { cwd: dir });
     const out = directoryIdentity(treeDir);
     assert.equal(out.mode, 'directory');
-    assert.equal(out.dir, realpathSync(treeDir), 'the exact (canonicalized) directory used must be recorded, not just the hash');
+    assert.ok(!('dir' in out), 'the local absolute directory path must NOT appear in the identity block (K17 re-audit, refusal-scan boundary)');
     assert.match(out.content_manifest_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(out.reproduce.content_manifest, 'node artifact-identity.mjs --dir <dir>',
+      'the reproduce command must stay location-neutral, never the real interpolated path');
     // The two modes must never be shape-ambiguous: a consumer reading `mode`
     // alone must be able to tell which computation path produced this blob.
     const gitOut = artifactIdentity(REPO, HEAD, 'plugins/core');
@@ -148,7 +156,7 @@ test('K17: directory-mode identity self-describes its mode and records the direc
   } finally { rm(dir, { recursive: true, force: true }); }
 });
 
-test('K17: CLI --dir output prints the mode, not just the hash', { skip: !HEAD }, async () => {
+test('K17: CLI --dir output prints the mode, never the local path', { skip: !HEAD }, async () => {
   const { mkdtempSync: mktmp, mkdirSync, rmSync: rm } = await import('node:fs');
   const dir = mktmp(join(tmpdir(), 'ai-k17-cli-'));
   const treeDir = join(dir, 'tree');
@@ -158,7 +166,10 @@ test('K17: CLI --dir output prints the mode, not just the hash', { skip: !HEAD }
     execFileSync('tar', ['-x', '-f', 'e.tar', '-C', 'tree'], { cwd: dir });
     const out = execFileSync(process.execPath, [join(SCRIPTS, 'artifact-identity.mjs'), '--dir', treeDir], { encoding: 'utf8' });
     assert.match(out, /^mode directory$/m, 'the human-readable --dir output must name its own mode');
+    assert.ok(!out.includes(treeDir), 'the human-readable --dir output must not leak the local absolute path');
     const json = execFileSync(process.execPath, [join(SCRIPTS, 'artifact-identity.mjs'), '--dir', treeDir, '--json'], { encoding: 'utf8' });
-    assert.equal(JSON.parse(json).mode, 'directory');
+    const parsed = JSON.parse(json);
+    assert.equal(parsed.mode, 'directory');
+    assert.ok(!('dir' in parsed), 'the JSON --dir output must not carry a dir field with the local path');
   } finally { rm(dir, { recursive: true, force: true }); }
 });
