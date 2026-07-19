@@ -76,6 +76,24 @@ const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
 export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'trace-write-failed', 'hook-log-write-failed'];
 
+// CORE_REASONING_ARM (2026-07-19): a test-only control for the preregistered
+// three-arm efficacy pilot (Hale + Antigravity + Keel convergence). 'automatic'
+// is the unchanged shipped default -- the directive fires only on a true Tier 1
+// zero-hit, exactly as before this existed. 'deterministic-only' and 'always-on'
+// exist ONLY so the pilot can force a real, distinguishable behavioral
+// difference per arm; no real user should ever set this. An explicit but
+// unrecognized value throws rather than silently falling back to 'automatic' --
+// a test harness that thinks it requested one arm and silently got another
+// would invalidate the pilot, so wrong input must be loud, not swallowed.
+export const REASONING_ARMS = ['automatic', 'deterministic-only', 'always-on'];
+export function resolveReasoningArm(rawValue) {
+  if (rawValue === undefined || rawValue === '') return 'automatic';
+  if (!REASONING_ARMS.includes(rawValue)) {
+    throw new Error(`CORE_REASONING_ARM must be one of ${REASONING_ARMS.join('/')}, got ${JSON.stringify(rawValue)}`);
+  }
+  return rawValue;
+}
+
 export function receipt(action, reason, extra = {}) {
   const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
   const r = RETRIEVAL_REASONS.includes(reason) ? reason : 'pipeline-error';
@@ -142,6 +160,17 @@ export async function main() {
   if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
+  // Single source of truth for whether the Tier 3 directive fires this turn —
+  // computed once, read both by the retrieval-log row (so requested vs. actual
+  // is auditable) and the later message-building block, so they can never
+  // disagree with each other. Explicit throw on an unrecognized arm value
+  // propagates through the outer try/catch as pipeline-error, which is the
+  // correct fail-closed behavior for a malformed test request.
+  const requestedArm = resolveReasoningArm(process.env.CORE_REASONING_ARM);
+  const zeroHit = final.length === 0;
+  const shouldEmitDirective = requestedArm === 'always-on' ? true
+    : requestedArm === 'deterministic-only' ? false
+    : zeroHit; // 'automatic' — unchanged shipped default
   // Telemetry outcome for the single terminal receipt (priority: pipeline
   // failure > event-write > trace-write > opt-out > ok).
   let telemetryReason = 'ok';
@@ -267,6 +296,9 @@ export async function main() {
         candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
         selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
+        // Only recorded when the pilot's control is actually in use — every
+        // ordinary retrieval-log row is byte-identical to before this existed.
+        ...(requestedArm !== 'automatic' ? { requested_arm: requestedArm, directive_fired: shouldEmitDirective } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
       // Stage the pending-marker write for AFTER delivery is confirmed below
@@ -310,19 +342,33 @@ export async function main() {
   }
 
   let reasoningDirective = '';
-  if (final.length === 0) {
+  if (shouldEmitDirective) {
     try {
       const shards = selectCandidates(prompt, store, { shardSize: 80 });
       if (shards.length) {
         const unitsTotal = shards[0].units_total;
-        reasoningDirective = `CORE reasoning escalation required: Tier 1 found no lexical context. Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
+        const why = zeroHit
+          ? 'Tier 1 found no lexical context.'
+          : `CORE_REASONING_ARM=${requestedArm} forces escalation regardless of Tier 1 result.`;
+        reasoningDirective = `CORE reasoning escalation required: ${why} Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
       }
     } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
   }
 
   const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
-  if (trace.pack && trace.pack.text) process.stdout.write(trace.pack.text);
-  else if (reasoningDirective) process.stdout.write(reasoningDirective.slice(0, OUTPUT_BYTE_CAP));
+  // Both can be true at once now (always-on can force the directive even when
+  // Tier 1 also found hits) — before CORE_REASONING_ARM existed this was
+  // structurally impossible (the directive only ever fired on zero-hit), so
+  // the old if/else-if silently dropping one of them was never reachable.
+  // Deliver both, directive appended after the pack, still under the same cap.
+  const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
+  if (packText && reasoningDirective) {
+    process.stdout.write((packText + reasoningDirective).slice(0, OUTPUT_BYTE_CAP));
+  } else if (packText) {
+    process.stdout.write(packText);
+  } else if (reasoningDirective) {
+    process.stdout.write(reasoningDirective.slice(0, OUTPUT_BYTE_CAP));
+  }
 
   // NOW persist the pending marker — after delivery, never before (Hale
   // audit, 2026-07-17). Only when something was actually injected: a marker
@@ -343,7 +389,11 @@ export async function main() {
   let reason;
   if (reasoningDirective) {
     action = 'delivered';
-    reason = 'no-hit';
+    // 'no-hit' is only honest for the true zero-hit case (unchanged from
+    // before this control existed). always-on can now force the directive
+    // even when Tier 1 found real hits -- reporting 'no-hit' there would be
+    // a fabrication, so fall back to the actual telemetry outcome instead.
+    reason = zeroHit ? 'no-hit' : telemetryReason;
   } else if (injected) {
     action = 'delivered';
     reason = telemetryReason;

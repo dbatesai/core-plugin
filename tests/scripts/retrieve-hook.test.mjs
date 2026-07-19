@@ -180,6 +180,69 @@ test('empty result is an honest no-hit at the tier actually run — never a fabr
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// CORE_REASONING_ARM (2026-07-19): the preregistered three-arm efficacy pilot
+// control. 'automatic' must be provably byte-identical to today's behavior
+// (every test above this block already proves that — none of them set the
+// var). These tests exercise the two new arms and the fail-closed contract.
+
+test('CORE_REASONING_ARM=deterministic-only suppresses the directive even on a true zero-hit', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-det-')));
+  try {
+    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'deterministic-only' }, root);
+    assert.doesNotMatch(out, /CORE reasoning escalation required/, 'deterministic-only must never emit the Tier 3 directive');
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, 'deterministic-only');
+    assert.equal(evt.directive_fired, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CORE_REASONING_ARM=always-on forces the directive even when Tier 1 found real hits', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-always-')));
+  try {
+    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'always-on' }, root);
+    assert.match(out, /widget/i, 'the real hit content must still be delivered, not silently dropped');
+    assert.match(out, /CORE reasoning escalation required/, 'always-on must force the directive even with hits present');
+    assert.match(out, /forces escalation regardless of Tier 1 result/, 'the forced case must not claim a fabricated zero-hit reason');
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, 'always-on');
+    assert.equal(evt.directive_fired, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CORE_REASONING_ARM=always-on with no hits: directive fires, reason stays honestly no-hit', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-always-nohit-')));
+  try {
+    runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'always-on' }, root);
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, 'always-on');
+    assert.equal(evt.directive_fired, true);
+    assert.equal(evt.result, 'no-hit', 'zero-hit is still honestly reported at the event-log level regardless of arm');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CORE_REASONING_ARM unset behaves identically to "automatic" (no requested_arm/directive_fired fields at all)', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-unset-')));
+  try {
+    runHook('widget decision', { CORE_METRICS_ENABLED: '1' }, root);
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, undefined, 'ordinary retrieval-log rows must stay byte-identical to before this control existed');
+    assert.equal(evt.directive_fired, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CORE_REASONING_ARM with a garbage value fails closed (pipeline-error), not a silent fallback to automatic', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-bad-')));
+  try {
+    const res = spawnSync('node', [HOOK], {
+      input: JSON.stringify({ prompt: 'widget decision', cwd: root }),
+      env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), CORE_REASONING_ARM: 'not-a-real-arm' },
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, 'a hook must never block the turn, even on a malformed test request');
+    assert.equal(res.stdout, '', 'no context/directive delivered on a rejected arm request');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('metrics opt-out means zero telemetry rows', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-')));
   try {
