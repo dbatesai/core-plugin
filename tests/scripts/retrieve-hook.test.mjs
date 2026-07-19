@@ -230,19 +230,6 @@ test('CORE_REASONING_ARM unset behaves identically to "automatic" (no requested_
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('CORE_REASONING_ARM with a garbage value fails closed (pipeline-error), not a silent fallback to automatic', () => {
-  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-bad-')));
-  try {
-    const res = spawnSync('node', [HOOK], {
-      input: JSON.stringify({ prompt: 'widget decision', cwd: root }),
-      env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), CORE_REASONING_ARM: 'not-a-real-arm' },
-      encoding: 'utf8',
-    });
-    assert.equal(res.status, 0, 'a hook must never block the turn, even on a malformed test request');
-    assert.equal(res.stdout, '', 'no context/directive delivered on a rejected arm request');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
 test('metrics opt-out means zero telemetry rows', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-')));
   try {
@@ -282,6 +269,14 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
     // via the explicit CORE_TEST_FORCE_PIPELINE_ERROR seam and runs the real
     // subprocess end to end — fail-open proven, not assumed.
     { name: 'pipeline-error-genuine-crash', env: { CORE_TEST_FORCE_PIPELINE_ERROR: '1' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
+    // Hale catch, 2026-07-19: resolveReasoningArm's throw originally landed
+    // OUTSIDE every try/catch in main(), so it escaped to the outer
+    // main().catch(() => process.exit(0)) with no receipt() call at all —
+    // exit 0 was right (never block the turn) but the promised typed
+    // pipeline-error row silently never got written. The standalone garbage-
+    // value test only checked exit/stdout, which is exactly why it missed
+    // this; this table-driven branch checks the actual hook-log receipt.
+    { name: 'reasoning-arm-invalid-genuine-crash', env: { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'not-a-real-arm' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
     { name: 'store-unavailable', env: {}, prompt: 'widget', expect: { action: 'skip', reason: 'store-unavailable' }, needStore: false, setup: (root) => { wf(join(root, '_memories'), 'not a directory'); } },
     { name: 'no-hit', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'zzqx unmatchable quark', expect: { action: 'delivered', reason: 'no-hit' } },
     { name: 'delivery-failed', env: { CORE_RETRIEVAL_BYTE_CAP: '0' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'delivery-failed' } },

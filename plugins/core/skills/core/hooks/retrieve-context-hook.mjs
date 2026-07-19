@@ -144,6 +144,7 @@ export async function main() {
   // and emits the canonical per-turn retrieval event from the same run, so the
   // telemetry corpus is product-emitted, not agent-behavior-dependent.
   let trace = null;
+  let requestedArm = 'automatic';
   const configuredCap = Number(process.env.CORE_RETRIEVAL_BYTE_CAP);
   const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
     ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
@@ -155,18 +156,19 @@ export async function main() {
     // gets caught at all). Same pattern as CORE_FILELOCK_NO_LINK: an explicit,
     // self-documenting test seam, never read in normal operation.
     if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
+    // Resolved INSIDE this try (Hale catch, 2026-07-19): a throw here used to
+    // land outside every try/catch in this function, so it escaped all the
+    // way to the outer main().catch(() => process.exit(0)) with no receipt()
+    // call at all -- exit 0 was correct (never block the turn) but the
+    // promised typed pipeline-error row silently never got written. Resolving
+    // it here reuses the exact same fault seam as buildRetrievalTrace instead
+    // of inventing a second one.
+    requestedArm = resolveReasoningArm(process.env.CORE_REASONING_ARM);
     trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
   } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
   if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
-  // Single source of truth for whether the Tier 3 directive fires this turn —
-  // computed once, read both by the retrieval-log row (so requested vs. actual
-  // is auditable) and the later message-building block, so they can never
-  // disagree with each other. Explicit throw on an unrecognized arm value
-  // propagates through the outer try/catch as pipeline-error, which is the
-  // correct fail-closed behavior for a malformed test request.
-  const requestedArm = resolveReasoningArm(process.env.CORE_REASONING_ARM);
   const zeroHit = final.length === 0;
   const shouldEmitDirective = requestedArm === 'always-on' ? true
     : requestedArm === 'deterministic-only' ? false
@@ -176,6 +178,7 @@ export async function main() {
   let telemetryReason = 'ok';
   let retrievalId = null;
   let outcomeNote = null; // bounded note when the post-answer outcome close failed
+  let reasoningDirective = ''; // declared here, not inside the try below, so it's still visible after the catch
   // Deferred-write inputs for the NEW pending marker (Hale audit, 2026-07-17,
   // hazard: "creates pending state before delivery"). The marker must only be
   // persisted once this turn's context is actually confirmed delivered to the
@@ -282,6 +285,27 @@ export async function main() {
           outcomeNote = String(err && err.message).slice(0, 80);
         }
       }
+      // Built here, BEFORE the event record below (Hale catch, 2026-07-19):
+      // recording directive_fired from the shouldEmitDirective PREDICATE, not
+      // the actual constructed string, meant a trial where selectCandidates
+      // threw (fail-open, directive silently stays '') would still log
+      // directive_fired:true -- requested and actual could disagree with no
+      // way to tell from the row alone, exactly the contamination risk Hale
+      // named. Moving construction here lets the recorded field reflect what
+      // was actually built, not merely requested.
+      if (shouldEmitDirective) {
+        try {
+          const shards = selectCandidates(prompt, store, { shardSize: 80 });
+          if (shards.length) {
+            const unitsTotal = shards[0].units_total;
+            const why = zeroHit
+              ? 'Tier 1 found no lexical context.'
+              : `CORE_REASONING_ARM=${requestedArm} forces escalation regardless of Tier 1 result.`;
+            reasoningDirective = `CORE reasoning escalation required: ${why} Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
+          }
+        } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
+      }
+
       const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
       const queryTerms = tokenize(prompt).slice(0, 8);
       const out = recordRetrievalEvent(store, {
@@ -298,7 +322,7 @@ export async function main() {
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
         // Only recorded when the pilot's control is actually in use — every
         // ordinary retrieval-log row is byte-identical to before this existed.
-        ...(requestedArm !== 'automatic' ? { requested_arm: requestedArm, directive_fired: shouldEmitDirective } : {}),
+        ...(requestedArm !== 'automatic' ? { requested_arm: requestedArm, directive_fired: Boolean(reasoningDirective) } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
       // Stage the pending-marker write for AFTER delivery is confirmed below
@@ -339,20 +363,6 @@ export async function main() {
     }
   } catch {
     telemetryReason = 'pipeline-error'; // fail-open by contract — surfaced in the terminal receipt below
-  }
-
-  let reasoningDirective = '';
-  if (shouldEmitDirective) {
-    try {
-      const shards = selectCandidates(prompt, store, { shardSize: 80 });
-      if (shards.length) {
-        const unitsTotal = shards[0].units_total;
-        const why = zeroHit
-          ? 'Tier 1 found no lexical context.'
-          : `CORE_REASONING_ARM=${requestedArm} forces escalation regardless of Tier 1 result.`;
-        reasoningDirective = `CORE reasoning escalation required: ${why} Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
-      }
-    } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
   }
 
   const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
