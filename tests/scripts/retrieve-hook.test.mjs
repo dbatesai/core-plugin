@@ -230,6 +230,23 @@ test('CORE_REASONING_ARM unset behaves identically to "automatic" (no requested_
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// Hale catch (2026-07-19, blueprint review): the preregistration's
+// "escalation-only" arm IS today's shipped default behavior -- the pilot
+// legitimately requests it by explicitly setting CORE_REASONING_ARM=automatic
+// (not by leaving the var unset, which is what a real user does). The prior
+// gate (`requestedArm !== 'automatic'`) gave that explicit request no
+// observable receipt at all, so the runner's own fail-closed contract would
+// have spoiled every escalation-only trial with nothing to check against.
+test('CORE_REASONING_ARM=automatic (explicit) DOES get an observable receipt, unlike leaving it unset', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-explicit-automatic-')));
+  try {
+    runHook('widget decision', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'automatic' }, root);
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, 'automatic', 'an explicit pilot request for the escalation-only arm must be auditable, not indistinguishable from an ordinary user who never set the var');
+    assert.equal(evt.directive_fired, false, 'a real hit exists, so automatic does not escalate -- same behavior as unset, but now observable');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('metrics opt-out means zero telemetry rows', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-')));
   try {

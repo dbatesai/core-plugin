@@ -322,9 +322,17 @@ export async function main() {
         candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
         selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
-        // Only recorded when the pilot's control is actually in use — every
-        // ordinary retrieval-log row is byte-identical to before this existed.
-        ...(requestedArm !== 'automatic' ? { requested_arm: requestedArm, directive_fired: Boolean(reasoningDirective) } : {}),
+        // Gated on the env var being EXPLICITLY set (Hale catch, 2026-07-19),
+        // not on the resolved arm differing from 'automatic'. An ordinary
+        // user who never touches CORE_REASONING_ARM still gets zero new
+        // fields -- byte-identical to before this existed. But the pilot's
+        // "escalation-only" arm (the preregistration's name for today's
+        // shipped default behavior) legitimately requests 'automatic'
+        // explicitly, and the prior condition gave that arm no observable
+        // receipt at all -- every escalation-only trial would have spoiled
+        // under the runner's own fail-closed contract, since there was
+        // nothing to check requested_arm against.
+        ...(process.env.CORE_REASONING_ARM !== undefined ? { requested_arm: requestedArm, directive_fired: Boolean(reasoningDirective) } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
       // Stage the pending-marker write for AFTER delivery is confirmed below
