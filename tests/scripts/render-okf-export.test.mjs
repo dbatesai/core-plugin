@@ -304,3 +304,32 @@ test('OKF v0.1-draft conformance: a hand-authored broken link in body prose is t
   const text = readFileSync(join(outDir, 'dc-8-broken-link.md'), 'utf8');
   assert.match(text, /does-not-exist-anywhere\.md/, 'the hand-authored broken link is preserved as-is, not stripped or "fixed"');
 });
+
+// Antigravity's review, 2026-07-19: does a cyclic edge relationship in the
+// memory graph make the export traverse infinitely? renderOkfExport's edge
+// rendering is a single FLAT pass — for each unit, it renders exactly that
+// unit's own outgoing frontmatter edges as one line each (render-okf-export.mjs,
+// the main units loop). It never follows a rendered edge to walk the graph
+// further, so there is no recursion into the edge structure at all — a cycle
+// is structurally incapable of causing unbounded work here, unlike a real
+// graph-walk (e.g. Tier-2 edge-walk retrieval, which is recursive and needs
+// its own hop limit). This test proves it directly rather than by inspection:
+// a real A<->B cycle exports cleanly, fast, with exactly the expected two
+// cross-links, and completion itself is the proof against a runaway loop.
+test('a cyclic edge relationship (A cites B, B cites A back) exports cleanly — no infinite loop, exactly one link each way', () => {
+  const root = mkdtempSync(join(tmpdir(), 'okf-cycle-'));
+  const mem = join(root, '_memories');
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'dc-a.md'),
+    '---\nid: dc-a\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-b\n---\n\n# A\n\nCites B.');
+  writeFileSync(join(mem, 'dc-b.md'),
+    '---\nid: dc-b\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-a\n---\n\n# B\n\nCites A back — a real cycle.');
+  const start = Date.now();
+  const { outputs, manifest } = renderOkfExport(root);
+  assert.ok(Date.now() - start < 5000, 'a two-node cycle must complete near-instantly, not hang or loop');
+  const a = outputs.get('dc-a.md');
+  const b = outputs.get('dc-b.md');
+  assert.equal((a.match(/\]\(dc-b\.md\)/g) || []).length, 1, 'A links to B exactly once, not repeated by a cycle walk');
+  assert.equal((b.match(/\]\(dc-a\.md\)/g) || []).length, 1, 'B links to A exactly once, not repeated by a cycle walk');
+  assert.equal(manifest.counts.edges_rendered, 2, 'exactly the two direct edges, nothing amplified by the cycle');
+});
