@@ -7,11 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Docs
+- Corrected two v3.12.0 release-note inaccuracies found in post-release review (Hale, 2026-07-19): the `producer_sha` scope claim below now says "recorded retrieval-outcome row" (the actual scope) instead of "telemetry row"; the Codex manifest's companion-utilities count and list are now consistent with the Claude manifest (six, including `/metrics-package`). The immutable `v3.12.0` tag is unchanged — these are forward corrections on `next`.
+
 ## [3.12.0] — 2026-07-18
 
 ### Added
 - **Reasoning-tier retrieval (DC-117)** — the retrieval path can selectively escalate to a deeper reasoning tier instead of running one-size-fits-all; shipped and tested, no calibrated measurement yet of its effect on retrieval quality.
-- **Self-identifying build provenance (`source_sha`)** — `/cut-release` now stamps the exact source commit a release packages into both plugin manifests, and every telemetry row can carry the matching `producer_sha`. This release is the first to carry a real (non-`"unknown"`) value.
+- **Self-identifying build provenance (`source_sha`)** — `/cut-release` now stamps the exact source commit a release packages into both plugin manifests, and every recorded retrieval-outcome row can carry the matching `producer_sha`. This release is the first to carry a real (non-`"unknown"`) value.
 - **Governed outcome-tracking core** — write-time enrichment, a terminal correctness stack, and a production outcome-writer for retrieval/answer outcomes. Schema-valid and covered by hostile-negative and fault-injection tests; not yet exercised on an installed artifact in production — that proof is the next step now that a real `source_sha` exists to anchor it.
 
 ### Changed
