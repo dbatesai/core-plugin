@@ -69,8 +69,12 @@ function buildTurn({ promptId, exposedContent, exposedStdout = exposedContent, e
   return { lines, anchorUuid };
 }
 
+// expectedPackText alone (no directive) IS the full expected emission, per
+// the oracle's own deriveExpectedEmission() branching — pack-only, no
+// truncation, matches this string byte-for-byte as long as it's under the
+// byte cap.
 function baseArgs(overrides = {}) {
-  return { expectedPromptId: 'p-1', expectedPackText: 'pack text alone', expectedFullInjectedContext: 'full injected context', ...overrides };
+  return { expectedPromptId: 'p-1', expectedPackText: 'default pack text', expectedDirectiveText: '', ...overrides };
 }
 
 test('happy path: tool-using turn — real exposure survives, terminal end_turn is the answer', () => {
@@ -85,11 +89,51 @@ test('happy path: tool-using turn — real exposure survives, terminal end_turn 
       ],
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.finalAnswerText, 'Here is the final answer.');
     assert.equal(result.injectedContextHash, sha256Hex(full));
-    assert.equal(result.packSha256, sha256Hex('pack text alone'));
+    assert.equal(result.packSha256, sha256Hex(full));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Real emission contract: pack + directive, UTF-8 byte-capped, exactly as
+// retrieve-context-hook.mjs emits it — the oracle must derive this itself,
+// not trust a caller-supplied "full context" independent of the pack.
+test('pack + directive combine under the real byte-cap contract, derived internally', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const pack = 'pack portion. ';
+    const directive = 'directive portion.';
+    const combined = pack + directive; // well under the 2048 default cap
+    const { lines } = buildTurn({ promptId: 'p-1', exposedContent: combined, exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }] });
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: pack, expectedDirectiveText: directive }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.packSha256, sha256Hex(pack), 'packSha256 is the pack ALONE, not the combined emission');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Hale re-audit (hale--f2c52de-two-join-failures), item 2: expectedPackText
+// and the old expectedFullInjectedContext used to be two unrelated
+// assertions -- a caller could fabricate a pack and separately supply the
+// transcript's real observed content, proving context->answer but nothing
+// about pack->context. Now there is no such call shape: the derived
+// emission MUST come from expectedPackText/expectedDirectiveText, so a
+// pack/directive pair that doesn't actually combine to the observed bytes
+// fails, even if some other unrelated string would have matched.
+test('round 3 item 2: a fabricated pack cannot be paired with unrelated observed content to force ok:true', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const realObserved = 'the real host-injected bytes';
+    const { lines } = buildTurn({ promptId: 'p-1', exposedContent: realObserved, exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }] });
+    const path = writeTranscript(root, lines);
+    // A caller cannot pass "the real observed content" directly anymore —
+    // it must derive from pack+directive. A fabricated pack that doesn't
+    // actually equal the observed bytes must fail.
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: 'a fabricated, unrelated pack', expectedDirectiveText: '' }));
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'HOST_EXPOSURE_HASH_MISMATCH');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -104,7 +148,7 @@ test('round 2 item 1: a tool-using turn (same-promptId tool_result mid-turn) doe
       steps: [{ kind: 'toolUse' }, { kind: 'toolResult' }, { kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, true, JSON.stringify(result));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -128,7 +172,7 @@ test('round 2 item 2: a second exposure appearing after a tool_result is caught 
       uuid: dupId, parentUuid: lines[toolResultIdx].uuid,
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'HOST_EXPOSURE_AMBIGUOUS');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -145,7 +189,7 @@ test('round 2 item 3: a non-descendant (orphan) exposure does not pass', () => {
       steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'HOST_EXPOSURE_MISSING', 'the orphan exposure must not count at all');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -162,7 +206,7 @@ test('round 2 item 4: text on a tool_use stop_reason never counts as the final a
       steps: [{ kind: 'toolUse' }], // only a tool_use turn, no real end_turn ever follows
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'ANSWER_MISSING');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -182,7 +226,7 @@ test('round 2 item 5: two distinct terminal answer groups spoil ambiguous, not p
       ],
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'AMBIGUOUS_FINAL_ANSWER');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -199,7 +243,7 @@ test('round 2 item 6: a trailing-LF-only difference between content and stdout n
       steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, true, JSON.stringify(result));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -215,7 +259,7 @@ test('round 2 item 7: a divergent content is caught even when stdout happens to 
       steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: expectedFull }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: expectedFull }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'HOST_EXPOSURE_HASH_MISMATCH', 'content, not stdout, must be the compared authority');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -231,7 +275,7 @@ test('round 2 item 8: a nonzero exitCode on the exposure fails closed', () => {
       steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'HOST_EXPOSURE_NONZERO_EXIT');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -250,29 +294,28 @@ test('round 2 item 9: multiple text blocks in one terminal message group are pre
       steps: [{ kind: 'terminal', messageId: oneId, blocks: [{ type: 'thinking', thinking: '' }, { type: 'text', text: 'Part one. ' }, { type: 'text', text: 'Part two.' }] }],
     });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: full }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.finalAnswerText, 'Part one. Part two.', 'both text blocks must survive, in order, not just the last');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// Hale round 2, item 10: the same promptId reused after an intervening
-// different turn must not be treated as one contiguous, pick-last turn.
-test('round 2 item 10: a reused promptId after an intervening different turn is out of scope, not pick-last', () => {
+// Hale round 3, item 1: the same promptId reused after an intervening
+// different turn resolves to TWO disjoint native turns — must spoil, never
+// silently pick the first (or the last).
+test('round 3 item 1: a reused promptId after an intervening different turn spoils REUSED_PROMPT_ID, never pick-first', () => {
   const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
   try {
     const fullA = 'context A';
     const fullOther = 'context OTHER';
     const turnA = buildTurn({ promptId: 'p-1', exposedContent: fullA, exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer A' }] }] }).lines;
     const turnOther = buildTurn({ promptId: 'p-OTHER', exposedContent: fullOther, exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer other' }] }] }).lines;
-    // p-1 reused later, after the intervening different turn — must never
-    // be merged into the first p-1 window.
     const turnAReused = buildTurn({ promptId: 'p-1', exposedContent: 'reused context', exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'reused answer' }] }] }).lines;
     const path = writeTranscript(root, [...turnA, ...turnOther, ...turnAReused]);
 
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: fullA }));
-    assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(result.finalAnswerText, 'answer A', 'must bind to the FIRST p-1 window, never merge with the reused one');
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: fullA }));
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'REUSED_PROMPT_ID');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -281,7 +324,7 @@ test('spoil: NO_USER_TURN_FOUND when the promptId does not appear at all', () =>
   try {
     const { lines } = buildTurn({ promptId: 'p-1', exposedContent: 'x', exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'a' }] }] });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPromptId: 'p-does-not-exist', expectedFullInjectedContext: 'x' }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPromptId: 'p-does-not-exist', expectedPackText: 'x' }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'NO_USER_TURN_FOUND');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -292,7 +335,7 @@ test('spoil: HOST_EXPOSURE_MISSING when the turn has no UserPromptSubmit hook_su
   try {
     const { lines } = buildTurn({ promptId: 'p-1', exposedContent: 'x', exitCode: 0, includeExposure: false, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'a' }] }] });
     const path = writeTranscript(root, lines);
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: 'x' }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: 'x' }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'HOST_EXPOSURE_MISSING');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -307,11 +350,11 @@ test('boundary correctness: content from a DIFFERENT turn never leaks into this 
     const turnB = buildTurn({ promptId: 'p-B', exposedContent: fullB, exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'Answer B.' }] }] }).lines;
     const path = writeTranscript(root, [...turnA, ...turnB]);
 
-    const resultA = checkHostExposureClaudeCode(path, baseArgs({ expectedPromptId: 'p-A', expectedFullInjectedContext: fullA }));
+    const resultA = checkHostExposureClaudeCode(path, baseArgs({ expectedPromptId: 'p-A', expectedPackText: fullA }));
     assert.equal(resultA.ok, true, JSON.stringify(resultA));
     assert.equal(resultA.finalAnswerText, 'Answer A.');
 
-    const crossCheck = checkHostExposureClaudeCode(path, baseArgs({ expectedPromptId: 'p-A', expectedFullInjectedContext: fullB }));
+    const crossCheck = checkHostExposureClaudeCode(path, baseArgs({ expectedPromptId: 'p-A', expectedPackText: fullB }));
     assert.equal(crossCheck.ok, false);
     assert.equal(crossCheck.reason, 'HOST_EXPOSURE_HASH_MISMATCH');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -323,20 +366,25 @@ test('spoil: MALFORMED_TRANSCRIPT_LINE fails closed instead of silently skipping
     const { lines } = buildTurn({ promptId: 'p-1', exposedContent: 'x', exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'a' }] }] });
     const path = join(root, 'transcript.jsonl');
     writeFileSync(path, lines.map((l) => JSON.stringify(l)).join('\n') + '\nnot valid json\n');
-    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedFullInjectedContext: 'x' }));
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: 'x' }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'MALFORMED_TRANSCRIPT_LINE');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('spoil: TRANSCRIPT_NOT_FOUND for a path that does not exist', () => {
-  const result = checkHostExposureClaudeCode('/definitely/does/not/exist.jsonl', baseArgs({ expectedFullInjectedContext: 'x' }));
+  const result = checkHostExposureClaudeCode('/definitely/does/not/exist.jsonl', baseArgs({ expectedPackText: 'x' }));
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'TRANSCRIPT_NOT_FOUND');
 });
 
-test('requires expectedPromptId, expectedPackText, and expectedFullInjectedContext — refuses to silently proceed without them', () => {
-  assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', { expectedPackText: 'p', expectedFullInjectedContext: 'f' }), /expectedPromptId/);
-  assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', { expectedPromptId: 'p-1', expectedFullInjectedContext: 'f' }), /expectedPackText/);
-  assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', { expectedPromptId: 'p-1', expectedPackText: 'p' }), /expectedFullInjectedContext/);
+test('requires expectedPromptId, expectedPackText, and expectedDirectiveText — refuses to silently proceed without them', () => {
+  assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', { expectedPackText: 'p', expectedDirectiveText: '' }), /expectedPromptId/);
+  assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', { expectedPromptId: 'p-1', expectedDirectiveText: '' }), /expectedPackText/);
+  assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', { expectedPromptId: 'p-1', expectedPackText: 'p' }), /expectedDirectiveText/);
+});
+
+test('requires byteCap to be a non-negative integer when supplied', () => {
+  assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', baseArgs({ byteCap: -1 })), /byteCap/);
+  assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', baseArgs({ byteCap: 'nope' })), /byteCap/);
 });

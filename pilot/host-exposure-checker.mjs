@@ -21,9 +21,7 @@
 //     entirely).
 //   - The turn's boundary runs through same-promptId tool-result lines and
 //     ends at the next `type:'user'` line carrying a DIFFERENT promptId (or
-//     end of file). This also closes reused-promptId ambiguity for free --
-//     content after an intervening different turn is simply outside the
-//     window.
+//     end of file).
 //   - Every candidate exposure/terminal-answer line inside that window must
 //     additionally be a real parentUuid DESCENDANT of the turn's anchor
 //     line -- a line that happens to sit in the right index range but
@@ -49,11 +47,37 @@
 //   - The full expected injected context and the deterministic pack text
 //     alone are DIFFERENT things and must not be conflated: the real hook
 //     emits `packText + reasoningDirective` (byte-capped) on the always-on/
-//     zero-hit-automatic path, not packText alone. Callers now supply both
-//     separately; only the full-context value is compared against the
-//     transcript, and the pack-text hash is preserved separately as
-//     provenance for the (separate) scorer, never asserted equal to the
-//     observed bytes itself.
+//     zero-hit-automatic path, not packText alone.
+//
+// Hale re-audit (hale--f2c52de-two-join-failures, superseding an interim
+// nine-of-ten note): two more bounded failures on the "corrected" version:
+//   1. Reused-promptId ambiguity was NOT closed "for free" as the comment
+//      above used to claim. First-anchor + stop-at-next-different-prompt
+//      finds the FIRST contiguous segment and simply ignores a LATER
+//      reappearance of the same promptId after an intervening different
+//      turn -- that is choosing a turn out of two disjoint candidates, the
+//      same evidence-ambiguity class as choosing the last one. Fixed: after
+//      the first segment's boundary is found, the rest of the transcript is
+//      scanned for another `type:'user'` row carrying the same promptId; if
+//      one exists, the whole call spoils REUSED_PROMPT_ID rather than
+//      silently accepting the first segment.
+//   2. `expectedPackText` and `expectedFullInjectedContext` were two
+//      independently caller-supplied, UNRELATED assertions -- a caller
+//      could pass an arbitrary pack, copy the transcript's real observed
+//      content into expectedFullInjectedContext, and get ok:true plus a
+//      fabricated packSha256 that proves nothing about pack -> context.
+//      Fixed: expectedFullInjectedContext is GONE. Callers now supply
+//      expectedPackText and expectedDirectiveText (either may be '') plus
+//      an optional byteCap (default 2048, the real OUTPUT_BYTE_CAP); the
+//      oracle DERIVES the expected full emission itself, using the real
+//      hook's own truncateUtf8() (imported, not reimplemented) under the
+//      exact same branching the product uses: pack+directive UTF-8-
+//      truncated to byteCap when both exist; pack alone (untruncated) when
+//      only pack exists; directive alone (truncated) when only directive
+//      exists; empty when neither exists. Only that DERIVED value is ever
+//      compared against the transcript's observed content -- there is no
+//      longer any call shape that can assert an unrelated "full context"
+//      independent of the pack it supposedly came from.
 //
 // Codex explicitly NOT covered here (Hale's own allowance: implement one
 // harness fully rather than block on transcript-shape discovery for both).
@@ -74,9 +98,25 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
+// Named truncateUtf8Safe at this frozen candidate's base (6dc12a3) --
+// current `next` renamed it to truncateUtf8, but this worktree is
+// deliberately frozen against next and never merges either direction.
+import { truncateUtf8Safe as truncateUtf8 } from '../plugins/core/skills/core/hooks/retrieve-context-hook.mjs';
+
+const OUTPUT_BYTE_CAP = 2048; // matches retrieve-context-hook.mjs's own default
 
 function sha256Hex(text) {
   return createHash('sha256').update(String(text), 'utf8').digest('hex');
+}
+
+// Mirrors retrieve-context-hook.mjs's real stdout-emission branching
+// exactly (packText/reasoningDirective combine step) — reusing the real
+// truncateUtf8() rather than a second, potentially-drifting one.
+function deriveExpectedEmission(packText, directiveText, byteCap) {
+  if (packText && directiveText) return truncateUtf8(packText + directiveText, byteCap);
+  if (packText) return packText;
+  if (directiveText) return truncateUtf8(directiveText, byteCap);
+  return '';
 }
 
 function isDescendantOf(lineByUuid, candidateUuid, ancestorUuid) {
@@ -97,31 +137,38 @@ function isDescendantOf(lineByUuid, candidateUuid, ancestorUuid) {
  *
  * @param {string} transcriptPath   path to the real .jsonl transcript
  * @param {object} opts
- * @param {string} opts.expectedPromptId              required — the native turn identity
- * @param {string} opts.expectedPackText               required — the deterministic
- *   retrieval pack text ALONE, before any directive append/byte-cap. Hashed
- *   and returned as `packSha256` for the separate scorer's provenance —
- *   never compared against the transcript directly (the hook may append a
- *   reasoning directive and byte-cap the result, so pack text alone is not
- *   what actually lands on stdout/content).
- * @param {string} opts.expectedFullInjectedContext    required — the exact
- *   text the runner computed the hook SHOULD have emitted for this trial
- *   (pack text plus any directive, already byte-capped as the real hook
- *   would). Compared byte-for-byte against the transcript's observed
- *   `attachment.content`.
+ * @param {string} opts.expectedPromptId       required — the native turn identity
+ * @param {string} opts.expectedPackText       required (may be '') — the
+ *   deterministic retrieval pack text alone, before any directive append or
+ *   byte-cap. Hashed and returned as `packSha256` for the separate scorer's
+ *   provenance.
+ * @param {string} opts.expectedDirectiveText  required (may be '') — the
+ *   reasoning-escalation directive text alone, before byte-cap.
+ * @param {number} [opts.byteCap]              defaults to 2048 (the real
+ *   OUTPUT_BYTE_CAP) — the effective byte cap in force for this trial
+ *   (smaller only if CORE_RETRIEVAL_BYTE_CAP was set tighter at fire time).
+ *
+ * The oracle DERIVES the expected full emission from expectedPackText +
+ * expectedDirectiveText + byteCap using the real hook's own branching and
+ * truncateUtf8() — there is no separate "expected full context" a caller
+ * can assert independently of the pack/directive it supposedly came from.
+ *
  * @returns {{ok:true, expectedPromptId, packSha256, injectedContextHash,
  *   finalAnswerHash, finalAnswerText} | {ok:false, reason:<CODE>, ...detail}}
  */
 export function checkHostExposureClaudeCode(transcriptPath, opts) {
-  const { expectedPromptId, expectedPackText, expectedFullInjectedContext } = opts || {};
+  const { expectedPromptId, expectedPackText, expectedDirectiveText, byteCap = OUTPUT_BYTE_CAP } = opts || {};
   if (typeof expectedPromptId !== 'string' || !expectedPromptId.trim()) {
     throw new Error('checkHostExposureClaudeCode requires expectedPromptId — the native turn identity to bind against');
   }
   if (typeof expectedPackText !== 'string') {
-    throw new Error('checkHostExposureClaudeCode requires expectedPackText — the deterministic retrieval pack text alone, kept separate for scorer provenance');
+    throw new Error('checkHostExposureClaudeCode requires expectedPackText — the deterministic retrieval pack text alone (may be \'\'), kept separate for scorer provenance');
   }
-  if (typeof expectedFullInjectedContext !== 'string') {
-    throw new Error('checkHostExposureClaudeCode requires expectedFullInjectedContext — the exact full text the hook should have emitted (pack + directive, byte-capped), compared against the transcript');
+  if (typeof expectedDirectiveText !== 'string') {
+    throw new Error('checkHostExposureClaudeCode requires expectedDirectiveText — the reasoning-directive text alone (may be \'\'); the oracle derives the real expected emission from this plus expectedPackText');
+  }
+  if (!Number.isInteger(byteCap) || byteCap < 0) {
+    throw new Error(`checkHostExposureClaudeCode requires byteCap to be a non-negative integer when supplied, got ${JSON.stringify(byteCap)}`);
   }
   if (!existsSync(transcriptPath)) {
     return { ok: false, reason: 'TRANSCRIPT_NOT_FOUND', path: transcriptPath };
@@ -160,6 +207,18 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   }
   const turnLines = lines.slice(anchorIdx + 1, boundaryEnd);
 
+  // Reused-promptId spoil (Hale re-audit, hale--f2c52de-two-join-failures):
+  // the same "unique" native promptId reappearing anywhere AFTER this
+  // turn's own boundary means the identity resolves to two disjoint native
+  // turns — choosing the first is the same evidence-ambiguity class as
+  // choosing the last, so this must fail closed rather than silently pick
+  // one.
+  for (let i = boundaryEnd; i < lines.length; i += 1) {
+    if (lines[i]?.type === 'user' && lines[i]?.promptId === expectedPromptId) {
+      return { ok: false, reason: 'REUSED_PROMPT_ID', expectedPromptId };
+    }
+  }
+
   const exposures = turnLines.filter((l) =>
     l?.type === 'attachment'
     && l?.attachment?.type === 'hook_success'
@@ -181,8 +240,9 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
     return { ok: false, reason: 'HOST_EXPOSURE_MISSING', expectedPromptId, detail: 'hook_success attachment has no content string' };
   }
 
+  const derivedExpectedEmission = deriveExpectedEmission(expectedPackText, expectedDirectiveText, byteCap);
   const observedHash = sha256Hex(observedContent);
-  const expectedHash = sha256Hex(expectedFullInjectedContext);
+  const expectedHash = sha256Hex(derivedExpectedEmission);
   if (observedHash !== expectedHash) {
     return { ok: false, reason: 'HOST_EXPOSURE_HASH_MISMATCH', expected: expectedHash, observed: observedHash };
   }
