@@ -124,6 +124,18 @@ export function checkCorpusLeakage(storeDir, plants) {
         { code: 'AMBIGUOUS_CARRIER', candidates: matches.map(m => m.rel) },
       );
     }
+    // Hale re-audit (hale--1346f5e-partial-pass-two-fail-open-edges),
+    // false pass 1: a designated carrier exists but its body does NOT
+    // actually contain the planted token -- checkCorpusLeakage still
+    // reported clean:true. A corpus with no planted answer anywhere
+    // cannot be a valid efficacy trial corpus at all; that must fail
+    // loudly and distinctly from an ordinary leak, not pass by omission.
+    if (!containsToken(matches[0].body, token)) {
+      throw Object.assign(
+        new Error(`carrierUnit ${JSON.stringify(carrierUnit)} (${matches[0].rel}) does not actually contain token ${JSON.stringify(token)} in its body -- the corpus has no planted answer for this trial`),
+        { code: 'CARRIER_MISSING_TOKEN', carrier: matches[0].rel },
+      );
+    }
     for (const unit of parsed) {
       // Metadata surfaces are never allowed to leak the token, carrier included.
       for (const field of METADATA_SURFACES) {

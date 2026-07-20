@@ -54,7 +54,7 @@ test('clean corpus: target token only in the designated carrier body passes', ()
 
 test('leak via unit id', () => {
   const root = store({
-    'dc-1-cobalt.md': '---\nid: dc-1-cobalt\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Pilot unit\n\nSome unrelated body.\n',
+    'dc-1-cobalt.md': '---\nid: dc-1-cobalt\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Pilot unit\n\nThe blue orchard proof codename is cobalt.\n',
   });
   const { clean, violations } = checkCorpusLeakage(root, [{ token: 'cobalt', carrierUnit: 'dc-1-cobalt.md' }]);
   assert.equal(clean, false);
@@ -63,7 +63,7 @@ test('leak via unit id', () => {
 
 test('leak via file path/name', () => {
   const root = store({
-    'dc-1-cobalt-proof.md': '---\nid: dc-1-proof\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Pilot unit\n\nBody.\n',
+    'dc-1-cobalt-proof.md': '---\nid: dc-1-proof\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Pilot unit\n\nThe blue orchard proof codename is cobalt.\n',
   });
   const { clean, violations } = checkCorpusLeakage(root, [{ token: 'cobalt', carrierUnit: 'dc-1-proof' }]);
   assert.equal(clean, false);
@@ -76,7 +76,7 @@ test('leak via file path/name', () => {
 // both.
 test('leak via block-style YAML topics', () => {
   const root = store({
-    'dc-1-proof.md': '---\nid: dc-1-proof\ntype: decision\nstatus: active\ntopics:\n  - pilot\n  - cobalt\n---\n\n# Pilot unit\n\nBody.\n',
+    'dc-1-proof.md': '---\nid: dc-1-proof\ntype: decision\nstatus: active\ntopics:\n  - pilot\n  - cobalt\n---\n\n# Pilot unit\n\nThe blue orchard proof codename is cobalt.\n',
   });
   const { clean, violations } = checkCorpusLeakage(root, [{ token: 'cobalt', carrierUnit: 'dc-1-proof.md' }]);
   assert.equal(clean, false);
@@ -85,7 +85,7 @@ test('leak via block-style YAML topics', () => {
 
 test('leak via flow-style YAML topics (unchanged coverage)', () => {
   const root = store({
-    'dc-1-proof.md': '---\nid: dc-1-proof\ntype: decision\nstatus: active\ntopics: [pilot, cobalt]\n---\n\n# Pilot unit\n\nBody.\n',
+    'dc-1-proof.md': '---\nid: dc-1-proof\ntype: decision\nstatus: active\ntopics: [pilot, cobalt]\n---\n\n# Pilot unit\n\nThe blue orchard proof codename is cobalt.\n',
   });
   const { clean, violations } = checkCorpusLeakage(root, [{ token: 'cobalt', carrierUnit: 'dc-1-proof.md' }]);
   assert.equal(clean, false);
@@ -120,7 +120,7 @@ test('leak via a sibling/decoy unit body (only the designated carrier may contai
 
 test('case-insensitive matching catches Cobalt/COBALT variants', () => {
   const root = store({
-    'dc-1-proof.md': '---\nid: dc-1-COBALT\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Pilot unit\n\nBody.\n',
+    'dc-1-proof.md': '---\nid: dc-1-COBALT\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Pilot unit\n\nThe proof codename is COBALT.\n',
   });
   const { clean } = checkCorpusLeakage(root, [{ token: 'cobalt', carrierUnit: 'dc-1-COBALT' }]);
   assert.equal(clean, false);
@@ -128,7 +128,7 @@ test('case-insensitive matching catches Cobalt/COBALT variants', () => {
 
 test('multiple planted tokens are checked independently, each against its own carrier', () => {
   const root = store({
-    'dc-1-cobalt.md': '---\nid: dc-1-cobalt\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Unit one\n\nBody one.\n',
+    'dc-1-cobalt.md': '---\nid: dc-1-cobalt\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Unit one\n\nThe proof codename is cobalt.\n',
     'dc-2-proof.md': '---\nid: dc-2-proof\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Unit two\n\nThe answer is amber.\n',
   });
   const { clean, violations } = checkCorpusLeakage(root, [
@@ -157,6 +157,6 @@ test('CLI: clean corpus exits 0, leaking corpus exits 1', async () => {
   const okOut = execFileSync('node', [SCRIPT, cleanRoot, 'cobalt=dc-1-proof.md'], { encoding: 'utf8' });
   assert.match(okOut, /^clean: 0 leaks/);
 
-  const leakRoot = store({ 'dc-1-cobalt.md': '---\nid: dc-1-cobalt\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Unit\n\nBody.\n' });
+  const leakRoot = store({ 'dc-1-cobalt.md': '---\nid: dc-1-cobalt\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Unit\n\nThe answer is cobalt.\n' });
   assert.throws(() => execFileSync('node', [SCRIPT, leakRoot, 'cobalt=dc-1-cobalt.md'], { encoding: 'utf8' }));
 });

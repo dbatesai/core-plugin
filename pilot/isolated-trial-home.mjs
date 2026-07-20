@@ -64,7 +64,17 @@ function sanitizePathComponent(value, label) {
  * @param {string} [opts.marketplaceName]  defaults to a unique per-call
  *   name so concurrent trials (even for the same candidate) never share
  *   a cache path and never collide.
- * @returns {{homeDir: string, cacheDir: string, marketplaceName: string, env: object, cleanup: function}}
+ * @returns {{homeDir: string, cacheDir: string, marketplaceName: string,
+ *   sourceContentHash: string, env: object, cleanup: function}}
+ *   sourceContentHash is captured from candidatePluginDir BEFORE the copy
+ *   happens (Hale re-audit, hale--1346f5e-partial-pass-two-fail-open-edges,
+ *   false pass 2: passing `sourceCandidateDir: cacheDir` to verifyIsolation
+ *   made it compare the installed directory to itself and trivially pass --
+ *   "requiring the argument did not make it an independent source of
+ *   truth." Capturing the hash here, before cpSync ever runs, means there
+ *   is no live directory reference for a caller to alias back to the
+ *   installed copy -- the oracle is fixed at copy time, not re-derivable
+ *   from anything verifyIsolation is given afterward.
  */
 export function createIsolatedHome({ harness, candidatePluginDir, version, marketplaceName } = {}) {
   if (harness !== 'claude' && harness !== 'codex') {
@@ -81,6 +91,11 @@ export function createIsolatedHome({ harness, candidatePluginDir, version, marke
     ? sanitizePathComponent(marketplaceName, 'marketplaceName')
     : `core-pilot-${process.pid}-${Date.now() % 100000}`;
 
+  // Captured BEFORE cpSync -- this is the independent oracle, not a
+  // pointer verifyIsolation could be tricked into re-deriving from the
+  // installed copy itself.
+  const sourceContentHash = directoryIdentity(candidatePluginDir).content_manifest_sha256;
+
   const homeDir = mkdtempSync(join(tmpdir(), `pilot-home-${harness}-`));
   const cacheDir = harness === 'claude'
     ? join(homeDir, '.claude', 'plugins', 'cache', mp, 'core', version)
@@ -95,7 +110,7 @@ export function createIsolatedHome({ harness, candidatePluginDir, version, marke
 
   const cleanup = () => rmSync(homeDir, { recursive: true, force: true });
 
-  return { homeDir, cacheDir, marketplaceName: mp, env, cleanup };
+  return { homeDir, cacheDir, marketplaceName: mp, sourceContentHash, env, cleanup };
 }
 
 /**
@@ -108,16 +123,22 @@ export function createIsolatedHome({ harness, candidatePluginDir, version, marke
  * @param {string} opts.version              the requested version
  * @param {string} opts.cacheDir             the exact expected install path
  *   (createIsolatedHome's own return value -- never re-derived by search)
- * @param {string} opts.sourceCandidateDir   REQUIRED: the original candidate
- *   content, for a byte-identity comparison against what's actually
- *   installed. Hale re-audit: this used to be optional and silently
- *   skipped the content check when omitted, reporting isolated:true
- *   without ever performing the promised comparison -- missing proof must
- *   fail closed, not pass by default.
+ * @param {string} opts.expectedSourceHash   REQUIRED: the source candidate's
+ *   content_manifest_sha256, captured by createIsolatedHome BEFORE the
+ *   copy happened. Hale re-audit (hale--1346f5e-partial-pass-two-fail-
+ *   open-edges, false pass 2): an earlier version took a live
+ *   `sourceCandidateDir` path and re-hashed it at verify time -- passing
+ *   `sourceCandidateDir: cacheDir` made the check compare the installed
+ *   directory to itself and trivially pass. "Requiring the argument did
+ *   not make it an independent source of truth." A pre-captured hash
+ *   string has no live directory for a caller to alias back to the
+ *   installed copy; the oracle is fixed before verifyIsolation ever runs.
+ *   Also required (unchanged from the prior re-audit): omitting it must
+ *   fail closed, never silently report isolated:true.
  */
-export function verifyIsolation({ homeDir, harness, version, cacheDir, sourceCandidateDir }) {
-  if (!sourceCandidateDir) {
-    throw Object.assign(new Error('sourceCandidateDir is required -- verifyIsolation cannot prove content identity without it, and a missing proof must never silently report isolated:true'), { code: 'SOURCE_CANDIDATE_REQUIRED' });
+export function verifyIsolation({ homeDir, harness, version, cacheDir, expectedSourceHash }) {
+  if (!expectedSourceHash) {
+    throw Object.assign(new Error('expectedSourceHash is required -- verifyIsolation cannot prove content identity without it, and a missing proof must never silently report isolated:true'), { code: 'SOURCE_HASH_REQUIRED' });
   }
 
   // 0. cacheDir must actually SIT UNDER homeDir at the expected relative
@@ -166,11 +187,10 @@ export function verifyIsolation({ homeDir, harness, version, cacheDir, sourceCan
   //    version number) is caught here even though checks 1-2 would pass a
   //    version that happens to match a mislabeled copy of something else.
   const installed = directoryIdentity(cacheDir);
-  const source = directoryIdentity(sourceCandidateDir);
-  if (installed.content_manifest_sha256 !== source.content_manifest_sha256) {
+  if (installed.content_manifest_sha256 !== expectedSourceHash) {
     return {
       isolated: false, reason: 'CONTENT_MISMATCH',
-      installedHash: installed.content_manifest_sha256, sourceHash: source.content_manifest_sha256,
+      installedHash: installed.content_manifest_sha256, sourceHash: expectedSourceHash,
     };
   }
 
