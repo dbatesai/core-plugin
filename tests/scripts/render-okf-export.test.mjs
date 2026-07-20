@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
-const { renderOkfExport, writeOkfExport, MANIFEST_NAME, INDEX_NOTE_NAME, renderIndexNote, validateLinkDensityThreshold, recoverOrphanedBackup } =
+const { renderOkfExport, writeOkfExport, MANIFEST_NAME, INDEX_NOTE_NAME, validateLinkDensityThreshold, recoverOrphanedBackup } =
   await import(pathToFileURL(join(SCRIPTS, 'render-okf-export.mjs')).href);
 
 function fixtureStore() {
