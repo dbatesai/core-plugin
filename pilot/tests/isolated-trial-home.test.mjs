@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, cpSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -8,12 +8,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const PILOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { createIsolatedHome, verifyIsolation } = await import(pathToFileURL(join(PILOT, 'isolated-trial-home.mjs')).href);
 
-function fakeCandidateDir() {
+function fakeCandidateDir(seed = 'x') {
   const dir = mkdtempSync(join(tmpdir(), 'fake-candidate-'));
-  mkdirSync(join(dir, 'skills', 'core'), { recursive: true });
-  writeFileSync(join(dir, '.claude-plugin', 'plugin.json').replace('.claude-plugin', 'skills/core'), '{}'); // placeholder, overwritten below
   mkdirSync(join(dir, '.claude-plugin'), { recursive: true });
+  mkdirSync(join(dir, 'skills', 'core'), { recursive: true });
   writeFileSync(join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'core', version: '3.12.1-pilot.1' }));
+  writeFileSync(join(dir, 'skills', 'core', 'marker.txt'), `content-${seed}`);
   return dir;
 }
 
@@ -23,6 +23,14 @@ test('createIsolatedHome rejects an invalid harness name', () => {
 
 test('createIsolatedHome rejects a missing candidate directory', () => {
   assert.throws(() => createIsolatedHome({ harness: 'claude', candidatePluginDir: '/definitely/does/not/exist', version: '1.0.0' }), (e) => e.code === 'CANDIDATE_DIR_MISSING');
+});
+
+// Hale re-audit amendment: caller-supplied version/marketplaceName become
+// path components and must not be able to traverse directories.
+test('createIsolatedHome rejects a path-traversal version or marketplaceName', () => {
+  const candidate = fakeCandidateDir();
+  assert.throws(() => createIsolatedHome({ harness: 'claude', candidatePluginDir: candidate, version: '../../etc' }), (e) => e.code === 'UNSAFE_PATH_COMPONENT');
+  assert.throws(() => createIsolatedHome({ harness: 'claude', candidatePluginDir: candidate, version: '3.12.1-pilot.1', marketplaceName: '../escape' }), (e) => e.code === 'UNSAFE_PATH_COMPONENT');
 });
 
 test('createIsolatedHome lays out the cache path exactly like a real Claude install and copies the candidate content', () => {
@@ -63,30 +71,100 @@ test('two isolated homes for the same candidate never collide (unique marketplac
   } finally { a.cleanup(); b.cleanup(); }
 });
 
-test('verifyIsolation reports isolated:true for a freshly-created single-candidate home', () => {
+test('verifyIsolation reports isolated:true for a freshly-created single-candidate home with matching content', () => {
   const candidate = fakeCandidateDir();
-  const { homeDir, cleanup } = createIsolatedHome({ harness: 'claude', candidatePluginDir: candidate, version: '3.12.1-pilot.1' });
+  const { homeDir, cacheDir, cleanup } = createIsolatedHome({ harness: 'claude', candidatePluginDir: candidate, version: '3.12.1-pilot.1' });
   try {
-    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1' });
-    assert.equal(result.isolated, true);
-    assert.equal(result.otherVersionsPresent.length, 0);
+    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1', cacheDir, sourceCandidateDir: candidate });
+    assert.equal(result.isolated, true, JSON.stringify(result));
   } finally { cleanup(); }
 });
 
 // Negative control: exactly the failure mode Hale's real installed proof
 // found — a second, different-version install present alongside the
-// candidate. verifyIsolation must catch it, not report false isolation.
+// candidate.
 test('verifyIsolation reports isolated:false when a second version is present (the exact failure Hale found)', () => {
   const candidate = fakeCandidateDir();
   const { homeDir, cacheDir, cleanup } = createIsolatedHome({ harness: 'claude', candidatePluginDir: candidate, version: '3.12.1-pilot.1' });
   try {
-    // Simulate a leftover stable install sitting alongside the candidate.
     const stableDir = cacheDir.replace('3.12.1-pilot.1', '3.12.0');
     mkdirSync(stableDir, { recursive: true });
     writeFileSync(join(stableDir, 'marker.txt'), 'stable install leftover');
-    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1' });
-    assert.equal(result.isolated, false, 'a second version present must be detected, not silently missed');
-    assert.equal(result.otherVersionsPresent.length, 1);
-    assert.match(result.otherVersionsPresent[0], /3\.12\.0$/);
+    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1', cacheDir, sourceCandidateDir: candidate });
+    assert.equal(result.isolated, false);
+    assert.equal(result.reason, 'OTHER_VERSIONS_PRESENT');
+  } finally { cleanup(); }
+});
+
+// Hale re-audit false pass 1 (cb2-filesystem-isolation-narrow-hold): real
+// content copied under a WRONG caller-supplied version number still
+// reported isolated:true because the old check only matched a directory
+// NAME. Content identity comparison against the real source must catch
+// this even when the manifest's own version field is internally consistent
+// with the path (i.e., simulate a genuinely mislabeled cache: the manifest
+// on disk says one version, the directory is named the same wrong version,
+// but the actual content differs from the true source candidate).
+test('verifyIsolation catches content that does not match the source candidate, even when the path/manifest version agree with each other', () => {
+  const realCandidate = fakeCandidateDir('real');
+  const differentCandidate = fakeCandidateDir('different'); // same manifest version, different marker content
+  // Manually build a cache dir the way createIsolatedHome would, but seed
+  // it with the WRONG candidate's content under the requested version.
+  const homeDir = mkdtempSync(join(tmpdir(), 'pilot-home-claude-'));
+  const cacheDir = join(homeDir, '.claude', 'plugins', 'cache', 'mp', 'core', '3.12.1-pilot.1');
+  mkdirSync(cacheDir, { recursive: true });
+  cpSync(differentCandidate, cacheDir, { recursive: true });
+  try {
+    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1', cacheDir, sourceCandidateDir: realCandidate });
+    assert.equal(result.isolated, false);
+    assert.equal(result.reason, 'CONTENT_MISMATCH');
+  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+});
+
+// Hale re-audit false pass 2: renaming the required .../core/<version> path
+// segment to .../not-core/<version> still reported isolated:true because
+// the old check searched broadly for ANY directory named like the version.
+// The new check looks at the EXACT expected path only.
+test('verifyIsolation fails when the candidate sits at the wrong path shape (e.g. .../not-core/<version> instead of .../core/<version>)', () => {
+  const candidate = fakeCandidateDir();
+  const homeDir = mkdtempSync(join(tmpdir(), 'pilot-home-claude-'));
+  const wrongShapeDir = join(homeDir, '.claude', 'plugins', 'cache', 'mp', 'not-core', '3.12.1-pilot.1');
+  mkdirSync(wrongShapeDir, { recursive: true });
+  cpSync(candidate, wrongShapeDir, { recursive: true });
+  // Caller asks verifyIsolation to check the CORRECT expected path shape,
+  // which is absent -- the content sitting at the wrong shape must not
+  // count.
+  const expectedCacheDir = join(homeDir, '.claude', 'plugins', 'cache', 'mp', 'core', '3.12.1-pilot.1');
+  try {
+    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1', cacheDir: expectedCacheDir, sourceCandidateDir: candidate });
+    assert.equal(result.isolated, false);
+    assert.equal(result.reason, 'EXPECTED_PATH_MISSING');
+  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+});
+
+test('verifyIsolation fails when the installed manifest claims a different name/version than requested', () => {
+  const candidate = fakeCandidateDir();
+  const homeDir = mkdtempSync(join(tmpdir(), 'pilot-home-claude-'));
+  const cacheDir = join(homeDir, '.claude', 'plugins', 'cache', 'mp', 'core', '3.12.1-pilot.1');
+  mkdirSync(cacheDir, { recursive: true });
+  cpSync(candidate, cacheDir, { recursive: true });
+  // Overwrite the manifest with a mismatched version, content otherwise identical.
+  writeFileSync(join(cacheDir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'core', version: '9.9.9' }));
+  try {
+    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1', cacheDir, sourceCandidateDir: candidate });
+    assert.equal(result.isolated, false);
+    assert.equal(result.reason, 'MANIFEST_IDENTITY_MISMATCH');
+  } finally { rmSync(homeDir, { recursive: true, force: true }); }
+});
+
+// End-to-end smoke: the real frozen candidate, through the real
+// createIsolatedHome + verifyIsolation pair, preserved as an executable
+// test/receipt per Hale's explicit ask -- not just a one-off manual run.
+test('smoke: createIsolatedHome + verifyIsolation against the real frozen pilot candidate 6dc12a3', () => {
+  const REAL_CANDIDATE = '/private/tmp/core-plugin-pilot-48a87f6/plugins/core';
+  if (!existsSync(REAL_CANDIDATE)) return; // environment-dependent path; skip if the candidate worktree isn't present
+  const { homeDir, cacheDir, cleanup } = createIsolatedHome({ harness: 'claude', candidatePluginDir: REAL_CANDIDATE, version: '3.12.1-pilot.1' });
+  try {
+    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1', cacheDir, sourceCandidateDir: REAL_CANDIDATE });
+    assert.equal(result.isolated, true, JSON.stringify(result));
   } finally { cleanup(); }
 });

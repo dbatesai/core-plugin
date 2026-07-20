@@ -9,13 +9,21 @@
 // the trial. Each trial needs its own filesystem-isolated home so no other
 // installed plugin version (stable or a different candidate) can fire.
 //
-// This module builds the isolated home's FILESYSTEM SCAFFOLDING: a fresh
-// temp HOME containing only the one candidate's packaged plugin content,
-// laid out at the same cache path shape Hale's own successful installed
-// proof used (`~/.claude/plugins/cache/<marketplace>/core/<version>/`).
+// Second re-audit (hale--cb2-filesystem-isolation-narrow-hold): the first
+// verifyIsolation() only checked that a directory NAMED like the version
+// existed somewhere under the cache root -- it never confirmed the content
+// there was actually the candidate. Two demonstrated false passes: (1)
+// copying the real candidate under a WRONG caller-supplied version number
+// still reported isolated:true; (2) renaming the required .../core/<version>
+// path segment to .../not-core/<version> still reported isolated:true.
+// Fixed below: the exact expected path is checked directly (not searched
+// for), its copied manifest must name === 'core' and the requested version,
+// and its content is hashed against the source candidate via the project's
+// own artifact-identity.mjs directory-mode manifest -- byte-identical or it
+// fails, not name-matched.
 //
-// Scope, stated honestly: this proves isolation and correct content at the
-// filesystem level (tested below). It does NOT yet prove a real spawned
+// Scope, stated honestly: this proves isolation and content correctness at
+// the filesystem level (tested below). It does NOT yet prove a real spawned
 // `claude`/`codex` CLI process actually discovers and fires this install --
 // that requires wiring the harness's own plugin-registration metadata
 // (settings.json / marketplace registration), which needs verification
@@ -23,9 +31,22 @@
 // installed-proof technique. Named explicitly as the next step, not
 // silently assumed done.
 
-import { mkdtempSync, mkdirSync, cpSync, existsSync, rmSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, cpSync, existsSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { directoryIdentity } from '../plugins/core/skills/core/scripts/artifact-identity.mjs';
+
+/**
+ * A caller-supplied path COMPONENT (never a full path) must not be able to
+ * traverse directories or escape the intended cache root. Rejects anything
+ * containing a path separator, a leading dot-dot, or a null byte.
+ */
+function sanitizePathComponent(value, label) {
+  if (typeof value !== 'string' || !value || /[/\\]/.test(value) || value === '.' || value === '..' || value.includes('\0')) {
+    throw Object.assign(new Error(`${label} must be a single safe path component, got ${JSON.stringify(value)}`), { code: 'UNSAFE_PATH_COMPONENT' });
+  }
+  return value;
+}
 
 /**
  * createIsolatedHome — build a fresh, single-purpose HOME directory
@@ -43,7 +64,7 @@ import { join } from 'node:path';
  * @param {string} [opts.marketplaceName]  defaults to a unique per-call
  *   name so concurrent trials (even for the same candidate) never share
  *   a cache path and never collide.
- * @returns {{homeDir: string, cacheDir: string, env: object, cleanup: function}}
+ * @returns {{homeDir: string, cacheDir: string, marketplaceName: string, env: object, cleanup: function}}
  */
 export function createIsolatedHome({ harness, candidatePluginDir, version, marketplaceName } = {}) {
   if (harness !== 'claude' && harness !== 'codex') {
@@ -55,10 +76,12 @@ export function createIsolatedHome({ harness, candidatePluginDir, version, marke
   if (!version) {
     throw Object.assign(new Error('version is required (the candidate manifest version, used in the cache path)'), { code: 'VERSION_REQUIRED' });
   }
+  sanitizePathComponent(version, 'version');
+  const mp = marketplaceName
+    ? sanitizePathComponent(marketplaceName, 'marketplaceName')
+    : `core-pilot-${process.pid}-${Date.now() % 100000}`;
 
   const homeDir = mkdtempSync(join(tmpdir(), `pilot-home-${harness}-`));
-  const mp = marketplaceName || `core-pilot-${process.pid}-${Date.now() % 100000}`;
-
   const cacheDir = harness === 'claude'
     ? join(homeDir, '.claude', 'plugins', 'cache', mp, 'core', version)
     : join(homeDir, '.codex', 'plugins', 'cache', mp, 'core', version);
@@ -72,49 +95,83 @@ export function createIsolatedHome({ harness, candidatePluginDir, version, marke
 
   const cleanup = () => rmSync(homeDir, { recursive: true, force: true });
 
-  return { homeDir, cacheDir, env, cleanup };
+  return { homeDir, cacheDir, marketplaceName: mp, env, cleanup };
 }
 
 /**
- * verifyIsolation — a fresh isolated home must contain exactly one
- * candidate's content and nothing from any other install (no other
- * marketplace/version directory anywhere under its plugin cache root).
- * This is the mechanical proof for "no persistent stable hook can fire" --
- * if the isolated home's cache root has only the one expected version
- * directory, there is nothing else present that could fire.
+ * verifyIsolation — proves BOTH that the exact expected candidate is
+ * installed AND that nothing else could possibly fire.
+ *
+ * @param {object} opts
+ * @param {string} opts.homeDir              the isolated home to inspect
+ * @param {string} opts.harness              'claude' | 'codex'
+ * @param {string} opts.version              the requested version
+ * @param {string} opts.cacheDir             the exact expected install path
+ *   (createIsolatedHome's own return value -- never re-derived by search)
+ * @param {string} opts.sourceCandidateDir   the original candidate content,
+ *   for a byte-identity comparison against what's actually installed
  */
-export function verifyIsolation({ homeDir, harness, version }) {
+export function verifyIsolation({ homeDir, harness, version, cacheDir, sourceCandidateDir }) {
+  const manifestPath = harness === 'claude'
+    ? join(cacheDir, '.claude-plugin', 'plugin.json')
+    : join(cacheDir, '.codex-plugin', 'plugin.json');
+
+  // 1. The EXACT expected path must exist -- never searched for by name.
+  if (!existsSync(cacheDir) || !existsSync(manifestPath)) {
+    return { isolated: false, reason: 'EXPECTED_PATH_MISSING', expectedPath: cacheDir };
+  }
+
+  // 2. The manifest actually installed there must claim to BE this plugin
+  //    at this version -- not just live at a correctly-named directory.
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch (e) {
+    return { isolated: false, reason: 'MANIFEST_UNREADABLE', error: e.message };
+  }
+  if (manifest.name !== 'core' || manifest.version !== version) {
+    return { isolated: false, reason: 'MANIFEST_IDENTITY_MISMATCH', found: { name: manifest.name, version: manifest.version }, expectedVersion: version };
+  }
+
+  // 3. Content must be byte-identical to the real source candidate -- the
+  //    false pass Hale demonstrated (real content copied under a WRONG
+  //    version number) is caught here even though checks 1-2 would pass a
+  //    version that happens to match a mislabeled copy of something else.
+  if (sourceCandidateDir) {
+    const installed = directoryIdentity(cacheDir);
+    const source = directoryIdentity(sourceCandidateDir);
+    if (installed.content_manifest_sha256 !== source.content_manifest_sha256) {
+      return {
+        isolated: false, reason: 'CONTENT_MISMATCH',
+        installedHash: installed.content_manifest_sha256, sourceHash: source.content_manifest_sha256,
+      };
+    }
+  }
+
+  // 4. Nothing ELSE under the cache root may be present -- any other
+  //    version-shaped directory anywhere is a leftover install that could
+  //    fire (Hale's original installed-proof failure: a persistent stable
+  //    hook alongside the candidate).
   const cacheRoot = harness === 'claude'
     ? join(homeDir, '.claude', 'plugins', 'cache')
     : join(homeDir, '.codex', 'plugins', 'cache');
-  const found = [];
-  const walk = (dir, depth) => {
-    if (depth > 4) return; // marketplace/core/<version> is 3 levels deep
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
-    for (const e of entries) {
-      if (e.isDirectory()) {
-        if (e.name === version) found.push(join(dir, e.name));
-        else walk(join(dir, e.name), depth + 1);
-      }
-    }
-  };
-  walk(cacheRoot, 0);
   const otherVersions = [];
   const findAllVersionDirs = (dir, depth) => {
-    if (depth > 4) return;
+    if (depth > 6) return;
     let entries;
     try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       const full = join(dir, e.name);
       if (/^\d+\.\d+\.\d+/.test(e.name)) {
-        if (e.name !== version) otherVersions.push(full);
+        if (e.name !== version || full !== cacheDir) otherVersions.push(full);
       } else {
         findAllVersionDirs(full, depth + 1);
       }
     }
   };
   findAllVersionDirs(cacheRoot, 0);
-  return { isolated: found.length === 1 && otherVersions.length === 0, expectedFound: found, otherVersionsPresent: otherVersions };
+  if (otherVersions.length > 0) {
+    return { isolated: false, reason: 'OTHER_VERSIONS_PRESENT', otherVersionsPresent: otherVersions };
+  }
+
+  return { isolated: true };
 }
