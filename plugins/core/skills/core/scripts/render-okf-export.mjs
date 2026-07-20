@@ -27,6 +27,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync
 import { join, resolve, dirname, basename, relative, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
+import { pidAlive, withFileLock } from './file-lock.mjs';
 
 export const GENERATOR_VERSION = '0.1.0';
 // Hale correction 6: pin the exact upstream revision the conformance claim is
@@ -88,13 +89,20 @@ export function validateLinkDensityThreshold(t) {
  */
 export function parseLinkDensityThresholdArg(raw, sawFlag) {
   if (!sawFlag) return null;
-  if (raw === undefined || raw === null || !/^-?\d+(\.\d+)?$/.test(raw.trim())) {
+  // Hale re-audit (54e4479): the original regex was more restrictive than
+  // the grammar needs to be (rejected ".5" and "1e2", both valid numeric
+  // literals) with no stated intent to narrow the format. Trim, reject
+  // blank, then let Number() + the already-strict validator do the real
+  // work -- Number('abc') is NaN and validateLinkDensityThreshold already
+  // rejects non-finite values, so no separate format check duplicates that.
+  const trimmed = typeof raw === 'string' ? raw.trim() : '';
+  if (!trimmed) {
     throw Object.assign(
       new Error(`--min-link-density requires a numeric value, got ${JSON.stringify(raw)}`),
       { code: 'INVALID_LINK_DENSITY_THRESHOLD' },
     );
   }
-  return validateLinkDensityThreshold(Number(raw));
+  return validateLinkDensityThreshold(Number(trimmed));
 }
 
 /**
@@ -186,14 +194,37 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
 }
 
 /**
- * recoverOrphanedBackup — Hale re-audit finding (4d7c65e): a real process
- * death after `renameSync(outDir, bakDir)` but before `renameSync(tmpDir,
- * outDir)` never reaches the catch/finally, so outDir is left absent and
- * `${outDir}.bak-<dead-pid>` is orphaned with no code to discover it. Runs
- * at the top of every writeOkfExport call: if outDir is currently missing
- * and exactly one `.bak-<pid>` sibling exists, that's the fingerprint of
- * this exact crash window — restore it. Multiple candidates are ambiguous
- * (which crash, which generation) and fail closed rather than guess.
+ * recoverOrphanedBackup — Hale re-audit finding (4d7c65e, then 54e4479):
+ * a real process death after `renameSync(outDir, bakDir)` but before
+ * `renameSync(tmpDir, outDir)` never reaches the catch/finally, so outDir
+ * is left absent and `${outDir}.bak-<dead-pid>` is orphaned with no code
+ * to discover it.
+ *
+ * The first fix swept every `.tmp-<pid>` unconditionally -- Hale's second
+ * re-audit demonstrated this is unsafe under real concurrency: a second
+ * live exporter's in-progress `.tmp-<pid>` (a validated tree not yet
+ * swapped in) would be deleted out from under it. "Every tmp is always
+ * disposable" is false while another process still owns that pid.
+ *
+ * Fixed with `pidAlive()` (file-lock.mjs, the project's own hardened
+ * liveness primitive — no second ad hoc implementation): a `.tmp-<pid>`
+ * or `.bak-<pid>` is only ever touched when that pid is confirmed dead.
+ * Covers all four transaction states:
+ *   - outDir absent + one DEAD-owner backup: restore it (the crash window
+ *     this function exists for).
+ *   - outDir absent + a LIVE-owner backup: another process is actively
+ *     finishing that exact transaction right now -- leave it alone.
+ *   - outDir present + a DEAD-owner backup: an earlier run's swap already
+ *     completed but died before its own cleanup -- safe to remove.
+ *   - outDir present + a LIVE-owner backup: mid-transaction elsewhere --
+ *     leave it alone.
+ *   - more than one DEAD-owner backup: ambiguous (which crash, which
+ *     generation) -- fail closed rather than guess.
+ *
+ * writeOkfExport (below) also serializes its whole transaction under the
+ * project's file lock, so in practice two writers never race for the same
+ * outDir concurrently at all — this function's own pid-awareness is
+ * defense in depth for direct callers, not the only safety net.
  */
 export function recoverOrphanedBackup(outDir) {
   const parent = dirname(outDir);
@@ -202,30 +233,30 @@ export function recoverOrphanedBackup(outDir) {
   let entries;
   try { entries = readdirSync(parent); } catch { entries = []; }
 
-  // Stray .tmp-<pid> dirs are ALWAYS disposable garbage -- content only
-  // becomes real via the atomic rename into outDir, so nothing ever reads
-  // a tmp dir as authoritative. Sweep every one unconditionally, regardless
-  // of outDir's current state: Hale's re-audit found one survived a
-  // recovery run because the prior version only ever cleaned up the
-  // CURRENT process's own pid-named tmp dir, never an older crashed run's.
-  const tmpPattern = new RegExp(`^${escaped}\\.tmp-\\d+$`);
-  for (const e of entries.filter(e => tmpPattern.test(e))) {
-    rmSync(join(parent, e), { recursive: true, force: true });
+  const tmpPattern = new RegExp(`^${escaped}\\.tmp-(\\d+)$`);
+  for (const e of entries) {
+    const m = e.match(tmpPattern);
+    if (m && !pidAlive(Number(m[1]))) rmSync(join(parent, e), { recursive: true, force: true });
   }
 
-  if (existsSync(outDir)) return { recovered: false };
-
-  const bakPattern = new RegExp(`^${escaped}\\.bak-\\d+$`);
+  const bakPattern = new RegExp(`^${escaped}\\.bak-(\\d+)$`);
   const baks = entries.filter(e => bakPattern.test(e));
-  if (baks.length === 0) return { recovered: false };
-  if (baks.length > 1) {
+  const deadBaks = baks.filter(e => !pidAlive(Number(e.match(bakPattern)[1])));
+
+  if (existsSync(outDir)) {
+    for (const e of deadBaks) rmSync(join(parent, e), { recursive: true, force: true });
+    return { recovered: false };
+  }
+
+  if (deadBaks.length === 0) return { recovered: false };
+  if (deadBaks.length > 1) {
     throw Object.assign(
-      new Error(`${baks.length} ambiguous backup directories found for ${outDir} (${baks.join(', ')}) — refusing to auto-recover; resolve manually`),
-      { code: 'AMBIGUOUS_BACKUP_RECOVERY', candidates: baks },
+      new Error(`${deadBaks.length} ambiguous dead-owner backup directories found for ${outDir} (${deadBaks.join(', ')}) — refusing to auto-recover; resolve manually`),
+      { code: 'AMBIGUOUS_BACKUP_RECOVERY', candidates: deadBaks },
     );
   }
-  renameSync(join(parent, baks[0]), outDir);
-  return { recovered: true, from: baks[0] };
+  renameSync(join(parent, deadBaks[0]), outDir);
+  return { recovered: true, from: deadBaks[0] };
 }
 
 /**
@@ -234,77 +265,100 @@ export function recoverOrphanedBackup(outDir) {
  * authored content); writes to a temp dir, validates every generated link
  * resolves, then atomically swaps into place. Recovers a prior crash's
  * orphaned backup before doing anything else (see recoverOrphanedBackup).
+ *
+ * The whole transaction (recovery through the swap) runs under the
+ * project's own file lock (file-lock.mjs, the K12-hardened generation-
+ * based mutex already used elsewhere in the plugin) — Hale's re-audit
+ * (54e4479) demonstrated that without real serialization, two concurrent
+ * exporters could race on the same outDir regardless of how careful the
+ * pid-liveness checks inside a single call are. A crashed prior holder's
+ * lock is detected as stale and taken over by the existing mechanism; no
+ * new liveness logic was written for that case.
+ *
+ * `lockOptions` passes through to withFileLock verbatim -- production
+ * callers never set it (the file-lock default staleMs, 10 minutes, is a
+ * deliberate cross-project policy: a lock is only stealable once BOTH its
+ * age exceeds that threshold AND its owner pid is confirmed dead, per the
+ * K12/round-3 hardening -- a suspended-then-revived process past any age
+ * ceiling would otherwise overlap its superseder). Tests that simulate a
+ * crash and want to observe recovery without a real 10-minute wait pass a
+ * tightened staleMs explicitly; this never weakens the dead-pid check
+ * itself, only how long a confirmed-dead owner's lock is honored first.
  */
-export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null } = {}) {
-  recoverOrphanedBackup(outDir);
-  const { manifest, outputs, generatedLinks } = renderOkfExport(projectDir, { linkDensityThreshold });
+export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null, lockOptions = {} } = {}) {
+  return withFileLock(`${outDir}.lock`, () => {
+    recoverOrphanedBackup(outDir);
+    const { manifest, outputs, generatedLinks } = renderOkfExport(projectDir, { linkDensityThreshold });
 
-  // The design spec calls this "a throwaway gitignored _okf-export/" — never
-  // implemented in the prototype. Only auto-gitignore when the export lands
-  // INSIDE the project (the default case); an explicit --out elsewhere is the
-  // user's own choice of location and not this script's concern.
-  ensureGitignored(projectDir, outDir);
+    // The design spec calls this "a throwaway gitignored _okf-export/" — never
+    // implemented in the prototype. Only auto-gitignore when the export lands
+    // INSIDE the project (the default case); an explicit --out elsewhere is the
+    // user's own choice of location and not this script's concern.
+    ensureGitignored(projectDir, outDir);
 
-  // Refuse symlinked or non-generated output (correction 3: no overwrite primitive).
-  if (existsSync(outDir)) {
-    if (lstatSync(outDir).isSymbolicLink()) {
-      throw Object.assign(new Error(`${outDir} is a symlink — refusing`), { code: 'REFUSE_SYMLINK' });
+    // Refuse symlinked or non-generated output (correction 3: no overwrite primitive).
+    if (existsSync(outDir)) {
+      if (lstatSync(outDir).isSymbolicLink()) {
+        throw Object.assign(new Error(`${outDir} is a symlink — refusing`), { code: 'REFUSE_SYMLINK' });
+      }
+      if (!existsSync(join(outDir, MANIFEST_NAME))) {
+        throw Object.assign(new Error(`${outDir} exists and has no ${MANIFEST_NAME} — not a generated export, refusing to replace`), { code: 'REFUSE_NON_GENERATED' });
+      }
     }
-    if (!existsSync(join(outDir, MANIFEST_NAME))) {
-      throw Object.assign(new Error(`${outDir} exists and has no ${MANIFEST_NAME} — not a generated export, refusing to replace`), { code: 'REFUSE_NON_GENERATED' });
+    const tmpDir = `${outDir}.tmp-${process.pid}`;
+    rmSync(tmpDir, { recursive: true, force: true });
+    for (const [rel, content] of outputs) {
+      const fpath = join(tmpDir, ...rel.split('/'));
+      mkdirSync(dirname(fpath), { recursive: true });
+      writeFileSync(fpath, content);
     }
-  }
-  const tmpDir = `${outDir}.tmp-${process.pid}`;
-  rmSync(tmpDir, { recursive: true, force: true });
-  for (const [rel, content] of outputs) {
-    const fpath = join(tmpDir, ...rel.split('/'));
-    mkdirSync(dirname(fpath), { recursive: true });
-    writeFileSync(fpath, content);
-  }
-  writeFileSync(join(tmpDir, MANIFEST_NAME), JSON.stringify(manifest, null, 2) + '\n');
+    writeFileSync(join(tmpDir, MANIFEST_NAME), JSON.stringify(manifest, null, 2) + '\n');
 
-  // Validate the written tree: parseable frontmatter with non-empty type, and every
-  // GENERATED Related link resolves to an exported file. Hand-authored body links are
-  // deliberately NOT validated — OKF requires broken links be tolerated, and prose may
-  // legitimately cite paths outside the bundle (or literal example syntax).
-  //
-  // Found while completing the OKF test suite, 2026-07-19: `type:\s*\S+` used
-  // \s (which matches newlines) between the colon and the required non-empty
-  // value, so `type:\n status: active` — an EMPTY type immediately followed by
-  // the next YAML key — matched anyway, treating "status" as if it were the
-  // type's value. [ \t]* (no \n) keeps the required value on the type line
-  // itself, so a genuinely empty type is correctly caught as non-conformant.
-  let invalid = 0;
-  for (const rel of outputs.keys()) {
-    const written = readFileSync(join(tmpDir, ...rel.split('/')), 'utf8');
-    if (!/^---\r?\n[\s\S]*?^type:[ \t]*\S/m.test(written.slice(0, 2000))) { invalid++; continue; }
-    for (const target of generatedLinks.get(rel) || []) {
-      if (!existsSync(join(tmpDir, ...target.split('/')))) { invalid++; break; }
+    // Validate the written tree: parseable frontmatter with non-empty type, and every
+    // GENERATED Related link resolves to an exported file. Hand-authored body links are
+    // deliberately NOT validated — OKF requires broken links be tolerated, and prose may
+    // legitimately cite paths outside the bundle (or literal example syntax).
+    //
+    // Found while completing the OKF test suite, 2026-07-19: `type:\s*\S+` used
+    // \s (which matches newlines) between the colon and the required non-empty
+    // value, so `type:\n status: active` — an EMPTY type immediately followed by
+    // the next YAML key — matched anyway, treating "status" as if it were the
+    // type's value. [ \t]* (no \n) keeps the required value on the type line
+    // itself, so a genuinely empty type is correctly caught as non-conformant.
+    let invalid = 0;
+    for (const rel of outputs.keys()) {
+      const written = readFileSync(join(tmpDir, ...rel.split('/')), 'utf8');
+      if (!/^---\r?\n[\s\S]*?^type:[ \t]*\S/m.test(written.slice(0, 2000))) { invalid++; continue; }
+      for (const target of generatedLinks.get(rel) || []) {
+        if (!existsSync(join(tmpDir, ...target.split('/')))) { invalid++; break; }
+      }
     }
-  }
-  if (invalid > 0) {
-    throw Object.assign(new Error(`${invalid} exported file(s) failed post-write validation — export aborted, temp kept at ${tmpDir}`), { code: 'POST_WRITE_VALIDATION_FAILED', tmpDir });
-  }
-  const bakDir = `${outDir}.bak-${process.pid}`;
-  let swapFailed = false;
-  if (existsSync(outDir)) renameSync(outDir, bakDir);
-  // Test-only: simulate a real process death (not a catchable JS throw) in
-  // exactly the crash window recoverOrphanedBackup() exists to close. A test
-  // spawns a child with this set, expects it to be killed by its exit code
-  // (never reaching the try/catch/finally below), then calls writeOkfExport
-  // again in-process and asserts the backup was restored automatically.
-  if (process.env.FAULT_INJECT_HARD_KILL === '1') process.exit(1);
-  try {
-    if (process.env.FAULT_INJECT_SWAP_CRASH === '1') throw new Error('Simulated swap crash');
-    renameSync(tmpDir, outDir);
-  } catch (e) {
-    swapFailed = true;
-    if (existsSync(bakDir)) renameSync(bakDir, outDir); // restore backup
-    throw Object.assign(new Error(`Swap failed, backup restored: ${e.message}`), { code: 'SWAP_FAILED', cause: e });
-  } finally {
-    if (!swapFailed && existsSync(bakDir)) rmSync(bakDir, { recursive: true, force: true });
-  }
-  return manifest;
+    if (invalid > 0) {
+      throw Object.assign(new Error(`${invalid} exported file(s) failed post-write validation — export aborted, temp kept at ${tmpDir}`), { code: 'POST_WRITE_VALIDATION_FAILED', tmpDir });
+    }
+    const bakDir = `${outDir}.bak-${process.pid}`;
+    let swapFailed = false;
+    if (existsSync(outDir)) renameSync(outDir, bakDir);
+    // Test-only: simulate a real process death (not a catchable JS throw) in
+    // exactly the crash window recoverOrphanedBackup() exists to close. A test
+    // spawns a child with this set, expects it to be killed by its exit code
+    // (never reaching the try/catch/finally below), then calls writeOkfExport
+    // again in-process and asserts the backup was restored automatically.
+    // The child's own lock is left held-but-stale on disk; the recovering
+    // call's withFileLock detects the dead pid and takes over normally.
+    if (process.env.FAULT_INJECT_HARD_KILL === '1') process.exit(1);
+    try {
+      if (process.env.FAULT_INJECT_SWAP_CRASH === '1') throw new Error('Simulated swap crash');
+      renameSync(tmpDir, outDir);
+    } catch (e) {
+      swapFailed = true;
+      if (existsSync(bakDir)) renameSync(bakDir, outDir); // restore backup
+      throw Object.assign(new Error(`Swap failed, backup restored: ${e.message}`), { code: 'SWAP_FAILED', cause: e });
+    } finally {
+      if (!swapFailed && existsSync(bakDir)) rmSync(bakDir, { recursive: true, force: true });
+    }
+    return manifest;
+  }, lockOptions);
 }
 
 function usage() {

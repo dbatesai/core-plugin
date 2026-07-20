@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
-const { renderOkfExport, writeOkfExport, MANIFEST_NAME, validateLinkDensityThreshold } =
+const { renderOkfExport, writeOkfExport, MANIFEST_NAME, validateLinkDensityThreshold, recoverOrphanedBackup } =
   await import(pathToFileURL(join(SCRIPTS, 'render-okf-export.mjs')).href);
 
 function fixtureStore() {
@@ -479,7 +479,12 @@ test('writeOkfExport recovers a real killed-process crash on the next run (not j
 
   // Next run (fresh, in-process, no fault flag) must recover automatically
   // and produce a correct export, not error out or silently lose data.
-  writeOkfExport(root, outDir);
+  // Production leaves the file-lock default staleMs (10 minutes, deliberate
+  // per K12 hardening: a lock is only stealable once BOTH aged past the
+  // threshold AND its owner pid is confirmed dead). This test tightens
+  // staleMs so it can observe the SAME dead-pid takeover path without a
+  // real 10-minute wait -- the pid-liveness check itself is unchanged.
+  writeOkfExport(root, outDir, { lockOptions: { staleMs: 50 } });
   assert.ok(existsSync(outDir), 'outDir must exist after the recovering run');
   assert.equal(readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8'), goodAlpha, 'recovered content must match the pre-crash export');
   // Hale second re-audit (34e57be): the killed child's OWN tmpDir (fully
@@ -489,6 +494,80 @@ test('writeOkfExport recovers a real killed-process crash on the next run (not j
   // the killed process's own leftover tmp dir) must be gone after recovery.
   const stray = readdirSync(root).filter(e => e.startsWith('_okf-export.bak-') || e.startsWith('_okf-export.tmp-'));
   assert.deepEqual(stray, [], `no stray tmp/backup artifacts may survive a completed recovery, found: ${stray.join(', ')}`);
+});
+
+// Hale second re-audit (54e4479), minimal repro 1: "Create
+// outDir.tmp-${process.pid} while that PID is live, then call
+// recoverOrphanedBackup(outDir). Expected: the live writer's tree remains.
+// Actual: it is deleted." The unconditional sweep from the prior fix was
+// unsafe under real concurrency -- a second live exporter's in-progress,
+// already-validated tmp dir would be destroyed out from under it. Fixed
+// with pidAlive() (file-lock.mjs): only a confirmed-dead pid's tmp dir is
+// ever touched.
+test('recoverOrphanedBackup never touches a live pid\'s tmp dir (Hale minimal repro 1)', () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  const liveTmp = `${outDir}.tmp-${process.pid}`; // this test's own pid — guaranteed alive
+  mkdirSync(liveTmp, { recursive: true });
+  writeFileSync(join(liveTmp, 'in-progress.md'), 'a concurrent writer\'s validated, not-yet-swapped tree');
+  recoverOrphanedBackup(outDir);
+  assert.ok(existsSync(liveTmp), 'a live pid\'s tmp dir must survive recovery, not be deleted');
+  assert.equal(readFileSync(join(liveTmp, 'in-progress.md'), 'utf8'), 'a concurrent writer\'s validated, not-yet-swapped tree');
+  rmSync(liveTmp, { recursive: true, force: true });
+});
+
+// Hale second re-audit, minimal repro 2: "Create a valid outDir plus
+// outDir.bak-999999999, representing death after tmpDir -> outDir, then
+// call recovery. Expected: the dead-owner backup is consumed. Actual: it
+// remains." The prior fix returned immediately once outDir existed,
+// leaving a completed-swap's own leftover backup orphaned forever.
+test('recoverOrphanedBackup consumes a dead-owner backup even when outDir already exists (Hale minimal repro 2)', () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  writeOkfExport(root, outDir);
+  const deadBak = `${outDir}.bak-999999999`; // not a real pid on any real machine
+  mkdirSync(deadBak, { recursive: true });
+  writeFileSync(join(deadBak, 'stale.md'), 'leftover from a completed swap whose cleanup never ran');
+  recoverOrphanedBackup(outDir);
+  assert.ok(!existsSync(deadBak), 'a dead-owner backup must be consumed even when outDir already exists and looks healthy');
+  assert.ok(existsSync(outDir), 'outDir itself must be untouched');
+});
+
+// Hale live-exporter-diff-concurrency-stop: a concurrent negative control
+// with a GENUINELY different pid, not just the two isolated minimal repros
+// above (which correctly use this test's own pid, per Hale's literal repro
+// instructions, but that means writeOkfExport's own "clear my own prior
+// attempt's leftover" self-cleanup would legitimately also touch a
+// same-pid fixture -- self-cleanup of your own past leftover is correct
+// and unrelated to this fix; the real concurrency question is a DIFFERENT
+// live pid). Spawns a real long-running child holding its own tmp dir
+// under its own real pid, confirms a competing writeOkfExport in THIS
+// process leaves it untouched, then cleans the child up.
+test('a live concurrent writer (a real, different pid) survives a competing writeOkfExport call', async () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  const { spawn } = await import('node:child_process');
+  const child = spawn('node', ['-e', `
+    const { mkdirSync, writeFileSync } = require('fs');
+    const dir = ${JSON.stringify(outDir)} + '.tmp-' + process.pid;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(dir + '/in-progress.md', 'concurrent writer content');
+    process.stdout.write(dir + '\\n');
+    setInterval(() => {}, 1000); // stay alive until killed
+  `], { stdio: ['ignore', 'pipe', 'ignore'] });
+
+  const childTmpDir = await new Promise((resolvePromise) => {
+    child.stdout.once('data', (buf) => resolvePromise(buf.toString().trim()));
+  });
+  try {
+    assert.ok(existsSync(childTmpDir), 'the child must have created its live tmp dir before we proceed');
+    writeOkfExport(root, outDir);
+    assert.ok(existsSync(childTmpDir), 'a competing writeOkfExport must never delete another LIVE process\'s in-progress tree');
+    assert.equal(readFileSync(join(childTmpDir, 'in-progress.md'), 'utf8'), 'concurrent writer content');
+  } finally {
+    child.kill('SIGKILL');
+    rmSync(childTmpDir, { recursive: true, force: true });
+  }
 });
 
 test('multiple ambiguous orphaned backups fail closed instead of guessing', async () => {
