@@ -121,9 +121,16 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
   if (cap.index.degraded) {
     warnings.push(`store DEGRADED: duplicate ids ${JSON.stringify(cap.index.duplicate_conflicts)}`);
   }
-  let edgesRendered = 0, edgesFiltered = 0, unitsWithActiveEdge = 0;
+  let edgesRendered = 0, edgesFiltered = 0, unitsWithOutgoingActiveEdge = 0;
   const outputs = new Map();        // rel path -> content
   const generatedLinks = new Map(); // rel path -> [resolved target rel paths]
+  // Hale re-audit (correction-okf-orphan-metric-semantic-mismatch): a unit
+  // targeted by another unit's kept edge (a backlink) is NOT a graph
+  // orphan even with zero outgoing edges of its own -- check-units.mjs's
+  // canonical definition requires BOTH outgoing and incoming to be absent.
+  // Track incoming hits across the whole pass so the true-orphan count can
+  // be computed after the loop, not conflated with "has no outgoing link."
+  const hasIncomingActiveEdge = new Set(); // unit path -> targeted by >=1 kept edge
   for (const u of units) {
     const raw = cap.raw?.[u.path];
     if (raw === undefined) { warnings.push(`no raw buffer for ${u.path} — skipped`); continue; }
@@ -143,15 +150,18 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
       const rel = posix.relative(posix.dirname(u.path), target.path);
       kept.push(`- [${e.type}: ${target.id}](${rel})`);
       linkTargets.push(target.path);
+      hasIncomingActiveEdge.add(target.path);
     }
     generatedLinks.set(u.path, linkTargets);
     if (kept.length > 0) {
-      unitsWithActiveEdge++;
+      unitsWithOutgoingActiveEdge++;
       edgesRendered += kept.length;
       text = text.trimEnd() + `\n\n## Related\n${kept.join('\n')}\n`;
     }
     outputs.set(u.path, text);
   }
+  const trueGraphOrphans = units.filter(u =>
+    !generatedLinks.get(u.path)?.length && !hasIncomingActiveEdge.has(u.path)).length;
 
   // Omissions ledger: every candidate file the capture saw but the export drops.
   const omitted = Object.keys(cap.raw || {}).filter(rel => !outputs.has(rel)).sort();
@@ -160,16 +170,40 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
   // Hale re-audit finding (4d7c65e): compare the unrounded ratio, not the
   // display-rounded percentage — rounding first could pass a gate the raw
   // ratio actually fails (or vice versa) right at the boundary.
-  const rawPct = units.length ? (unitsWithActiveEdge / units.length) * 100 : 0;
+  //
+  // Hale re-audit (correction-okf-orphan-metric-semantic-mismatch): the
+  // gate itself (outgoing-link density) is unchanged, but the field names
+  // and CLI wording used to say "orphans" for "no OUTGOING active edge" --
+  // check-units.mjs's canonical orphan definition requires BOTH outgoing
+  // AND incoming (backlink) to be absent. Renamed the outgoing-only fields
+  // explicitly and added true_graph_orphans as its own, correctly-labeled
+  // count using the same both-outgoing-and-incoming-absent rule.
+  //
+  // Population scope, stated explicitly to avoid a second false alarm:
+  // true_graph_orphans is computed over the SAME population this export
+  // actually contains -- canonical units AND observations/<YYYY-MM>/ --
+  // because that is what a person will actually see as connected or
+  // disconnected when browsing the exported vault in Obsidian.
+  // check-units.mjs's own DEFAULT run (no --include-observations) scopes
+  // to top-level canonical units only, by design (iterActiveUnits skips
+  // every subdirectory unless that flag is passed) -- a materially
+  // smaller population. The two numbers answer different questions and
+  // are not directly comparable: verified directly against the live
+  // store, check-units --include-observations reports 113 orphans against
+  // its own (slightly different, 446 vs 441) population count, consistent
+  // with this export's 131 once observations are counted on both sides --
+  // not a contradiction, a scope difference.
+  const rawPct = units.length ? (unitsWithOutgoingActiveEdge / units.length) * 100 : 0;
   const density = {
     active_units: units.length,
-    with_active_edge: unitsWithActiveEdge,
-    pct_with_active_edge: Math.round(rawPct * 10) / 10,
-    orphans: units.length - unitsWithActiveEdge,
+    with_outgoing_active_edge: unitsWithOutgoingActiveEdge,
+    without_outgoing_active_edge: units.length - unitsWithOutgoingActiveEdge,
+    pct_with_outgoing_active_edge: Math.round(rawPct * 10) / 10,
+    true_graph_orphans: trueGraphOrphans,
     threshold,
   };
   if (threshold !== null && rawPct < threshold) {
-    throw Object.assign(new Error(`Link density ${density.pct_with_active_edge}% is below threshold ${threshold}%`), { code: 'LINK_DENSITY_FAILED' });
+    throw Object.assign(new Error(`Outgoing-link density ${density.pct_with_outgoing_active_edge}% is below threshold ${threshold}%`), { code: 'LINK_DENSITY_FAILED' });
   }
 
   const manifest = {
@@ -420,7 +454,7 @@ function main(argv) {
   const { counts, link_density: density, warnings } = manifest;
   process.stdout.write(`exported ${counts.exported_units} units → ${outDir}\n`);
   process.stdout.write(`snapshot ${manifest.snapshot_id.slice(0, 12)}… | edges rendered ${counts.edges_rendered}, filtered ${counts.edges_filtered_inactive_or_external} | omitted ${counts.omitted_files} file(s)\n`);
-  process.stdout.write(`link density: ${density.pct_with_active_edge}% of active units carry ≥1 active edge (${density.orphans} orphans) — threshold unratified, David's call\n`);
+  process.stdout.write(`outgoing-link density: ${density.pct_with_outgoing_active_edge}% of active units carry ≥1 outgoing active edge (${density.without_outgoing_active_edge} with none — not the same as graph orphans) — true graph orphans (no outgoing AND no incoming edge, within this export's own population of canonical units + observations): ${density.true_graph_orphans} — threshold unratified, David's call\n`);
   if (warnings.length) process.stdout.write(`warnings: ${warnings.length} (see manifest)\n`);
   return 0;
 }

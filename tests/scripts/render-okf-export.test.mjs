@@ -75,11 +75,18 @@ test('an orphan unit (no active edges) gets no Related block, not an empty one',
 test('link density is measured honestly, with an unratified threshold', () => {
   const root = fixtureStore();
   const { manifest } = renderOkfExport(root);
-  // Active units: alpha, beta, orphan = 3. With-active-edge: alpha only (beta's
-  // and orphan's own outgoing edges are none) — but beta IS a target, not a
-  // source, so density counts units that themselves carry an outgoing active edge.
+  // Active units: alpha, beta, orphan = 3. With-OUTGOING-active-edge: alpha
+  // only (beta's and orphan's own outgoing edges are none).
   assert.equal(manifest.link_density.active_units, 3);
-  assert.equal(manifest.link_density.with_active_edge, 1);
+  assert.equal(manifest.link_density.with_outgoing_active_edge, 1);
+  assert.equal(manifest.link_density.without_outgoing_active_edge, 2);
+  // Hale re-audit (correction-okf-orphan-metric-semantic-mismatch): beta
+  // has no OUTGOING edge, but alpha links TO it -- a real backlink, so
+  // beta must NOT count as a true graph orphan. Only dc-4-orphan (neither
+  // outgoing nor incoming) is a real graph orphan. This is exactly Hale's
+  // requested fixture: "B has no outgoing edge but A links to B; B must
+  // not be labeled a graph orphan."
+  assert.equal(manifest.link_density.true_graph_orphans, 1, 'only dc-4-orphan is a true graph orphan; dc-2-beta has a real backlink from dc-1-alpha');
   assert.equal(manifest.link_density.threshold, null, 'the threshold must stay unratified, not silently defaulted');
 });
 
