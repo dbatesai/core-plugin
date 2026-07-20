@@ -205,6 +205,12 @@ export async function runClaudeSyntheticTrial(opts) {
   const {
     sourceStoreDir, plants, candidatePluginDir, candidateRepoRoot, expectedCandidateGitSha,
     expectedProducerVersion, expectedProducerSha, prompt, arm, date, model, estimand,
+    // Hale, hale--6676db9-audit-hold-remediation-plan-required: the smallest
+    // possible reuse of this primitive for a matched control -- everything
+    // else about the call stays identical, only the real hook's own
+    // documented opt-out env var flips. Default true (treatment) so every
+    // existing call site is unaffected.
+    retrievalHookEnabled = true,
     timeoutMs = 60000, deps = {},
   } = opts || {};
   const fetchInventory = deps.fetchInventory || realFetchPluginInventory;
@@ -395,7 +401,13 @@ export async function runClaudeSyntheticTrial(opts) {
     const startedAt = Date.now();
     const spawnResult = spawnClaude(commandArgs, {
       cwd: realStoreDir,
-      env: { ...process.env, CORE_REASONING_ARM: arm },
+      // retrievalHookEnabled: false sets the real hook's own documented
+      // opt-out (retrieve-context-hook.mjs: `CORE_RETRIEVAL_HOOK === '0'`
+      // -> skip). Deliberately NOT unsetting it when true -- omission would
+      // leave a stray '0' from the calling process's own environment
+      // silently in effect, which is exactly the kind of ambient-state leak
+      // this whole pilot exists to close.
+      env: { ...process.env, CORE_REASONING_ARM: arm, CORE_RETRIEVAL_HOOK: retrievalHookEnabled ? '1' : '0' },
       encoding: 'utf8',
       timeout: timeoutMs,
     });
@@ -572,7 +584,9 @@ export async function runClaudeSyntheticTrial(opts) {
     return {
       ok: true,
       command: {
-        bin: 'claude', args: commandArgs, cwd: realStoreDir, env: { CORE_REASONING_ARM: arm },
+        bin: 'claude', args: commandArgs, cwd: realStoreDir,
+        env: { CORE_REASONING_ARM: arm, CORE_RETRIEVAL_HOOK: retrievalHookEnabled ? '1' : '0' },
+        retrievalHookEnabled,
         requestedModel: model, reportedModel: cliResult.model || null,
         observedModel: exposure.observedModel, observedCliVersion: exposure.observedCliVersion,
       },

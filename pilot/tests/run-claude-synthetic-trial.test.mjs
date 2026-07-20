@@ -889,3 +889,43 @@ test('DI composition: observed model and CLI version are recorded in the envelop
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
   }
 });
+
+// Hale, hale--6676db9-audit-hold-remediation-plan-required: the smallest
+// reusable piece of the matched-control design -- proves retrievalHookEnabled
+// actually reaches the real hook's own opt-out env var, in both directions,
+// and defaults safely when the caller doesn't pass it at all. This is
+// plumbing, not the control leg's own validation logic (that's the next,
+// separately-scoped piece -- see the design note in the mailbox reply).
+test('retrievalHookEnabled sets the real hook opt-out env var explicitly, both directions, and defaults to enabled', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  try {
+    for (const [label, retrievalHookEnabled] of [['explicit-on', true], ['explicit-off', false], ['default (omitted)', undefined]]) {
+      const sessionId = `fixture-session-hookflag-${label.replace(/[^a-z0-9]+/gi, '-')}`;
+      const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+      const capturedEnvs = [];
+      const inner = makeFixtureSpawn({ sessionId, promptId: `${sessionId}-prompt`, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds });
+      const spawnClaude = (args, spawnOpts) => { capturedEnvs.push(spawnOpts.env); return inner(args, spawnOpts); };
+      const result = await runClaudeSyntheticTrial({
+        sourceStoreDir: store, plants: PLANTS,
+        candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+        expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+        prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+        ...(retrievalHookEnabled === undefined ? {} : { retrievalHookEnabled }),
+        deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+      });
+      assert.equal(result.ok, true, `${label}: ${JSON.stringify(result, null, 2)}`);
+      const expectEnabled = retrievalHookEnabled !== false; // default true
+      assert.equal(capturedEnvs[0].CORE_RETRIEVAL_HOOK, expectEnabled ? '1' : '0', `${label}: real spawn env`);
+      assert.equal(result.command.retrievalHookEnabled, expectEnabled, `${label}: recorded in envelope`);
+      assert.equal(result.command.env.CORE_RETRIEVAL_HOOK, expectEnabled ? '1' : '0', `${label}: recorded env mirrors real spawn env`);
+    }
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
