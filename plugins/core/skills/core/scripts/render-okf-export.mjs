@@ -30,6 +30,7 @@ import { loadSnapshot } from './generate-summary-index.mjs';
 import { pidAlive, withFileLock } from './file-lock.mjs';
 
 export const GENERATOR_VERSION = '0.1.0';
+export const INDEX_NOTE_NAME = 'index.md';
 // Hale correction 6: pin the exact upstream revision the conformance claim is
 // made against. okf/SPEC.md @ GoogleCloudPlatform/knowledge-catalog.
 export const OKF_SPEC_PIN = 'ee67a5ca27044ebe7c38385f5b6cffc2305a9c1a'; // 2026-06-12, v0.1 Draft
@@ -103,6 +104,84 @@ export function parseLinkDensityThresholdArg(raw, sawFlag) {
     );
   }
   return validateLinkDensityThreshold(Number(trimmed));
+}
+
+/**
+ * renderIndexNote — a generated `index.md` MOC (map-of-content), the vault's
+ * entry point. Named in the original design spec's adversarial-pass finding
+ * 6 as deferred, not rejected: "OKF ceremony... until a real OKF consumer
+ * appears." A real Obsidian viewer landing on ~450 alphabetically-sorted,
+ * id-named files with no starting point is exactly the "does this feel
+ * trustworthy" gap this closes — a browse-by-type list plus an explicit
+ * isolated-notes section, generated fresh every export, never hand-edited.
+ *
+ * Pure function of the same in-memory data renderOkfExport already computed
+ * (units, per-unit outgoing link targets, which units have a real backlink)
+ * — no new store read, no new walk.
+ *
+ * @param {Array<{id, path, type, status, summary}>} units
+ * @param {Map<string, string[]>} generatedLinks  unit path -> outgoing target paths
+ * @param {Set<string>} hasIncomingActiveEdge      unit paths with >=1 real backlink
+ * @param {object} density  the same density block renderOkfExport computes
+ * @param {string} snapshotId
+ */
+export function renderIndexNote(units, generatedLinks, hasIncomingActiveEdge, density, snapshotId) {
+  const byType = new Map();
+  for (const u of units) {
+    const type = u.type || 'untyped';
+    if (!byType.has(type)) byType.set(type, []);
+    byType.get(type).push(u);
+  }
+  const sortedTypes = [...byType.keys()].sort();
+
+  const lines = [];
+  lines.push('---');
+  // type: index (not a real OKF unit type) satisfies writeOkfExport's own
+  // post-write validation, which requires non-empty type: frontmatter on
+  // every exported file -- this note is vault furniture, not a knowledge
+  // unit, but the validator doesn't distinguish and shouldn't need to.
+  //
+  // Deliberately NO wall-clock generated_at here (unlike the manifest,
+  // which is a separate file outside the byte-identity guarantee): this
+  // note is part of `outputs`, and the existing "deterministic reruns are
+  // byte-identical" test covers everything in `outputs` -- a live
+  // timestamp baked into the body would make that guarantee false on this
+  // one file alone. snapshot_id is already the content-derived, genuinely
+  // deterministic answer to "what store state does this reflect."
+  lines.push('type: index');
+  lines.push('generator: render-okf-export.mjs');
+  lines.push(`snapshot_id: ${snapshotId}`);
+  lines.push('---');
+  lines.push('');
+  lines.push('# CORE memory export');
+  lines.push('');
+  lines.push(`${units.length} units, ${density.with_outgoing_active_edge} with at least one outgoing link (${density.pct_with_outgoing_active_edge}%). This note is regenerated every export — edits here are lost on the next run.`);
+  lines.push('');
+
+  for (const type of sortedTypes) {
+    const inType = byType.get(type).slice().sort((a, b) => a.id.localeCompare(b.id));
+    lines.push(`## ${type} (${inType.length})`);
+    lines.push('');
+    for (const u of inType) {
+      const summary = u.summary ? ` — ${u.summary}` : '';
+      lines.push(`- [${u.id}](${u.path})${summary}`);
+    }
+    lines.push('');
+  }
+
+  const isolated = units
+    .filter((u) => !generatedLinks.get(u.path)?.length && !hasIncomingActiveEdge.has(u.path))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (isolated.length > 0) {
+    lines.push(`## Isolated notes (${isolated.length})`);
+    lines.push('');
+    lines.push('No outgoing or incoming links in this export — nothing to click through to or from in graph view.');
+    lines.push('');
+    for (const u of isolated) lines.push(`- [${u.id}](${u.path})`);
+    lines.push('');
+  }
+
+  return lines.join('\n');
 }
 
 /**
@@ -228,7 +307,25 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
     omitted,
     link_density: density,
     warnings,
+    index_note: INDEX_NOTE_NAME,
   };
+
+  // ── 4. Generated index note — the vault's entry point. Added to outputs
+  // AFTER the manifest so exported_units counts real units only; the note
+  // itself is named separately (manifest.index_note) rather than folded in.
+  // Fail closed rather than silently overwrite: SCAFFOLD already excludes
+  // any source unit literally named index.md (case-insensitive) from
+  // `units` before this line runs, so this check is unreachable through
+  // any real fixture today -- pure defense in depth in case SCAFFOLD's
+  // pattern is ever narrowed to stop matching INDEX_NOTE_NAME specifically.
+  // Never guess when a check costs nothing.
+  if (outputs.has(INDEX_NOTE_NAME)) {
+    throw Object.assign(
+      new Error(`a real unit already occupies ${INDEX_NOTE_NAME} at the export root — refusing to overwrite it with the generated index note`),
+      { code: 'INDEX_NOTE_NAME_COLLISION' },
+    );
+  }
+  outputs.set(INDEX_NOTE_NAME, renderIndexNote(units, generatedLinks, hasIncomingActiveEdge, density, cap.snapshotId));
 
   return { manifest, outputs, generatedLinks };
 }

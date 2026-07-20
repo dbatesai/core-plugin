@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
-const { renderOkfExport, writeOkfExport, MANIFEST_NAME, validateLinkDensityThreshold, recoverOrphanedBackup } =
+const { renderOkfExport, writeOkfExport, MANIFEST_NAME, INDEX_NOTE_NAME, renderIndexNote, validateLinkDensityThreshold, recoverOrphanedBackup } =
   await import(pathToFileURL(join(SCRIPTS, 'render-okf-export.mjs')).href);
 
 function fixtureStore() {
@@ -99,7 +99,65 @@ test('writeOkfExport: full round-trip lands on disk, manifest included, generate
   assert.ok(!existsSync(join(outDir, 'dc-3-retired.md')), 'retired unit must not land on disk either');
   const written = readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8');
   assert.match(written, /## Related/);
-  assert.equal(manifest.counts.exported_units, 3);
+  assert.equal(manifest.counts.exported_units, 3, 'exported_units counts real units only, not the generated index note');
+});
+
+// The generated index.md MOC — the vault's entry point (deferred-not-
+// rejected in the original design spec's adversarial pass). Covers:
+// presence, real content grouped by type, the isolated-notes section, that
+// it's excluded from exported_units, and the collision guard.
+test('renderOkfExport generates index.md grouped by type, with an isolated-notes section, and it never counts toward exported_units', () => {
+  const root = fixtureStore();
+  const { outputs, manifest } = renderOkfExport(root);
+  assert.ok(outputs.has(INDEX_NOTE_NAME), 'the generated index note must be present in outputs');
+  const index = outputs.get(INDEX_NOTE_NAME);
+  assert.match(index, /^---\ntype: index\n/, 'the index note must carry type: index frontmatter to pass post-write validation');
+  assert.match(index, /## decision \(2\)/);
+  assert.match(index, /- \[dc-1-alpha\]\(dc-1-alpha\.md\)/);
+  assert.match(index, /## observation \(1\)/);
+  // dc-4-orphan has no outgoing edge and no backlink -- it must appear in
+  // the isolated-notes section, same population as true_graph_orphans.
+  assert.match(index, /## Isolated notes \(1\)/);
+  assert.match(index, /- \[dc-4-orphan\]\(dc-4-orphan\.md\)/);
+  // dc-2-beta has a real backlink (dc-1-alpha cites it) -- it must NOT be
+  // listed as isolated, matching the true_graph_orphans semantics exactly.
+  const isolatedSection = index.slice(index.indexOf('## Isolated notes'));
+  assert.ok(!isolatedSection.includes('dc-2-beta'), 'a unit with a real backlink must not appear in the isolated-notes section');
+  assert.equal(manifest.counts.exported_units, 3, 'the index note itself is not a unit and must not inflate exported_units');
+  assert.equal(manifest.index_note, INDEX_NOTE_NAME);
+});
+
+test('the index note is excluded from the deterministic byte-identity guarantee by having no live timestamp in it', () => {
+  const root = fixtureStore();
+  const first = renderOkfExport(root).outputs.get(INDEX_NOTE_NAME);
+  const second = renderOkfExport(root).outputs.get(INDEX_NOTE_NAME);
+  assert.equal(first, second, 'two renders of an unchanged store must produce a byte-identical index note, same as every other exported file');
+});
+
+// The SCAFFOLD regex (INDEX[^/]*.md, case-insensitive) already excludes any
+// source unit literally named index.md from `units` before the index note
+// is ever generated -- confirmed here directly, which is why
+// INDEX_NOTE_NAME_COLLISION can't be triggered through a real fixture: the
+// two layers overlap by design (SCAFFOLD is the first line of defense at
+// the source; the outputs.has() check in renderOkfExport is pure defense
+// in depth in case that regex is ever narrowed). This test documents the
+// actual, exercisable guarantee instead of asserting an unreachable path.
+test('a source unit literally named index.md is dropped as SCAFFOLD, never silently collided with the generated note', () => {
+  const root = fixtureStore();
+  writeFileSync(join(root, '_memories', 'index.md'), '---\nid: dc-5-index-collision\ntype: decision\nstatus: active\n---\n\n# A real unit that happens to be named index.md\n');
+  const { outputs } = renderOkfExport(root);
+  const index = outputs.get(INDEX_NOTE_NAME);
+  assert.match(index, /^---\ntype: index\n/, 'the generated index note, not the colliding source file, wins the slot');
+  assert.ok(!index.includes('dc-5-index-collision'), 'the colliding source unit never reaches the export at all -- SCAFFOLD drops it upstream');
+});
+
+test('writeOkfExport: the index note lands on disk in a real round-trip and links resolve', () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  writeOkfExport(root, outDir);
+  assert.ok(existsSync(join(outDir, INDEX_NOTE_NAME)));
+  const index = readFileSync(join(outDir, INDEX_NOTE_NAME), 'utf8');
+  assert.match(index, /## decision \(2\)/);
 });
 
 test('writeOkfExport is idempotent-safe: re-running against its own prior output replaces cleanly', () => {
