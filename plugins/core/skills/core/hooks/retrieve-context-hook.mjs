@@ -55,7 +55,7 @@ const TOP_N = 3;
  * counts UTF-16 code units, not bytes — wrong for a byte-budget contract on
  * any non-ASCII content (K-series UTF-8 byte-cap fix, Hale's re-audit 2026-07-19).
  */
-function truncateUtf8(str, maxBytes) {
+export function truncateUtf8(str, maxBytes) {
   const buf = Buffer.from(str, 'utf8');
   if (buf.length <= maxBytes) return str;
   let end = maxBytes;
