@@ -350,11 +350,31 @@ export async function runClaudeSyntheticTrial(opts) {
     // among the units Tier 1 selected, AND the final answer actually
     // contains a planted token -- neither is inferable from a clean join +
     // clean exposure alone.
+    //
+    // Hale, hale--6e4e086-stop-and-telemetry-hold: "the efficacy oracle
+    // currently trusts an after-the-fact retrieval recomputation... make
+    // joinResult.retrieval.units_retrieved authoritative and require it to
+    // agree with the independently recomputed selectedUnitIds. A
+    // disagreement must spoil, not be hidden." Without this, the
+    // instrument could recompute a carrier hit while the REAL joined
+    // telemetry row logged something else (or nothing) -- exactly what the
+    // committed happy fixture had been doing.
+    const loggedUnitIds = (joinResult.retrieval.units_retrieved || []).map((u) => u.id);
+    const loggedSelectedCount = joinResult.retrieval.selected_count;
+    const sortedLogged = [...loggedUnitIds].sort();
+    const sortedRecomputed = [...selectedUnitIds].sort();
+    const idsAgree = sortedLogged.length === sortedRecomputed.length && sortedLogged.every((id, i) => id === sortedRecomputed[i]);
+    if (!idsAgree || loggedSelectedCount !== selectedUnitIds.length) {
+      return spoil('TELEMETRY_SELECTION_MISMATCH', {
+        detail: { loggedUnitIds, loggedSelectedCount, recomputedUnitIds: selectedUnitIds },
+      });
+    }
+
     const selectedCarrierTokens = plants
       .map((p) => p.token)
-      .filter((token) => selectedUnitIds.includes(carrierIdsByToken.get(token)));
+      .filter((token) => loggedUnitIds.includes(carrierIdsByToken.get(token)) && selectedUnitIds.includes(carrierIdsByToken.get(token)));
     if (selectedCarrierTokens.length === 0) {
-      return spoil('EFFICACY_CARRIER_NOT_SELECTED', { detail: { selectedUnitIds, expectedCarrierIds: [...carrierIdsByToken.values()] } });
+      return spoil('EFFICACY_CARRIER_NOT_SELECTED', { detail: { loggedUnitIds, selectedUnitIds, expectedCarrierIds: [...carrierIdsByToken.values()] } });
     }
     const answerMatchedTokens = selectedCarrierTokens.filter((token) =>
       String(exposure.finalAnswerText || '').toLowerCase().includes(String(token).toLowerCase()));

@@ -160,14 +160,21 @@ function fakeFetchInventory({ pluginDir } = {}) {
 // host-exposure-checker.mjs) into the exact cwd/session the orchestrator
 // gives it, then returns a realistic CLI JSON result. No process is ever
 // spawned -- this fixture is the "spawn result" the DI seam exists for.
-function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answerText, arm, date, cleanupPaths }) {
+function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds = [] }) {
   return (args, spawnOpts) => {
     const cwd = spawnOpts.cwd;
+    // Hale, hale--6e4e086-stop-and-telemetry-hold: the JOINED retrieval row
+    // is now cross-checked against the independently recomputed selection
+    // (TELEMETRY_SELECTION_MISMATCH otherwise) -- this fixture must log
+    // units_retrieved/selected_count that genuinely reflect what the
+    // caller says Tier 1 selected, never a fixed zero-hit placeholder.
     const retrieval = recordRetrievalEvent(cwd, {
       trigger: 'per-turn-hook', mechanism: 'model-free-substrate',
       retrieval_id: `${sessionId}-retrieval`,
       intent_topics: ['fixture'], tier_reached: 1, escalation_path: [1],
-      units_retrieved: [], result: 'no-hit', candidate_count: 0, selected_count: 0, context_pack_token_estimate: 0,
+      units_retrieved: selectedUnitIds.map((id) => ({ id, tier: 1, source_stage: 'ranked' })),
+      result: selectedUnitIds.length === 0 ? 'no-hit' : 'hit',
+      candidate_count: selectedUnitIds.length, selected_count: selectedUnitIds.length, context_pack_token_estimate: 0,
       requested_arm: arm, directive_fired: directiveText !== '',
     }, { today: date });
     recordRetrievalOutcome(cwd, {
@@ -187,6 +194,10 @@ function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answer
       { type: 'user', promptId, uuid: 'u1', parentUuid: null, message: { role: 'user', content: [{ type: 'text', text: 'fixture prompt' }] } },
       { type: 'attachment', uuid: 'u2', parentUuid: 'u1', attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: 'tu1', content: fullEmission, stdout: `${fullEmission}\n`, exitCode: 0 } },
       { type: 'assistant', uuid: 'u3', parentUuid: 'u2', message: { model: 'claude-sonnet-5', id: 'msg1', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: answerText }] } },
+      // A real completed `-p` invocation always fires the candidate's own
+      // Stop hook (answer-close-hook.mjs) too -- host-exposure-checker.mjs
+      // now requires it (Hale, hale--b75fecc-paid-run-not-release-evidence).
+      { type: 'attachment', uuid: 'u4', parentUuid: 'u3', attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu2', content: '', stdout: '', exitCode: 0 } },
     ];
     writeFileSync(transcriptPath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
 
@@ -210,9 +221,9 @@ test('DI composition: a full fixture-driven trial composes to a real ok:true env
   // content-based, so computing it against the source store (same file
   // bytes buildFreshTrialStore will copy verbatim) yields an identical
   // result to what the orchestrator derives against its own fresh copy.
-  const { packText, directiveText } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  const { packText, directiveText, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
   try {
-    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-1', packText, directiveText, answerText, arm, date, cleanupPaths });
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-1', packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
@@ -435,9 +446,9 @@ test('spoil: EFFICACY_ANSWER_MISSING_TARGET when the carrier is selected but the
   // answer deliberately never repeats the planted token "cobalt".
   const answerText = 'I found a relevant memory but will not restate its contents here.';
   const sessionId = 'fixture-session-notarget-1';
-  const { packText, directiveText } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  const { packText, directiveText, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
   try {
-    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-notarget-1', packText, directiveText, answerText, arm, date, cleanupPaths });
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-notarget-1', packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
@@ -461,9 +472,9 @@ test('DI composition happy path also asserts the efficacy contract fields, not j
   const prompt = 'What is the proof codename?';
   const answerText = 'The proof codename is cobalt.';
   const sessionId = 'fixture-session-efficacy-happy-1';
-  const { packText, directiveText } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  const { packText, directiveText, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
   try {
-    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-efficacy-happy-1', packText, directiveText, answerText, arm, date, cleanupPaths });
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-efficacy-happy-1', packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
@@ -476,6 +487,46 @@ test('DI composition happy path also asserts the efficacy contract fields, not j
     assert.deepEqual(result.efficacy.selectedCarrierTokens, ['cobalt']);
     assert.deepEqual(result.efficacy.answerMatchedTokens, ['cobalt']);
     assert.equal(result.transcriptPath && result.transcriptPath.length > 0, true);
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+// Hale, hale--6e4e086-stop-and-telemetry-hold: "the instrument [must not]
+// disagree with its own actual joined telemetry while claiming efficacy."
+// A recomputation that selects the carrier means nothing if the REAL
+// joined retrieval row logged something else -- this must spoil, not be
+// silently overridden by the independent recomputation.
+test('spoil: TELEMETRY_SELECTION_MISMATCH when the joined retrieval row disagrees with the independently recomputed selection', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-telemetry-mismatch-1';
+  const { packText, directiveText } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    // Deliberately logs a DIFFERENT unit id than the real recomputation
+    // (which selects 'dc-1-carrier') -- the recomputation would still
+    // "pass" the carrier-selected check if trusted alone; the real joined
+    // telemetry must be checked instead, and disagreement must spoil.
+    const spawnClaude = makeFixtureSpawn({
+      sessionId, promptId: 'fixture-prompt-telemetry-mismatch-1', packText, directiveText, answerText, arm, date, cleanupPaths,
+      selectedUnitIds: ['some-other-unit-not-the-carrier'],
+    });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'TELEMETRY_SELECTION_MISMATCH');
+    assert.deepEqual(result.detail.loggedUnitIds, ['some-other-unit-not-the-carrier']);
+    assert.ok(result.detail.recomputedUnitIds.includes('dc-1-carrier'));
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }

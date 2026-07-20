@@ -249,29 +249,41 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   // exclude the user-global settings source at invocation time (the
   // root-cause fix); this is the second, transcript-side layer.
   //
-  // Self-caught (2026-07-20) against a REAL gated invocation, not a
-  // synthetic fixture: a first version of this check flagged ANY second
-  // hook attachment as unexpected, which false-positived on the
-  // candidate's OWN legitimate 'Stop' hook (answer-close-hook.mjs) --
-  // every real `-p` invocation fires both UserPromptSubmit
-  // (retrieve-context-hook.mjs) and Stop (answer-close-hook.mjs) as normal
-  // product behavior, not a leak. The real signal is not "more than one
-  // hook fired" -- it's "a hook fired whose name isn't one of the
-  // candidate's own two hooks." Any hookName outside this allowlist (a
-  // foreign PreToolUse:Skill hook, a SessionStart hook, anything else from
-  // the excluded user-global settings) is the actual isolation failure.
-  const CANDIDATE_OWNED_HOOK_NAMES = new Set(['UserPromptSubmit', 'Stop']);
-  const foreignHookAttachments = turnLines.filter((l) =>
+  // Two self-corrections chained here, both caught by Hale against real
+  // native-shape falsifiers, not synthetic fixtures:
+  //   1. A first version flagged ANY second hook attachment, false-
+  //      positiving on the candidate's OWN legitimate 'Stop' hook
+  //      (answer-close-hook.mjs, which fires on every real invocation).
+  //   2. Hale, hale--a138d40-isolation-pass-stop-false-positive /
+  //      hale--6e4e086-stop-and-telemetry-hold: an allowlist keyed on
+  //      hookName ALONE was still too loose -- it does not require the
+  //      Stop hook to actually be SUCCESSFUL (a hook_failure Stop with
+  //      exitCode:1 still matched the name and passed), and does not
+  //      enforce CARDINALITY (a second, foreign attachment using the same
+  //      hookName as a legitimate one -- e.g. two 'Stop' attachments,
+  //      one real and one a masquerading foreign hook -- both matched the
+  //      allowlist and both passed).
+  //
+  // The real contract: exactly ONE successful UserPromptSubmit exposure
+  // (already required above) plus exactly ONE successful ('hook_success',
+  // exitCode 0) 'Stop' attachment, and NOTHING else -- no duplicate of
+  // either, no hook_failure of either, no foreign hookName. Any deviation
+  // from that exact shape spoils, never inferred from hookName alone.
+  const otherHookAttachments = turnLines.filter((l) =>
     l?.type === 'attachment'
     && (l?.attachment?.type === 'hook_success' || l?.attachment?.type === 'hook_failure')
     && l?.uuid
-    && !CANDIDATE_OWNED_HOOK_NAMES.has(l?.attachment?.hookName)
+    && l.uuid !== exposures[0].uuid
     && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
-  if (foreignHookAttachments.length > 0) {
+  const isLegitimateStop = (l) => l.attachment.type === 'hook_success' && l.attachment.hookName === 'Stop' && l.attachment.exitCode === 0;
+  const legitimateStops = otherHookAttachments.filter(isLegitimateStop);
+  const unexpectedHooks = otherHookAttachments.filter((l) => !isLegitimateStop(l));
+  if (legitimateStops.length !== 1 || unexpectedHooks.length > 0) {
     return {
       ok: false, reason: 'UNEXPECTED_HOOK_ACTIVITY', expectedPromptId,
-      count: foreignHookAttachments.length,
-      hookNames: foreignHookAttachments.map((l) => l.attachment.hookName),
+      legitimateStopCount: legitimateStops.length,
+      unexpectedCount: unexpectedHooks.length,
+      hookNames: otherHookAttachments.map((l) => l.attachment.hookName),
     };
   }
   const exposureAttachment = exposures[0].attachment;

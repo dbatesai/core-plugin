@@ -34,9 +34,13 @@ function chain(lines, line, parentUuid) {
  * Builds a real-shaped Claude Code turn, verified against this session's
  * own live transcript: anchor user line, decorative attachment chain, the
  * UserPromptSubmit hook_success exposure, then a caller-supplied sequence
- * of "steps" (tool cycles and/or a terminal end_turn message group).
+ * of "steps" (tool cycles and/or a terminal end_turn message group), then
+ * (by default) the candidate's own legitimate Stop hook attachment -- a
+ * REAL completed `-p` invocation always fires both (verified against the
+ * real transcript captured in iteration 21). Pass `includeStop: false` to
+ * explore the no-Stop-yet case explicitly.
  */
-function buildTurn({ promptId, exposedContent, exposedStdout = exposedContent, exitCode = 0, steps, exposureParent = 'chain', includeExposure = true }) {
+function buildTurn({ promptId, exposedContent, exposedStdout = exposedContent, exitCode = 0, steps, exposureParent = 'chain', includeExposure = true, includeStop = true }) {
   const lines = [];
   const anchorUuid = chain(lines, { type: 'user', promptId, message: { role: 'user', content: [{ type: 'text', text: 'a prompt' }] } }, null);
 
@@ -65,6 +69,12 @@ function buildTurn({ promptId, exposedContent, exposedStdout = exposedContent, e
         first = false;
       }
     }
+  }
+  if (includeStop) {
+    chain(lines, {
+      type: 'attachment',
+      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: uid(), content: '', stdout: '', exitCode: 0, command: '', durationMs: 1 },
+    });
   }
   return { lines, anchorUuid };
 }
@@ -456,12 +466,17 @@ test('UNEXPECTED_HOOK_ACTIVITY: a second hook_success attachment (e.g. a leaked 
     const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'UNEXPECTED_HOOK_ACTIVITY');
-    assert.equal(result.count, 1);
+    assert.equal(result.unexpectedCount, 1);
+    assert.equal(result.legitimateStopCount, 1, 'the default-included legitimate Stop hook must still be recognized as legitimate alongside the foreign one');
     assert.ok(result.hookNames.includes('PreToolUse'));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('UNEXPECTED_HOOK_ACTIVITY: a lone UserPromptSubmit exposure with no other hook activity still passes (no false positive)', () => {
+// buildTurn includes the candidate's own legitimate Stop hook by default
+// (real transcript shape) -- this is the exposure-plus-legitimate-Stop
+// happy path, not "no other hook activity" (that case is covered
+// separately below via includeStop:false).
+test('UNEXPECTED_HOOK_ACTIVITY: exposure plus the candidate\'s own legitimate Stop hook is NOT a false positive', () => {
   const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
   try {
     const full = 'the full injected context';
@@ -475,13 +490,31 @@ test('UNEXPECTED_HOOK_ACTIVITY: a lone UserPromptSubmit exposure with no other h
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// Self-caught (2026-07-20) against a REAL gated invocation, not a synthetic
-// fixture: the first version of this check flagged ANY second hook
-// attachment, which false-positived on the candidate's OWN legitimate
-// 'Stop' hook (answer-close-hook.mjs) -- every real `-p` invocation fires
-// both UserPromptSubmit and Stop as normal product behavior. A candidate-
-// owned Stop hook attachment must NOT be flagged as unexpected activity.
-test('UNEXPECTED_HOOK_ACTIVITY: the candidate\'s own legitimate Stop hook firing is NOT a false positive', () => {
+// Hale, hale--b75fecc-paid-run-not-release-evidence: "spoil duplicate,
+// failed, missing, or mismatched candidate hooks." A MISSING Stop hook
+// (the turn window captured before Stop fired, or Stop never fired at
+// all) must spoil too -- a real completed `-p` invocation always has one.
+test('UNEXPECTED_HOOK_ACTIVITY: a missing Stop hook (never fired) spoils, not treated as optional', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0, includeStop: false,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.legitimateStopCount, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Hale's exact falsifier 1 (hale--b75fecc-paid-run-not-release-evidence):
+// two descendant Stop attachments -- one real, one a foreign command
+// disguised with the SAME hookName -- must not both pass just because the
+// name matches. Duplicate legitimate-shaped Stops are ambiguous and spoil.
+test('UNEXPECTED_HOOK_ACTIVITY: a duplicate Stop attachment (one real, one foreign masquerading with the same hookName) spoils', () => {
   const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
   try {
     const full = 'the full injected context';
@@ -489,13 +522,43 @@ test('UNEXPECTED_HOOK_ACTIVITY: the candidate\'s own legitimate Stop hook firing
       promptId: 'p-1', exposedContent: full, exitCode: 0,
       steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
     });
+    // buildTurn already appended one legitimate Stop; splice in a SECOND
+    // one masquerading as the candidate's own (same hookName, different
+    // underlying command) right before it.
     const lastUuid = lines[lines.length - 1].uuid;
-    lines.push({
-      type: 'attachment', uuid: 'stop-hook-1', parentUuid: lastUuid,
-      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu-stop', content: '', stdout: '', exitCode: 0, command: '', durationMs: 1 },
+    lines.splice(lines.length - 1, 0, {
+      type: 'attachment', uuid: 'foreign-stop-1', parentUuid: lastUuid,
+      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu-foreign-stop', content: '', stdout: '', exitCode: 0, command: 'bash ~/.claude/hooks/some-other-stop-hook.sh', durationMs: 1 },
     });
     const path = writeTranscript(root, lines);
     const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
-    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.legitimateStopCount, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Hale's exact falsifier 2: a Stop attachment with type:hook_failure and
+// exitCode:1 must not pass just because the hookName matches -- a FAILED
+// Stop hook is not "the candidate operating normally."
+test('UNEXPECTED_HOOK_ACTIVITY: a failed Stop hook (hook_failure, exitCode 1) spoils, never passes on hookName alone', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0, includeStop: false,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const lastUuid = lines[lines.length - 1].uuid;
+    lines.push({
+      type: 'attachment', uuid: 'failed-stop-1', parentUuid: lastUuid,
+      attachment: { type: 'hook_failure', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu-failed-stop', content: '', stdout: '', exitCode: 1, command: '', durationMs: 1 },
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.legitimateStopCount, 0);
+    assert.equal(result.unexpectedCount, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
