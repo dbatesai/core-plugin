@@ -24,7 +24,7 @@
 //   node render-okf-export.mjs <project-dir> [--out <dir>] [--check]
 
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, lstatSync, renameSync, realpathSync } from 'node:fs';
-import { join, resolve, dirname, relative, posix } from 'node:path';
+import { join, resolve, dirname, basename, relative, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
 
@@ -57,21 +57,44 @@ function ensureGitignored(projectDir, outDir) {
 }
 
 /**
- * validateLinkDensityThreshold — Hale re-audit finding (4d7c65e): the
- * threshold API accepted -1, NaN, and the string "abc" with no rejection.
- * Closes the gate to a finite number in [0,100]; null/undefined mean "no
- * gate" (report-only), which stays the default.
+ * validateLinkDensityThreshold — the JS API contract. STRICT: only an
+ * actual `number` (finite, in [0,100]) or null/undefined ("no gate")
+ * are accepted. Hale's second re-audit (34e57be) found the first version
+ * used `Number(t)` coercion, so `"10"`, `""`, `" "`, `true`, `false`, and
+ * `[]` all silently converted to valid numbers instead of being rejected
+ * -- a caller could pass a string and never know it wasn't a number. No
+ * coercion of any kind here; string parsing is a CLI-only concern, done
+ * explicitly and separately by parseLinkDensityThresholdArg below.
  */
 export function validateLinkDensityThreshold(t) {
   if (t === null || t === undefined) return null;
-  const n = Number(t);
-  if (!Number.isFinite(n) || n < 0 || n > 100) {
+  if (typeof t !== 'number' || !Number.isFinite(t) || t < 0 || t > 100) {
     throw Object.assign(
-      new Error(`link density threshold must be a finite number in [0,100], got ${JSON.stringify(t)}`),
+      new Error(`link density threshold must be a finite number in [0,100], got ${JSON.stringify(t)} (${typeof t})`),
       { code: 'INVALID_LINK_DENSITY_THRESHOLD' },
     );
   }
-  return n;
+  return t;
+}
+
+/**
+ * parseLinkDensityThresholdArg — the ONLY place a CLI string is allowed to
+ * become a number. `raw` is `undefined` when the --min-link-density flag
+ * was never passed at all (valid: "no gate"). Hale's second re-audit also
+ * found that a flag passed with no following value silently disabled the
+ * gate (exit 0, threshold: null) -- indistinguishable from "flag never
+ * given". `sawFlag` disambiguates: when the flag WAS present but its value
+ * is missing or non-numeric, that's a caller error, not silent no-gate.
+ */
+export function parseLinkDensityThresholdArg(raw, sawFlag) {
+  if (!sawFlag) return null;
+  if (raw === undefined || raw === null || !/^-?\d+(\.\d+)?$/.test(raw.trim())) {
+    throw Object.assign(
+      new Error(`--min-link-density requires a numeric value, got ${JSON.stringify(raw)}`),
+      { code: 'INVALID_LINK_DENSITY_THRESHOLD' },
+    );
+  }
+  return validateLinkDensityThreshold(Number(raw));
 }
 
 /**
@@ -173,12 +196,26 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
  * (which crash, which generation) and fail closed rather than guess.
  */
 export function recoverOrphanedBackup(outDir) {
-  if (existsSync(outDir)) return { recovered: false };
   const parent = dirname(outDir);
-  const base = outDir.split('/').pop();
+  const base = basename(outDir);
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let entries;
-  try { entries = readdirSync(parent); } catch { return { recovered: false }; }
-  const bakPattern = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.bak-\\d+$`);
+  try { entries = readdirSync(parent); } catch { entries = []; }
+
+  // Stray .tmp-<pid> dirs are ALWAYS disposable garbage -- content only
+  // becomes real via the atomic rename into outDir, so nothing ever reads
+  // a tmp dir as authoritative. Sweep every one unconditionally, regardless
+  // of outDir's current state: Hale's re-audit found one survived a
+  // recovery run because the prior version only ever cleaned up the
+  // CURRENT process's own pid-named tmp dir, never an older crashed run's.
+  const tmpPattern = new RegExp(`^${escaped}\\.tmp-\\d+$`);
+  for (const e of entries.filter(e => tmpPattern.test(e))) {
+    rmSync(join(parent, e), { recursive: true, force: true });
+  }
+
+  if (existsSync(outDir)) return { recovered: false };
+
+  const bakPattern = new RegExp(`^${escaped}\\.bak-\\d+$`);
   const baks = entries.filter(e => bakPattern.test(e));
   if (baks.length === 0) return { recovered: false };
   if (baks.length > 1) {
@@ -279,13 +316,20 @@ function main(argv) {
   const projectDir = resolve(argv.find(a => !a.startsWith('--')) || '.');
   const outFlag = argv.includes('--out') ? argv[argv.indexOf('--out') + 1] : null;
   const checkOnly = argv.includes('--check');
-  const densityFlag = argv.includes('--min-link-density') ? argv[argv.indexOf('--min-link-density') + 1] : null;
+  const sawDensityFlag = argv.includes('--min-link-density');
+  // Hale re-audit (34e57be): the value slot can be out of bounds (flag is
+  // the last argument) or accidentally grab the NEXT flag as its value
+  // (`--min-link-density --check`) -- either must be treated as "flag
+  // present, value missing", not silently coerced to a real value.
+  const densityIdx = sawDensityFlag ? argv.indexOf('--min-link-density') + 1 : -1;
+  const densityRaw = (densityIdx >= 0 && densityIdx < argv.length && !argv[densityIdx].startsWith('--'))
+    ? argv[densityIdx] : undefined;
   if (!existsSync(join(projectDir, '_memories'))) return usage();
   const outDir = resolve(outFlag || join(projectDir, '_okf-export'));
 
   let linkDensityThreshold;
   try {
-    linkDensityThreshold = validateLinkDensityThreshold(densityFlag);
+    linkDensityThreshold = parseLinkDensityThresholdArg(densityRaw, sawDensityFlag);
   } catch (e) {
     process.stderr.write(`FATAL: ${e.message}\n`);
     return 2;

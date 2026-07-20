@@ -236,18 +236,23 @@ test('a stale file from a prior export is removed when the source unit disappear
   assert.ok(!existsSync(join(outDir, 'dc-4-orphan.md')), 'a unit retired between runs must not survive as a stale file in the regenerated export');
 });
 
-test('a leftover tmp directory from a different pid does not block or corrupt a fresh export (own-pid-only cleanup)', () => {
+test('a leftover tmp directory from a different (crashed) pid is swept, not just tolerated', () => {
   const root = fixtureStore();
   const outDir = join(root, '_okf-export');
-  // Simulate a crashed prior run's leftover temp dir under a DIFFERENT pid —
-  // writeOkfExport only ever rmSync's its OWN `${outDir}.tmp-${process.pid}`.
+  // Simulate a crashed prior run's leftover temp dir under a DIFFERENT pid.
+  // Hale re-audit (34e57be): the original fix only ever cleaned up the
+  // CURRENT process's own `${outDir}.tmp-${process.pid}`, so an older
+  // crashed run's tmp dir survived indefinitely -- tmp dirs are always
+  // disposable (real content only exists once atomically renamed into
+  // outDir), so recoverOrphanedBackup now sweeps every `.tmp-*` sibling
+  // unconditionally, regardless of which pid created it.
   const staleTmp = `${outDir}.tmp-999999999`;
   mkdirSync(staleTmp, { recursive: true });
   writeFileSync(join(staleTmp, 'junk.md'), 'leftover from a crashed run');
   const manifest = writeOkfExport(root, outDir);
   assert.equal(manifest.counts.exported_units, 3, 'a fresh run succeeds normally regardless of an unrelated stale tmp dir');
   assert.ok(existsSync(join(outDir, MANIFEST_NAME)), 'the real export landed');
-  rmSync(staleTmp, { recursive: true, force: true });
+  assert.ok(!existsSync(staleTmp), 'the stray tmp dir from a different pid must be swept, not left behind');
 });
 
 test('a post-write validation failure rolls back atomically — the prior good export is left untouched, never partially overwritten', () => {
@@ -391,6 +396,41 @@ test('CLI --min-link-density exposes the gate and rejects an invalid value with 
   assert.equal(manifest.link_density.threshold, 10);
 });
 
+// Hale second re-audit (34e57be), finding 2: a flag present but its value
+// missing (last argument, or the next token is itself another flag)
+// silently exited 0 with threshold: null -- indistinguishable from the flag
+// never being passed at all. Both shapes must now error loudly.
+test('CLI --min-link-density with a missing value errors instead of silently disabling the gate', async () => {
+  const root = fixtureStore();
+  const { execFileSync } = await import('node:child_process');
+  const SCRIPT = join(SCRIPTS, 'render-okf-export.mjs');
+
+  // Flag is the last argument -- no value follows at all.
+  assert.throws(() => execFileSync('node', [SCRIPT, root, '--check', '--min-link-density'], { encoding: 'utf8' }));
+
+  // Flag's "value" slot is actually another flag.
+  assert.throws(() => execFileSync('node', [SCRIPT, root, '--min-link-density', '--check'], { encoding: 'utf8' }));
+
+  // Flag genuinely never passed -- this remains valid "no gate".
+  const out = execFileSync('node', [SCRIPT, root, '--check'], { encoding: 'utf8' });
+  assert.equal(JSON.parse(out).link_density.threshold, null);
+});
+
+// Hale second re-audit, finding 1: validateLinkDensityThreshold used
+// Number(t) coercion, so "10" -> 10, "" -> 0, " " -> 0, true -> 1,
+// false -> 0, and [] -> 0 all silently became valid numbers. The JS API
+// must be strict (typeof === 'number'); only the CLI parser converts
+// strings, and only via an explicit numeric-format check.
+test('validateLinkDensityThreshold is strict: no type coercion, even for values Number() would accept', () => {
+  for (const bad of ['10', '', ' ', true, false, [], {}, [10]]) {
+    assert.throws(
+      () => validateLinkDensityThreshold(bad),
+      (e) => e.code === 'INVALID_LINK_DENSITY_THRESHOLD',
+      `${JSON.stringify(bad)} (${typeof bad}) must be rejected by the strict JS API, not coerced`,
+    );
+  }
+});
+
 test('writeOkfExport swap survives a caught in-process exception (existing exception-rollback path)', () => {
   const root = fixtureStore();
   const outDir = join(root, '_okf-export');
@@ -442,7 +482,13 @@ test('writeOkfExport recovers a real killed-process crash on the next run (not j
   writeOkfExport(root, outDir);
   assert.ok(existsSync(outDir), 'outDir must exist after the recovering run');
   assert.equal(readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8'), goodAlpha, 'recovered content must match the pre-crash export');
-  assert.equal(readdirSync(root).filter(e => e.startsWith('_okf-export.bak-')).length, 0, 'the recovered backup directory must be consumed, not left behind');
+  // Hale second re-audit (34e57be): the killed child's OWN tmpDir (fully
+  // written before the crash, never promoted) also survives the crash and
+  // was not being swept -- "recovery consumed the backup but left
+  // export.tmp-<pid>/". Every stray artifact (both the consumed backup and
+  // the killed process's own leftover tmp dir) must be gone after recovery.
+  const stray = readdirSync(root).filter(e => e.startsWith('_okf-export.bak-') || e.startsWith('_okf-export.tmp-'));
+  assert.deepEqual(stray, [], `no stray tmp/backup artifacts may survive a completed recovery, found: ${stray.join(', ')}`);
 });
 
 test('multiple ambiguous orphaned backups fail closed instead of guessing', async () => {
