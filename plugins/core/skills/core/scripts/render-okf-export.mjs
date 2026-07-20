@@ -188,11 +188,17 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
   // to top-level canonical units only, by design (iterActiveUnits skips
   // every subdirectory unless that flag is passed) -- a materially
   // smaller population. The two numbers answer different questions and
-  // are not directly comparable: verified directly against the live
-  // store, check-units --include-observations reports 113 orphans against
-  // its own (slightly different, 446 vs 441) population count, consistent
-  // with this export's 131 once observations are counted on both sides --
-  // not a contradiction, a scope difference.
+  // are not directly comparable, and the gap is NOT population alone
+  // (Hale, hale--f07549f-orphan-metric-pass correction): against the same
+  // live store, check-units --include-observations reports 113 orphans
+  // against its own 446-unit population, versus this export's 131 against
+  // 441. check-units treats any outgoing edge or backlink as connectivity,
+  // full stop; this export only counts an edge as connecting if its
+  // target survives the export's own active/internal filtering (dangling,
+  // missing, and external-store targets are dropped before counting) --
+  // a stricter, export-scoped notion of "connected." So the 113-vs-131
+  // difference comes from both a smaller population AND a looser
+  // connectivity rule on check-units's side, not population alone.
   const rawPct = units.length ? (unitsWithOutgoingActiveEdge / units.length) * 100 : 0;
   const density = {
     active_units: units.length,
