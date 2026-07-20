@@ -114,6 +114,28 @@ test('pack + directive combine under the real byte-cap contract, derived interna
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// Self-caught (2026-07-20) against a REAL live invocation (always-on arm,
+// zero retrieval hits, directive-only emission) -- not a synthetic fixture.
+// The real hook's own directive template always ends in "\n", but Claude
+// Code's transcript `attachment.content` field is trailing-whitespace-
+// trimmed relative to raw stdout (the SAME normalization Hale's earlier
+// content-vs-stdout finding described, now shown to apply to a
+// directive-only emission too, not just the pack case already covered).
+// A derived expectation ending in real trailing whitespace must still match
+// the transcript's trimmed content, or every always-on zero-hit trial would
+// falsely reject.
+test('a derived emission with real trailing whitespace (the real directive template) still matches the transcript\'s trimmed content', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const directiveWithTrailingNewline = 'CORE reasoning escalation required: Tier 1 found no lexical context. Follow the Tier 3 retrieval protocol.\n';
+    const observedTrimmedContent = directiveWithTrailingNewline.trimEnd(); // exactly what Claude Code's real content field carries
+    const { lines } = buildTurn({ promptId: 'p-1', exposedContent: observedTrimmedContent, exitCode: 0, steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }] });
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: '', expectedDirectiveText: directiveWithTrailingNewline }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 // Hale re-audit (hale--f2c52de-two-join-failures), item 2: expectedPackText
 // and the old expectedFullInjectedContext used to be two unrelated
 // assertions -- a caller could fabricate a pack and separately supply the

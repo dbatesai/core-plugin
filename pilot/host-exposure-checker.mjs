@@ -248,7 +248,16 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
     return { ok: false, reason: 'HOST_EXPOSURE_MISSING', expectedPromptId, detail: 'hook_success attachment has no content string' };
   }
 
-  const derivedExpectedEmission = deriveExpectedEmission(expectedPackText, expectedDirectiveText, byteCap);
+  // Self-caught (2026-07-20) against a REAL live invocation, not a synthetic
+  // fixture: `attachment.content` is Claude Code's own trailing-whitespace-
+  // trimmed view of stdout (Hale's earlier finding: content === stdout.trimEnd()
+  // was verified for the pack-only case; a real always-on, zero-hit,
+  // directive-only invocation shows the SAME normalization applies to a
+  // directive-only emission too -- the real hook's own template ends every
+  // directive in "\n", but the transcript's content field never carries it.
+  // The derived expectation must be compared in the SAME normalized form
+  // content actually is, not the raw emission the hook wrote to stdout.
+  const derivedExpectedEmission = deriveExpectedEmission(expectedPackText, expectedDirectiveText, byteCap).trimEnd();
   const observedHash = sha256Hex(observedContent);
   const expectedHash = sha256Hex(derivedExpectedEmission);
   if (observedHash !== expectedHash) {
