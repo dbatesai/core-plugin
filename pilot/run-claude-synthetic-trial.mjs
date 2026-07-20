@@ -90,11 +90,13 @@ const SUPPORTED_ARMS = new Set(['always-on', 'deterministic-only']);
 // exclusive estimands -- 'do not relabel one as the other.'
 const ESTIMANDS = new Set(['hook-delivery-only', 'agent-with-tools']);
 
-// Computed 2026-07-20 against this exact frozen candidate's
-// plugins/core/skills/core/hooks/retrieve-context-hook.mjs. The directive
-// template below was hand-transcribed from that exact file at that exact
-// hash -- see deriveExpectedPackAndDirective()'s drift check.
-const PINNED_HOOK_SOURCE_SHA256 = '20eb61e3d1019c3deba2874295652479d6bdaa6c9ec04c5766191cc94a2af1ab';
+// Re-pinned 2026-07-20 after merging next (44f5075) into this candidate
+// branch (e942d55): the file hash changed (truncateUtf8Safe -> truncateUtf8,
+// byteCap instead of the hardcoded OUTPUT_BYTE_CAP -- both in the byte-cap
+// path, not the directive template), but the actual directive-template text
+// below was re-verified byte-for-byte identical in the merged source before
+// re-pinning -- never just silence the drift check without checking.
+const PINNED_HOOK_SOURCE_SHA256 = '859a6224e780ffdc54a3a4f479afa837c11e4319950d76b51cc06cbb53f310bf';
 
 function sha256Hex(text) { return createHash('sha256').update(String(text), 'utf8').digest('hex'); }
 function sha256File(path) { try { return sha256Hex(readFileSync(path, 'utf8')); } catch { return null; } }

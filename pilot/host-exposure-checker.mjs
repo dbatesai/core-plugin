@@ -98,10 +98,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
-// Named truncateUtf8Safe at this frozen candidate's base (6dc12a3) --
-// current `next` renamed it to truncateUtf8, but this worktree is
-// deliberately frozen against next and never merges either direction.
-import { truncateUtf8Safe as truncateUtf8 } from '../plugins/core/skills/core/hooks/retrieve-context-hook.mjs';
+import { truncateUtf8 } from '../plugins/core/skills/core/hooks/retrieve-context-hook.mjs';
 
 const OUTPUT_BYTE_CAP = 2048; // matches retrieve-context-hook.mjs's own default
 
