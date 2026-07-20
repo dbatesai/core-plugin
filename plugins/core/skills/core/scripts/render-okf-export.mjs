@@ -23,7 +23,7 @@
 // CLI:
 //   node render-okf-export.mjs <project-dir> [--out <dir>] [--check]
 
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, lstatSync, renameSync, realpathSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, lstatSync, renameSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname, relative, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
@@ -57,10 +57,29 @@ function ensureGitignored(projectDir, outDir) {
 }
 
 /**
+ * validateLinkDensityThreshold — Hale re-audit finding (4d7c65e): the
+ * threshold API accepted -1, NaN, and the string "abc" with no rejection.
+ * Closes the gate to a finite number in [0,100]; null/undefined mean "no
+ * gate" (report-only), which stays the default.
+ */
+export function validateLinkDensityThreshold(t) {
+  if (t === null || t === undefined) return null;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0 || n > 100) {
+    throw Object.assign(
+      new Error(`link density threshold must be a finite number in [0,100], got ${JSON.stringify(t)}`),
+      { code: 'INVALID_LINK_DENSITY_THRESHOLD' },
+    );
+  }
+  return n;
+}
+
+/**
  * renderOkfExport — build the export in memory (no disk writes). Exposed so
  * tests and --check can inspect the manifest/outputs without touching disk.
  */
 export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}) {
+  const threshold = validateLinkDensityThreshold(linkDensityThreshold);
   // ── 1. One atomic validated snapshot (correction 3: no raw store walk) ──
   const cap = loadSnapshot(projectDir, { captureBodies: true, retainRaw: true });
   const units = cap.index.units.filter(u => !SCAFFOLD.test(u.path)); // active-only, invalidation-filtered, dup-resolved, sorted
@@ -107,15 +126,19 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
   const omitted = Object.keys(cap.raw || {}).filter(rel => !outputs.has(rel)).sort();
 
   // ── 3. Link-density gate (correction 7: measured, threshold David-unratified) ─
+  // Hale re-audit finding (4d7c65e): compare the unrounded ratio, not the
+  // display-rounded percentage — rounding first could pass a gate the raw
+  // ratio actually fails (or vice versa) right at the boundary.
+  const rawPct = units.length ? (unitsWithActiveEdge / units.length) * 100 : 0;
   const density = {
     active_units: units.length,
     with_active_edge: unitsWithActiveEdge,
-    pct_with_active_edge: units.length ? Math.round((unitsWithActiveEdge / units.length) * 1000) / 10 : 0,
+    pct_with_active_edge: Math.round(rawPct * 10) / 10,
     orphans: units.length - unitsWithActiveEdge,
-    threshold: linkDensityThreshold,
+    threshold,
   };
-  if (linkDensityThreshold !== null && density.pct_with_active_edge < linkDensityThreshold) {
-    throw Object.assign(new Error(`Link density ${density.pct_with_active_edge}% is below threshold ${linkDensityThreshold}%`), { code: 'LINK_DENSITY_FAILED' });
+  if (threshold !== null && rawPct < threshold) {
+    throw Object.assign(new Error(`Link density ${density.pct_with_active_edge}% is below threshold ${threshold}%`), { code: 'LINK_DENSITY_FAILED' });
   }
 
   const manifest = {
@@ -140,12 +163,43 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
 }
 
 /**
+ * recoverOrphanedBackup — Hale re-audit finding (4d7c65e): a real process
+ * death after `renameSync(outDir, bakDir)` but before `renameSync(tmpDir,
+ * outDir)` never reaches the catch/finally, so outDir is left absent and
+ * `${outDir}.bak-<dead-pid>` is orphaned with no code to discover it. Runs
+ * at the top of every writeOkfExport call: if outDir is currently missing
+ * and exactly one `.bak-<pid>` sibling exists, that's the fingerprint of
+ * this exact crash window — restore it. Multiple candidates are ambiguous
+ * (which crash, which generation) and fail closed rather than guess.
+ */
+export function recoverOrphanedBackup(outDir) {
+  if (existsSync(outDir)) return { recovered: false };
+  const parent = dirname(outDir);
+  const base = outDir.split('/').pop();
+  let entries;
+  try { entries = readdirSync(parent); } catch { return { recovered: false }; }
+  const bakPattern = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.bak-\\d+$`);
+  const baks = entries.filter(e => bakPattern.test(e));
+  if (baks.length === 0) return { recovered: false };
+  if (baks.length > 1) {
+    throw Object.assign(
+      new Error(`${baks.length} ambiguous backup directories found for ${outDir} (${baks.join(', ')}) — refusing to auto-recover; resolve manually`),
+      { code: 'AMBIGUOUS_BACKUP_RECOVERY', candidates: baks },
+    );
+  }
+  renameSync(join(parent, baks[0]), outDir);
+  return { recovered: true, from: baks[0] };
+}
+
+/**
  * writeOkfExport — validate-then-swap write of a renderOkfExport() result to
  * disk. Refuses a non-generated existing directory (never overwrites hand-
  * authored content); writes to a temp dir, validates every generated link
- * resolves, then atomically swaps into place.
+ * resolves, then atomically swaps into place. Recovers a prior crash's
+ * orphaned backup before doing anything else (see recoverOrphanedBackup).
  */
 export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null } = {}) {
+  recoverOrphanedBackup(outDir);
   const { manifest, outputs, generatedLinks } = renderOkfExport(projectDir, { linkDensityThreshold });
 
   // The design spec calls this "a throwaway gitignored _okf-export/" — never
@@ -197,6 +251,12 @@ export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null
   const bakDir = `${outDir}.bak-${process.pid}`;
   let swapFailed = false;
   if (existsSync(outDir)) renameSync(outDir, bakDir);
+  // Test-only: simulate a real process death (not a catchable JS throw) in
+  // exactly the crash window recoverOrphanedBackup() exists to close. A test
+  // spawns a child with this set, expects it to be killed by its exit code
+  // (never reaching the try/catch/finally below), then calls writeOkfExport
+  // again in-process and asserts the backup was restored automatically.
+  if (process.env.FAULT_INJECT_HARD_KILL === '1') process.exit(1);
   try {
     if (process.env.FAULT_INJECT_SWAP_CRASH === '1') throw new Error('Simulated swap crash');
     renameSync(tmpDir, outDir);
@@ -211,7 +271,7 @@ export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null
 }
 
 function usage() {
-  process.stderr.write('usage: node render-okf-export.mjs <project-dir> [--out <dir>] [--check]\n');
+  process.stderr.write('usage: node render-okf-export.mjs <project-dir> [--out <dir>] [--check] [--min-link-density <pct>]\n');
   return 2;
 }
 
@@ -219,18 +279,27 @@ function main(argv) {
   const projectDir = resolve(argv.find(a => !a.startsWith('--')) || '.');
   const outFlag = argv.includes('--out') ? argv[argv.indexOf('--out') + 1] : null;
   const checkOnly = argv.includes('--check');
+  const densityFlag = argv.includes('--min-link-density') ? argv[argv.indexOf('--min-link-density') + 1] : null;
   if (!existsSync(join(projectDir, '_memories'))) return usage();
   const outDir = resolve(outFlag || join(projectDir, '_okf-export'));
 
+  let linkDensityThreshold;
+  try {
+    linkDensityThreshold = validateLinkDensityThreshold(densityFlag);
+  } catch (e) {
+    process.stderr.write(`FATAL: ${e.message}\n`);
+    return 2;
+  }
+
   if (checkOnly) {
-    const { manifest } = renderOkfExport(projectDir);
+    const { manifest } = renderOkfExport(projectDir, { linkDensityThreshold });
     process.stdout.write(JSON.stringify(manifest, null, 2) + '\n');
     return 0;
   }
 
   let manifest;
   try {
-    manifest = writeOkfExport(projectDir, outDir);
+    manifest = writeOkfExport(projectDir, outDir, { linkDensityThreshold });
   } catch (e) {
     process.stderr.write(`FATAL: ${e.message}\n`);
     return 2;

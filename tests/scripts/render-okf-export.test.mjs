@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
-const { renderOkfExport, writeOkfExport, MANIFEST_NAME } =
+const { renderOkfExport, writeOkfExport, MANIFEST_NAME, validateLinkDensityThreshold } =
   await import(pathToFileURL(join(SCRIPTS, 'render-okf-export.mjs')).href);
 
 function fixtureStore() {
@@ -348,12 +348,55 @@ test('link density threshold is executable and caller-supplied', () => {
   assert.equal(manifest.link_density.threshold, 10.0);
 });
 
-test('writeOkfExport swap is crash-recoverable', () => {
+// Hale re-audit (4d7c65e): direct execution accepted -1, NaN, and "abc" as
+// thresholds with no rejection. Each of these must be refused loudly, not
+// silently coerced or accepted.
+test('link density threshold rejects out-of-range and non-numeric values', () => {
+  const root = fixtureStore();
+  for (const bad of [-1, 101, NaN, 'abc', Infinity, -Infinity]) {
+    assert.throws(
+      () => renderOkfExport(root, { linkDensityThreshold: bad }),
+      (e) => e.code === 'INVALID_LINK_DENSITY_THRESHOLD',
+      `threshold ${JSON.stringify(bad)} must be rejected, not silently accepted`,
+    );
+  }
+  // Boundary values are valid *inputs*, not off-by-one rejected -- tested
+  // against validateLinkDensityThreshold directly so a legitimately-failing
+  // gate (100% threshold against real fixture density) isn't confused with
+  // an invalid-input rejection; renderOkfExport's actual gate behavior is
+  // covered by the existing "threshold is executable" test above.
+  assert.doesNotThrow(() => validateLinkDensityThreshold(0));
+  assert.doesNotThrow(() => validateLinkDensityThreshold(100));
+  // null/undefined mean "no gate" — must stay valid (the default, report-only path).
+  assert.doesNotThrow(() => validateLinkDensityThreshold(null));
+  assert.doesNotThrow(() => validateLinkDensityThreshold(undefined));
+});
+
+// Hale re-audit: "today only JavaScript callers can use it" — the gate must
+// be reachable from the actual CLI/skill entry point, not just the JS API.
+test('CLI --min-link-density exposes the gate and rejects an invalid value with a clear exit', async () => {
+  const root = fixtureStore();
+  const { execFileSync } = await import('node:child_process');
+  const SCRIPT = join(SCRIPTS, 'render-okf-export.mjs');
+
+  // Invalid value -> non-zero exit, no export written.
+  assert.throws(() => execFileSync('node', [SCRIPT, root, '--check', '--min-link-density', 'abc'], { encoding: 'utf8' }));
+
+  // Valid, failing threshold -> non-zero exit (LINK_DENSITY_FAILED via CLI path).
+  assert.throws(() => execFileSync('node', [SCRIPT, root, '--check', '--min-link-density', '99.9'], { encoding: 'utf8' }));
+
+  // Valid, passing threshold -> succeeds, manifest reflects the caller-supplied value.
+  const out = execFileSync('node', [SCRIPT, root, '--check', '--min-link-density', '10'], { encoding: 'utf8' });
+  const manifest = JSON.parse(out);
+  assert.equal(manifest.link_density.threshold, 10);
+});
+
+test('writeOkfExport swap survives a caught in-process exception (existing exception-rollback path)', () => {
   const root = fixtureStore();
   const outDir = join(root, '_okf-export');
   writeOkfExport(root, outDir); // write good export
   const goodAlpha = readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8');
-  
+
   process.env.FAULT_INJECT_SWAP_CRASH = '1';
   try {
     writeOkfExport(root, outDir);
@@ -363,7 +406,56 @@ test('writeOkfExport swap is crash-recoverable', () => {
   } finally {
     delete process.env.FAULT_INJECT_SWAP_CRASH;
   }
-  
+
   assert.equal(readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8'), goodAlpha, 'backup must be restored');
+});
+
+// Hale re-audit (4d7c65e): "FAULT_INJECT_SWAP_CRASH throws inside the same
+// process, so the catch restores the backup. A real process death after
+// renameSync(outDir, bakDir) never reaches catch." This test kills a REAL
+// child process at exactly that window (process.exit, not a thrown JS
+// error — the child never reaches its own try/catch/finally), then proves
+// the NEXT writeOkfExport call in a fresh process recovers automatically.
+test('writeOkfExport recovers a real killed-process crash on the next run (not just a caught exception)', async () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  writeOkfExport(root, outDir); // write good export
+  const goodAlpha = readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8');
+
+  const { spawnSync } = await import('node:child_process');
+  const SCRIPT = join(SCRIPTS, 'render-okf-export.mjs');
+  const killed = spawnSync('node', [SCRIPT, root, '--out', outDir], {
+    env: { ...process.env, FAULT_INJECT_HARD_KILL: '1' },
+    encoding: 'utf8',
+  });
+  assert.notEqual(killed.status, 0, 'the child must have died before completing the export');
+
+  // Crash window: outDir renamed away, tmpDir never renamed in. outDir must
+  // be absent and exactly one orphaned backup must exist right now.
+  assert.ok(!existsSync(outDir), 'outDir must be absent immediately after the simulated crash');
+  const { readdirSync } = await import('node:fs');
+  const orphans = readdirSync(root).filter(e => e.startsWith('_okf-export.bak-'));
+  assert.equal(orphans.length, 1, 'exactly one orphaned backup must exist post-crash');
+
+  // Next run (fresh, in-process, no fault flag) must recover automatically
+  // and produce a correct export, not error out or silently lose data.
+  writeOkfExport(root, outDir);
+  assert.ok(existsSync(outDir), 'outDir must exist after the recovering run');
+  assert.equal(readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8'), goodAlpha, 'recovered content must match the pre-crash export');
+  assert.equal(readdirSync(root).filter(e => e.startsWith('_okf-export.bak-')).length, 0, 'the recovered backup directory must be consumed, not left behind');
+});
+
+test('multiple ambiguous orphaned backups fail closed instead of guessing', async () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  writeOkfExport(root, outDir);
+  rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(`${outDir}.bak-11111`, { recursive: true });
+  mkdirSync(`${outDir}.bak-22222`, { recursive: true });
+  assert.throws(
+    () => writeOkfExport(root, outDir),
+    (e) => e.code === 'AMBIGUOUS_BACKUP_RECOVERY',
+    'two candidate backups must never be auto-resolved by guessing',
+  );
 });
 
