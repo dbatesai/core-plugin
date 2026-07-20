@@ -359,15 +359,6 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   }
   const finalAnswerText = textBlocks.join('');
 
-  // Hale, hale--55f1222-closure-rejected / hale--wip-visible-confound-
-  // still-false-green: "a requested alias is not observed execution
-  // identity." The real transcript carries both, verified on this
-  // session's own retained iteration-21 file: every line has a top-level
-  // `version` (the Claude Code CLI version), and every assistant line
-  // carries `message.model` (the model that actually generated it).
-  const observedModel = group.find((l) => typeof l.message?.model === 'string')?.message.model || null;
-  const observedCliVersion = turnLines.find((l) => typeof l.version === 'string')?.version || null;
-
   // Hale, hale--paid-run-direct-file-read-confound: a real gated trial's
   // answer turned out to come from the model directly Bash/Read-ing the
   // carrier file, not from the injected (title-only) pack content -- the
@@ -378,15 +369,41 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   // token match in the final answer might be tool-mediated rather than
   // pack-delivered. This does not itself decide causality -- it makes the
   // confound visible instead of silently absorbing it into "efficacy."
+  const descendantAssistantLines = turnLines.filter((l) =>
+    l?.type === 'assistant' && l?.uuid && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
   const toolCallsInTurn = [];
-  for (const l of turnLines) {
-    if (l?.type !== 'assistant' || !l?.uuid || !isDescendantOf(lineByUuid, l.uuid, anchorUuid)) continue;
+  for (const l of descendantAssistantLines) {
     const content = l.message?.content;
     if (!Array.isArray(content)) continue;
     for (const c of content) {
       if (c?.type === 'tool_use') toolCallsInTurn.push({ name: c.name, input: c.input });
     }
   }
+
+  // Hale, hale--observed-identity-must-be-unambiguous: the prior version
+  // (group.find / turnLines.find) silently took the FIRST observed model or
+  // CLI version, so a contaminated or mixed transcript -- two different
+  // message.model values inside the same terminal message group, or two
+  // different top-level `version` values across the turn -- still passed
+  // as if unambiguous. Collect every unique non-empty value over the
+  // verified descendant evidence and require exactly one of each; anything
+  // else is a real ambiguity, not something to silently resolve by picking
+  // whichever line happened to come first.
+  const observedModels = [...new Set(
+    group.map((l) => l.message?.model).filter((m) => typeof m === 'string' && m),
+  )];
+  if (observedModels.length > 1) {
+    return { ok: false, reason: 'MODEL_IDENTITY_AMBIGUOUS', expectedPromptId, observedModels };
+  }
+  const descendantTurnLines = turnLines.filter((l) => l?.uuid && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
+  const observedCliVersions = [...new Set(
+    descendantTurnLines.map((l) => l.version).filter((v) => typeof v === 'string' && v),
+  )];
+  if (observedCliVersions.length > 1) {
+    return { ok: false, reason: 'CLI_VERSION_AMBIGUOUS', expectedPromptId, observedCliVersions };
+  }
+  const observedModel = observedModels[0] || null;
+  const observedCliVersion = observedCliVersions[0] || null;
 
   // This ok:true proves exposure + a real terminal answer, nothing about
   // whether the answer was correct or actually used the context — that

@@ -593,3 +593,99 @@ test('UNEXPECTED_HOOK_ACTIVITY: a failed Stop hook (hook_failure, exitCode 1) sp
     assert.equal(result.unexpectedCount, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// Hale, hale--observed-identity-must-be-unambiguous: group.find/turnLines.find
+// silently took the first observed model/version, so a mixed/contaminated
+// transcript still passed as if unambiguous. These four cover the checker's
+// own contract directly (missing, mixed-model, mixed-version); the
+// requested-vs-observed MISMATCH case is an orchestrator-level concern,
+// already covered in run-claude-synthetic-trial.test.mjs.
+
+test('observedModel/observedCliVersion are null (not thrown) when genuinely absent from the transcript', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    for (const l of lines) { if (l.message) delete l.message.model; } // buildTurn's fixture always sets a model — strip it to test genuine absence
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.observedModel, null, 'missing model must surface as null, not throw or silently invent a value');
+    assert.equal(result.observedCliVersion, null, 'buildTurn fixtures never set a top-level version field — must be null, not throw');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('spoil: MODEL_IDENTITY_AMBIGUOUS when the terminal message group carries two different message.model values', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0,
+      steps: [{ kind: 'terminal', messageId: 'msg_shared', blocks: [{ type: 'thinking', thinking: '' }, { type: 'text', text: 'answer' }] }],
+    });
+    // Both blocks share one message.id (one logical terminal message split
+    // across lines, per the checker's own grouping) but disagree on model —
+    // exactly Hale's counterexample: sonnet on one line, opus on the next.
+    const terminal = lines.filter((l) => l.type === 'assistant' && l.message?.id === 'msg_shared');
+    assert.equal(terminal.length, 2, 'fixture sanity: expected exactly two lines in the shared terminal group');
+    terminal[0].message.model = 'claude-sonnet-5';
+    terminal[1].message.model = 'claude-opus-4-8';
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'MODEL_IDENTITY_AMBIGUOUS');
+    assert.deepEqual([...result.observedModels].sort(), ['claude-opus-4-8', 'claude-sonnet-5']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('spoil: CLI_VERSION_AMBIGUOUS when descendant turn lines carry two different top-level version values', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0,
+      steps: [
+        { kind: 'toolUse' }, { kind: 'toolResult' },
+        { kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] },
+      ],
+    });
+    // Real transcripts carry a top-level `version` on every line; a mixed
+    // sequence (e.g. a CLI upgrade mid-session) must not silently resolve
+    // to whichever value happened to appear first.
+    let toggled = false;
+    for (const l of lines) {
+      if (l.type === 'assistant' || (l.type === 'user' && l.message?.content?.[0]?.type === 'tool_result')) {
+        l.version = toggled ? '2.1.999' : '2.1.215';
+        toggled = !toggled;
+      }
+    }
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'CLI_VERSION_AMBIGUOUS');
+    assert.deepEqual([...result.observedCliVersions].sort(), ['2.1.215', '2.1.999']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a single consistent model and version across the whole descendant turn resolves cleanly, not flagged ambiguous', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0,
+      steps: [
+        { kind: 'toolUse' }, { kind: 'toolResult' },
+        { kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] },
+      ],
+    });
+    for (const l of lines) { if (l.type === 'assistant' || l.type === 'user') l.version = '2.1.215'; }
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.observedModel, 'claude-sonnet-5');
+    assert.equal(result.observedCliVersion, '2.1.215');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
