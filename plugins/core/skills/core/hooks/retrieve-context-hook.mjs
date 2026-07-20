@@ -212,9 +212,19 @@ export async function main() {
       const shards = selectCandidates(prompt, store, { shardSize: 80 });
       if (shards.length) {
         const unitsTotal = shards[0].units_total;
+        // Pilot self-invocation finding (2026-07-21, real-invocation probe):
+        // the internal test-control env var name leaking into model-facing
+        // text ("CORE_REASONING_ARM=always-on forces...") reads as a
+        // fabricated/self-referential instruction to a fresh model with no
+        // established trust in this session -- three real Claude Code
+        // invocations independently flagged content built this way as a
+        // likely prompt injection. Describe the forced case in the same
+        // plain, non-mechanism-revealing register as the honest zero-hit
+        // case; the requestedArm value itself has no legitimate reason to
+        // appear in what the model reads.
         const why = zeroHit
           ? 'Tier 1 found no lexical context.'
-          : `CORE_REASONING_ARM=${requestedArm} forces escalation regardless of Tier 1 result.`;
+          : 'An explicit escalation request forces escalation regardless of Tier 1 result.';
         reasoningDirective = `CORE reasoning escalation required: ${why} Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
       }
     } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
