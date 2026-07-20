@@ -171,7 +171,7 @@ function fakeFetchInventory({ pluginDir } = {}) {
 // host-exposure-checker.mjs) into the exact cwd/session the orchestrator
 // gives it, then returns a realistic CLI JSON result. No process is ever
 // spawned -- this fixture is the "spawn result" the DI seam exists for.
-function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds = [], deliveredUnitIds = rankedUnitIds, includeToolUse = false }) {
+function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds = [], deliveredUnitIds = rankedUnitIds, includeToolUse = false, omitModel = false, omitVersion = false }) {
   return (args, spawnOpts) => {
     const cwd = spawnOpts.cwd;
     // Hale, hale--6e4e086-stop-and-telemetry-hold / hale--0255-a5ee4c9-and-
@@ -217,6 +217,13 @@ function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answer
       // now requires it (Hale, hale--b75fecc-paid-run-not-release-evidence).
       { type: 'attachment', uuid: 'u4', parentUuid: 'u3', version: FIXTURE_CLI_VERSION, attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu2', content: '', stdout: '', exitCode: 0, command: EXPECTED_STOP_COMMAND } },
     ];
+    // Hale, hale--memory-architecture-advice-18: MODEL_OR_VERSION_NOT_OBSERVED
+    // (run-claude-synthetic-trial.mjs) fails closed when either observed
+    // value is null, but had zero test coverage -- these two flags let a
+    // test reproduce a genuinely absent field instead of just asserting the
+    // code exists.
+    if (omitModel) { for (const l of lines) { if (l.message) delete l.message.model; } }
+    if (omitVersion) { for (const l of lines) delete l.version; }
     writeFileSync(transcriptPath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
 
     return {
@@ -786,6 +793,69 @@ test('spoil: MODEL_IDENTITY_MISMATCH when the observed transcript model disagree
     assert.equal(result.spoilReason, 'MODEL_IDENTITY_MISMATCH');
     assert.equal(result.detail.requestedModel, 'claude-opus-4-8');
     assert.equal(result.detail.observedModel, FIXTURE_MODEL);
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+// Hale, hale--memory-architecture-advice-18: host-exposure-checker.mjs
+// legitimately returns ok:true with a null observedModel/observedCliVersion
+// (that checker proves exposure+answer, not identity) -- but for a TRIAL's
+// execution-identity proof, an absent observed value must fail closed here
+// at the orchestrator boundary, or requested identity could silently stand
+// in for unobserved reality. The code (MODEL_OR_VERSION_NOT_OBSERVED) was
+// already present but had zero test coverage before this.
+test('spoil: MODEL_OR_VERSION_NOT_OBSERVED when the transcript never carries an observed model', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-nomodel-1';
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-nomodel-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds, omitModel: true });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'MODEL_OR_VERSION_NOT_OBSERVED');
+    assert.equal(result.detail.observedModel, null);
+    assert.equal(result.detail.observedCliVersion, FIXTURE_CLI_VERSION);
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+test('spoil: MODEL_OR_VERSION_NOT_OBSERVED when the transcript never carries an observed CLI version', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-noversion-1';
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-noversion-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds, omitVersion: true });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'MODEL_OR_VERSION_NOT_OBSERVED');
+    assert.equal(result.detail.observedModel, FIXTURE_MODEL);
+    assert.equal(result.detail.observedCliVersion, null);
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
