@@ -83,7 +83,7 @@ import { captureCursor, checkTrialWindow } from './trial-window-join-checker.mjs
 import { checkHostExposureClaudeCode } from './host-exposure-checker.mjs';
 import { fetchPluginInventory as realFetchPluginInventory, computeDisableAllOverlay, verifyOverlayApplied } from './invocation-plugin-overlay.mjs';
 import { checkCorpusLeakage, checkStringsForLeakage, resolveCarrierIds } from './corpus-leakage-check.mjs';
-import { directoryIdentity } from '../plugins/core/skills/core/scripts/artifact-identity.mjs';
+import { directoryIdentity, manifestFromGit, treeOid } from '../plugins/core/skills/core/scripts/artifact-identity.mjs';
 
 const SUPPORTED_ARMS = new Set(['always-on', 'deterministic-only']);
 
@@ -187,7 +187,7 @@ function buildImmutableCandidateCopy(candidatePluginDir) {
  */
 export async function runClaudeSyntheticTrial(opts) {
   const {
-    sourceStoreDir, plants, candidatePluginDir, candidateRepoRoot,
+    sourceStoreDir, plants, candidatePluginDir, candidateRepoRoot, expectedCandidateGitSha,
     expectedProducerVersion, expectedProducerSha, prompt, arm, date,
     timeoutMs = 60000, deps = {},
   } = opts || {};
@@ -262,6 +262,44 @@ export async function runClaudeSyntheticTrial(opts) {
     // derived from the REAL current inventory, verified against the
     // corrected (exactly-one-enabled) invariant.
     candidateCopy = buildImmutableCandidateCopy(candidatePluginDir);
+
+    // Hale, hale--b75fecc-paid-run-not-release-evidence /
+    // hale--memory-architecture-advice--2026-07-20-15: "candidateRepoRoot
+    // text alone is not proof" -- a caller-supplied SHA string next to an
+    // arbitrary directory proves nothing about what's actually IN that
+    // directory. When the caller supplies expectedCandidateGitSha, verify
+    // the copied candidate's content hash against the REAL git object
+    // database at that exact commit (manifestFromGit -- no working tree,
+    // no tar, no extraction step to trust) using the SAME manifest
+    // algorithm directoryIdentity already uses, so the two are directly
+    // comparable. A caller that omits expectedCandidateGitSha gets no
+    // binding proof at all -- that absence is visible in the envelope
+    // (verifiedCandidateGitSha: null), never silently assumed.
+    let verifiedCandidateGitSha = null;
+    let verifiedCandidateTreeOid = null;
+    if (expectedCandidateGitSha) {
+      if (!candidateRepoRoot) {
+        return spoil('CANDIDATE_SHA_BINDING_MISSING_REPO_ROOT', { detail: 'expectedCandidateGitSha requires candidateRepoRoot to resolve it against' });
+      }
+      let gitManifest;
+      try {
+        gitManifest = manifestFromGit(candidateRepoRoot, expectedCandidateGitSha, 'plugins/core');
+      } catch (e) {
+        return spoil('CANDIDATE_SHA_BINDING_GIT_ERROR', { detail: e.message });
+      }
+      if (gitManifest.content_manifest_sha256 !== candidateCopy.contentHash) {
+        return spoil('CANDIDATE_SHA_BINDING_MISMATCH', {
+          detail: { expectedGitSha: expectedCandidateGitSha, gitContentHash: gitManifest.content_manifest_sha256, candidateContentHash: candidateCopy.contentHash },
+        });
+      }
+      verifiedCandidateGitSha = expectedCandidateGitSha;
+      try {
+        verifiedCandidateTreeOid = treeOid(candidateRepoRoot, expectedCandidateGitSha, 'plugins/core');
+      } catch (e) {
+        return spoil('CANDIDATE_SHA_BINDING_GIT_ERROR', { detail: e.message });
+      }
+    }
+
     const candidateId = 'core@inline';
     const baseline = fetchInventory({ timeoutMs });
     if (!baseline.ok) return spoil('PLUGIN_INVENTORY_FAILED', { detail: baseline });
@@ -398,6 +436,7 @@ export async function runClaudeSyntheticTrial(opts) {
         preInvocationContentHash: candidateCopy.contentHash, postInvocationContentHash: postHash,
         resolvedInventoryEntry: overlayCheck.candidate, resolvedInventory: overlayCheck.resolvedInventory,
         resolvedEnabledCount: 1, expectedProducerVersion, expectedProducerSha,
+        verifiedCandidateGitSha, verifiedCandidateTreeOid,
       },
       invocation: {
         sessionId: cliResult.session_id,

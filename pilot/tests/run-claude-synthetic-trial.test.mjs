@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const PILOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CORE_SCRIPTS = join(PILOT, '..', 'plugins', 'core', 'skills', 'core', 'scripts');
@@ -15,6 +16,7 @@ const { mapProjectPathToSlug } = await import(pathToFileURL(join(CORE_SCRIPTS, '
 const REAL_CANDIDATE_PLUGIN_DIR = join(PILOT, '..', 'plugins', 'core');
 const REAL_REPO_ROOT = join(PILOT, '..');
 const REAL_CORE_SKILL_ROOT = join(REAL_CANDIDATE_PLUGIN_DIR, 'skills', 'core');
+const REAL_REPO_HEAD_SHA = execFileSync('git', ['-C', REAL_REPO_ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const HARNESS = 'claude-code';
 const PRODUCER_VERSION = '3.12.1-pilot.1';
 const PRODUCER_SHA = 'fc8a23ad99bbc1d082f4ebed4388093a53c9fc47';
@@ -527,6 +529,91 @@ test('spoil: TELEMETRY_SELECTION_MISMATCH when the joined retrieval row disagree
     assert.equal(result.spoilReason, 'TELEMETRY_SELECTION_MISMATCH');
     assert.deepEqual(result.detail.loggedUnitIds, ['some-other-unit-not-the-carrier']);
     assert.ok(result.detail.recomputedUnitIds.includes('dc-1-carrier'));
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+// ---------------------------------------------------------------------
+// Product-SHA binding. Hale, hale--b75fecc-paid-run-not-release-evidence /
+// hale--memory-architecture-advice--2026-07-20-15: "candidateRepoRoot text
+// alone is not proof" -- verifying the candidate's copied content against
+// the REAL git object database at an exact commit, not trusting a caller-
+// supplied string next to an arbitrary directory.
+// ---------------------------------------------------------------------
+
+test('spoil: CANDIDATE_SHA_BINDING_MISSING_REPO_ROOT when expectedCandidateGitSha is given without candidateRepoRoot', async () => {
+  const store = decoyStore();
+  try {
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
+      expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      prompt: 'x', arm: 'always-on', date: '2026-07-20',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_MISSING_REPO_ROOT');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('spoil: CANDIDATE_SHA_BINDING_GIT_ERROR for a SHA that does not resolve in the given repo', async () => {
+  const store = decoyStore();
+  try {
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedCandidateGitSha: 'not-a-real-sha-0000000000000000000000',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_GIT_ERROR');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('spoil: CANDIDATE_SHA_BINDING_MISMATCH when the copied candidate content does not match the real git object database at the given SHA', async () => {
+  const store = decoyStore();
+  // A syntactically-real directory, but its content has nothing to do with
+  // the real commit's plugins/core tree -- the binding check must catch
+  // this from content alone, not from any structural assumption.
+  const mismatchedCandidateDir = mkdtempSync(join(tmpdir(), 'mismatched-candidate-'));
+  writeFileSync(join(mismatchedCandidateDir, 'not-the-real-plugin.txt'), 'this is not plugins/core content');
+  try {
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: mismatchedCandidateDir, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      prompt: 'x', arm: 'always-on', date: '2026-07-20',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_MISMATCH');
+    assert.equal(result.detail.expectedGitSha, REAL_REPO_HEAD_SHA);
+    assert.notEqual(result.detail.gitContentHash, result.detail.candidateContentHash);
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    rmSync(mismatchedCandidateDir, { recursive: true, force: true });
+  }
+});
+
+test('DI composition: CANDIDATE_SHA_BINDING passes and is recorded in the envelope when the candidate genuinely matches the real commit', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-sha-binding-1';
+  const { packText, directiveText, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-sha-binding-1', packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result, null, 2));
+    assert.equal(result.candidateIdentity.verifiedCandidateGitSha, REAL_REPO_HEAD_SHA);
+    assert.ok(result.candidateIdentity.verifiedCandidateTreeOid);
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
