@@ -105,6 +105,18 @@ import { truncateUtf8Safe as truncateUtf8 } from '../plugins/core/skills/core/ho
 
 const OUTPUT_BYTE_CAP = 2048; // matches retrieve-context-hook.mjs's own default
 
+// Hale, hale--stop-wip-3-of-4-command-identity: checking hookName/type/
+// exitCode alone still doesn't prove candidate OWNERSHIP -- a foreign hook
+// registered under the same hookName with a different underlying command
+// (e.g. a stray user hook also named 'Stop') passed on name alone. Bound
+// to the exact command strings configured in this candidate's own
+// hooks/hooks.json (verified byte-for-byte, same source-of-truth the
+// PINNED_HOOK_SOURCE_SHA256 pin in run-claude-synthetic-trial.mjs already
+// trusts) -- the env var is intentionally UNEXPANDED, matching what the
+// real transcript's attachment.command field shows.
+export const EXPECTED_USER_PROMPT_SUBMIT_COMMAND = 'node "${CLAUDE_PLUGIN_ROOT}/skills/core/hooks/retrieve-context-hook.mjs"';
+export const EXPECTED_STOP_COMMAND = 'node "${CLAUDE_PLUGIN_ROOT}/skills/core/hooks/answer-close-hook.mjs"';
+
 function sha256Hex(text) {
   return createHash('sha256').update(String(text), 'utf8').digest('hex');
 }
@@ -275,7 +287,7 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
     && l?.uuid
     && l.uuid !== exposures[0].uuid
     && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
-  const isLegitimateStop = (l) => l.attachment.type === 'hook_success' && l.attachment.hookName === 'Stop' && l.attachment.exitCode === 0;
+  const isLegitimateStop = (l) => l.attachment.type === 'hook_success' && l.attachment.hookName === 'Stop' && l.attachment.exitCode === 0 && l.attachment.command === EXPECTED_STOP_COMMAND;
   const legitimateStops = otherHookAttachments.filter(isLegitimateStop);
   const unexpectedHooks = otherHookAttachments.filter((l) => !isLegitimateStop(l));
   if (legitimateStops.length !== 1 || unexpectedHooks.length > 0) {
@@ -284,11 +296,18 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
       legitimateStopCount: legitimateStops.length,
       unexpectedCount: unexpectedHooks.length,
       hookNames: otherHookAttachments.map((l) => l.attachment.hookName),
+      commands: otherHookAttachments.map((l) => l.attachment.command),
     };
   }
   const exposureAttachment = exposures[0].attachment;
   if (exposureAttachment.exitCode !== 0) {
     return { ok: false, reason: 'HOST_EXPOSURE_NONZERO_EXIT', expectedPromptId, exitCode: exposureAttachment.exitCode };
+  }
+  // Hale, hale--stop-wip-3-of-4-command-identity: hookName alone doesn't
+  // prove candidate ownership -- bind the UserPromptSubmit exposure's
+  // command too, same as the Stop side above.
+  if (exposureAttachment.command !== EXPECTED_USER_PROMPT_SUBMIT_COMMAND) {
+    return { ok: false, reason: 'HOST_EXPOSURE_COMMAND_MISMATCH', expectedPromptId, expected: EXPECTED_USER_PROMPT_SUBMIT_COMMAND, found: exposureAttachment.command };
   }
   const observedContent = exposureAttachment.content;
   if (typeof observedContent !== 'string') {
@@ -340,6 +359,26 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   }
   const finalAnswerText = textBlocks.join('');
 
+  // Hale, hale--paid-run-direct-file-read-confound: a real gated trial's
+  // answer turned out to come from the model directly Bash/Read-ing the
+  // carrier file, not from the injected (title-only) pack content -- the
+  // orchestrator had no way to see that from an ok:true alone. Every
+  // tool_use block anywhere in the turn (descendant-verified, any
+  // stop_reason -- a tool call can appear mid-turn before the terminal
+  // end_turn group) is surfaced here so a caller can classify whether a
+  // token match in the final answer might be tool-mediated rather than
+  // pack-delivered. This does not itself decide causality -- it makes the
+  // confound visible instead of silently absorbing it into "efficacy."
+  const toolCallsInTurn = [];
+  for (const l of turnLines) {
+    if (l?.type !== 'assistant' || !l?.uuid || !isDescendantOf(lineByUuid, l.uuid, anchorUuid)) continue;
+    const content = l.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const c of content) {
+      if (c?.type === 'tool_use') toolCallsInTurn.push({ name: c.name, input: c.input });
+    }
+  }
+
   // This ok:true proves exposure + a real terminal answer, nothing about
   // whether the answer was correct or actually used the context — that
   // stays the separate scorer's job.
@@ -350,5 +389,6 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
     injectedContextHash: observedHash,
     finalAnswerHash: sha256Hex(finalAnswerText),
     finalAnswerText,
+    toolCallsInTurn,
   };
 }

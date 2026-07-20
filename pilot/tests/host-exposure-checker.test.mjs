@@ -7,7 +7,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PILOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { checkHostExposureClaudeCode } = await import(pathToFileURL(join(PILOT, 'host-exposure-checker.mjs')).href);
+const { checkHostExposureClaudeCode, EXPECTED_USER_PROMPT_SUBMIT_COMMAND, EXPECTED_STOP_COMMAND } = await import(pathToFileURL(join(PILOT, 'host-exposure-checker.mjs')).href);
 
 function sha256Hex(text) { return createHash('sha256').update(text, 'utf8').digest('hex'); }
 
@@ -51,7 +51,7 @@ function buildTurn({ promptId, exposedContent, exposedStdout = exposedContent, e
     const parent = exposureParent === 'orphan' ? uid() : undefined; // 'orphan': parentUuid points to a uuid never in the file
     chain(lines, {
       type: 'attachment',
-      attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: uid(), content: exposedContent, stdout: exposedStdout, exitCode, command: '', durationMs: 1 },
+      attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: uid(), content: exposedContent, stdout: exposedStdout, exitCode, command: EXPECTED_USER_PROMPT_SUBMIT_COMMAND, durationMs: 1 },
     }, parent);
   }
 
@@ -73,7 +73,7 @@ function buildTurn({ promptId, exposedContent, exposedStdout = exposedContent, e
   if (includeStop) {
     chain(lines, {
       type: 'attachment',
-      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: uid(), content: '', stdout: '', exitCode: 0, command: '', durationMs: 1 },
+      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: uid(), content: '', stdout: '', exitCode: 0, command: EXPECTED_STOP_COMMAND, durationMs: 1 },
     });
   }
   return { lines, anchorUuid };
@@ -513,8 +513,11 @@ test('UNEXPECTED_HOOK_ACTIVITY: a missing Stop hook (never fired) spoils, not tr
 // Hale's exact falsifier 1 (hale--b75fecc-paid-run-not-release-evidence):
 // two descendant Stop attachments -- one real, one a foreign command
 // disguised with the SAME hookName -- must not both pass just because the
-// name matches. Duplicate legitimate-shaped Stops are ambiguous and spoil.
-test('UNEXPECTED_HOOK_ACTIVITY: a duplicate Stop attachment (one real, one foreign masquerading with the same hookName) spoils', () => {
+// name matches. Hale, hale--stop-wip-3-of-4-command-identity: hookName
+// alone doesn't prove ownership; the command binding added below is what
+// actually catches this -- the foreign one is now correctly classified as
+// unexpected (wrong command), not as a second "legitimate" duplicate.
+test('UNEXPECTED_HOOK_ACTIVITY: a foreign Stop attachment masquerading with the same hookName but a different command spoils', () => {
   const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
   try {
     const full = 'the full injected context';
@@ -534,7 +537,35 @@ test('UNEXPECTED_HOOK_ACTIVITY: a duplicate Stop attachment (one real, one forei
     const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.legitimateStopCount, 1);
+    assert.equal(result.unexpectedCount, 1);
+    assert.ok(result.commands.includes('bash ~/.claude/hooks/some-other-stop-hook.sh'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// True duplicate: TWO attachments both with the exact expected command --
+// same evidence-ambiguity class as every other duplicate check in this
+// pilot. Neither wrong name nor wrong command catches this; cardinality
+// (legitimateStops.length !== 1) is what must.
+test('UNEXPECTED_HOOK_ACTIVITY: two Stop attachments both with the correct command still spoils (cardinality, not just command binding)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const lastUuid = lines[lines.length - 1].uuid;
+    lines.splice(lines.length - 1, 0, {
+      type: 'attachment', uuid: 'true-duplicate-stop-1', parentUuid: lastUuid,
+      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu-true-dup', content: '', stdout: '', exitCode: 0, command: EXPECTED_STOP_COMMAND, durationMs: 1 },
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'UNEXPECTED_HOOK_ACTIVITY');
     assert.equal(result.legitimateStopCount, 2);
+    assert.equal(result.unexpectedCount, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

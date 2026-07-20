@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 const PILOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CORE_SCRIPTS = join(PILOT, '..', 'plugins', 'core', 'skills', 'core', 'scripts');
 const { runClaudeSyntheticTrial, deriveExpectedPackAndDirective } = await import(pathToFileURL(join(PILOT, 'run-claude-synthetic-trial.mjs')).href);
+const { EXPECTED_USER_PROMPT_SUBMIT_COMMAND, EXPECTED_STOP_COMMAND } = await import(pathToFileURL(join(PILOT, 'host-exposure-checker.mjs')).href);
 const { recordRetrievalEvent } = await import(pathToFileURL(join(CORE_SCRIPTS, 'record-retrieval-event.mjs')).href);
 const { recordRetrievalOutcome } = await import(pathToFileURL(join(CORE_SCRIPTS, 'record-retrieval-outcome.mjs')).href);
 const { mapProjectPathToSlug } = await import(pathToFileURL(join(CORE_SCRIPTS, 'project-slug.mjs')).href);
@@ -45,7 +46,7 @@ test('spoil: UNSUPPORTED_ARM for automatic (not yet supported, named explicitly)
 test('spoil: CORPUS_MISSING when sourceStoreDir has no _memories directory', async () => {
   const store = mkdtempSync(join(tmpdir(), 'source-store-empty-'));
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20' });
+    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CORPUS_MISSING');
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -54,10 +55,10 @@ test('spoil: CORPUS_MISSING when sourceStoreDir has no _memories directory', asy
 test('spoil: PLANTS_REQUIRED when plants is missing or empty', async () => {
   const store = decoyStore();
   try {
-    const r1 = await runClaudeSyntheticTrial({ sourceStoreDir: store, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20' });
+    const r1 = await runClaudeSyntheticTrial({ sourceStoreDir: store, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
     assert.equal(r1.ok, false);
     assert.equal(r1.spoilReason, 'PLANTS_REQUIRED');
-    const r2 = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: [], candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20' });
+    const r2 = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: [], candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
     assert.equal(r2.ok, false);
     assert.equal(r2.spoilReason, 'PLANTS_REQUIRED');
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -66,7 +67,7 @@ test('spoil: PLANTS_REQUIRED when plants is missing or empty', async () => {
 test('spoil: CANDIDATE_PLUGIN_DIR_MISSING for a nonexistent candidate path', async () => {
   const store = decoyStore();
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: '/definitely/does/not/exist', prompt: 'x', arm: 'always-on', date: '2026-07-20' });
+    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: '/definitely/does/not/exist', prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CANDIDATE_PLUGIN_DIR_MISSING');
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -75,7 +76,7 @@ test('spoil: CANDIDATE_PLUGIN_DIR_MISSING for a nonexistent candidate path', asy
 test('spoil: MISSING_REQUIRED_INPUT when prompt or date are absent', async () => {
   const store = decoyStore();
   try {
-    const r1 = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, arm: 'always-on', date: '2026-07-20' });
+    const r1 = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
     assert.equal(r1.ok, false);
     assert.equal(r1.spoilReason, 'MISSING_REQUIRED_INPUT');
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -89,7 +90,7 @@ test('spoil: a corpus with no real planted answer fails closed via the real leak
   mkdirSync(join(store, '_memories'), { recursive: true });
   writeFileSync(join(store, '_memories', 'dc-1-carrier.md'), '---\nid: dc-1-carrier\ntype: decision\nstatus: active\ntopics: [probe]\n---\n\n# Carrier unit\n\nNothing relevant here.\n');
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20' });
+    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
     assert.equal(result.ok, false);
     assert.match(result.spoilReason, /^CORPUS_LEAKAGE_CHECK_ERROR_/);
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -102,7 +103,7 @@ test('spoil: CORPUS_LEAKAGE_FOUND when a decoy unit leaks the planted token', as
   const store = decoyStore();
   writeFileSync(join(store, '_memories', 'dc-2-decoy.md'), '---\nid: dc-2-decoy\ntype: decision\nstatus: active\ntopics: [probe]\n---\n\n# Decoy\n\nAlso mentions cobalt by accident.\n');
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20' });
+    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CORPUS_LEAKAGE_FOUND');
     assert.ok(result.violations.some((v) => v.unit === 'dc-2-decoy.md'));
@@ -126,7 +127,8 @@ test('corpus copy is content-only: a subdirectory under _memories is genuinely e
   try {
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
-      prompt: 'irrelevant', arm: 'always-on', date: '2026-07-20',
+      candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      prompt: 'irrelevant', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
       deps: { fetchInventory: () => ({ ok: false, reason: 'FORCED_FOR_TEST' }) },
     });
     assert.equal(result.ok, false);
@@ -162,21 +164,22 @@ function fakeFetchInventory({ pluginDir } = {}) {
 // host-exposure-checker.mjs) into the exact cwd/session the orchestrator
 // gives it, then returns a realistic CLI JSON result. No process is ever
 // spawned -- this fixture is the "spawn result" the DI seam exists for.
-function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds = [] }) {
+function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds = [], deliveredUnitIds = rankedUnitIds, includeToolUse = false }) {
   return (args, spawnOpts) => {
     const cwd = spawnOpts.cwd;
-    // Hale, hale--6e4e086-stop-and-telemetry-hold: the JOINED retrieval row
-    // is now cross-checked against the independently recomputed selection
-    // (TELEMETRY_SELECTION_MISMATCH otherwise) -- this fixture must log
-    // units_retrieved/selected_count that genuinely reflect what the
-    // caller says Tier 1 selected, never a fixed zero-hit placeholder.
+    // Hale, hale--6e4e086-stop-and-telemetry-hold / hale--0255-a5ee4c9-and-
+    // sha-wip-disposition item 3: the JOINED retrieval row is cross-checked
+    // against the independently recomputed selection -- units_retrieved
+    // against the RANKED set, selected_count against the DELIVERED
+    // (byte-cap-accepted) count, matching the real hook's own two
+    // different source fields (trace.stages.final vs trace.pack.accepted).
     const retrieval = recordRetrievalEvent(cwd, {
       trigger: 'per-turn-hook', mechanism: 'model-free-substrate',
       retrieval_id: `${sessionId}-retrieval`,
       intent_topics: ['fixture'], tier_reached: 1, escalation_path: [1],
-      units_retrieved: selectedUnitIds.map((id) => ({ id, tier: 1, source_stage: 'ranked' })),
-      result: selectedUnitIds.length === 0 ? 'no-hit' : 'hit',
-      candidate_count: selectedUnitIds.length, selected_count: selectedUnitIds.length, context_pack_token_estimate: 0,
+      units_retrieved: rankedUnitIds.map((id) => ({ id, tier: 1, source_stage: 'ranked' })),
+      result: rankedUnitIds.length === 0 ? 'no-hit' : 'hit',
+      candidate_count: rankedUnitIds.length, selected_count: deliveredUnitIds.length, context_pack_token_estimate: 0,
       requested_arm: arm, directive_fired: directiveText !== '',
     }, { today: date });
     recordRetrievalOutcome(cwd, {
@@ -194,12 +197,18 @@ function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answer
     const fullEmission = (packText && directiveText ? packText + directiveText : packText || directiveText).trimEnd();
     const lines = [
       { type: 'user', promptId, uuid: 'u1', parentUuid: null, message: { role: 'user', content: [{ type: 'text', text: 'fixture prompt' }] } },
-      { type: 'attachment', uuid: 'u2', parentUuid: 'u1', attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: 'tu1', content: fullEmission, stdout: `${fullEmission}\n`, exitCode: 0 } },
-      { type: 'assistant', uuid: 'u3', parentUuid: 'u2', message: { model: 'claude-sonnet-5', id: 'msg1', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: answerText }] } },
+      { type: 'attachment', uuid: 'u2', parentUuid: 'u1', attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: 'tu1', content: fullEmission, stdout: `${fullEmission}\n`, exitCode: 0, command: EXPECTED_USER_PROMPT_SUBMIT_COMMAND } },
+      // Hale, hale--paid-run-direct-file-read-confound: the real iteration-
+      // 21 transcript showed exactly this shape -- a Bash/Read tool_use
+      // block between exposure and the final answer, which is how the
+      // model actually saw the planted token. includeToolUse lets a test
+      // reproduce that shape to prove the confound gate catches it.
+      ...(includeToolUse ? [{ type: 'assistant', uuid: 'utool', parentUuid: 'u2', message: { model: 'claude-sonnet-5', id: 'msgtool', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'Read', input: { file_path: '_memories/dc-1-carrier.md' } }] } }] : []),
+      { type: 'assistant', uuid: 'u3', parentUuid: includeToolUse ? 'utool' : 'u2', message: { model: 'claude-sonnet-5', id: 'msg1', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: answerText }] } },
       // A real completed `-p` invocation always fires the candidate's own
       // Stop hook (answer-close-hook.mjs) too -- host-exposure-checker.mjs
       // now requires it (Hale, hale--b75fecc-paid-run-not-release-evidence).
-      { type: 'attachment', uuid: 'u4', parentUuid: 'u3', attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu2', content: '', stdout: '', exitCode: 0 } },
+      { type: 'attachment', uuid: 'u4', parentUuid: 'u3', attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu2', content: '', stdout: '', exitCode: 0, command: EXPECTED_STOP_COMMAND } },
     ];
     writeFileSync(transcriptPath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
 
@@ -223,14 +232,14 @@ test('DI composition: a full fixture-driven trial composes to a real ok:true env
   // content-based, so computing it against the source store (same file
   // bytes buildFreshTrialStore will copy verbatim) yields an identical
   // result to what the orchestrator derives against its own fresh copy.
-  const { packText, directiveText, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
   try {
-    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-1', packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds });
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, true, JSON.stringify(result, null, 2));
@@ -265,9 +274,9 @@ test('DI composition: CANDIDATE_MUTATED_DURING_INVOCATION fires when the copied 
     };
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude: mutatingSpawn },
     });
     assert.equal(result.ok, false);
@@ -303,9 +312,9 @@ test('DI composition: a missing outcome row (Stop hook never fired) spoils the j
     };
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -341,9 +350,9 @@ test('DI composition: a duplicate retrieval row inside the trial window spoils c
     };
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -371,9 +380,9 @@ test('DI composition: transcript content that diverges from the independently-de
     const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-fedcontext-1', packText: 'this pack text was never actually derived', directiveText, answerText, arm, date, cleanupPaths });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -399,7 +408,8 @@ test('spoil: PROMPT_LEAKAGE_FOUND when the prompt itself spells out the planted 
   try {
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
-      prompt: 'The answer is cobalt; repeat it.', arm: 'always-on', date: '2026-07-20',
+      candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      prompt: 'The answer is cobalt; repeat it.', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
       deps: { fetchInventory: () => { inventoryWasCalled = true; return { ok: true, inventory: [] }; } },
     });
     assert.equal(result.ok, false);
@@ -409,7 +419,7 @@ test('spoil: PROMPT_LEAKAGE_FOUND when the prompt itself spells out the planted 
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('spoil: EFFICACY_CARRIER_NOT_SELECTED when Tier 1 finds no lexical relation to the carrier at all', async () => {
+test('spoil: EFFICACY_CARRIER_NOT_DELIVERED when Tier 1 finds no lexical relation to the carrier at all', async () => {
   const store = decoyStore();
   const cleanupPaths = [];
   const arm = 'deterministic-only';
@@ -424,13 +434,13 @@ test('spoil: EFFICACY_CARRIER_NOT_SELECTED when Tier 1 finds no lexical relation
     const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-noselect-1', packText, directiveText, answerText, arm, date, cleanupPaths });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
-    assert.equal(result.spoilReason, 'EFFICACY_CARRIER_NOT_SELECTED');
+    assert.equal(result.spoilReason, 'EFFICACY_CARRIER_NOT_DELIVERED');
     assert.ok(result.retainedArtifacts.trialStoreDir, 'the spoil envelope must still retain the trial store path');
   } finally {
     rmSync(store, { recursive: true, force: true });
@@ -448,14 +458,14 @@ test('spoil: EFFICACY_ANSWER_MISSING_TARGET when the carrier is selected but the
   // answer deliberately never repeats the planted token "cobalt".
   const answerText = 'I found a relevant memory but will not restate its contents here.';
   const sessionId = 'fixture-session-notarget-1';
-  const { packText, directiveText, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
   try {
-    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-notarget-1', packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds });
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-notarget-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -474,18 +484,18 @@ test('DI composition happy path also asserts the efficacy contract fields, not j
   const prompt = 'What is the proof codename?';
   const answerText = 'The proof codename is cobalt.';
   const sessionId = 'fixture-session-efficacy-happy-1';
-  const { packText, directiveText, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
   try {
-    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-efficacy-happy-1', packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds });
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-efficacy-happy-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, true, JSON.stringify(result, null, 2));
-    assert.ok(result.efficacy.selectedUnitIds.includes('dc-1-carrier'));
+    assert.ok(result.efficacy.deliveredUnitIds.includes('dc-1-carrier'));
     assert.deepEqual(result.efficacy.selectedCarrierTokens, ['cobalt']);
     assert.deepEqual(result.efficacy.answerMatchedTokens, ['cobalt']);
     assert.equal(result.transcriptPath && result.transcriptPath.length > 0, true);
@@ -516,19 +526,19 @@ test('spoil: TELEMETRY_SELECTION_MISMATCH when the joined retrieval row disagree
     // telemetry must be checked instead, and disagreement must spoil.
     const spawnClaude = makeFixtureSpawn({
       sessionId, promptId: 'fixture-prompt-telemetry-mismatch-1', packText, directiveText, answerText, arm, date, cleanupPaths,
-      selectedUnitIds: ['some-other-unit-not-the-carrier'],
+      rankedUnitIds: ['some-other-unit-not-the-carrier'],
     });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'TELEMETRY_SELECTION_MISMATCH');
-    assert.deepEqual(result.detail.loggedUnitIds, ['some-other-unit-not-the-carrier']);
-    assert.ok(result.detail.recomputedUnitIds.includes('dc-1-carrier'));
+    assert.deepEqual(result.detail.loggedRankedUnitIds, ['some-other-unit-not-the-carrier']);
+    assert.ok(result.detail.recomputedRankedUnitIds.includes('dc-1-carrier'));
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
@@ -543,26 +553,39 @@ test('spoil: TELEMETRY_SELECTION_MISMATCH when the joined retrieval row disagree
 // supplied string next to an arbitrary directory.
 // ---------------------------------------------------------------------
 
-test('spoil: CANDIDATE_SHA_BINDING_MISSING_REPO_ROOT when expectedCandidateGitSha is given without candidateRepoRoot', async () => {
+test('spoil: CANDIDATE_SHA_BINDING_REQUIRED when candidateRepoRoot is missing (SHA binding is mandatory, never optional)', async () => {
   const store = decoyStore();
   try {
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
       expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
-      prompt: 'x', arm: 'always-on', date: '2026-07-20',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
     });
     assert.equal(result.ok, false);
-    assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_MISSING_REPO_ROOT');
+    assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_REQUIRED');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('spoil: CANDIDATE_SHA_BINDING_GIT_ERROR for a SHA that does not resolve in the given repo', async () => {
+test('spoil: CANDIDATE_SHA_BINDING_INVALID_SHA for a mutable ref (HEAD) instead of a resolved 40-hex commit', async () => {
   const store = decoyStore();
   try {
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
-      expectedCandidateGitSha: 'not-a-real-sha-0000000000000000000000',
-      prompt: 'x', arm: 'always-on', date: '2026-07-20',
+      expectedCandidateGitSha: 'HEAD',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_INVALID_SHA');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('spoil: CANDIDATE_SHA_BINDING_GIT_ERROR for a real-shaped 40-hex SHA that does not resolve in the given repo', async () => {
+  const store = decoyStore();
+  try {
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedCandidateGitSha: '0'.repeat(40),
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_GIT_ERROR');
@@ -578,9 +601,9 @@ test('spoil: CANDIDATE_SHA_BINDING_MISMATCH when the copied candidate content do
   writeFileSync(join(mismatchedCandidateDir, 'not-the-real-plugin.txt'), 'this is not plugins/core content');
   try {
     const result = await runClaudeSyntheticTrial({
-      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: mismatchedCandidateDir, candidateRepoRoot: REAL_REPO_ROOT,
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: mismatchedCandidateDir, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
-      prompt: 'x', arm: 'always-on', date: '2026-07-20',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_MISMATCH');
@@ -600,20 +623,99 @@ test('DI composition: CANDIDATE_SHA_BINDING passes and is recorded in the envelo
   const prompt = 'What is the proof codename?';
   const answerText = 'The proof codename is cobalt.';
   const sessionId = 'fixture-session-sha-binding-1';
-  const { packText, directiveText, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
   try {
-    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-sha-binding-1', packText, directiveText, answerText, arm, date, cleanupPaths, selectedUnitIds });
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-sha-binding-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds });
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
-      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date,
+      prompt, arm, date, estimand: 'agent-with-tools',
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, true, JSON.stringify(result, null, 2));
     assert.equal(result.candidateIdentity.verifiedCandidateGitSha, REAL_REPO_HEAD_SHA);
     assert.ok(result.candidateIdentity.verifiedCandidateTreeOid);
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+// ---------------------------------------------------------------------
+// Estimand / tool-confound gate. Hale, hale--paid-run-direct-file-read-
+// confound: the iteration-21 "efficacy" result was invalidated because
+// the model used Bash/Read to open the carrier file directly rather than
+// relying on the injected (title-only) pack content, and the orchestrator
+// had no way to see or classify that.
+// ---------------------------------------------------------------------
+
+test('spoil: UNSUPPORTED_ESTIMAND for a value outside the closed vocabulary, validated before any spawn', async () => {
+  const store = decoyStore();
+  try {
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'something-else',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'UNSUPPORTED_ESTIMAND');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('spoil: EFFICACY_TOOL_CONFOUND_FOR_HOOK_DELIVERY_ESTIMAND when a tool call appears between exposure and answer under the hook-delivery-only estimand', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-toolconfound-1';
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    // Same shape Hale found in the real iteration-21 transcript: a Read
+    // tool_use block sits between the UserPromptSubmit exposure and the
+    // terminal answer -- exactly the confound this estimand exists to rule out.
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-toolconfound-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds, includeToolUse: true });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date, estimand: 'hook-delivery-only',
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'EFFICACY_TOOL_CONFOUND_FOR_HOOK_DELIVERY_ESTIMAND');
+    assert.equal(result.detail.toolCallsInTurn.length, 1);
+    assert.equal(result.detail.toolCallsInTurn[0].name, 'Read');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+test('DI composition: agent-with-tools estimand tolerates tool use but records the confound explicitly in the envelope, never silently', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-toolconfound-2';
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-toolconfound-2', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds, includeToolUse: true });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date, estimand: 'agent-with-tools',
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result, null, 2));
+    assert.equal(result.efficacy.toolMediatedConfoundPossible, true);
+    assert.equal(result.efficacy.toolCallsInTurn.length, 1);
+    assert.equal(result.efficacy.estimand, 'agent-with-tools');
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }

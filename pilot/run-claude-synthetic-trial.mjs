@@ -86,6 +86,9 @@ import { checkCorpusLeakage, checkStringsForLeakage, resolveCarrierIds } from '.
 import { directoryIdentity, manifestFromGit, treeOid } from '../plugins/core/skills/core/scripts/artifact-identity.mjs';
 
 const SUPPORTED_ARMS = new Set(['always-on', 'deterministic-only']);
+// Hale, hale--paid-run-direct-file-read-confound: preregistered, mutually
+// exclusive estimands -- 'do not relabel one as the other.'
+const ESTIMANDS = new Set(['hook-delivery-only', 'agent-with-tools']);
 
 // Computed 2026-07-20 against this exact frozen candidate's
 // plugins/core/skills/core/hooks/retrieve-context-hook.mjs. The directive
@@ -117,8 +120,19 @@ export async function deriveExpectedPackAndDirective(prompt, storeDir, arm, core
   const { selectCandidates } = await import(join(coreSkillRoot, 'scripts', 'select-relevant-units.mjs'));
   const trace = buildRetrievalTrace(prompt, storeDir, { topN: 3, byteCap: 2048 });
   const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
-  const selectedUnitIds = (trace.stages?.final || []).map((u) => u.id);
-  const zeroHit = selectedUnitIds.length === 0;
+  // Hale, hale--0255-a5ee4c9-and-sha-wip-disposition item 3: "distinguish
+  // ranked from delivered under the byte cap." The shipped hook logs
+  // units_retrieved from trace.stages.final (every RANKED candidate,
+  // whether or not it survived the byte cap) but selected_count from
+  // trace.pack.accepted.length (what actually made it into the delivered
+  // pack). Conflating them let the earlier telemetry-authority check
+  // compare two genuinely different populations. rankedUnitIds mirrors
+  // units_retrieved; deliveredUnitIds mirrors what's actually in packText
+  // -- only a unit in deliveredUnitIds can have influenced the model via
+  // the injected content at all.
+  const rankedUnitIds = (trace.stages?.final || []).map((u) => u.id);
+  const deliveredUnitIds = (trace.pack?.accepted || []).map((u) => u.id);
+  const zeroHit = rankedUnitIds.length === 0;
   const shouldEmitDirective = arm === 'always-on' ? true : arm === 'deterministic-only' ? false : zeroHit;
   let directiveText = '';
   if (shouldEmitDirective) {
@@ -128,7 +142,7 @@ export async function deriveExpectedPackAndDirective(prompt, storeDir, arm, core
       directiveText = realDirectiveTemplate({ why, shardCount: shards.length, unitsTotal: shards[0].units_total });
     }
   }
-  return { packText, directiveText, expectedDirectiveFired: directiveText !== '', selectedUnitIds };
+  return { packText, directiveText, expectedDirectiveFired: directiveText !== '', rankedUnitIds, deliveredUnitIds };
 }
 
 // Copies ONLY top-level _memories/*.md files -- never subdirectories
@@ -188,7 +202,7 @@ function buildImmutableCandidateCopy(candidatePluginDir) {
 export async function runClaudeSyntheticTrial(opts) {
   const {
     sourceStoreDir, plants, candidatePluginDir, candidateRepoRoot, expectedCandidateGitSha,
-    expectedProducerVersion, expectedProducerSha, prompt, arm, date, model,
+    expectedProducerVersion, expectedProducerSha, prompt, arm, date, model, estimand,
     timeoutMs = 60000, deps = {},
   } = opts || {};
   const fetchInventory = deps.fetchInventory || realFetchPluginInventory;
@@ -210,6 +224,12 @@ export async function runClaudeSyntheticTrial(opts) {
     if (!SUPPORTED_ARMS.has(arm)) {
       return { ok: false, spoilReason: 'UNSUPPORTED_ARM', detail: `arm must be one of ${[...SUPPORTED_ARMS].join('/')} (automatic is not yet supported)`, arm };
     }
+    // Hale, hale--paid-run-direct-file-read-confound: validated up front
+    // (never after a paid invocation) so an unsupported estimand can't
+    // spend real money before being caught.
+    if (!ESTIMANDS.has(estimand)) {
+      return { ok: false, spoilReason: 'UNSUPPORTED_ESTIMAND', detail: `estimand must be one of ${[...ESTIMANDS].join('/')}`, estimand };
+    }
     if (!sourceStoreDir || !existsSync(join(sourceStoreDir, '_memories'))) {
       return { ok: false, spoilReason: 'CORPUS_MISSING', sourceStoreDir };
     }
@@ -221,6 +241,21 @@ export async function runClaudeSyntheticTrial(opts) {
     }
     if (!prompt || !date) {
       return { ok: false, spoilReason: 'MISSING_REQUIRED_INPUT', detail: 'prompt and date are required' };
+    }
+    // Hale, hale--sha-wip-executable-0-of-2 / hale--0255-a5ee4c9-and-sha-wip-
+    // disposition: "expectedCandidateGitSha cannot be optional for an
+    // evidence-producing ok:true... require a resolved immutable 40-hex
+    // commit, not HEAD, a branch, or another mutable ref." Every prior real
+    // trial (including the iteration-21 result) used an unverified
+    // candidate; this closes that gap unconditionally, not just when a
+    // caller happens to opt in. A mutable ref (HEAD, a branch name) fails
+    // the shape check below before git ever resolves it -- no ref
+    // resolution step exists that could accidentally accept one.
+    if (!candidateRepoRoot) {
+      return { ok: false, spoilReason: 'CANDIDATE_SHA_BINDING_REQUIRED', detail: 'candidateRepoRoot is required for every evidence-producing run' };
+    }
+    if (typeof expectedCandidateGitSha !== 'string' || !/^[0-9a-f]{40}$/.test(expectedCandidateGitSha)) {
+      return { ok: false, spoilReason: 'CANDIDATE_SHA_BINDING_INVALID_SHA', detail: 'expectedCandidateGitSha must be a resolved 40-lowercase-hex commit, not HEAD, a branch, or any other mutable ref', received: expectedCandidateGitSha };
     }
 
     // Step 1: fresh trial store, content-only copy, real leakage check.
@@ -264,41 +299,30 @@ export async function runClaudeSyntheticTrial(opts) {
     candidateCopy = buildImmutableCandidateCopy(candidatePluginDir);
 
     // Hale, hale--b75fecc-paid-run-not-release-evidence /
-    // hale--memory-architecture-advice--2026-07-20-15: "candidateRepoRoot
-    // text alone is not proof" -- a caller-supplied SHA string next to an
-    // arbitrary directory proves nothing about what's actually IN that
-    // directory. When the caller supplies expectedCandidateGitSha, verify
-    // the copied candidate's content hash against the REAL git object
-    // database at that exact commit (manifestFromGit -- no working tree,
-    // no tar, no extraction step to trust) using the SAME manifest
-    // algorithm directoryIdentity already uses, so the two are directly
-    // comparable. A caller that omits expectedCandidateGitSha gets no
-    // binding proof at all -- that absence is visible in the envelope
-    // (verifiedCandidateGitSha: null), never silently assumed.
-    let verifiedCandidateGitSha = null;
-    let verifiedCandidateTreeOid = null;
-    if (expectedCandidateGitSha) {
-      if (!candidateRepoRoot) {
-        return spoil('CANDIDATE_SHA_BINDING_MISSING_REPO_ROOT', { detail: 'expectedCandidateGitSha requires candidateRepoRoot to resolve it against' });
-      }
-      let gitManifest;
-      try {
-        gitManifest = manifestFromGit(candidateRepoRoot, expectedCandidateGitSha, 'plugins/core');
-      } catch (e) {
-        return spoil('CANDIDATE_SHA_BINDING_GIT_ERROR', { detail: e.message });
-      }
-      if (gitManifest.content_manifest_sha256 !== candidateCopy.contentHash) {
-        return spoil('CANDIDATE_SHA_BINDING_MISMATCH', {
-          detail: { expectedGitSha: expectedCandidateGitSha, gitContentHash: gitManifest.content_manifest_sha256, candidateContentHash: candidateCopy.contentHash },
-        });
-      }
-      verifiedCandidateGitSha = expectedCandidateGitSha;
-      try {
-        verifiedCandidateTreeOid = treeOid(candidateRepoRoot, expectedCandidateGitSha, 'plugins/core');
-      } catch (e) {
-        return spoil('CANDIDATE_SHA_BINDING_GIT_ERROR', { detail: e.message });
-      }
+    // hale--sha-wip-executable-0-of-2: "candidateRepoRoot text alone is not
+    // proof" -- verify the copied candidate's content hash against the
+    // REAL git object database at the exact resolved commit (already
+    // required and shape-validated above), never a working tree, tar, or
+    // trusted string. manifestFromGit uses the SAME manifest algorithm
+    // directoryIdentity already uses, so the two are directly comparable.
+    let gitManifest;
+    try {
+      gitManifest = manifestFromGit(candidateRepoRoot, expectedCandidateGitSha, 'plugins/core');
+    } catch (e) {
+      return spoil('CANDIDATE_SHA_BINDING_GIT_ERROR', { detail: e.message });
     }
+    if (gitManifest.content_manifest_sha256 !== candidateCopy.contentHash) {
+      return spoil('CANDIDATE_SHA_BINDING_MISMATCH', {
+        detail: { expectedGitSha: expectedCandidateGitSha, gitContentHash: gitManifest.content_manifest_sha256, candidateContentHash: candidateCopy.contentHash },
+      });
+    }
+    let verifiedCandidateTreeOid;
+    try {
+      verifiedCandidateTreeOid = treeOid(candidateRepoRoot, expectedCandidateGitSha, 'plugins/core');
+    } catch (e) {
+      return spoil('CANDIDATE_SHA_BINDING_GIT_ERROR', { detail: e.message });
+    }
+    const verifiedCandidateGitSha = expectedCandidateGitSha;
 
     const candidateId = 'core@inline';
     const baseline = fetchInventory({ timeoutMs });
@@ -330,9 +354,18 @@ export async function runClaudeSyntheticTrial(opts) {
     // output) -- the only honest way to KNOW the model is to name it on
     // the invocation via --model, then record what was REQUESTED (never
     // fabricate a "reported" value the CLI doesn't actually return).
+    // Hale, hale--paid-run-direct-file-read-confound: for the
+    // 'hook-delivery-only' estimand, tools are structurally disabled
+    // (--tools "" -- verified live via `claude --help`: "Use \"\" to
+    // disable all tools") so the model CANNOT Bash/Read its way to the
+    // planted token independent of the injected pack. This is the root-
+    // cause fix; the toolCallsInTurn transcript check above is the second
+    // layer in case the flag alone doesn't fully hold, same pattern as
+    // --setting-sources + UNEXPECTED_HOOK_ACTIVITY.
     const commandArgs = [
       '--settings', overlayJson, '--setting-sources', 'project,local', '--plugin-dir', candidateCopy.candidateCopyDir,
       ...(model ? ['--model', model] : []),
+      ...(estimand === 'hook-delivery-only' ? ['--tools', ''] : []),
       '-p', prompt, '--output-format', 'json',
     ];
     const startedAt = Date.now();
@@ -364,7 +397,7 @@ export async function runClaudeSyntheticTrial(opts) {
 
     // Step 4 continued (join).
     const coreSkillRoot = join(candidateCopy.candidateCopyDir, 'skills', 'core');
-    const { packText, directiveText, expectedDirectiveFired, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, realStoreDir, arm, coreSkillRoot);
+    const { packText, directiveText, expectedDirectiveFired, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, realStoreDir, arm, coreSkillRoot);
     const joinResult = checkTrialWindow(realStoreDir, {
       date,
       retrievalWindow: { before: retrievalBefore, after: retrievalAfter },
@@ -403,32 +436,95 @@ export async function runClaudeSyntheticTrial(opts) {
     // Hale, hale--6e4e086-stop-and-telemetry-hold: "the efficacy oracle
     // currently trusts an after-the-fact retrieval recomputation... make
     // joinResult.retrieval.units_retrieved authoritative and require it to
-    // agree with the independently recomputed selectedUnitIds. A
-    // disagreement must spoil, not be hidden." Without this, the
-    // instrument could recompute a carrier hit while the REAL joined
-    // telemetry row logged something else (or nothing) -- exactly what the
-    // committed happy fixture had been doing.
-    const loggedUnitIds = (joinResult.retrieval.units_retrieved || []).map((u) => u.id);
+    // agree with the independently recomputed selection. A disagreement
+    // must spoil, not be hidden." Without this, the instrument could
+    // recompute a carrier hit while the REAL joined telemetry row logged
+    // something else (or nothing) -- exactly what the committed happy
+    // fixture had been doing.
+    //
+    // Hale, hale--0255-a5ee4c9-and-sha-wip-disposition item 3: the shipped
+    // hook logs units_retrieved from the RANKED set (trace.stages.final)
+    // but selected_count from the DELIVERED set (trace.pack.accepted) --
+    // conflating them (as an earlier version here did) compares two
+    // different populations and either false-spoils whenever the cap
+    // excludes something, or silently accepts a mismatch when it doesn't.
+    // Each logged field is now checked against its OWN correct population.
+    const loggedRankedUnitIds = (joinResult.retrieval.units_retrieved || []).map((u) => u.id);
     const loggedSelectedCount = joinResult.retrieval.selected_count;
-    const sortedLogged = [...loggedUnitIds].sort();
-    const sortedRecomputed = [...selectedUnitIds].sort();
-    const idsAgree = sortedLogged.length === sortedRecomputed.length && sortedLogged.every((id, i) => id === sortedRecomputed[i]);
-    if (!idsAgree || loggedSelectedCount !== selectedUnitIds.length) {
+    const sortedLoggedRanked = [...loggedRankedUnitIds].sort();
+    const sortedRecomputedRanked = [...rankedUnitIds].sort();
+    const rankedIdsAgree = sortedLoggedRanked.length === sortedRecomputedRanked.length && sortedLoggedRanked.every((id, i) => id === sortedRecomputedRanked[i]);
+    if (!rankedIdsAgree || loggedSelectedCount !== deliveredUnitIds.length) {
       return spoil('TELEMETRY_SELECTION_MISMATCH', {
-        detail: { loggedUnitIds, loggedSelectedCount, recomputedUnitIds: selectedUnitIds },
+        detail: {
+          loggedRankedUnitIds, recomputedRankedUnitIds: rankedUnitIds,
+          loggedSelectedCount, recomputedDeliveredCount: deliveredUnitIds.length,
+        },
       });
     }
 
+    // Hale, hale--paid-run-direct-file-read-confound: buildFinalContextPack
+    // emits ID + title only, never body content -- a carrier that is only
+    // RANKED (not DELIVERED, i.e. cap-excluded from trace.pack.accepted)
+    // never appears in the injected content at all, so crediting it toward
+    // efficacy would credit something the model was never shown. Only a
+    // carrier actually in deliveredUnitIds can count.
     const selectedCarrierTokens = plants
       .map((p) => p.token)
-      .filter((token) => loggedUnitIds.includes(carrierIdsByToken.get(token)) && selectedUnitIds.includes(carrierIdsByToken.get(token)));
+      .filter((token) => deliveredUnitIds.includes(carrierIdsByToken.get(token)));
     if (selectedCarrierTokens.length === 0) {
-      return spoil('EFFICACY_CARRIER_NOT_SELECTED', { detail: { loggedUnitIds, selectedUnitIds, expectedCarrierIds: [...carrierIdsByToken.values()] } });
+      return spoil('EFFICACY_CARRIER_NOT_DELIVERED', { detail: { deliveredUnitIds, rankedUnitIds, expectedCarrierIds: [...carrierIdsByToken.values()] } });
+    }
+    // The delivered pack is title/breadcrumb only (id + H1), never the
+    // carrier's body -- so the injected content itself must actually
+    // contain the carrier's emitted line before the final answer is even
+    // consulted. This does NOT by itself prove the answer came from that
+    // content rather than a tool call (see the tool-call classification
+    // below); it only proves the carrier was genuinely delivered.
+    const deliveredCarrierIdsInPack = selectedCarrierTokens.map((token) => carrierIdsByToken.get(token));
+    const packMissingCarrierId = deliveredCarrierIdsInPack.find((id) => !packText.includes(id));
+    if (packMissingCarrierId) {
+      return spoil('EFFICACY_CARRIER_NOT_IN_INJECTED_CONTENT', { detail: { packText, missingCarrierId: packMissingCarrierId } });
     }
     const answerMatchedTokens = selectedCarrierTokens.filter((token) =>
       String(exposure.finalAnswerText || '').toLowerCase().includes(String(token).toLowerCase()));
     if (answerMatchedTokens.length === 0) {
       return spoil('EFFICACY_ANSWER_MISSING_TARGET', { detail: { finalAnswerText: exposure.finalAnswerText, expectedAnyOf: selectedCarrierTokens } });
+    }
+
+    // Hale, hale--paid-run-direct-file-read-confound: the iteration-21
+    // "efficacy" result was invalidated by exactly this gap -- the model
+    // used Bash/Read to open the carrier file directly rather than relying
+    // on the injected (title-only) content, and the orchestrator had no
+    // way to see that, or to distinguish it from real pack-delivery
+    // efficacy. "One successful treatment run is not causal evidence" for
+    // either estimand -- this closes the VISIBILITY gap (never silently
+    // credit a tool-mediated answer as hook-delivery), not the full causal
+    // design (a matched no-tools-vs-tools control arm remains unbuilt,
+    // named honestly below rather than faked).
+    //
+    // Two estimands, preregistered per-call, never inferred or relabeled:
+    //   'hook-delivery-only' -- proves the INJECTED PACK caused the answer.
+    //     Tools are structurally disabled (--tools "", verified live via
+    //     `claude --help`: "Use \"\" to disable all tools"). Since the real
+    //     product's buildFinalContextPack() never emits body content (only
+    //     id + title), this estimand can only ever succeed for a query
+    //     answerable from the TITLE/ID alone -- body-fact recall is
+    //     structurally out of reach for it, by product design, not a test
+    //     gap. Any tool_use appearing anyway (the flag failing to hold)
+    //     spoils closed rather than being silently absorbed.
+    //   'agent-with-tools' -- proves an end-to-end agent (memory hint plus
+    //     unrestricted tools) can recall the target. Tool use is expected
+    //     and does not spoil, but the confound is recorded explicitly in
+    //     the envelope so a caller can never mistake this for hook-delivery
+    //     evidence. A matched tools-enabled CONTROL run (same prompt, no
+    //     memory pack) is required to make this causal and is NOT built
+    //     here -- named as the explicit next gap, not implied as done.
+    const toolCallsInTurn = exposure.toolCallsInTurn || [];
+    if (estimand === 'hook-delivery-only' && toolCallsInTurn.length > 0) {
+      return spoil('EFFICACY_TOOL_CONFOUND_FOR_HOOK_DELIVERY_ESTIMAND', {
+        detail: { toolCallsInTurn, note: 'the --tools "" restriction did not hold -- verified from the transcript, never trusted from the flag alone' },
+      });
     }
 
     // Step 7: one fail-closed, comprehensive raw evidence envelope.
@@ -462,7 +558,15 @@ export async function runClaudeSyntheticTrial(opts) {
       cursors: { retrievalBefore, retrievalAfter, outcomeBefore, outcomeAfter },
       join: joinResult,
       exposure,
-      efficacy: { selectedUnitIds, selectedCarrierTokens, answerMatchedTokens },
+      efficacy: {
+        estimand, rankedUnitIds, deliveredUnitIds, selectedCarrierTokens, answerMatchedTokens,
+        toolCallsInTurn,
+        // 'hook-delivery-only' + a nonzero toolCallsInTurn is already
+        // impossible above (it spoils before reaching here); this field
+        // exists so an 'agent-with-tools' envelope is never mistaken for
+        // clean hook-delivery evidence just because ok:true.
+        toolMediatedConfoundPossible: estimand === 'agent-with-tools' && toolCallsInTurn.length > 0,
+      },
       hashes: {
         packSha256: exposure.packSha256,
         directiveSha256: sha256Hex(directiveText),
