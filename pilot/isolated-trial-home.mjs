@@ -33,7 +33,7 @@
 
 import { mkdtempSync, mkdirSync, cpSync, existsSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep, isAbsolute } from 'node:path';
 import { directoryIdentity } from '../plugins/core/skills/core/scripts/artifact-identity.mjs';
 
 /**
@@ -108,10 +108,40 @@ export function createIsolatedHome({ harness, candidatePluginDir, version, marke
  * @param {string} opts.version              the requested version
  * @param {string} opts.cacheDir             the exact expected install path
  *   (createIsolatedHome's own return value -- never re-derived by search)
- * @param {string} opts.sourceCandidateDir   the original candidate content,
- *   for a byte-identity comparison against what's actually installed
+ * @param {string} opts.sourceCandidateDir   REQUIRED: the original candidate
+ *   content, for a byte-identity comparison against what's actually
+ *   installed. Hale re-audit: this used to be optional and silently
+ *   skipped the content check when omitted, reporting isolated:true
+ *   without ever performing the promised comparison -- missing proof must
+ *   fail closed, not pass by default.
  */
 export function verifyIsolation({ homeDir, harness, version, cacheDir, sourceCandidateDir }) {
+  if (!sourceCandidateDir) {
+    throw Object.assign(new Error('sourceCandidateDir is required -- verifyIsolation cannot prove content identity without it, and a missing proof must never silently report isolated:true'), { code: 'SOURCE_CANDIDATE_REQUIRED' });
+  }
+
+  // 0. cacheDir must actually SIT UNDER homeDir at the expected relative
+  //    shape (.claude|.codex/plugins/cache/<mp>/core/<version>) -- Hale
+  //    re-audit: passing the real source directory itself as cacheDir
+  //    (with an unrelated, empty homeDir) made every later check pass
+  //    trivially (manifest/hash match themselves; the empty home scan
+  //    found no competitors) without cacheDir ever having been INSTALLED
+  //    anywhere. The relative shape can't be satisfied by an arbitrary
+  //    absolute path elsewhere on disk, only by a real install under this
+  //    specific isolated home.
+  const cachePrefix = harness === 'claude'
+    ? ['.claude', 'plugins', 'cache'] : ['.codex', 'plugins', 'cache'];
+  const rel = relative(homeDir, cacheDir);
+  const relParts = rel.split(sep);
+  const shapeOk = !rel.startsWith('..') && !isAbsolute(rel)
+    && relParts.length === cachePrefix.length + 3
+    && cachePrefix.every((seg, i) => relParts[i] === seg)
+    && relParts[cachePrefix.length + 1] === 'core'
+    && relParts[cachePrefix.length + 2] === version;
+  if (!shapeOk) {
+    return { isolated: false, reason: 'CACHE_PATH_NOT_UNDER_HOME', homeDir, cacheDir, expectedRelativeShape: `${cachePrefix.join('/')}/<marketplace>/core/${version}` };
+  }
+
   const manifestPath = harness === 'claude'
     ? join(cacheDir, '.claude-plugin', 'plugin.json')
     : join(cacheDir, '.codex-plugin', 'plugin.json');
@@ -135,15 +165,13 @@ export function verifyIsolation({ homeDir, harness, version, cacheDir, sourceCan
   //    false pass Hale demonstrated (real content copied under a WRONG
   //    version number) is caught here even though checks 1-2 would pass a
   //    version that happens to match a mislabeled copy of something else.
-  if (sourceCandidateDir) {
-    const installed = directoryIdentity(cacheDir);
-    const source = directoryIdentity(sourceCandidateDir);
-    if (installed.content_manifest_sha256 !== source.content_manifest_sha256) {
-      return {
-        isolated: false, reason: 'CONTENT_MISMATCH',
-        installedHash: installed.content_manifest_sha256, sourceHash: source.content_manifest_sha256,
-      };
-    }
+  const installed = directoryIdentity(cacheDir);
+  const source = directoryIdentity(sourceCandidateDir);
+  if (installed.content_manifest_sha256 !== source.content_manifest_sha256) {
+    return {
+      isolated: false, reason: 'CONTENT_MISMATCH',
+      installedHash: installed.content_manifest_sha256, sourceHash: source.content_manifest_sha256,
+    };
   }
 
   // 4. Nothing ELSE under the cache root may be present -- any other

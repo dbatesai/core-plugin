@@ -108,9 +108,21 @@ export function checkCorpusLeakage(storeDir, plants) {
   const isCarrier = (unit, carrierUnit) => unit.rel === carrierUnit || unit.id === carrierUnit;
 
   for (const { token, carrierUnit } of plants) {
-    const carrierExists = parsed.some(u => isCarrier(u, carrierUnit));
-    if (!carrierExists) {
+    const matches = parsed.filter(u => isCarrier(u, carrierUnit));
+    if (matches.length === 0) {
       throw Object.assign(new Error(`carrierUnit ${JSON.stringify(carrierUnit)} for token ${JSON.stringify(token)} matches no unit in the corpus`), { code: 'CARRIER_NOT_FOUND' });
+    }
+    // Hale re-audit (hale--4fa-f624-narrow-pass-new-falsifiers): two units
+    // sharing a duplicate frontmatter id, both with the token in their
+    // body, both matched the plant -- both counted as "the carrier" and
+    // the corpus reported clean. A carrier reference must resolve to
+    // exactly one unit; ambiguity here means the corpus itself has a
+    // duplicate-id problem the leakage check cannot safely reason past.
+    if (matches.length > 1) {
+      throw Object.assign(
+        new Error(`carrierUnit ${JSON.stringify(carrierUnit)} for token ${JSON.stringify(token)} matches ${matches.length} units (${matches.map(m => m.rel).join(', ')}) — ambiguous, refusing to guess which is the real carrier`),
+        { code: 'AMBIGUOUS_CARRIER', candidates: matches.map(m => m.rel) },
+      );
     }
     for (const unit of parsed) {
       // Metadata surfaces are never allowed to leak the token, carrier included.

@@ -27,6 +27,23 @@ test('checkCorpusLeakage requires an explicit carrier per token', () => {
   );
 });
 
+// Hale re-audit (hale--4fa-f624-narrow-pass-new-falsifiers): "Two units
+// share frontmatter id 'duplicate-carrier', both bodies contain the
+// token, and the plant names that id. checkCorpusLeakage() treats both
+// as carriers and returns clean: true." A carrier reference must resolve
+// to exactly one unit -- ambiguity here means the corpus itself has a
+// duplicate-id problem the check must not silently reason past.
+test('checkCorpusLeakage rejects an ambiguous carrier reference (duplicate frontmatter id)', () => {
+  const root = store({
+    'dc-1-a.md': '---\nid: duplicate-carrier\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Unit A\n\nThe answer is cobalt.\n',
+    'dc-2-b.md': '---\nid: duplicate-carrier\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Unit B\n\nAlso says cobalt here.\n',
+  });
+  assert.throws(
+    () => checkCorpusLeakage(root, [{ token: 'cobalt', carrierUnit: 'duplicate-carrier' }]),
+    (e) => e.code === 'AMBIGUOUS_CARRIER',
+  );
+});
+
 test('clean corpus: target token only in the designated carrier body passes', () => {
   const root = store({
     'dc-1-proof.md': '---\nid: dc-1-proof\ntype: decision\nstatus: active\ntopics: [pilot]\n---\n\n# Pilot proof unit\n\nThe blue orchard proof codename is cobalt.\n',

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, cpSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, cpSync, readdirSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -156,15 +156,59 @@ test('verifyIsolation fails when the installed manifest claims a different name/
   } finally { rmSync(homeDir, { recursive: true, force: true }); }
 });
 
+// Hale re-audit (hale--4fa-f624-narrow-pass-new-falsifiers), false pass:
+// "Omit sourceCandidateDir while passing an otherwise normal isolated
+// home. verifyIsolation() returns isolated: true without performing the
+// promised content comparison." A missing proof must fail closed, not
+// pass by omission.
+test('verifyIsolation requires sourceCandidateDir — omitting it must throw, never silently pass', () => {
+  const candidate = fakeCandidateDir();
+  const { homeDir, cacheDir, cleanup } = createIsolatedHome({ harness: 'claude', candidatePluginDir: candidate, version: '3.12.1-pilot.1' });
+  try {
+    assert.throws(
+      () => verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1', cacheDir }),
+      (e) => e.code === 'SOURCE_CANDIDATE_REQUIRED',
+    );
+  } finally { cleanup(); }
+});
+
+// Hale re-audit, false pass: "Pass the real source directory itself as
+// cacheDir while homeDir is an unrelated empty directory. Manifest and
+// hashes match, the empty home scan finds no competitors, and
+// verifyIsolation() returns isolated: true." cacheDir must actually sit
+// under homeDir at the expected relative shape, not just point at
+// something that happens to satisfy the later checks trivially.
+test('verifyIsolation rejects a cacheDir that is not actually under the given homeDir', () => {
+  const candidate = fakeCandidateDir();
+  const unrelatedEmptyHome = mkdtempSync(join(tmpdir(), 'pilot-home-unrelated-'));
+  try {
+    // cacheDir = the real source directory itself, nothing to do with
+    // unrelatedEmptyHome at all.
+    const result = verifyIsolation({ homeDir: unrelatedEmptyHome, harness: 'claude', version: '3.12.1-pilot.1', cacheDir: candidate, sourceCandidateDir: candidate });
+    assert.equal(result.isolated, false);
+    assert.equal(result.reason, 'CACHE_PATH_NOT_UNDER_HOME');
+  } finally { rmSync(unrelatedEmptyHome, { recursive: true, force: true }); }
+});
+
 // End-to-end smoke: the real frozen candidate, through the real
 // createIsolatedHome + verifyIsolation pair, preserved as an executable
 // test/receipt per Hale's explicit ask -- not just a one-off manual run.
-test('smoke: createIsolatedHome + verifyIsolation against the real frozen pilot candidate 6dc12a3', () => {
-  const REAL_CANDIDATE = '/private/tmp/core-plugin-pilot-48a87f6/plugins/core';
-  if (!existsSync(REAL_CANDIDATE)) return; // environment-dependent path; skip if the candidate worktree isn't present
-  const { homeDir, cacheDir, cleanup } = createIsolatedHome({ harness: 'claude', candidatePluginDir: REAL_CANDIDATE, version: '3.12.1-pilot.1' });
+//
+// Hale re-audit (hale--4fa-f624-narrow-pass-new-falsifiers): the prior
+// version hard-coded a DIFFERENT worktree's absolute path
+// (/private/tmp/core-plugin-pilot-48a87f6) and silently returned as a
+// passing test when that path was absent -- an environment difference
+// could make the smoke never actually execute while still reporting
+// green. This branch (pilot-runner-6dc12a3) IS checked out at the frozen
+// candidate itself, so its own repo-relative plugins/core IS the real
+// candidate content -- no cross-worktree reference, no absent-path skip.
+test('smoke: createIsolatedHome + verifyIsolation against this worktree\'s own frozen candidate content', () => {
+  const REAL_CANDIDATE = join(PILOT, '..', 'plugins', 'core');
+  const manifest = JSON.parse(readFileSync(join(REAL_CANDIDATE, '.claude-plugin', 'plugin.json'), 'utf8'));
+  assert.ok(manifest.version, 'this worktree\'s own plugins/core must be a real, readable candidate manifest');
+  const { homeDir, cacheDir, cleanup } = createIsolatedHome({ harness: 'claude', candidatePluginDir: REAL_CANDIDATE, version: manifest.version });
   try {
-    const result = verifyIsolation({ homeDir, harness: 'claude', version: '3.12.1-pilot.1', cacheDir, sourceCandidateDir: REAL_CANDIDATE });
+    const result = verifyIsolation({ homeDir, harness: 'claude', version: manifest.version, cacheDir, sourceCandidateDir: REAL_CANDIDATE });
     assert.equal(result.isolated, true, JSON.stringify(result));
   } finally { cleanup(); }
 });
