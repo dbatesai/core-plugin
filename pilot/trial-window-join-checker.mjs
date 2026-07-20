@@ -28,6 +28,28 @@
 //     retrieval_id. This checker's window scoping must not treat that as a
 //     spoil when it lands outside the window it was asked to check.
 //
+// Hale re-audit (hale--de3066d-window-design-pass-five-fail-open-hold):
+// PASS on the byte-cursor window design, HOLD on the oracle itself -- an
+// executable falsifier suite found five false passes. All five closed here:
+//   1. A second retrieval row for a DIFFERENT arm inside the retrieval
+//      window used to be invisible (only requested-arm matches were
+//      counted) -- any contamination in the window now fails closed before
+//      arm is even checked.
+//   2. Same shape on the outcome side: a second outcome row for a DIFFERENT
+//      retrieval_id inside the outcome window used to be invisible (the
+//      code filtered to the target retrieval_id before counting) -- any
+//      contamination in the outcome window now fails closed first.
+//   3. Every expected-identity argument (harness/session/producer version/
+//      producer SHA) was optional; omitting all of them still returned
+//      ok:true. All four are now required, same tier as expectedArm.
+//   4. A malformed or non-object JSON line inside the window was silently
+//      dropped by the parser instead of being treated as a data-quality
+//      spoil.
+//   5. A negative `before` cursor was silently clamped to zero, silently
+//      widening the caller's own declared window. Cursors are now validated
+//      strictly (integer, 0 <= before <= after <= current file size) and
+//      never clamped or widened -- an invalid cursor throws.
+//
 // Scope, stated honestly (Hale's point 7): this proves the LOG-LEVEL join is
 // real and singular -- it does NOT prove the retrieved content was actually
 // delivered to or seen by the model. That is a separate, still-required
@@ -52,31 +74,63 @@ export function captureCursor(storeDir, date, filename) {
   try { return statSync(path).size; } catch { return 0; }
 }
 
-function readRowsInWindow(storeDir, date, filename, before, after) {
+class MalformedRowError extends Error {
+  constructor(detail) { super('malformed row inside the checked window'); this.detail = detail; }
+}
+
+// Strict cursor validation (Hale falsifier 5): never clamp, never widen.
+// currentSize is the file's real size right now -- `after` may legitimately
+// equal it (the common case) but can never exceed it.
+function validateWindow(before, after, currentSize, label) {
+  if (!Number.isInteger(before) || before < 0) {
+    throw Object.assign(new Error(`${label}.before must be a non-negative integer, got ${JSON.stringify(before)}`), { code: 'INVALID_CURSOR' });
+  }
+  if (!Number.isInteger(after) || after < 0) {
+    throw Object.assign(new Error(`${label}.after must be a non-negative integer, got ${JSON.stringify(after)}`), { code: 'INVALID_CURSOR' });
+  }
+  if (before > after) {
+    throw Object.assign(new Error(`${label}.before (${before}) must be <= ${label}.after (${after})`), { code: 'INVALID_CURSOR_ORDER' });
+  }
+  if (after > currentSize) {
+    throw Object.assign(new Error(`${label}.after (${after}) exceeds the file's current size (${currentSize}) — a window can never claim to cover bytes that don't exist yet`), { code: 'CURSOR_BEYOND_FILE_END' });
+  }
+}
+
+// Malformed/non-object rows are a spoil reason (Hale falsifier 4), not a
+// filter -- a corrupt line inside the exact window being relied on as
+// evidence must never be silently invisible.
+function readRowsInWindow(storeDir, date, filename, before, after, label) {
   const path = join(storeDir, '_sessions', date, filename);
-  if (!existsSync(path)) return [];
-  const start = Math.max(0, before);
-  const end = Math.max(start, after);
-  const length = end - start;
-  if (length <= 0) return [];
+  const currentSize = existsSync(path) ? statSync(path).size : 0;
+  validateWindow(before, after, currentSize, label);
+  const length = after - before;
+  if (length === 0) return [];
   const fd = openSync(path, 'r');
   let buf;
   try {
     buf = Buffer.alloc(length);
-    readSync(fd, buf, 0, length, start);
+    readSync(fd, buf, 0, length, before);
   } finally {
     closeSync(fd);
   }
-  return buf.toString('utf8').split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => { try { return JSON.parse(line); } catch { return null; } })
-    .filter(Boolean);
+  const lines = buf.toString('utf8').split('\n').map((line) => line.trim()).filter(Boolean);
+  const rows = [];
+  for (const line of lines) {
+    let parsed;
+    try { parsed = JSON.parse(line); } catch {
+      throw new MalformedRowError(line.slice(0, 200));
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new MalformedRowError(line.slice(0, 200));
+    }
+    rows.push(parsed);
+  }
+  return rows;
 }
 
 /**
  * checkTrialWindow — the join oracle. Returns { ok:true, retrieval, outcome }
- * only when every one of Hale's six spoil conditions is ruled out; otherwise
+ * only when every spoil condition is ruled out; otherwise
  * { ok:false, reason:<CODE>, ...detail } naming exactly which one fired.
  *
  * @param {string} storeDir
@@ -86,58 +140,78 @@ function readRowsInWindow(storeDir, date, filename, before, after) {
  *   cursors into retrieval-log.jsonl (from captureCursor)
  * @param {{before:number, after:number}} opts.outcomeWindow
  *   cursors into outcome-log.jsonl (from captureCursor)
- * @param {string} opts.expectedArm            required requested_arm value
- * @param {string} [opts.expectedHarness]
- * @param {string} [opts.expectedSessionId]
- * @param {string} [opts.expectedProducerVersion]
- * @param {string} [opts.expectedProducerSha]
+ * @param {string} opts.expectedArm              required requested_arm value
+ * @param {string} opts.expectedHarness          required (Hale falsifier 3)
+ * @param {string} opts.expectedSessionId        required
+ * @param {string} opts.expectedProducerVersion  required
+ * @param {string} opts.expectedProducerSha      required
  */
 export function checkTrialWindow(storeDir, opts) {
-  const { date, retrievalWindow, outcomeWindow, expectedArm } = opts || {};
+  const { date, retrievalWindow, outcomeWindow, expectedArm, expectedHarness, expectedSessionId, expectedProducerVersion, expectedProducerSha } = opts || {};
   if (!date) throw new Error('checkTrialWindow requires date');
   if (!retrievalWindow || !outcomeWindow) throw new Error('checkTrialWindow requires retrievalWindow and outcomeWindow cursors — never scans the whole log');
   if (!expectedArm) throw new Error('checkTrialWindow requires expectedArm — an untagged join proves nothing about which arm ran');
-
-  // Point 1: cursor/before-after-window scoped, never global-log counting —
-  // only the bytes between the caller's own before/after cursors are ever
-  // read, on both files.
-  const newRetrievals = readRowsInWindow(storeDir, date, 'retrieval-log.jsonl', retrievalWindow.before, retrievalWindow.after)
-    .filter((r) => r.kind === 'retrieval');
-
-  // Point 2 + point 5 (duplicate retrievals spoil closed): exactly one
-  // arm-tagged retrieval row in the window.
-  const armMatches = newRetrievals.filter((r) => r.requested_arm === expectedArm);
-  if (armMatches.length === 0) {
-    return { ok: false, reason: 'NO_ARM_TAGGED_RETRIEVAL_IN_WINDOW', expectedArm, newRetrievalCount: newRetrievals.length };
+  for (const [name, value] of [
+    ['expectedHarness', expectedHarness], ['expectedSessionId', expectedSessionId],
+    ['expectedProducerVersion', expectedProducerVersion], ['expectedProducerSha', expectedProducerSha],
+  ]) {
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new Error(`checkTrialWindow requires ${name} — proving a join without stating the identity it must carry proves nothing`);
+    }
   }
-  if (armMatches.length > 1) {
-    return { ok: false, reason: 'DUPLICATE_ARM_TAGGED_RETRIEVALS_IN_WINDOW', expectedArm, count: armMatches.length };
+
+  let newRetrievals, newOutcomes;
+  try {
+    newRetrievals = readRowsInWindow(storeDir, date, 'retrieval-log.jsonl', retrievalWindow.before, retrievalWindow.after, 'retrievalWindow')
+      .filter((r) => r.kind === 'retrieval');
+    newOutcomes = readRowsInWindow(storeDir, date, 'outcome-log.jsonl', outcomeWindow.before, outcomeWindow.after, 'outcomeWindow')
+      .filter((r) => r.kind === 'retrieval-outcome');
+  } catch (e) {
+    if (e instanceof MalformedRowError) {
+      return { ok: false, reason: 'MALFORMED_ROW_IN_WINDOW', detail: e.detail };
+    }
+    throw e;
   }
-  const retrieval = armMatches[0];
+
+  // Hale falsifier 1: any OTHER retrieval row in the window is contamination,
+  // not something to filter past on the way to the arm match. Exactly one
+  // retrieval row, period, THEN check its arm.
+  if (newRetrievals.length === 0) {
+    return { ok: false, reason: 'NO_RETRIEVAL_ROWS_IN_WINDOW' };
+  }
+  if (newRetrievals.length > 1) {
+    return { ok: false, reason: 'MULTIPLE_RETRIEVAL_ROWS_IN_WINDOW', count: newRetrievals.length };
+  }
+  const retrieval = newRetrievals[0];
+  if (retrieval.requested_arm !== expectedArm) {
+    return { ok: false, reason: 'ARM_MISMATCH', expected: expectedArm, found: retrieval.requested_arm };
+  }
   if (!retrieval.retrieval_id) {
     return { ok: false, reason: 'RETRIEVAL_MISSING_ID' };
   }
 
-  // Point 3 + point 5 (ambiguous outcomes / missing rows spoil closed):
-  // exactly one outcome row for THIS retrieval_id in the outcome window.
-  const outcomesForRetrieval = readRowsInWindow(storeDir, date, 'outcome-log.jsonl', outcomeWindow.before, outcomeWindow.after)
-    .filter((r) => r.kind === 'retrieval-outcome' && r.retrieval_id === retrieval.retrieval_id);
-  if (outcomesForRetrieval.length === 0) {
-    return { ok: false, reason: 'NO_OUTCOME_IN_WINDOW', retrieval_id: retrieval.retrieval_id };
+  // Hale falsifier 2: same shape on the outcome side. Exactly one outcome
+  // row, period, THEN check it joins to this retrieval_id.
+  if (newOutcomes.length === 0) {
+    return { ok: false, reason: 'NO_OUTCOME_ROWS_IN_WINDOW' };
   }
-  if (outcomesForRetrieval.length > 1) {
-    return { ok: false, reason: 'AMBIGUOUS_OUTCOME_IN_WINDOW', retrieval_id: retrieval.retrieval_id, count: outcomesForRetrieval.length };
+  if (newOutcomes.length > 1) {
+    return { ok: false, reason: 'MULTIPLE_OUTCOME_ROWS_IN_WINDOW', count: newOutcomes.length };
   }
-  const outcome = outcomesForRetrieval[0];
+  const outcome = newOutcomes[0];
+  if (outcome.retrieval_id !== retrieval.retrieval_id) {
+    return { ok: false, reason: 'OUTCOME_RETRIEVAL_ID_MISMATCH', expected: retrieval.retrieval_id, found: outcome.retrieval_id };
+  }
 
   // The "immediate Stop outcome" shape specifically — answer-close-hook.mjs
   // always writes unknown/unobservable at Stop time; a stronger outcome row
-  // is legitimate but is a DIFFERENT, later event, not what point 3 asks for.
+  // is legitimate but is a DIFFERENT, later event, not what this checks.
   if (outcome.usefulness_outcome !== 'unknown' || outcome.evidence_authority !== 'unobservable') {
     return { ok: false, reason: 'NOT_THE_IMMEDIATE_STOP_OUTCOME_SHAPE', retrieval_id: retrieval.retrieval_id, found: { usefulness_outcome: outcome.usefulness_outcome, evidence_authority: outcome.evidence_authority } };
   }
 
-  // Point 4 + point 5 (wrong identity / a second producer spoil closed).
+  // Identity checks — all four now required above, so this is a pure match,
+  // never an optional skip (Hale falsifier 3).
   const identityChecks = [
     ['expectedHarness', 'harness', 'HARNESS_MISMATCH'],
     ['expectedSessionId', 'session_id', 'SESSION_MISMATCH'],
@@ -145,12 +219,12 @@ export function checkTrialWindow(storeDir, opts) {
     ['expectedProducerSha', 'producer_sha', 'PRODUCER_SHA_MISMATCH'],
   ];
   for (const [optKey, field, reason] of identityChecks) {
-    if (opts[optKey] !== undefined && outcome[field] !== opts[optKey]) {
+    if (outcome[field] !== opts[optKey]) {
       return { ok: false, reason, expected: opts[optKey], found: outcome[field], retrieval_id: retrieval.retrieval_id };
     }
   }
 
-  // Point 7: this ok:true proves the join, nothing about delivery — callers
-  // must not present it as a delivered-pack/host-exposure receipt.
+  // This ok:true proves the join, nothing about delivery — callers must
+  // never present it as a delivered-pack/host-exposure receipt.
   return { ok: true, retrieval, outcome };
 }
