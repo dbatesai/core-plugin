@@ -188,7 +188,7 @@ function buildImmutableCandidateCopy(candidatePluginDir) {
 export async function runClaudeSyntheticTrial(opts) {
   const {
     sourceStoreDir, plants, candidatePluginDir, candidateRepoRoot, expectedCandidateGitSha,
-    expectedProducerVersion, expectedProducerSha, prompt, arm, date,
+    expectedProducerVersion, expectedProducerSha, prompt, arm, date, model,
     timeoutMs = 60000, deps = {},
   } = opts || {};
   const fetchInventory = deps.fetchInventory || realFetchPluginInventory;
@@ -323,7 +323,18 @@ export async function runClaudeSyntheticTrial(opts) {
     // sources to load (user, project, local)'. host-exposure-checker.mjs's
     // UNEXPECTED_HOOK_ACTIVITY check is the transcript-side second layer in
     // case this flag alone doesn't fully hold.
-    const commandArgs = ['--settings', overlayJson, '--setting-sources', 'project,local', '--plugin-dir', candidateCopy.candidateCopyDir, '-p', prompt, '--output-format', 'json'];
+    // Hale, hale--b75fecc-paid-run-not-release-evidence: "report actual CLI
+    // version/model identity; the real envelope currently shows
+    // cliModel:null." The real `-p --output-format json` result has no
+    // model field to read back (verified against iteration 21's actual
+    // output) -- the only honest way to KNOW the model is to name it on
+    // the invocation via --model, then record what was REQUESTED (never
+    // fabricate a "reported" value the CLI doesn't actually return).
+    const commandArgs = [
+      '--settings', overlayJson, '--setting-sources', 'project,local', '--plugin-dir', candidateCopy.candidateCopyDir,
+      ...(model ? ['--model', model] : []),
+      '-p', prompt, '--output-format', 'json',
+    ];
     const startedAt = Date.now();
     const spawnResult = spawnClaude(commandArgs, {
       cwd: realStoreDir,
@@ -425,7 +436,7 @@ export async function runClaudeSyntheticTrial(opts) {
       ok: true,
       command: {
         bin: 'claude', args: commandArgs, cwd: realStoreDir, env: { CORE_REASONING_ARM: arm },
-        cliModel: cliResult.model || null,
+        requestedModel: model || null, reportedModel: cliResult.model || null,
       },
       corpus: {
         sourceStoreDir, trialStoreDir: realStoreDir, unitCount: trialStore.unitCount,
