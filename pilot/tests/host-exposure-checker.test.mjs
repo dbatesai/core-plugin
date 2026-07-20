@@ -7,7 +7,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PILOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const { checkHostExposureClaudeCode, EXPECTED_USER_PROMPT_SUBMIT_COMMAND, EXPECTED_STOP_COMMAND } = await import(pathToFileURL(join(PILOT, 'host-exposure-checker.mjs')).href);
+const { checkHostExposureClaudeCode, checkControlAnswerClaudeCode, EXPECTED_USER_PROMPT_SUBMIT_COMMAND, EXPECTED_STOP_COMMAND } = await import(pathToFileURL(join(PILOT, 'host-exposure-checker.mjs')).href);
 
 function sha256Hex(text) { return createHash('sha256').update(text, 'utf8').digest('hex'); }
 
@@ -688,4 +688,43 @@ test('a single consistent model and version across the whole descendant turn res
     assert.equal(result.observedModel, 'claude-sonnet-5');
     assert.equal(result.observedCliVersion, '2.1.215');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Hale, hale--6676db9-audit-hold-remediation-plan-required: the control-leg
+// oracle for the matched treatment/control design. Its entire premise is
+// that no exposure occurred -- these prove that premise is actually
+// enforced, not just assumed.
+
+test('checkControlAnswerClaudeCode: a real suppressed turn (no exposure attachment) yields the answer + observed identity', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: '', includeExposure: false,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer without any injected context' }] }],
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkControlAnswerClaudeCode(path, { expectedPromptId: 'p-1' });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.finalAnswerText, 'answer without any injected context');
+    assert.equal(result.observedModel, 'claude-sonnet-5');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('spoil: CONTROL_HOOK_NOT_SUPPRESSED when a UserPromptSubmit exposure exists despite the opt-out (red falsifier)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: 'context that should never have been injected', includeExposure: true,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkControlAnswerClaudeCode(path, { expectedPromptId: 'p-1' });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'CONTROL_HOOK_NOT_SUPPRESSED');
+    assert.equal(result.exposureCount, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('checkControlAnswerClaudeCode requires expectedPromptId, same contract as the treatment checker', () => {
+  assert.throws(() => checkControlAnswerClaudeCode('/tmp/whatever.jsonl', {}), /expectedPromptId/);
 });

@@ -141,6 +141,65 @@ function isDescendantOf(lineByUuid, candidateUuid, ancestorUuid) {
   return false;
 }
 
+// Shared by checkHostExposureClaudeCode (treatment) and
+// checkControlAnswerClaudeCode (control leg, hale--6676db9-audit-hold-
+// remediation-plan-required): parse the transcript and resolve exactly one
+// native turn's line window, independent of whether that turn shows a
+// retrieval exposure. Both callers need the same anchor/boundary/reused-
+// promptId logic; only what they require to find WITHIN that window
+// differs (exposure present vs. exposure absent).
+function resolveTrialTurn(transcriptPath, expectedPromptId) {
+  if (!existsSync(transcriptPath)) {
+    return { ok: false, reason: 'TRANSCRIPT_NOT_FOUND', path: transcriptPath };
+  }
+  const raw = readFileSync(transcriptPath, 'utf8');
+  const rawLines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = [];
+  for (const line of rawLines) {
+    let parsed;
+    try { parsed = JSON.parse(line); } catch {
+      return { ok: false, reason: 'MALFORMED_TRANSCRIPT_LINE' };
+    }
+    lines.push(parsed);
+  }
+
+  const lineByUuid = new Map();
+  for (const l of lines) { if (l?.uuid) lineByUuid.set(l.uuid, l); }
+
+  // The anchor is the FIRST line carrying the expected promptId — a
+  // tool-using turn re-emits type:'user' tool_result lines with the SAME
+  // promptId later in the SAME turn; anchoring on the last occurrence loses
+  // the real initial exposure entirely.
+  let anchorIdx = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (lines[i]?.type === 'user' && lines[i]?.promptId === expectedPromptId) { anchorIdx = i; break; }
+  }
+  if (anchorIdx === -1) {
+    return { ok: false, reason: 'NO_USER_TURN_FOUND', expectedPromptId };
+  }
+  const anchorUuid = lines[anchorIdx].uuid;
+
+  let boundaryEnd = lines.length;
+  for (let i = anchorIdx + 1; i < lines.length; i += 1) {
+    if (lines[i]?.type === 'user' && lines[i]?.promptId !== expectedPromptId) { boundaryEnd = i; break; }
+  }
+  const turnLines = lines.slice(anchorIdx + 1, boundaryEnd);
+
+  // Reused-promptId spoil (Hale re-audit, hale--f2c52de-two-join-failures):
+  // the same "unique" native promptId reappearing anywhere AFTER this
+  // turn's own boundary means the identity resolves to two disjoint native
+  // turns — choosing the first is the same evidence-ambiguity class as
+  // choosing the last, so this must fail closed rather than silently pick
+  // one.
+  for (let i = boundaryEnd; i < lines.length; i += 1) {
+    if (lines[i]?.type === 'user' && lines[i]?.promptId === expectedPromptId) {
+      return { ok: false, reason: 'REUSED_PROMPT_ID', expectedPromptId };
+    }
+  }
+
+  return { ok: true, lineByUuid, anchorUuid, turnLines };
+}
+
 /**
  * checkHostExposureClaudeCode — the host-exposure oracle for Claude Code.
  *
@@ -187,54 +246,10 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   if (byteCap > OUTPUT_BYTE_CAP) {
     throw new Error(`checkHostExposureClaudeCode requires byteCap <= ${OUTPUT_BYTE_CAP} (the product's real OUTPUT_BYTE_CAP ceiling — CORE_RETRIEVAL_BYTE_CAP can only tighten it, never widen it), got ${byteCap}`);
   }
-  if (!existsSync(transcriptPath)) {
-    return { ok: false, reason: 'TRANSCRIPT_NOT_FOUND', path: transcriptPath };
-  }
 
-  const raw = readFileSync(transcriptPath, 'utf8');
-  const rawLines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
-  const lines = [];
-  for (const line of rawLines) {
-    let parsed;
-    try { parsed = JSON.parse(line); } catch {
-      return { ok: false, reason: 'MALFORMED_TRANSCRIPT_LINE' };
-    }
-    lines.push(parsed);
-  }
-
-  const lineByUuid = new Map();
-  for (const l of lines) { if (l?.uuid) lineByUuid.set(l.uuid, l); }
-
-  // The anchor is the FIRST line carrying the expected promptId — a
-  // tool-using turn re-emits type:'user' tool_result lines with the SAME
-  // promptId later in the SAME turn; anchoring on the last occurrence loses
-  // the real initial exposure entirely.
-  let anchorIdx = -1;
-  for (let i = 0; i < lines.length; i += 1) {
-    if (lines[i]?.type === 'user' && lines[i]?.promptId === expectedPromptId) { anchorIdx = i; break; }
-  }
-  if (anchorIdx === -1) {
-    return { ok: false, reason: 'NO_USER_TURN_FOUND', expectedPromptId };
-  }
-  const anchorUuid = lines[anchorIdx].uuid;
-
-  let boundaryEnd = lines.length;
-  for (let i = anchorIdx + 1; i < lines.length; i += 1) {
-    if (lines[i]?.type === 'user' && lines[i]?.promptId !== expectedPromptId) { boundaryEnd = i; break; }
-  }
-  const turnLines = lines.slice(anchorIdx + 1, boundaryEnd);
-
-  // Reused-promptId spoil (Hale re-audit, hale--f2c52de-two-join-failures):
-  // the same "unique" native promptId reappearing anywhere AFTER this
-  // turn's own boundary means the identity resolves to two disjoint native
-  // turns — choosing the first is the same evidence-ambiguity class as
-  // choosing the last, so this must fail closed rather than silently pick
-  // one.
-  for (let i = boundaryEnd; i < lines.length; i += 1) {
-    if (lines[i]?.type === 'user' && lines[i]?.promptId === expectedPromptId) {
-      return { ok: false, reason: 'REUSED_PROMPT_ID', expectedPromptId };
-    }
-  }
+  const turn = resolveTrialTurn(transcriptPath, expectedPromptId);
+  if (!turn.ok) return turn;
+  const { lineByUuid, anchorUuid, turnLines } = turn;
 
   const exposures = turnLines.filter((l) =>
     l?.type === 'attachment'
@@ -410,6 +425,117 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
     expectedPromptId,
     packSha256: sha256Hex(expectedPackText),
     injectedContextHash: observedHash,
+    finalAnswerHash: sha256Hex(finalAnswerText),
+    finalAnswerText,
+    toolCallsInTurn,
+    observedModel,
+    observedCliVersion,
+  };
+}
+
+/**
+ * checkControlAnswerClaudeCode — the control-leg oracle for Claude Code,
+ * pairing with checkHostExposureClaudeCode for the matched treatment/
+ * control design (Hale, hale--6676db9-audit-hold-remediation-plan-
+ * required). Proves the retrieval hook was genuinely suppressed
+ * (CORE_RETRIEVAL_HOOK=0 held) and extracts the real final answer plus
+ * observed model/CLI version, WITHOUT requiring or tolerating an exposure
+ * -- the control's entire premise is that none occurred.
+ *
+ * KNOWN GAP, named rather than silently skipped: unlike
+ * checkHostExposureClaudeCode, this does not yet verify Stop-hook
+ * ownership (foreign/duplicate/failed Stop attachments,
+ * UNEXPECTED_HOOK_ACTIVITY's exact contract). Porting that check
+ * correctly for the no-exposure case is a separate, deliberately deferred
+ * follow-up -- see the mailbox design reply, not rushed into this pass.
+ *
+ * @param {string} transcriptPath
+ * @param {object} opts
+ * @param {string} opts.expectedPromptId  required — the native turn identity
+ * @returns {{ok:true, expectedPromptId, finalAnswerHash, finalAnswerText,
+ *   toolCallsInTurn, observedModel, observedCliVersion} |
+ *   {ok:false, reason:<CODE>, ...detail}}
+ */
+export function checkControlAnswerClaudeCode(transcriptPath, opts) {
+  const { expectedPromptId } = opts || {};
+  if (typeof expectedPromptId !== 'string' || !expectedPromptId.trim()) {
+    throw new Error('checkControlAnswerClaudeCode requires expectedPromptId — the native turn identity to bind against');
+  }
+
+  const turn = resolveTrialTurn(transcriptPath, expectedPromptId);
+  if (!turn.ok) return turn;
+  const { lineByUuid, anchorUuid, turnLines } = turn;
+
+  // The control's entire premise: the retrieval hook must NOT have fired.
+  // Any UserPromptSubmit hook_success attachment here means
+  // CORE_RETRIEVAL_HOOK=0 did not actually suppress it -- a real problem,
+  // not something to silently tolerate or treat the same as a treatment run.
+  const exposures = turnLines.filter((l) =>
+    l?.type === 'attachment'
+    && l?.attachment?.type === 'hook_success'
+    && l?.attachment?.hookName === 'UserPromptSubmit'
+    && l?.uuid
+    && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
+  if (exposures.length > 0) {
+    return { ok: false, reason: 'CONTROL_HOOK_NOT_SUPPRESSED', expectedPromptId, exposureCount: exposures.length };
+  }
+
+  const terminalLines = turnLines.filter((l) =>
+    l?.type === 'assistant'
+    && l?.message?.stop_reason === 'end_turn'
+    && l?.uuid
+    && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
+  const messageIds = [...new Set(terminalLines.map((l) => l.message.id).filter(Boolean))];
+  if (messageIds.length === 0) {
+    return { ok: false, reason: 'ANSWER_MISSING', expectedPromptId };
+  }
+  if (messageIds.length > 1) {
+    return { ok: false, reason: 'AMBIGUOUS_FINAL_ANSWER', expectedPromptId, count: messageIds.length };
+  }
+  const group = terminalLines.filter((l) => l.message.id === messageIds[0]);
+  const textBlocks = [];
+  for (const l of group) {
+    const content = l.message.content;
+    if (!Array.isArray(content)) continue;
+    for (const c of content) {
+      if (c?.type === 'text' && typeof c.text === 'string') textBlocks.push(c.text);
+    }
+  }
+  if (textBlocks.length === 0) {
+    return { ok: false, reason: 'ANSWER_MISSING', expectedPromptId };
+  }
+  const finalAnswerText = textBlocks.join('');
+
+  const descendantAssistantLines = turnLines.filter((l) =>
+    l?.type === 'assistant' && l?.uuid && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
+  const toolCallsInTurn = [];
+  for (const l of descendantAssistantLines) {
+    const content = l.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const c of content) {
+      if (c?.type === 'tool_use') toolCallsInTurn.push({ name: c.name, input: c.input });
+    }
+  }
+
+  const observedModels = [...new Set(
+    group.map((l) => l.message?.model).filter((m) => typeof m === 'string' && m),
+  )];
+  if (observedModels.length > 1) {
+    return { ok: false, reason: 'MODEL_IDENTITY_AMBIGUOUS', expectedPromptId, observedModels };
+  }
+  const descendantTurnLines = turnLines.filter((l) => l?.uuid && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
+  const observedCliVersions = [...new Set(
+    descendantTurnLines.map((l) => l.version).filter((v) => typeof v === 'string' && v),
+  )];
+  if (observedCliVersions.length > 1) {
+    return { ok: false, reason: 'CLI_VERSION_AMBIGUOUS', expectedPromptId, observedCliVersions };
+  }
+  const observedModel = observedModels[0] || null;
+  const observedCliVersion = observedCliVersions[0] || null;
+
+  return {
+    ok: true,
+    expectedPromptId,
     finalAnswerHash: sha256Hex(finalAnswerText),
     finalAnswerText,
     toolCallsInTurn,
