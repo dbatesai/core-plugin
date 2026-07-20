@@ -91,6 +91,37 @@ test('output is byte-capped', () => {
   assert.ok(Buffer.byteLength(out, 'utf8') <= 2048, 'injected context must stay within the byte cap');
 });
 
+// Hale's pre-registered byte-cap falsifier (2026-07-19): the final emission
+// re-sliced (packText + reasoningDirective) with String.slice(0, 2048) --
+// UTF-16 code units, not UTF-8 bytes. buildFinalContextPack() already caps
+// the pack ALONE correctly (byte-safe), so a pack full of multi-byte
+// characters (CJK, 3 bytes/char) can land near 2048 bytes while still under
+// 2048 code units -- appending the reasoning directive on top and slicing
+// by code-unit count then lets the TOTAL emitted payload sail past the
+// 2048-byte budget, because the naive slice never even triggers. Verified
+// to fail against the pre-fix implementation before this fix landed.
+test('non-ASCII pack + reasoning directive stays inside the byte cap (Hale byte-cap falsifier)', () => {
+  const root = mkdtempSync(join(trustedTestTmpRoot(), 'rh-utf8-'));
+  try {
+    const store = join(root, '_memories');
+    mkd(store, { recursive: true });
+    wf(join(root, 'PROJECT.md'), '# T\n');
+    // Three active units, each summary a wall of 3-byte CJK characters
+    // (~240 chars = ~720 bytes each) -- close to SUMMARY_MAX so
+    // buildFinalContextPack fills near its 2048-byte cap using content
+    // that is LOW in UTF-16 code units relative to its byte weight.
+    const cjkFiller = '漢'.repeat(215);
+    for (let i = 1; i <= 3; i++) {
+      wf(join(store, `dc-gadget-${i}.md`),
+        `---\nid: dc-gadget-${i}\ntype: decision\nstatus: active\ncreated: 2026-07-0${i}\ntopics:\n  - gadget\n---\n\n# ${cjkFiller}\n\ngadget decision body ${i}.\n`);
+    }
+    const out = runHook('gadget', { CORE_RETRIEVAL_HOOK: '1', CORE_REASONING_ARM: 'always-on' }, root);
+    assert.ok(Buffer.byteLength(out, 'utf8') <= 2048,
+      `combined pack+directive emission must stay within the byte cap, got ${Buffer.byteLength(out, 'utf8')} bytes`);
+    assert.ok(!out.includes('�'), 'must never emit a replacement character from a mid-sequence cut');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('integration: bootstrap integrity marker + hook injection coexist under a combined cap', async () => {
   const { checkContextIntegrity } = await import('../../plugins/core/skills/core/scripts/check-context-integrity.mjs');
   const marker = checkContextIntegrity({ memoryBytes: 1000, projectTotalLines: 100, projectReadLines: 100 }).marker;

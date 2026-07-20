@@ -49,6 +49,36 @@ import { logHookEvent } from './hook-log.mjs';
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
 
+// UTF-8-safe byte-budget truncation for the hook's final stdout emission.
+// `String.prototype.slice` counts UTF-16 code units, not UTF-8 bytes: for
+// multi-byte-heavy content (CJK, emoji) a code-unit slice can (a) land mid
+// character, corrupting it into a decode artifact, and (b) — the more
+// serious case — let the total emitted payload exceed OUTPUT_BYTE_CAP
+// outright, because a low code-unit count can still encode to well over
+// 2048 bytes. buildFinalContextPack() already byte-caps the pack alone
+// correctly; this closes the gap in the hook's own pack+directive
+// concatenation, the step that re-slices by the wrong unit (Hale's
+// pre-registered byte-cap falsifier, 2026-07-19).
+export function truncateUtf8Safe(str, maxBytes) {
+  const full = Buffer.from(str, 'utf8');
+  if (full.length <= maxBytes) return str;
+  // Walk back from the truncation point over any continuation bytes
+  // (10xxxxxx) to find the start of the sequence that straddles maxBytes.
+  let leadPos = maxBytes;
+  let steps = 0;
+  while (leadPos > 0 && steps < 4 && (full[leadPos] & 0xC0) === 0x80) {
+    leadPos--;
+    steps++;
+  }
+  const lead = full[leadPos];
+  let seqLen = 1;
+  if ((lead & 0xE0) === 0xC0) seqLen = 2;
+  else if ((lead & 0xF0) === 0xE0) seqLen = 3;
+  else if ((lead & 0xF8) === 0xF0) seqLen = 4;
+  const end = (leadPos + seqLen <= maxBytes) ? leadPos + seqLen : leadPos;
+  return full.subarray(0, end).toString('utf8');
+}
+
 // Producer identity for outcome rows — read from the plugin manifest so the
 // version can never fork from the shipped identity; 'unknown' is honest when
 // the manifest is unreadable (packaged layouts vary).
@@ -383,11 +413,11 @@ export async function main() {
   // Deliver both, directive appended after the pack, still under the same cap.
   const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
   if (packText && reasoningDirective) {
-    process.stdout.write((packText + reasoningDirective).slice(0, OUTPUT_BYTE_CAP));
+    process.stdout.write(truncateUtf8Safe(packText + reasoningDirective, OUTPUT_BYTE_CAP));
   } else if (packText) {
     process.stdout.write(packText);
   } else if (reasoningDirective) {
-    process.stdout.write(reasoningDirective.slice(0, OUTPUT_BYTE_CAP));
+    process.stdout.write(truncateUtf8Safe(reasoningDirective, OUTPUT_BYTE_CAP));
   }
 
   // NOW persist the pending marker — after delivery, never before (Hale
