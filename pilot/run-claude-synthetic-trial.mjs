@@ -243,7 +243,17 @@ export async function runClaudeSyntheticTrial(opts) {
     // Step 3 + 4: real invocation, invocation-local cursors.
     const retrievalBefore = captureCursor(realStoreDir, date, 'retrieval-log.jsonl');
     const outcomeBefore = captureCursor(realStoreDir, date, 'outcome-log.jsonl');
-    const commandArgs = ['--settings', overlayJson, '--plugin-dir', candidateCopy.candidateCopyDir, '-p', prompt, '--output-format', 'json'];
+    // Hale, hale--9561fcd-gated-transcript-contamination-hold: the overlay
+    // technique isolates PLUGIN enablement only. A real gated run showed a
+    // user-level PreToolUse:Skill hook (bash ~/.claude/hooks/pre-tool-
+    // memory.sh, global memory index injection) firing from the untouched
+    // user-global settings.json. --setting-sources excludes 'user' so only
+    // the trial's own project/local settings apply -- verified directly on
+    // this machine: --help lists it as 'Comma-separated list of setting
+    // sources to load (user, project, local)'. host-exposure-checker.mjs's
+    // UNEXPECTED_HOOK_ACTIVITY check is the transcript-side second layer in
+    // case this flag alone doesn't fully hold.
+    const commandArgs = ['--settings', overlayJson, '--setting-sources', 'project,local', '--plugin-dir', candidateCopy.candidateCopyDir, '-p', prompt, '--output-format', 'json'];
     const startedAt = Date.now();
     const spawnResult = spawnClaude(commandArgs, {
       cwd: realStoreDir,

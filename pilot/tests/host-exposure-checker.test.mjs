@@ -427,3 +427,50 @@ test('rejects byteCap greater than the real product OUTPUT_BYTE_CAP (2048)', () 
     }
   });
 });
+
+// Hale, hale--9561fcd-gated-transcript-contamination-hold: a real gated run
+// showed a user-level PreToolUse:Skill hook (pre-tool-memory.sh, global
+// memory index injection) firing alongside the candidate's own
+// UserPromptSubmit hook -- the pilot's isolation only covered plugin
+// enablement, not the harness's own --setting-sources. This is the
+// transcript-side second layer: for a bare `-p` prompt with no tool use,
+// the ONLY hook activity in the turn should be the one counted exposure.
+test('UNEXPECTED_HOOK_ACTIVITY: a second hook_success attachment (e.g. a leaked global PreToolUse hook) fails closed', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    // Splice in a second, foreign hook_success attachment right after the
+    // real exposure -- same shape a leaked global PreToolUse:Skill hook
+    // (pre-tool-memory.sh) produces in a real transcript.
+    const exposureIdx = lines.findIndex((l) => l.attachment?.hookName === 'UserPromptSubmit');
+    const foreignHookLine = {
+      type: 'attachment', uuid: 'foreign-hook-1', parentUuid: lines[exposureIdx].uuid,
+      attachment: { type: 'hook_success', hookName: 'PreToolUse', hookEvent: 'PreToolUse', toolUseID: 'tu-foreign', content: 'global memory index injected', stdout: 'global memory index injected', exitCode: 0, command: 'bash ~/.claude/hooks/pre-tool-memory.sh', durationMs: 1 },
+    };
+    lines.splice(exposureIdx + 1, 0, foreignHookLine);
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.count, 2);
+    assert.ok(result.hookNames.includes('PreToolUse'));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('UNEXPECTED_HOOK_ACTIVITY: a lone UserPromptSubmit exposure with no other hook activity still passes (no false positive)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

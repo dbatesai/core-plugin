@@ -239,6 +239,32 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   if (exposures.length > 1) {
     return { ok: false, reason: 'HOST_EXPOSURE_AMBIGUOUS', expectedPromptId, count: exposures.length };
   }
+
+  // Hale, hale--9561fcd-gated-transcript-contamination-hold: a real gated
+  // run showed a user-level PreToolUse:Skill hook firing (pre-tool-memory.sh,
+  // injecting the GLOBAL memory index) alongside the candidate's own
+  // UserPromptSubmit hook -- the isolation the pilot claims is only over
+  // PLUGIN enablement, not over the harness's --setting-sources. The
+  // orchestrator now also passes `--setting-sources project,local` to
+  // exclude the user-global settings source at invocation time (the
+  // root-cause fix); this is the second, transcript-side layer -- for a
+  // trial that used a bare `-p` prompt with no tool use, the ONLY hook
+  // activity anywhere in the turn should be the one counted exposure above.
+  // Any other hook_success/hook_failure attachment (any hookName, any
+  // descendant line) proves isolation did not actually hold, regardless of
+  // what the CLI flags claimed -- fail closed rather than trust the flag.
+  const allHookAttachments = turnLines.filter((l) =>
+    l?.type === 'attachment'
+    && (l?.attachment?.type === 'hook_success' || l?.attachment?.type === 'hook_failure')
+    && l?.uuid
+    && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
+  if (allHookAttachments.length > 1) {
+    return {
+      ok: false, reason: 'UNEXPECTED_HOOK_ACTIVITY', expectedPromptId,
+      count: allHookAttachments.length,
+      hookNames: allHookAttachments.map((l) => l.attachment.hookName),
+    };
+  }
   const exposureAttachment = exposures[0].attachment;
   if (exposureAttachment.exitCode !== 0) {
     return { ok: false, reason: 'HOST_EXPOSURE_NONZERO_EXIT', expectedPromptId, exitCode: exposureAttachment.exitCode };
