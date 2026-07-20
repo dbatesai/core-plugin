@@ -40,6 +40,13 @@ export const MANIFEST_NAME = 'okf-export-manifest.json';
 // scaffolding, not OKF documents (validate.mjs skip-list honored).
 const SCAFFOLD = /(^|\/)(INDEX[^/]*|README|MEMORY|log)\.md$/i;
 
+// Neutralizes markdown link/emphasis syntax in hand-authored text (e.g. a
+// source unit's own H1) before it's spliced into a file that's supposed to
+// be entirely generated and pre-validated. Backslash-escaping is enough for
+// CommonMark/Obsidian to render the characters literally instead of parsing
+// them as syntax.
+const escapeMdText = (s) => s.replace(/[[\]\\]/g, '\\$&');
+
 /**
  * ensureGitignored — idempotent append, same pattern as mailbox.mjs's
  * ensureGitignored. Only fires when outDir resolves to a direct child of
@@ -163,7 +170,13 @@ export function renderIndexNote(units, generatedLinks, hasIncomingActiveEdge, de
     lines.push(`## ${type} (${inType.length})`);
     lines.push('');
     for (const u of inType) {
-      const summary = u.summary ? ` — ${u.summary}` : '';
+      // Hale (okf-index-truth-external-0-of-3): u.summary is the source
+      // unit's own H1 text, hand-authored and unvalidated -- copying it
+      // verbatim can synthesize a real markdown link (e.g. a body literally
+      // titled `# Alpha [spoof](missing.md)`) inside a file readers expect
+      // to be fully generated and trustworthy. Escape link/emphasis syntax
+      // so summary text can never render as a link this note didn't intend.
+      const summary = u.summary ? ` — ${escapeMdText(u.summary)}` : '';
       lines.push(`- [${u.id}](${u.path})${summary}`);
     }
     lines.push('');
@@ -175,7 +188,12 @@ export function renderIndexNote(units, generatedLinks, hasIncomingActiveEdge, de
   if (isolated.length > 0) {
     lines.push(`## Isolated notes (${isolated.length})`);
     lines.push('');
-    lines.push('No outgoing or incoming links in this export — nothing to click through to or from in graph view.');
+    // Hale (okf-index-truth-external-0-of-3): this note itself links to
+    // every unit listed above, so "no incoming links" would be false read
+    // literally against the whole export -- scope the claim to unit-to-unit
+    // edges (the actual graph-orphan population), not this note's own
+    // navigation links.
+    lines.push('No links to or from another *unit* in this export (this index note\'s own navigation links above don\'t count) — isolated in graph view once this note is excluded.');
     lines.push('');
     for (const u of isolated) lines.push(`- [${u.id}](${u.path})`);
     lines.push('');
@@ -192,6 +210,22 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
   const threshold = validateLinkDensityThreshold(linkDensityThreshold);
   // ── 1. One atomic validated snapshot (correction 3: no raw store walk) ──
   const cap = loadSnapshot(projectDir, { captureBodies: true, retainRaw: true });
+  // Hale (okf-index-truth-external-0-of-3): checking for this collision
+  // AFTER the SCAFFOLD filter (as the code originally did, down at step 4)
+  // never fires -- SCAFFOLD already silently drops any INDEX*.md-named
+  // active unit right here, before that later check ever sees it. A real,
+  // frontmatter-bearing unit at exactly the reserved index-note path would
+  // vanish from the export with no warning and no error. Check the
+  // unfiltered snapshot first, so a genuine collision fails loud instead of
+  // being silently absorbed into the same bucket as INDEX-*/README/MEMORY
+  // scaffolding (which staying silent is still correct for).
+  const indexNameCollision = cap.index.units.find(u => u.path.toLowerCase() === INDEX_NOTE_NAME);
+  if (indexNameCollision) {
+    throw Object.assign(
+      new Error(`a real unit ("${indexNameCollision.id}" at ${indexNameCollision.path}) occupies the reserved index-note path ${INDEX_NOTE_NAME} at the export root — rename the source unit or move it out of the root, don't let it collide with the generated index`),
+      { code: 'INDEX_NOTE_NAME_COLLISION' },
+    );
+  }
   const units = cap.index.units.filter(u => !SCAFFOLD.test(u.path)); // active-only, invalidation-filtered, dup-resolved, sorted
   const activeById = new Map(units.map(u => [u.id, u]));
 
@@ -313,12 +347,9 @@ export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}
   // ── 4. Generated index note — the vault's entry point. Added to outputs
   // AFTER the manifest so exported_units counts real units only; the note
   // itself is named separately (manifest.index_note) rather than folded in.
-  // Fail closed rather than silently overwrite: SCAFFOLD already excludes
-  // any source unit literally named index.md (case-insensitive) from
-  // `units` before this line runs, so this check is unreachable through
-  // any real fixture today -- pure defense in depth in case SCAFFOLD's
-  // pattern is ever narrowed to stop matching INDEX_NOTE_NAME specifically.
-  // Never guess when a check costs nothing.
+  // The real collision catch is upstream now (indexNameCollision, above) --
+  // this one is a second, cheap backstop in case outputs ever ends up with
+  // that key through some path other than cap.index.units.
   if (outputs.has(INDEX_NOTE_NAME)) {
     throw Object.assign(
       new Error(`a real unit already occupies ${INDEX_NOTE_NAME} at the export root — refusing to overwrite it with the generated index note`),

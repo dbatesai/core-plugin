@@ -134,21 +134,45 @@ test('the index note is excluded from the deterministic byte-identity guarantee 
   assert.equal(first, second, 'two renders of an unchanged store must produce a byte-identical index note, same as every other exported file');
 });
 
-// The SCAFFOLD regex (INDEX[^/]*.md, case-insensitive) already excludes any
-// source unit literally named index.md from `units` before the index note
-// is ever generated -- confirmed here directly, which is why
-// INDEX_NOTE_NAME_COLLISION can't be triggered through a real fixture: the
-// two layers overlap by design (SCAFFOLD is the first line of defense at
-// the source; the outputs.has() check in renderOkfExport is pure defense
-// in depth in case that regex is ever narrowed). This test documents the
-// actual, exercisable guarantee instead of asserting an unreachable path.
-test('a source unit literally named index.md is dropped as SCAFFOLD, never silently collided with the generated note', () => {
+test('a hand-authored H1 containing markdown link syntax cannot synthesize a real link in the generated index note (Hale okf-index-truth-external-0-of-3)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'okf-export-injection-'));
+  mkdirSync(join(root, '_memories'), { recursive: true });
+  writeFileSync(join(root, '_memories', 'dc-9-spoof.md'),
+    '---\nid: dc-9-spoof\ntype: decision\nstatus: active\n---\n\n# Alpha [spoof](missing.md)\n\nBody.');
+  const index = renderOkfExport(root).outputs.get(INDEX_NOTE_NAME);
+  assert.ok(!index.includes('[spoof](missing.md)'), 'the source H1\'s own markdown link syntax must never survive unescaped into the generated note');
+  assert.match(index, /Alpha \\\[spoof\\\]\(missing\.md\)/, 'the text itself is preserved, just neutralized so it cannot render as a link');
+});
+
+test('the isolated-notes claim is scoped to unit-to-unit edges, not falsified by the index note\'s own navigation links (Hale okf-index-truth-external-0-of-3)', () => {
   const root = fixtureStore();
+  const index = renderOkfExport(root).outputs.get(INDEX_NOTE_NAME);
+  const isolatedSection = index.slice(index.indexOf('## Isolated notes'));
+  assert.ok(!isolatedSection.includes('No outgoing or incoming links in this export'), 'the old wording was literally false once the index note itself links to every listed unit');
+  assert.match(isolatedSection, /another \*unit\*/, 'the claim must be explicit that it excludes this note\'s own navigation links');
+});
+
+// Hale caught the earlier version of this: the SCAFFOLD regex (INDEX[^/]*.md,
+// case-insensitive) silently drops any source unit literally named index.md
+// from `units` -- including a real, frontmatter-bearing one -- before the
+// index note is ever generated, with no warning. Treating that as "the
+// guard is unreachable, so it's fine" was itself the defect: a real unit at
+// the reserved path would just vanish. renderOkfExport() now checks the
+// unfiltered snapshot for that exact collision BEFORE the SCAFFOLD filter
+// runs, so it fails loud (INDEX_NOTE_NAME_COLLISION) instead of silently.
+test('a real unit occupying the reserved index-note path fails closed (Hale: silent SCAFFOLD-drop was the actual defect)', () => {
+  // NOT fixtureStore() -- it already plants an uppercase _memories/INDEX.md
+  // scaffold file, which on a case-insensitive filesystem (default macOS
+  // APFS) is the SAME file as a lowercase index.md, masking the real
+  // collision this test needs to exercise. A fresh, minimal store avoids it.
+  const root = mkdtempSync(join(tmpdir(), 'okf-export-collision-'));
+  mkdirSync(join(root, '_memories'), { recursive: true });
   writeFileSync(join(root, '_memories', 'index.md'), '---\nid: dc-5-index-collision\ntype: decision\nstatus: active\n---\n\n# A real unit that happens to be named index.md\n');
-  const { outputs } = renderOkfExport(root);
-  const index = outputs.get(INDEX_NOTE_NAME);
-  assert.match(index, /^---\ntype: index\n/, 'the generated index note, not the colliding source file, wins the slot');
-  assert.ok(!index.includes('dc-5-index-collision'), 'the colliding source unit never reaches the export at all -- SCAFFOLD drops it upstream');
+  assert.throws(
+    () => renderOkfExport(root),
+    (e) => e.code === 'INDEX_NOTE_NAME_COLLISION' && e.message.includes('dc-5-index-collision'),
+    'a real, frontmatter-bearing unit at the reserved index-note path must fail loud, not vanish silently into the SCAFFOLD bucket',
+  );
 });
 
 test('writeOkfExport: the index note lands on disk in a real round-trip and links resolve', () => {
