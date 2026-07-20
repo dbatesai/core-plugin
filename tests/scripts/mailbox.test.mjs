@@ -39,6 +39,20 @@ test('BLOCKER: unresolved target id fails loud (throws), never silent-drops', ()
   assert.throws(() => postMessage({ to: 'no-such-workspace-id-xyz', from: 'a', topic: 't', body: 'b' }), /unknown project id/);
 });
 
+// Self-caught 2026-07-20: list/read/archive used to call the plain path
+// resolver instead of the registry-aware resolveTarget() `post` already
+// used. A bare workspace id passed to `list` silently resolved relative to
+// the CALLER's cwd, found nothing, and printed "no unread messages" --
+// indistinguishable from a genuinely empty mailbox. A 172-message backlog
+// sat unseen behind exactly this for several /loop iterations before it was
+// caught. These three ops must now fail loud on an unresolved id, exactly
+// like post already did -- never silently report "empty."
+test('BLOCKER: list/read/archive fail loud on an unresolved id too, never silently report empty', () => {
+  assert.throws(() => listMessages('no-such-workspace-id-xyz'), /unknown project id/);
+  assert.throws(() => readMessage('no-such-workspace-id-xyz', 'whatever.md'), /unknown project id/);
+  assert.throws(() => archiveMessage('no-such-workspace-id-xyz', 'whatever.md'), /unknown project id/);
+});
+
 test('BLOCKER: write-anywhere guard — cannot post into a non-project directory', () => {
   const notProj = mkdtempSync(join(tmpdir(), 'not-a-project-'));
   try {
