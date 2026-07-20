@@ -137,6 +137,16 @@ export function createIsolatedHome({ harness, candidatePluginDir, version, marke
  *   fail closed, never silently report isolated:true.
  */
 export function verifyIsolation({ homeDir, harness, version, cacheDir, expectedSourceHash }) {
+  // Hale re-audit (hale--cc35b7d-two-pass-invalid-harness-hold, new
+  // falsifier): createIsolatedHome() rejects an unknown harness, but this
+  // exported verifier never did -- every `harness === 'claude' ? A : B`
+  // ternary below silently treated ANY other value (including garbage like
+  // 'banana') as if it were 'codex', still returning isolated:true against
+  // a real Codex install. The two entry points must agree on what a valid
+  // harness even is.
+  if (harness !== 'claude' && harness !== 'codex') {
+    throw Object.assign(new Error(`harness must be 'claude' or 'codex', got ${JSON.stringify(harness)}`), { code: 'INVALID_HARNESS' });
+  }
   if (!expectedSourceHash) {
     throw Object.assign(new Error('expectedSourceHash is required -- verifyIsolation cannot prove content identity without it, and a missing proof must never silently report isolated:true'), { code: 'SOURCE_HASH_REQUIRED' });
   }

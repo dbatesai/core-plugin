@@ -176,6 +176,27 @@ test('verifyIsolation requires expectedSourceHash — omitting it must throw, ne
   } finally { cleanup(); }
 });
 
+// Hale re-audit (hale--cc35b7d-two-pass-invalid-harness-hold), new
+// falsifier: "construct a valid Codex isolated home, then call
+// verifyIsolation() with harness: 'banana', the real Codex cache path,
+// and the captured source hash. It returns { isolated: true }. Every
+// harness ternary silently treats anything other than 'claude' as
+// Codex, even though createIsolatedHome() correctly rejects unknown
+// harnesses." The two entry points must agree on what a valid harness
+// is -- verifyIsolation() must fail closed on the same input
+// createIsolatedHome() already rejects, not silently pass it through
+// every claude/codex ternary as if it were Codex.
+test('verifyIsolation rejects an invalid harness name, even against a real Codex install (the exact falsifier Hale found)', () => {
+  const candidate = fakeCandidateDir();
+  const { homeDir, cacheDir, sourceContentHash, cleanup } = createIsolatedHome({ harness: 'codex', candidatePluginDir: candidate, version: '3.12.1-pilot.1' });
+  try {
+    assert.throws(
+      () => verifyIsolation({ homeDir, harness: 'banana', version: '3.12.1-pilot.1', cacheDir, expectedSourceHash: sourceContentHash }),
+      (e) => e.code === 'INVALID_HARNESS',
+    );
+  } finally { cleanup(); }
+});
+
 // Hale re-audit (hale--1346f5e-partial-pass-two-fail-open-edges), false
 // pass 2: "Pass sourceCandidateDir: cacheDir. verifyIsolation() compares
 // the installed directory to itself and returns { isolated: true };
