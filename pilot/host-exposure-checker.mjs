@@ -247,22 +247,31 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   // PLUGIN enablement, not over the harness's --setting-sources. The
   // orchestrator now also passes `--setting-sources project,local` to
   // exclude the user-global settings source at invocation time (the
-  // root-cause fix); this is the second, transcript-side layer -- for a
-  // trial that used a bare `-p` prompt with no tool use, the ONLY hook
-  // activity anywhere in the turn should be the one counted exposure above.
-  // Any other hook_success/hook_failure attachment (any hookName, any
-  // descendant line) proves isolation did not actually hold, regardless of
-  // what the CLI flags claimed -- fail closed rather than trust the flag.
-  const allHookAttachments = turnLines.filter((l) =>
+  // root-cause fix); this is the second, transcript-side layer.
+  //
+  // Self-caught (2026-07-20) against a REAL gated invocation, not a
+  // synthetic fixture: a first version of this check flagged ANY second
+  // hook attachment as unexpected, which false-positived on the
+  // candidate's OWN legitimate 'Stop' hook (answer-close-hook.mjs) --
+  // every real `-p` invocation fires both UserPromptSubmit
+  // (retrieve-context-hook.mjs) and Stop (answer-close-hook.mjs) as normal
+  // product behavior, not a leak. The real signal is not "more than one
+  // hook fired" -- it's "a hook fired whose name isn't one of the
+  // candidate's own two hooks." Any hookName outside this allowlist (a
+  // foreign PreToolUse:Skill hook, a SessionStart hook, anything else from
+  // the excluded user-global settings) is the actual isolation failure.
+  const CANDIDATE_OWNED_HOOK_NAMES = new Set(['UserPromptSubmit', 'Stop']);
+  const foreignHookAttachments = turnLines.filter((l) =>
     l?.type === 'attachment'
     && (l?.attachment?.type === 'hook_success' || l?.attachment?.type === 'hook_failure')
     && l?.uuid
+    && !CANDIDATE_OWNED_HOOK_NAMES.has(l?.attachment?.hookName)
     && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
-  if (allHookAttachments.length > 1) {
+  if (foreignHookAttachments.length > 0) {
     return {
       ok: false, reason: 'UNEXPECTED_HOOK_ACTIVITY', expectedPromptId,
-      count: allHookAttachments.length,
-      hookNames: allHookAttachments.map((l) => l.attachment.hookName),
+      count: foreignHookAttachments.length,
+      hookNames: foreignHookAttachments.map((l) => l.attachment.hookName),
     };
   }
   const exposureAttachment = exposures[0].attachment;

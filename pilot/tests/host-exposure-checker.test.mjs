@@ -456,7 +456,7 @@ test('UNEXPECTED_HOOK_ACTIVITY: a second hook_success attachment (e.g. a leaked 
     const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'UNEXPECTED_HOOK_ACTIVITY');
-    assert.equal(result.count, 2);
+    assert.equal(result.count, 1);
     assert.ok(result.hookNames.includes('PreToolUse'));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -468,6 +468,31 @@ test('UNEXPECTED_HOOK_ACTIVITY: a lone UserPromptSubmit exposure with no other h
     const { lines } = buildTurn({
       promptId: 'p-1', exposedContent: full, exitCode: 0,
       steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Self-caught (2026-07-20) against a REAL gated invocation, not a synthetic
+// fixture: the first version of this check flagged ANY second hook
+// attachment, which false-positived on the candidate's OWN legitimate
+// 'Stop' hook (answer-close-hook.mjs) -- every real `-p` invocation fires
+// both UserPromptSubmit and Stop as normal product behavior. A candidate-
+// owned Stop hook attachment must NOT be flagged as unexpected activity.
+test('UNEXPECTED_HOOK_ACTIVITY: the candidate\'s own legitimate Stop hook firing is NOT a false positive', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const full = 'the full injected context';
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: full, exitCode: 0,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const lastUuid = lines[lines.length - 1].uuid;
+    lines.push({
+      type: 'attachment', uuid: 'stop-hook-1', parentUuid: lastUuid,
+      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu-stop', content: '', stdout: '', exitCode: 0, command: '', durationMs: 1 },
     });
     const path = writeTranscript(root, lines);
     const result = checkHostExposureClaudeCode(path, baseArgs({ expectedPackText: full }));
