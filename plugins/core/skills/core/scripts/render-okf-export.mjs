@@ -556,6 +556,7 @@ function main(argv) {
   }
   const { counts, link_density: density, warnings } = manifest;
   process.stdout.write(`exported ${counts.exported_units} units → ${outDir}\n`);
+  process.stdout.write(`index note: ${manifest.index_note} (vault entry point, not counted in exported_units)\n`);
   process.stdout.write(`snapshot ${manifest.snapshot_id.slice(0, 12)}… | edges rendered ${counts.edges_rendered}, filtered ${counts.edges_filtered_inactive_or_external} | omitted ${counts.omitted_files} file(s)\n`);
   process.stdout.write(`outgoing-link density: ${density.pct_with_outgoing_active_edge}% of active units carry ≥1 outgoing active edge (${density.without_outgoing_active_edge} with none — not the same as graph orphans) — true graph orphans (no outgoing AND no incoming edge, within this export's own population of canonical units + observations): ${density.true_graph_orphans} — threshold unratified, David's call\n`);
   if (warnings.length) process.stdout.write(`warnings: ${warnings.length} (see manifest)\n`);
