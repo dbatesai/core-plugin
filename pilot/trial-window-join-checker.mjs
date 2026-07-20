@@ -50,6 +50,29 @@
 //      strictly (integer, 0 <= before <= after <= current file size) and
 //      never clamped or widened -- an invalid cursor throws.
 //
+// Hale re-audit (hale--7e92b7f-five-closed-four-product-match-failures):
+// PASS on the five de3066d falsifiers; HOLD on product-matched proof --
+// four more consolidated failures, all closed here too:
+//   1. Fixtures (and callers) used impossible arm values ('memory-on' /
+//      'memory-off') that don't exist in the product's closed vocabulary.
+//      expectedArm is now validated against the real, imported
+//      REASONING_ARMS set -- an impossible arm throws instead of silently
+//      "matching."
+//   2. `requested_arm` proves INTENT, not that the arm's behavioral
+//      difference actually fired -- an always-on row with
+//      directive_fired:false used to pass. Callers now supply
+//      expectedDirectiveFired explicitly (the runner computes the real
+//      expectation from arm + trial preconditions; this oracle stays a
+//      pure boolean match, no arm-specific inference here).
+//   3. A Stop outcome missing answer_turn_id used to pass despite the
+//      product's own outcome schema requiring it non-empty. Both
+//      retrieval_id and answer_turn_id are now required non-empty strings.
+//   4. Rows were filtered to the expected kind BEFORE exact-one
+//      enforcement -- a wrong-kind row inside the window vanished instead
+//      of counting as contamination. Every row in the window now counts
+//      toward exact-one regardless of kind; kind is checked only after
+//      exact-one is already established (UNEXPECTED_ROW_KIND_IN_WINDOW).
+//
 // Scope, stated honestly (Hale's point 7): this proves the LOG-LEVEL join is
 // real and singular -- it does NOT prove the retrieved content was actually
 // delivered to or seen by the model. That is a separate, still-required
@@ -60,6 +83,9 @@
 
 import { existsSync, statSync, openSync, closeSync, readSync } from 'node:fs';
 import { join } from 'node:path';
+import { REASONING_ARMS } from '../plugins/core/skills/core/hooks/retrieve-context-hook.mjs';
+
+export { REASONING_ARMS };
 
 /**
  * captureCursor — the byte offset at the END of a log file right now (0 if
@@ -140,17 +166,26 @@ function readRowsInWindow(storeDir, date, filename, before, after, label) {
  *   cursors into retrieval-log.jsonl (from captureCursor)
  * @param {{before:number, after:number}} opts.outcomeWindow
  *   cursors into outcome-log.jsonl (from captureCursor)
- * @param {string} opts.expectedArm              required requested_arm value
- * @param {string} opts.expectedHarness          required (Hale falsifier 3)
+ * @param {string} opts.expectedArm              required, must be a real REASONING_ARMS value
+ * @param {boolean} opts.expectedDirectiveFired  required (Hale falsifier 2) — the
+ *   caller-computed expectation for retrieval.directive_fired, derived from
+ *   arm + trial preconditions; this oracle only compares, never infers it.
+ * @param {string} opts.expectedHarness          required
  * @param {string} opts.expectedSessionId        required
  * @param {string} opts.expectedProducerVersion  required
  * @param {string} opts.expectedProducerSha      required
  */
 export function checkTrialWindow(storeDir, opts) {
-  const { date, retrievalWindow, outcomeWindow, expectedArm, expectedHarness, expectedSessionId, expectedProducerVersion, expectedProducerSha } = opts || {};
+  const { date, retrievalWindow, outcomeWindow, expectedArm, expectedDirectiveFired, expectedHarness, expectedSessionId, expectedProducerVersion, expectedProducerSha } = opts || {};
   if (!date) throw new Error('checkTrialWindow requires date');
   if (!retrievalWindow || !outcomeWindow) throw new Error('checkTrialWindow requires retrievalWindow and outcomeWindow cursors — never scans the whole log');
   if (!expectedArm) throw new Error('checkTrialWindow requires expectedArm — an untagged join proves nothing about which arm ran');
+  if (!REASONING_ARMS.includes(expectedArm)) {
+    throw new Error(`checkTrialWindow requires expectedArm to be one of ${REASONING_ARMS.join('/')} (the product's real closed vocabulary), got ${JSON.stringify(expectedArm)}`);
+  }
+  if (typeof expectedDirectiveFired !== 'boolean') {
+    throw new Error('checkTrialWindow requires expectedDirectiveFired as a boolean — requested_arm proves intent, not that the arm behaviorally fired');
+  }
   for (const [name, value] of [
     ['expectedHarness', expectedHarness], ['expectedSessionId', expectedSessionId],
     ['expectedProducerVersion', expectedProducerVersion], ['expectedProducerSha', expectedProducerSha],
@@ -160,12 +195,10 @@ export function checkTrialWindow(storeDir, opts) {
     }
   }
 
-  let newRetrievals, newOutcomes;
+  let allRetrievalRows, allOutcomeRows;
   try {
-    newRetrievals = readRowsInWindow(storeDir, date, 'retrieval-log.jsonl', retrievalWindow.before, retrievalWindow.after, 'retrievalWindow')
-      .filter((r) => r.kind === 'retrieval');
-    newOutcomes = readRowsInWindow(storeDir, date, 'outcome-log.jsonl', outcomeWindow.before, outcomeWindow.after, 'outcomeWindow')
-      .filter((r) => r.kind === 'retrieval-outcome');
+    allRetrievalRows = readRowsInWindow(storeDir, date, 'retrieval-log.jsonl', retrievalWindow.before, retrievalWindow.after, 'retrievalWindow');
+    allOutcomeRows = readRowsInWindow(storeDir, date, 'outcome-log.jsonl', outcomeWindow.before, outcomeWindow.after, 'outcomeWindow');
   } catch (e) {
     if (e instanceof MalformedRowError) {
       return { ok: false, reason: 'MALFORMED_ROW_IN_WINDOW', detail: e.detail };
@@ -173,34 +206,47 @@ export function checkTrialWindow(storeDir, opts) {
     throw e;
   }
 
-  // Hale falsifier 1: any OTHER retrieval row in the window is contamination,
-  // not something to filter past on the way to the arm match. Exactly one
-  // retrieval row, period, THEN check its arm.
-  if (newRetrievals.length === 0) {
+  // Hale falsifier 4: exact-one is enforced over EVERY row in the window,
+  // not just rows that already match the expected kind — a wrong-kind row
+  // is contamination too, and must not silently vanish via a pre-filter.
+  if (allRetrievalRows.length === 0) {
     return { ok: false, reason: 'NO_RETRIEVAL_ROWS_IN_WINDOW' };
   }
-  if (newRetrievals.length > 1) {
-    return { ok: false, reason: 'MULTIPLE_RETRIEVAL_ROWS_IN_WINDOW', count: newRetrievals.length };
+  if (allRetrievalRows.length > 1) {
+    return { ok: false, reason: 'MULTIPLE_RETRIEVAL_ROWS_IN_WINDOW', count: allRetrievalRows.length };
   }
-  const retrieval = newRetrievals[0];
+  const retrieval = allRetrievalRows[0];
+  if (retrieval.kind !== 'retrieval') {
+    return { ok: false, reason: 'UNEXPECTED_ROW_KIND_IN_WINDOW', window: 'retrieval', expectedKind: 'retrieval', found: retrieval.kind };
+  }
   if (retrieval.requested_arm !== expectedArm) {
     return { ok: false, reason: 'ARM_MISMATCH', expected: expectedArm, found: retrieval.requested_arm };
   }
-  if (!retrieval.retrieval_id) {
+  if (typeof retrieval.retrieval_id !== 'string' || !retrieval.retrieval_id.trim()) {
     return { ok: false, reason: 'RETRIEVAL_MISSING_ID' };
   }
+  if (typeof retrieval.directive_fired !== 'boolean') {
+    return { ok: false, reason: 'DIRECTIVE_FIRED_NOT_BOOLEAN', found: retrieval.directive_fired };
+  }
+  if (retrieval.directive_fired !== expectedDirectiveFired) {
+    return { ok: false, reason: 'DIRECTIVE_FIRED_MISMATCH', expected: expectedDirectiveFired, found: retrieval.directive_fired };
+  }
 
-  // Hale falsifier 2: same shape on the outcome side. Exactly one outcome
-  // row, period, THEN check it joins to this retrieval_id.
-  if (newOutcomes.length === 0) {
+  if (allOutcomeRows.length === 0) {
     return { ok: false, reason: 'NO_OUTCOME_ROWS_IN_WINDOW' };
   }
-  if (newOutcomes.length > 1) {
-    return { ok: false, reason: 'MULTIPLE_OUTCOME_ROWS_IN_WINDOW', count: newOutcomes.length };
+  if (allOutcomeRows.length > 1) {
+    return { ok: false, reason: 'MULTIPLE_OUTCOME_ROWS_IN_WINDOW', count: allOutcomeRows.length };
   }
-  const outcome = newOutcomes[0];
+  const outcome = allOutcomeRows[0];
+  if (outcome.kind !== 'retrieval-outcome') {
+    return { ok: false, reason: 'UNEXPECTED_ROW_KIND_IN_WINDOW', window: 'outcome', expectedKind: 'retrieval-outcome', found: outcome.kind };
+  }
   if (outcome.retrieval_id !== retrieval.retrieval_id) {
     return { ok: false, reason: 'OUTCOME_RETRIEVAL_ID_MISMATCH', expected: retrieval.retrieval_id, found: outcome.retrieval_id };
+  }
+  if (typeof outcome.answer_turn_id !== 'string' || !outcome.answer_turn_id.trim()) {
+    return { ok: false, reason: 'OUTCOME_MISSING_ANSWER_TURN_ID' };
   }
 
   // The "immediate Stop outcome" shape specifically — answer-close-hook.mjs
