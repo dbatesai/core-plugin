@@ -333,3 +333,37 @@ test('a cyclic edge relationship (A cites B, B cites A back) exports cleanly —
   assert.equal((b.match(/\]\(dc-a\.md\)/g) || []).length, 1, 'B links to A exactly once, not repeated by a cycle walk');
   assert.equal(manifest.counts.edges_rendered, 2, 'exactly the two direct edges, nothing amplified by the cycle');
 });
+
+test('log.md is excluded from the export per OKF v0.1 draft section 7', () => {
+  const root = fixtureStore();
+  writeFileSync(join(root, '_memories', 'log.md'), '# OKF section 7 reserved file');
+  const { outputs } = renderOkfExport(root);
+  assert.ok(!outputs.has('log.md'), 'log.md must be excluded');
+});
+
+test('link density threshold is executable and caller-supplied', () => {
+  const root = fixtureStore();
+  assert.throws(() => renderOkfExport(root, { linkDensityThreshold: 99.9 }), (e) => e.code === 'LINK_DENSITY_FAILED');
+  const { manifest } = renderOkfExport(root, { linkDensityThreshold: 10.0 });
+  assert.equal(manifest.link_density.threshold, 10.0);
+});
+
+test('writeOkfExport swap is crash-recoverable', () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  writeOkfExport(root, outDir); // write good export
+  const goodAlpha = readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8');
+  
+  process.env.FAULT_INJECT_SWAP_CRASH = '1';
+  try {
+    writeOkfExport(root, outDir);
+    assert.fail('should have thrown SWAP_FAILED');
+  } catch (e) {
+    assert.equal(e.code, 'SWAP_FAILED');
+  } finally {
+    delete process.env.FAULT_INJECT_SWAP_CRASH;
+  }
+  
+  assert.equal(readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8'), goodAlpha, 'backup must be restored');
+});
+

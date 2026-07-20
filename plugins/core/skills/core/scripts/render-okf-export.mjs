@@ -36,7 +36,7 @@ export const MANIFEST_NAME = 'okf-export-manifest.json';
 
 // Allow-list per spec: knowledge units only — INDEX-*/README/MEMORY are store
 // scaffolding, not OKF documents (validate.mjs skip-list honored).
-const SCAFFOLD = /(^|\/)(INDEX[^/]*|README|MEMORY)\.md$/i;
+const SCAFFOLD = /(^|\/)(INDEX[^/]*|README|MEMORY|log)\.md$/i;
 
 /**
  * ensureGitignored — idempotent append, same pattern as mailbox.mjs's
@@ -60,7 +60,7 @@ function ensureGitignored(projectDir, outDir) {
  * renderOkfExport — build the export in memory (no disk writes). Exposed so
  * tests and --check can inspect the manifest/outputs without touching disk.
  */
-export function renderOkfExport(projectDir) {
+export function renderOkfExport(projectDir, { linkDensityThreshold = null } = {}) {
   // ── 1. One atomic validated snapshot (correction 3: no raw store walk) ──
   const cap = loadSnapshot(projectDir, { captureBodies: true, retainRaw: true });
   const units = cap.index.units.filter(u => !SCAFFOLD.test(u.path)); // active-only, invalidation-filtered, dup-resolved, sorted
@@ -112,8 +112,11 @@ export function renderOkfExport(projectDir) {
     with_active_edge: unitsWithActiveEdge,
     pct_with_active_edge: units.length ? Math.round((unitsWithActiveEdge / units.length) * 1000) / 10 : 0,
     orphans: units.length - unitsWithActiveEdge,
-    threshold: null, // David ratifies before this is called ship-ready
+    threshold: linkDensityThreshold,
   };
+  if (linkDensityThreshold !== null && density.pct_with_active_edge < linkDensityThreshold) {
+    throw Object.assign(new Error(`Link density ${density.pct_with_active_edge}% is below threshold ${linkDensityThreshold}%`), { code: 'LINK_DENSITY_FAILED' });
+  }
 
   const manifest = {
     generator: 'render-okf-export.mjs',
@@ -142,8 +145,8 @@ export function renderOkfExport(projectDir) {
  * authored content); writes to a temp dir, validates every generated link
  * resolves, then atomically swaps into place.
  */
-export function writeOkfExport(projectDir, outDir) {
-  const { manifest, outputs, generatedLinks } = renderOkfExport(projectDir);
+export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null } = {}) {
+  const { manifest, outputs, generatedLinks } = renderOkfExport(projectDir, { linkDensityThreshold });
 
   // The design spec calls this "a throwaway gitignored _okf-export/" — never
   // implemented in the prototype. Only auto-gitignore when the export lands
@@ -191,8 +194,19 @@ export function writeOkfExport(projectDir, outDir) {
   if (invalid > 0) {
     throw Object.assign(new Error(`${invalid} exported file(s) failed post-write validation — export aborted, temp kept at ${tmpDir}`), { code: 'POST_WRITE_VALIDATION_FAILED', tmpDir });
   }
-  rmSync(outDir, { recursive: true, force: true });
-  renameSync(tmpDir, outDir);
+  const bakDir = `${outDir}.bak-${process.pid}`;
+  let swapFailed = false;
+  if (existsSync(outDir)) renameSync(outDir, bakDir);
+  try {
+    if (process.env.FAULT_INJECT_SWAP_CRASH === '1') throw new Error('Simulated swap crash');
+    renameSync(tmpDir, outDir);
+  } catch (e) {
+    swapFailed = true;
+    if (existsSync(bakDir)) renameSync(bakDir, outDir); // restore backup
+    throw Object.assign(new Error(`Swap failed, backup restored: ${e.message}`), { code: 'SWAP_FAILED', cause: e });
+  } finally {
+    if (!swapFailed && existsSync(bakDir)) rmSync(bakDir, { recursive: true, force: true });
+  }
   return manifest;
 }
 
