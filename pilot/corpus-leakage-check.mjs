@@ -151,6 +151,43 @@ export function checkCorpusLeakage(storeDir, plants) {
 }
 
 /**
+ * resolveCarrierIds — for each plant, resolve its carrierUnit reference
+ * (a relative path OR a frontmatter id — checkCorpusLeakage accepts either)
+ * to the unit's REAL frontmatter id. Callers (the efficacy contract in
+ * run-claude-synthetic-trial.mjs) need the real id to cross-reference
+ * against a retrieval trace's selected unit ids, which are always keyed by
+ * frontmatter id, never by the caller's possibly-path-shaped reference.
+ * Shares the exact carrier-resolution rules checkCorpusLeakage uses (same
+ * ambiguity/not-found errors) so the two never drift apart.
+ *
+ * @param {string} storeDir
+ * @param {Array<{token: string, carrierUnit: string}>} plants
+ * @returns {Map<string, string>} token -> real frontmatter id
+ */
+export function resolveCarrierIds(storeDir, plants) {
+  const memDir = join(storeDir, '_memories');
+  const files = walkStore(memDir);
+  const parsed = files.map(({ rel, full }) => {
+    const raw = readFileSync(full, 'utf8');
+    const frontmatter = parseFrontmatter(raw);
+    return { rel, id: frontmatter.id || '' };
+  });
+  const isCarrier = (unit, carrierUnit) => unit.rel === carrierUnit || unit.id === carrierUnit;
+  const out = new Map();
+  for (const { token, carrierUnit } of plants) {
+    const matches = parsed.filter(u => isCarrier(u, carrierUnit));
+    if (matches.length !== 1) {
+      throw Object.assign(
+        new Error(`resolveCarrierIds: carrierUnit ${JSON.stringify(carrierUnit)} for token ${JSON.stringify(token)} matches ${matches.length} units, expected exactly 1`),
+        { code: matches.length === 0 ? 'CARRIER_NOT_FOUND' : 'AMBIGUOUS_CARRIER' },
+      );
+    }
+    out.set(token, matches[0].id);
+  }
+  return out;
+}
+
+/**
  * checkStringsForLeakage — Hale's amendment: "include runner prompt/arm/
  * generated-index metadata among the preflight surfaces." A trial's query
  * prompt, its arm label, and any generated index/summary text are surfaces

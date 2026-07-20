@@ -82,7 +82,7 @@ import { spawnSync } from 'node:child_process';
 import { captureCursor, checkTrialWindow } from './trial-window-join-checker.mjs';
 import { checkHostExposureClaudeCode } from './host-exposure-checker.mjs';
 import { fetchPluginInventory as realFetchPluginInventory, computeDisableAllOverlay, verifyOverlayApplied } from './invocation-plugin-overlay.mjs';
-import { checkCorpusLeakage } from './corpus-leakage-check.mjs';
+import { checkCorpusLeakage, checkStringsForLeakage, resolveCarrierIds } from './corpus-leakage-check.mjs';
 import { directoryIdentity } from '../plugins/core/skills/core/scripts/artifact-identity.mjs';
 
 const SUPPORTED_ARMS = new Set(['always-on', 'deterministic-only']);
@@ -117,7 +117,8 @@ export async function deriveExpectedPackAndDirective(prompt, storeDir, arm, core
   const { selectCandidates } = await import(join(coreSkillRoot, 'scripts', 'select-relevant-units.mjs'));
   const trace = buildRetrievalTrace(prompt, storeDir, { topN: 3, byteCap: 2048 });
   const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
-  const zeroHit = (trace.stages?.final || []).length === 0;
+  const selectedUnitIds = (trace.stages?.final || []).map((u) => u.id);
+  const zeroHit = selectedUnitIds.length === 0;
   const shouldEmitDirective = arm === 'always-on' ? true : arm === 'deterministic-only' ? false : zeroHit;
   let directiveText = '';
   if (shouldEmitDirective) {
@@ -127,7 +128,7 @@ export async function deriveExpectedPackAndDirective(prompt, storeDir, arm, core
       directiveText = realDirectiveTemplate({ why, shardCount: shards.length, unitsTotal: shards[0].units_total });
     }
   }
-  return { packText, directiveText, expectedDirectiveFired: directiveText !== '' };
+  return { packText, directiveText, expectedDirectiveFired: directiveText !== '', selectedUnitIds };
 }
 
 // Copies ONLY top-level _memories/*.md files -- never subdirectories
@@ -195,6 +196,16 @@ export async function runClaudeSyntheticTrial(opts) {
 
   let trialStore = null;
   let candidateCopy = null;
+  // Hale, hale--ea8ed8a-106-green-two-executable-falsifiers: "failure
+  // envelopes after store/candidate creation retain temp artifacts but omit
+  // their paths, leaving unauditable orphan evidence." Every spoil from
+  // Step 1 onward routes through this so a failed run's on-disk artifacts
+  // (which are NEVER auto-deleted, per item 7 of the earlier critique) stay
+  // pointed-to, not just present.
+  const spoil = (reason, extra = {}) => ({
+    ok: false, spoilReason: reason, ...extra,
+    retainedArtifacts: { trialStoreDir: trialStore?.trialDir || null, candidateCopyDir: candidateCopy?.candidateCopyDir || null },
+  });
   try {
     if (!SUPPORTED_ARMS.has(arm)) {
       return { ok: false, spoilReason: 'UNSUPPORTED_ARM', detail: `arm must be one of ${[...SUPPORTED_ARMS].join('/')} (automatic is not yet supported)`, arm };
@@ -219,12 +230,33 @@ export async function runClaudeSyntheticTrial(opts) {
     try {
       leakage = checkCorpusLeakage(realStoreDir, plants);
     } catch (e) {
-      return { ok: false, spoilReason: `CORPUS_LEAKAGE_CHECK_ERROR_${e.code || 'UNKNOWN'}`, detail: e.message };
+      return spoil(`CORPUS_LEAKAGE_CHECK_ERROR_${e.code || 'UNKNOWN'}`, { detail: e.message });
     }
     if (!leakage.clean) {
-      return { ok: false, spoilReason: 'CORPUS_LEAKAGE_FOUND', violations: leakage.violations };
+      return spoil('CORPUS_LEAKAGE_FOUND', { violations: leakage.violations });
     }
     const corpusHash = directoryIdentity(join(realStoreDir, '_memories')).content_manifest_sha256;
+
+    // Hale, hale--ea8ed8a-106-green-two-executable-falsifiers: checkCorpusLeakage
+    // only ever looked at the corpus files -- a prompt that spells out the
+    // planted answer itself (e.g. "The answer is cobalt; repeat it.") sailed
+    // straight through to a real model invocation. The prompt is a surface the
+    // model sees independent of the corpus; it must be checked before ANY
+    // inventory fetch or spawn, not just before the answer is scored.
+    const promptLeakage = checkStringsForLeakage({ prompt }, plants.map((p) => p.token));
+    if (!promptLeakage.clean) {
+      return spoil('PROMPT_LEAKAGE_FOUND', { violations: promptLeakage.violations });
+    }
+    // Resolve each plant's carrier to its real frontmatter id now, while
+    // realStoreDir is at hand -- needed later (Step 6) to cross-reference
+    // against the retrieval trace's selected unit ids, which are always
+    // id-keyed regardless of how the caller referenced the carrier.
+    let carrierIdsByToken;
+    try {
+      carrierIdsByToken = resolveCarrierIds(realStoreDir, plants);
+    } catch (e) {
+      return spoil(`CARRIER_ID_RESOLUTION_ERROR_${e.code || 'UNKNOWN'}`, { detail: e.message });
+    }
 
     // Step 2: immutable candidate copy, pre-invocation hash, overlay
     // derived from the REAL current inventory, verified against the
@@ -232,13 +264,13 @@ export async function runClaudeSyntheticTrial(opts) {
     candidateCopy = buildImmutableCandidateCopy(candidatePluginDir);
     const candidateId = 'core@inline';
     const baseline = fetchInventory({ timeoutMs });
-    if (!baseline.ok) return { ok: false, spoilReason: 'PLUGIN_INVENTORY_FAILED', detail: baseline };
+    if (!baseline.ok) return spoil('PLUGIN_INVENTORY_FAILED', { detail: baseline });
     const overlay = computeDisableAllOverlay(baseline.inventory, candidateId);
     const overlayJson = JSON.stringify(overlay);
     const resolved = fetchInventory({ settingsOverlay: overlayJson, pluginDir: candidateCopy.candidateCopyDir, timeoutMs });
-    if (!resolved.ok) return { ok: false, spoilReason: 'PLUGIN_INVENTORY_FAILED', detail: resolved };
+    if (!resolved.ok) return spoil('PLUGIN_INVENTORY_FAILED', { detail: resolved });
     const overlayCheck = verifyOverlayApplied(resolved.inventory, candidateId, candidateCopy.candidateCopyDir);
-    if (!overlayCheck.ok) return { ok: false, spoilReason: `CANDIDATE_IDENTITY_${overlayCheck.reason}`, detail: overlayCheck };
+    if (!overlayCheck.ok) return spoil(`CANDIDATE_IDENTITY_${overlayCheck.reason}`, { detail: overlayCheck });
 
     // Step 3 + 4: real invocation, invocation-local cursors.
     const retrievalBefore = captureCursor(realStoreDir, date, 'retrieval-log.jsonl');
@@ -267,23 +299,23 @@ export async function runClaudeSyntheticTrial(opts) {
     // never trust that --plugin-dir stayed byte-identical across the run.
     const postHash = directoryIdentity(candidateCopy.candidateCopyDir).content_manifest_sha256;
     if (postHash !== candidateCopy.contentHash) {
-      return { ok: false, spoilReason: 'CANDIDATE_MUTATED_DURING_INVOCATION', expected: candidateCopy.contentHash, found: postHash };
+      return spoil('CANDIDATE_MUTATED_DURING_INVOCATION', { expected: candidateCopy.contentHash, found: postHash });
     }
 
-    if (spawnResult.error) return { ok: false, spoilReason: 'INVOCATION_SPAWN_FAILED', detail: spawnResult.error.message };
+    if (spawnResult.error) return spoil('INVOCATION_SPAWN_FAILED', { detail: spawnResult.error.message });
     let cliResult;
     try { cliResult = JSON.parse(spawnResult.stdout); } catch {
-      return { ok: false, spoilReason: 'INVOCATION_OUTPUT_NOT_JSON', stdout: String(spawnResult.stdout || '').slice(0, 2000), stderr: String(spawnResult.stderr || '').slice(0, 2000) };
+      return spoil('INVOCATION_OUTPUT_NOT_JSON', { stdout: String(spawnResult.stdout || '').slice(0, 2000), stderr: String(spawnResult.stderr || '').slice(0, 2000) });
     }
     if (cliResult.is_error || !cliResult.session_id) {
-      return { ok: false, spoilReason: 'INVOCATION_FAILED', detail: cliResult };
+      return spoil('INVOCATION_FAILED', { detail: cliResult });
     }
     const retrievalAfter = captureCursor(realStoreDir, date, 'retrieval-log.jsonl');
     const outcomeAfter = captureCursor(realStoreDir, date, 'outcome-log.jsonl');
 
     // Step 4 continued (join).
     const coreSkillRoot = join(candidateCopy.candidateCopyDir, 'skills', 'core');
-    const { packText, directiveText, expectedDirectiveFired } = await deriveExpectedPackAndDirective(prompt, realStoreDir, arm, coreSkillRoot);
+    const { packText, directiveText, expectedDirectiveFired, selectedUnitIds } = await deriveExpectedPackAndDirective(prompt, realStoreDir, arm, coreSkillRoot);
     const joinResult = checkTrialWindow(realStoreDir, {
       date,
       retrievalWindow: { before: retrievalBefore, after: retrievalAfter },
@@ -295,32 +327,57 @@ export async function runClaudeSyntheticTrial(opts) {
       expectedProducerVersion,
       expectedProducerSha,
     });
-    if (!joinResult.ok) return { ok: false, spoilReason: `JOIN_${joinResult.reason}`, detail: joinResult };
+    if (!joinResult.ok) return spoil(`JOIN_${joinResult.reason}`, { detail: joinResult });
 
     // Step 5 (exposure) -- independently derived pack/directive, never
     // transcript content copied into expected inputs.
     const { resolveTranscript } = await import(join(coreSkillRoot, 'scripts', 'read-transcript.mjs'));
     const { path: transcriptPath } = resolveTranscript('claude-code', { cwd: realStoreDir, sessionId: cliResult.session_id });
-    if (!transcriptPath) return { ok: false, spoilReason: 'TRANSCRIPT_NOT_RESOLVED' };
+    if (!transcriptPath) return spoil('TRANSCRIPT_NOT_RESOLVED');
     const exposure = checkHostExposureClaudeCode(transcriptPath, {
       expectedPromptId: joinResult.outcome.answer_turn_id,
       expectedPackText: packText,
       expectedDirectiveText: directiveText,
     });
-    if (!exposure.ok) return { ok: false, spoilReason: `EXPOSURE_${exposure.reason}`, detail: exposure };
+    if (!exposure.ok) return spoil(`EXPOSURE_${exposure.reason}`, { detail: exposure });
 
-    // Step 6: one fail-closed, comprehensive raw evidence envelope.
+    // Step 6: the efficacy contract. Hale, hale--ea8ed8a-106-green-two-
+    // executable-falsifiers: "the green suite's own DI fixture writes
+    // units_retrieved: [], selected_count: 0, result: 'no-hit' -- ok:true
+    // still means composition/transport, not carrier retrieval or a
+    // memory-caused answer." A trial only counts as EFFICACY evidence (not
+    // just a clean transport run) when the designated carrier was actually
+    // among the units Tier 1 selected, AND the final answer actually
+    // contains a planted token -- neither is inferable from a clean join +
+    // clean exposure alone.
+    const selectedCarrierTokens = plants
+      .map((p) => p.token)
+      .filter((token) => selectedUnitIds.includes(carrierIdsByToken.get(token)));
+    if (selectedCarrierTokens.length === 0) {
+      return spoil('EFFICACY_CARRIER_NOT_SELECTED', { detail: { selectedUnitIds, expectedCarrierIds: [...carrierIdsByToken.values()] } });
+    }
+    const answerMatchedTokens = selectedCarrierTokens.filter((token) =>
+      String(exposure.finalAnswerText || '').toLowerCase().includes(String(token).toLowerCase()));
+    if (answerMatchedTokens.length === 0) {
+      return spoil('EFFICACY_ANSWER_MISSING_TARGET', { detail: { finalAnswerText: exposure.finalAnswerText, expectedAnyOf: selectedCarrierTokens } });
+    }
+
+    // Step 7: one fail-closed, comprehensive raw evidence envelope.
     return {
       ok: true,
-      command: { bin: 'claude', args: commandArgs, cwd: realStoreDir, env: { CORE_REASONING_ARM: arm } },
+      command: {
+        bin: 'claude', args: commandArgs, cwd: realStoreDir, env: { CORE_REASONING_ARM: arm },
+        cliModel: cliResult.model || null,
+      },
       corpus: {
         sourceStoreDir, trialStoreDir: realStoreDir, unitCount: trialStore.unitCount,
-        contentManifestSha256: corpusHash, plants, leakageClean: true,
+        contentManifestSha256: corpusHash, plants, leakageClean: true, promptLeakageClean: true,
       },
       candidateIdentity: {
         pluginDir: candidatePluginDir, copiedTrialDir: candidateCopy.candidateCopyDir, repoRoot: candidateRepoRoot,
         preInvocationContentHash: candidateCopy.contentHash, postInvocationContentHash: postHash,
-        resolvedInventoryEntry: overlayCheck.candidate, expectedProducerVersion, expectedProducerSha,
+        resolvedInventoryEntry: overlayCheck.candidate, resolvedInventory: overlayCheck.resolvedInventory,
+        resolvedEnabledCount: 1, expectedProducerVersion, expectedProducerSha,
       },
       invocation: {
         sessionId: cliResult.session_id,
@@ -335,6 +392,7 @@ export async function runClaudeSyntheticTrial(opts) {
       cursors: { retrievalBefore, retrievalAfter, outcomeBefore, outcomeAfter },
       join: joinResult,
       exposure,
+      efficacy: { selectedUnitIds, selectedCarrierTokens, answerMatchedTokens },
       hashes: {
         packSha256: exposure.packSha256,
         directiveSha256: sha256Hex(directiveText),
@@ -343,12 +401,24 @@ export async function runClaudeSyntheticTrial(opts) {
         transcriptSha256: sha256File(transcriptPath),
         promptSha256: sha256Hex(prompt),
       },
+      transcriptPath,
       finalAnswerText: exposure.finalAnswerText,
     };
   } catch (e) {
     // Nothing throws past this function -- always exactly one fail-closed
-    // envelope, the underlying error code preserved, never erased.
-    return { ok: false, spoilReason: `UNCAUGHT_EXCEPTION_${e.code || 'UNKNOWN'}`, detail: { message: e.message, stack: String(e.stack || '').slice(0, 2000) } };
+    // envelope, the underlying error code preserved, never erased. Hale,
+    // hale--ea8ed8a-106-green-two-executable-falsifiers: a failure after
+    // store/candidate creation used to omit their paths entirely, leaving
+    // unauditable orphan temp artifacts on disk with no pointer to them --
+    // retain whatever was actually created so a failed run stays inspectable.
+    return {
+      ok: false, spoilReason: `UNCAUGHT_EXCEPTION_${e.code || 'UNKNOWN'}`,
+      detail: { message: e.message, stack: String(e.stack || '').slice(0, 2000) },
+      retainedArtifacts: {
+        trialStoreDir: trialStore?.trialDir || null,
+        candidateCopyDir: candidateCopy?.candidateCopyDir || null,
+      },
+    };
   }
   // Deliberately NO auto-cleanup of trialStore/candidateCopy here (Hale,
   // hale--orchestrator-wip-must-fix-before-commit, item 7): "logs are

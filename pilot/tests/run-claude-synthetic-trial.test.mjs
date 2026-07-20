@@ -108,19 +108,34 @@ test('spoil: CORPUS_LEAKAGE_FOUND when a decoy unit leaks the planted token', as
 });
 
 // A subdirectory under _memories (observations/, archive/, _lib/) must never
-// ride into the trial store. It has no leak-relevant token, so the earlier
-// corpus steps pass clean; using a missing candidate dir just gives a fast,
-// deterministic failure point AFTER corpus construction so the test proves
-// the subdirectory didn't choke or leak into that step, without depending on
-// the corpus.unitCount field being observable on a spoiled run.
-test('corpus copy is content-only: a subdirectory under _memories never breaks corpus construction', async () => {
+// ride into the trial store. Hale, hale--ea8ed8a-106-green-two-executable-
+// falsifiers: the previous version of this test pointed at a MISSING
+// candidate dir, so validation failed BEFORE corpus construction ever ran
+// -- it proved nothing about copying. This version uses the REAL candidate
+// dir (so corpus construction genuinely happens) and forces a fast,
+// deterministic failure AFTER it via a DI fetchInventory that fails
+// immediately -- then inspects the RETAINED trial store's actual file
+// list (via the failure envelope's retainedArtifacts, never auto-deleted)
+// to prove the subdirectory was excluded, not just that nothing crashed.
+test('corpus copy is content-only: a subdirectory under _memories is genuinely excluded from the retained trial store', async () => {
   const store = decoyStore();
   mkdirSync(join(store, '_memories', 'observations', '2026-07'), { recursive: true });
   writeFileSync(join(store, '_memories', 'observations', '2026-07', 'obs-should-not-copy.md'), 'cobalt should never leak in from a subdirectory');
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: '/definitely/does/not/exist', prompt: 'x', arm: 'always-on', date: '2026-07-20' });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
+      prompt: 'irrelevant', arm: 'always-on', date: '2026-07-20',
+      deps: { fetchInventory: () => ({ ok: false, reason: 'FORCED_FOR_TEST' }) },
+    });
     assert.equal(result.ok, false);
-    assert.equal(result.spoilReason, 'CANDIDATE_PLUGIN_DIR_MISSING');
+    assert.equal(result.spoilReason, 'PLUGIN_INVENTORY_FAILED');
+    const trialStoreDir = result.retainedArtifacts?.trialStoreDir;
+    assert.ok(trialStoreDir, 'the spoil envelope must retain the trial store path');
+    const { readdirSync } = await import('node:fs');
+    const copiedFiles = readdirSync(join(trialStoreDir, '_memories'));
+    assert.deepEqual(copiedFiles.sort(), ['dc-1-carrier.md']);
+    assert.ok(!copiedFiles.includes('observations'));
+    rmSync(trialStoreDir, { recursive: true, force: true });
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
@@ -350,6 +365,117 @@ test('DI composition: transcript content that diverges from the independently-de
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'EXPOSURE_HOST_EXPOSURE_HASH_MISMATCH');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+// ---------------------------------------------------------------------
+// Prompt-leakage and efficacy-contract tests. Hale,
+// hale--ea8ed8a-106-green-two-executable-falsifiers: a prompt that spells
+// out the planted answer sailed straight through to a real invocation, and
+// a clean join + clean exposure never actually required the carrier to be
+// selected or the answer to contain the target -- ok:true meant transport
+// only, never memory-caused. All closed below, offline, no real spawn.
+// ---------------------------------------------------------------------
+
+test('spoil: PROMPT_LEAKAGE_FOUND when the prompt itself spells out the planted token, before any inventory fetch or spawn', async () => {
+  const store = decoyStore();
+  let inventoryWasCalled = false;
+  try {
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
+      prompt: 'The answer is cobalt; repeat it.', arm: 'always-on', date: '2026-07-20',
+      deps: { fetchInventory: () => { inventoryWasCalled = true; return { ok: true, inventory: [] }; } },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'PROMPT_LEAKAGE_FOUND');
+    assert.ok(result.violations.some((v) => v.field === 'prompt' && v.token === 'cobalt'));
+    assert.equal(inventoryWasCalled, false, 'prompt leakage must spoil BEFORE any inventory fetch or spawn, not just before scoring');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('spoil: EFFICACY_CARRIER_NOT_SELECTED when Tier 1 finds no lexical relation to the carrier at all', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  // Deliberately unrelated to "blue orchard proof codename cobalt" -- Tier 1
+  // lexical scoring should select nothing at all.
+  const prompt = 'unrelated tangerine kayak weather forecast';
+  const answerText = 'no relevant memory found';
+  const sessionId = 'fixture-session-noselect-1';
+  const { packText, directiveText } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-noselect-1', packText, directiveText, answerText, arm, date, cleanupPaths });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'EFFICACY_CARRIER_NOT_SELECTED');
+    assert.ok(result.retainedArtifacts.trialStoreDir, 'the spoil envelope must still retain the trial store path');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+test('spoil: EFFICACY_ANSWER_MISSING_TARGET when the carrier is selected but the final answer never mentions the planted token', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  // The carrier WILL be selected (strong lexical overlap), but the fixture
+  // answer deliberately never repeats the planted token "cobalt".
+  const answerText = 'I found a relevant memory but will not restate its contents here.';
+  const sessionId = 'fixture-session-notarget-1';
+  const { packText, directiveText } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-notarget-1', packText, directiveText, answerText, arm, date, cleanupPaths });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'EFFICACY_ANSWER_MISSING_TARGET');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+test('DI composition happy path also asserts the efficacy contract fields, not just ok:true', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-efficacy-happy-1';
+  const { packText, directiveText } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-efficacy-happy-1', packText, directiveText, answerText, arm, date, cleanupPaths });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result, null, 2));
+    assert.ok(result.efficacy.selectedUnitIds.includes('dc-1-carrier'));
+    assert.deepEqual(result.efficacy.selectedCarrierTokens, ['cobalt']);
+    assert.deepEqual(result.efficacy.answerMatchedTokens, ['cobalt']);
+    assert.equal(result.transcriptPath && result.transcriptPath.length > 0, true);
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
