@@ -21,6 +21,13 @@ const REAL_REPO_HEAD_SHA = execFileSync('git', ['-C', REAL_REPO_ROOT, 'rev-parse
 const HARNESS = 'claude-code';
 const PRODUCER_VERSION = '3.12.1-pilot.1';
 const PRODUCER_SHA = 'fc8a23ad99bbc1d082f4ebed4388093a53c9fc47';
+// Hale, hale--55f1222-closure-rejected: model is now mandatory, and the
+// fixture transcript's observed message.model must genuinely match what
+// the trial requests -- FIXTURE_MODEL is used as BOTH the requested
+// `model` opt and the fixture's message.model so the match is exact
+// (never relying on the orchestrator's substring-based alias tolerance).
+const FIXTURE_MODEL = 'claude-sonnet-5-fixture';
+const FIXTURE_CLI_VERSION = '2.1.215-fixture';
 
 function decoyStore() {
   const dir = mkdtempSync(join(tmpdir(), 'source-store-'));
@@ -46,7 +53,7 @@ test('spoil: UNSUPPORTED_ARM for automatic (not yet supported, named explicitly)
 test('spoil: CORPUS_MISSING when sourceStoreDir has no _memories directory', async () => {
   const store = mkdtempSync(join(tmpdir(), 'source-store-empty-'));
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
+    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CORPUS_MISSING');
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -55,10 +62,10 @@ test('spoil: CORPUS_MISSING when sourceStoreDir has no _memories directory', asy
 test('spoil: PLANTS_REQUIRED when plants is missing or empty', async () => {
   const store = decoyStore();
   try {
-    const r1 = await runClaudeSyntheticTrial({ sourceStoreDir: store, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
+    const r1 = await runClaudeSyntheticTrial({ sourceStoreDir: store, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL });
     assert.equal(r1.ok, false);
     assert.equal(r1.spoilReason, 'PLANTS_REQUIRED');
-    const r2 = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: [], candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
+    const r2 = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: [], candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL });
     assert.equal(r2.ok, false);
     assert.equal(r2.spoilReason, 'PLANTS_REQUIRED');
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -67,7 +74,7 @@ test('spoil: PLANTS_REQUIRED when plants is missing or empty', async () => {
 test('spoil: CANDIDATE_PLUGIN_DIR_MISSING for a nonexistent candidate path', async () => {
   const store = decoyStore();
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: '/definitely/does/not/exist', prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
+    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: '/definitely/does/not/exist', prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CANDIDATE_PLUGIN_DIR_MISSING');
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -76,7 +83,7 @@ test('spoil: CANDIDATE_PLUGIN_DIR_MISSING for a nonexistent candidate path', asy
 test('spoil: MISSING_REQUIRED_INPUT when prompt or date are absent', async () => {
   const store = decoyStore();
   try {
-    const r1 = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
+    const r1 = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL });
     assert.equal(r1.ok, false);
     assert.equal(r1.spoilReason, 'MISSING_REQUIRED_INPUT');
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -90,7 +97,7 @@ test('spoil: a corpus with no real planted answer fails closed via the real leak
   mkdirSync(join(store, '_memories'), { recursive: true });
   writeFileSync(join(store, '_memories', 'dc-1-carrier.md'), '---\nid: dc-1-carrier\ntype: decision\nstatus: active\ntopics: [probe]\n---\n\n# Carrier unit\n\nNothing relevant here.\n');
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
+    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL });
     assert.equal(result.ok, false);
     assert.match(result.spoilReason, /^CORPUS_LEAKAGE_CHECK_ERROR_/);
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -103,7 +110,7 @@ test('spoil: CORPUS_LEAKAGE_FOUND when a decoy unit leaks the planted token', as
   const store = decoyStore();
   writeFileSync(join(store, '_memories', 'dc-2-decoy.md'), '---\nid: dc-2-decoy\ntype: decision\nstatus: active\ntopics: [probe]\n---\n\n# Decoy\n\nAlso mentions cobalt by accident.\n');
   try {
-    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools' });
+    const result = await runClaudeSyntheticTrial({ sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA, prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CORPUS_LEAKAGE_FOUND');
     assert.ok(result.violations.some((v) => v.unit === 'dc-2-decoy.md'));
@@ -128,7 +135,7 @@ test('corpus copy is content-only: a subdirectory under _memories is genuinely e
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
       candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
-      prompt: 'irrelevant', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
+      prompt: 'irrelevant', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: () => ({ ok: false, reason: 'FORCED_FOR_TEST' }) },
     });
     assert.equal(result.ok, false);
@@ -196,19 +203,19 @@ function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answer
     cleanupPaths.push(transcriptPath);
     const fullEmission = (packText && directiveText ? packText + directiveText : packText || directiveText).trimEnd();
     const lines = [
-      { type: 'user', promptId, uuid: 'u1', parentUuid: null, message: { role: 'user', content: [{ type: 'text', text: 'fixture prompt' }] } },
-      { type: 'attachment', uuid: 'u2', parentUuid: 'u1', attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: 'tu1', content: fullEmission, stdout: `${fullEmission}\n`, exitCode: 0, command: EXPECTED_USER_PROMPT_SUBMIT_COMMAND } },
+      { type: 'user', promptId, uuid: 'u1', parentUuid: null, version: FIXTURE_CLI_VERSION, message: { role: 'user', content: [{ type: 'text', text: 'fixture prompt' }] } },
+      { type: 'attachment', uuid: 'u2', parentUuid: 'u1', version: FIXTURE_CLI_VERSION, attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: 'tu1', content: fullEmission, stdout: `${fullEmission}\n`, exitCode: 0, command: EXPECTED_USER_PROMPT_SUBMIT_COMMAND } },
       // Hale, hale--paid-run-direct-file-read-confound: the real iteration-
       // 21 transcript showed exactly this shape -- a Bash/Read tool_use
       // block between exposure and the final answer, which is how the
       // model actually saw the planted token. includeToolUse lets a test
       // reproduce that shape to prove the confound gate catches it.
-      ...(includeToolUse ? [{ type: 'assistant', uuid: 'utool', parentUuid: 'u2', message: { model: 'claude-sonnet-5', id: 'msgtool', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'Read', input: { file_path: '_memories/dc-1-carrier.md' } }] } }] : []),
-      { type: 'assistant', uuid: 'u3', parentUuid: includeToolUse ? 'utool' : 'u2', message: { model: 'claude-sonnet-5', id: 'msg1', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: answerText }] } },
+      ...(includeToolUse ? [{ type: 'assistant', uuid: 'utool', parentUuid: 'u2', version: FIXTURE_CLI_VERSION, message: { model: FIXTURE_MODEL, id: 'msgtool', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'Read', input: { file_path: '_memories/dc-1-carrier.md' } }] } }] : []),
+      { type: 'assistant', uuid: 'u3', parentUuid: includeToolUse ? 'utool' : 'u2', version: FIXTURE_CLI_VERSION, message: { model: FIXTURE_MODEL, id: 'msg1', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: answerText }] } },
       // A real completed `-p` invocation always fires the candidate's own
       // Stop hook (answer-close-hook.mjs) too -- host-exposure-checker.mjs
       // now requires it (Hale, hale--b75fecc-paid-run-not-release-evidence).
-      { type: 'attachment', uuid: 'u4', parentUuid: 'u3', attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu2', content: '', stdout: '', exitCode: 0, command: EXPECTED_STOP_COMMAND } },
+      { type: 'attachment', uuid: 'u4', parentUuid: 'u3', version: FIXTURE_CLI_VERSION, attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu2', content: '', stdout: '', exitCode: 0, command: EXPECTED_STOP_COMMAND } },
     ];
     writeFileSync(transcriptPath, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
 
@@ -239,7 +246,7 @@ test('DI composition: a full fixture-driven trial composes to a real ok:true env
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, true, JSON.stringify(result, null, 2));
@@ -276,7 +283,7 @@ test('DI composition: CANDIDATE_MUTATED_DURING_INVOCATION fires when the copied 
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude: mutatingSpawn },
     });
     assert.equal(result.ok, false);
@@ -314,7 +321,7 @@ test('DI composition: a missing outcome row (Stop hook never fired) spoils the j
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -352,7 +359,7 @@ test('DI composition: a duplicate retrieval row inside the trial window spoils c
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -382,7 +389,7 @@ test('DI composition: transcript content that diverges from the independently-de
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -409,7 +416,7 @@ test('spoil: PROMPT_LEAKAGE_FOUND when the prompt itself spells out the planted 
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
       candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
-      prompt: 'The answer is cobalt; repeat it.', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
+      prompt: 'The answer is cobalt; repeat it.', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: () => { inventoryWasCalled = true; return { ok: true, inventory: [] }; } },
     });
     assert.equal(result.ok, false);
@@ -436,7 +443,7 @@ test('spoil: EFFICACY_CARRIER_NOT_DELIVERED when Tier 1 finds no lexical relatio
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -465,7 +472,7 @@ test('spoil: EFFICACY_ANSWER_MISSING_TARGET when the carrier is selected but the
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -491,7 +498,7 @@ test('DI composition happy path also asserts the efficacy contract fields, not j
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, true, JSON.stringify(result, null, 2));
@@ -532,7 +539,7 @@ test('spoil: TELEMETRY_SELECTION_MISMATCH when the joined retrieval row disagree
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -559,7 +566,7 @@ test('spoil: CANDIDATE_SHA_BINDING_REQUIRED when candidateRepoRoot is missing (S
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR,
       expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
-      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_REQUIRED');
@@ -572,7 +579,7 @@ test('spoil: CANDIDATE_SHA_BINDING_INVALID_SHA for a mutable ref (HEAD) instead 
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
       expectedCandidateGitSha: 'HEAD',
-      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_INVALID_SHA');
@@ -585,7 +592,7 @@ test('spoil: CANDIDATE_SHA_BINDING_GIT_ERROR for a real-shaped 40-hex SHA that d
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
       expectedCandidateGitSha: '0'.repeat(40),
-      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_GIT_ERROR');
@@ -601,9 +608,9 @@ test('spoil: CANDIDATE_SHA_BINDING_MISMATCH when the copied candidate content do
   writeFileSync(join(mismatchedCandidateDir, 'not-the-real-plugin.txt'), 'this is not plugins/core content');
   try {
     const result = await runClaudeSyntheticTrial({
-      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: mismatchedCandidateDir, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: mismatchedCandidateDir, candidateRepoRoot: REAL_REPO_ROOT,
       expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
-      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_MISMATCH');
@@ -629,9 +636,8 @@ test('DI composition: CANDIDATE_SHA_BINDING passes and is recorded in the envelo
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
-      expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, true, JSON.stringify(result, null, 2));
@@ -656,7 +662,7 @@ test('spoil: UNSUPPORTED_ESTIMAND for a value outside the closed vocabulary, val
   try {
     const result = await runClaudeSyntheticTrial({
       sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
-      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'something-else',
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'something-else', model: FIXTURE_MODEL,
     });
     assert.equal(result.ok, false);
     assert.equal(result.spoilReason, 'UNSUPPORTED_ESTIMAND');
@@ -681,7 +687,7 @@ test('spoil: EFFICACY_TOOL_CONFOUND_FOR_HOOK_DELIVERY_ESTIMAND when a tool call 
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'hook-delivery-only',
+      prompt, arm, date, estimand: 'hook-delivery-only', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, false);
@@ -709,13 +715,105 @@ test('DI composition: agent-with-tools estimand tolerates tool use but records t
       sourceStoreDir: store, plants: PLANTS,
       candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
       expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
-      prompt, arm, date, estimand: 'agent-with-tools',
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
       deps: { fetchInventory: fakeFetchInventory, spawnClaude },
     });
     assert.equal(result.ok, true, JSON.stringify(result, null, 2));
     assert.equal(result.efficacy.toolMediatedConfoundPossible, true);
     assert.equal(result.efficacy.toolCallsInTurn.length, 1);
     assert.equal(result.efficacy.estimand, 'agent-with-tools');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+// ---------------------------------------------------------------------
+// Commit-object identity + observed model/CLI version. Hale,
+// hale--sha-wip-tree-object-false-pass / hale--55f1222-closure-rejected /
+// hale--wip-visible-confound-still-false-green.
+// ---------------------------------------------------------------------
+
+test('spoil: CANDIDATE_SHA_BINDING_NOT_COMMIT for a real 40-hex TREE object OID, not a commit', async () => {
+  const store = decoyStore();
+  try {
+    const treeOid = execFileSync('git', ['-C', REAL_REPO_ROOT, 'rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT,
+      expectedCandidateGitSha: treeOid,
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'CANDIDATE_SHA_BINDING_NOT_COMMIT');
+    assert.equal(result.objectType, 'tree');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('spoil: MODEL_REQUIRED when model is omitted, validated before any spawn', async () => {
+  const store = decoyStore();
+  try {
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS, candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      prompt: 'x', arm: 'always-on', date: '2026-07-20', estimand: 'agent-with-tools',
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'MODEL_REQUIRED');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('spoil: MODEL_IDENTITY_MISMATCH when the observed transcript model disagrees with what was requested', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-modelmismatch-1';
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-modelmismatch-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date, estimand: 'agent-with-tools',
+      // Deliberately request a DIFFERENT model than the fixture transcript
+      // actually shows (FIXTURE_MODEL) -- requested and observed must agree.
+      model: 'claude-opus-4-8',
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'MODEL_IDENTITY_MISMATCH');
+    assert.equal(result.detail.requestedModel, 'claude-opus-4-8');
+    assert.equal(result.detail.observedModel, FIXTURE_MODEL);
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+test('DI composition: observed model and CLI version are recorded in the envelope and agree with the request', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const sessionId = 'fixture-session-modelmatch-1';
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    const spawnClaude = makeFixtureSpawn({ sessionId, promptId: 'fixture-prompt-modelmatch-1', packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds });
+    const result = await runClaudeSyntheticTrial({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result, null, 2));
+    assert.equal(result.command.requestedModel, FIXTURE_MODEL);
+    assert.equal(result.command.observedModel, FIXTURE_MODEL);
+    assert.equal(result.command.observedCliVersion, FIXTURE_CLI_VERSION);
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }

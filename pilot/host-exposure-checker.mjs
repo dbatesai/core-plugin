@@ -359,6 +359,15 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   }
   const finalAnswerText = textBlocks.join('');
 
+  // Hale, hale--55f1222-closure-rejected / hale--wip-visible-confound-
+  // still-false-green: "a requested alias is not observed execution
+  // identity." The real transcript carries both, verified on this
+  // session's own retained iteration-21 file: every line has a top-level
+  // `version` (the Claude Code CLI version), and every assistant line
+  // carries `message.model` (the model that actually generated it).
+  const observedModel = group.find((l) => typeof l.message?.model === 'string')?.message.model || null;
+  const observedCliVersion = turnLines.find((l) => typeof l.version === 'string')?.version || null;
+
   // Hale, hale--paid-run-direct-file-read-confound: a real gated trial's
   // answer turned out to come from the model directly Bash/Read-ing the
   // carrier file, not from the injected (title-only) pack content -- the
@@ -390,5 +399,7 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
     finalAnswerHash: sha256Hex(finalAnswerText),
     finalAnswerText,
     toolCallsInTurn,
+    observedModel,
+    observedCliVersion,
   };
 }

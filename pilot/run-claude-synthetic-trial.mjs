@@ -78,7 +78,7 @@ import { existsSync, readdirSync, readFileSync, realpathSync, mkdtempSync, mkdir
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { captureCursor, checkTrialWindow } from './trial-window-join-checker.mjs';
 import { checkHostExposureClaudeCode } from './host-exposure-checker.mjs';
 import { fetchPluginInventory as realFetchPluginInventory, computeDisableAllOverlay, verifyOverlayApplied } from './invocation-plugin-overlay.mjs';
@@ -230,6 +230,14 @@ export async function runClaudeSyntheticTrial(opts) {
     if (!ESTIMANDS.has(estimand)) {
       return { ok: false, spoilReason: 'UNSUPPORTED_ESTIMAND', detail: `estimand must be one of ${[...ESTIMANDS].join('/')}`, estimand };
     }
+    // Hale, hale--55f1222-closure-rejected: "a requested alias is not
+    // observed execution identity." Recording model was made optional
+    // last iteration; that's backwards for an evidence-producing run --
+    // without a REQUESTED model there is nothing to compare the transcript's
+    // OBSERVED model against, so identity can never be verified either way.
+    if (!model) {
+      return { ok: false, spoilReason: 'MODEL_REQUIRED', detail: 'model is required for every evidence-producing run -- it is what the observed transcript model gets verified against' };
+    }
     if (!sourceStoreDir || !existsSync(join(sourceStoreDir, '_memories'))) {
       return { ok: false, spoilReason: 'CORPUS_MISSING', sourceStoreDir };
     }
@@ -256,6 +264,20 @@ export async function runClaudeSyntheticTrial(opts) {
     }
     if (typeof expectedCandidateGitSha !== 'string' || !/^[0-9a-f]{40}$/.test(expectedCandidateGitSha)) {
       return { ok: false, spoilReason: 'CANDIDATE_SHA_BINDING_INVALID_SHA', detail: 'expectedCandidateGitSha must be a resolved 40-lowercase-hex commit, not HEAD, a branch, or any other mutable ref', received: expectedCandidateGitSha };
+    }
+    // Hale, hale--sha-wip-tree-object-false-pass: 40-lowercase-hex shape
+    // alone doesn't prove it's a COMMIT -- a tree OID (git rev-parse
+    // HEAD^{tree}) or a blob OID is exactly as hex-shaped and reached
+    // inventory before this check existed. `git cat-file -t` reports the
+    // real object type from the object database; only 'commit' qualifies.
+    let objectType;
+    try {
+      objectType = execFileSync('git', ['-C', candidateRepoRoot, 'cat-file', '-t', expectedCandidateGitSha], { encoding: 'utf8' }).trim();
+    } catch (e) {
+      return { ok: false, spoilReason: 'CANDIDATE_SHA_BINDING_GIT_ERROR', detail: e.message };
+    }
+    if (objectType !== 'commit') {
+      return { ok: false, spoilReason: 'CANDIDATE_SHA_BINDING_NOT_COMMIT', detail: `expectedCandidateGitSha resolves to a git object of type ${JSON.stringify(objectType)}, not 'commit'`, received: expectedCandidateGitSha, objectType };
     }
 
     // Step 1: fresh trial store, content-only copy, real leakage check.
@@ -423,6 +445,23 @@ export async function runClaudeSyntheticTrial(opts) {
     });
     if (!exposure.ok) return spoil(`EXPOSURE_${exposure.reason}`, { detail: exposure });
 
+    // Hale, hale--55f1222-closure-rejected / hale--wip-visible-confound-
+    // still-false-green: requested and OBSERVED identity must both be
+    // present and agree. --model accepts an ALIAS ('opus'/'sonnet'/
+    // 'fable') while the transcript's observed message.model is a full ID
+    // ('claude-opus-4-8') -- exact string equality would always fail even
+    // when correct, so the match is substring-based (case-insensitive,
+    // either direction). This is a pragmatic check, not a cryptographic
+    // one; it is still strictly more than the prior state (nothing).
+    if (!exposure.observedModel || !exposure.observedCliVersion) {
+      return spoil('MODEL_OR_VERSION_NOT_OBSERVED', { detail: { observedModel: exposure.observedModel, observedCliVersion: exposure.observedCliVersion } });
+    }
+    const requestedNorm = String(model).toLowerCase();
+    const observedNorm = String(exposure.observedModel).toLowerCase();
+    if (!observedNorm.includes(requestedNorm) && !requestedNorm.includes(observedNorm)) {
+      return spoil('MODEL_IDENTITY_MISMATCH', { detail: { requestedModel: model, observedModel: exposure.observedModel } });
+    }
+
     // Step 6: the efficacy contract. Hale, hale--ea8ed8a-106-green-two-
     // executable-falsifiers: "the green suite's own DI fixture writes
     // units_retrieved: [], selected_count: 0, result: 'no-hit' -- ok:true
@@ -532,7 +571,8 @@ export async function runClaudeSyntheticTrial(opts) {
       ok: true,
       command: {
         bin: 'claude', args: commandArgs, cwd: realStoreDir, env: { CORE_REASONING_ARM: arm },
-        requestedModel: model || null, reportedModel: cliResult.model || null,
+        requestedModel: model, reportedModel: cliResult.model || null,
+        observedModel: exposure.observedModel, observedCliVersion: exposure.observedCliVersion,
       },
       corpus: {
         sourceStoreDir, trialStoreDir: realStoreDir, unitCount: trialStore.unitCount,
