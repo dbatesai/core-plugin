@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { escapeCell, buildIndex } from '../../plugins/core/skills/core/scripts/generate-decisions-index.mjs';
+import { escapeCell, buildIndex, truncate, SUMMARY_MAX } from '../../plugins/core/skills/core/scripts/generate-decisions-index.mjs';
 
 test('M9: INDEX-decisions.md is written atomically (a crash mid-write must not yield a false-drift index)', () => {
   const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/generate-decisions-index.mjs', import.meta.url)), 'utf8');
@@ -20,6 +20,17 @@ test('escapeCell escapes pipes and backslashes and flattens newlines', () => {
   assert.equal(escapeCell('a\rb'), 'a b', 'a lone carriage return is flattened too');
   assert.equal(escapeCell('a\r\n\nb'), 'a b', 'runs of CR/LF collapse to one space');
   assert.equal(escapeCell(null), '');
+});
+
+// Independent review, 2026-07-19: this local truncate() was a hand-duplicated
+// copy of the surrogate-splitting bug fixed in generate-summary-index.mjs —
+// now delegates to the shared text-truncate.mjs helper. Direct regression
+// coverage so this specific export can't silently regress back to a local copy.
+test('truncate() never orphans a UTF-16 surrogate pair (astral characters, e.g. emoji)', () => {
+  const emoji = '🎯'.repeat(SUMMARY_MAX);
+  const out = truncate(emoji, SUMMARY_MAX);
+  assert.ok(!out.includes('�'), 'no lone-surrogate replacement character');
+  assert.ok(!Buffer.from(out, 'utf8').toString('utf8').includes('�'), 'round-trips clean through UTF-8 bytes too');
 });
 
 function scratchMemories(units) {

@@ -30,6 +30,17 @@
  * registered id or a path to a real project. An unresolved target FAILS LOUD
  * (exit 2) — a comms channel must never silently drop a message.
  *
+ * Self-caught 2026-07-20: `list`/`read`/`archive` used to resolve <project>
+ * with a bare `resolve()` instead of the registry-aware resolveTarget() that
+ * `post --to` already used -- a workspace id (e.g. an id NOT containing '/'
+ * or '.') silently resolved relative to the CALLER'S cwd instead of through
+ * the registry, and a wrong/unregistered id landed on a nonexistent
+ * directory and printed "no unread messages" instead of failing loud. That
+ * is indistinguishable from a genuinely empty mailbox and is exactly the
+ * silent-drop the FAILS LOUD invariant above was supposed to rule out --
+ * caught only because a 172-message backlog turned out to be sitting
+ * unseen behind it. All three ops now route through resolveTarget() too.
+ *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only, macOS + Windows.
  */
 
@@ -113,7 +124,7 @@ function parseName(name) {
 
 /** Unread messages: *.md in _mailbox/ (not archive/, not dotfiles). Missing dir → []. */
 export function listMessages(projectPath) {
-  const dir = mailboxDir(resolve(projectPath));
+  const dir = mailboxDir(resolveTarget(projectPath));
   let names;
   try { names = readdirSync(dir); } catch { return []; }
   const out = [];
@@ -137,7 +148,7 @@ export function listMessages(projectPath) {
 }
 
 export function readMessage(projectPath, file) {
-  const full = join(mailboxDir(resolve(projectPath)), basename(file));
+  const full = join(mailboxDir(resolveTarget(projectPath)), basename(file));
   return readFileSync(full, 'utf8');
 }
 
@@ -169,7 +180,7 @@ function moveNonColliding(src, dir, filename) {
 
 /** Move a message to archive/ (mark read). Idempotent: already-archived/absent → no-op. */
 export function archiveMessage(projectPath, file) {
-  const proj = resolve(projectPath);
+  const proj = resolveTarget(projectPath);
   const src = join(mailboxDir(proj), basename(file));
   if (!existsSync(src)) return false; // already archived or never existed
   const dir = archiveDir(proj);

@@ -49,34 +49,21 @@ import { logHookEvent } from './hook-log.mjs';
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
 
-// UTF-8-safe byte-budget truncation for the hook's final stdout emission.
-// `String.prototype.slice` counts UTF-16 code units, not UTF-8 bytes: for
-// multi-byte-heavy content (CJK, emoji) a code-unit slice can (a) land mid
-// character, corrupting it into a decode artifact, and (b) — the more
-// serious case — let the total emitted payload exceed OUTPUT_BYTE_CAP
-// outright, because a low code-unit count can still encode to well over
-// 2048 bytes. buildFinalContextPack() already byte-caps the pack alone
-// correctly; this closes the gap in the hook's own pack+directive
-// concatenation, the step that re-slices by the wrong unit (Hale's
-// pre-registered byte-cap falsifier, 2026-07-19).
-export function truncateUtf8Safe(str, maxBytes) {
-  const full = Buffer.from(str, 'utf8');
-  if (full.length <= maxBytes) return str;
-  // Walk back from the truncation point over any continuation bytes
-  // (10xxxxxx) to find the start of the sequence that straddles maxBytes.
-  let leadPos = maxBytes;
-  let steps = 0;
-  while (leadPos > 0 && steps < 4 && (full[leadPos] & 0xC0) === 0x80) {
-    leadPos--;
-    steps++;
-  }
-  const lead = full[leadPos];
-  let seqLen = 1;
-  if ((lead & 0xE0) === 0xC0) seqLen = 2;
-  else if ((lead & 0xF0) === 0xE0) seqLen = 3;
-  else if ((lead & 0xF8) === 0xF0) seqLen = 4;
-  const end = (leadPos + seqLen <= maxBytes) ? leadPos + seqLen : leadPos;
-  return full.subarray(0, end).toString('utf8');
+/**
+ * Truncate `str` to at most `maxBytes` UTF-8 bytes without splitting a
+ * multi-byte character (or a surrogate pair) mid-sequence. String.slice
+ * counts UTF-16 code units, not bytes — wrong for a byte-budget contract on
+ * any non-ASCII content (K-series UTF-8 byte-cap fix, Hale's re-audit 2026-07-19).
+ */
+export function truncateUtf8(str, maxBytes) {
+  const buf = Buffer.from(str, 'utf8');
+  if (buf.length <= maxBytes) return str;
+  let end = maxBytes;
+  // Back off while sitting on a UTF-8 continuation byte (10xxxxxx = 0x80-0xBF)
+  // — that means `end` is mid-sequence; the first non-continuation byte at or
+  // before `end` is where a complete character boundary actually is.
+  while (end > 0 && (buf[end] & 0xC0) === 0x80) end--;
+  return buf.subarray(0, end).toString('utf8');
 }
 
 // Producer identity for outcome rows — read from the plugin manifest so the
@@ -411,13 +398,25 @@ export async function main() {
   // structurally impossible (the directive only ever fired on zero-hit), so
   // the old if/else-if silently dropping one of them was never reachable.
   // Deliver both, directive appended after the pack, still under the same cap.
+  //
+  // Hale's re-audit, 2026-07-19: buildFinalContextPack already budgets
+  // packText in real UTF-8 bytes (Buffer.byteLength), but this final combine
+  // step used to re-truncate with String.slice(0, OUTPUT_BYTE_CAP) — .slice
+  // counts UTF-16 code units, not bytes, so appending reasoningDirective and
+  // re-slicing could both exceed the preregistered byte budget on non-ASCII
+  // content AND split a multi-byte character (or a surrogate pair) mid-
+  // sequence, corrupting the delivered payload. It also always used the
+  // hardcoded 2048 constant rather than the effective `byteCap` (which can be
+  // smaller via CORE_RETRIEVAL_BYTE_CAP), silently ignoring a tighter
+  // configured budget. truncateUtf8 trims on a real byte offset and backs off
+  // to the nearest complete UTF-8 sequence boundary instead of cutting blind.
   const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
   if (packText && reasoningDirective) {
-    process.stdout.write(truncateUtf8Safe(packText + reasoningDirective, OUTPUT_BYTE_CAP));
+    process.stdout.write(truncateUtf8(packText + reasoningDirective, byteCap));
   } else if (packText) {
     process.stdout.write(packText);
   } else if (reasoningDirective) {
-    process.stdout.write(truncateUtf8Safe(reasoningDirective, OUTPUT_BYTE_CAP));
+    process.stdout.write(truncateUtf8(reasoningDirective, byteCap));
   }
 
   // NOW persist the pending marker — after delivery, never before (Hale

@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadValidEnrichments } from './enrichment-sidecar.mjs';
+import { truncate as sharedTruncate } from './text-truncate.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -219,9 +220,16 @@ export function deriveSummary(body) {
   return '';
 }
 
-function truncate(text, maxLen = SUMMARY_MAX) {
-  const t = String(text ?? '');
-  return t.length <= maxLen ? t : t.slice(0, maxLen - 1).trimEnd() + '…';
+// Found while regression-testing the K-series UTF-8 byte-cap fix (retrieve-
+// context-hook.mjs), 2026-07-19: this is the actual source of the corruption
+// that fix's test caught (`.slice(0, maxLen - 1)` counted UTF-16 code units
+// and could orphan a surrogate pair). An independent review the same day
+// found two more hand-duplicated copies of this exact bug
+// (generate-decisions-index.mjs, generate-risks-index.mjs) that a same-file
+// fix here didn't reach — collapsed all three into text-truncate.mjs so
+// there's no second copy left to drift.
+export function truncate(text, maxLen = SUMMARY_MAX) {
+  return sharedTruncate(text, maxLen);
 }
 
 // Active = status missing or literally 'active'. Anything else (retired, archived,

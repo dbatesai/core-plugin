@@ -128,28 +128,26 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
 }
 
 /**
- * K17 (Hale's audit, 2026-07-16): "mode-blind" — the CLI's --dir output was a
- * bare manifestHash() result ({content_manifest_sha256, file_count, entries}),
- * with no field naming which computation path produced it and no record of
- * WHICH directory. artifactIdentity's git-mode output has ref/subdir/tree_oid
- * self-describing it; the directory-mode output had no equivalent — a saved
- * JSON blob from one mode was indistinguishable in shape from the other only
- * by which fields happened to be absent, not by an explicit self-description.
- * This is exactly wrong for an identity mechanism whose whole point (per the
- * module docstring) is that two INDEPENDENT exports must be provably
- * comparable and auditable after the fact, not just numerically equal.
- * Mirrors artifactIdentity's shape so both modes are symmetric and explicit.
+ * K17 (Hale's audit, 2026-07-16; re-audited 2026-07-19): "mode-blind" — the
+ * CLI's --dir output was a bare manifestHash() result with no field naming
+ * which computation path produced it. The first fix added a `mode` field but
+ * also embedded the canonical absolute local directory in `dir` and in
+ * `reproduce.content_manifest` — Hale's re-audit demonstrated this fails
+ * CORE's OWN refusal-scan boundary (aggregate-receipt.mjs's isPathShaped):
+ * a machine-local path is not part of the content identity, varies by
+ * machine, and is exactly the kind of non-reconstructive-evidence violation
+ * that boundary exists to catch. Fixed: `mode` alone makes the output
+ * self-describing without publishing the local filesystem layout; the
+ * reproduce command uses a location-neutral `<dir>` placeholder.
  */
 export function directoryIdentity(dir) {
-  const root = realpathSync(dir);
   const { content_manifest_sha256, file_count } = manifestFromDirectory(dir);
   return {
     mode: 'directory',
-    dir: root,
     content_manifest_sha256,
     file_count,
     reproduce: {
-      content_manifest: `node artifact-identity.mjs --dir ${root}`,
+      content_manifest: 'node artifact-identity.mjs --dir <dir>',
     },
   };
 }
@@ -160,7 +158,7 @@ function main(argv) {
   if (dirIdx >= 0) {
     const out = directoryIdentity(argv[dirIdx + 1]);
     process.stdout.write(json ? JSON.stringify(out, null, 2) + '\n'
-      : `mode ${out.mode}\ndir ${out.dir}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\n`);
+      : `mode ${out.mode}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\n`);
     return 0;
   }
   const subIdx = argv.indexOf('--subdir');

@@ -251,6 +251,32 @@ test('CORE_REASONING_ARM=always-on with no hits: directive fires, reason stays h
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// UTF-8 byte-cap fix (Hale's re-audit, 2026-07-19): the final pack+directive
+// combine step used to re-truncate with String.slice(0, 2048) — UTF-16 code
+// units, not bytes — which can both exceed the preregistered 2048-byte budget
+// on non-ASCII content and split a multi-byte character (or a surrogate pair)
+// mid-sequence. A dense-emoji unit body forces the packText close to the cap
+// on its own, so appending the forced reasoning directive (always-on) pushes
+// the combine step over budget and exercises the exact truncation boundary.
+test('K-series UTF-8 fix: dense multi-byte content + forced directive stays within the real byte budget with no corrupted (replacement-char) truncation', () => {
+  const root = mkdtempSync(join(trustedTestTmpRoot(), 'rh-utf8-'));
+  const store = join(root, '_memories');
+  mkd(store, { recursive: true });
+  wf(join(root, 'PROJECT.md'), '# T\n');
+  // 600 four-byte emoji = 2400 raw UTF-8 bytes in the body alone — comfortably
+  // past the 2048 cap on its own, entirely multi-byte, so any byte-unaware
+  // truncation is very likely to land mid-character.
+  const emojiFiller = '🎯'.repeat(600);
+  wf(join(store, 'dc-1-widget.md'),
+    `---\nid: dc-1-widget\ntype: decision\nstatus: active\ncreated: 2026-07-01\ntopics:\n  - widget\n---\n\nWidget decision body. ${emojiFiller}\n`);
+  try {
+    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_REASONING_ARM: 'always-on' }, root);
+    assert.ok(Buffer.byteLength(out, 'utf8') <= 2048, `delivered payload must respect the real UTF-8 byte budget (got ${Buffer.byteLength(out, 'utf8')} bytes)`);
+    assert.ok(!out.includes('�'), 'no replacement-character corruption from a mid-sequence split');
+    assert.match(out, /CORE reasoning escalation required/, 'the forced directive must still be present, not silently dropped by the fix');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('CORE_REASONING_ARM unset behaves identically to "automatic" (no requested_arm/directive_fired fields at all)', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-unset-')));
   try {
