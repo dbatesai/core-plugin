@@ -388,3 +388,20 @@ test('requires byteCap to be a non-negative integer when supplied', () => {
   assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', baseArgs({ byteCap: -1 })), /byteCap/);
   assert.throws(() => checkHostExposureClaudeCode('/tmp/whatever.jsonl', baseArgs({ byteCap: 'nope' })), /byteCap/);
 });
+
+// Hale watcher finding (byte-cap-and-composition-checkpoint): the real
+// product's OUTPUT_BYTE_CAP (2048) is a hard ceiling a caller must never be
+// able to exceed -- a byteCap > 2048 would let a caller "prove" an emission
+// the real hook could never actually produce.
+test('rejects byteCap greater than the real product OUTPUT_BYTE_CAP (2048)', () => {
+  assert.throws(
+    () => checkHostExposureClaudeCode('/tmp/whatever.jsonl', baseArgs({ byteCap: 2049 })),
+    /byteCap <= 2048/,
+  );
+  // The real ceiling itself must still be accepted (boundary, not off-by-one).
+  assert.doesNotThrow(() => {
+    try { checkHostExposureClaudeCode('/tmp/whatever.jsonl', baseArgs({ byteCap: 2048 })); } catch (e) {
+      if (e.message.includes('byteCap')) throw e; // only re-throw if it's the cap check itself
+    }
+  });
+});

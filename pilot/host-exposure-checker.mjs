@@ -170,6 +170,14 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
   if (!Number.isInteger(byteCap) || byteCap < 0) {
     throw new Error(`checkHostExposureClaudeCode requires byteCap to be a non-negative integer when supplied, got ${JSON.stringify(byteCap)}`);
   }
+  // Hale watcher finding (byte-cap-and-composition-checkpoint): the real
+  // product's OUTPUT_BYTE_CAP (2048) is a hard ceiling -- CORE_RETRIEVAL_BYTE_CAP
+  // can only ever tighten it (`Math.min(configuredCap, OUTPUT_BYTE_CAP)`), never
+  // widen it. Accepting any non-negative integer here let a caller "prove" an
+  // emission the real hook could never actually produce.
+  if (byteCap > OUTPUT_BYTE_CAP) {
+    throw new Error(`checkHostExposureClaudeCode requires byteCap <= ${OUTPUT_BYTE_CAP} (the product's real OUTPUT_BYTE_CAP ceiling — CORE_RETRIEVAL_BYTE_CAP can only tighten it, never widen it), got ${byteCap}`);
+  }
   if (!existsSync(transcriptPath)) {
     return { ok: false, reason: 'TRANSCRIPT_NOT_FOUND', path: transcriptPath };
   }
