@@ -477,14 +477,18 @@ test('writeOkfExport recovers a real killed-process crash on the next run (not j
   const orphans = readdirSync(root).filter(e => e.startsWith('_okf-export.bak-'));
   assert.equal(orphans.length, 1, 'exactly one orphaned backup must exist post-crash');
 
-  // Next run (fresh, in-process, no fault flag) must recover automatically
-  // and produce a correct export, not error out or silently lose data.
-  // Production leaves the file-lock default staleMs (10 minutes, deliberate
-  // per K12 hardening: a lock is only stealable once BOTH aged past the
-  // threshold AND its owner pid is confirmed dead). This test tightens
-  // staleMs so it can observe the SAME dead-pid takeover path without a
-  // real 10-minute wait -- the pid-liveness check itself is unchanged.
-  writeOkfExport(root, outDir, { lockOptions: { staleMs: 50 } });
+  // Next run: the ORDINARY production call, no special options. Hale
+  // re-audit (hale--lock-test-production-mismatch, hale--48854e2-
+  // production-next-run-hold): an earlier version of this test passed a
+  // test-only tightened staleMs while production kept file-lock's
+  // cross-project 10-minute default -- so this test proved "recoverable
+  // on the next run" while the real CLI path, reproduced exactly (export,
+  // hard-kill, export again with no flags), still threw LOCK_HELD for ten
+  // minutes after a real crash. writeOkfExport now hardcodes staleMs: 0
+  // for its own lock (pidAlive() is what actually protects a live
+  // process; staleMs never did on its own), so this call IS the real
+  // path -- must succeed immediately, not after any wait.
+  writeOkfExport(root, outDir);
   assert.ok(existsSync(outDir), 'outDir must exist after the recovering run');
   assert.equal(readFileSync(join(outDir, 'dc-1-alpha.md'), 'utf8'), goodAlpha, 'recovered content must match the pre-crash export');
   // Hale second re-audit (34e57be): the killed child's OWN tmpDir (fully
@@ -531,6 +535,32 @@ test('recoverOrphanedBackup consumes a dead-owner backup even when outDir alread
   recoverOrphanedBackup(outDir);
   assert.ok(!existsSync(deadBak), 'a dead-owner backup must be consumed even when outDir already exists and looks healthy');
   assert.ok(existsSync(outDir), 'outDir itself must be untouched');
+});
+
+// Hale re-audit (hale--exporter-lock-stale-default): "when outDir is
+// absent and any live-owner backup exists, do not restore an older dead
+// backup beside it; the live owner has the active transaction." A live
+// backup means that pid's swap is actively in flight -- restoring a
+// different, dead backup out from under it would be a real correctness
+// bug, not a hypothetical one.
+test('recoverOrphanedBackup defers entirely when a live-owner backup exists, even alongside a dead one', () => {
+  const root = fixtureStore();
+  const outDir = join(root, '_okf-export');
+  const liveBak = `${outDir}.bak-${process.pid}`; // this test's own pid — guaranteed alive
+  const deadBak = `${outDir}.bak-999999999`;
+  mkdirSync(liveBak, { recursive: true });
+  writeFileSync(join(liveBak, 'live.md'), 'the live owner\'s active transaction');
+  mkdirSync(deadBak, { recursive: true });
+  writeFileSync(join(deadBak, 'dead.md'), 'an unrelated older dead backup');
+  try {
+    const result = recoverOrphanedBackup(outDir);
+    assert.equal(result.recovered, false);
+    assert.ok(!existsSync(outDir), 'outDir must stay absent — recovery must not proceed while a live owner is active');
+    assert.ok(existsSync(liveBak), 'the live owner\'s backup must be untouched');
+  } finally {
+    rmSync(liveBak, { recursive: true, force: true });
+    rmSync(deadBak, { recursive: true, force: true });
+  }
 });
 
 // Hale live-exporter-diff-concurrency-stop: a concurrent negative control

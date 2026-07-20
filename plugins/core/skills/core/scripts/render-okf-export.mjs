@@ -241,12 +241,21 @@ export function recoverOrphanedBackup(outDir) {
 
   const bakPattern = new RegExp(`^${escaped}\\.bak-(\\d+)$`);
   const baks = entries.filter(e => bakPattern.test(e));
+  const liveBaks = baks.filter(e => pidAlive(Number(e.match(bakPattern)[1])));
   const deadBaks = baks.filter(e => !pidAlive(Number(e.match(bakPattern)[1])));
 
   if (existsSync(outDir)) {
     for (const e of deadBaks) rmSync(join(parent, e), { recursive: true, force: true });
     return { recovered: false };
   }
+
+  // Hale re-audit (hale--exporter-lock-stale-default): a live-owner backup
+  // means that pid's transaction is actively in flight right now -- it is
+  // the authority on this outDir, not an older dead backup that happens to
+  // also be lying around. Restoring the dead one out from under a live
+  // owner's active transaction would be a real correctness bug, not a
+  // theoretical one. Defer entirely rather than guess which backup wins.
+  if (liveBaks.length > 0) return { recovered: false };
 
   if (deadBaks.length === 0) return { recovered: false };
   if (deadBaks.length > 1) {
@@ -275,17 +284,23 @@ export function recoverOrphanedBackup(outDir) {
  * lock is detected as stale and taken over by the existing mechanism; no
  * new liveness logic was written for that case.
  *
- * `lockOptions` passes through to withFileLock verbatim -- production
- * callers never set it (the file-lock default staleMs, 10 minutes, is a
- * deliberate cross-project policy: a lock is only stealable once BOTH its
- * age exceeds that threshold AND its owner pid is confirmed dead, per the
- * K12/round-3 hardening -- a suspended-then-revived process past any age
- * ceiling would otherwise overlap its superseder). Tests that simulate a
- * crash and want to observe recovery without a real 10-minute wait pass a
- * tightened staleMs explicitly; this never weakens the dead-pid check
- * itself, only how long a confirmed-dead owner's lock is honored first.
+ * Uses staleMs: 0 for this lock specifically (Hale re-audit,
+ * hale--lock-test-production-mismatch and hale--48854e2-production-next-
+ * run-hold: the earlier version kept file-lock's cross-project 10-minute
+ * default here on a mistaken safety theory, and a test-only lockOptions
+ * seam tightened staleMs only in tests -- so the committed test proved
+ * "recoverable on the next run" while the real CLI path, reproduced
+ * exactly, still threw LOCK_HELD for ten minutes after a real crash.
+ * staleMs never protects a live process on its own: file-lock's own
+ * staleness rule is age > staleMs AND !pidAlive(pid) -- both conditions,
+ * always. A live or suspended-then-revived owner is never stolen from
+ * regardless of staleMs; zero only makes a CONFIRMED-DEAD owner's lock
+ * reclaimable immediately instead of after an arbitrary wait. There is no
+ * safety reason to delay recovering from a death this transaction can
+ * already prove happened, so production and tests now use the exact same
+ * call with no configurable seam between them.
  */
-export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null, lockOptions = {} } = {}) {
+export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null } = {}) {
   return withFileLock(`${outDir}.lock`, () => {
     recoverOrphanedBackup(outDir);
     const { manifest, outputs, generatedLinks } = renderOkfExport(projectDir, { linkDensityThreshold });
@@ -358,7 +373,7 @@ export function writeOkfExport(projectDir, outDir, { linkDensityThreshold = null
       if (!swapFailed && existsSync(bakDir)) rmSync(bakDir, { recursive: true, force: true });
     }
     return manifest;
-  }, lockOptions);
+  }, { staleMs: 0 });
 }
 
 function usage() {
