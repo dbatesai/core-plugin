@@ -80,7 +80,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { captureCursor, checkTrialWindow } from './trial-window-join-checker.mjs';
-import { checkHostExposureClaudeCode } from './host-exposure-checker.mjs';
+import { checkHostExposureClaudeCode, checkControlAnswerClaudeCode } from './host-exposure-checker.mjs';
 import { fetchPluginInventory as realFetchPluginInventory, computeDisableAllOverlay, verifyOverlayApplied } from './invocation-plugin-overlay.mjs';
 import { checkCorpusLeakage, checkStringsForLeakage, resolveCarrierIds } from './corpus-leakage-check.mjs';
 import { directoryIdentity, manifestFromGit, treeOid } from '../plugins/core/skills/core/scripts/artifact-identity.mjs';
@@ -452,6 +452,81 @@ export async function runClaudeSyntheticTrial(opts) {
     const { resolveTranscript } = await import(join(coreSkillRoot, 'scripts', 'read-transcript.mjs'));
     const { path: transcriptPath } = resolveTranscript('claude-code', { cwd: realStoreDir, sessionId: cliResult.session_id });
     if (!transcriptPath) return spoil('TRANSCRIPT_NOT_RESOLVED');
+
+    // Hale, hale--6676db9-audit-hold-remediation-plan-required item 1: a
+    // control run (retrievalHookEnabled: false) must NOT be routed through
+    // checkHostExposureClaudeCode -- that function's whole contract assumes
+    // the hook fired and produced an exposure, which is false BY DESIGN for
+    // a control run. Reusing it here would spoil every real, correct
+    // control observation as if something were broken. checkControlAnswerClaudeCode
+    // is the control-shaped counterpart (spoils CONTROL_HOOK_NOT_SUPPRESSED
+    // if an exposure occurs anyway -- the red falsifier proving the
+    // opt-out actually held, not just assumed). No efficacy/carrier
+    // checks below apply to a control run: there is no injected pack to
+    // check delivery of by design, so this branch returns its own
+    // control-shaped envelope rather than falling through to Step 6/7.
+    if (!retrievalHookEnabled) {
+      const control = checkControlAnswerClaudeCode(transcriptPath, {
+        expectedPromptId: joinResult.outcome.answer_turn_id,
+      });
+      if (!control.ok) return spoil(`CONTROL_${control.reason}`, { detail: control });
+      if (!control.observedModel || !control.observedCliVersion) {
+        return spoil('MODEL_OR_VERSION_NOT_OBSERVED', { detail: { observedModel: control.observedModel, observedCliVersion: control.observedCliVersion } });
+      }
+      const requestedNormControl = String(model).toLowerCase();
+      const observedNormControl = String(control.observedModel).toLowerCase();
+      if (!observedNormControl.includes(requestedNormControl) && !requestedNormControl.includes(observedNormControl)) {
+        return spoil('MODEL_IDENTITY_MISMATCH', { detail: { requestedModel: model, observedModel: control.observedModel } });
+      }
+      return {
+        ok: true,
+        command: {
+          bin: 'claude', args: commandArgs, cwd: realStoreDir,
+          env: { CORE_REASONING_ARM: arm, CORE_RETRIEVAL_HOOK: '0' },
+          retrievalHookEnabled: false,
+          requestedModel: model, reportedModel: cliResult.model || null,
+          observedModel: control.observedModel, observedCliVersion: control.observedCliVersion,
+        },
+        corpus: {
+          sourceStoreDir, trialStoreDir: realStoreDir, unitCount: trialStore.unitCount,
+          contentManifestSha256: corpusHash, plants, leakageClean: true, promptLeakageClean: true,
+        },
+        candidateIdentity: {
+          pluginDir: candidatePluginDir, copiedTrialDir: candidateCopy.candidateCopyDir, repoRoot: candidateRepoRoot,
+          preInvocationContentHash: candidateCopy.contentHash, postInvocationContentHash: postHash,
+          resolvedInventoryEntry: overlayCheck.candidate, resolvedInventory: overlayCheck.resolvedInventory,
+          resolvedEnabledCount: 1, expectedProducerVersion, expectedProducerSha,
+          verifiedCandidateGitSha, verifiedCandidateTreeOid,
+        },
+        invocation: {
+          sessionId: cliResult.session_id,
+          arm,
+          exitCode: spawnResult.status,
+          wallTimeMs,
+          totalCostUsd: cliResult.total_cost_usd,
+          stdoutSha256: sha256Hex(spawnResult.stdout || ''),
+          stderrSha256: sha256Hex(spawnResult.stderr || ''),
+          finalResultField: cliResult.result,
+        },
+        cursors: { retrievalBefore, retrievalAfter, outcomeBefore, outcomeAfter },
+        join: joinResult,
+        control,
+        // Explicit not-applicable, never simply omitted -- an absent field
+        // reads as "forgot to compute," a null-shaped one reads as "does
+        // not apply to a control run by design." Hale's own audit language
+        // for the paired wrapper: "only retrieval hook on/off differs";
+        // there is no pack/efficacy dimension on this leg to report.
+        efficacy: null,
+        hashes: {
+          transcriptSha256: sha256File(transcriptPath),
+          promptSha256: sha256Hex(prompt),
+          finalAnswerHash: control.finalAnswerHash,
+        },
+        transcriptPath,
+        finalAnswerText: control.finalAnswerText,
+      };
+    }
+
     const exposure = checkHostExposureClaudeCode(transcriptPath, {
       expectedPromptId: joinResult.outcome.answer_turn_id,
       expectedPackText: packText,
@@ -657,4 +732,86 @@ export async function runClaudeSyntheticTrial(opts) {
   // so the caller can inspect them afterward; cleanup is the CALLER's
   // decision (e.g. only after archiving, or after some retention window),
   // never automatic here.
+}
+
+// runMatchedControlPair -- the paired on/off wrapper Hale's remediation
+// plan item 1 asked for (hale--6676db9-audit-hold-remediation-plan-
+// required): "same prompt, corpus, tools, requested model, observed model,
+// CLI version, candidate commit, and settings; only retrieval hook on/off
+// differs. Fail closed on any other difference. Pre-register the
+// comparison and keep/rollback threshold."
+//
+// Deliberately thin: runClaudeSyntheticTrial already builds a FRESH trial
+// store and a FRESH immutable candidate copy per call (Steps 1-2), so
+// calling it twice with the same opts already gives each leg its own
+// isolated store/session per Hale's "fresh store per trial" requirement --
+// this wrapper does not need to (and must not) reimplement that isolation
+// itself. Its only real job is: run both legs with the SAME caller-supplied
+// opts except retrievalHookEnabled, verify after the fact that nothing
+// about candidate/model/corpus identity actually diverged between the two
+// real runs (a same-opts call is not proof of a same-observed-identity
+// result -- the model could still drift, the candidate could still be
+// mutated mid-run), and refuse to call the pair a valid comparison if it
+// did. It does NOT compute or claim efficacy from a single pair -- Hale,
+// hale--paid-run-direct-file-read-confound: "one successful treatment run
+// is not causal evidence." A pair is one data point; the keep/rollback
+// decision is a pre-registered human/advisor call this wrapper only
+// carries through honestly, never computes.
+export async function runMatchedControlPair(opts) {
+  const { keepRollbackThreshold, ...trialOpts } = opts || {};
+  // Fail closed up front -- Hale's own phrase is "pre-register the...
+  // threshold," which means it must exist BEFORE either paid run, not be
+  // an optional afterthought a caller can silently omit.
+  if (keepRollbackThreshold === undefined || keepRollbackThreshold === null) {
+    return { ok: false, spoilReason: 'KEEP_ROLLBACK_THRESHOLD_REQUIRED', detail: 'the comparison threshold must be pre-registered before either leg runs, per Hale\'s remediation-plan item 1' };
+  }
+  if ('retrievalHookEnabled' in trialOpts) {
+    return { ok: false, spoilReason: 'RETRIEVAL_HOOK_ENABLED_NOT_CALLER_CONTROLLED', detail: 'runMatchedControlPair sets retrievalHookEnabled itself for each leg -- a caller-supplied value would defeat the pairing' };
+  }
+
+  const treatment = await runClaudeSyntheticTrial({ ...trialOpts, retrievalHookEnabled: true });
+  const control = await runClaudeSyntheticTrial({ ...trialOpts, retrievalHookEnabled: false });
+
+  if (!treatment.ok || !control.ok) {
+    return {
+      ok: false, spoilReason: 'PAIR_LEG_SPOILED',
+      detail: {
+        treatmentSpoiled: !treatment.ok ? treatment.spoilReason : null,
+        controlSpoiled: !control.ok ? control.spoilReason : null,
+      },
+      treatment, control,
+    };
+  }
+
+  // Cross-run invariants -- fail closed on ANY divergence, per Hale's exact
+  // wording. Same requested/observed model, same CLI version, same
+  // verified candidate git SHA, same corpus content hash. Arm and
+  // retrievalHookEnabled are EXPECTED to differ (that is the whole point
+  // of the pair) and are excluded from this check.
+  const mismatches = [];
+  if (treatment.command.requestedModel !== control.command.requestedModel) mismatches.push('requestedModel');
+  if (treatment.command.observedModel !== control.command.observedModel) mismatches.push('observedModel');
+  if (treatment.command.observedCliVersion !== control.command.observedCliVersion) mismatches.push('observedCliVersion');
+  if (treatment.candidateIdentity.verifiedCandidateGitSha !== control.candidateIdentity.verifiedCandidateGitSha) mismatches.push('verifiedCandidateGitSha');
+  if (treatment.candidateIdentity.expectedProducerVersion !== control.candidateIdentity.expectedProducerVersion) mismatches.push('expectedProducerVersion');
+  if (treatment.corpus.contentManifestSha256 !== control.corpus.contentManifestSha256) mismatches.push('corpus.contentManifestSha256');
+  if (treatment.invocation.arm !== control.invocation.arm) mismatches.push('arm');
+  if (mismatches.length > 0) {
+    return { ok: false, spoilReason: 'PAIR_IDENTITY_MISMATCH', detail: { mismatches }, treatment, control };
+  }
+
+  return {
+    ok: true,
+    keepRollbackThreshold,
+    treatment,
+    control,
+    // Honest, minimal comparison -- NOT an efficacy verdict. One pair is
+    // one data point; a keep/rollback DECISION from it is the pre-
+    // registered human/advisor call this function only carries through.
+    comparison: {
+      treatmentAnsweredWithPlantedToken: (treatment.efficacy?.answerMatchedTokens || []).length > 0,
+      controlAnsweredWithPlantedToken: treatment.corpus.plants.some((p) =>
+        String(control.finalAnswerText || '').toLowerCase().includes(String(p.token).toLowerCase())),
+    },
+  };
 }

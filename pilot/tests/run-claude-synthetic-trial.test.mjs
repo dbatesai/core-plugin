@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 
 const PILOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CORE_SCRIPTS = join(PILOT, '..', 'plugins', 'core', 'skills', 'core', 'scripts');
-const { runClaudeSyntheticTrial, deriveExpectedPackAndDirective } = await import(pathToFileURL(join(PILOT, 'run-claude-synthetic-trial.mjs')).href);
+const { runClaudeSyntheticTrial, runMatchedControlPair, deriveExpectedPackAndDirective } = await import(pathToFileURL(join(PILOT, 'run-claude-synthetic-trial.mjs')).href);
 const { EXPECTED_USER_PROMPT_SUBMIT_COMMAND, EXPECTED_STOP_COMMAND } = await import(pathToFileURL(join(PILOT, 'host-exposure-checker.mjs')).href);
 const { recordRetrievalEvent } = await import(pathToFileURL(join(CORE_SCRIPTS, 'record-retrieval-event.mjs')).href);
 const { recordRetrievalOutcome } = await import(pathToFileURL(join(CORE_SCRIPTS, 'record-retrieval-outcome.mjs')).href);
@@ -171,7 +171,7 @@ function fakeFetchInventory({ pluginDir } = {}) {
 // host-exposure-checker.mjs) into the exact cwd/session the orchestrator
 // gives it, then returns a realistic CLI JSON result. No process is ever
 // spawned -- this fixture is the "spawn result" the DI seam exists for.
-function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds = [], deliveredUnitIds = rankedUnitIds, includeToolUse = false, omitModel = false, omitVersion = false }) {
+function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds = [], deliveredUnitIds = rankedUnitIds, includeToolUse = false, omitModel = false, omitVersion = false, includeExposure = true }) {
   return (args, spawnOpts) => {
     const cwd = spawnOpts.cwd;
     // Hale, hale--6e4e086-stop-and-telemetry-hold / hale--0255-a5ee4c9-and-
@@ -202,16 +202,22 @@ function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answer
     const transcriptPath = join(transcriptDir, `${sessionId}.jsonl`);
     cleanupPaths.push(transcriptPath);
     const fullEmission = (packText && directiveText ? packText + directiveText : packText || directiveText).trimEnd();
+    // Hale, hale--memory-architecture-advice-2026-07-20-12: a genuinely
+    // suppressed control transcript (CORE_RETRIEVAL_HOOK=0 actually held)
+    // never emits a UserPromptSubmit attachment at all -- includeExposure
+    // lets a test reproduce that real shape instead of every fixture
+    // implicitly modeling a treatment turn.
+    const exposureParentUuid = includeExposure ? 'u2' : 'u1';
     const lines = [
       { type: 'user', promptId, uuid: 'u1', parentUuid: null, version: FIXTURE_CLI_VERSION, message: { role: 'user', content: [{ type: 'text', text: 'fixture prompt' }] } },
-      { type: 'attachment', uuid: 'u2', parentUuid: 'u1', version: FIXTURE_CLI_VERSION, attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: 'tu1', content: fullEmission, stdout: `${fullEmission}\n`, exitCode: 0, command: EXPECTED_USER_PROMPT_SUBMIT_COMMAND } },
+      ...(includeExposure ? [{ type: 'attachment', uuid: 'u2', parentUuid: 'u1', version: FIXTURE_CLI_VERSION, attachment: { type: 'hook_success', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: 'tu1', content: fullEmission, stdout: `${fullEmission}\n`, exitCode: 0, command: EXPECTED_USER_PROMPT_SUBMIT_COMMAND } }] : []),
       // Hale, hale--paid-run-direct-file-read-confound: the real iteration-
       // 21 transcript showed exactly this shape -- a Bash/Read tool_use
       // block between exposure and the final answer, which is how the
       // model actually saw the planted token. includeToolUse lets a test
       // reproduce that shape to prove the confound gate catches it.
-      ...(includeToolUse ? [{ type: 'assistant', uuid: 'utool', parentUuid: 'u2', version: FIXTURE_CLI_VERSION, message: { model: FIXTURE_MODEL, id: 'msgtool', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'Read', input: { file_path: '_memories/dc-1-carrier.md' } }] } }] : []),
-      { type: 'assistant', uuid: 'u3', parentUuid: includeToolUse ? 'utool' : 'u2', version: FIXTURE_CLI_VERSION, message: { model: FIXTURE_MODEL, id: 'msg1', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: answerText }] } },
+      ...(includeToolUse ? [{ type: 'assistant', uuid: 'utool', parentUuid: exposureParentUuid, version: FIXTURE_CLI_VERSION, message: { model: FIXTURE_MODEL, id: 'msgtool', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'Read', input: { file_path: '_memories/dc-1-carrier.md' } }] } }] : []),
+      { type: 'assistant', uuid: 'u3', parentUuid: includeToolUse ? 'utool' : exposureParentUuid, version: FIXTURE_CLI_VERSION, message: { model: FIXTURE_MODEL, id: 'msg1', role: 'assistant', stop_reason: 'end_turn', content: [{ type: 'text', text: answerText }] } },
       // A real completed `-p` invocation always fires the candidate's own
       // Stop hook (answer-close-hook.mjs) too -- host-exposure-checker.mjs
       // now requires it (Hale, hale--b75fecc-paid-run-not-release-evidence).
@@ -906,9 +912,16 @@ test('retrievalHookEnabled sets the real hook opt-out env var explicitly, both d
   try {
     for (const [label, retrievalHookEnabled] of [['explicit-on', true], ['explicit-off', false], ['default (omitted)', undefined]]) {
       const sessionId = `fixture-session-hookflag-${label.replace(/[^a-z0-9]+/gi, '-')}`;
+      // Hale, hale--memory-architecture-advice-2026-07-20-12: a real
+      // retrievalHookEnabled:false run produces a transcript with NO
+      // UserPromptSubmit attachment at all -- reflecting that shape here
+      // is what makes this test exercise the real control branch instead
+      // of spoiling on CONTROL_HOOK_NOT_SUPPRESSED against a fixture that
+      // never modeled genuine suppression.
+      const includeExposure = retrievalHookEnabled !== false;
       const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
       const capturedEnvs = [];
-      const inner = makeFixtureSpawn({ sessionId, promptId: `${sessionId}-prompt`, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds });
+      const inner = makeFixtureSpawn({ sessionId, promptId: `${sessionId}-prompt`, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds, includeExposure });
       const spawnClaude = (args, spawnOpts) => { capturedEnvs.push(spawnOpts.env); return inner(args, spawnOpts); };
       const result = await runClaudeSyntheticTrial({
         sourceStoreDir: store, plants: PLANTS,
@@ -924,6 +937,132 @@ test('retrievalHookEnabled sets the real hook opt-out env var explicitly, both d
       assert.equal(result.command.retrievalHookEnabled, expectEnabled, `${label}: recorded in envelope`);
       assert.equal(result.command.env.CORE_RETRIEVAL_HOOK, expectEnabled ? '1' : '0', `${label}: recorded env mirrors real spawn env`);
     }
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+// Hale, hale--6676db9-audit-hold-remediation-plan-required item 1: the
+// actual paired wrapper -- "same prompt, corpus, tools, requested model,
+// observed model, CLI version, candidate commit, and settings; only
+// retrieval hook on/off differs. Fail closed on any other difference."
+
+test('runMatchedControlPair: two real fixture-driven legs compose to a valid pair, cross-run invariants checked, no efficacy verdict claimed', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    // One spawnClaude implementation serving BOTH internal calls -- keys off
+    // the real env var runClaudeSyntheticTrial sets, exactly the signal a
+    // real `claude` CLI invocation would also see, rather than a test-only
+    // side channel.
+    const spawnClaude = (args, spawnOpts) => {
+      const enabled = spawnOpts.env.CORE_RETRIEVAL_HOOK === '1';
+      const sessionId = enabled ? 'fixture-session-pair-treatment' : 'fixture-session-pair-control';
+      const inner = makeFixtureSpawn({
+        sessionId, promptId: `${sessionId}-prompt`, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds,
+        includeExposure: enabled,
+      });
+      return inner(args, spawnOpts);
+    };
+    const result = await runMatchedControlPair({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+      keepRollbackThreshold: 0.1,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result, null, 2));
+    assert.equal(result.treatment.ok, true, 'treatment leg');
+    assert.equal(result.control.ok, true, 'control leg');
+    assert.equal(result.treatment.command.retrievalHookEnabled, true);
+    assert.equal(result.control.command.retrievalHookEnabled, false);
+    assert.equal(result.keepRollbackThreshold, 0.1);
+    // Comparison is deliberately minimal -- raw signal only, never a
+    // computed efficacy verdict from one pair.
+    assert.equal(result.comparison.treatmentAnsweredWithPlantedToken, true);
+    assert.deepEqual(Object.keys(result).sort(), ['comparison', 'control', 'keepRollbackThreshold', 'ok', 'treatment']);
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }
+  }
+});
+
+test('spoil: KEEP_ROLLBACK_THRESHOLD_REQUIRED when the threshold is not pre-registered before either leg runs', async () => {
+  const store = decoyStore();
+  try {
+    const result = await runMatchedControlPair({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt: 'irrelevant', arm: 'deterministic-only', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude: () => { throw new Error('must not spawn — threshold check must fire first'); } },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'KEEP_ROLLBACK_THRESHOLD_REQUIRED');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
+test('spoil: RETRIEVAL_HOOK_ENABLED_NOT_CALLER_CONTROLLED when a caller tries to pass retrievalHookEnabled directly', async () => {
+  const store = decoyStore();
+  try {
+    const result = await runMatchedControlPair({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt: 'irrelevant', arm: 'deterministic-only', date: '2026-07-20', estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+      keepRollbackThreshold: 0.1, retrievalHookEnabled: true,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude: () => { throw new Error('must not spawn — the ownership check must fire first'); } },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.spoilReason, 'RETRIEVAL_HOOK_ENABLED_NOT_CALLER_CONTROLLED');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+  }
+});
+
+test('spoil: PAIR_LEG_SPOILED when the control leg spoils (fixture leaks a real exposure) — the pair fails closed, not silently half-reported', async () => {
+  const store = decoyStore();
+  const cleanupPaths = [];
+  const arm = 'deterministic-only';
+  const date = '2026-07-20';
+  const prompt = 'What is the proof codename?';
+  const answerText = 'The proof codename is cobalt.';
+  const { packText, directiveText, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, store, arm, REAL_CORE_SKILL_ROOT);
+  try {
+    // A broken fixture: ALWAYS includes the exposure, even on the control
+    // leg -- exactly the CONTROL_HOOK_NOT_SUPPRESSED shape a real bug would
+    // produce. Proves the pair fails closed rather than reporting the
+    // treatment leg's success while quietly dropping the control failure.
+    const spawnClaude = (args, spawnOpts) => {
+      const enabled = spawnOpts.env.CORE_RETRIEVAL_HOOK === '1';
+      const sessionId = enabled ? 'fixture-session-pairfail-treatment' : 'fixture-session-pairfail-control';
+      const inner = makeFixtureSpawn({
+        sessionId, promptId: `${sessionId}-prompt`, packText, directiveText, answerText, arm, date, cleanupPaths, rankedUnitIds, deliveredUnitIds,
+        includeExposure: true,
+      });
+      return inner(args, spawnOpts);
+    };
+    const result = await runMatchedControlPair({
+      sourceStoreDir: store, plants: PLANTS,
+      candidatePluginDir: REAL_CANDIDATE_PLUGIN_DIR, candidateRepoRoot: REAL_REPO_ROOT, expectedCandidateGitSha: REAL_REPO_HEAD_SHA,
+      expectedProducerVersion: PRODUCER_VERSION, expectedProducerSha: PRODUCER_SHA,
+      prompt, arm, date, estimand: 'agent-with-tools', model: FIXTURE_MODEL,
+      keepRollbackThreshold: 0.1,
+      deps: { fetchInventory: fakeFetchInventory, spawnClaude },
+    });
+    assert.equal(result.ok, false, JSON.stringify(result, null, 2));
+    assert.equal(result.spoilReason, 'PAIR_LEG_SPOILED');
+    assert.equal(result.detail.treatmentSpoiled, null);
+    assert.equal(result.detail.controlSpoiled, 'CONTROL_CONTROL_HOOK_NOT_SUPPRESSED');
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }

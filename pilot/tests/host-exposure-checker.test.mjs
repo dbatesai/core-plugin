@@ -728,3 +728,111 @@ test('spoil: CONTROL_HOOK_NOT_SUPPRESSED when a UserPromptSubmit exposure exists
 test('checkControlAnswerClaudeCode requires expectedPromptId, same contract as the treatment checker', () => {
   assert.throws(() => checkControlAnswerClaudeCode('/tmp/whatever.jsonl', {}), /expectedPromptId/);
 });
+
+// Hale, hale--memory-architecture-advice-2026-07-20-12: "control 'no
+// exposure' can still pass when the candidate UserPromptSubmit hook failed
+// rather than was deliberately suppressed." A hook_failure attachment
+// proves the hook DID attempt to run (and broke) -- the exact opposite of
+// what CONTROL_HOOK_NOT_SUPPRESSED's absence-of-hook_success check alone
+// can tell apart from genuine suppression.
+test('spoil: CONTROL_CANDIDATE_HOOK_FAILED when the candidate UserPromptSubmit hook fired and crashed, never passed off as suppression', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const { lines, anchorUuid } = buildTurn({
+      promptId: 'p-1', exposedContent: '', includeExposure: false,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    lines.splice(1, 0, {
+      type: 'attachment', uuid: 'failed-ups-1', parentUuid: anchorUuid,
+      attachment: { type: 'hook_failure', hookName: 'UserPromptSubmit', hookEvent: 'UserPromptSubmit', toolUseID: 'tu-failed-ups', content: '', stdout: '', exitCode: 1, command: EXPECTED_USER_PROMPT_SUBMIT_COMMAND, durationMs: 1 },
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkControlAnswerClaudeCode(path, { expectedPromptId: 'p-1' });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'CONTROL_CANDIDATE_HOOK_FAILED');
+    assert.equal(result.failureCount, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Hale, hale--memory-architecture-advice-2026-07-20-13: "add red fixtures
+// for candidate hook failure plus foreign, duplicate, and failed Stop
+// events; all must spoil the control." Stop-hook ownership now mirrors
+// checkHostExposureClaudeCode's exact contract on the control leg too.
+
+test('spoil: CONTROL_UNEXPECTED_HOOK_ACTIVITY when the Stop hook never fired on an otherwise-suppressed control turn', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: '', includeExposure: false, includeStop: false,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkControlAnswerClaudeCode(path, { expectedPromptId: 'p-1' });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'CONTROL_UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.legitimateStopCount, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('spoil: CONTROL_UNEXPECTED_HOOK_ACTIVITY for a foreign Stop attachment masquerading with the same hookName but a different command', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: '', includeExposure: false,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const lastUuid = lines[lines.length - 1].uuid;
+    lines.splice(lines.length - 1, 0, {
+      type: 'attachment', uuid: 'foreign-stop-control-1', parentUuid: lastUuid,
+      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu-foreign-stop-control', content: '', stdout: '', exitCode: 0, command: 'bash ~/.claude/hooks/some-other-stop-hook.sh', durationMs: 1 },
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkControlAnswerClaudeCode(path, { expectedPromptId: 'p-1' });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'CONTROL_UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.legitimateStopCount, 1);
+    assert.equal(result.unexpectedCount, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('spoil: CONTROL_UNEXPECTED_HOOK_ACTIVITY for two Stop attachments both with the correct command (cardinality, not just command binding)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: '', includeExposure: false,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const lastUuid = lines[lines.length - 1].uuid;
+    lines.splice(lines.length - 1, 0, {
+      type: 'attachment', uuid: 'true-duplicate-stop-control-1', parentUuid: lastUuid,
+      attachment: { type: 'hook_success', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu-true-dup-control', content: '', stdout: '', exitCode: 0, command: EXPECTED_STOP_COMMAND, durationMs: 1 },
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkControlAnswerClaudeCode(path, { expectedPromptId: 'p-1' });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'CONTROL_UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.legitimateStopCount, 2);
+    assert.equal(result.unexpectedCount, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('spoil: CONTROL_UNEXPECTED_HOOK_ACTIVITY for a failed Stop hook (hook_failure, exitCode 1), never passed on hookName alone', () => {
+  const root = mkdtempSync(join(tmpdir(), 'host-exposure-'));
+  try {
+    const { lines } = buildTurn({
+      promptId: 'p-1', exposedContent: '', includeExposure: false, includeStop: false,
+      steps: [{ kind: 'terminal', blocks: [{ type: 'text', text: 'answer' }] }],
+    });
+    const lastUuid = lines[lines.length - 1].uuid;
+    lines.push({
+      type: 'attachment', uuid: 'failed-stop-control-1', parentUuid: lastUuid,
+      attachment: { type: 'hook_failure', hookName: 'Stop', hookEvent: 'Stop', toolUseID: 'tu-failed-stop-control', content: '', stdout: '', exitCode: 1, command: '', durationMs: 1 },
+    });
+    const path = writeTranscript(root, lines);
+    const result = checkControlAnswerClaudeCode(path, { expectedPromptId: 'p-1' });
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(result.reason, 'CONTROL_UNEXPECTED_HOOK_ACTIVITY');
+    assert.equal(result.legitimateStopCount, 0);
+    assert.equal(result.unexpectedCount, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

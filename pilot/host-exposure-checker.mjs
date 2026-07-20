@@ -442,12 +442,19 @@ export function checkHostExposureClaudeCode(transcriptPath, opts) {
  * observed model/CLI version, WITHOUT requiring or tolerating an exposure
  * -- the control's entire premise is that none occurred.
  *
- * KNOWN GAP, named rather than silently skipped: unlike
- * checkHostExposureClaudeCode, this does not yet verify Stop-hook
- * ownership (foreign/duplicate/failed Stop attachments,
- * UNEXPECTED_HOOK_ACTIVITY's exact contract). Porting that check
- * correctly for the no-exposure case is a separate, deliberately deferred
- * follow-up -- see the mailbox design reply, not rushed into this pass.
+ * Hale, hale--memory-architecture-advice-2026-07-20-12/-13: the prior
+ * version's premise was too narrow -- "no successful exposure" was treated
+ * as proof of deliberate suppression, but a candidate UserPromptSubmit hook
+ * that tried to fire and crashed produces the exact same observation (zero
+ * hook_success rows) while proving nothing about whether the opt-out
+ * actually worked. Two closures now, both required before this counts as a
+ * real falsifier of "suppression held":
+ *   1. A `hook_failure` UserPromptSubmit attachment now spoils closed
+ *      (CONTROL_CANDIDATE_HOOK_FAILED) instead of silently passing as
+ *      suppression -- disabled and broken must never look identical.
+ *   2. Stop-hook ownership is now ported from checkHostExposureClaudeCode's
+ *      exact contract (foreign/duplicate/failed Stop attachments all
+ *      spoil) -- the KNOWN GAP this docstring used to name is closed.
  *
  * @param {string} transcriptPath
  * @param {object} opts
@@ -466,18 +473,52 @@ export function checkControlAnswerClaudeCode(transcriptPath, opts) {
   if (!turn.ok) return turn;
   const { lineByUuid, anchorUuid, turnLines } = turn;
 
-  // The control's entire premise: the retrieval hook must NOT have fired.
-  // Any UserPromptSubmit hook_success attachment here means
-  // CORE_RETRIEVAL_HOOK=0 did not actually suppress it -- a real problem,
-  // not something to silently tolerate or treat the same as a treatment run.
-  const exposures = turnLines.filter((l) =>
+  // The control's entire premise: the retrieval hook must NOT have fired
+  // at all -- not fired-and-succeeded, not fired-and-failed. Either
+  // observation means CORE_RETRIEVAL_HOOK=0 did not actually hold; a
+  // failure is a real defect (the opt-out env var wasn't respected, or the
+  // hook broke for an unrelated reason) that looks identical to a clean
+  // control from the outside unless it's checked explicitly.
+  const userPromptSubmitAttachments = turnLines.filter((l) =>
     l?.type === 'attachment'
-    && l?.attachment?.type === 'hook_success'
+    && (l?.attachment?.type === 'hook_success' || l?.attachment?.type === 'hook_failure')
     && l?.attachment?.hookName === 'UserPromptSubmit'
     && l?.uuid
     && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
-  if (exposures.length > 0) {
-    return { ok: false, reason: 'CONTROL_HOOK_NOT_SUPPRESSED', expectedPromptId, exposureCount: exposures.length };
+  const successfulExposures = userPromptSubmitAttachments.filter((l) => l.attachment.type === 'hook_success');
+  const failedUserPromptSubmit = userPromptSubmitAttachments.filter((l) => l.attachment.type === 'hook_failure');
+  if (successfulExposures.length > 0) {
+    return { ok: false, reason: 'CONTROL_HOOK_NOT_SUPPRESSED', expectedPromptId, exposureCount: successfulExposures.length };
+  }
+  if (failedUserPromptSubmit.length > 0) {
+    return {
+      ok: false, reason: 'CONTROL_CANDIDATE_HOOK_FAILED', expectedPromptId,
+      failureCount: failedUserPromptSubmit.length,
+      failures: failedUserPromptSubmit.map((l) => ({ command: l.attachment.command, exitCode: l.attachment.exitCode })),
+    };
+  }
+
+  // Stop-hook ownership -- same exact contract as checkHostExposureClaudeCode
+  // (exactly one successful, command-verified Stop attachment, nothing
+  // else). No legitimate UserPromptSubmit exposure to exclude first here,
+  // since a genuinely clean control has none at all.
+  const otherHookAttachments = turnLines.filter((l) =>
+    l?.type === 'attachment'
+    && (l?.attachment?.type === 'hook_success' || l?.attachment?.type === 'hook_failure')
+    && l?.attachment?.hookName !== 'UserPromptSubmit'
+    && l?.uuid
+    && isDescendantOf(lineByUuid, l.uuid, anchorUuid));
+  const isLegitimateStop = (l) => l.attachment.type === 'hook_success' && l.attachment.hookName === 'Stop' && l.attachment.exitCode === 0 && l.attachment.command === EXPECTED_STOP_COMMAND;
+  const legitimateStops = otherHookAttachments.filter(isLegitimateStop);
+  const unexpectedHooks = otherHookAttachments.filter((l) => !isLegitimateStop(l));
+  if (legitimateStops.length !== 1 || unexpectedHooks.length > 0) {
+    return {
+      ok: false, reason: 'CONTROL_UNEXPECTED_HOOK_ACTIVITY', expectedPromptId,
+      legitimateStopCount: legitimateStops.length,
+      unexpectedCount: unexpectedHooks.length,
+      hookNames: otherHookAttachments.map((l) => l.attachment.hookName),
+      commands: otherHookAttachments.map((l) => l.attachment.command),
+    };
   }
 
   const terminalLines = turnLines.filter((l) =>
