@@ -274,3 +274,53 @@ export function checkTrialWindow(storeDir, opts) {
   // never present it as a delivered-pack/host-exposure receipt.
   return { ok: true, retrieval, outcome };
 }
+
+/**
+ * checkControlTrialWindow — the control-leg counterpart to checkTrialWindow,
+ * surfaced by the first real (non-fixture) invocation of the paired wrapper
+ * (2026-07-21): a real CORE_RETRIEVAL_HOOK=0 run never calls
+ * recordRetrievalEvent()/recordRetrievalOutcome() at all -- the hook's own
+ * opt-out branch returns before either is reached (retrieve-context-hook.mjs
+ * `if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip',
+ * 'retrieval-opt-out')`, a HOOKS-log receipt, never a retrieval-log row).
+ * checkTrialWindow's unconditional "exactly one retrieval row" contract is
+ * therefore the wrong check for a control leg -- it isn't a looser version
+ * of the same join, it is a DIFFERENT, positive assertion: prove the
+ * opt-out touched neither telemetry stream at all, not merely that no
+ * exposure appeared in the transcript. A stray row here (of either kind)
+ * is real contamination -- a prior treatment leg's window overlapping this
+ * one, or the opt-out silently failing to suppress recording even though
+ * it suppressed delivery -- and must spoil exactly as hard as a
+ * MULTIPLE_RETRIEVAL_ROWS_IN_WINDOW would on the treatment side.
+ *
+ * @param {string} storeDir
+ * @param {object} opts
+ * @param {string} opts.date
+ * @param {{before:number, after:number}} opts.retrievalWindow
+ * @param {{before:number, after:number}} opts.outcomeWindow
+ * @returns {{ok:true} | {ok:false, reason:<CODE>, ...detail}}
+ */
+export function checkControlTrialWindow(storeDir, opts) {
+  const { date, retrievalWindow, outcomeWindow } = opts || {};
+  if (!date) throw new Error('checkControlTrialWindow requires date');
+  if (!retrievalWindow || !outcomeWindow) throw new Error('checkControlTrialWindow requires retrievalWindow and outcomeWindow cursors — never scans the whole log');
+
+  let allRetrievalRows, allOutcomeRows;
+  try {
+    allRetrievalRows = readRowsInWindow(storeDir, date, 'retrieval-log.jsonl', retrievalWindow.before, retrievalWindow.after, 'retrievalWindow');
+    allOutcomeRows = readRowsInWindow(storeDir, date, 'outcome-log.jsonl', outcomeWindow.before, outcomeWindow.after, 'outcomeWindow');
+  } catch (e) {
+    if (e instanceof MalformedRowError) {
+      return { ok: false, reason: 'MALFORMED_ROW_IN_WINDOW', detail: e.detail };
+    }
+    throw e;
+  }
+
+  if (allRetrievalRows.length > 0) {
+    return { ok: false, reason: 'CONTROL_UNEXPECTED_RETRIEVAL_ROWS_IN_WINDOW', count: allRetrievalRows.length, rows: allRetrievalRows };
+  }
+  if (allOutcomeRows.length > 0) {
+    return { ok: false, reason: 'CONTROL_UNEXPECTED_OUTCOME_ROWS_IN_WINDOW', count: allOutcomeRows.length, rows: allOutcomeRows };
+  }
+  return { ok: true };
+}

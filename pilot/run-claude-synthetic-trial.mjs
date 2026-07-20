@@ -79,7 +79,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { captureCursor, checkTrialWindow } from './trial-window-join-checker.mjs';
+import { captureCursor, checkTrialWindow, checkControlTrialWindow } from './trial-window-join-checker.mjs';
 import { checkHostExposureClaudeCode, checkControlAnswerClaudeCode } from './host-exposure-checker.mjs';
 import { fetchPluginInventory as realFetchPluginInventory, computeDisableAllOverlay, verifyOverlayApplied } from './invocation-plugin-overlay.mjs';
 import { checkCorpusLeakage, checkStringsForLeakage, resolveCarrierIds } from './corpus-leakage-check.mjs';
@@ -433,41 +433,66 @@ export async function runClaudeSyntheticTrial(opts) {
 
     // Step 4 continued (join).
     const coreSkillRoot = join(candidateCopy.candidateCopyDir, 'skills', 'core');
-    const { packText, directiveText, expectedDirectiveFired, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, realStoreDir, arm, coreSkillRoot);
-    const joinResult = checkTrialWindow(realStoreDir, {
-      date,
-      retrievalWindow: { before: retrievalBefore, after: retrievalAfter },
-      outcomeWindow: { before: outcomeBefore, after: outcomeAfter },
-      expectedArm: arm,
-      expectedDirectiveFired,
-      expectedHarness: 'claude-code',
-      expectedSessionId: cliResult.session_id,
-      expectedProducerVersion,
-      expectedProducerSha,
-    });
-    if (!joinResult.ok) return spoil(`JOIN_${joinResult.reason}`, { detail: joinResult });
-
-    // Step 5 (exposure) -- independently derived pack/directive, never
-    // transcript content copied into expected inputs.
     const { resolveTranscript } = await import(join(coreSkillRoot, 'scripts', 'read-transcript.mjs'));
-    const { path: transcriptPath } = resolveTranscript('claude-code', { cwd: realStoreDir, sessionId: cliResult.session_id });
-    if (!transcriptPath) return spoil('TRANSCRIPT_NOT_RESOLVED');
 
-    // Hale, hale--6676db9-audit-hold-remediation-plan-required item 1: a
+    // Hale, hale--6676db9-audit-hold-remediation-plan-required item 1, and
+    // the first real (non-fixture) run of this wrapper (2026-07-21): a
     // control run (retrievalHookEnabled: false) must NOT be routed through
-    // checkHostExposureClaudeCode -- that function's whole contract assumes
-    // the hook fired and produced an exposure, which is false BY DESIGN for
-    // a control run. Reusing it here would spoil every real, correct
-    // control observation as if something were broken. checkControlAnswerClaudeCode
-    // is the control-shaped counterpart (spoils CONTROL_HOOK_NOT_SUPPRESSED
-    // if an exposure occurs anyway -- the red falsifier proving the
-    // opt-out actually held, not just assumed). No efficacy/carrier
-    // checks below apply to a control run: there is no injected pack to
-    // check delivery of by design, so this branch returns its own
-    // control-shaped envelope rather than falling through to Step 6/7.
+    // checkTrialWindow/checkHostExposureClaudeCode -- both assume the hook
+    // fired. The real hook's own opt-out branch (CORE_RETRIEVAL_HOOK=0)
+    // returns before recordRetrievalEvent()/recordRetrievalOutcome() are
+    // ever reached, so a genuine control leg has ZERO rows in either log --
+    // checkTrialWindow's "exactly one retrieval row" requirement isn't a
+    // looser version of the control case, it is simply the wrong check.
+    // checkControlTrialWindow asserts the correct, distinct positive claim
+    // (zero rows in both windows); checkControlAnswerClaudeCode is the
+    // exposure-side counterpart. Branching here, before either treatment-
+    // shaped check runs, is what a fixture-only test suite could not catch
+    // (the fixtures always wrote a retrieval/outcome row regardless of
+    // includeExposure) -- this shape was only found by a real invocation.
     if (!retrievalHookEnabled) {
+      const controlJoin = checkControlTrialWindow(realStoreDir, {
+        date,
+        retrievalWindow: { before: retrievalBefore, after: retrievalAfter },
+        outcomeWindow: { before: outcomeBefore, after: outcomeAfter },
+      });
+      if (!controlJoin.ok) return spoil(`CONTROL_JOIN_${controlJoin.reason}`, { detail: controlJoin });
+
+      const { path: transcriptPath } = resolveTranscript('claude-code', { cwd: realStoreDir, sessionId: cliResult.session_id });
+      if (!transcriptPath) return spoil('TRANSCRIPT_NOT_RESOLVED');
+
+      // No retrieval/outcome row exists to carry a native turn identity for
+      // a control leg, so it can't be read off joinResult.outcome.answer_turn_id
+      // the way the treatment leg does. A fresh trial store + fresh session
+      // has exactly one real user turn; the transcript's own first line is
+      // that anchor (mirrors how every DI fixture in this pilot constructs
+      // turn 1: parentUuid null, uuid first). Fail closed rather than guess
+      // if that shape doesn't hold.
+      let transcriptLines;
+      try {
+        transcriptLines = readFileSync(transcriptPath, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l));
+      } catch (e) {
+        return spoil('CONTROL_TRANSCRIPT_UNREADABLE', { detail: e.message });
+      }
+      // Self-corrected against a real transcript (2026-07-21): the FIRST
+      // line is not reliably the user anchor -- a real Claude Code
+      // transcript can carry an administrative line (observed:
+      // type:'queue-operation') before the actual user turn. Search for it
+      // instead of assuming position, and require exactly one distinct
+      // promptId among type:'user' lines -- more than one is the same
+      // evidence-ambiguity class as REUSED_PROMPT_ID on the treatment side.
+      const userPromptIds = [...new Set(
+        transcriptLines.filter((l) => l?.type === 'user' && typeof l?.promptId === 'string' && l.promptId.trim()).map((l) => l.promptId),
+      )];
+      if (userPromptIds.length === 0) {
+        return spoil('CONTROL_ANCHOR_PROMPT_NOT_FOUND', { detail: { lineTypes: [...new Set(transcriptLines.map((l) => l?.type))] } });
+      }
+      if (userPromptIds.length > 1) {
+        return spoil('CONTROL_ANCHOR_PROMPT_AMBIGUOUS', { detail: { userPromptIds } });
+      }
+
       const control = checkControlAnswerClaudeCode(transcriptPath, {
-        expectedPromptId: joinResult.outcome.answer_turn_id,
+        expectedPromptId: userPromptIds[0],
       });
       if (!control.ok) return spoil(`CONTROL_${control.reason}`, { detail: control });
       if (!control.observedModel || !control.observedCliVersion) {
@@ -509,7 +534,7 @@ export async function runClaudeSyntheticTrial(opts) {
           finalResultField: cliResult.result,
         },
         cursors: { retrievalBefore, retrievalAfter, outcomeBefore, outcomeAfter },
-        join: joinResult,
+        join: controlJoin,
         control,
         // Explicit not-applicable, never simply omitted -- an absent field
         // reads as "forgot to compute," a null-shaped one reads as "does
@@ -526,6 +551,25 @@ export async function runClaudeSyntheticTrial(opts) {
         finalAnswerText: control.finalAnswerText,
       };
     }
+
+    // Treatment leg only, from here — the real hook fired and this is the
+    // "exactly one retrieval row" join contract that assumes exposure.
+    const { packText, directiveText, expectedDirectiveFired, rankedUnitIds, deliveredUnitIds } = await deriveExpectedPackAndDirective(prompt, realStoreDir, arm, coreSkillRoot);
+    const joinResult = checkTrialWindow(realStoreDir, {
+      date,
+      retrievalWindow: { before: retrievalBefore, after: retrievalAfter },
+      outcomeWindow: { before: outcomeBefore, after: outcomeAfter },
+      expectedArm: arm,
+      expectedDirectiveFired,
+      expectedHarness: 'claude-code',
+      expectedSessionId: cliResult.session_id,
+      expectedProducerVersion,
+      expectedProducerSha,
+    });
+    if (!joinResult.ok) return spoil(`JOIN_${joinResult.reason}`, { detail: joinResult });
+
+    const { path: transcriptPath } = resolveTranscript('claude-code', { cwd: realStoreDir, sessionId: cliResult.session_id });
+    if (!transcriptPath) return spoil('TRANSCRIPT_NOT_RESOLVED');
 
     const exposure = checkHostExposureClaudeCode(transcriptPath, {
       expectedPromptId: joinResult.outcome.answer_turn_id,

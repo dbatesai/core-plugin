@@ -180,21 +180,33 @@ function makeFixtureSpawn({ sessionId, promptId, packText, directiveText, answer
     // against the RANKED set, selected_count against the DELIVERED
     // (byte-cap-accepted) count, matching the real hook's own two
     // different source fields (trace.stages.final vs trace.pack.accepted).
-    const retrieval = recordRetrievalEvent(cwd, {
-      trigger: 'per-turn-hook', mechanism: 'model-free-substrate',
-      retrieval_id: `${sessionId}-retrieval`,
-      intent_topics: ['fixture'], tier_reached: 1, escalation_path: [1],
-      units_retrieved: rankedUnitIds.map((id) => ({ id, tier: 1, source_stage: 'ranked' })),
-      result: rankedUnitIds.length === 0 ? 'no-hit' : 'hit',
-      candidate_count: rankedUnitIds.length, selected_count: deliveredUnitIds.length, context_pack_token_estimate: 0,
-      requested_arm: arm, directive_fired: directiveText !== '',
-    }, { today: date });
-    recordRetrievalOutcome(cwd, {
-      retrieval_id: retrieval.record.retrieval_id,
-      usefulness_outcome: 'unknown', evidence_authority: 'unobservable',
-      harness: HARNESS, session_id: sessionId, answer_turn_id: promptId,
-      producer_version: PRODUCER_VERSION, producer_sha: PRODUCER_SHA,
-    }, { today: date });
+    //
+    // Gated on includeExposure (2026-07-21, first real-invocation finding):
+    // the real hook's CORE_RETRIEVAL_HOOK=0 branch returns BEFORE either
+    // recordRetrievalEvent() or recordRetrievalOutcome() is ever reached --
+    // a genuine control leg writes to NEITHER log, not just omits the
+    // transcript attachment. A fixture that always wrote both regardless of
+    // includeExposure was testing a shape no real control run produces,
+    // which is exactly why the bug this fixes wasn't caught until a real
+    // (non-fixture) invocation surfaced it.
+    let retrieval = null;
+    if (includeExposure) {
+      retrieval = recordRetrievalEvent(cwd, {
+        trigger: 'per-turn-hook', mechanism: 'model-free-substrate',
+        retrieval_id: `${sessionId}-retrieval`,
+        intent_topics: ['fixture'], tier_reached: 1, escalation_path: [1],
+        units_retrieved: rankedUnitIds.map((id) => ({ id, tier: 1, source_stage: 'ranked' })),
+        result: rankedUnitIds.length === 0 ? 'no-hit' : 'hit',
+        candidate_count: rankedUnitIds.length, selected_count: deliveredUnitIds.length, context_pack_token_estimate: 0,
+        requested_arm: arm, directive_fired: directiveText !== '',
+      }, { today: date });
+      recordRetrievalOutcome(cwd, {
+        retrieval_id: retrieval.record.retrieval_id,
+        usefulness_outcome: 'unknown', evidence_authority: 'unobservable',
+        harness: HARNESS, session_id: sessionId, answer_turn_id: promptId,
+        producer_version: PRODUCER_VERSION, producer_sha: PRODUCER_SHA,
+      }, { today: date });
+    }
 
     const slug = mapProjectPathToSlug(cwd);
     const transcriptDir = join(homedir(), '.claude', 'projects', slug);
@@ -1062,7 +1074,15 @@ test('spoil: PAIR_LEG_SPOILED when the control leg spoils (fixture leaks a real 
     assert.equal(result.ok, false, JSON.stringify(result, null, 2));
     assert.equal(result.spoilReason, 'PAIR_LEG_SPOILED');
     assert.equal(result.detail.treatmentSpoiled, null);
-    assert.equal(result.detail.controlSpoiled, 'CONTROL_CONTROL_HOOK_NOT_SUPPRESSED');
+    // The control-window check now runs before the exposure check (2026-07-21
+    // restructuring), so a fixture that leaks a real exposure -- which, via
+    // makeFixtureSpawn, also leaks the retrieval/outcome rows a real fired
+    // hook would produce -- is caught by the join-contamination check first.
+    // This is a MORE correct catch, not a weaker one: any real control leg
+    // whose hook fired has both symptoms together, and this proves the
+    // stronger of the two fires first rather than requiring both checks to
+    // independently agree.
+    assert.equal(result.detail.controlSpoiled, 'CONTROL_JOIN_CONTROL_UNEXPECTED_RETRIEVAL_ROWS_IN_WINDOW');
   } finally {
     rmSync(store, { recursive: true, force: true });
     for (const p of cleanupPaths) { try { rmSync(p, { force: true }); } catch { /* best-effort */ } }

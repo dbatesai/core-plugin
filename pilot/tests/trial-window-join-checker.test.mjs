@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const PILOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPTS = join(PILOT, '..', 'plugins', 'core', 'skills', 'core', 'scripts');
-const { captureCursor, checkTrialWindow, REASONING_ARMS } = await import(pathToFileURL(join(PILOT, 'trial-window-join-checker.mjs')).href);
+const { captureCursor, checkTrialWindow, checkControlTrialWindow, REASONING_ARMS } = await import(pathToFileURL(join(PILOT, 'trial-window-join-checker.mjs')).href);
 const { recordRetrievalEvent } = await import(pathToFileURL(join(SCRIPTS, 'record-retrieval-event.mjs')).href);
 const { recordRetrievalOutcome } = await import(pathToFileURL(join(SCRIPTS, 'record-retrieval-outcome.mjs')).href);
 
@@ -561,5 +561,83 @@ test('round 2 falsifier 4: a valid JSON row with the wrong kind inside the windo
     }));
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'MULTIPLE_RETRIEVAL_ROWS_IN_WINDOW', 'the wrong-kind row must still count toward exact-one, not vanish');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Surfaced by the first real (non-fixture) invocation of the paired
+// treatment/control wrapper (2026-07-21): checkTrialWindow's "exactly one
+// retrieval row" contract is the TREATMENT contract. A genuine control leg
+// (CORE_RETRIEVAL_HOOK=0) never reaches recordRetrievalEvent/
+// recordRetrievalOutcome at all -- checkControlTrialWindow asserts the
+// distinct, correct positive claim for that case: zero rows in both logs.
+
+test('checkControlTrialWindow: a genuinely empty window (real suppression) passes', () => {
+  const root = store();
+  try {
+    const retrievalBefore = captureCursor(root, DATE, 'retrieval-log.jsonl');
+    const outcomeBefore = captureCursor(root, DATE, 'outcome-log.jsonl');
+    // Nothing planted -- this is the real shape a suppressed hook leaves.
+    const retrievalAfter = captureCursor(root, DATE, 'retrieval-log.jsonl');
+    const outcomeAfter = captureCursor(root, DATE, 'outcome-log.jsonl');
+
+    const result = checkControlTrialWindow(root, {
+      date: DATE,
+      retrievalWindow: { before: retrievalBefore, after: retrievalAfter },
+      outcomeWindow: { before: outcomeBefore, after: outcomeAfter },
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('spoil: CONTROL_UNEXPECTED_RETRIEVAL_ROWS_IN_WINDOW when a retrieval row lands despite the opt-out', () => {
+  const root = store();
+  try {
+    const retrievalBefore = captureCursor(root, DATE, 'retrieval-log.jsonl');
+    const outcomeBefore = captureCursor(root, DATE, 'outcome-log.jsonl');
+    plantRetrieval(root, { retrievalId: 'r-leaked' });
+    const retrievalAfter = captureCursor(root, DATE, 'retrieval-log.jsonl');
+    const outcomeAfter = captureCursor(root, DATE, 'outcome-log.jsonl');
+
+    const result = checkControlTrialWindow(root, {
+      date: DATE,
+      retrievalWindow: { before: retrievalBefore, after: retrievalAfter },
+      outcomeWindow: { before: outcomeBefore, after: outcomeAfter },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'CONTROL_UNEXPECTED_RETRIEVAL_ROWS_IN_WINDOW');
+    assert.equal(result.count, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('spoil: CONTROL_UNEXPECTED_OUTCOME_ROWS_IN_WINDOW when an outcome row lands despite the opt-out (retrieval row itself excluded from this window)', () => {
+  const root = store();
+  try {
+    // Plant the retrieval OUTSIDE the retrieval window (captured before it
+    // opens) but its outcome INSIDE the outcome window -- proves the outcome
+    // check is independent, not just a side effect of the retrieval check
+    // already having fired.
+    plantRetrieval(root, { retrievalId: 'r-preexisting' });
+    const retrievalBefore = captureCursor(root, DATE, 'retrieval-log.jsonl');
+    const outcomeBefore = captureCursor(root, DATE, 'outcome-log.jsonl');
+    plantImmediateOutcome(root, { retrievalId: 'r-preexisting' });
+    const retrievalAfter = captureCursor(root, DATE, 'retrieval-log.jsonl');
+    const outcomeAfter = captureCursor(root, DATE, 'outcome-log.jsonl');
+
+    const result = checkControlTrialWindow(root, {
+      date: DATE,
+      retrievalWindow: { before: retrievalBefore, after: retrievalAfter },
+      outcomeWindow: { before: outcomeBefore, after: outcomeAfter },
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'CONTROL_UNEXPECTED_OUTCOME_ROWS_IN_WINDOW');
+    assert.equal(result.count, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('checkControlTrialWindow requires date and both window cursors, same contract discipline as checkTrialWindow', () => {
+  const root = store();
+  try {
+    assert.throws(() => checkControlTrialWindow(root, { retrievalWindow: { before: 0, after: 0 }, outcomeWindow: { before: 0, after: 0 } }), /requires date/);
+    assert.throws(() => checkControlTrialWindow(root, { date: DATE, outcomeWindow: { before: 0, after: 0 } }), /requires retrievalWindow and outcomeWindow/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
