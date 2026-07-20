@@ -91,19 +91,24 @@ export function computeDisableAllOverlay(inventory, candidateId = 'core@inline')
 
 /**
  * verifyOverlayApplied — re-fetches the inventory WITH the overlay in
- * effect and confirms it actually did what it claims: the candidate is
- * enabled at the exact expected installPath, and every OTHER plugin that
- * was enabled in the baseline inventory is now disabled. Never trust the
- * overlay's own intent — verify the resolved state.
+ * effect and confirms the REAL invariant holds over the resolved inventory
+ * as a whole: exactly one plugin is enabled, period, and it is the
+ * candidate, at the exact expected installPath. Never trust the overlay's
+ * own intent — verify the resolved state.
  *
- * @param {Array<{id, enabled}>} baselineInventory  from fetchPluginInventory
- *   BEFORE the overlay (no --settings/--plugin-dir args)
+ * Hale re-audit (hale--29aa260-overlay-false-pass): an earlier version only
+ * rechecked plugins that were enabled in a BASELINE snapshot -- a plugin
+ * newly enabled by something other than this overlay was invisible to that
+ * check and passed silently. There is no baseline parameter anymore; the
+ * only thing that proves isolation is "is the resolved inventory's enabled
+ * set exactly {candidate}," independent of what came before.
+ *
  * @param {Array<{id, enabled, installPath}>} resolvedInventory  from
  *   fetchPluginInventory WITH the overlay applied
  * @param {string} candidateId
  * @param {string} expectedInstallPath
  */
-export function verifyOverlayApplied(baselineInventory, resolvedInventory, candidateId, expectedInstallPath) {
+export function verifyOverlayApplied(resolvedInventory, candidateId, expectedInstallPath) {
   const resolvedById = new Map(resolvedInventory.filter((p) => p && typeof p.id === 'string').map((p) => [p.id, p]));
   const candidate = resolvedById.get(candidateId);
   if (!candidate) {
@@ -115,16 +120,20 @@ export function verifyOverlayApplied(baselineInventory, resolvedInventory, candi
   if (candidate.installPath !== expectedInstallPath) {
     return { ok: false, reason: 'CANDIDATE_WRONG_INSTALL_PATH', expected: expectedInstallPath, found: candidate.installPath };
   }
-  const stillEnabled = [];
-  for (const p of baselineInventory) {
-    if (!p || typeof p.id !== 'string' || p.id === candidateId) continue;
-    if (p.enabled) {
-      const resolved = resolvedById.get(p.id);
-      if (resolved && resolved.enabled) stillEnabled.push(p.id);
-    }
-  }
-  if (stillEnabled.length > 0) {
-    return { ok: false, reason: 'OTHER_PLUGINS_STILL_ENABLED', ids: stillEnabled };
+  // Hale re-audit (hale--29aa260-overlay-false-pass): the old check only
+  // re-verified plugins that were enabled in the BASELINE -- a plugin that
+  // was OFF in baseline but got newly, unexpectedly enabled in the resolved
+  // inventory (his exact demonstrated counterexample: `surprise@auto`) was
+  // never looked at, so it silently passed. The real invariant is over the
+  // RESOLVED inventory as a whole: exactly one enabled plugin, period, and
+  // it must be the candidate -- not "every previously-enabled plugin is
+  // still enabled or not," which says nothing about NEW ones.
+  const resolvedEnabled = resolvedInventory.filter((p) => p && typeof p.id === 'string' && p.enabled);
+  if (resolvedEnabled.length !== 1 || resolvedEnabled[0].id !== candidateId) {
+    return {
+      ok: false, reason: 'MORE_THAN_CANDIDATE_ENABLED',
+      enabledIds: resolvedEnabled.map((p) => p.id),
+    };
   }
   return { ok: true, candidate, resolvedInventory };
 }

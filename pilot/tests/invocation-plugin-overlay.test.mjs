@@ -64,50 +64,63 @@ test('fetchPluginInventory: a nonexistent claude binary/bad args fails closed wi
   assert.ok(typeof result.ok === 'boolean');
 });
 
-test('verifyOverlayApplied: passes when the candidate is enabled at the right path and every other baseline-enabled plugin is off', () => {
-  const baseline = [{ id: 'core@core', enabled: true }, { id: 'other@mp', enabled: true }];
+test('verifyOverlayApplied: passes when exactly the candidate is enabled in the resolved inventory', () => {
   const resolved = [
     { id: 'core@inline', enabled: true, installPath: '/candidate/path' },
     { id: 'core@core', enabled: false },
     { id: 'other@mp', enabled: false },
   ];
-  const result = verifyOverlayApplied(baseline, resolved, 'core@inline', '/candidate/path');
+  const result = verifyOverlayApplied(resolved, 'core@inline', '/candidate/path');
   assert.equal(result.ok, true, JSON.stringify(result));
 });
 
 test('verifyOverlayApplied: fails when the candidate is missing from the resolved inventory', () => {
-  const baseline = [{ id: 'core@core', enabled: true }];
   const resolved = [{ id: 'core@core', enabled: false }];
-  const result = verifyOverlayApplied(baseline, resolved, 'core@inline', '/candidate/path');
+  const result = verifyOverlayApplied(resolved, 'core@inline', '/candidate/path');
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'CANDIDATE_NOT_IN_RESOLVED_INVENTORY');
 });
 
 test('verifyOverlayApplied: fails when the candidate is present but not actually enabled', () => {
-  const baseline = [{ id: 'core@core', enabled: true }];
   const resolved = [{ id: 'core@inline', enabled: false, installPath: '/candidate/path' }, { id: 'core@core', enabled: false }];
-  const result = verifyOverlayApplied(baseline, resolved, 'core@inline', '/candidate/path');
+  const result = verifyOverlayApplied(resolved, 'core@inline', '/candidate/path');
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'CANDIDATE_NOT_ENABLED');
 });
 
 test('verifyOverlayApplied: fails when the candidate resolves to the WRONG install path (a same-named different install)', () => {
-  const baseline = [{ id: 'core@core', enabled: true }];
   const resolved = [{ id: 'core@inline', enabled: true, installPath: '/wrong/path' }, { id: 'core@core', enabled: false }];
-  const result = verifyOverlayApplied(baseline, resolved, 'core@inline', '/candidate/path');
+  const result = verifyOverlayApplied(resolved, 'core@inline', '/candidate/path');
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'CANDIDATE_WRONG_INSTALL_PATH');
 });
 
-test('verifyOverlayApplied: fails when another baseline-enabled plugin is still enabled after the overlay', () => {
-  const baseline = [{ id: 'core@core', enabled: true }, { id: 'other@mp', enabled: true }];
+test('verifyOverlayApplied: fails when another plugin is still enabled after the overlay', () => {
   const resolved = [
     { id: 'core@inline', enabled: true, installPath: '/candidate/path' },
     { id: 'core@core', enabled: false },
     { id: 'other@mp', enabled: true }, // overlay failed to disable this one
   ];
-  const result = verifyOverlayApplied(baseline, resolved, 'core@inline', '/candidate/path');
+  const result = verifyOverlayApplied(resolved, 'core@inline', '/candidate/path');
   assert.equal(result.ok, false);
-  assert.equal(result.reason, 'OTHER_PLUGINS_STILL_ENABLED');
-  assert.deepEqual(result.ids, ['other@mp']);
+  assert.equal(result.reason, 'MORE_THAN_CANDIDATE_ENABLED');
+  assert.deepEqual(result.enabledIds.sort(), ['core@inline', 'other@mp']);
+});
+
+// Hale re-audit (hale--29aa260-overlay-false-pass), the exact demonstrated
+// counterexample: baseline core@core:true, resolved core@inline:true,
+// core@core:false, plus a NEWLY auto-enabled surprise@auto:true that was
+// never in the baseline at all. The old check only rechecked
+// baseline-enabled plugins and returned ok:true. There is no baseline
+// parameter anymore -- this must fail on the resolved inventory alone.
+test('Hale false-pass counterexample: a newly-enabled plugin that was never in any baseline still fails closed', () => {
+  const resolved = [
+    { id: 'core@inline', enabled: true, installPath: '/candidate/path' },
+    { id: 'core@core', enabled: false },
+    { id: 'surprise@auto', enabled: true }, // never existed in any prior snapshot
+  ];
+  const result = verifyOverlayApplied(resolved, 'core@inline', '/candidate/path');
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'MORE_THAN_CANDIDATE_ENABLED');
+  assert.ok(result.enabledIds.includes('surprise@auto'));
 });
