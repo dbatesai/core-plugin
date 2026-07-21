@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   classifyBullet, extractMostRecentDate, parseBullets, extractMovesSection, demoteMoves,
+  SIZE_PRESSURE_AGE_DAYS,
 } from '../../plugins/core/skills/core/scripts/demote-moves.mjs';
+import { HARD_CAP_BYTES } from '../../plugins/core/skills/core/scripts/compact-project.mjs';
 
 const TODAY = '2026-06-02';
 
@@ -265,4 +267,66 @@ test('MEM-013: crash-retry does not duplicate the archive block', () => {
   const archive = readFileSync(join(dir, 'PROJECT-ARCHIVE.md'), 'utf8');
   assert.equal((archive.match(/Old thing 2026-03-01/g) || []).length, 1, 'archived exactly once');
   assert.match(readFileSync(join(dir, 'PROJECT.md'), 'utf8'), /→ see `PROJECT-ARCHIVE\.md §Moves/);
+});
+
+// ---------- size-pressure fallback (2026-07-21) ----------
+
+function projectOverCapWithAgedBullet(dateStr) {
+  const dir = scratchProject();
+  const filler = '#'.repeat(HARD_CAP_BYTES + 5000); // pushes PROJECT.md over the hard cap
+  const text = [
+    '# P', '', '## Moves', '', '### Active', '',
+    `- [x] **Item shipped ${dateStr}** — done.`,
+    '- [ ] **Still active** — keep me.', '',
+    '## Notes', '', filler,
+  ].join('\n');
+  writeFileSync(join(dir, 'PROJECT.md'), text);
+  return dir;
+}
+
+test('demoteMoves: an item younger than the 30-day floor but over the 7-day size-pressure floor stays put when PROJECT.md is under cap', () => {
+  const dir = scratchProject();
+  writeFileSync(join(dir, 'PROJECT.md'), [
+    '# P', '', '## Moves', '', '### Active', '',
+    '- [x] **Item shipped 2026-05-23** — done.', // 10 days before TODAY (2026-06-02)
+    '- [ ] **Still active** — keep me.', '',
+    '## Notes', '',
+  ].join('\n'));
+  try {
+    const stats = demoteMoves(dir, { today: TODAY });
+    assert.equal(stats.demoted, 0, 'under cap: normal 30-day floor applies, 10d item stays');
+    assert.equal(stats.sizePressureApplied, undefined, 'no escalation when under cap');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('demoteMoves: the same 10-day-old item demotes once PROJECT.md is over its hard cap (size-pressure escalation)', () => {
+  const dir = projectOverCapWithAgedBullet('2026-05-23'); // 10 days before TODAY
+  try {
+    const stats = demoteMoves(dir, { today: TODAY });
+    assert.equal(stats.demoted, 1, 'over cap: escalated 7-day floor demotes the 10d item');
+    assert.equal(stats.sizePressureApplied, true, 'stats report the escalation fired');
+    assert.equal(stats.ageFloorDays, SIZE_PRESSURE_AGE_DAYS);
+    const project = readFileSync(join(dir, 'PROJECT.md'), 'utf8');
+    assert.ok(/→ see `PROJECT-ARCHIVE\.md §Moves 2026-06-02`/.test(project), 'stub left behind');
+    assert.ok(/Still active/.test(project), 'active item untouched');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('demoteMoves: size pressure never escalates when the normal floor already found demotions (no need, no surprise over-demotion)', () => {
+  const dir = scratchProject();
+  const filler = '#'.repeat(HARD_CAP_BYTES + 5000);
+  writeFileSync(join(dir, 'PROJECT.md'), [
+    '# P', '', '## Moves', '', '### Active', '',
+    '- [x] **Old enough for normal floor 2026-03-01** — done.', // 93 days — demotes at floor 30 already
+    '- [x] **Too young even for size pressure 2026-05-30** — done.', // 3 days — younger than 7-day floor too
+    '- [ ] **Still active** — keep me.', '',
+    '## Notes', '', filler,
+  ].join('\n'));
+  try {
+    const stats = demoteMoves(dir, { today: TODAY });
+    assert.equal(stats.demoted, 1, 'only the already-30d-aged item demotes');
+    assert.equal(stats.sizePressureApplied, undefined, 'normal floor already found a candidate, no escalation needed');
+    const project = readFileSync(join(dir, 'PROJECT.md'), 'utf8');
+    assert.ok(/Too young even for size pressure/.test(project), '3-day item stays even though file is over cap');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
