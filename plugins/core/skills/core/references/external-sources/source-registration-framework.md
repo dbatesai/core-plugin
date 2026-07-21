@@ -364,13 +364,14 @@ None initially. If the file grows past a threshold (say 50MB), a hygiene pass at
 
 ## What CORE ships alongside this framework
 
-Three artifacts CORE ships in support of the framework:
+Two artifacts CORE ships in support of the framework:
 
 1. **This framework document.** The contract.
 2. **`references/confidence-assignment-guide.md`.** Pattern catalog for confidence-level assignment, source-category-agnostic, pattern-anchored. Installations reference this when implementing extractors.
-3. **`scripts/analyze-source-pull-log.mjs`.** Monitoring log analyzer; reads the JSONL, produces aggregate statistics. Wired into `/finalize` (Step 3, "Source-pull monitoring") and available on-demand.
 
-These three plus the existing observation schema, DC-70 promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
+(A third artifact, `scripts/analyze-source-pull-log.mjs`, shipped a monitoring-log analyzer for the §7 read protocol — deleted 2026-07-21, see §7 above for why. Not replaced yet.)
+
+These two plus the existing observation schema, DC-70 promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
 
 ---
 

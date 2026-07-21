@@ -237,17 +237,14 @@ function realish() { return (process.hrtime.bigint().toString(36) + (_seq++).toS
 function ensureGitignored(project) {
   const gi = join(project, '.gitignore');
   let cur = '';
-  let existed = true;
   try { cur = readFileSync(gi, 'utf8'); } catch (e) {
-    if (e && e.code === 'ENOENT') existed = false;
-    else throw new Error(`cannot verify .gitignore leak protection at ${gi}: ${e.message}`);
+    if (!e || e.code !== 'ENOENT') throw new Error(`cannot verify .gitignore leak protection at ${gi}: ${e.message}`);
   }
   if (/^_mailbox\/?\s*$/m.test(cur)) return; // already protected — nothing to write
   const add = (cur && !cur.endsWith('\n') ? '\n' : '') + '_mailbox/\n';
   try { writeFileSync(gi, cur + add); } catch (e) {
     throw new Error(`cannot establish _mailbox/ gitignore leak protection at ${gi}: ${e.message}`);
   }
-  void existed; // (documents intent: a missing file is fine, a present-but-broken one is not)
 }
 
 /** Post a message into a target project's mailbox. Returns the written filename. */

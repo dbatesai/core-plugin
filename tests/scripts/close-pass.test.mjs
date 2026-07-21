@@ -10,7 +10,7 @@ import {
   detectCloseState, beginClose, recordOp, releaseLock, runClose,
   claudeSpawnShell, CLOSE_OPS,
 } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');
@@ -158,13 +158,19 @@ test('detectCloseState: crashed-mid-close with a store-signature mismatch re-owe
 // finalize protocol correctly (`_close-marker.json` on a real close shows every op recorded)
 // — so this isn't "the mechanism never works," it's "the parent trusts the child's exit code
 // as a proxy for protocol compliance, with nothing checking that compliance actually happened."
-test('detectCloseState: a closed marker with judgment ops never recorded reports them owed, not silently complete', () => {
+test('runClose: a spawnFinalize that "succeeds" while recording zero judgment ops is NOT certified closed (Hale\'s root-cause catch)', () => {
   const store = freshStore();
   try {
     // Simulate the pathological case directly: a spawnFinalize that "succeeds" but never
     // shells out to record anything beyond what runClose itself records (maintenance-run).
+    // Root-fix version (2026-07-21): runClose() itself must not certify this as closed --
+    // catching it only on a LATER detectCloseState read means the certifying function lied
+    // at the moment it mattered (r.ok, the marker status, and the close-complete log line).
     const r = runClose(store, { spawnFinalize: () => undefined });
-    assert.ok(r.ok, 'runClose reports success (matches the real no-op-child behavior)');
+    assert.equal(r.ok, false, 'runClose must NOT report success when required judgment ops were never recorded');
+
+    const marker = JSON.parse(readFileSync(join(store, '_memories', '_close-marker.json'), 'utf8'));
+    assert.equal(marker.status, 'failed', 'the marker itself must not claim closed on an incomplete close');
 
     const det = detectCloseState(store, { allOps: CLOSE_OPS });
     assert.notEqual(det.state, 'closed', 'a closed marker missing judgment-op records must not read as a complete close');
