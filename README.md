@@ -40,11 +40,11 @@ claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Either path installs the main skill and five companion skills, and leaves your `~/.claude/settings.json` exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session, installing on Codex, optional hooks, and troubleshooting.
+Either path installs the main skill and seven companion skills, and leaves your `~/.claude/settings.json` exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session, installing on Codex, optional hooks, and troubleshooting.
 
 ## Commands
 
-Type `/core` to start — it loads your project and orients before anything else. Five companions handle the rest: **`/finalize`** (close a session), **`/process-memory`** (clean up memory on demand), **`/register-sources`** (point CORE at outside data that should feed the project), **`/configure-project`** (set up and health-check a project), and **`/vibecheck`** (capture how the session felt). Two optional hooks pair well with CORE — a guard before a write touches installed skill files, and a per-turn nudge to keep the voice plain. They live in your own `~/.claude/settings.json`; [INSTALL.md](INSTALL.md) shows how to add them.
+Type `/core` to start — it loads your project and orients before anything else. Seven companions handle the rest: **`/finalize`** (close a session), **`/process-memory`** (clean up memory on demand), **`/register-sources`** (point CORE at outside data that should feed the project), **`/configure-project`** (set up and health-check a project), **`/vibecheck`** (capture how the session felt), **`/export-obsidian`** (open what CORE knows as a browsable graph in Obsidian — backlinks, note browsing, the works), and **`/metrics-package`** (pull an anonymized stats package showing how well the memory is actually working). Two optional hooks pair well with CORE — a guard before a write touches installed skill files, and a per-turn nudge to keep the voice plain. They live in your own `~/.claude/settings.json`; [INSTALL.md](INSTALL.md) shows how to add them.
 
 [USAGE.md](USAGE.md) is the full reference — every command, protocol, and script, and what each one does.
 

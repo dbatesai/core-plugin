@@ -59,6 +59,22 @@ Capture the emotional truth of a session as ASCII art.
 - **What it does:** renders how the session felt — not a status report, the actual vibe — and logs it to `~/.core/vibes/vibe-log.md`. Terminal-only, no browser.
 - **When to use:** "vibecheck," or whenever you want to mark the feel of a session.
 
+### `/export-obsidian`
+
+Open what CORE knows as a browsable graph in Obsidian.
+
+- **What it does:** exports the memory store as a read-only projection — markdown files with generated frontmatter-derived links and a manifest — that opens directly as an Obsidian vault and is simultaneously OKF v0.1-draft conformant. Graph view, backlinks, note browsing, all computed fresh from one atomic snapshot of the store each run.
+- **When to use:** "let me see what you know," "open this in Obsidian," "can I browse the graph" — anytime seeing the connections matters more than being told about them.
+- **Writes:** `_okf-export/` — disposable and regenerated each run; edits to the exported files never flow back to the real store.
+
+### `/metrics-package`
+
+Pull an anonymized stats package showing how well the memory is actually working.
+
+- **What it does:** builds a zip on the Desktop with retrieval, recognition, store-health, hygiene, and capability statistics — numbers, dates, fixed vocabulary, and salted pseudonyms only. Real project content never enters it by construction.
+- **When to use:** "pull the memory stats," "export a metrics package," or whenever you want shareable evidence of how the memory system is performing.
+- **Writes:** a zip file to `~/Desktop/`.
+
 ---
 
 ## Additional reference
