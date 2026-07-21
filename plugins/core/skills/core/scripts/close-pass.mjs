@@ -176,12 +176,19 @@ export function detectCloseState(store, { allOps = [], storeSignature = null, no
   const sigMismatch = storeSignature != null && marker.store_signature != null
     && marker.store_signature !== storeSignature;
 
-  // Terminal states. `closed` = the runner's finish stamped success — TRUST it (the envelope
-  // guarantees the marker, so a clean close is closed even though the runner records only a
-  // couple of the ops; re-deriving "owed" from unrecorded LLM ops would re-close every session).
+  // Terminal states. `closed` = the runner's finish stamped success. A genuinely complete
+  // close DOES carry every judgment op in marker.ops — the headless /finalize child shells
+  // out to `close-pass.mjs record --op <op>` at each protocol step (finalize/SKILL.md), and a
+  // real production marker confirms this lands correctly. What `closed` alone can't rule out
+  // is the child exiting cleanly (or a test stub returning success) WITHOUT ever following that
+  // protocol — nothing here previously checked that the record calls actually happened, only
+  // that the process didn't report failure (Hale's close-marker-semantic-gap finding,
+  // 2026-07-21). So: still trust `closed`, but only once the required ops are actually present
+  // as `done` — that re-owes the pathological case without re-closing a session that worked.
   // `failed` = finished but /finalize failed (P1 fix) — re-owe so the next startup retries.
   if (marker.status === 'closed') {
     if (sigMismatch) return { state: 'owed', owed: allOps.filter(isStoreDerived), reason: 'store-changed' };
+    if (notDone.length) return { state: 'owed', owed: notDone, reason: 'closed-but-incomplete' };
     return { state: 'closed', owed: [] };
   }
   if (marker.status === 'failed') {

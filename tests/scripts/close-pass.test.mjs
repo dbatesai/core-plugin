@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
   detectCloseState, beginClose, recordOp, releaseLock, runClose,
-  claudeSpawnShell,
+  claudeSpawnShell, CLOSE_OPS,
 } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 import { writeFileSync } from 'node:fs';
 
@@ -147,6 +147,53 @@ test('detectCloseState: crashed-mid-close with a store-signature mismatch re-owe
     // already-recorded-done transcript op should NOT reappear.
     assert.ok(det.owed.includes('maintenance-run'), 'store-derived op re-owed on signature drift');
     assert.ok(!det.owed.includes('reflection-a'), 'already-done transcript op not re-owed');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+// Hale's falsifier (2026-07-21, close-marker-semantic-gap): a spawnFinalize that returns
+// success (or a test-stub `undefined`, treated as success per P1/P5) WITHOUT the headless
+// child ever calling `close-pass.mjs record --op <op>` for the ten judgment ops (everything
+// beyond maintenance-run) must not read back as a complete, nothing-owed close. Confirmed
+// live production markers DO carry all twelve ops when the headless child follows the
+// finalize protocol correctly (`_close-marker.json` on a real close shows every op recorded)
+// — so this isn't "the mechanism never works," it's "the parent trusts the child's exit code
+// as a proxy for protocol compliance, with nothing checking that compliance actually happened."
+test('detectCloseState: a closed marker with judgment ops never recorded reports them owed, not silently complete', () => {
+  const store = freshStore();
+  try {
+    // Simulate the pathological case directly: a spawnFinalize that "succeeds" but never
+    // shells out to record anything beyond what runClose itself records (maintenance-run).
+    const r = runClose(store, { spawnFinalize: () => undefined });
+    assert.ok(r.ok, 'runClose reports success (matches the real no-op-child behavior)');
+
+    const det = detectCloseState(store, { allOps: CLOSE_OPS });
+    assert.notEqual(det.state, 'closed', 'a closed marker missing judgment-op records must not read as a complete close');
+    for (const op of CLOSE_OPS) {
+      if (op === 'maintenance-run') continue; // this one IS mechanically recorded by runClose itself
+      assert.ok(det.owed.includes(op), `${op} was never recorded and must surface as owed, not silently trusted`);
+    }
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('detectCloseState: a closed marker with every CLOSE_OPS entry actually recorded reads as complete (the healthy-path counterpart)', () => {
+  const store = freshStore();
+  try {
+    const r = runClose(store, {
+      spawnFinalize: (s) => {
+        // Simulate the real headless child: after maintenance-run (already recorded by
+        // runClose itself before this callback fires), shell out to record every remaining
+        // judgment op, exactly as finalize/SKILL.md instructs at each step.
+        for (const op of CLOSE_OPS) {
+          if (op === 'maintenance-run') continue;
+          recordOp(s, { op, status: 'done' });
+        }
+        return { ok: true };
+      },
+    });
+    assert.ok(r.ok);
+    const det = detectCloseState(store, { allOps: CLOSE_OPS });
+    assert.equal(det.state, 'closed', 'a genuinely complete close must not be penalized by the new check');
+    assert.deepEqual(det.owed, []);
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
