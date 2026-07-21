@@ -227,19 +227,33 @@ function realish() { return (process.hrtime.bigint().toString(36) + (_seq++).toS
  * potentially cross-project-sensitive inbound comms; unlike the memory store it must
  * never be committed/pushed. Idempotent append to <project>/.gitignore.
  */
+// Fail-closed (Hale's finding, 2026-07-21): the old version swallowed every
+// failure here — a `.gitignore` that couldn't be read OR written (e.g. it's a
+// directory, or the tree is read-only in a way that isn't a plain ENOENT on a
+// missing file) silently fell through, and postMessage() still wrote the
+// mailbox content with no leak protection actually established. Returns
+// normally on success; THROWS when protection can't be verified, so the
+// caller (postMessage) can refuse rather than write unprotected content.
 function ensureGitignored(project) {
   const gi = join(project, '.gitignore');
   let cur = '';
-  try { cur = readFileSync(gi, 'utf8'); } catch { /* none yet */ }
-  if (/^_mailbox\/?\s*$/m.test(cur)) return;
+  let existed = true;
+  try { cur = readFileSync(gi, 'utf8'); } catch (e) {
+    if (e && e.code === 'ENOENT') existed = false;
+    else throw new Error(`cannot verify .gitignore leak protection at ${gi}: ${e.message}`);
+  }
+  if (/^_mailbox\/?\s*$/m.test(cur)) return; // already protected — nothing to write
   const add = (cur && !cur.endsWith('\n') ? '\n' : '') + '_mailbox/\n';
-  try { writeFileSync(gi, cur + add); } catch { /* read-only tree — best effort */ }
+  try { writeFileSync(gi, cur + add); } catch (e) {
+    throw new Error(`cannot establish _mailbox/ gitignore leak protection at ${gi}: ${e.message}`);
+  }
+  void existed; // (documents intent: a missing file is fine, a present-but-broken one is not)
 }
 
 /** Post a message into a target project's mailbox. Returns the written filename. */
 export function postMessage({ to, from, topic, body, date }) {
   const target = resolveTarget(to, { forWrite: true });
-  ensureGitignored(target);
+  ensureGitignored(target); // throws (fail-closed) rather than let an unwritten mailbox proceed unprotected
   const d = date || new Date().toISOString().slice(0, 10);
   const base = `${slugify(from, 'sender')}--${slugify(topic, 'message')}--${d}`;
   const front = `---\nfrom: ${from}\ntopic: ${topic}\ndate: ${d}\n---\n\n`;

@@ -154,6 +154,26 @@ test('governance: posting git-ignores _mailbox/ (leak control, not a doc sentenc
   } finally { rmSync(b, { recursive: true, force: true }); }
 });
 
+// Hale's finding (2026-07-21): ensureGitignored() swallows every failure, then
+// postMessage() writes _mailbox/ regardless — so if gitignore protection can't
+// be established, the mailbox still gets written with no leak protection, and
+// post reports success. Repro: make .gitignore a directory, so both the read
+// and the write inside ensureGitignored throw. This must fail closed, not
+// silently proceed to write potentially-committable mailbox content.
+test('governance: postMessage refuses when gitignore protection cannot be established (fail-closed, not silent)', () => {
+  const b = project();
+  try {
+    mkdirSync(join(b, '.gitignore')); // .gitignore as a directory -> read AND write both throw inside ensureGitignored
+    assert.throws(
+      () => postMessage({ to: b, from: 'x', topic: 't', body: 'b' }),
+      /gitignore|leak/i,
+      'postMessage must refuse rather than write mailbox content with no proven leak protection',
+    );
+    const mailboxContents = existsSync(join(b, '_mailbox')) ? readdirSync(join(b, '_mailbox')) : [];
+    assert.equal(mailboxContents.length, 0, 'no message was actually written on the failed-protection path');
+  } finally { rmSync(b, { recursive: true, force: true }); }
+});
+
 test('boundary: _mailbox is a sibling of _memories and never enters the memory index', async () => {
   const b = project();
   try {
