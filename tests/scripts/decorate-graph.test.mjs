@@ -78,8 +78,76 @@ test('decorateUnitText cleanly removes a stale block once its edges are gone', (
   const activeById = new Map([['dc-1', {}]]);
   const withBlock = `---\nid: dc-1\ntype: decision\nstatus: active\n---\n\n# dc-1\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-2]]\n${EDGES_END}\n`;
   const out = decorateUnitText(withBlock, 'dc-1', [], activeById);
-  assert.equal(findExistingEdgesBlock(out), null);
+  assert.deepEqual(findExistingEdgesBlock(out), { ok: true, block: null });
   assert.doesNotMatch(out, /CORE:BEGIN_EDGES/);
+});
+
+test('findExistingEdgesBlock fails closed on a malformed marker state (Hale\'s falsifier)', () => {
+  // One orphaned BEGIN, no END, a human-authored line after it — exactly the
+  // shape that used to let a later regenerated END pair with the wrong BEGIN
+  // and silently delete everything in between.
+  const malformed = `# dc-1\n\nBody.\n\n${EDGES_BEGIN}\nHUMAN-MUST-SURVIVE\n`;
+  assert.deepEqual(findExistingEdgesBlock(malformed), { ok: false, block: null });
+});
+
+test('findExistingEdgesBlock fails closed on duplicate BEGIN markers', () => {
+  const malformed = `${EDGES_BEGIN}\nfirst\n${EDGES_BEGIN}\nsecond\n${EDGES_END}\n`;
+  assert.deepEqual(findExistingEdgesBlock(malformed), { ok: false, block: null });
+});
+
+test('findExistingEdgesBlock fails closed when END precedes BEGIN', () => {
+  const malformed = `${EDGES_END}\nstuff\n${EDGES_BEGIN}\n`;
+  assert.deepEqual(findExistingEdgesBlock(malformed), { ok: false, block: null });
+});
+
+test('decorateUnitText throws MALFORMED_EDGES_MARKERS instead of corrupting a malformed file', () => {
+  const activeById = new Map([['dc-1', {}], ['dc-2', {}]]);
+  const malformed = `# dc-1\n\nBody.\n\n${EDGES_BEGIN}\nHUMAN-MUST-SURVIVE\n`;
+  assert.throws(
+    () => decorateUnitText(malformed, 'dc-1', [{ type: 'cites', target: 'dc-2' }], activeById),
+    (e) => e.code === 'MALFORMED_EDGES_MARKERS',
+  );
+});
+
+test('decorateStore refuses a malformed-marker file without touching its siblings', () => {
+  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-malformed-'));
+  try {
+    const mem = join(root, '_memories');
+    mkdirSync(mem, { recursive: true });
+    writeFileSync(join(mem, 'dc-1-bad.md'),
+      `---\nid: dc-1-bad\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-2-good\n---\n\n# dc-1-bad\n\n${EDGES_BEGIN}\nHUMAN-MUST-SURVIVE\n`);
+    writeFileSync(join(mem, 'dc-2-good.md'),
+      '---\nid: dc-2-good\ntype: decision\nstatus: active\n---\n\n# dc-2-good\n\nBody.\n');
+    const before = readFileSync(join(mem, 'dc-1-bad.md'), 'utf8');
+
+    const result = decorateStore(root);
+
+    const after = readFileSync(join(mem, 'dc-1-bad.md'), 'utf8');
+    assert.equal(before, after, 'the malformed file must be left byte-identical, not guessed at');
+    assert.match(after, /HUMAN-MUST-SURVIVE/, 'the human-authored line must survive');
+    assert.equal(result.refused.some(r => r.path === 'dc-1-bad.md'), true);
+    assert.equal(result.refused.some(r => r.path === 'dc-2-good.md'), false, 'a sibling file is unaffected by dc-1-bad\'s malformed markers');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('stale-byte comparison: bytes mutated after capture correctly fail Buffer.equals', () => {
+  // decorateStore's refusal path is exactly Buffer.equals() between the bytes
+  // captured at snapshot time and a fresh read immediately before write.
+  // Exercising the full concurrent-writer race through decorateStore itself
+  // would need dependency injection into loadSnapshot's timing; this test
+  // instead verifies the actual comparison primitive the refusal relies on,
+  // using real file I/O — the same pattern this codebase's other
+  // concurrency-safety tests use (e.g. file-lock.mjs's crash simulations
+  // construct state directly rather than running real parallel processes).
+  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-stale-'));
+  try {
+    const filePath = join(root, 'unit.md');
+    writeFileSync(filePath, 'original content, as captured by the snapshot');
+    const captured = readFileSync(filePath);
+    writeFileSync(filePath, 'mutated by a concurrent writer after the snapshot');
+    const current = readFileSync(filePath);
+    assert.equal(current.equals(captured), false, 'mutated bytes must not match the captured snapshot bytes');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('decorateStore: writes changed units, skips unchanged, never touches a retired unit', () => {

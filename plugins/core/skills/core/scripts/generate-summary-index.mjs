@@ -39,6 +39,7 @@ import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadValidEnrichments } from './enrichment-sidecar.mjs';
 import { truncate as sharedTruncate } from './text-truncate.mjs';
+import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -205,7 +206,17 @@ export function loadUnitBodies(storePath, index) {
     if (!existsSync(fpath)) continue;
     let raw;
     try { raw = readFileSync(fpath, 'utf8'); } catch { continue; }
-    const body = raw.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+    let body = raw.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+    // Strip decorate-graph.mjs's generated [[wikilink]] block before it ever
+    // reaches BM25 — the block is CORE-generated metadata (unit ids, edge
+    // types), not content the unit is actually about, and letting it into the
+    // ranked body would skew relevance toward whatever a unit happens to
+    // link to rather than what it says.
+    const beginIdx = body.indexOf(EDGES_BEGIN);
+    const endIdx = body.indexOf(EDGES_END);
+    if (beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx) {
+      body = (body.slice(0, beginIdx) + body.slice(endIdx + EDGES_END.length)).trim();
+    }
     const topics = (u.topics || []).join(' ');
     out.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
   }

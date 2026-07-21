@@ -85,3 +85,10 @@ export const EDGE_TYPE_NORMALIZE = {
 //   stability-class:  durably-correct | durably-suspect
 export const VALID_CONFIDENCE_LEVELS = new Set(['sourced', 'inferred', 'reconstructed']);
 export const VALID_STABILITY_CLASSES = new Set(['durably-correct', 'durably-suspect']);
+
+// decorate-graph.mjs's generated-edges markers. Shared here (not defined in
+// decorate-graph.mjs itself) so generate-summary-index.mjs can strip the
+// block from the BM25-facing body derivation without an import cycle
+// (decorate-graph.mjs imports loadSnapshot FROM generate-summary-index.mjs).
+export const EDGES_BEGIN = '<!-- CORE:BEGIN_EDGES -->';
+export const EDGES_END = '<!-- CORE:END_EDGES -->';

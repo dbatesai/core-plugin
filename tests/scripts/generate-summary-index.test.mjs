@@ -3,7 +3,8 @@ import assert from 'node:assert';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateSummaryIndex, loadFreshIndex, computeSourceSignature, truncate, SUMMARY_MAX } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
+import { generateSummaryIndex, loadFreshIndex, loadSnapshot, loadUnitBodies, computeSourceSignature, truncate, SUMMARY_MAX } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
+import { EDGES_BEGIN, EDGES_END } from '../../plugins/core/skills/core/scripts/unit-vocab.mjs';
 
 function fixtureStore() {
   const root = mkdtempSync(join(tmpdir(), 'core-idx-'));
@@ -146,4 +147,35 @@ test('K04 control: an index with no next_invalidation_at (nothing time-bound) is
   writeFileSync(join(lib, 'unit-summaries.json'), JSON.stringify(cached, null, 2));
   const res = loadFreshIndex(root);
   assert.equal(res.units[0].summary, 'SENTINEL-FROM-CACHE', 'a cache with no time bound and a byte match must be served as-is, not regenerated');
+});
+
+test('archive/ is excluded from the active-data walk (Hale\'s anti-resurrection finding)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'core-idx-archive-'));
+  const mem = join(root, '_memories');
+  const archive = join(mem, 'archive');
+  mkdirSync(archive, { recursive: true });
+  writeFileSync(join(mem, 'dc-1-active.md'),
+    '---\nid: dc-1-active\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1\n\nBody.');
+  writeFileSync(join(archive, 'dc-2-archived.md'),
+    '---\nid: dc-2-archived\ntype: decision\nstatus: archived\ntopics:\n  - retrieval\n---\n\n# DC-2\n\nMust never appear.');
+
+  const cap = loadSnapshot(root, { captureBodies: true, retainRaw: true });
+  const paths = cap.index.units.map(u => u.path);
+  assert.ok(paths.every(p => !p.includes('archive/')), 'no unit path should include archive/');
+  assert.ok(!('dc-2-archived.md' in (cap.raw || {})) || !paths.includes('archive/dc-2-archived.md'));
+});
+
+test('loadUnitBodies strips the decorate-graph generated edges block from the BM25-facing body', () => {
+  const root = mkdtempSync(join(tmpdir(), 'core-idx-edges-strip-'));
+  const mem = join(root, '_memories');
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'dc-1.md'),
+    `---\nid: dc-1\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1\n\nReal body content that should rank.\n\n${EDGES_BEGIN}\n## Related\n- cites: [[dc-2]]\n${EDGES_END}\n`);
+
+  const res = generateSummaryIndex(root);
+  const bodies = loadUnitBodies(root, res);
+  const u = bodies.find(b => b.id === 'dc-1');
+  assert.match(u.text, /Real body content that should rank/);
+  assert.doesNotMatch(u.text, /CORE:BEGIN_EDGES/, 'generated marker must not reach the ranked body');
+  assert.doesNotMatch(u.text, /\[\[dc-2\]\]/, 'generated wikilink must not reach the ranked body');
 });
