@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { retrieveContext, tokenize } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
+import { retrieveContext, tokenize, main as retrieveContextMain } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
 // The obligation-3 fixture store lives in-repo under tests/fixtures/ so CI (which checks
 // out only core-plugin) can reach it. The generated _lib/ cache is gitignored + regenerated.
@@ -48,4 +48,38 @@ test('deterministic — same query yields the same ordered ids', () => {
   const a = retrieveContext('omega speedmaster sale', FIXT, { topN: 5 }).map(h => h.id);
   const b = retrieveContext('omega speedmaster sale', FIXT, { topN: 5 }).map(h => h.id);
   assert.deepEqual(a, b);
+});
+
+// ---------- CLI main(): unrecognized-flag garbage query (Meridian, live Windows box, 2026-07-20) ----------
+//
+// A fat-fingered `--query "..."` used to fall straight through the old arg filter
+// (which only stripped --top/--pack) into the positional slot, so the literal
+// string "--query" became the query text and the tool silently returned a
+// confident top result for garbage input -- no error, no abstention signal. Since
+// this CLI must invoke the exact same function agents/harnesses use to probe
+// delivered bytes (Train A A4), a silently-corrupted query here is a
+// silently-corrupted measurement anywhere the CLI is used that way.
+
+function captured(stream, fn) {
+  const orig = stream.write;
+  const chunks = [];
+  stream.write = (c) => { chunks.push(String(c)); return true; };
+  try { return [fn(), chunks.join('')]; } finally { stream.write = orig; }
+}
+
+test('CLI main(): an unrecognized --query flag is rejected, not silently treated as the query text', () => {
+  const [code, err] = captured(process.stderr, () => retrieveContextMain([FIXT, '--query', 'omega speedmaster sale']));
+  assert.equal(code, 2, 'must fail loud, not silently proceed on garbage input');
+  assert.match(err, /unrecognized flag/);
+});
+
+test('CLI main(): a real positional query still works normally', () => {
+  const [code, out] = captured(process.stdout, () => retrieveContextMain([FIXT, 'omega speedmaster sale', '--top', '3']));
+  assert.equal(code, 0);
+  assert.match(out, /\[\d\.\d\]/, 'prints at least one scored result line');
+});
+
+test('CLI main(): --top and --pack are still recognized and never rejected as unknown flags', () => {
+  const [code] = captured(process.stdout, () => retrieveContextMain([FIXT, 'omega speedmaster sale', '--top', '5', '--pack']));
+  assert.equal(code, 0);
 });
