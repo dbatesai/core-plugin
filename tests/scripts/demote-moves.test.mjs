@@ -7,7 +7,7 @@ import {
   classifyBullet, extractMostRecentDate, parseBullets, extractMovesSection, demoteMoves,
   SIZE_PRESSURE_AGE_DAYS,
 } from '../../plugins/core/skills/core/scripts/demote-moves.mjs';
-import { HARD_CAP_BYTES } from '../../plugins/core/skills/core/scripts/compact-project.mjs';
+import { PROJECT_MD_CAP_BYTES } from '../../plugins/core/skills/core/scripts/compact-project.mjs';
 
 const TODAY = '2026-06-02';
 
@@ -273,7 +273,7 @@ test('MEM-013: crash-retry does not duplicate the archive block', () => {
 
 function projectOverCapWithAgedBullet(dateStr) {
   const dir = scratchProject();
-  const filler = '#'.repeat(HARD_CAP_BYTES + 5000); // pushes PROJECT.md over the hard cap
+  const filler = '#'.repeat(PROJECT_MD_CAP_BYTES + 5000); // pushes PROJECT.md over the hard cap
   const text = [
     '# P', '', '## Moves', '', '### Active', '',
     `- [x] **Item shipped ${dateStr}** — done.`,
@@ -314,7 +314,7 @@ test('demoteMoves: the same 10-day-old item demotes once PROJECT.md is over its 
 
 test('demoteMoves: size pressure reports no escalation when the escalated floor finds nothing extra beyond the normal floor', () => {
   const dir = scratchProject();
-  const filler = '#'.repeat(HARD_CAP_BYTES + 5000);
+  const filler = '#'.repeat(PROJECT_MD_CAP_BYTES + 5000);
   writeFileSync(join(dir, 'PROJECT.md'), [
     '# P', '', '## Moves', '', '### Active', '',
     '- [x] **Old enough for normal floor 2026-03-01** — done.', // 93 days — demotes at floor 30 already
@@ -337,7 +337,7 @@ test("demoteMoves: Hale's catch (2026-07-21) — one old item no longer masks ot
   // never ran under the old gate — the 10-day item sat untouched even though
   // the file was still massively over cap after removing just the one item.
   const dir = scratchProject();
-  const filler = '#'.repeat(HARD_CAP_BYTES + 5000);
+  const filler = '#'.repeat(PROJECT_MD_CAP_BYTES + 5000);
   writeFileSync(join(dir, 'PROJECT.md'), [
     '# P', '', '## Moves', '', '### Active', '',
     '- [x] **Old enough for normal floor 2026-03-01** — done.', // 93 days — demotes at floor 30

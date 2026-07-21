@@ -38,7 +38,7 @@ import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
-import { HARD_CAP_BYTES } from './compact-project.mjs';
+import { PROJECT_MD_CAP_BYTES } from './compact-project.mjs';
 
 // Terminal statuses come from the shared vocabulary (SYN-005): retired/archived/
 // superseded. 'resolved'/'closed' were never schema statuses and no longer gate;
@@ -365,7 +365,7 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   // escalation would never fire, and dozens of 10-29-day bullets would sit
   // untouched on a file still massively over cap.
   const sizeBytes = Buffer.byteLength(text, 'utf8');
-  if (sizeBytes > HARD_CAP_BYTES) {
+  if (sizeBytes > PROJECT_MD_CAP_BYTES) {
     const escalated = classifyAll(SIZE_PRESSURE_AGE_DAYS);
     if (escalated.demos.length > demotions.length) {
       demotions = escalated.demos;

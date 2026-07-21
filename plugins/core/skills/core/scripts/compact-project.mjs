@@ -41,9 +41,6 @@ export const PROJECT_MD_CAP_BYTES = 67000;
 // 2026-05-24 (session 34) — the old name implied enforcement the script
 // never had.
 export const SOFT_TARGET_BYTES = 70000;
-// Back-compat export for any consumer still on the old name. Remove when no
-// callers reference it. Tracked via the project-md-over-cap event payload.
-export const HARD_CAP_BYTES = SOFT_TARGET_BYTES;
 
 export function parseArgv(argv) {
   const flags = new Set();
