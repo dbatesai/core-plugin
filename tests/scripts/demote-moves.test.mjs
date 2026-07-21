@@ -312,7 +312,7 @@ test('demoteMoves: the same 10-day-old item demotes once PROJECT.md is over its 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('demoteMoves: size pressure never escalates when the normal floor already found demotions (no need, no surprise over-demotion)', () => {
+test('demoteMoves: size pressure reports no escalation when the escalated floor finds nothing extra beyond the normal floor', () => {
   const dir = scratchProject();
   const filler = '#'.repeat(HARD_CAP_BYTES + 5000);
   writeFileSync(join(dir, 'PROJECT.md'), [
@@ -325,8 +325,34 @@ test('demoteMoves: size pressure never escalates when the normal floor already f
   try {
     const stats = demoteMoves(dir, { today: TODAY });
     assert.equal(stats.demoted, 1, 'only the already-30d-aged item demotes');
-    assert.equal(stats.sizePressureApplied, undefined, 'normal floor already found a candidate, no escalation needed');
+    assert.equal(stats.sizePressureApplied, undefined, 'escalated floor finds nothing extra beyond the normal floor here');
     const project = readFileSync(join(dir, 'PROJECT.md'), 'utf8');
     assert.ok(/Too young even for size pressure/.test(project), '3-day item stays even though file is over cap');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("demoteMoves: Hale's catch (2026-07-21) — one old item no longer masks other over-floor items still over cap", () => {
+  // Pre-fix bug: the escalation only fired when the normal floor found ZERO
+  // candidates. Here the normal floor finds the 93-day item, so escalation
+  // never ran under the old gate — the 10-day item sat untouched even though
+  // the file was still massively over cap after removing just the one item.
+  const dir = scratchProject();
+  const filler = '#'.repeat(HARD_CAP_BYTES + 5000);
+  writeFileSync(join(dir, 'PROJECT.md'), [
+    '# P', '', '## Moves', '', '### Active', '',
+    '- [x] **Old enough for normal floor 2026-03-01** — done.', // 93 days — demotes at floor 30
+    '- [x] **Only old enough for size pressure 2026-05-23** — done.', // 10 days — demotes at floor 7 only
+    '- [x] **Too young for either floor 2026-05-30** — done.', // 3 days — demotes at neither
+    '- [ ] **Still active** — keep me.', '',
+    '## Notes', '', filler,
+  ].join('\n'));
+  try {
+    const stats = demoteMoves(dir, { today: TODAY });
+    assert.equal(stats.demoted, 2, 'both the 93-day and 10-day items demote once escalation runs');
+    assert.equal(stats.sizePressureApplied, true, 'escalation reports it fired');
+    assert.equal(stats.ageFloorDays, SIZE_PRESSURE_AGE_DAYS);
+    const project = readFileSync(join(dir, 'PROJECT.md'), 'utf8');
+    assert.ok(/Too young for either floor/.test(project), '3-day item still stays — escalation has a floor too');
+    assert.equal((project.match(/→ see `PROJECT-ARCHIVE/g) || []).length, 2, 'two stubs left');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

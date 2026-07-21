@@ -355,19 +355,23 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   let sizePressureApplied = false;
   let ageFloorDays = CLOSE_AGE_DAYS;
 
-  // Size-pressure fallback: only escalate when the normal floor found nothing
-  // AND the file is demonstrably over its hard cap — never a substitute for
-  // the normal floor, only a fallback when it structurally can't keep up.
-  if (demotions.length === 0) {
-    const sizeBytes = Buffer.byteLength(text, 'utf8');
-    if (sizeBytes > HARD_CAP_BYTES) {
-      const escalated = classifyAll(SIZE_PRESSURE_AGE_DAYS);
-      if (escalated.demos.length > 0) {
-        demotions = escalated.demos;
-        kept = escalated.keeps;
-        sizePressureApplied = true;
-        ageFloorDays = SIZE_PRESSURE_AGE_DAYS;
-      }
+  // Size-pressure fallback: when the file is over its hard cap, check the
+  // shorter floor regardless of what the normal floor already found — a
+  // shorter floor is a strict superset (age >= floor demotes; 7 <= 30, so
+  // everything the 30-day floor catches, the 7-day floor also catches, plus
+  // anything 7-29 days old). Gating on "the normal floor found nothing" (the
+  // original design, Hale's catch 2026-07-21) let a single old item mask
+  // every other item still over cap: one 93-day bullet would demote, the
+  // escalation would never fire, and dozens of 10-29-day bullets would sit
+  // untouched on a file still massively over cap.
+  const sizeBytes = Buffer.byteLength(text, 'utf8');
+  if (sizeBytes > HARD_CAP_BYTES) {
+    const escalated = classifyAll(SIZE_PRESSURE_AGE_DAYS);
+    if (escalated.demos.length > demotions.length) {
+      demotions = escalated.demos;
+      kept = escalated.keeps;
+      sizePressureApplied = true;
+      ageFloorDays = SIZE_PRESSURE_AGE_DAYS;
     }
   }
 
