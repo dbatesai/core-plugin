@@ -45,14 +45,6 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
-  // select-relevant-units.mjs left this allowlist 2026-07-17: DC-117 resolved
-  // Gate G3 and references/retrieval.md §Tier 3 step 1 now names it on the
-  // product path (shortlist --max 100 before any Explore subagent).
-  'instruction-surface-adapter.mjs': {
-    reason: 'Deliberately-staged v3.0 instruction-surface system (dry-run core; --apply is David-gated + content-generation not implemented). Activation is tied to the pending "does the contract→generator system still earn its complexity at N=2 surfaces" decision (PROJECT.md §State). Wire or retire when that decides.',
-    allowlistDate: '2026-06-09',
-    reviewBy: '2026-09-09',
-  },
   'retrieval-harness.mjs': {
     reason: 'Offline Recall@K gold harness (DC-113 Tier-A T1; arms trimmed to model-free per DC-114) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the DC-115 measurement ceremony (Crest\'s shared harness is the BBLens twin). Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
     allowlistDate: '2026-07-07',
