@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import {
   applyHotSection, recordProjectMdWrite, HOT_BEGIN, HOT_END,
   currentHotSection, clearHotSection, candidatesForSynthesis,
-  HOT_SECTION_TOKEN_BUDGET,
+  HOT_SECTION_TOKEN_BUDGET, hashOutsideHotBlock, classifyProjectMdChange,
 } from '../../plugins/core/skills/core/scripts/hot-section.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/hot-section.mjs', import.meta.url));
@@ -66,6 +67,76 @@ test('recordProjectMdWrite tolerates a missing per-project cache file (creates i
     recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-06T00:00:00Z', home });
     const cache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
     assert.equal(cache.files[join(project, 'PROJECT.md')].last_written_by, 'hot-section');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- Hale's hot-section-edit-attribution finding (2026-07-21) ----------
+//
+// `last_written_by: hot-section` alone is a stale label: it proves who wrote the
+// PREVIOUSLY cached bytes, not the CURRENT ones. A user edit made after a hot-section
+// apply would carry that same stale label at the next check and get silently
+// misclassified as CORE's own synthesis — a direct violation of the user-control
+// invariant (a user edit must never be silently discarded). These tests exercise the
+// deterministic replacement: `outside_hash` + `classifyProjectMdChange`, which hashes
+// only the content outside the hot-section markers — hot-section.mjs never touches
+// that region by construction, so a mismatch there can only be a user edit.
+
+test("classifyProjectMdChange: a user edit outside the hot block after a hot-section apply reads as 'outside-changed', not hot-block-only", () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'Right now: shipping the thing.', { now: '2026-06-06T00:00:00Z', home });
+    const cachedStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[join(project, 'PROJECT.md')];
+    assert.match(cachedStamp.outside_hash, /^[0-9a-f]{16}$/, 'the stamp records an outside-block hash');
+
+    // The user edits PROJECT.md outside the markers — the exact scenario the old
+    // last_written_by-only check would have silently misattributed to CORE.
+    const current = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    const userEdited = current.replace('The thing.', 'The thing, but I changed this myself.');
+    assert.notEqual(userEdited, current, 'sanity: the edit actually changed the text');
+
+    const verdict = classifyProjectMdChange(cachedStamp, userEdited);
+    assert.equal(verdict, 'outside-changed',
+      'a change outside the hot block must never read as hot-block-only, regardless of the stale last_written_by label');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('classifyProjectMdChange: a second, later hot-section apply (only the marker block changes) reads as hot-block-only', () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'Right now: first synthesis.', { now: '2026-06-06T00:00:00Z', home });
+    const cachedStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[join(project, 'PROJECT.md')];
+
+    const updatedText = applyHotSection(project, 'Right now: second synthesis, nothing outside changed.', { now: '2026-06-06T01:00:00Z', home });
+    const verdict = classifyProjectMdChange(cachedStamp, updatedText);
+    assert.equal(verdict, 'hot-block-only', 'a real hot-section-only change is correctly recognized as safe');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('classifyProjectMdChange: no cached outside_hash (older/missing stamp) reports no-baseline rather than guessing', () => {
+  assert.equal(classifyProjectMdChange(null, 'anything'), 'no-baseline');
+  assert.equal(classifyProjectMdChange({ last_written_by: 'hot-section' }, 'anything'), 'no-baseline',
+    'a pre-fix stamp with no outside_hash must not be silently trusted as hot-block-only');
+});
+
+test('hashOutsideHotBlock: identical regardless of what changes INSIDE the markers', () => {
+  const withBlockA = `# Project\n${HOT_BEGIN}\nfoo\n${HOT_END}\n\nbody text\n`;
+  const withBlockB = `# Project\n${HOT_BEGIN}\nbar bar bar\n${HOT_END}\n\nbody text\n`;
+  assert.equal(hashOutsideHotBlock(withBlockA), hashOutsideHotBlock(withBlockB));
+});
+
+test('clearHotSection stamps recordProjectMdWrite so edit-detection state stays truthful after a clear (Hale, second finding)', () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'Right now: shipping the thing.', { now: '2026-06-06T00:00:00Z', home });
+    clearHotSection(project, { now: '2026-06-06T02:00:00Z', home });
+
+    const cache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
+    const entry = cache.files[join(project, 'PROJECT.md')];
+    assert.equal(entry.last_written, '2026-06-06T02:00:00Z', 'the clear re-stamps the cache, not just the earlier apply');
+
+    const actualHash = createHash('sha256')
+      .update(readFileSync(join(project, 'PROJECT.md'), 'utf8'), 'utf8').digest('hex').slice(0, 16);
+    assert.equal(entry.last_hash, actualHash, 'cached hash matches the post-clear file — no longer permanently stale');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

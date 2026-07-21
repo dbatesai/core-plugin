@@ -410,7 +410,7 @@ Hash-based comparison against the state cache. The cache of record is **per-proj
 
 You update the cache on every read/write. You compare at every read.
 
-CORE's own writes are not user edits. Scripts that render PROJECT.md (e.g. `hot-section.mjs apply`) stamp `last_written_by` with their own name; a diff confined to the marker-delimited hot-section block, or a file whose `last_written_by` is a CORE writer, is CORE's synthesis — refresh the entry, don't propagate or fire anti-resurrection.
+CORE's own writes are not user edits. Scripts that render PROJECT.md (e.g. `hot-section.mjs apply`) stamp `last_written_by` with their own name — but that label alone is not trustworthy evidence for a later mismatch: it says who wrote the previously cached bytes, not the current ones, so a user edit made after a hot-section apply would carry the same stale label (Hale's finding, 2026-07-21). Use `hot-section.mjs`'s `classifyProjectMdChange(cachedStamp, currentText)` instead — it hashes only the content outside the marker-delimited hot block, which `hot-section.mjs` never touches by construction. `'hot-block-only'` is CORE's synthesis: refresh the entry, don't propagate or fire anti-resurrection. `'outside-changed'` or `'no-baseline'` (a pre-fix stamp with no `outside_hash`) must be treated as a genuine user edit.
 
 Runs at:
 - startup (full sweep).
