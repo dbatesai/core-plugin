@@ -189,3 +189,22 @@ test('decorateStore --dry-run (dryRun option) reports changes without writing th
     assert.equal(result.dry_run, true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('decorateUnitText is CRLF-safe (Meridian\'s Windows review, 2026-07-21)', () => {
+  // Marker lookup is plain string indexOf on the literal marker text, not a
+  // newline-spanning regex, so a file rewritten with \r\n by Obsidian or a
+  // Windows editor must not break block detection, idempotence, or removal.
+  const activeById = new Map([['dc-1', {}], ['dc-2', {}]]);
+  const crlfText = '---\r\nid: dc-1\r\ntype: decision\r\nstatus: active\r\n---\r\n\r\n# dc-1\r\n\r\nBody with CRLF.\r\n';
+  const edges = [{ type: 'cites', target: 'dc-2' }];
+
+  const once = decorateUnitText(crlfText, 'dc-1', edges, activeById);
+  assert.match(once, /\[\[dc-2\]\]/);
+
+  const twice = decorateUnitText(once, 'dc-1', edges, activeById);
+  assert.equal(once, twice, 'idempotent on a CRLF file');
+
+  const removed = decorateUnitText(once, 'dc-1', [], activeById);
+  assert.doesNotMatch(removed, /CORE:BEGIN_EDGES/);
+  assert.match(removed, /Body with CRLF\.\r\n/, 'human-authored CRLF line endings survive block removal');
+});
