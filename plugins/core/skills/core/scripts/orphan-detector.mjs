@@ -45,6 +45,11 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
+  'decorate-graph.mjs': {
+    reason: 'New in-place Obsidian [[wikilink]] graph decoration mechanism (David\'s 2026-07-21 direction change, replacing the export-only OKF projection). Mechanism and tests are built and reviewed (Antigravity); the invocation surface (a slash command, or a hygiene.md hook) is not yet decided. Wire it in once that decision lands.',
+    allowlistDate: '2026-07-21',
+    reviewBy: '2026-09-21',
+  },
   // select-relevant-units.mjs left this allowlist 2026-07-17: DC-117 resolved
   // Gate G3 and references/retrieval.md §Tier 3 step 1 now names it on the
   // product path (shortlist --max 100 before any Explore subagent).
