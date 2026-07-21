@@ -339,6 +339,13 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     const status = String(u.fm.status || '').toLowerCase();
     if (status === 'archived' && !String(u.path).includes('archive'))
       report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit has status=archived but is not in archive/ subdir' });
+    // retired-in-active: flags a unit that should be relocated. Physical
+    // relocation to archive/ is organization, not an enforcement boundary on
+    // its own (Hale's 2026-07-21 correction) -- the actual anti-resurrection
+    // guarantee is generate-summary-index.mjs excluding archive/ from its
+    // walk (isCandidateDir) plus this being status-filtered everywhere else.
+    if (status === 'retired' && !String(u.path).includes('archive'))
+      report.push({ level: 'WARN', check: 'retired-in-active', unit_id: uid, detail: 'Unit has status=retired but is not in archive/ subdir — relocate it for store organization' });
 
     // MEM-018: unknown provenance is now visible. An active, aged,
     // non-observation unit with no sources scores the degraded S default —

@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [3.13.0] — 2026-07-21
 
 ### Added
-- **`/export-obsidian`** — a new companion utility that exports the current project's memory store as an Obsidian-browsable vault (and OKF v0.1-draft-conformant bundle): a read-only projection with generated markdown-link edges, retired units and retired-target edges filtered, built from one atomic snapshot of the store. Export-only — the live store is never touched.
+- **`/export-obsidian`** — decorates the project's memory store in place with real Obsidian `[[wikilinks]]`, so `_memories/` itself opens directly as an Obsidian vault (graph view, backlinks, note browsing) — no separate export copy to go stale. Each unit gets a marker-delimited, auto-regenerated edges block computed from its own frontmatter, from one atomic snapshot of the store; retired/archived units and any edge pointing at one are excluded entirely. Idempotent (a unit is only rewritten when its block actually changed) and fails closed on a malformed marker state rather than guessing.
+- **`check-units.mjs` `retired-in-active` check** — flags a `status: retired` unit still sitting outside `_memories/archive/`, so retirement gets physically enforced instead of drifting.
 - **`CORE_REASONING_ARM`** — a test-only environment-variable control (`automatic`/`deterministic-only`/`always-on`) that lets the memory-efficacy pilot force which reasoning-escalation behavior runs on a given trial. `automatic` (the default, whether set explicitly or left unset) stays byte-identical to previously shipped behavior.
 - **Mailbox unread-count nudge** — a per-turn hook surfaces the unread `_mailbox/` count so backlogs can't silently accumulate unnoticed.
 - **PROJECT.md size-pressure fallback** — `demote-moves.mjs` now escalates to a shorter age floor for one run when PROJECT.md is over its cap and the normal floor can't keep up with a fast-moving project.
@@ -24,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 - **`analyze-source-pull-log.mjs`** and its tests — three-way consensus determined it was structurally dead code.
+- **`instruction-surface-adapter.mjs`** and its test — a dry-run-only v3.0 instruction-surface system with no real caller in the product (no command, no hook). Its core mutation path was a permanent stub that always refused. Everything it was reaching for — writing a CORE-owned block into a harness instruction surface — is already covered by the CONTRACT.md generator system (`generate-claude-md.mjs`/`generate-agents-md.mjs`), which actually writes.
+- **`render-okf-export.mjs`** and its test — superseded by the in-place `[[wikilink]]` decoration described above; the separate export folder it produced is gone along with it.
 
 ### Changed
 - **`/orient` shim** now carries an explicit 2026-08-15 sunset date.
