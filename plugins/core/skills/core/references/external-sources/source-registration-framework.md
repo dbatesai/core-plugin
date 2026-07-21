@@ -358,7 +358,7 @@ None initially. If the file grows past a threshold (say 50MB), a hygiene pass at
 
 ### Read protocol
 
-`/finalize` reads the log at session close to surface monitoring signals per DC-85 spec section 9. This is wired: the finalize skill's Step 3 "Source-pull monitoring" bullet runs `scripts/analyze-source-pull-log.mjs --workspace <id>` whenever `<project>/_sources/` exists, aggregating the last 14 days and surfacing only actionable signals (a registered source with no pulls in window, a climbing error count, Mode-C distribution above ~30%). Wrapper authors can rely on monitoring being operational on any install that runs `/finalize`.
+**Not currently wired — the analyzer was deleted 2026-07-21.** `scripts/analyze-source-pull-log.mjs` shipped a read-side analyzer, but no installation (including BBLens) had ever actually implemented the write side this section describes — no `source-pull-log.jsonl` existed anywhere it was checked. Worse, 2 of the 3 signals the analyzer promised (a registered source missing from the window, an error count climbing *this session*) were structurally undeliverable with its actual inputs: it never read `<project>/_sources/` to know what "missing" means, and its CLI received no session boundary to know what "this session" means. Three-way consensus (Hale, Antigravity, Keel) to delete rather than patch a read side with no real writer. Wrapper authors: do not rely on monitoring being operational. If this comes back, it needs the missing inputs (the registered source set, an explicit session boundary) designed in from the start, alongside a real writer — not a read side built first and guessed at.
 
 ---
 

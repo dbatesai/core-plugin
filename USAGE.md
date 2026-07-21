@@ -110,6 +110,5 @@ The plugin ships the deterministic spine the commands run on — the surfaces wh
 - **Capability & identity** — `resolve-plugin-root.mjs`, `capability-probe.mjs`, `capability-history.mjs`, `record-capability-snapshot.mjs`, `analyze-capability-drift.mjs`, `workspace-fork-check.mjs`, `project-slug.mjs`, `write-visibility-canary.mjs`.
 - **Validation & integrity** — `validate.mjs` (retrieval-health runner), `orphan-detector.mjs` (every script reached, every protocol indexed), `audit-memory-boundary.mjs` (native-memory vs. CORE-store boundary).
 - **Multi-agent** — `adversarial-run-gate.mjs`, `validate-adversarial-artifacts.mjs`.
-- **External sources** — `analyze-source-pull-log.mjs`.
 - **Instruction surface (staged)** — `contract-format.mjs`, `generate-agents-md.mjs`, `generate-claude-md.mjs`, `migrate-to-contract.mjs`, `configure-project.mjs`.
 - **Helpers** — `frontmatter-flat.mjs`, `fs-atomic.mjs`.
