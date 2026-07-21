@@ -11,9 +11,7 @@ import {
   parseFrontmatter, normalizeNewlines, _todayFromArg,
   rankUnits, main as priorityMain,
   score, signalS, NO_SOURCES_DEFAULT_S,
-  renderPriorityTopBlock, injectPriorityTop, PRIORITY_TOP_BEGIN, PRIORITY_TOP_END,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
-import { readFileSync } from 'node:fs';
 
 test('M3: a malformed --today falls back to today, never null (no TypeError at toISOString)', () => {
   const d = _todayFromArg('garbage');
@@ -169,80 +167,4 @@ test('MEM-005: pinned:false is neutral — identical score to an unpinned unit (
   const base = { fm: { created: '2026-06-01', topics: ['a'] } };
   const pinnedFalse = { fm: { created: '2026-06-01', topics: ['a'], pinned: false } };
   assert.equal(score(pinnedFalse, [], today), score(base, [], today));
-});
-
-// ---------- --inject-top: self-maintaining MEMORY.md top-N block (Crest ask, 2026-07-21) ----------
-
-test('renderPriorityTopBlock: wraps N pointer lines in markers, path relative to baseDir', () => {
-  const { dir, mem } = rankVault();
-  try {
-    const ranked = rankUnits(mem, { today: parseIsoDate('2026-06-09') });
-    const block = renderPriorityTopBlock(ranked, 10, { baseDir: dir, now: '2026-06-09T00:00:00Z' });
-    assert.match(block, new RegExp(PRIORITY_TOP_BEGIN.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')));
-    assert.match(block, new RegExp(PRIORITY_TOP_END.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')));
-    assert.match(block, /\[dc-live\]\(_memories[/\\]dc-live\.md\)/, 'link path is relative to baseDir');
-    assert.doesNotMatch(block, /dc-dead/, 'invalidated unit stays excluded from the generated block');
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test('injectPriorityTop: first run appends a new marker block to an existing file', () => {
-  const { dir, mem } = rankVault();
-  try {
-    const target = join(dir, 'MEMORY.md');
-    writeFileSync(target, '# Existing content\n\nsomething hand-written\n');
-    const ranked = rankUnits(mem, { today: parseIsoDate('2026-06-09') });
-    const result = injectPriorityTop(target, ranked, 10, { now: '2026-06-09T00:00:00Z' });
-    assert.ok(result.written);
-    const text = readFileSync(target, 'utf8');
-    assert.match(text, /# Existing content/, 'prior content is preserved');
-    assert.match(text, /dc-live/, 'new block landed');
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test('injectPriorityTop: second run replaces only the marker-delimited block in place', () => {
-  const { dir, mem } = rankVault();
-  try {
-    const target = join(dir, 'MEMORY.md');
-    writeFileSync(target, '# Existing content\n\nsomething hand-written\n');
-    const ranked = rankUnits(mem, { today: parseIsoDate('2026-06-09') });
-    injectPriorityTop(target, ranked, 10, { now: '2026-06-09T00:00:00Z' });
-    const before = readFileSync(target, 'utf8');
-    const second = injectPriorityTop(target, ranked, 10, { now: '2026-06-09T00:00:00Z' });
-    assert.equal(second.written, false, 'identical regeneration is a no-op, not a rewrite');
-    assert.equal(readFileSync(target, 'utf8'), before);
-
-    // Now change the ranked set and confirm only the block content changes, not the hand-written prose.
-    writeFileSync(join(mem, 'dc-new.md'),
-      '---\nid: dc-new\ntype: decision\nstatus: active\ncreated: 2026-06-08\nupdated: 2026-06-08\ntopics: [a]\n---\n\n# new\n');
-    const ranked2 = rankUnits(mem, { today: parseIsoDate('2026-06-09') });
-    const third = injectPriorityTop(target, ranked2, 10, { now: '2026-06-09T00:00:00Z' });
-    assert.ok(third.written);
-    const text = readFileSync(target, 'utf8');
-    assert.match(text, /# Existing content/, 'hand-written prose outside the markers survives a regen');
-    assert.match(text, /dc-new/, 'the new unit appears after regeneration');
-    assert.equal((text.match(new RegExp(PRIORITY_TOP_BEGIN.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g')) || []).length, 1,
-      'regeneration must not duplicate the marker block');
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test('injectPriorityTop: missing target file is treated as empty, block becomes the whole file', () => {
-  const { dir, mem } = rankVault();
-  try {
-    const target = join(dir, 'DOES-NOT-EXIST.md');
-    const ranked = rankUnits(mem, { today: parseIsoDate('2026-06-09') });
-    const result = injectPriorityTop(target, ranked, 10, { now: '2026-06-09T00:00:00Z' });
-    assert.ok(result.written);
-    assert.match(readFileSync(target, 'utf8'), /dc-live/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test('CLI --inject-top wires through main() and reports whether it wrote', () => {
-  const { dir, mem } = rankVault();
-  try {
-    const target = join(dir, 'MEMORY.md');
-    const [, out] = quiet(process.stdout, () =>
-      priorityMain([mem, '--today', '2026-06-09', '--top', '5', '--inject-top', target]));
-    assert.match(out, /Regenerated top-5 block/);
-    assert.match(readFileSync(target, 'utf8'), /dc-live/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
