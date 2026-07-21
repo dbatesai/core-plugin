@@ -2,8 +2,9 @@
  * orphan-detector.mjs — definition-of-done enforcement for the plugin.
  *
  * CORE kept building mechanisms and never wiring them in (the "last-mile" debt:
- * metrics-init, adversarial-run-gate, instruction-surface-adapter, generate-agents-md,
- * clusters.md). The rule adopted to stop it: a mechanism isn't done until a skill
+ * metrics-init, adversarial-run-gate, generate-agents-md, clusters.md — a fifth
+ * example, instruction-surface-adapter.mjs, was never wired and has since been
+ * removed rather than kept staged). The rule adopted to stop it: a mechanism isn't done until a skill
  * invokes it AND a test asserts the wiring. This script is the standing check.
  *
  * It flags two kinds of orphan:
