@@ -10,7 +10,7 @@ import {
   writeCanary, upsertCanaryLine, CANARY_TAG, canaryFilePath as writeSideFilePath,
 } from '../../plugins/core/skills/core/scripts/write-visibility-canary.mjs';
 import {
-  probe, classify, scanTranscript, redactToken, countLines,
+  probe, classify, scanTranscript, redactToken, countLines, resolveTranscript,
 } from '../../plugins/core/skills/core/scripts/capability/memory-visible-probe.mjs';
 
 function line(obj) { return JSON.stringify(obj); }
@@ -18,6 +18,43 @@ function txt(text) { return line({ type: 'assistant', message: { role: 'assistan
 function tool(name, input) { return line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', name, input: input || {} }] } }); }
 
 const OK = { token: 't', memoryWritten: true, memoryHasToken: true, transcriptAvailable: true };
+
+// --- resolveTranscript path mapping (Meridian's live Windows-box repro, 2026-07-20) ---
+// Was a hand-rolled `.replace(/\//g, '-')` -- missed the Windows drive colon entirely
+// and any dot, producing a mapped path that never matched the real Claude Code
+// projects folder, on top of a real cwd. Must use the canonical mapProjectPathToSlug.
+
+test('resolveTranscript: an explicit override always wins, existence-checked', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mvp-transcript-'));
+  try {
+    assert.equal(resolveTranscript('/any/cwd', root, join(root, 'nope.jsonl')), null, 'a missing override resolves to null');
+    const real = join(root, 'real.jsonl');
+    writeFileSync(real, '');
+    assert.equal(resolveTranscript('/any/cwd', root, real), real);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('resolveTranscript: finds the transcript dir for a Windows drive-colon cwd', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mvp-transcript-'));
+  try {
+    const cwd = 'C:\\Users\\david\\Documents\\Projects\\core-windows';
+    // mapProjectPathToSlug replaces every /, \, ., and : -- the colon right after the
+    // drive letter and the following backslash both become '-', hence the double dash.
+    const slugDir = join(root, '.claude', 'projects', 'C--Users-david-Documents-Projects-core-windows');
+    mkdirSync(slugDir, { recursive: true });
+    const jsonl = join(slugDir, 'session.jsonl');
+    writeFileSync(jsonl, '');
+    assert.equal(resolveTranscript(cwd, root, null), jsonl,
+      'must resolve to the slug the real Claude Code projects folder actually uses, colon and all');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('resolveTranscript: returns null when no matching projects dir exists (not a thrown error)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mvp-transcript-'));
+  try {
+    assert.equal(resolveTranscript('/nowhere/near/anything', root, null), null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 // --- write-canary (idempotent + redaction) ---
 

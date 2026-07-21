@@ -23,6 +23,25 @@ test('mappedMemoryPath honors the provided home', () => {
   assert.match(p, /^\/tmp\/h\/\.claude\/projects\/-proj-Foo\/memory\/MEMORY\.md$/);
 });
 
+// Meridian's live Windows-box repro (2026-07-20): a hand-rolled `.replace(/[/\\]/g, '-')`
+// missed the drive colon (and any dot), producing a mapped path that never matched the
+// real Claude Code projects folder -- so this probe falsely reported memory not visible
+// on Windows while the mechanism was actually working. Must use the canonical
+// mapProjectPathToSlug encoder, which handles '.' and ':' too.
+test('mappedMemoryPath handles a Windows drive-colon path (Meridian, 2026-07-20)', () => {
+  const p = mappedMemoryPath('C:\\Users\\david\\Documents\\Projects\\core-windows', '/home');
+  // The SLUG segment (derived from cwd) must never carry a colon -- that would be an
+  // un-creatable path segment. `home` is a real filesystem path and is used as-is.
+  const slug = p.split('/.claude/projects/')[1].split('/memory/')[0];
+  assert.doesNotMatch(slug, /:/, 'the cwd-derived slug must not contain a colon');
+  assert.equal(slug, 'C--Users-david-Documents-Projects-core-windows');
+});
+
+test('mappedMemoryPath handles a dotted username (the original DC-104 bug this shares a root cause with)', () => {
+  const p = mappedMemoryPath('/Users/David.Bates28/Documents/Projects/CORE', '/home');
+  assert.equal(p, '/home/.claude/projects/-Users-David-Bates28-Documents-Projects-CORE/memory/MEMORY.md');
+});
+
 // --- classifyMemoryState (pure) ---
 
 test('classifyMemoryState: PASS when file exists and canary present, with a primary evidence entry', () => {
