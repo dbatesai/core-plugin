@@ -30,7 +30,7 @@
 // CLI:
 //   node decorate-graph.mjs <project-dir> [--check] [--dry-run]
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
