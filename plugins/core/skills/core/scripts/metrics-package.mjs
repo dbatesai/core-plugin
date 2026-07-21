@@ -797,6 +797,31 @@ export function collectProject(projectDir, { home, seal }) {
 // destZip's directory as the process cwd and pass only its basename to -f, so
 // -f never contains a drive letter. -C's argument for the source tree stays
 // absolute and is unaffected by the process cwd change.
+// ZIP local-file-header magic number (PK\x03\x04). `-a` auto-selects the archive
+// format from destZip's extension, but ZIP support behind `-a` is NOT consistent
+// across tar builds (Meridian, live Windows box, 2026-07-20): GNU tar (what Git
+// Bash/MSYS2 put first on PATH on her machine) has no ZIP support at all and
+// silently emits an uncompressed TAR wearing a .zip extension, exit 0. The `tar -t`
+// listing check below does NOT catch this -- GNU tar happily lists its own tar
+// output, and manifest.json is right there, so the old code returned ok:true for a
+// file that is not actually a zip. Checking the real magic bytes is the only
+// verification that can't be fooled by a tar binary lying about its own output.
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+
+// Pure and directly testable on purpose: zipStaging() below shells out to the real
+// `tar` binary, whose ZIP-support behavior is exactly what's non-deterministic
+// across platforms/PATH order -- a test can't reliably force a specific tar's
+// buggy behavior. This function is the actual verification logic; test it directly
+// against synthetic fixture files instead.
+export function verifyZipMagic(path) {
+  let header;
+  try { header = readFileSync(path).subarray(0, 4); } catch (e) { return { ok: false, reason: `cannot read produced archive: ${e.message}` }; }
+  if (!header.equals(ZIP_MAGIC)) {
+    return { ok: false, reason: `produced file is not a real zip (magic bytes ${header.toString('hex')}, expected ${ZIP_MAGIC.toString('hex')} -- the local tar likely has no zip support and silently wrote a plain tar wearing a .zip extension)` };
+  }
+  return { ok: true };
+}
+
 export function zipStaging(stagingDir, destZip) {
   const destDir = dirname(destZip);
   const destBase = basename(destZip);
@@ -804,7 +829,7 @@ export function zipStaging(stagingDir, destZip) {
   if (res.error || res.status !== 0 || !existsSync(destZip)) return { ok: false, reason: res.error ? String(res.error.message) : `tar exit ${res.status}` };
   const list = spawnSync('tar', ['-t', '-f', destBase], { cwd: destDir, encoding: 'utf8', timeout: 60_000 });
   if (list.status !== 0 || !/manifest\.json/.test(list.stdout || '')) return { ok: false, reason: 'zip verification failed (manifest.json not listed)' };
-  return { ok: true };
+  return verifyZipMagic(destZip);
 }
 
 function desktopDir(home) {

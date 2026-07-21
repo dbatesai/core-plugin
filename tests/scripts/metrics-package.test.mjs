@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
-  buildLeakPatterns, leakScanDir,
+  buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging,
 } from '../../plugins/core/skills/core/scripts/metrics-package.mjs';
 
 // Planted tripwires — distinctive strings that MUST NOT survive into any package byte.
@@ -71,6 +71,56 @@ function extractZip(zipPath, dest) {
   assert.equal(res.status, 0, `zip extracts (status=${res.status}, error=${res.error?.message || 'none'}, stderr=${JSON.stringify(res.stderr)})`);
   return dest;
 }
+
+// ---------- verifyZipMagic / zipStaging: silent tar-as-zip corruption (Meridian, 2026-07-20) ----------
+//
+// Live Windows-box finding: GNU tar (first on PATH via Git Bash/MSYS2 on her machine)
+// has no ZIP support behind `-a`, so for a `.zip` filename it silently emits an
+// uncompressed TAR wearing a .zip extension, exit 0 -- and the old `tar -t` + manifest
+// listing check couldn't tell the difference, because GNU tar happily lists its own
+// tar output. zipStaging() returned ok:true for a file that is not actually a zip.
+// Confirmed against her actual repro: the mislabeled file's first bytes were
+// `2e 2f` ("./", a tar header), not `50 4b` (zip magic).
+
+test('verifyZipMagic: rejects a plain-tar-wearing-a-zip-extension file (GNU tar\'s exact failure mode)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-zipmagic-'));
+  try {
+    const fakeZip = join(root, 'fake.zip');
+    // Meridian's exact confirmed bytes for the corrupted case: a tar header starts "./".
+    writeFileSync(fakeZip, Buffer.from('./manifest.json\x00\x00\x00garbage-tar-bytes'));
+    const result = verifyZipMagic(fakeZip);
+    assert.equal(result.ok, false, 'a mislabeled tar must not be certified as a real zip');
+    assert.match(result.reason, /not a real zip/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('verifyZipMagic: accepts a file with real zip local-file-header magic bytes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-zipmagic-'));
+  try {
+    const realZip = join(root, 'real.zip');
+    writeFileSync(realZip, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]));
+    const result = verifyZipMagic(realZip);
+    assert.equal(result.ok, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('verifyZipMagic: a missing/unreadable file fails closed with a clear reason, not a thrown error', () => {
+  const result = verifyZipMagic(join(tmpdir(), 'definitely-does-not-exist-' + Date.now(), 'x.zip'));
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /cannot read/);
+});
+
+test('zipStaging: the real local tar on this box produces a file that passes the magic-byte check too (end-to-end sanity)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-zipstaging-'));
+  try {
+    const stage = join(root, 'stage');
+    mkdirSync(stage, { recursive: true });
+    writeFileSync(join(stage, 'manifest.json'), '{}');
+    const dest = join(root, 'out.zip');
+    const result = zipStaging(stage, dest);
+    assert.equal(result.ok, true, `real tar on this box should produce a genuine zip: ${result.reason || ''}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('package never contains planted names, paths, topics, or raw unit ids', () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-test-'));
