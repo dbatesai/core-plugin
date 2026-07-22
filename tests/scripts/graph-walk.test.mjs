@@ -80,6 +80,34 @@ test('includeInvalidated:true reaches an edge target physically relocated to arc
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("a canonical archived-active unit (status:active, archived:true, no t_invalid) is absent by default and present only with includeInvalidated (Hale's 2026-07-22 finding)", () => {
+  const { dir, mem } = vault();
+  try {
+    const archive = join(mem, 'archive');
+    mkdirSync(archive, { recursive: true });
+    // Neither downstream suppression check fires on this fixture: status is
+    // active (isActiveStatus passes) and there's no t_invalid (isInvalidated
+    // is false) -- the only thing that can keep it out of a default walk is
+    // resolveTarget refusing to look in archive/ at all.
+    writeFileSync(join(archive, 'archived-active.md'), [
+      '---', 'id: archived-active', 'type: decision', 'status: active',
+      'archived: true', 'archived_at: 2026-05-30', 'created: 2026-05-25',
+      'sources: [PROJECT.md]', '---', '', '# archived-active', 'body',
+    ].join('\n'));
+    writeFileSync(join(mem, 'seed.md'), [
+      '---', 'id: seed', 'type: decision', 'created: 2026-05-25',
+      'sources: [PROJECT.md]', 'edges:',
+      '  - { type: cites, target: archived-active }', '---', '', '# seed', 'body',
+    ].join('\n'));
+
+    const withoutInvalid = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY }).map(c => c.unit_id);
+    assert.ok(!withoutInvalid.includes('archived-active'), 'default walk must not leak an archived active-status unit');
+
+    const withInvalid = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY, includeInvalidated: true }).map(c => c.unit_id);
+    assert.ok(withInvalid.includes('archived-active'), 'explicit includeInvalidated still reaches it');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('an open-interval unit (no t_invalid) is never suppressed', () => {
   const { dir, mem } = vault();
   try {

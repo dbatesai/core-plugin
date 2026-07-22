@@ -33,7 +33,7 @@ import {
 } from './priority.mjs';
 import { isActiveStatus } from './unit-vocab.mjs';
 
-function resolveTarget(target, memoriesDir, includeObservations = false) {
+function resolveTarget(target, memoriesDir, includeObservations = false, includeInvalidated = false) {
   const t = target.trim();
   const direct = resolve(t);
   if (existsSync(direct)) return direct;
@@ -42,13 +42,16 @@ function resolveTarget(target, memoriesDir, includeObservations = false) {
   if (existsSync(c1)) return c1;
   const c2 = join(memoriesDir, t);
   if (existsSync(c2)) return c2;
-  // A retired-in-active unit physically relocated to archive/ is still a
-  // valid edge target for cold-history walks (Hale's 2026-07-21 finding) --
-  // path resolution here is unconditional, same as c1/c2 above; whether the
-  // resolved unit actually surfaces in output is the separate
-  // includeInvalidated suppression check downstream, not this function's job.
-  const c3 = join(memoriesDir, 'archive', `${stem}.md`);
-  if (existsSync(c3)) return c3;
+  // Archive is out of scope for a default walk (Hale's 2026-07-22 finding):
+  // an archived unit can carry status:active with no t_invalid, so neither
+  // downstream suppression check (isInvalidated / isActiveStatus) would ever
+  // catch it -- resolving the path at all is what has to be gated, not just
+  // whether it later surfaces. Cold-history walks (includeInvalidated:true)
+  // still need it, same as the inverse-edge archive scan below.
+  if (includeInvalidated) {
+    const c3 = join(memoriesDir, 'archive', `${stem}.md`);
+    if (existsSync(c3)) return c3;
+  }
   if (includeObservations) {
     // SYN-007: edges pointing into observations/<YYYY-MM>/ resolved to null.
     const obsRoot = join(memoriesDir, 'observations');
@@ -142,7 +145,7 @@ export function walk(seedPath, {
   const queue = []; // [hop, path, edgeType, sourceId, direction]
 
   for (const e of extractEdges(seed)) {
-    const tp = resolveTarget(e.target, mDir, includeObservations);
+    const tp = resolveTarget(e.target, mDir, includeObservations, includeInvalidated);
     if (tp && !visited.has(resolve(tp))) {
       queue.push([1, tp, e.type, seed.id, 'outbound']);
     }
@@ -190,7 +193,7 @@ export function walk(seedPath, {
 
     if (hop < hops) {
       for (const e of extractEdges(unit)) {
-        const tp = resolveTarget(e.target, mDir, includeObservations);
+        const tp = resolveTarget(e.target, mDir, includeObservations, includeInvalidated);
         if (tp && !visited.has(resolve(tp))) {
           queue.push([hop + 1, tp, e.type, unit.id, 'outbound']);
         }
