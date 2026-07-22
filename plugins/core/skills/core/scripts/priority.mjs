@@ -436,16 +436,50 @@ export function iterUnits(memoriesDir) {
 }
 
 /**
+ * iterArchivedUnits — the ONE archive-aware companion to iterUnits, for the
+ * explicit-history modes only (Hale's 2026-07-21 finding): retired-in-active
+ * enforcement (check-units.mjs) actively pushes retired units into
+ * `archive/`, but iterUnits is top-level-only by design (default retrieval
+ * must stay non-recursive, per ARCHITECTURE.md/data-storage.md). Once a unit
+ * physically moves to `archive/`, it silently disappeared from every
+ * "--include-invalid" / cold-history caller too, not just default retrieval
+ * -- that's a real regression for a memory product whose MVP is complete
+ * recall, not a side effect of "cleanup." Callers that mean to see cold
+ * history (rankUnits with includeInvalidated:true, graph-walk's same flag,
+ * bitemporal's inherently-historical queries) merge this in; default,
+ * non-invalidated retrieval never calls this function.
+ */
+export function iterArchivedUnits(memoriesDir) {
+  const archiveDir = join(memoriesDir, 'archive');
+  const units = [];
+  let entries;
+  try { entries = readdirSync(archiveDir).sort(); } catch { return units; }
+  for (const fname of entries) {
+    if (!fname.endsWith('.md')) continue;
+    if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
+    try {
+      units.push(loadUnit(join(archiveDir, fname)));
+    } catch (e) {
+      process.stderr.write(`warn: archive/${fname}: failed to load (${e && e.message ? e.message : e}) — excluded\n`);
+    }
+  }
+  return units;
+}
+
+/**
  * Rank every loadable, currently-valid unit (SOD-003). The bi-temporal
  * suppression invariant — default retrieval excludes invalidated units
  * (ARCHITECTURE.md, data-storage.md) — is applied HERE so every consumer
  * (the CLI, generate-memory-index, any wrapper) inherits it instead of
- * re-deriving it. Cold history stays reachable with includeInvalidated:true.
+ * re-deriving it. Cold history stays reachable with includeInvalidated:true,
+ * which also merges in archive/ (iterArchivedUnits) so a physically
+ * relocated retired unit stays reachable for an explicit historical query.
  * @returns {Array<[number, object]>} [score, unit] pairs, descending.
  */
 export function rankUnits(memoriesDir, { sessionTopics = [], today = null, includeInvalidated = false } = {}) {
   const t = today || _todayUTC();
-  const ranked = iterUnits(memoriesDir)
+  const pool = includeInvalidated ? iterUnits(memoriesDir).concat(iterArchivedUnits(memoriesDir)) : iterUnits(memoriesDir);
+  const ranked = pool
     .filter(u => !u.fm._load_error)
     .filter(u => includeInvalidated || isActiveStatus(u.fm))
     .filter(u => includeInvalidated || !isInvalidated(u, t))
