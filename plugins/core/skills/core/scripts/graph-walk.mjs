@@ -29,7 +29,7 @@ import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   loadUnit, scoreProxyRS, extractEdges, parseIsoDate, isInvalidated,
-  SCORE_PRUNE_THRESHOLD, iterArchivedUnits,
+  SCORE_PRUNE_THRESHOLD,
 } from './priority.mjs';
 import { isActiveStatus } from './unit-vocab.mjs';
 
