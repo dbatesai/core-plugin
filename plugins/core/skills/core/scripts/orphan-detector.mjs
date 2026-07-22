@@ -46,11 +46,6 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
-  'generate-skills-manifest.mjs': {
-    reason: 'CLI utility for an external, downstream consumer (BBLens\'s refresh-builder, Crest\'s 2026-07-20 operator-needs asks 1/2) to enumerate CORE\'s public command surface instead of hand-maintaining an allowlist against it. No CORE-internal skill or hook calls it by design -- it is invoked directly, the same shape as retrieval-harness.mjs below.',
-    allowlistDate: '2026-07-22',
-    reviewBy: '2026-10-22',
-  },
   'retrieval-harness.mjs': {
     reason: 'Offline Recall@K gold harness (DC-113 Tier-A T1; arms trimmed to model-free per DC-114) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the DC-115 measurement ceremony (Crest\'s shared harness is the BBLens twin). Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
     allowlistDate: '2026-07-07',
