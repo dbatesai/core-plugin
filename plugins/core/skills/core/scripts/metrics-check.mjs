@@ -9,7 +9,7 @@
  * them by co-location (`scriptDir`-relative) instead of hunting for an
  * installed plugin cache the way the old standalone version had to.
  *
- * Reports THREE SEPARATE, HONESTLY-LABELED EVIDENCE CLASSES (2026-07-22 —
+ * Reports FOUR SEPARATE, HONESTLY-LABELED EVIDENCE CLASSES (2026-07-22 —
  * never blend them into one umbrella verdict again; see the "Evidence-class
  * contract" comment below for the full rationale):
  *
@@ -17,29 +17,50 @@
  *     throwaway scratch store, writes synthetic units through the plugin's
  *     own scripts, and proves the full write → validate → index → retrieve →
  *     suppress round trip END TO END, fresh, on every run — plus this
- *     project's real validator counts and unit census. Real, proven evidence
- *     that the STORE MECHANICS work. Says nothing about retrieval quality or
- *     user benefit.
- *  2. RETRIEVAL REGRESSION (proven-live / proxy / provisional / direct,
- *     row-by-row): does retrieval itself work well? Retrieval-log coverage
- *     (capture volume, not correctness), a LIVE gold-set Recall@K run via
- *     retrieval-harness.mjs against this project's own pre-registered gold
- *     set when one exists (genuinely exercised this run, on the real product
- *     functions — not a simulator), the live retrieval-quality proxy from
- *     analyze-retrieval-quality.mjs's real retrieval-log rows, the
- *     recognition signal, and the calibration pool that gates it. Every row
- *     here says plainly when the underlying evidence doesn't exist yet.
- *  3. USER BENEFIT (not-evaluated): does any of this measurably help the
+ *     project's real validator counts, unit census, and plain-count telemetry
+ *     capture (from analyze-retrieval-quality.mjs's real retrieval-log rows).
+ *     Real, proven evidence that the STORE MECHANICS work. Says nothing about
+ *     retrieval quality or user benefit.
+ *  2. RETRIEVAL REGRESSION (provisional / not-evaluated): does retrieval
+ *     itself work well against a reference answer key? Exactly one signal —
+ *     a LIVE gold-set Recall@K run via retrieval-harness.mjs against this
+ *     project's own pre-registered gold set when one exists (genuinely
+ *     exercised this run, on the real product functions — not a simulator);
+ *     an honest absence otherwise.
+ *  3. MEASUREMENT READINESS (provisional / direct): is the instrumentation
+ *     itself ready to be trusted? The recognition signal and the calibration
+ *     pool that gates it.
+ *  4. USER BENEFIT (not-evaluated): does any of this measurably help the
  *     user get better answers? Nothing in this codebase measures that yet —
  *     no matched memory-on/off comparison exists — so the row says so
- *     plainly instead of being silently folded into the other two classes.
+ *     plainly instead of being silently folded into the other classes.
  *
  * Output (default): the rendered report — a MECHANICS-scoped verdict heading,
- * three sectioned blocks of 10-char bar gauges (one gauge per row, one
- * section per evidence class), and a 1-3 sentence narrative that speaks to
- * all three classes, never just the first. Pass --json to also dump the full
- * data object (probe/store/calibration/regression/verdict + the same
- * `report` string) so other tooling can consume it without re-parsing text.
+ * sectioned blocks of 10-char bar gauges (one gauge per row, one section per
+ * evidence class), and a 1-3 sentence narrative that speaks to all the
+ * classes, never just the first. Pass --json to also dump the canonical data
+ * object. Its top-level structure IS the four-evidence-class taxonomy
+ * (2026-07-22, Hale's slice acceptance revise — the machine consumer must
+ * receive the SAME taxonomy the human report renders, never a different one):
+ *
+ *   schema_version  — METRICS_REPORT_SCHEMA_VERSION, stamped by this script
+ *   producer        — { script, plugin, plugin_version, source_sha } from the
+ *                     plugin manifest (the same identity convention the
+ *                     manifest itself carries)
+ *   mechanics       — { status, probe, store, telemetry }: the mechanics-
+ *                     scoped machine verdict plus everything mechanics-class
+ *   regression      — { gold }: the gold-set snapshot ONLY
+ *   readiness       — { recognition_signal, calibration }
+ *   benefit         — { status: 'not-evaluated', reason }
+ *   generated_at / project / caveats / report — run metadata + the rendered
+ *                     report string
+ *
+ * There is exactly ONE such object: gatherMetrics() builds it, the renderer
+ * (computeRows/buildNarrative/renderReport) consumes it field-for-field, and
+ * --json emits it verbatim — no adapter schema beside it, so the machine and
+ * human views can never diverge again. There is deliberately NO umbrella
+ * top-level verdict: the machine verdict lives at mechanics.status, scoped
+ * exactly like the human 'MECHANICS: …' heading.
  *
  * Exit 0 always (report, don't block); the verdict lives in the data.
  *
@@ -55,6 +76,33 @@ import { runHarness } from './retrieval-harness.mjs';
 import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQualityReport } from './analyze-retrieval-quality.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
+
+// ============================================================
+// Report identity — who produced this object and under which schema.
+// ============================================================
+
+// Version of the canonical four-class report object below. Same stamping
+// convention as RETRIEVAL_EVENT_SCHEMA_VERSION in record-retrieval-event.mjs:
+// always OUR stamp, never a caller-supplied value.
+export const METRICS_REPORT_SCHEMA_VERSION = '1.0.0';
+
+/**
+ * Producer identity for the emitted object, sourced from the plugin manifest
+ * (plugins/core/.claude-plugin/plugin.json) — the codebase's existing identity
+ * surface, which already carries `version` and `source_sha`. Fails open: a
+ * missing/unreadable manifest yields null identity fields, never a crash of
+ * the health check.
+ */
+export function producerIdentity() {
+  const identity = { script: 'metrics-check.mjs', plugin: null, plugin_version: null, source_sha: null };
+  try {
+    const manifest = JSON.parse(readFileSync(join(scriptDir, '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+    identity.plugin = manifest.name ?? null;
+    identity.plugin_version = manifest.version ?? null;
+    identity.source_sha = manifest.source_sha ?? null;
+  } catch { /* fail open — identity stays null rather than blocking the report */ }
+  return identity;
+}
 
 // ============================================================
 // Bar rendering — the 10-character gauge every row uses.
@@ -279,11 +327,17 @@ export function checkLiveRetrievalProxy(project) {
 
 export function computeRows(out) {
   const rows = [];
+  // Every read below comes off the SAME canonical four-class object --json
+  // emits — mechanics/regression/readiness/benefit — so the render and the
+  // machine output can never carry different taxonomies (Hale, 2026-07-22).
+  const mech = out.mechanics || {};
+  const store = mech.store || {};
+  const readiness = out.readiness || {};
 
   // ---- MECHANICS: proven store mechanics only ----
 
   // 1. Round-trip proof — binary.
-  const roundTrip = !!out.probe?.round_trip;
+  const roundTrip = !!mech.probe?.round_trip;
   rows.push({
     section: SECTION.MECHANICS,
     label: 'Round-trip proof',
@@ -294,16 +348,16 @@ export function computeRows(out) {
   });
 
   // 2. Unit integrity — % of units with no attention-tier warning.
-  const total = out.store?.present ? (out.store.census?.total ?? 0) : 0;
-  const attention = out.store?.warning_triage?.attention ?? 0;
+  const total = store.present ? (store.census?.total ?? 0) : 0;
+  const attention = store.warning_triage?.attention ?? 0;
   const clean = Math.max(0, total - attention);
   const integrityPct = total > 0 ? (clean / total) * 100 : 0;
   rows.push({
     section: SECTION.MECHANICS,
     label: `Unit integrity (${total})`,
-    pct: out.store?.present ? integrityPct : 0,
+    pct: store.present ? integrityPct : 0,
     trust: TRUST.DIRECT,
-    value: !out.store?.present ? 'no store' : `${attention} warning${attention === 1 ? '' : 's'}`,
+    value: !store.present ? 'no store' : `${attention} warning${attention === 1 ? '' : 's'}`,
   });
 
   // 3. Telemetry capture — REPLACES the old "Retrieval-log coverage" percentage
@@ -315,8 +369,11 @@ export function computeRows(out) {
   // regression row) folds in here too: it is a mechanism/instrumentation
   // diagnostic, not a regression claim, per Hale's item 3. Malformed-row
   // rejection counts (closed codes only) live here as well — capture health
-  // is a mechanics concern.
-  const proxy = out.regression?.liveProxy || {};
+  // is a mechanics concern, and the data now LIVES at mechanics.telemetry in
+  // the canonical object (not regression.liveProxy — the old placement that
+  // contradicted this very classification; Hale, 2026-07-22 acceptance
+  // revise, item 1).
+  const proxy = mech.telemetry || {};
   const rejected = proxy.rejected || { current: { count: 0, by_code: {} }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 0 };
   const rejectedNote = rejected.total > 0
     ? `; ${rejected.total} row(s) rejected (${[
@@ -391,7 +448,7 @@ export function computeRows(out) {
   // FAILURE rate (rec-fail-tier-0), so a bigger number is worse. The bar shows
   // (100 - rate) so a fuller bar always reads as "healthier" like every other
   // row here, even though the raw metric it's built from is a failure rate.
-  const recognition = parseRecognitionSignal(out.store?.recognition_signal?.text);
+  const recognition = parseRecognitionSignal(readiness.recognition_signal?.text);
   let recPct = 0;
   let recValue = 'no data yet';
   if (recognition.available) {
@@ -406,7 +463,7 @@ export function computeRows(out) {
 
   // 6. Calibration pool — labeled turns / 100, straightforward. This is the
   // classifier's own readiness gate for the recognition signal above.
-  const cal = out.calibration || {};
+  const cal = readiness.calibration || {};
   const labeled = cal.available ? (cal.labeled_count ?? 0) : 0;
   const minNeeded = cal.available ? (cal.min_needed ?? 100) : 100;
   const calPct = minNeeded > 0 ? Math.min(100, (labeled / minNeeded) * 100) : 0;
@@ -420,14 +477,16 @@ export function computeRows(out) {
 
   // ---- USER BENEFIT: does any of this measurably help the user? Nothing in
   // this codebase answers that yet — no matched memory-on/off comparison, no
-  // independent outcome labels. Say so plainly; never imply the other two
-  // classes cover it. ----
+  // independent outcome labels. Say so plainly; never imply the other
+  // classes cover it. The row sources the canonical benefit class directly
+  // (same status word, same reason string) — never a parallel copy. ----
+  const benefit = out.benefit || {};
   rows.push({
     section: SECTION.BENEFIT,
     label: 'Matched comparison',
     pct: 0,
-    trust: TRUST.NOT_EVALUATED,
-    value: 'no matched memory-on/off comparison exists — nothing currently measures whether this helps',
+    trust: benefit.status || TRUST.NOT_EVALUATED,
+    value: benefit.reason || 'no matched memory-on/off comparison exists — nothing currently measures whether this helps',
   });
 
   return rows;
@@ -440,32 +499,37 @@ export function computeRows(out) {
 // ============================================================
 
 export function buildNarrative(out) {
-  const attention = out.store?.warning_triage?.attention ?? 0;
-  const cal = out.calibration || {};
+  // Same canonical four-class object the renderer and --json use — never a
+  // parallel view of the data.
+  const mech = out.mechanics || {};
+  const store = mech.store || {};
+  const attention = store.warning_triage?.attention ?? 0;
+  const cal = out.readiness?.calibration || {};
   const labeled = cal.available ? (cal.labeled_count ?? 0) : 0;
   const minNeeded = cal.available ? (cal.min_needed ?? 100) : 100;
-  const recognition = parseRecognitionSignal(out.store?.recognition_signal?.text);
+  const recognition = parseRecognitionSignal(out.readiness?.recognition_signal?.text);
 
   // A mechanics hard-fail leads with the failure and the single next action —
   // "instead of anything else" (SKILL.md §Step 3) — so it does NOT get padded
   // with the regression/benefit sentences below; those evidence classes don't
   // matter until mechanics itself is trustworthy again.
-  if (out.verdict === 'DEGRADED') {
+  if (mech.status === 'DEGRADED') {
     const failures = [];
-    if (!out.probe?.round_trip) failures.push('the live round-trip probe failed');
-    if (out.store?.present && out.store.schema?.exit !== 0) failures.push('the schema validator did not exit clean');
-    if ((out.store?.integrity?.fail ?? 0) > 0) failures.push(`the validator found ${out.store.integrity.fail} integrity failure(s)`);
+    if (!mech.probe?.round_trip) failures.push('the live round-trip probe failed');
+    if (store.present && store.schema?.exit !== 0) failures.push('the schema validator did not exit clean');
+    if ((store.integrity?.fail ?? 0) > 0) failures.push(`the validator found ${store.integrity.fail} integrity failure(s)`);
     const lead = failures.length ? failures.join(', and ') : 'a hard check failed';
     return `DEGRADED — ${lead}; fix that before trusting anything else here.`;
   }
 
-  if (out.verdict === 'MACHINERY-WORKING-NO-STORE') {
+  if (mech.status === 'MACHINERY-WORKING-NO-STORE') {
     return 'The plugin machinery round-trips clean on a scratch store, but this project has no _memories/ store yet — there is nothing here to measure.';
   }
 
   // s1 — mechanics + telemetry capture (an instrumentation fact, not
-  // regression evidence — Hale, 2026-07-22 slice-1 revise).
-  const proxy = out.regression?.liveProxy || {};
+  // regression evidence — Hale, 2026-07-22 slice-1 revise; the data lives at
+  // mechanics.telemetry in the canonical object).
+  const proxy = mech.telemetry || {};
   let s1 = 'Mechanics are proven and working';
   if (proxy.available) {
     s1 += `; telemetry capture shows ${proxy.retrievalEvents} typed events across ${proxy.days} days (${proxy.t1Pct}%/${proxy.t2Pct}%/${proxy.t3Pct}% T1/T2/T3 mix)`;
@@ -504,9 +568,11 @@ export function buildNarrative(out) {
 
 // Display text for the MECHANICS heading only — 'HEALTHY' replaces the old
 // 'WORKING' wording per Hale's slice-1 revise (matching his exact target
-// shape: "MECHANICS: HEALTHY"). The internal out.verdict KEYS are unchanged
-// ('WORKING'/'WORKING-WITH-CAVEATS'/...) — only this presentation layer
-// changed, so nothing that branches on out.verdict needed to move.
+// shape: "MECHANICS: HEALTHY"). The internal status KEYS are unchanged
+// ('WORKING'/'WORKING-WITH-CAVEATS'/...), but the field now lives at
+// mechanics.status in the canonical object — scoped to mechanics exactly like
+// this heading, never an umbrella top-level `verdict` (Hale, 2026-07-22
+// acceptance revise, item 4).
 const VERDICT_DISPLAY = {
   'WORKING': 'HEALTHY',
   'WORKING-WITH-CAVEATS': 'HEALTHY — with caveats',
@@ -533,7 +599,7 @@ export function renderReport(out, { workspaceName } = {}) {
   const name = workspaceName || basename(out.project || process.cwd());
   const rows = computeRows(out);
   const lines = [];
-  lines.push(`MECHANICS: ${VERDICT_DISPLAY[out.verdict] || out.verdict || 'UNKNOWN'}`);
+  lines.push(`MECHANICS: ${VERDICT_DISPLAY[out.mechanics?.status] || out.mechanics?.status || 'UNKNOWN'}`);
   lines.push('');
   lines.push(`CORE Memory Health — ${name}`);
   lines.push('');
@@ -569,7 +635,27 @@ export function renderReport(out, { workspaceName } = {}) {
 // ============================================================
 
 export async function gatherMetrics(cwd, { home = homedir() } = {}) {
-  const out = { generated_at: new Date().toISOString(), project: cwd, probe: {}, store: {}, calibration: {}, regression: {}, verdict: null, caveats: [] };
+  // THE canonical object. Its top-level structure IS the four-evidence-class
+  // taxonomy (mechanics/regression/readiness/benefit) plus identity and run
+  // metadata — the renderer consumes this exact object and --json emits it
+  // verbatim, so machine and human views share one taxonomy by construction
+  // (Hale, 2026-07-22 acceptance revise). No umbrella top-level verdict: the
+  // machine verdict is mechanics.status, scoped like the rendered heading.
+  const out = {
+    schema_version: METRICS_REPORT_SCHEMA_VERSION, // always OUR stamp (record-retrieval-event.mjs convention)
+    producer: producerIdentity(),
+    generated_at: new Date().toISOString(),
+    project: cwd,
+    mechanics: { status: null, probe: {}, store: {}, telemetry: {} },
+    regression: { gold: {} },
+    readiness: { recognition_signal: null, calibration: {} },
+    benefit: {
+      status: TRUST.NOT_EVALUATED,
+      reason: 'no matched memory-on/off comparison exists — nothing currently measures whether this helps',
+    },
+    caveats: [],
+  };
+  const mech = out.mechanics;
 
   // ---- 1. LIVE PROBE on a scratch store ----
   const scratch = join(tmpdir(), `core-metrics-probe-${process.pid}`);
@@ -600,17 +686,17 @@ ${body}
     unit('probe-retired-fact', 'retired', `The ${RETIRED_TOKEN} was decommissioned.`, 'probe, retired');
 
     const validate = run('check-units.mjs', ['--store', scratch, '--schema']);
-    out.probe.validate = { pass: validate.code === 0, exit: validate.code };
+    mech.probe.validate = { pass: validate.code === 0, exit: validate.code };
 
     const hit = run('retrieve-context.mjs', [scratch, TOKEN, '--pack']);
-    out.probe.retrieve = { pass: hit.out.includes('probe-live-fact'), evidence: hit.out.trim().split('\n').slice(0, 3).join(' | ').slice(0, 200) };
+    mech.probe.retrieve = { pass: hit.out.includes('probe-live-fact'), evidence: hit.out.trim().split('\n').slice(0, 3).join(' | ').slice(0, 200) };
 
     const suppressed = run('retrieve-context.mjs', [scratch, RETIRED_TOKEN]);
-    out.probe.suppress_retired = { pass: !suppressed.out.includes('probe-retired-fact'), evidence: suppressed.out.trim() ? 'substitutes only' : 'zero output (retired never indexed)' };
+    mech.probe.suppress_retired = { pass: !suppressed.out.includes('probe-retired-fact'), evidence: suppressed.out.trim() ? 'substitutes only' : 'zero output (retired never indexed)' };
 
-    out.probe.round_trip = out.probe.validate.pass && out.probe.retrieve.pass && out.probe.suppress_retired.pass;
+    mech.probe.round_trip = mech.probe.validate.pass && mech.probe.retrieve.pass && mech.probe.suppress_retired.pass;
   } catch (e) {
-    out.probe.round_trip = false; out.caveats.push(`probe crashed: ${String(e).slice(0, 120)}`);
+    mech.probe.round_trip = false; out.caveats.push(`probe crashed: ${String(e).slice(0, 120)}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -618,17 +704,17 @@ ${body}
   // ---- 2. THIS-STORE HEALTH (read-only) ----
   const store = join(cwd, '_memories');
   if (!existsSync(store)) {
-    out.store.present = false; out.caveats.push('no _memories/ store in this project');
+    mech.store.present = false; out.caveats.push('no _memories/ store in this project');
   } else {
-    out.store.present = true;
+    mech.store.present = true;
     const parseCounts = (s) => {
       const m = s.match(/PASS:\s*(\d+)\s+WARN:\s*(\d+)\s+FAIL:\s*(\d+)/);
       return m ? { pass: +m[1], warn: +m[2], fail: +m[3] } : null;
     };
     const schema = run('check-units.mjs', ['--store', cwd, '--schema']);
-    out.store.schema = { exit: schema.code, ...parseCounts(schema.out) };
+    mech.store.schema = { exit: schema.code, ...parseCounts(schema.out) };
     const integ = run('check-units.mjs', ['--store', cwd, '--integrity']);
-    out.store.integrity = { exit: integ.code, ...parseCounts(integ.out) };
+    mech.store.integrity = { exit: integ.code, ...parseCounts(integ.out) };
 
     // Triage the WARN rows so the verdict only escalates what a human should act on.
     const INFO_CATS = new Set(['external-ref']);
@@ -641,7 +727,7 @@ ${body}
       else if (UPKEEP_CATS.has(m[1])) triage.routine_upkeep++;
       else { triage.attention++; if (triage.attention_items.length < 5) triage.attention_items.push(`${m[1]}: ${m[2]}`); }
     }
-    out.store.warning_triage = triage;
+    mech.store.warning_triage = triage;
 
     // unit census by status
     const census = { active: 0, retired: 0, archived: 0, superseded: 0, other: 0, total: 0 };
@@ -654,7 +740,7 @@ ${body}
         census[st] !== undefined ? census[st]++ : census.other++;
       } catch { census.other++; }
     }
-    out.store.census = census;
+    mech.store.census = census;
 
     // retrieval-log RAW capture presence — a simple "is anything being
     // written at all" count (files/rows), deliberately with NO schema
@@ -678,44 +764,52 @@ ${body}
         }
       }
     }
-    out.store.retrieval_log = { files, rows,
+    mech.store.retrieval_log = { files, rows,
       note: 'raw line/file count only — capture presence, not schema validity or retrieval correctness (see the Telemetry capture row for the validated, rejection-counted breakdown)' };
 
-    // recognition / trend signal state
+    // recognition / trend signal state — a MEASUREMENT-READINESS fact, so it
+    // lives in the readiness class (not under the mechanics store — the old
+    // placement that contradicted the render's classification; Hale,
+    // 2026-07-22 acceptance revise, item 2).
     try {
       const wsId = JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8')).workspace_id;
       const sig = join(home, '.core/workspaces', wsId, 'metrics/orient-signal.txt');
       if (existsSync(sig)) {
-        out.store.recognition_signal = { text: readFileSync(sig, 'utf8').trim(), age_hours: Math.round((Date.now() - statSync(sig).mtimeMs) / 3.6e6) };
+        out.readiness.recognition_signal = { text: readFileSync(sig, 'utf8').trim(), age_hours: Math.round((Date.now() - statSync(sig).mtimeMs) / 3.6e6) };
       }
     } catch { /* no workspace pointer — skip */ }
 
     // memory-processing recency
     try {
       const pm = JSON.parse(readFileSync(join(store, '_pm-state.json'), 'utf8'));
-      out.store.last_memory_processing = pm.last_run || null;
+      mech.store.last_memory_processing = pm.last_run || null;
     } catch { /* absent is fine */ }
   }
 
-  // ---- 3. CALIBRATION POOL (read-only) ----
-  out.calibration = checkCalibrationPool(cwd, { home });
+  // ---- 3. CALIBRATION POOL (read-only) — measurement-readiness class ----
+  out.readiness.calibration = checkCalibrationPool(cwd, { home });
 
   // ---- 4. RETRIEVAL REGRESSION (read-only + one live product-path run) ----
+  // The regression class carries the gold-set snapshot ONLY. The live
+  // telemetry/tier-mix data is a mechanics/instrumentation fact and lives at
+  // mechanics.telemetry (Hale, 2026-07-22 acceptance revise, item 1 — the old
+  // regression.liveProxy placement contradicted the render's classification).
   out.regression.gold = await checkGoldRegression(cwd);
-  out.regression.liveProxy = checkLiveRetrievalProxy(cwd);
+  mech.telemetry = checkLiveRetrievalProxy(cwd);
 
-  // ---- verdict: hard evidence only; routine upkeep never demotes it ----
-  const attention = out.store.warning_triage?.attention ?? 0;
-  if (out.probe.round_trip && out.store.present && out.store.schema?.exit === 0 && (out.store.integrity?.fail ?? 1) === 0) {
-    out.verdict = attention > 0 ? 'WORKING-WITH-CAVEATS' : 'WORKING';
-  } else if (out.probe.round_trip && !out.store.present) {
-    out.verdict = 'MACHINERY-WORKING-NO-STORE';
+  // ---- mechanics status: hard evidence only; routine upkeep never demotes
+  // it. Scoped to mechanics (mech.status), never an umbrella claim. ----
+  const attention = mech.store.warning_triage?.attention ?? 0;
+  if (mech.probe.round_trip && mech.store.present && mech.store.schema?.exit === 0 && (mech.store.integrity?.fail ?? 1) === 0) {
+    mech.status = attention > 0 ? 'WORKING-WITH-CAVEATS' : 'WORKING';
+  } else if (mech.probe.round_trip && !mech.store.present) {
+    mech.status = 'MACHINERY-WORKING-NO-STORE';
   } else {
-    out.verdict = 'DEGRADED';
+    mech.status = 'DEGRADED';
   }
-  if (attention > 0) out.caveats.push(`${attention} warning(s) need a look: ${out.store.warning_triage.attention_items.join('; ')}`);
-  if (out.store.warning_triage && (out.store.warning_triage.informational + out.store.warning_triage.routine_upkeep) > 0) {
-    out.store.upkeep_note = `${out.store.warning_triage.routine_upkeep} routine-upkeep warns (agent fixes at next hygiene pass) + ${out.store.warning_triage.informational} informational (by design) — nothing for the user`;
+  if (attention > 0) out.caveats.push(`${attention} warning(s) need a look: ${mech.store.warning_triage.attention_items.join('; ')}`);
+  if (mech.store.warning_triage && (mech.store.warning_triage.informational + mech.store.warning_triage.routine_upkeep) > 0) {
+    mech.store.upkeep_note = `${mech.store.warning_triage.routine_upkeep} routine-upkeep warns (agent fixes at next hygiene pass) + ${mech.store.warning_triage.informational} informational (by design) — nothing for the user`;
   }
 
   out.report = renderReport(out);

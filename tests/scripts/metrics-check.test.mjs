@@ -1,13 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   renderBar, computeRows, buildNarrative, renderReport, parseRecognitionSignal,
   checkCalibrationPool, checkGoldRegression, checkLiveRetrievalProxy, gatherMetrics,
+  producerIdentity, METRICS_REPORT_SCHEMA_VERSION,
   BAR_WIDTH, FILLED_CHAR, EMPTY_CHAR, FAILED_CHAR, TRUST, SECTION,
 } from '../../plugins/core/skills/core/scripts/metrics-check.mjs';
+
+const SCRIPT = join(import.meta.dirname, '..', '..', 'plugins', 'core', 'skills', 'core', 'scripts', 'metrics-check.mjs');
+const MANIFEST = join(import.meta.dirname, '..', '..', 'plugins', 'core', '.claude-plugin', 'plugin.json');
 
 // ---------------------------------------------------------------------------
 // renderBar — the 10-char gauge. Deterministic rounding, tested at boundaries.
@@ -101,21 +106,37 @@ test('parseRecognitionSignal: empty/missing text is unavailable', () => {
 // recognition + calibration moved into their own readiness section).
 // ---------------------------------------------------------------------------
 
+// The canonical four-class object (2026-07-22, Hale's acceptance revise):
+// mechanics/regression/readiness/benefit at the top level, machine verdict
+// scoped at mechanics.status, identity stamped — the SAME object --json
+// emits and the renderer consumes.
 function baseOut(overrides = {}) {
   return {
+    schema_version: METRICS_REPORT_SCHEMA_VERSION,
+    producer: { script: 'metrics-check.mjs', plugin: 'core', plugin_version: '0.0.0-test', source_sha: null },
     project: '/tmp/demo',
-    probe: { round_trip: true },
-    store: {
-      present: true,
-      schema: { exit: 0 },
-      integrity: { fail: 0 },
-      warning_triage: { informational: 0, routine_upkeep: 0, attention: 0, attention_items: [] },
-      census: { total: 10 },
-      retrieval_log: { files: 10, rows: 10 },
+    mechanics: {
+      status: 'WORKING',
+      probe: { round_trip: true },
+      store: {
+        present: true,
+        schema: { exit: 0 },
+        integrity: { fail: 0 },
+        warning_triage: { informational: 0, routine_upkeep: 0, attention: 0, attention_items: [] },
+        census: { total: 10 },
+        retrieval_log: { files: 10, rows: 10 },
+      },
+      telemetry: {},
     },
-    calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false },
-    regression: {},
-    verdict: 'WORKING',
+    regression: { gold: {} },
+    readiness: {
+      recognition_signal: null,
+      calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false },
+    },
+    benefit: {
+      status: TRUST.NOT_EVALUATED,
+      reason: 'no matched memory-on/off comparison exists — nothing currently measures whether this helps',
+    },
     caveats: [],
     ...overrides,
   };
@@ -143,7 +164,7 @@ test('computeRows: round-trip PASS renders 100% proven-live, tagged mechanics', 
 });
 
 test('computeRows: round-trip FAIL is marked failed and shows FAIL', () => {
-  const rows = computeRows(baseOut({ probe: { round_trip: false } }));
+  const rows = computeRows(baseOut({ mechanics: { ...baseOut().mechanics, probe: { round_trip: false } } }));
   const rt = rows.find((r) => r.label === 'Round-trip proof');
   assert.equal(rt.failed, true);
   assert.equal(rt.value, 'FAIL');
@@ -151,10 +172,13 @@ test('computeRows: round-trip FAIL is marked failed and shows FAIL', () => {
 
 test('computeRows: unit integrity is (clean/total) with 1 attention warning out of 293, tagged mechanics', () => {
   const out = baseOut({
-    store: {
-      present: true, schema: { exit: 0 }, integrity: { fail: 0 },
-      warning_triage: { informational: 0, routine_upkeep: 0, attention: 1, attention_items: ['x'] },
-      census: { total: 293 }, retrieval_log: { files: 1, rows: 1 },
+    mechanics: {
+      ...baseOut().mechanics,
+      store: {
+        present: true, schema: { exit: 0 }, integrity: { fail: 0 },
+        warning_triage: { informational: 0, routine_upkeep: 0, attention: 1, attention_items: ['x'] },
+        census: { total: 293 }, retrieval_log: { files: 1, rows: 1 },
+      },
     },
   });
   const rows = computeRows(out);
@@ -166,7 +190,7 @@ test('computeRows: unit integrity is (clean/total) with 1 attention warning out 
 });
 
 test('computeRows: calibration pool is labeled_count/min_needed, direct trust, tagged readiness', () => {
-  const rows = computeRows(baseOut({ calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false } }));
+  const rows = computeRows(baseOut({ readiness: { recognition_signal: null, calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false } } }));
   const cal = rows.find((r) => r.label === 'Calibration pool');
   assert.equal(cal.pct, 22);
   assert.equal(cal.trust, TRUST.DIRECT);
@@ -175,7 +199,7 @@ test('computeRows: calibration pool is labeled_count/min_needed, direct trust, t
 });
 
 test('computeRows: calibration unavailable falls back to 0/100 without crashing', () => {
-  const rows = computeRows(baseOut({ calibration: {} }));
+  const rows = computeRows(baseOut({ readiness: { recognition_signal: null, calibration: {} } }));
   const cal = rows.find((r) => r.label === 'Calibration pool');
   assert.equal(cal.value, '0/100 labeled');
   assert.equal(cal.pct, 0);
@@ -183,8 +207,8 @@ test('computeRows: calibration unavailable falls back to 0/100 without crashing'
 
 test('computeRows: recognition signal bar is INVERTED (100 - rec-fail rate), tagged readiness', () => {
   const out = baseOut({
-    store: {
-      ...baseOut().store,
+    readiness: {
+      ...baseOut().readiness,
       recognition_signal: { text: 'rec-fail-tier-0: 3/6 turns today (50%) vs 7-day avg 21% ↑ [PROVISIONAL]' },
     },
   });
@@ -197,7 +221,7 @@ test('computeRows: recognition signal bar is INVERTED (100 - rec-fail rate), tag
 });
 
 test('computeRows: no store present renders "no store" and zero pct for store-dependent rows', () => {
-  const rows = computeRows(baseOut({ store: { present: false } }));
+  const rows = computeRows(baseOut({ mechanics: { ...baseOut().mechanics, store: { present: false } } }));
   const ui = rows.find((r) => r.label === 'Unit integrity (0)');
   assert.equal(ui.value, 'no store');
   assert.equal(ui.pct, 0);
@@ -210,8 +234,9 @@ test('computeRows: no store present renders "no store" and zero pct for store-de
 
 test('computeRows: Telemetry capture is a no-gauge MECHANICS row with plain counts, no percentage claim', () => {
   const rows = computeRows(baseOut({
-    regression: {
-      liveProxy: {
+    mechanics: {
+      ...baseOut().mechanics,
+      telemetry: {
         available: true, days: 36, retrievalEvents: 266,
         t1Pct: 99, t2Pct: 1, t3Pct: 0,
         topEscalationTopic: 'agents-md', topEscalationRate: 100,
@@ -231,8 +256,9 @@ test('computeRows: Telemetry capture is a no-gauge MECHANICS row with plain coun
 
 test('computeRows: Telemetry capture names rejected-row counts by schema tier when present', () => {
   const rows = computeRows(baseOut({
-    regression: {
-      liveProxy: {
+    mechanics: {
+      ...baseOut().mechanics,
+      telemetry: {
         available: true, days: 1, retrievalEvents: 1,
         t1Pct: 100, t2Pct: 0, t3Pct: 0, topEscalationTopic: null, topEscalationRate: null,
         rejected: { current: { count: 2, by_code: { 'invalid-tier': 2 } }, legacy: { count: 1, by_code: { 'legacy-missing-tier': 1 } }, other: { count: 0, by_code: {} }, total: 3 },
@@ -333,9 +359,12 @@ test('buildNarrative: WORKING with no caveats stays within 1-3 sentences and nam
 
 test('buildNarrative: DEGRADED leads with what failed and does not pad with regression/benefit sentences', () => {
   const out = baseOut({
-    probe: { round_trip: false },
-    store: { present: true, schema: { exit: 1 }, integrity: { fail: 2 }, warning_triage: { informational: 0, routine_upkeep: 0, attention: 0, attention_items: [] } },
-    verdict: 'DEGRADED',
+    mechanics: {
+      status: 'DEGRADED',
+      probe: { round_trip: false },
+      store: { present: true, schema: { exit: 1 }, integrity: { fail: 2 }, warning_triage: { informational: 0, routine_upkeep: 0, attention: 0, attention_items: [] } },
+      telemetry: {},
+    },
   });
   const n = buildNarrative(out);
   assert.ok(n.startsWith('DEGRADED —'), `expected DEGRADED lead, got: ${n}`);
@@ -345,22 +374,23 @@ test('buildNarrative: DEGRADED leads with what failed and does not pad with regr
 });
 
 test('buildNarrative: MACHINERY-WORKING-NO-STORE names the gap plainly, single sentence', () => {
-  const out = baseOut({ store: { present: false }, verdict: 'MACHINERY-WORKING-NO-STORE' });
+  const out = baseOut({ mechanics: { ...baseOut().mechanics, store: { present: false }, status: 'MACHINERY-WORKING-NO-STORE' } });
   const n = buildNarrative(out);
   assert.match(n, /no _memories\/ store yet/);
 });
 
 test('buildNarrative: names the calibration pool count and gate', () => {
-  const n = buildNarrative(baseOut({ calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false } }));
+  const n = buildNarrative(baseOut({ readiness: { recognition_signal: null, calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false } } }));
   assert.match(n, /currently 22/);
   assert.match(n, /clears 100 labeled turns/);
 });
 
 test('buildNarrative: mentions the telemetry-capture and gold-set-snapshot numbers when present, never as a passing gate', () => {
   const n = buildNarrative(baseOut({
-    regression: {
-      gold: { available: true, n: 22, context3_r3: 0.68 },
-      liveProxy: { available: true, retrievalEvents: 260, days: 36, t1Pct: 99, t2Pct: 1, t3Pct: 0 },
+    regression: { gold: { available: true, n: 22, context3_r3: 0.68 } },
+    mechanics: {
+      ...baseOut().mechanics,
+      telemetry: { available: true, retrievalEvents: 260, days: 36, t1Pct: 99, t2Pct: 1, t3Pct: 0 },
     },
   }));
   assert.match(n, /telemetry capture shows 260 typed events across 36 days/);
@@ -407,8 +437,11 @@ test('renderReport: the Telemetry capture row renders with no bracket/bar, unlik
 
 test('renderReport: WORKING-WITH-CAVEATS displays as HEALTHY — with caveats, still MECHANICS-scoped', () => {
   const out = baseOut({
-    store: { ...baseOut().store, warning_triage: { informational: 0, routine_upkeep: 0, attention: 1, attention_items: ['x'] } },
-    verdict: 'WORKING-WITH-CAVEATS',
+    mechanics: {
+      ...baseOut().mechanics,
+      store: { ...baseOut().mechanics.store, warning_triage: { informational: 0, routine_upkeep: 0, attention: 1, attention_items: ['x'] } },
+      status: 'WORKING-WITH-CAVEATS',
+    },
   });
   const text = renderReport(out);
   assert.equal(text.split('\n')[0], 'MECHANICS: HEALTHY — with caveats');
@@ -612,8 +645,9 @@ test('checkLiveRetrievalProxy: an all-malformed corpus is unavailable but honest
 
 test('computeRows: Telemetry capture row names the rejected-row count by schema tier when present', () => {
   const rows = computeRows(baseOut({
-    regression: {
-      liveProxy: {
+    mechanics: {
+      ...baseOut().mechanics,
+      telemetry: {
         available: true, days: 1, retrievalEvents: 1,
         t1Pct: 100, t2Pct: 0, t3Pct: 0, topEscalationTopic: null, topEscalationRate: null,
         rejected: { current: { count: 2, by_code: { 'invalid-tier': 2 } }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 2 },
@@ -638,13 +672,93 @@ test('gatherMetrics: real end-to-end run surfaces a rejected row in the rendered
     writeFileSync(join(day, 'retrieval-log.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
 
     const out = await gatherMetrics(root);
-    assert.equal(out.store.retrieval_log.files, 1, 'the raw capture-presence scan still counts the file');
-    assert.equal(out.store.retrieval_log.rows, 2, 'and both raw lines, with no schema judgement of its own');
-    assert.equal(out.regression.liveProxy.rejected.total, 1, 'schema validation + rejection counting comes from checkLiveRetrievalProxy');
-    assert.equal(out.regression.liveProxy.rejected.legacy.by_code['legacy-missing-tier'], 1);
+    assert.equal(out.mechanics.store.retrieval_log.files, 1, 'the raw capture-presence scan still counts the file');
+    assert.equal(out.mechanics.store.retrieval_log.rows, 2, 'and both raw lines, with no schema judgement of its own');
+    assert.equal(out.mechanics.telemetry.rejected.total, 1, 'schema validation + rejection counting comes from checkLiveRetrievalProxy');
+    assert.equal(out.mechanics.telemetry.rejected.legacy.by_code['legacy-missing-tier'], 1);
     assert.match(out.report, /Telemetry capture/);
     assert.match(out.report, /1 row\(s\) rejected/);
     assert.match(out.report, /1 legacy/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// CLI --json contract (2026-07-22, Hale's acceptance revise): the machine
+// output must carry the SAME four-evidence-class taxonomy the rendered report
+// does — exact class placement, producer/schema identity, and the ABSENCE of
+// the old contradictory fields (top-level verdict/probe/store/calibration,
+// regression.liveProxy). This locks the CLI boundary itself, not just the
+// exported functions.
+// ---------------------------------------------------------------------------
+
+test('CLI --json contract: exact four-class placement, identity stamp, old contradictory fields absent, renderer sources the same object', () => {
+  const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-cli-contract-'));
+  try {
+    mkdirSync(join(root, '_memories'), { recursive: true });
+    const day = join(root, '_sessions', '2026-07-22');
+    mkdirSync(day, { recursive: true });
+    writeFileSync(join(day, 'retrieval-log.jsonl'),
+      JSON.stringify({ ts: '2026-07-22T10:00:00Z', kind: 'retrieval', schema_version: '1.0.0', trigger: 'session-start', intent_topics: ['alpha'], tier_reached: 1, escalation_path: [1], units_retrieved: [{ id: 'u1', tier: 1 }] }) + '\n');
+
+    const stdout = execFileSync('node', [SCRIPT, root, '--json'], { encoding: 'utf8', timeout: 120000 });
+
+    // The CLI prints the rendered report, a blank line, then the JSON object.
+    const jsonStart = stdout.indexOf('\n\n{');
+    assert.ok(jsonStart > 0, 'expected rendered report followed by a JSON object');
+    const rendered = stdout.slice(0, jsonStart);
+    const out = JSON.parse(stdout.slice(jsonStart + 2));
+
+    // ---- exact top-level shape: the four classes + identity + run metadata,
+    // nothing else — in particular NO umbrella verdict and NO top-level
+    // probe/store/calibration.
+    assert.deepEqual(Object.keys(out).sort(), [
+      'benefit', 'caveats', 'generated_at', 'mechanics', 'producer', 'project',
+      'readiness', 'regression', 'report', 'schema_version',
+    ]);
+    assert.ok(!('verdict' in out), 'the old umbrella verdict field must be absent');
+    assert.ok(!('probe' in out) && !('store' in out) && !('calibration' in out), 'old top-level placements must be absent');
+
+    // ---- identity: schema stamped by the script, producer from the plugin
+    // manifest (the codebase's existing version/source_sha identity surface).
+    assert.equal(out.schema_version, METRICS_REPORT_SCHEMA_VERSION);
+    const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
+    assert.deepEqual(out.producer, {
+      script: 'metrics-check.mjs',
+      plugin: manifest.name,
+      plugin_version: manifest.version,
+      source_sha: manifest.source_sha,
+    });
+    assert.equal(producerIdentity().plugin_version, manifest.version, 'the exported identity helper reads the same manifest');
+
+    // ---- mechanics: round-trip probe, store integrity, telemetry, and the
+    // mechanics-scoped machine status (never an umbrella claim).
+    assert.deepEqual(Object.keys(out.mechanics).sort(), ['probe', 'status', 'store', 'telemetry']);
+    assert.ok(['WORKING', 'WORKING-WITH-CAVEATS', 'DEGRADED', 'MACHINERY-WORKING-NO-STORE'].includes(out.mechanics.status));
+    assert.equal(typeof out.mechanics.probe.round_trip, 'boolean');
+    assert.equal(out.mechanics.store.present, true);
+    assert.equal(out.mechanics.telemetry.available, true, 'telemetry/tier data lives under mechanics');
+    assert.equal(out.mechanics.telemetry.retrievalEvents, 1);
+
+    // ---- regression: the gold-set snapshot ONLY — liveProxy must be gone.
+    assert.deepEqual(Object.keys(out.regression), ['gold']);
+    assert.ok(!('liveProxy' in out.regression), 'the old regression.liveProxy placement must be absent');
+    assert.equal(out.regression.gold.available, false, 'no gold set in this scratch project — honest absence');
+
+    // ---- readiness: recognition + calibration, together, as their own class.
+    assert.deepEqual(Object.keys(out.readiness).sort(), ['calibration', 'recognition_signal']);
+
+    // ---- benefit: structured not-evaluated status, not just report prose.
+    assert.equal(out.benefit.status, 'not-evaluated');
+    assert.match(out.benefit.reason, /no matched memory-on\/off comparison exists/);
+
+    // ---- single source of truth: the report string in the JSON is exactly
+    // what the CLI rendered, and re-rendering FROM the emitted object
+    // reproduces it byte-for-byte — the renderer consumes this same object,
+    // so machine and human views cannot diverge.
+    assert.equal(out.report, rendered);
+    assert.equal(renderReport(out), out.report);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
