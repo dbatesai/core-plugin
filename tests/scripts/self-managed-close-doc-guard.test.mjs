@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 
 // Structural guards for self-managed maintenance (spec 2026-06-29). These assert the
 // load-bearing invariants the adversarial pass caught survive future prose edits — they
 // are documentation, but documentation the whole correctness argument rests on.
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core');
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const ROOT = join(REPO_ROOT, 'plugins', 'core');
 const read = (...p) => readFileSync(join(ROOT, ...p), 'utf8');
 
 test('startup: catch-up runs AFTER the edit-detection block (edit-detection-first crux)', () => {
@@ -121,6 +122,43 @@ test('the close op list has a single source: close-pass.mjs CLOSE_OPS', async ()
     'startup.md detect --ops must match CLOSE_OPS exactly');
   assert.ok(read('skills', 'finalize', 'SKILL.md').includes(opsCsv),
     'finalize SKILL.md begin --ops must match CLOSE_OPS exactly');
+});
+
+// Graph decoration (`/export-obsidian` retired 2026-07-22 — see CHANGELOG) is
+// now wired into the automatic maintenance passes the same way demote-moves
+// and compact-project are: a tracked close op the LLM half of /finalize (and
+// the on-demand /process-memory pass) actually invokes and records, not just
+// a string sitting in an array. close-pass.mjs itself never calls the
+// decorator directly — like every other judgment op except maintenance-run,
+// execution is the agent's job per finalize/SKILL.md; this only guards that
+// the wiring instructions are actually present, not silently dropped.
+test('decorate-graph: tracked as a real close op (STORE_DERIVED + CLOSE_OPS), not a phantom string', async () => {
+  const mod = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  assert.ok(mod.CLOSE_OPS.includes('decorate-graph'), 'CLOSE_OPS must list decorate-graph');
+  assert.equal(mod.isStoreDerived('decorate-graph'), true,
+    'decorate-graph rewrites unit files, so it must re-owe on a post-close store change like demote-moves/compact-project/check-units');
+});
+
+test('decorate-graph: finalize/SKILL.md actually invokes the script and records the op', () => {
+  const f = read('skills', 'finalize', 'SKILL.md');
+  assert.match(f, /node \$\{CORE_ROOT\}\/skills\/core\/scripts\/decorate-graph\.mjs <project>/,
+    'finalize must run decorate-graph.mjs, not just mention it');
+  assert.match(f, /Record op `decorate-graph`/, 'the decoration sub-step must record its op like its siblings');
+});
+
+test('decorate-graph: process-memory/SKILL.md actually invokes the script', () => {
+  const p = read('skills', 'process-memory', 'SKILL.md');
+  assert.match(p, /node "\$\{CORE_ROOT\}\/skills\/core\/scripts\/decorate-graph\.mjs" "<project>"/,
+    'process-memory must run decorate-graph.mjs as part of its hygiene sequence, not just describe it');
+});
+
+test('export-obsidian: fully retired — no shipped skill, no lingering command references in the shipped docs', () => {
+  assert.ok(!existsSync(join(ROOT, 'skills', 'export-obsidian')),
+    'the export-obsidian skill directory must be gone');
+  for (const doc of ['README.md', 'USAGE.md', 'INSTALL.md']) {
+    const src = readFileSync(join(REPO_ROOT, doc), 'utf8');
+    assert.ok(!src.includes('export-obsidian'), `${doc} must not reference the retired /export-obsidian command`);
+  }
 });
 
 test('codex: the exit-hook drop names startup-catch-up as the equivalent', () => {

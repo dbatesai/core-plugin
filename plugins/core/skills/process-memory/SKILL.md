@@ -136,6 +136,20 @@ Surface its one-line narration (never silent — visible-continuous-curation). T
 
 ---
 
+## Step 4.5 — Decorate the memory graph (Obsidian wikilinks)
+
+Regenerate the marker-delimited `[[wikilink]]` block in every active unit, computed from that unit's own `edges:` frontmatter, so `_memories/` itself opens directly as an Obsidian vault — graph view, backlinks, note browsing, no separate export copy to go stale:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/decorate-graph.mjs" "<project>"
+```
+
+The script is the only writer of the generated block — it sits between `<!-- CORE:BEGIN_EDGES -->` / `<!-- CORE:END_EDGES -->` markers and is fully regenerated each run; a unit is only rewritten when its computed block actually differs from what's on disk. Retired/archived units are excluded from the snapshot entirely, so they're never decorated. A unit whose markers are duplicated, orphaned, or out of order is refused and left byte-identical rather than guessed at — name any refused file plainly, it needs a manual look. Narrate "decorated N units" only if N > 0; "none needed" is a clean result, not a failure.
+
+*On failure:* each file writes atomically, but a non-zero exit means at least one unit was refused, not that nothing landed — other units may have decorated cleanly in the same run. Name the refused file(s) plainly, then continue to Step 5.
+
+---
+
 ## Step 5 — PROJECT.md tier discipline (DC-85 Phase 1b + 1c)
 
 Run three scripts in order — demote-moves first, then compact-project, then demote-state-narrative. The first two auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs). The third is dry-run-default in v1 per DC-93 — only `--apply` writes.
@@ -236,6 +250,7 @@ Tell the user what happened across all steps in one tight block:
 - Observations: count graduated / surfaced
 - Validation: before/after counts (PASS/WARN/FAIL) + names of any issues surfaced for user judgment
 - Indexes: regenerated (and whether anything changed)
+- Graph decoration: units decorated, or "none needed"
 - PROJECT.md: before/after bytes if compacted, or "under cap" if not
 - IMPROVEMENT_LOG.md: under cap, or surfaced recommendation
 - Retrieval quality: tier distribution + any anomalies, or "clean"

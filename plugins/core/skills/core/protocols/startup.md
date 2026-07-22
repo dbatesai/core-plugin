@@ -161,7 +161,7 @@ Run three-state detection (skip silently if `CORE_ROOT` is unresolved or `CORE_A
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && [ "$CORE_AUTO_CLOSE" != "0" ] && \
 node "${CORE_ROOT}/skills/core/scripts/close-pass.mjs" detect <project> \
-  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,session-summary,memory-refresh \
+  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,decorate-graph,reflection-a,reflection-b,metrics,session-summary,memory-refresh \
   || echo "(close detect skipped)"
 ```
 

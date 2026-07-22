@@ -203,7 +203,7 @@ export function detectCloseState(store, { allOps = [], storeSignature = null, no
 // (Transcript-derived ops aren't here — they always run when a close runs, gated by shouldSpawn.)
 const STORE_DERIVED = new Set([
   'maintenance-run', 'render-project-md', 'hot-section', 'demote-moves',
-  'compact-project', 'demote-state', 'check-units', 'validity-stamp',
+  'compact-project', 'demote-state', 'check-units', 'validity-stamp', 'decorate-graph',
 ]);
 export function isStoreDerived(op) { return STORE_DERIVED.has(op); }
 
@@ -271,7 +271,7 @@ export function isRegisteredWorkspace(store, { indexPath = resolveIndexPath() } 
 // The full op set the close envelope is responsible for (the hook imports this list — single source).
 export const CLOSE_OPS = [
   'maintenance-run', 'render-project-md', 'hot-section', 'demote-moves',
-  'compact-project', 'demote-state', 'check-units', 'reflection-a', 'reflection-b',
+  'compact-project', 'demote-state', 'check-units', 'decorate-graph', 'reflection-a', 'reflection-b',
   'metrics', 'session-summary', 'memory-refresh',
 ];
 

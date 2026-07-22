@@ -23,7 +23,7 @@ Finalize is ONE method with three entry points: **interactive** — the user typ
 ```bash
 # Begin: acquire the lock + write the in-progress marker enumerating owed ops.
 node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs begin <project> --session <session-id> \
-  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,session-summary,memory-refresh
+  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,decorate-graph,reflection-a,reflection-b,metrics,session-summary,memory-refresh
 # (if it prints "lock held; another close is running" — STOP; a close is already in flight)
 
 # After each op completes, record it (this is what makes a crashed close recoverable):
@@ -104,8 +104,9 @@ Walk the unit store and run the hygiene operations from `protocols/hygiene.md`, 
 
 - `demote-moves.mjs` and `compact-project.mjs` write atomically — a non-zero exit means nothing landed, so it's safe to keep going past them.
 - `bitemporal.mjs --stamp` writes to historical units. If the dry-run itself errors, do NOT run `--apply` this session — skip the whole validity-stamp sub-step (3.14) and name the skip in Step 6.
+- `decorate-graph.mjs` writes each unit file atomically, but the run as a whole isn't all-or-nothing: a non-zero exit means at least one file was refused (a malformed marker state, or a stale-byte race), not that nothing landed — other units may have decorated cleanly in the same run. Report refusals by name; don't read a non-zero exit here as "nothing happened."
 
-Sub-steps 3.1–3.7 change the store; 3.8 onward are read-and-report passes — except the validity stamp in 3.14, which is why it gets the dry-run rule above. A failure in a read-and-report pass costs visibility, not data. Every skipped or failed sub-step gets named in the Step 6 closing declaration.
+Sub-steps 3.1–3.7 change the store; 3.8 onward are read-and-report passes — except the validity stamp in 3.14 and the graph decoration in 3.17, both of which write and both of which get their own failure-handling note above/below rather than the generic read-and-report one. A failure in a read-and-report pass costs visibility, not data. Every skipped or failed sub-step gets named in the Step 6 closing declaration.
 
 ### 3.1 Demote closed §Moves bullets (DC-85 Phase 1b)
 
@@ -216,6 +217,12 @@ Run `node ${CORE_ROOT}/skills/core/scripts/calibrate-classifier.mjs <project> --
 When this session edited the plugin tree itself (a new `scripts/*.mjs` or a `protocols/*.md`), run `node ${CORE_ROOT}/skills/core/scripts/orphan-detector.mjs`. It flags any script no skill/protocol/descriptor reaches and any protocol missing from the SKILL.md index — the "built but never wired" debt that recurs (`metrics-init` and `adversarial-run-gate` were both caught this way; the orphaned `clusters.md` protocol was retired rather than wired). Exit 1 = a new orphan: wire it AND assert the wiring in a test, or add it to the detector's `ALLOWLIST` with a reason if it's deliberately-staged forward-wiring. Allowlisted items still print every run so they stay visible. Skip on projects where you didn't touch the plugin (running it against an unmodified install is always clean).
 
 *On failure:* dev-meta only — narrate and continue; it never blocks a user project's close.
+
+### 3.17 Decorate the memory graph (Obsidian wikilinks)
+
+Run `node ${CORE_ROOT}/skills/core/scripts/decorate-graph.mjs <project>`. This regenerates the marker-delimited `[[wikilink]]` block in every active unit, computed from that unit's own `edges:` frontmatter over one atomic snapshot of the store, so `_memories/` itself opens directly as an Obsidian vault — graph view, backlinks, note browsing — with no separate export copy to go stale. The script is the only writer of the generated block (between `<!-- CORE:BEGIN_EDGES -->` / `<!-- CORE:END_EDGES -->` markers); a unit is only rewritten when its computed block actually changed, and retired/archived units are excluded from the snapshot entirely so they're never decorated. A unit whose markers are duplicated, orphaned, or out of order is refused and left byte-identical — name any refused file plainly in Step 6 rather than silently skipping it. Narrate "decorated N units" only if N > 0; "none needed" is a clean result. Record op `decorate-graph`.
+
+*On failure:* each file writes atomically, but a non-zero exit means at least one unit was refused, not that nothing landed — other units may have decorated cleanly in the same run. Name the refused file(s) plainly; don't claim the whole store decorated in Step 6.
 
 The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in `references/hygiene-strategies.md`.
 
