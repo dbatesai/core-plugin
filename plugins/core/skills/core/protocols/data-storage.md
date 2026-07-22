@@ -393,7 +393,7 @@ The user owns PROJECT.md. Manage it in whatever way best serves accuracy and tho
 
 ## Edit detection
 
-Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json` (single-owner — two projects closing at once can't clobber each other). A small global `~/.core/state-cache.json` remains for genuinely cross-project files (`dm-profile.md`, `topics.md`). **One-release union-read:** read both, and where the same file appears in each, the newer `last_written` wins — old-version sessions still write the global file until every install picks the release up; each per-project stamp prunes its file's global entry (under the lock), so the union converges. Cache shape, either surface:
+Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json` — single-owner ACROSS PROJECTS (two projects closing at once write separate files, so they can't clobber each other), but NOT single-owner WITHIN a project: `decorate-graph.mjs`, `hot-section.mjs`, and `maintenance-run.mjs` can all stamp the same project-local cache in the same window, so the read-modify-write itself is locked (`stampFiles`/`stampFile` in `state-cache.mjs`, under `<project>/_memories/_lib/.state-cache.lock` via `withFileLock` — Hale's finding, 2026-07-22, after a 40-concurrent-process probe measured real lost writes against the old unlocked version). A small global `~/.core/state-cache.json` remains for genuinely cross-project files (`dm-profile.md`, `topics.md`). **One-release union-read:** read both, and where the same file appears in each, the newer `last_written` wins — old-version sessions still write the global file until every install picks the release up; each per-project stamp prunes its file's global entry (under the lock), so the union converges. Cache shape, either surface:
 
 ```json
 {
@@ -416,6 +416,8 @@ CORE's own writes are not user edits. Scripts that render PROJECT.md or a unit f
 - **Unit files** (`_memories/*.md`) — `decorate-graph.mjs` stamps `last_written_by: decorate-graph` for every file it actually rewrites (Hale's finding, 2026-07-22 — this used to be a prose instruction telling the agent to update the cache by hand after a decoration pass; it is now code, matching the PROJECT.md precedent). Use `classifyUnitChange(cachedStamp, currentText)` from `decorate-graph.mjs`: it hashes only the content outside the marker-delimited `CORE:BEGIN_EDGES`/`CORE:END_EDGES` block. `'edges-block-only'` is CORE's own regenerated wikilink block: refresh the entry, don't propagate or fire anti-resurrection. `'outside-changed'` or `'no-baseline'` must be treated as a genuine user edit.
 
 `maintenance-run.mjs` stamps `last_written_by: maintenance-run` the same way for the fully machine-generated files it writes (`INDEX-decisions.md`, `INDEX-risks.md`, the summary index) — no block-splitting classifier needed there, since those files have no human-authored region to distinguish from CORE's own.
+
+**Both classifiers now also gate the WRITE itself, in code, not just later reads (Hale's finding, 2026-07-22 — "mixed-ownership writers launder unreconciled edits").** Preserving the human-authored bytes on a rewrite is not the same as preserving authorship: `decorate-graph.mjs`/`hot-section.mjs` used to rewrite their own generated region and then unconditionally stamp a FRESH `outside_hash` — even when the human-authored region had ALREADY diverged from the last known baseline before the rewrite ran. That fresh stamp made the divergence permanently undetectable: the user's bytes survived, but the fact that they'd changed was never observed, attributed, or propagated (a hash mismatch that WOULD have read `outside-changed` against the true prior baseline instead read `edges-block-only`/`hot-block-only` against the writer's own just-laundered one). Fixed at the writer boundary, inside `decorateStore`/`decorateStoreLocked` and `applyHotSection`/`clearHotSection`: each now reads the PRE-write cache and classifies the file BEFORE writing. A file with a prior cache entry that classifies `outside-changed` or `no-baseline` is refused — not decorated, not re-stamped — and reported as `needs_reconciliation` (decorate-graph: in `decorateStore`'s return value; hot-section: a thrown `NEEDS_RECONCILIATION` error). A file with NO prior cache entry has no established baseline to violate, so its first-ever write still proceeds and establishes that baseline. Because the check lives inside the writer functions themselves, any caller — this protocol, a hook, `/finalize`, a manual script invocation — gets the protection automatically, without needing to call the classifier first at each call site.
 
 Runs at:
 - startup (full sweep).
@@ -443,9 +445,13 @@ built 2026-07-14). The old "single-writer assumption" is retired. The rules, per
   `~/.core/workspaces/<id>/last-active`. Read it per-workspace first; the `last_active` field
   still present in old `index.json` entries is a tolerant read fallback for one release, and
   nothing writes it.
-- **Edit-detection state-cache is per-project** (see §Edit detection above): the hot path has
-  no shared write at all. The residual global cache (cross-project files only) is written
-  under `~/.core/state-cache.lock` via `withFileLock`.
+- **Edit-detection state-cache is per-project** (see §Edit detection above): the project-local
+  cache DOES have a shared write within a project — `decorate-graph.mjs`, `hot-section.mjs`,
+  and `maintenance-run.mjs` can all stamp it in the same window — so `stampFiles`/`stampFile`
+  serialize the read-modify-write under `<project>/_memories/_lib/.state-cache.lock` (Hale's
+  finding, 2026-07-22: the old "no shared write at all" assumption here was false and cost real
+  writes under a 40-concurrent-process probe). The residual global cache (cross-project files
+  only) is written under `~/.core/state-cache.lock` via `withFileLock`.
 - **`dm-profile.md`, `topics.md`** — rare, usually interactive writes. Atomic
   write-temp-then-rename stays mandatory; if the file changed under you mid-session, re-read,
   merge your entry into the fresh copy, and narrate the collision in one line.

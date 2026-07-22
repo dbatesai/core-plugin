@@ -11,9 +11,27 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import {
   hashText, projectCachePath, readProjectCache, stampFiles, stampFile,
 } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
+
+const STATE_CACHE_SCRIPT = pathToFileURL(
+  join(new URL('../../plugins/core/skills/core/scripts', import.meta.url).pathname, 'state-cache.mjs')
+).href;
+
+// Genuinely concurrent child processes (spawnSync would serialize the "race" —
+// same pattern index-registry.test.mjs's lost-update proof uses).
+function spawnAsync(args) {
+  return new Promise((res) => {
+    const c = spawn(process.execPath, args, { timeout: 30000 });
+    let stdout = '', stderr = '';
+    c.stdout.on('data', d => { stdout += d; });
+    c.stderr.on('data', d => { stderr += d; });
+    c.on('close', (status) => res({ status, stdout, stderr }));
+  });
+}
 
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'state-cache-'));
@@ -104,5 +122,39 @@ test('stampFile (singular) is a thin one-entry wrapper around stampFiles', () =>
     const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
     assert.equal(cache.files['/single.md'].last_written_by, 'hot-section');
     assert.equal(cache.files['/single.md'].outside_hash, 'cafebabecafebabe');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---- THE LOST-UPDATE PROOF (Hale's finding, 2026-07-22): stampFiles used to
+// be an unlocked read-modify-write over the whole project-local cache file.
+// Hale's own 40-concurrent-process probe measured the consequence directly:
+// 29/40 entries survived, 11 lost to the race. This reproduces that same
+// shape — N genuinely concurrent OS processes (not just concurrent promises
+// in one process — spawnSync would serialize them, defeating the point),
+// each stamping a DISTINCT file path into the SAME project-local cache — and
+// asserts every single one survives now that the read-modify-write is
+// serialized under `.state-cache.lock` (same withFileLock primitive
+// index-registry.mjs's own lost-update proof already relies on). ----
+test("race: 40 concurrent processes each stamping a distinct file all survive — no lost update (Hale's 40-process finding: 29/40 survived before the lock fix)", async () => {
+  const { root, project, home, cachePath } = setup();
+  try {
+    const N = 40;
+    const code = (i) => [
+      `import { stampFile } from ${JSON.stringify(STATE_CACHE_SCRIPT)};`,
+      `stampFile(${JSON.stringify(project)}, ${JSON.stringify(`/concurrent-${i}.md`)}, ${JSON.stringify(hashText(`entry-${i}`))}, 'concurrency-test', { now: '2026-07-22T00:00:00Z', home: ${JSON.stringify(home)} });`,
+    ].join('\n');
+
+    const procs = await Promise.all(
+      Array.from({ length: N }, (_, i) => spawnAsync(['--input-type=module', '-e', code(i)]))
+    );
+    for (const p of procs) assert.equal(p.status, 0, `stamp process ${p} exited 0 (stderr: ${p.stderr})`);
+
+    const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+    const survived = Object.keys(cache.files).length;
+    assert.equal(survived, N, `all ${N} concurrent stamps must survive under the lock (got ${survived}/${N})`);
+    for (let i = 0; i < N; i++) {
+      assert.ok(cache.files[`/concurrent-${i}.md`], `entry ${i} present`);
+      assert.equal(cache.files[`/concurrent-${i}.md`].last_written_by, 'concurrency-test');
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

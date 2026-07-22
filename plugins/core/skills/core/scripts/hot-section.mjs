@@ -32,7 +32,8 @@ import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
 import { logEvent } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { hashText, stampFile } from './state-cache.mjs';
+import { hashText, stampFile, readProjectCache } from './state-cache.mjs';
+import { withFileLock } from './file-lock.mjs';
 
 export const HOT_BEGIN = '<!-- HOT-SECTION:BEGIN -->';
 export const HOT_END = '<!-- HOT-SECTION:END -->';
@@ -78,6 +79,53 @@ function renderBlock(text, timestamp) {
 
 function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+}
+
+// Writer-boundary lock (Hale's finding, 2026-07-22 — "mixed-ownership
+// writers launder unreconciled edits"): applyHotSection/clearHotSection had
+// NO lock at all around their PROJECT.md read-modify-write, so two
+// concurrent invocations (a hook and a manual `/finalize`, say) could
+// interleave. Same `withFileLock` primitive decorate-graph.mjs's
+// `.decorate-graph.lock` already uses — no new mechanism, just the same
+// pattern applied to this writer's own file.
+function hotSectionLockPath(projectDir) {
+  return join(resolve(projectDir), '_memories', '.hot-section.lock');
+}
+
+/**
+ * NeedsReconciliationError — thrown instead of writing when PROJECT.md's
+ * human-authored region (everything outside the marker-delimited hot block)
+ * already disagrees with the last established baseline. Mirrors the existing
+ * HOT_SECTION_OVER_BUDGET pattern in this same file: a typed, catchable error
+ * rather than a silent skip or a value the caller might not check.
+ */
+function needsReconciliationError(path, classification) {
+  const err = new Error(
+    `PROJECT.md needs reconciliation before a hot-section write: content outside the hot block ` +
+    `already diverged from the last known baseline (classification: ${classification}). ` +
+    `Refusing to rewrite/re-stamp over an unreconciled user edit.`
+  );
+  err.code = 'NEEDS_RECONCILIATION';
+  err.path = path;
+  err.classification = classification;
+  return err;
+}
+
+/**
+ * Refuse a write when PROJECT.md has a PRIOR established baseline that the
+ * CURRENT (pre-write) bytes already disagree with outside the hot block.
+ * Gated on `cachedStamp` being present, same reasoning as
+ * decorate-graph.mjs's identical check: a file with no prior cache entry has
+ * no established baseline to violate, so its first-ever hot-section write is
+ * safe and is exactly how that baseline gets established.
+ */
+function assertReconciled(projectDir, path, currentText) {
+  const cache = readProjectCache(projectDir);
+  const cachedStamp = cache.files[path];
+  const classification = classifyProjectMdChange(cachedStamp, currentText);
+  if (cachedStamp && classification !== 'hot-block-only') {
+    throw needsReconciliationError(path, classification);
+  }
 }
 
 // The edit-detection cache records, per file, who last wrote it and a content
@@ -171,32 +219,42 @@ export function applyHotSection(projectDir, text, { now, allowOverBudget = false
     throw err;
   }
 
-  const { path, text: original } = readProjectMd(projectDir);
-  const block = renderBlock(text, now || nowIso());
-  const existing = findExistingBlock(original);
-  let updated;
-  if (existing) {
-    updated = original.slice(0, existing.start) + block + original.slice(existing.end);
-  } else {
-    // Insert before the first `## What & Why` heading. If that's missing,
-    // append the block to the end (defensive — unusual but well-defined).
-    const insertAt = original.indexOf('## What & Why');
-    if (insertAt === -1) {
-      updated = original.endsWith('\n') ? original + '\n' + block : original + '\n\n' + block;
+  // Lock + pre-write reconciliation check (Hale's finding, 2026-07-22):
+  // acquire the writer's own lock, then classify PROJECT.md's human-authored
+  // region against the pre-write baseline BEFORE touching the file. Throws
+  // NEEDS_RECONCILIATION instead of writing when it already diverged —
+  // never rewrite-and-restamp over an unreconciled user edit.
+  const { updated, applied } = withFileLock(hotSectionLockPath(projectDir), () => {
+    const { path, text: original } = readProjectMd(projectDir);
+    assertReconciled(projectDir, resolve(path), original);
+    const block = renderBlock(text, now || nowIso());
+    const existing = findExistingBlock(original);
+    let next;
+    if (existing) {
+      next = original.slice(0, existing.start) + block + original.slice(existing.end);
     } else {
-      updated = original.slice(0, insertAt) + block + original.slice(insertAt);
+      // Insert before the first `## What & Why` heading. If that's missing,
+      // append the block to the end (defensive — unusual but well-defined).
+      const insertAt = original.indexOf('## What & Why');
+      if (insertAt === -1) {
+        next = original.endsWith('\n') ? original + '\n' + block : original + '\n\n' + block;
+      } else {
+        next = original.slice(0, insertAt) + block + original.slice(insertAt);
+      }
     }
-  }
-  if (updated !== original) {
-    atomicWriteFileSync(path, updated);
-    recordProjectMdWrite(path, { now, home });
-  }
+    if (next !== original) {
+      atomicWriteFileSync(path, next);
+      recordProjectMdWrite(path, { now, home });
+    }
+    return { updated: next, applied: next !== original };
+  }, { retries: 20, retryDelayMs: 50 });
+
   logEvent(projectDir, 'retrieval-log.jsonl', {
     kind: 'hot-section-synthesis',
     tokens,
     budget: HOT_SECTION_TOKEN_BUDGET,
     over_budget: tokens > HOT_SECTION_TOKEN_BUDGET,
-    applied: updated !== original,
+    applied,
   });
   return updated;
 }
@@ -215,19 +273,25 @@ export function currentHotSection(projectDir) {
 }
 
 export function clearHotSection(projectDir, { now, home } = {}) {
-  const { path, text: original } = readProjectMd(projectDir);
-  const existing = findExistingBlock(original);
-  if (!existing) return original;
-  const updated = original.slice(0, existing.start) + original.slice(existing.end);
-  if (updated !== original) {
-    atomicWriteFileSync(path, updated);
-    // Hale's second finding, same audit: clearHotSection wrote PROJECT.md but
-    // never stamped the cache, leaving `last_hash`/`outside_hash` permanently
-    // stale after a clear — edit-detection would then misread the clear
-    // itself as an unattributed change on the very next check.
-    recordProjectMdWrite(path, { now, home });
-  }
-  return updated;
+  return withFileLock(hotSectionLockPath(projectDir), () => {
+    const { path, text: original } = readProjectMd(projectDir);
+    const existing = findExistingBlock(original);
+    if (!existing) return original;
+    // Same authorship-boundary check as applyHotSection: a clear also
+    // rewrites (removes) the generated region and re-stamps — it must not
+    // do so over a human-authored region that already diverged unreconciled.
+    assertReconciled(projectDir, resolve(path), original);
+    const updated = original.slice(0, existing.start) + original.slice(existing.end);
+    if (updated !== original) {
+      atomicWriteFileSync(path, updated);
+      // Hale's second finding, same audit: clearHotSection wrote PROJECT.md but
+      // never stamped the cache, leaving `last_hash`/`outside_hash` permanently
+      // stale after a clear — edit-detection would then misread the clear
+      // itself as an unattributed change on the very next check.
+      recordProjectMdWrite(path, { now, home });
+    }
+    return updated;
+  }, { retries: 20, retryDelayMs: 50 });
 }
 
 export function candidatesForSynthesis(projectDir, { top = DEFAULT_CANDIDATE_COUNT, sessionTopics = [], today = null } = {}) {
@@ -348,7 +412,15 @@ function cmdApply(args) {
     process.stderr.write('error: no synthesis text provided (use --text "..." or --file PATH, or pipe to stdin)\n');
     return 2;
   }
-  applyHotSection(projectDir, text);
+  try {
+    applyHotSection(projectDir, text);
+  } catch (e) {
+    if (e.code === 'NEEDS_RECONCILIATION') {
+      process.stderr.write(`hot-section: refusing to apply — ${e.message}\n`);
+      return 1;
+    }
+    throw e;
+  }
   process.stdout.write(`PROJECT.md: hot section applied (${text.trim().split('\n').length} lines).\n`);
   return 0;
 }
@@ -363,7 +435,15 @@ function cmdCurrent(args) {
 function cmdClear(args) {
   const projectDir = resolveProjectDir(args.positionals[0]);
   const before = readProjectMd(projectDir).text;
-  clearHotSection(projectDir);
+  try {
+    clearHotSection(projectDir);
+  } catch (e) {
+    if (e.code === 'NEEDS_RECONCILIATION') {
+      process.stderr.write(`hot-section: refusing to clear — ${e.message}\n`);
+      return 1;
+    }
+    throw e;
+  }
   const after = readProjectMd(projectDir).text;
   if (before === after) process.stdout.write('No hot section present; nothing to clear.\n');
   else process.stdout.write('PROJECT.md: hot section cleared.\n');

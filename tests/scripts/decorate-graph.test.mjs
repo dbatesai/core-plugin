@@ -332,3 +332,110 @@ test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stde
     assert.match(result.stderr, /dc-1-bad\.md/, 'the refused file must be named on stderr');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---- Authorship-laundering regression (Hale's finding, 2026-07-22: mailbox
+// "premaintenance-authorship-falsifier", "723c24a-authorship-ordering-repro",
+// "mixed-ownership-writers-launder-unreconciled-edits"). Exact reproduction:
+// decorate a unit (establishes a baseline), the user edits the body OUTSIDE
+// the edges block, the unit's edge TARGET retires (so the edges block goes
+// stale too), decoration runs again. Before the fix: decorateStore rewrote
+// the now-stale edges block, preserved the user's bytes, but then stamped a
+// FRESH outside_hash computed from the post-user-edit text — so the next
+// classifyUnitChange call read 'edges-block-only' instead of
+// 'outside-changed', and the user's edit was never observed, attributed, or
+// propagated (silent loss of user INTENT, even though the bytes survived).
+// After the fix: decorateStore must refuse to touch or re-stamp dc-alpha.md,
+// report it under needs_reconciliation, and a later classification check
+// must still correctly read 'outside-changed'. ----
+
+function authorshipFixture(root) {
+  const mem = join(root, '_memories');
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'dc-alpha.md'),
+    '---\nid: dc-alpha\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-beta\n---\n\n# Alpha\n\nOriginal body.\n');
+  writeFileSync(join(mem, 'dc-beta.md'),
+    '---\nid: dc-beta\ntype: decision\nstatus: active\n---\n\n# Beta\n\nTarget.\n');
+}
+
+test("decorateStore refuses to rewrite/re-stamp a unit whose human-authored body already diverged from its baseline, and reports needs_reconciliation (Hale's authorship-laundering finding)", () => {
+  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-authorship-'));
+  try {
+    const home = testHome(root);
+    authorshipFixture(root);
+    const unitPath = join(root, '_memories', 'dc-alpha.md');
+
+    // 1. Decorate once — establishes the baseline.
+    const first = decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    assert.ok(first.changed.includes('dc-alpha.md'), 'sanity: first pass actually decorated dc-alpha');
+    const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+    const baselineStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[unitPath];
+
+    // 2. The user hand-edits the body OUTSIDE the edges block — an
+    // unreconciled edit nobody has processed yet.
+    const userEdited = readFileSync(unitPath, 'utf8')
+      .replace('Original body.', 'Original body.\n\nUSER EDIT MUST BE OBSERVED.');
+    writeFileSync(unitPath, userEdited);
+    assert.equal(classifyUnitChange(baselineStamp, userEdited), 'outside-changed',
+      'sanity: the classifier itself correctly sees the user edit before any maintenance runs');
+
+    // 3. The edge target retires — the edges block is now ALSO stale, so a
+    // real decoration pass has a genuine reason to touch this file.
+    writeFileSync(join(root, '_memories', 'dc-beta.md'),
+      '---\nid: dc-beta\ntype: decision\nstatus: retired\n---\n\n# Beta\n\nTarget.\n');
+
+    // 4. Run decoration again — this must NOT silently absorb the user edit.
+    const second = decorateStore(root, { now: '2026-07-22T01:00:00Z', home });
+    assert.equal(second.changed.includes('dc-alpha.md'), false,
+      'the file must NOT be rewritten while an unreconciled user edit is outstanding');
+    assert.deepEqual(second.needs_reconciliation, [{ path: 'dc-alpha.md', classification: 'outside-changed' }],
+      'the refusal must be a real, visible signal, not a silent skip');
+
+    // 5. The user's bytes are untouched, the cache was NOT re-stamped, and a
+    // fresh classification check still correctly reads outside-changed —
+    // nothing lost, nothing silently laundered into edges-block-only.
+    const current = readFileSync(unitPath, 'utf8');
+    assert.match(current, /USER EDIT MUST BE OBSERVED/, "the user's edit must still be in the file");
+    const afterStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[unitPath];
+    assert.deepEqual(afterStamp, baselineStamp, 'the cache entry must be untouched — no re-stamp over an unreconciled edit');
+    assert.equal(classifyUnitChange(afterStamp, current), 'outside-changed',
+      'the SAME classifier call that was laundered to edges-block-only before the fix must still report outside-changed after it');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('decorateStore --dry-run also reports needs_reconciliation (preview never claims a launder-risk file would be safely decorated)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-authorship-dry-'));
+  try {
+    const home = testHome(root);
+    authorshipFixture(root);
+    const unitPath = join(root, '_memories', 'dc-alpha.md');
+    decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    writeFileSync(unitPath, readFileSync(unitPath, 'utf8').replace('Original body.', 'Original body.\n\nUSER EDIT.'));
+    writeFileSync(join(root, '_memories', 'dc-beta.md'),
+      '---\nid: dc-beta\ntype: decision\nstatus: retired\n---\n\n# Beta\n\nTarget.\n');
+
+    const result = decorateStore(root, { dryRun: true, home });
+    assert.equal(result.changed.includes('dc-alpha.md'), false);
+    assert.equal(result.needs_reconciliation.some(r => r.path === 'dc-alpha.md'), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI entrypoint exits 1 and names a needs-reconciliation file on stderr when an unreconciled user edit blocks decoration', () => {
+  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-cli-reconcile-'));
+  try {
+    const home = testHome(root);
+    authorshipFixture(root);
+    const unitPath = join(root, '_memories', 'dc-alpha.md');
+    decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    writeFileSync(unitPath, readFileSync(unitPath, 'utf8').replace('Original body.', 'Original body.\n\nUSER EDIT.'));
+    writeFileSync(join(root, '_memories', 'dc-beta.md'),
+      '---\nid: dc-beta\ntype: decision\nstatus: retired\n---\n\n# Beta\n\nTarget.\n');
+
+    const result = spawnSync(process.execPath, [CLI_PATH, root], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(result.status, 1, 'blocking on an unreconciled edit must exit nonzero');
+    assert.doesNotMatch(result.stdout, /none needed a change/);
+    assert.match(result.stderr, /dc-alpha\.md/, 'the blocked file must be named on stderr');
+    assert.match(result.stderr, /reconciliation/, 'the reason must be legible, not just a bare path');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

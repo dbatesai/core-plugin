@@ -116,31 +116,6 @@ node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" --store <project> --inte
 
 Exit 0 → proceed normally. Anything else → degraded path: still load PROJECT.md and whatever units parse (the user needs to work), but lead the readiness summary with the failure and the probe's output, hold anti-resurrection and autonomous renders until the store is reconciled (you can't trust edit-detection against a broken store), and propose the fix — `/process-memory`, or resuming the migration if the damage traces to one. Never load a failing store silently as if it were healthy.
 
-**Decoration + index refresh backstop (spec 2026-07-22).** The integrity probe above only catches a broken *store*; it says nothing about whether every maintenance op that's supposed to keep the store current actually ran. That's exactly the 2026-07-22 gap: `decorate-graph.mjs` was fully built, tested, and reviewed for weeks, but only ever ran as a manual command nobody remembered to invoke — it wasn't even tracked as a close op, so the startup catch-up below (which only discharges ops its own `--ops` list already knows about) could never have flagged it as owed. That catch-up mechanism is bookkeeping-driven: it fires when its own marker says a close is owed. It cannot catch a case where the bookkeeping itself is wrong, incomplete, or where an op was never registered as trackable in the first place. So this step runs for real, unconditionally, every session, on every returning workspace — independent of whatever the close-pass ledger believes happened (guarded like every script call):
-
-```bash
-[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/decorate-graph.mjs" <project> \
-  || echo "CORE-DECORATION-SKIPPED: graph decoration didn't complete cleanly (or CORE_ROOT unresolved — call skipped)"
-
-[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" <project> --json \
-  || echo "CORE-MAINTENANCE-SKIPPED: index refresh didn't complete cleanly (or CORE_ROOT unresolved — call skipped)"
-```
-
-Both calls are idempotent and cheap — a no-op run on a fully-current store completes fast with zero rewrites (confirmed on the real 525-unit CORE store) — so unconditional is the deliberate choice, not something to gate later. `decorate-graph.mjs` regenerates the `[[wikilink]]` block in every active unit. `maintenance-run.mjs` is the same "mechanical half of upkeep" `hygiene.md` and `/finalize` Step 2.3 already use — it regenerates `INDEX-decisions.md`, `INDEX-risks.md`, and the summary index Tier 1 retrieval reads, cleans cloud-sync ghost duplicates, and checks the PROJECT.md cap, all signature-gated internally so nothing actually rewrites unless the unit set changed. Running it here means those indexes are never stale relative to the real unit store, regardless of what the last close did or didn't do. (`generate-memory-index.mjs` also matches the `generate-*-index.mjs` shape but targets a different surface entirely — the harness's cross-session auto-memory `MEMORY.md`, not this project's `_memories/INDEX-*.md` — and isn't wired into any close/hygiene pipeline today; it's out of scope here, not silently dropped.)
-
-Both calls write files this same load is about to read and edit-detect against — but stamping the state cache for those writes is no longer your job. As of 2026-07-22 both scripts stamp `last_written_by` (`decorate-graph`, `maintenance-run`) into the per-project state cache **in their own code**, in the same operation as the write, via the shared `state-cache.mjs` helper — the identical real-lock, code-level pattern `hot-section.mjs` already uses for PROJECT.md's hot section (see `data-storage.md` §Edit detection). There is nothing to reconcile by hand here; the edit-detection sweep below already reads a cache these two calls kept current.
-
-Narrate per `feedback_readiness_only_escalations` — only when something non-trivial happened:
-- Decoration updated a meaningful number of units → name the count (*"graph decoration updated 14 units — probably a bulk edit or a first run since a schema change."*).
-- Decoration refused any files → surface them by name, they're user-actionable (a malformed marker state needs a manual look), same framing as `/finalize`'s own decorate-graph failure handling.
-- `maintenance-run.mjs`'s `ranOps` came back non-empty → use its own `narration` field (already plain voice, e.g. *"kept memory current: regenerated indexes + summary index"*) plus any `notes` (e.g. PROJECT.md over the soft cap).
-- Either call is skipped (`CORE_ROOT` unresolved) or fails → say so plainly, the same as the integrity probe's degraded path.
-- Otherwise — both calls came back current, nothing to report — say nothing about this step at all.
-
-This is a backstop, not a replacement for the `/finalize` and `/process-memory` wiring, which still run decoration and index regeneration as part of the normal close. The two layers are deliberately redundant on a healthy store: on any ordinary session, close-time maintenance already left the store current, so this step is a fast no-op. Its value is entirely in the failure mode close-time maintenance can't self-detect — an op quietly missing from the tracked list, or bookkeeping that's wrong about what it covers — which only shows up if something runs the real thing directly, on a fixed schedule, without asking the ledger for permission first.
-
 The v2 load uses the retrieval ladder, not a cover-to-cover read. The goal is to know enough to answer the user's next question, not to load every file.
 
 - Read `<project>/workspace.json` to get the workspace id and data path.
@@ -175,6 +150,36 @@ Run edit-detection on the files you read against the state cache — per-project
 - **PROJECT.md (user edit):** a change OUTSIDE the hot block is the user's authorship asserting itself. Propagate back to the source units (frontmatter updates, `status: retired` for removed facts). Anti-resurrection fires for removals — a fact the user deleted stays deleted.
 
 Surface any genuine user edit in the readiness summary before the agenda.
+
+**Decoration + index refresh backstop (spec 2026-07-22; reordered 2026-07-22 — see below).** The integrity probe above only catches a broken *store*; it says nothing about whether every maintenance op that's supposed to keep the store current actually ran. That's exactly the 2026-07-22 gap: `decorate-graph.mjs` was fully built, tested, and reviewed for weeks, but only ever ran as a manual command nobody remembered to invoke — it wasn't even tracked as a close op, so the startup catch-up below (which only discharges ops its own `--ops` list already knows about) could never have flagged it as owed. That catch-up mechanism is bookkeeping-driven: it fires when its own marker says a close is owed. It cannot catch a case where the bookkeeping itself is wrong, incomplete, or where an op was never registered as trackable in the first place. So this step runs for real, unconditionally, every session, on every returning workspace — independent of whatever the close-pass ledger believes happened (guarded like every script call):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/decorate-graph.mjs" <project> \
+  || echo "CORE-DECORATION-SKIPPED: graph decoration didn't complete cleanly (or CORE_ROOT unresolved — call skipped)"
+
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" <project> --json \
+  || echo "CORE-MAINTENANCE-SKIPPED: index refresh didn't complete cleanly (or CORE_ROOT unresolved — call skipped)"
+```
+
+**This runs AFTER edit-detection above, never before (Hale's finding, 2026-07-22 — "mixed-ownership writers launder unreconciled edits").** The old ordering ran this backstop before the retrieval ladder even read the files edit-detection classifies, so a between-session user edit to a unit body or PROJECT.md could get silently absorbed: decoration/hot-section would preserve the user's bytes but then unconditionally stamp a FRESH baseline over them, and the classifier below would then read the file as CORE's own regenerated block (`edges-block-only`/`hot-block-only`) instead of the genuine user edit it actually was — bytes survived, but the fact that they'd changed was never observed, attributed, or propagated. Running this step only after edit-detection has already read and classified the pre-decoration bytes closes that window at the protocol level, matching the ordering the startup catch-up below already required for the exact same reason.
+
+That ordering fix is belt-and-suspenders, not the sole protection: `decorate-graph.mjs` and `hot-section.mjs` now refuse the write in CODE, at the writer boundary, regardless of when or from where they're called. Each reads the pre-write state cache, classifies the file's human-authored region against its last established baseline, and — if that region already diverged (`outside-changed`, or `no-baseline` on a file that DOES have a prior cache entry) — refuses to touch or re-stamp it, reporting it under `needs_reconciliation` instead of silently absorbing it. So even a future caller that invokes either script out of order (a hook, another protocol path, a manual run) gets this protection automatically, without needing to know or honor this ordering.
+
+Both calls are idempotent and cheap — a no-op run on a fully-current store completes fast with zero rewrites (confirmed on the real 525-unit CORE store) — so unconditional is the deliberate choice, not something to gate later. `decorate-graph.mjs` regenerates the `[[wikilink]]` block in every active unit. `maintenance-run.mjs` is the same "mechanical half of upkeep" `hygiene.md` and `/finalize` Step 2.3 already use — it regenerates `INDEX-decisions.md`, `INDEX-risks.md`, and the summary index Tier 1 retrieval reads, cleans cloud-sync ghost duplicates, and checks the PROJECT.md cap, all signature-gated internally so nothing actually rewrites unless the unit set changed. Running it here means those indexes are never stale relative to the real unit store, regardless of what the last close did or didn't do. (`generate-memory-index.mjs` also matches the `generate-*-index.mjs` shape but targets a different surface entirely — the harness's cross-session auto-memory `MEMORY.md`, not this project's `_memories/INDEX-*.md` — and isn't wired into any close/hygiene pipeline today; it's out of scope here, not silently dropped.)
+
+Both scripts stamp `last_written_by` (`decorate-graph`, `maintenance-run`) into the per-project state cache **in their own code**, in the same operation as the write, via the shared `state-cache.mjs` helper — the identical real-lock, code-level pattern `hot-section.mjs` already uses for PROJECT.md's hot section (see `data-storage.md` §Edit detection). There is nothing to reconcile by hand here.
+
+Narrate per `feedback_readiness_only_escalations` — only when something non-trivial happened:
+- Decoration updated a meaningful number of units → name the count (*"graph decoration updated 14 units — probably a bulk edit or a first run since a schema change."*).
+- Decoration refused any files → surface them by name, they're user-actionable (a malformed marker state needs a manual look), same framing as `/finalize`'s own decorate-graph failure handling.
+- Decoration or hot-section reported any file under `needs_reconciliation` → surface it too, distinctly from a plain refusal: it means a unit body or PROJECT.md already diverged from its last known baseline before this backstop even ran (an unreconciled user edit), and the write was skipped specifically to avoid re-stamping over it. Name the file(s) and say plainly that they still need a reconciliation pass.
+- `maintenance-run.mjs`'s `ranOps` came back non-empty → use its own `narration` field (already plain voice, e.g. *"kept memory current: regenerated indexes + summary index"*) plus any `notes` (e.g. PROJECT.md over the soft cap).
+- Either call is skipped (`CORE_ROOT` unresolved) or fails → say so plainly, the same as the integrity probe's degraded path.
+- Otherwise — both calls came back current, nothing to report — say nothing about this step at all.
+
+This is a backstop, not a replacement for the `/finalize` and `/process-memory` wiring, which still run decoration and index regeneration as part of the normal close. The two layers are deliberately redundant on a healthy store: on any ordinary session, close-time maintenance already left the store current, so this step is a fast no-op. Its value is entirely in the failure mode close-time maintenance can't self-detect — an op quietly missing from the tracked list, or bookkeeping that's wrong about what it covers — which only shows up if something runs the real thing directly, on a fixed schedule, without asking the ledger for permission first.
 
 ## Startup catch-up — discharge an owed close (spec 2026-06-29)
 

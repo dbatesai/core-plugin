@@ -407,3 +407,81 @@ test('CLI: clear subcommand reports success and actually removes the block', () 
     assert.ok(!pm.includes(HOT_BEGIN), 'block actually gone');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---- Authorship-laundering regression (Hale's finding, 2026-07-22: mailbox
+// "mixed-ownership-writers-launder-unreconciled-edits"). Exact reproduction:
+// apply a hot section (establishes a baseline), the user hand-edits
+// PROJECT.md OUTSIDE the hot block, then a second `applyHotSection` runs.
+// Before the fix: the write landed (the user's bytes preserved) and then
+// unconditionally re-stamped a FRESH outside_hash computed from the
+// post-user-edit file — so the next classifyProjectMdChange call read
+// 'hot-block-only' instead of 'outside-changed', and the edit was never
+// observed, attributed, or propagated. After the fix: applyHotSection/
+// clearHotSection must refuse (NEEDS_RECONCILIATION), never write or
+// re-stamp, and a later classification check must still read
+// 'outside-changed'. ----
+
+test("applyHotSection refuses (NEEDS_RECONCILIATION) and never re-stamps when PROJECT.md's body already diverged from its baseline (Hale's authorship-laundering finding)", () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'First synthesis.', { now: '2026-07-22T00:00:00Z', home });
+    const pmPath = join(project, 'PROJECT.md');
+    const baselineStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[pmPath];
+
+    // The user hand-edits PROJECT.md OUTSIDE the hot block.
+    const userEdited = readFileSync(pmPath, 'utf8').replace('The thing.', 'The thing.\n\nUSER EDIT MUST BE OBSERVED.');
+    writeFileSync(pmPath, userEdited);
+    assert.equal(classifyProjectMdChange(baselineStamp, userEdited), 'outside-changed',
+      'sanity: the classifier itself correctly sees the user edit before any maintenance runs');
+
+    // A second synthesis pass must refuse rather than launder the edit.
+    assert.throws(
+      () => applyHotSection(project, 'Second synthesis.', { now: '2026-07-22T01:00:00Z', home }),
+      (e) => e.code === 'NEEDS_RECONCILIATION' && e.classification === 'outside-changed',
+    );
+
+    const current = readFileSync(pmPath, 'utf8');
+    assert.match(current, /USER EDIT MUST BE OBSERVED/, "the user's edit must still be in the file");
+    assert.doesNotMatch(current, /Second synthesis/, 'the blocked write must never land');
+    const afterStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[pmPath];
+    assert.deepEqual(afterStamp, baselineStamp, 'the cache entry must be untouched — no re-stamp over an unreconciled edit');
+    assert.equal(classifyProjectMdChange(afterStamp, current), 'outside-changed',
+      'the SAME classifier call that was laundered to hot-block-only before the fix must still report outside-changed after it');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('clearHotSection also refuses (NEEDS_RECONCILIATION) rather than removing the block over an unreconciled user edit', () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'Ephemeral.', { now: '2026-07-22T00:00:00Z', home });
+    const pmPath = join(project, 'PROJECT.md');
+    const baselineStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[pmPath];
+    writeFileSync(pmPath, readFileSync(pmPath, 'utf8').replace('The thing.', 'The thing.\n\nUSER EDIT.'));
+
+    assert.throws(
+      () => clearHotSection(project, { now: '2026-07-22T01:00:00Z', home }),
+      (e) => e.code === 'NEEDS_RECONCILIATION',
+    );
+    const current = readFileSync(pmPath, 'utf8');
+    assert.match(current, /HOT-SECTION:BEGIN/, 'the hot block must still be present — the blocked clear never landed');
+    const afterStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[pmPath];
+    assert.deepEqual(afterStamp, baselineStamp, 'no re-stamp over an unreconciled edit');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: apply exits 1 and reports refusal on stderr when PROJECT.md needs reconciliation', () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'First synthesis.', { now: '2026-07-22T00:00:00Z', home });
+    const pmPath = join(project, 'PROJECT.md');
+    writeFileSync(pmPath, readFileSync(pmPath, 'utf8').replace('The thing.', 'The thing.\n\nUSER EDIT.'));
+
+    const res = spawnSync(process.execPath, [SCRIPT, 'apply', project, '--text', 'Second synthesis.'], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 1, 'a blocked apply must exit nonzero');
+    assert.match(res.stderr, /reconciliation/);
+    const current = readFileSync(pmPath, 'utf8');
+    assert.doesNotMatch(current, /Second synthesis/, 'the blocked write must never land via the CLI either');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

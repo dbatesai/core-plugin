@@ -13,13 +13,23 @@
  * `recordProjectMdWrite` now calls into it instead of owning its own copy.
  *
  * Cache of record: per-project at `<project>/_memories/_lib/state-cache.json`
- * — single-owner, so two projects closing at once can't clobber each other's
- * hashes; no lock needed for this write. A residual global
- * `~/.core/state-cache.json` exists for genuinely cross-project files; every
- * per-project stamp also prunes its own file paths out of the global cache
- * under `~/.core/state-cache.lock`, so a stale global entry can never shadow
- * a fresher per-project one (see `data-storage.md` §"Shared-write
- * concurrency" for the one-release union-read this migration established).
+ * — single-owner ACROSS PROJECTS (two projects closing at once can't clobber
+ * each other's hashes, since each writes its own file), but NOT single-owner
+ * WITHIN a project: `decorate-graph.mjs`, `hot-section.mjs`, and
+ * `maintenance-run.mjs` can all stamp the same project-local cache file in
+ * the same window (concurrent hooks/agents/CLI invocations), and the write
+ * itself is a read-modify-write over the whole JSON file. Hale's 40-concurrent-
+ * process probe (2026-07-22) measured the real consequence of the old
+ * "no lock needed" assumption: 29/40 stamps survived, 11 lost to the race.
+ * Fixed: the read-modify-write below is now serialized under a project-local
+ * lock (`<project>/_memories/_lib/.state-cache.lock`, same `withFileLock`
+ * primitive every other lock in this codebase uses — no new mechanism). A
+ * residual global `~/.core/state-cache.json` exists for genuinely
+ * cross-project files; every per-project stamp also prunes its own file
+ * paths out of the global cache under `~/.core/state-cache.lock`, so a stale
+ * global entry can never shadow a fresher per-project one (see
+ * `data-storage.md` §"Shared-write concurrency" for the one-release
+ * union-read this migration established).
  *
  * What this module deliberately does NOT own: any domain-specific "what
  * counts as CORE's own write vs a real user edit" classification (e.g.
@@ -83,18 +93,29 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
   const ts = now || nowIso();
   const cachePath = projectCachePath(projectDir);
 
+  // The read-modify-write over the whole project-local cache file must be
+  // serialized: any caller of stampFiles/stampFile races every OTHER caller
+  // (decorate-graph, hot-section, maintenance-run, and any future writer),
+  // not just other instances of itself. Reuses the same withFileLock
+  // primitive every other lock in this codebase uses (Hale's finding,
+  // 2026-07-22 — 29/40 entries survived an unlocked 40-concurrent-process
+  // stamp probe). Best-effort throughout, same as before: a lock-acquire
+  // failure or cache-write failure must never block or fail the caller's
+  // real write, which has already happened by the time this runs.
   try {
     mkdirSync(dirname(cachePath), { recursive: true });
-    const cache = readProjectCache(projectDir);
-    for (const e of entries) {
-      cache.files[e.path] = {
-        last_hash: e.hash,
-        last_written: ts,
-        last_written_by: e.lastWrittenBy,
-        ...(e.extra || {}),
-      };
-    }
-    atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n');
+    withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
+      const cache = readProjectCache(projectDir);
+      for (const e of entries) {
+        cache.files[e.path] = {
+          last_hash: e.hash,
+          last_written: ts,
+          last_written_by: e.lastWrittenBy,
+          ...(e.extra || {}),
+        };
+      }
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n');
+    }, { retries: 20, retryDelayMs: 50 });
   } catch { /* best-effort: a cache-write failure never blocks the underlying write */ }
 
   // One-release migration prune (matches recordProjectMdWrite's original

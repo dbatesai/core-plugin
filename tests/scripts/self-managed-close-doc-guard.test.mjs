@@ -181,16 +181,33 @@ test('startup: decoration + index refresh backstop runs for real (not --dry-run/
     'the decoration/index calls must be guarded exactly like every other script call in this file');
 });
 
-test('startup: the backstop step sits right after the integrity probe and before the retrieval ladder', () => {
+test("startup: the backstop step runs AFTER edit-detection and before startup catch-up (Hale's authorship-ordering finding, 2026-07-22)", () => {
+  // Was: 'the backstop step sits right after the integrity probe and before the
+  // retrieval ladder' — that WAS the bug. Hale's repro (mailbox
+  // "723c24a-authorship-ordering-repro", 2026-07-22): running decoration before
+  // edit-detection ever read the pre-decoration bytes let decorate-graph
+  // preserve a between-session user edit's BYTES while unconditionally
+  // stamping a fresh baseline over it — so edit-detection, once it finally
+  // ran, could never observe that the edit had happened at all (classified
+  // 'edges-block-only' instead of 'outside-changed'). The doc-level fix is
+  // ordering: edit-detection must classify the files the retrieval ladder
+  // just read BEFORE this backstop's decoration/maintenance calls get a
+  // chance to rewrite and re-stamp them. (The writers also refuse this in
+  // code now regardless of call order — see decorate-graph.mjs/
+  // hot-section.mjs's needs_reconciliation gate — but the doc order must not
+  // contradict that belt-and-suspenders story either.)
   const s = read('skills', 'core', 'protocols', 'startup.md');
   const integrity = s.indexOf('Integrity probe before loading');
-  const backstop = s.indexOf('Decoration + index refresh backstop');
   const ladder = s.indexOf('The v2 load uses the retrieval ladder');
+  const editDetection = s.indexOf('Run edit-detection on the files you read');
+  const backstop = s.indexOf('Decoration + index refresh backstop');
   const catchUp = s.indexOf('## Startup catch-up');
-  assert.ok(integrity > 0 && backstop > 0 && ladder > 0 && catchUp > 0, 'all four anchors must exist');
-  assert.ok(backstop > integrity, 'the backstop must come after the integrity probe');
-  assert.ok(backstop < ladder, 'the backstop must run before the tiered retrieval ladder reads any unit content');
-  assert.ok(backstop < catchUp, 'the backstop must run before (and independent of) the close-pass catch-up bookkeeping');
+  assert.ok(integrity > 0 && ladder > 0 && editDetection > 0 && backstop > 0 && catchUp > 0, 'all five anchors must exist');
+  assert.ok(ladder > integrity, 'the retrieval ladder reads files after the integrity probe');
+  assert.ok(editDetection > ladder, 'edit-detection classifies the files the retrieval ladder just read');
+  assert.ok(backstop > editDetection,
+    'the backstop must run AFTER edit-detection has classified the pre-decoration bytes — never before');
+  assert.ok(backstop < catchUp, 'the backstop must still run before (and independent of) the close-pass catch-up bookkeeping');
 });
 
 test('startup: the backstop is framed as unconditional and independent of close-pass bookkeeping, not a duplicate of it', () => {

@@ -38,7 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
-import { hashText, stampFiles } from './state-cache.mjs';
+import { hashText, stampFiles, readProjectCache } from './state-cache.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 
 export { EDGES_BEGIN, EDGES_END };
@@ -202,9 +202,23 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
   const activeById = new Map(units.map(u => [u.id, u]));
   const memoriesDir = join(resolve(projectDir), '_memories');
 
+  // Authorship-boundary fix (Hale's finding, 2026-07-22 — "mixed-ownership
+  // writers launder unreconciled edits"): read the state cache ONCE, before
+  // any of this run's writes land, as the pre-write baseline every unit gets
+  // classified against below. The bug this closes: decorate-graph used to
+  // rewrite its own generated block and then unconditionally stamp a FRESH
+  // outside_hash — even when the human-authored region had ALREADY diverged
+  // from the last known-good baseline (a between-session user edit nobody
+  // had reconciled yet). The fresh stamp made that divergence permanently
+  // undetectable: the user's bytes survived, but the fact that they changed
+  // was never observed, attributed, or propagated. See
+  // classifyUnitChange below for what "already diverged" means.
+  const preWriteCache = readProjectCache(projectDir);
+
   const changed = [];
   const unchanged = [];
   const refused = [];
+  const needsReconciliation = [];
   const stampEntries = [];
   for (const u of units) {
     const raw = cap.raw?.[u.path];
@@ -222,6 +236,24 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     if (updated === text) { unchanged.push(u.path); continue; }
 
     const filePath = join(memoriesDir, ...u.path.split('/'));
+
+    // Refuse to decorate (and never re-stamp) a file whose human-authored
+    // region already disagrees with the last established baseline. Gated on
+    // `cachedStamp` being present: a file with NO prior cache entry has no
+    // established baseline to violate — its first-ever decoration is safe
+    // and is exactly how that baseline gets established in the first place.
+    // A file that DOES have a prior entry but classifies as 'outside-changed'
+    // (a real edit since the last stamp) or 'no-baseline' (a pre-fix entry
+    // recorded before outside_hash existed, so we can't prove what "outside"
+    // looked like) is an unreconciled user edit already in flight — decorate
+    // must not touch it or launder it into a fresh stamp.
+    const cachedStamp = preWriteCache.files[filePath];
+    const classification = classifyUnitChange(cachedStamp, text);
+    if (cachedStamp && classification !== 'edges-block-only') {
+      needsReconciliation.push({ path: u.path, classification });
+      continue;
+    }
+
     if (!dryRun) {
       // Stale-byte refusal (Hale's concurrency finding): the file lock this
       // script runs under is private to decorate-graph, so it doesn't
@@ -259,6 +291,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     changed,
     unchanged_count: unchanged.length,
     refused,
+    needs_reconciliation: needsReconciliation,
     dry_run: dryRun,
   };
 }
@@ -284,7 +317,7 @@ function main(argv) {
 
   const result = decorateStoreLocked(projectDir, { dryRun });
 
-  if (result.changed.length === 0 && result.refused.length === 0) {
+  if (result.changed.length === 0 && result.refused.length === 0 && result.needs_reconciliation.length === 0) {
     process.stdout.write(`decorate-graph: ${result.total_units} units, none needed a change (snapshot ${result.snapshot_id.slice(0, 12)}).\n`);
     return 0;
   }
@@ -305,8 +338,18 @@ function main(argv) {
     for (const r of result.refused) process.stderr.write(`  ${r.path}: ${r.reason}\n`);
   }
 
-  if (check) return (result.changed.length > 0 || result.refused.length > 0) ? 1 : 0;
-  return result.refused.length > 0 ? 1 : 0;
+  // A unit whose human-authored region already diverged from the last known
+  // baseline (Hale's authorship-laundering finding, 2026-07-22) is a real,
+  // user-visible signal — not a silent skip. Printing it alongside refusals
+  // and treating it as exit-nonzero keeps the same "never claim quiet
+  // success while something needs a look" discipline as the refused-file path.
+  if (result.needs_reconciliation.length > 0) {
+    process.stderr.write(`decorate-graph: ${result.needs_reconciliation.length} file(s) need reconciliation before decoration (unreconciled user edit outside the generated block):\n`);
+    for (const r of result.needs_reconciliation) process.stderr.write(`  ${r.path}: ${r.classification}\n`);
+  }
+
+  if (check) return (result.changed.length > 0 || result.refused.length > 0 || result.needs_reconciliation.length > 0) ? 1 : 0;
+  return (result.refused.length > 0 || result.needs_reconciliation.length > 0) ? 1 : 0;
 }
 
 const _cliEntry = (() => { try { return fileURLToPath(import.meta.url) === resolve(process.argv[1]); } catch { return false; } })();
