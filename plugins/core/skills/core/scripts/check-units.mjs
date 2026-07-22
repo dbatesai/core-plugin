@@ -30,7 +30,7 @@
  */
 
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { resolve, join, basename } from 'node:path';
+import { resolve, join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.mjs';
 
@@ -337,7 +337,11 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     }
 
     const status = String(u.fm.status || '').toLowerCase();
-    const inArchiveDir = String(u.path).split(/[\\/]/).includes('archive');
+    // The immediate parent only (Hale's 2026-07-22 finding): a full-path
+    // segment scan false-positives when the project itself sits under some
+    // unrelated ancestor directory named "archive" -- that has nothing to do
+    // with this unit store's own archive/ subdirectory.
+    const inArchiveDir = basename(dirname(String(u.path))) === 'archive';
     // Canonical archiving (hygiene.md) sets `archived: true` and does not
     // require a status change -- a unit can be `status: active, archived:
     // true` and this must still catch it left top-level. The legacy
