@@ -19,6 +19,7 @@ const {
   hashOutsideEdgesBlock, classifyUnitChange,
 } = await import(pathToFileURL(join(SCRIPTS, 'decorate-graph.mjs')).href);
 const { hashText } = await import(pathToFileURL(join(SCRIPTS, 'state-cache.mjs')).href);
+const { stampCreatedBaseline } = await import(pathToFileURL(join(SCRIPTS, 'lifecycle-detect.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'decorate-graph.mjs');
 
 // Isolated HOME for every test that actually writes (and therefore stamps the
@@ -44,6 +45,16 @@ function fixtureStore() {
   writeFileSync(join(mem, 'dc-4-orphan.md'),
     '---\nid: dc-4-orphan\ntype: observation\nstatus: active\n---\n\n# DC-4 — No edges\n\nBody.\n');
   writeFileSync(join(mem, 'INDEX.md'), '# scaffolding — must be excluded');
+  // dc-1-alpha is the only unit here that will gain an edges block, so it is
+  // the only one that reaches the write guard. Stamp its creation baseline the
+  // way graduation does (lifecycle-detect stampCreatedBaseline --kind unit) —
+  // a no-baseline unit now fails closed (Hale's 2026-07-22 root fix), and a
+  // freshly-graduated unit is decoratable precisely because its creating writer
+  // stamped it at creation. The other units gain no block, short-circuit before
+  // the guard, and need no baseline (so the orphan-never-stamped invariant holds).
+  const home = join(root, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  stampCreatedBaseline(root, join(mem, 'dc-1-alpha.md'), { kind: 'unit', home });
   return root;
 }
 
@@ -198,14 +209,22 @@ test('decorateStore: a second run over unchanged output writes nothing further',
 test('decorateStore --dry-run (dryRun option) reports changes without writing them', () => {
   const root = fixtureStore();
   try {
+    const home = testHome(root);
     const before = readFileSync(join(root, '_memories', 'dc-1-alpha.md'), 'utf8');
-    const result = decorateStore(root, { dryRun: true });
-    const after = readFileSync(join(root, '_memories', 'dc-1-alpha.md'), 'utf8');
+    const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+    const alphaPath = join(root, '_memories', 'dc-1-alpha.md');
+    const creationStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[alphaPath];
+    const result = decorateStore(root, { dryRun: true, home });
+    const after = readFileSync(alphaPath, 'utf8');
     assert.equal(before, after, 'dry run must not write');
     assert.ok(result.changed.includes('dc-1-alpha.md'));
     assert.equal(result.dry_run, true);
-    assert.ok(!existsSync(join(root, '_memories', '_lib', 'state-cache.json')),
-      'dry run must not stamp the state cache either — nothing was actually written');
+    // Dry run must not RE-stamp: the only stamp present is the creation baseline
+    // (last_written_by: unit-create), never a decorate-graph stamp — nothing was
+    // actually written, so nothing re-attributed.
+    const afterStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[alphaPath];
+    assert.deepEqual(afterStamp, creationStamp, 'dry run leaves the creation baseline untouched — no re-stamp');
+    assert.equal(afterStamp.last_written_by, 'unit-create', 'still the creation stamp, not decorate-graph');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -355,6 +374,13 @@ function authorshipFixture(root) {
     '---\nid: dc-alpha\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-beta\n---\n\n# Alpha\n\nOriginal body.\n');
   writeFileSync(join(mem, 'dc-beta.md'),
     '---\nid: dc-beta\ntype: decision\nstatus: active\n---\n\n# Beta\n\nTarget.\n');
+  // dc-alpha gains an edges block, so it reaches the write guard — stamp its
+  // creation baseline (graduation would have done this) so the FIRST decoration
+  // legitimately proceeds. The user edit that lands AFTER that first decoration
+  // is what these tests then prove is refused, never laundered.
+  const home = join(root, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  stampCreatedBaseline(root, join(mem, 'dc-alpha.md'), { kind: 'unit', home });
 }
 
 test("decorateStore refuses to rewrite/re-stamp a unit whose human-authored body already diverged from its baseline, and reports needs_reconciliation (Hale's authorship-laundering finding)", () => {

@@ -30,7 +30,7 @@ import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { readProjectCache } from './state-cache.mjs';
 import { classifyProjectMdChange, recordProjectMdWrite } from './hot-section.mjs';
 import {
-  writeGuardDecision, readSessionInventory, withProjectMdWriterLock,
+  writeGuardDecision, withProjectMdWriterLock,
 } from './lifecycle-core.mjs';
 
 export const DECISIONS_HEADER = '**Decisions (dated, append-only):**';
@@ -285,7 +285,6 @@ export function main(argv) {
   let refused = null;
   if (wouldWrite) {
     const absProjectMd = resolve(projectMd);
-    const sessionInventory = readSessionInventory(projectDir);
     withProjectMdWriterLock(projectDir, () => {
       let live;
       try { live = readFileSync(projectMd, 'utf8'); }
@@ -294,9 +293,7 @@ export function main(argv) {
       const cache = readProjectCache(projectDir);
       const cachedStamp = cache.files[absProjectMd];
       const classification = classifyProjectMdChange(cachedStamp, live);
-      const decision = writeGuardDecision({
-        cachedStamp, classification, projectDir, absPath: absProjectMd, sessionInventory,
-      });
+      const decision = writeGuardDecision({ cachedStamp, classification });
       if (!decision.proceed) { refused = { reason: 'pending-edit', classification: decision.classification, detail: decision.reason }; return; }
 
       // Live-preimage CAS: the bytes we computed `newText` from must still be

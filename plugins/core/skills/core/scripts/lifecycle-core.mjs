@@ -1,36 +1,41 @@
 /**
  * lifecycle-core.mjs — the user-authorship-boundary primitives shared by every
- * writer that mutates a mixed-ownership file (Hale's 2026-07-22 finding, second
- * pass). Deliberately imports NO writer module (only node:* + file-lock), so the
+ * writer that mutates a mixed-ownership file (Hale's 2026-07-22 findings).
+ * Deliberately imports NO writer module (only node:* + file-lock), so the
  * writers can depend on it without an import cycle, and `lifecycle-detect.mjs`
  * (the executable preflight) can depend on BOTH the writers and this.
  *
- * Three things live here, and only these three:
+ * Two things live here, and only these two:
  *
- *   1. The session-start inventory — the record of which user-sensitive files
- *      already existed when the session began. This is what lets a no-cache-
- *      baseline file be told apart: a file present at session start with no
- *      cache stamp is a genuinely PRE-EXISTING, never-seen file (a user could
- *      have created it between sessions — treat conservatively); a file that
- *      appears only AFTER session start is one CORE created this session (the
- *      normal graduation/first-write path — safe to establish its baseline).
- *      This is the honest `no-baseline` semantics Hale's point 8 asked for.
- *
- *   2. `writeGuardDecision` — the single, shared refuse-or-proceed rule every
+ *   1. `writeGuardDecision` — the single, shared refuse-or-proceed rule every
  *      in-scope writer applies against the PRE-WRITE cache baseline, so the
- *      decision is identical across decorate-graph, hot-section, and
- *      compact-project rather than three subtly-divergent inline copies.
+ *      decision is identical across decorate-graph, hot-section, compact-project,
+ *      demote-moves, and demote-state-narrative rather than several subtly-
+ *      divergent inline copies.
  *
- *   3. `withProjectMdWriterLock` — ONE shared lock across ALL writers that touch
+ *   2. `withProjectMdWriterLock` — ONE shared lock across ALL writers that touch
  *      PROJECT.md (hot-section, compaction, moves/state demotion, full render).
  *      Writer-local locks (.hot-section.lock etc.) only serialize a writer
  *      against ITSELF; two DIFFERENT writers racing the same PROJECT.md still
  *      interleave destructively without a lock they all share (Hale's point 7).
  *
+ * THE AUTHORSHIP RULE (Hale's 2026-07-22 falsifier — session timing cannot prove
+ * authorship). A file with NO cache-stamp baseline is NEVER assumed to be
+ * CORE-authored. The previous design inferred "absent from the session-start
+ * inventory => CORE created it this session => safe to auto-write" — that
+ * inference is false: a file the USER creates by hand partway through a session
+ * is also absent from the start-of-session inventory, so timing alone cannot
+ * tell "CORE created this a moment ago" from "the user created this a moment
+ * ago." That inference is removed. The ONLY way a no-baseline file becomes
+ * writable by decorate/hot-section/compact is that the CREATING CORE writer
+ * stamps the exact bytes it just wrote, at creation time (see
+ * `lifecycle-detect.mjs` `stampCreatedBaseline`/`createFile`). Absent that
+ * stamp, every downstream writer REFUSES the file and surfaces it as
+ * `no-baseline`/`needs-reconciliation` — fail closed, never fail open.
+ *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only, node:* imports only.
  */
 
-import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
 
@@ -51,55 +56,25 @@ export function withProjectMdWriterLock(projectDir, fn, opts = {}) {
   });
 }
 
-// ---------- Session-start inventory (Hale point 8) ----------
-
-export function sessionInventoryPath(projectDir) {
-  return join(resolve(projectDir), '_memories', '_lib', '.lifecycle-session.json');
-}
+// ---------- The no-baseline safety rule ----------
 
 /**
- * Read the session-start inventory, or `null` when none has been recorded.
- * `null` is a real, distinct state: it means "no preflight ran this session,"
- * and every caller degrades gracefully to the pre-fix behaviour (first write
- * establishes the baseline) rather than blocking legitimate work.
- */
-export function readSessionInventory(projectDir) {
-  try {
-    const inv = JSON.parse(readFileSync(sessionInventoryPath(projectDir), 'utf8'));
-    if (inv && typeof inv === 'object' && Array.isArray(inv.paths)) return inv;
-  } catch { /* absent or unparseable — treat as no inventory */ }
-  return null;
-}
-
-/**
- * resolveNoBaseline — the point-8 judgment call, isolated so it has exactly one
- * home. Given a file that has NO cache baseline at all, decide whether writing
- * it now is a safe first write (CORE created it this session) or must be held
- * (it pre-existed the session and CORE has genuinely never reconciled it).
+ * resolveNoBaseline — the judgment for a file that has NO cache baseline at all.
  *
- *   - No inventory recorded  → { safe:true,  reason:'no-session-inventory' }
- *       Graceful degradation: without a preflight there is no signal to tell
- *       the two apart, so preserve the established first-write-is-safe behaviour
- *       rather than block the normal graduation→decoration path. (This is the
- *       exact failure point 8 warns against — a brand-new unit written this
- *       session must NOT get stuck in no-baseline limbo.)
- *   - Path in the inventory  → { safe:false, reason:'pre-existing-uncached' }
- *       The file already existed when the session began and still has no cache
- *       stamp — CORE never wrote or reconciled it, so it might be a real user
- *       creation. Fail closed: surface it, do not silently auto-write over it.
- *   - Path not in inventory  → { safe:true,  reason:'created-this-session' }
- *       The file did not exist at session start, so CORE created it this
- *       session (graduation, a first render). This is exactly how a baseline
- *       gets established for a legitimately new file.
+ * There is exactly one answer now: REFUSE. Timing-based authorship inference
+ * (the old "absent from session inventory => created-this-session => safe"
+ * branch) is GONE — it could not distinguish a CORE-created file from a
+ * user-created one that appeared after session start (Hale's 2026-07-22
+ * executable falsifier). A creating CORE writer establishes the first baseline
+ * itself at creation time; any writer that later meets a file with no baseline
+ * is, by construction, NOT its creator and must not overwrite or attribute it.
+ *
+ * Kept as a named export (rather than inlined) so the decision has one home and
+ * the intent is documented at the call site. Always returns:
+ *   { safe: false, reason: 'no-baseline' }
  */
-export function resolveNoBaseline(projectDir, absPath, { sessionInventory } = {}) {
-  const inv = sessionInventory === undefined ? readSessionInventory(projectDir) : sessionInventory;
-  if (!inv) return { safe: true, reason: 'no-session-inventory' };
-  const abs = resolve(absPath);
-  const present = inv.paths.some(p => resolve(p) === abs);
-  return present
-    ? { safe: false, reason: 'pre-existing-uncached' }
-    : { safe: true, reason: 'created-this-session' };
+export function resolveNoBaseline() {
+  return { safe: false, reason: 'no-baseline' };
 }
 
 /**
@@ -111,18 +86,18 @@ export function resolveNoBaseline(projectDir, absPath, { sessionInventory } = {}
  * 'no-baseline' (the classifier had no outside_hash to compare against).
  *
  * Returns { proceed, classification, reason? }:
- *   - No cache stamp at all → defer to resolveNoBaseline (point 8).
+ *   - No cache stamp at all → REFUSE ('no-baseline'): a creating writer would
+ *     have stamped it; absence means it is not CORE-authored (see the module
+ *     header). Fail closed.
  *   - Cache stamp present but the region diverged ('outside-changed') or can't
  *     be proven ('no-baseline' with a stamp that predates outside_hash) →
  *     refuse; it is an unreconciled edit in flight and must not be laundered.
  *   - Otherwise (region byte-identical to the baseline) → proceed.
  */
-export function writeGuardDecision({ cachedStamp, classification, projectDir, absPath, sessionInventory }) {
+export function writeGuardDecision({ cachedStamp, classification }) {
   if (!cachedStamp) {
-    const nb = resolveNoBaseline(projectDir, absPath, { sessionInventory });
-    return nb.safe
-      ? { proceed: true, classification: 'no-baseline', reason: nb.reason }
-      : { proceed: false, classification: 'no-baseline', reason: nb.reason };
+    const nb = resolveNoBaseline();
+    return { proceed: false, classification: 'no-baseline', reason: nb.reason };
   }
   if (classification === 'outside-changed' || classification === 'no-baseline') {
     return { proceed: false, classification, reason: classification };

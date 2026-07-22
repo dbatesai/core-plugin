@@ -29,10 +29,10 @@ import { main as compactMain } from '../../plugins/core/skills/core/scripts/comp
 import { decorateStore } from '../../plugins/core/skills/core/scripts/decorate-graph.mjs';
 import { stampFile, readProjectCache, hashText } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
 import {
-  writeGuardDecision, resolveNoBaseline, readSessionInventory,
+  writeGuardDecision, resolveNoBaseline,
 } from '../../plugins/core/skills/core/scripts/lifecycle-core.mjs';
 import {
-  recordSessionStart, detectStore, classifyFileLifecycle,
+  recordSessionStart, detectStore, classifyFileLifecycle, createFile, stampCreatedBaseline,
 } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
 
 const SCRIPTS = new URL('../../plugins/core/skills/core/scripts', import.meta.url).pathname;
@@ -157,6 +157,7 @@ test('point1: detector classifies clean / generated-only / pending-edit', () => 
   const { root, home, project, pm } = setup();
   try {
     writeFileSync(pm, '# P\n\n## What & Why\n\nBody.\n');
+    recordProjectMdWrite(pm, { now: NOW, home }); // creation baseline (render step's stamp)
     // clean: apply a hot section, stamp lands, nothing changes after.
     applyHotSection(project, 'First.', { now: NOW, home });
     let r = classifyFileLifecycle(project, pm, { kind: 'project' });
@@ -205,61 +206,136 @@ test('point1: detector classifies missing, malformed, and read-only', () => {
 });
 
 // ---------------------------------------------------------------------------
-// POINT 8: no-baseline distinction — created-this-session vs pre-existing.
+// THE AUTHORSHIP RULE (Hale's 2026-07-22 root fix — session timing cannot prove
+// authorship). No cache-stamp baseline ALWAYS refuses. The old timing inference
+// ("absent from session inventory => created-this-session => safe") and the
+// missing-inventory fail-open are both GONE. A creating CORE writer establishes
+// the first baseline at creation time; any writer that later meets a no-baseline
+// file is, by construction, not its creator and must hold it.
 // ---------------------------------------------------------------------------
 
-test('point8: pre-existing-uncached is held; created-this-session proceeds; no inventory degrades permissively', () => {
-  const { root, home, project } = setup();
+test('rule: resolveNoBaseline ALWAYS refuses — no timing inference, no missing-inventory fail-open', () => {
+  const { root, project } = setup();
   try {
-    const mem = join(project, '_memories');
-    // A user-created unit present at session start, never cached.
-    const userUnit = join(mem, 'dc-user.md');
-    writeFileSync(userUnit, `---\nid: dc-user\ntype: decision\nstatus: active\n---\n\n# User\n`);
-    writeFileSync(join(project, 'PROJECT.md'), '# P\n\n## What & Why\n\nx\n');
-
-    // No inventory yet → permissive (graceful degradation).
-    assert.equal(resolveNoBaseline(project, userUnit, { sessionInventory: readSessionInventory(project) }).safe, true, 'no inventory → permissive');
-
+    // Regardless of inventory state, arguments, or timing: no baseline → refuse.
+    assert.deepEqual(resolveNoBaseline(), { safe: false, reason: 'no-baseline' });
     recordSessionStart(project, { sessionId: 's1', now: NOW });
-    // A unit graduated AFTER session start.
-    const newUnit = join(mem, 'dc-new.md');
-    writeFileSync(newUnit, `---\nid: dc-new\ntype: decision\nstatus: active\n---\n\n# New\n`);
-
-    const inv = readSessionInventory(project);
-    assert.equal(resolveNoBaseline(project, userUnit, { sessionInventory: inv }).safe, false, 'pre-existing-uncached → held');
-    assert.equal(resolveNoBaseline(project, newUnit, { sessionInventory: inv }).safe, true, 'created-this-session → safe');
-
-    // And the detector reflects it.
-    const det = detectStore(project);
-    const byName = Object.fromEntries(det.files.map(f => [f.path.split('/').pop(), f]));
-    assert.equal(byName['dc-user.md'].safeFirstWrite, false);
-    assert.equal(byName['dc-new.md'].safeFirstWrite, true);
+    assert.deepEqual(resolveNoBaseline(project, join(project, '_memories', 'anything.md')),
+      { safe: false, reason: 'no-baseline' }, 'a file that appeared after session start is NOT assumed CORE-created');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('point8: decorate-graph HOLDS a pre-existing-uncached unit but decorates a created-this-session unit', () => {
+test('rule: writeGuardDecision refuses a no-baseline file (no cache stamp at all)', () => {
+  assert.deepEqual(
+    writeGuardDecision({ cachedStamp: undefined, classification: 'edges-block-only' }),
+    { proceed: false, classification: 'no-baseline', reason: 'no-baseline' },
+    'no stamp → refuse, even when the domain classifier would have said the generated region is all that changed');
+});
+
+// REGRESSION (Hale's executable falsifier, probe-post-start-user-file.mjs): a
+// file the USER creates by hand after session start has no baseline and was
+// absent from the session-start inventory — timing cannot distinguish it from a
+// CORE-created file. It must be HELD as no-baseline, byte-identical, NOT
+// rewritten or attributed to CORE.
+test('regression (post-start user file): decorate-graph HOLDS a user-created no-baseline unit, byte-identical, never attributed to CORE', () => {
   const { root, home, project } = setup();
   try {
     const mem = join(project, '_memories');
-    // Pre-existing user unit that cites a target (so decorate WOULD add a block).
-    writeFileSync(join(mem, 'dc-user.md'),
-      `---\nid: dc-user\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-target\n---\n\n# User\n`);
-    writeFileSync(join(mem, 'dc-target.md'), `---\nid: dc-target\ntype: decision\nstatus: active\n---\n\n# Target\n`);
     writeFileSync(join(project, 'PROJECT.md'), '# P\n\n## What & Why\n\nx\n');
     recordSessionStart(project, { sessionId: 's1', now: NOW });
 
-    // A NEW unit created this session that also cites the target.
-    writeFileSync(join(mem, 'dc-new.md'),
-      `---\nid: dc-new\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-target\n---\n\n# New\n`);
+    // The user creates this by hand AFTER session start. No baseline, absent
+    // from the inventory — the exact counterexample that used to auto-decorate.
+    const userUnit = join(mem, 'dc-user-created-after-start.md');
+    writeFileSync(userUnit,
+      `---\nid: dc-user-created-after-start\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-target\n---\n\n# User\n\nUSER BYTES.\n`);
+    writeFileSync(join(mem, 'dc-target.md'), `---\nid: dc-target\ntype: decision\nstatus: active\n---\n\n# Target\n`);
+
+    const before = readFileSync(userUnit, 'utf8');
+    const res = decorateStore(project, { now: NOW, home });
+    const after = readFileSync(userUnit, 'utf8');
+
+    assert.equal(after, before, 'the user-created file is byte-identical — never rewritten');
+    assert.ok(!res.changed.includes('dc-user-created-after-start.md'), 'never reported as changed/decorated');
+    const held = res.needs_reconciliation.find(r => r.path === 'dc-user-created-after-start.md');
+    assert.ok(held, 'held as needs_reconciliation, surfaced not absorbed');
+    assert.equal(held.classification, 'no-baseline');
+    assert.ok(after.includes('USER BYTES.') && !after.includes('## Related'),
+      'user bytes intact, no CORE-authored edges block injected');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// LEGITIMATE same-session creation: a brand-new unit created THROUGH the real
+// creation code path (createFile — write + stamp the creation baseline in one
+// operation, exactly what graduation does via the --stamp-created CLI) decorates
+// normally in the same session and is NEVER wrongly held as no-baseline.
+test('regression (legit creation path): a unit created via createFile decorates normally, never held as no-baseline', () => {
+  const { root, home, project } = setup();
+  try {
+    const mem = join(project, '_memories');
+    writeFileSync(join(project, 'PROJECT.md'), '# P\n\n## What & Why\n\nx\n');
+    writeFileSync(join(mem, 'dc-target.md'), `---\nid: dc-target\ntype: decision\nstatus: active\n---\n\n# Target\n`);
+    recordSessionStart(project, { sessionId: 's1', now: NOW });
+
+    // The REAL creation path: CORE writes the new unit AND stamps its baseline
+    // atomically. Not a hand fixture that skips the stamp.
+    const newUnit = join(mem, 'dc-new.md');
+    const outcome = createFile(project, newUnit,
+      `---\nid: dc-new\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-target\n---\n\n# New\n`,
+      { kind: 'unit', now: NOW, home });
+    assert.equal(outcome.stamped, true, 'the creation baseline landed');
 
     const res = decorateStore(project, { now: NOW, home });
-    const heldPaths = res.needs_reconciliation.map(r => r.path);
-    assert.ok(heldPaths.includes('dc-user.md'), 'pre-existing-uncached unit is held, not decorated');
-    const held = res.needs_reconciliation.find(r => r.path === 'dc-user.md');
-    assert.equal(held.classification, 'no-baseline');
-    assert.ok(res.changed.includes('dc-new.md'), 'created-this-session unit decorates normally');
-    // The held unit's bytes are untouched (no edges block written).
-    assert.ok(!readFileSync(join(mem, 'dc-user.md'), 'utf8').includes('## Related'), 'held unit not decorated');
+    assert.ok(res.changed.includes('dc-new.md'), 'the freshly-created unit decorates');
+    assert.ok(!res.needs_reconciliation.some(r => r.path === 'dc-new.md'), 'never wrongly held as no-baseline');
+    assert.ok(readFileSync(newUnit, 'utf8').includes('## Related'), 'edges block written');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// The CLI creation-baseline seam (--stamp-created) is what graduation / the
+// PROJECT.md render step actually invoke: agent writes the file by hand, then
+// stamps it. Proves stampCreatedBaseline is the same seam createFile bundles.
+test('regression (agent write + stamp seam): stampCreatedBaseline after a hand write makes decoration proceed', () => {
+  const { root, home, project } = setup();
+  try {
+    const mem = join(project, '_memories');
+    writeFileSync(join(project, 'PROJECT.md'), '# P\n\n## What & Why\n\nx\n');
+    writeFileSync(join(mem, 'dc-target.md'), `---\nid: dc-target\ntype: decision\nstatus: active\n---\n\n# Target\n`);
+    recordSessionStart(project, { sessionId: 's1', now: NOW });
+
+    // Agent writes the unit by hand (Write tool), then the creation step stamps it.
+    const newUnit = join(mem, 'dc-hand.md');
+    writeFileSync(newUnit, `---\nid: dc-hand\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-target\n---\n\n# Hand\n`);
+    stampCreatedBaseline(project, newUnit, { kind: 'unit', now: NOW, home });
+
+    const res = decorateStore(project, { now: NOW, home });
+    assert.ok(res.changed.includes('dc-hand.md'), 'a hand-written unit stamped at creation decorates');
+    assert.ok(!res.needs_reconciliation.some(r => r.path === 'dc-hand.md'), 'not held');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('detector: every no-baseline file is a needs-attention item; pre_existing is a non-authoritative hint', () => {
+  const { root, project } = setup();
+  try {
+    const mem = join(project, '_memories');
+    const userUnit = join(mem, 'dc-user.md');
+    writeFileSync(userUnit, `---\nid: dc-user\ntype: decision\nstatus: active\n---\n\n# User\n`);
+    writeFileSync(join(project, 'PROJECT.md'), '# P\n\n## What & Why\n\nx\n');
+    recordSessionStart(project, { sessionId: 's1', now: NOW });
+    const newUnit = join(mem, 'dc-new.md');
+    writeFileSync(newUnit, `---\nid: dc-new\ntype: decision\nstatus: active\n---\n\n# New\n`);
+
+    const det = detectStore(project);
+    const byName = Object.fromEntries(det.files.map(f => [f.path.split('/').pop(), f]));
+    // Both no-baseline; both need attention (no timing exemption).
+    assert.equal(byName['dc-user.md'].classification, 'no-baseline');
+    assert.equal(byName['dc-new.md'].classification, 'no-baseline');
+    const attentionNames = det.needs_attention.map(f => f.path.split('/').pop());
+    assert.ok(attentionNames.includes('dc-user.md') && attentionNames.includes('dc-new.md'),
+      'both no-baseline files are surfaced — neither is silently exempted by timing');
+    // pre_existing is a diagnostic hint only: dc-user present at start, dc-new appeared after.
+    assert.equal(byName['dc-user.md'].pre_existing, true);
+    assert.equal(byName['dc-new.md'].pre_existing, false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -311,6 +387,7 @@ test('point7: concurrent compact + demote-moves on the same PROJECT.md — no in
       '**Risks (active):**', '', '- None.', '',
     ].join('\n');
     writeFileSync(pm, original);
+    recordProjectMdWrite(pm, { now: NOW, home }); // creation baseline so both concurrent writers actually run
 
     // Compute the two clean single-writer outcomes on isolated copies. The
     // shared lock + CAS guarantee the concurrent result equals ONE of these
@@ -320,6 +397,7 @@ test('point7: concurrent compact + demote-moves on the same PROJECT.md — no in
       mkdirSync(join(d, '_memories'), { recursive: true });
       writeFileSync(join(d, '_memories', 'dc-1-alpha.md'), readFileSync(join(mem, 'dc-1-alpha.md')));
       writeFileSync(join(d, 'PROJECT.md'), original);
+      recordProjectMdWrite(join(d, 'PROJECT.md'), { now: NOW, home }); // creation baseline so the writer actually runs
       const code = [
         `import { main as compact } from ${JSON.stringify(pathToFileURL(join(SCRIPTS, 'compact-project.mjs')).href)};`,
         `import { main as demote } from ${JSON.stringify(pathToFileURL(join(SCRIPTS, 'demote-moves.mjs')).href)};`,

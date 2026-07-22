@@ -34,7 +34,7 @@ import { logEvent } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { hashText, stampFile, readProjectCache } from './state-cache.mjs';
 import {
-  writeGuardDecision, readSessionInventory, withProjectMdWriterLock,
+  writeGuardDecision, withProjectMdWriterLock,
 } from './lifecycle-core.mjs';
 
 export const HOT_BEGIN = '<!-- HOT-SECTION:BEGIN -->';
@@ -159,17 +159,17 @@ function needsReconciliationError(path, classification) {
  * no established baseline to violate, so its first-ever hot-section write is
  * safe and is exactly how that baseline gets established.
  */
-function assertReconciled(projectDir, path, currentText, sessionInventory) {
+function assertReconciled(projectDir, path, currentText) {
   const cache = readProjectCache(projectDir);
   const cachedStamp = cache.files[path];
   const classification = classifyProjectMdChange(cachedStamp, currentText);
   // Shared refuse-or-proceed rule (lifecycle-core.mjs) — identical logic to
-  // decorate-graph and compact-project, including Hale's point-8 no-baseline
-  // handling: a PROJECT.md that pre-existed the session with no cache stamp is
-  // held (pre-existing-uncached), not silently written over.
-  const decision = writeGuardDecision({
-    cachedStamp, classification, projectDir, absPath: path, sessionInventory,
-  });
+  // decorate-graph and compact-project. A PROJECT.md with NO cache stamp always
+  // refuses now (Hale's 2026-07-22 root fix — session timing cannot prove
+  // authorship). A freshly-rendered PROJECT.md is writable because its render
+  // step stamped it at creation (lifecycle-detect.mjs stampCreatedBaseline
+  // --kind project); an un-stamped no-baseline PROJECT.md is held, not written.
+  const decision = writeGuardDecision({ cachedStamp, classification });
   if (!decision.proceed) throw needsReconciliationError(path, decision.classification);
 }
 
@@ -276,14 +276,13 @@ export function applyHotSection(projectDir, text, { now, allowOverBudget = false
   // region against the pre-write baseline, refuse a malformed marker state
   // byte-identically, and re-verify the on-disk bytes immediately before the
   // atomic write so an out-of-lock writer can't be laundered either.
-  const sessionInventory = readSessionInventory(projectDir);
   const { updated, applied, stampOutcome } = withProjectMdWriterLock(projectDir, () => {
     const { path, text: original } = readProjectMd(projectDir);
     // Strict marker refusal FIRST — a malformed marker state must never be
     // parsed-past, guessed at, or written over (Hale's point 4).
     const scan = findExistingBlock(original);
     if (!scan.ok) throw malformedHotMarkersError(resolve(path));
-    assertReconciled(projectDir, resolve(path), original, sessionInventory);
+    assertReconciled(projectDir, resolve(path), original);
     const block = renderBlock(text, now || nowIso());
     const existing = scan.block;
     let next;
@@ -349,7 +348,6 @@ export function currentHotSection(projectDir) {
 }
 
 export function clearHotSection(projectDir, { now, home } = {}) {
-  const sessionInventory = readSessionInventory(projectDir);
   return withProjectMdWriterLock(projectDir, () => {
     const { path, text: original } = readProjectMd(projectDir);
     const scan = findExistingBlock(original);
@@ -360,7 +358,7 @@ export function clearHotSection(projectDir, { now, home } = {}) {
     // Same authorship-boundary check as applyHotSection: a clear also
     // rewrites (removes) the generated region and re-stamps — it must not
     // do so over a human-authored region that already diverged unreconciled.
-    assertReconciled(projectDir, resolve(path), original, sessionInventory);
+    assertReconciled(projectDir, resolve(path), original);
     const updated = original.slice(0, scan.block.start) + original.slice(scan.block.end);
     if (updated !== original) {
       // Live-preimage CAS (Hale's point 2).

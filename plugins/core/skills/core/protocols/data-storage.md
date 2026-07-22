@@ -237,7 +237,14 @@ The graduation step is where the LLM's value lives — noticing connections acro
 5. Compose the graduated unit with rich frontmatter and edges.
 6. Edge back to source observations via `cites` with `note: "graduated from"`.
 7. **Link at graduation — at least 3 edges, or argue zero (DC-94a).** Before the write completes, name and write typed edges to at least three related units (what it depends on, supersedes, refines, conflicts with, or cites). A graduated decision or risk that connects to nothing is invisible to Tier-2 edge-walk retrieval — and the whole point of the store is that traversal finds an answer before the agent says "I don't know." If there genuinely are fewer than three real relationships, write one sentence in the body saying why it stands alone. `check-units --integrity` emits a benign `link-density` WARN for an active, non-observation unit under three edges, so under-linked units stay visible without blocking. Never invent an edge to clear the count — a false edge is worse than a missing one.
-8. Source observations stay in place — the raw record is preserved.
+8. **Stamp the creation baseline in the SAME step you write the unit (Hale's 2026-07-22 authorship rule).** A newly-written unit has no cache-stamp baseline, and CORE never assumes authorship from timing — so until its creating writer stamps it, decoration/hot-section/compaction will HOLD it as `no-baseline` (fail closed) rather than touch it. Establish the baseline the instant the file lands, so the same session's decoration backstop can decorate it normally:
+
+   ```bash
+   node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" <project> --stamp-created "_memories/<new-unit>.md" --kind unit
+   ```
+
+   This is the ONLY safe first-write: creating a new file establishes its first baseline, which is a different, safe operation from overwriting an existing file that might carry unreconciled user content. If you skip it, the unit is not lost — it is held and surfaced at the next lifecycle pass, and you re-stamp then. (Same seam for a fresh PROJECT.md render: `--stamp-created PROJECT.md --kind project`.)
+9. Source observations stay in place — the raw record is preserved.
 
 ### Dispatch gate — Sonnet vs Opus
 

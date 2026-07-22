@@ -39,7 +39,7 @@ import { loadSnapshot } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { hashText, stampFiles, readProjectCache } from './state-cache.mjs';
-import { writeGuardDecision, readSessionInventory } from './lifecycle-core.mjs';
+import { writeGuardDecision } from './lifecycle-core.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 
 export { EDGES_BEGIN, EDGES_END };
@@ -215,11 +215,6 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
   // was never observed, attributed, or propagated. See
   // classifyUnitChange below for what "already diverged" means.
   const preWriteCache = readProjectCache(projectDir);
-  // Session-start inventory drives Hale's point-8 no-baseline distinction: a
-  // unit that pre-existed the session with no cache stamp is held; a unit that
-  // appeared this session (a freshly-graduated one) gets its first, safe
-  // decoration. Read once for the whole store pass.
-  const sessionInventory = readSessionInventory(projectDir);
 
   const changed = [];
   const unchanged = [];
@@ -256,13 +251,13 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     const cachedStamp = preWriteCache.files[filePath];
     const classification = classifyUnitChange(cachedStamp, text);
     // Shared refuse-or-proceed rule (lifecycle-core.mjs) — identical logic to
-    // hot-section and compact-project. Same behaviour as before for a stamped
-    // file (refuse on 'outside-changed'/'no-baseline'); the only change is
-    // Hale's point-8 no-baseline handling for a file with NO stamp at all — a
-    // pre-existing-uncached unit is now held instead of silently decorated.
-    const decision = writeGuardDecision({
-      cachedStamp, classification, projectDir, absPath: filePath, sessionInventory,
-    });
+    // hot-section and compact-project. A stamped file refuses on
+    // 'outside-changed'/'no-baseline'; a file with NO stamp at all ALWAYS
+    // refuses now (Hale's 2026-07-22 root fix — session timing cannot prove
+    // authorship). A legitimately new unit is decoratable because its creating
+    // writer stamped it at creation (lifecycle-detect.mjs stampCreatedBaseline);
+    // an un-stamped no-baseline unit is held and surfaced, never rewritten.
+    const decision = writeGuardDecision({ cachedStamp, classification });
     if (!decision.proceed) {
       needsReconciliation.push({ path: u.path, classification: decision.classification });
       continue;

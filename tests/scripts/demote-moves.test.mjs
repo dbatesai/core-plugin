@@ -8,11 +8,21 @@ import {
   SIZE_PRESSURE_AGE_DAYS,
 } from '../../plugins/core/skills/core/scripts/demote-moves.mjs';
 import { PROJECT_MD_CAP_BYTES } from '../../plugins/core/skills/core/scripts/compact-project.mjs';
+import { stampCreatedBaseline } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
 
 const TODAY = '2026-06-02';
 
 function bullet(text) {
   return parseBullets(text)[0];
+}
+
+// Establish PROJECT.md's creation baseline the way the render step now does — a
+// no-baseline PROJECT.md fails closed (Hale's 2026-07-22 root fix), so a demote
+// writer only proceeds against a file CORE has stamped at creation.
+function stampPm(dir) {
+  const home = join(dir, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  stampCreatedBaseline(dir, join(dir, 'PROJECT.md'), { kind: 'project', home });
 }
 
 function scratchProject(units = {}) {
@@ -139,6 +149,7 @@ test('demoteMoves moves an aged completed bullet to PROJECT-ARCHIVE.md and leave
     '- [ ] **Still active** — keep me.', '',
     '## Notes', '', 'end',
   ].join('\n'));
+  stampPm(dir);
 
   const stats = demoteMoves(dir, { today: TODAY });
   assert.equal(stats.demoted, 1);
@@ -201,6 +212,7 @@ function projectWithAgedClosed(n) {
   for (let i = 0; i < n; i++) lines.push(`- [x] **Item ${i} shipped 2026-03-01** — done.`);
   lines.push('', '## Notes', '', 'end');
   writeFileSync(join(dir, 'PROJECT.md'), lines.join('\n'));
+  stampPm(dir);
   return dir;
 }
 
@@ -226,6 +238,7 @@ test('multi-bullet demotion preserves an adjacent kept bullet (rewriteMovesWithS
     '- [x] **Old B 2026-03-02** — done.',
     '', '## Notes', '', 'end',
   ].join('\n'));
+  stampPm(dir);
   try {
     const stats = demoteMoves(dir, { today: TODAY });
     assert.equal(stats.demoted, 2);
@@ -258,16 +271,17 @@ test('MEM-013: crash-retry does not duplicate the archive block', () => {
   const original = ['# P', '', '## Moves', '',
     '- [x] **Old thing 2026-03-01** — done.', '', '## Notes', ''].join('\n');
   writeFileSync(join(dir, 'PROJECT.md'), original);
+  stampPm(dir);                                     // creation baseline (the render step's stamp)
 
   demoteMoves(dir, { today: TODAY });               // completes: archive + stub + baseline stamp
   writeFileSync(join(dir, 'PROJECT.md'), original); // simulate crash AFTER archive append, BEFORE PROJECT.md write
   // The PROJECT.md write and its baseline stamp are now COUPLED under one lock
   // (Hale's 2026-07-22 boundary fix): a crash "before the PROJECT.md write"
-  // means neither the write NOR the stamp landed. Clear the state-cache so the
-  // simulated crash state is coherent — otherwise a stamp with no matching
-  // PROJECT.md content correctly reads as an unreconciled external revert and
-  // the writer refuses (which is the right behaviour, just not this crash's).
-  rmSync(join(dir, '_memories', '_lib'), { recursive: true, force: true });
+  // means neither the write NOR the stamp landed. The reverted content is the
+  // CORE-authored `original` render, so re-establish its creation baseline (as
+  // the render step would) — otherwise the demoted-content stamp still on disk
+  // disagrees with the reverted bytes and the writer correctly refuses.
+  stampPm(dir);
   const retry = demoteMoves(dir, { today: TODAY });
 
   assert.equal(retry.demoted, 1, 'retry still stubs the bullet');
@@ -288,6 +302,7 @@ function projectOverCapWithAgedBullet(dateStr) {
     '## Notes', '', filler,
   ].join('\n');
   writeFileSync(join(dir, 'PROJECT.md'), text);
+  stampPm(dir);
   return dir;
 }
 
@@ -329,6 +344,7 @@ test('demoteMoves: size pressure reports no escalation when the escalated floor 
     '- [ ] **Still active** — keep me.', '',
     '## Notes', '', filler,
   ].join('\n'));
+  stampPm(dir);
   try {
     const stats = demoteMoves(dir, { today: TODAY });
     assert.equal(stats.demoted, 1, 'only the already-30d-aged item demotes');
@@ -353,6 +369,7 @@ test("demoteMoves: Hale's catch (2026-07-21) — one old item no longer masks ot
     '- [ ] **Still active** — keep me.', '',
     '## Notes', '', filler,
   ].join('\n'));
+  stampPm(dir);
   try {
     const stats = demoteMoves(dir, { today: TODAY });
     assert.equal(stats.demoted, 2, 'both the 93-day and 10-day items demote once escalation runs');

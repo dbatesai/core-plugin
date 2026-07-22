@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import {
   compactDecisions, loadUnits, main, DECISIONS_HEADER,
 } from '../../plugins/core/skills/core/scripts/compact-project.mjs';
+import { stampCreatedBaseline } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
 
 const UNIT = `---
 id: dc-12-pick-the-store
@@ -36,6 +37,12 @@ function project(entry) {
     '**Risks (live):**', '',
     '- none', '',
   ].join('\n'));
+  // Establish PROJECT.md's creation baseline the render step now does — a
+  // no-baseline PROJECT.md fails closed (Hale's 2026-07-22 root fix), so
+  // compaction only proceeds against a file CORE stamped at creation.
+  const home = join(dir, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  stampCreatedBaseline(dir, join(dir, 'PROJECT.md'), { kind: 'project', home });
   return dir;
 }
 

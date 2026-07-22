@@ -42,7 +42,7 @@ import { PROJECT_MD_CAP_BYTES } from './compact-project.mjs';
 import { readProjectCache } from './state-cache.mjs';
 import { classifyProjectMdChange, recordProjectMdWrite } from './hot-section.mjs';
 import {
-  writeGuardDecision, readSessionInventory, withProjectMdWriterLock,
+  writeGuardDecision, withProjectMdWriterLock,
 } from './lifecycle-core.mjs';
 
 // Terminal statuses come from the shared vocabulary (SYN-005): retired/archived/
@@ -455,7 +455,6 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   //      on a pending edit or a stale preimage, and leave no orphan archive
   //      block (the guard runs BEFORE the archive append).
   const absProjectMd = resolve(projectMdPath);
-  const sessionInventory = readSessionInventory(projectDir);
   withProjectMdWriterLock(projectDir, () => {
     let live;
     try { live = readFileSync(projectMdPath, 'utf8'); } catch { live = null; }
@@ -463,7 +462,7 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
     const cache = readProjectCache(projectDir);
     const cachedStamp = cache.files[absProjectMd];
     const classification = classifyProjectMdChange(cachedStamp, live);
-    const decision = writeGuardDecision({ cachedStamp, classification, projectDir, absPath: absProjectMd, sessionInventory });
+    const decision = writeGuardDecision({ cachedStamp, classification });
     if (!decision.proceed) { stats.refused = true; stats.refusedReason = 'pending-edit'; stats.refusedClassification = decision.classification; return; }
     if (live !== text) { stats.refused = true; stats.refusedReason = 'stale-preimage'; return; }
 

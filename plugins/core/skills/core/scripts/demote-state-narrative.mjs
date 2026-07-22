@@ -40,7 +40,7 @@ import { extractBackingUnitRefs } from './demote-moves.mjs';
 import { readProjectCache } from './state-cache.mjs';
 import { classifyProjectMdChange, recordProjectMdWrite } from './hot-section.mjs';
 import {
-  writeGuardDecision, readSessionInventory, withProjectMdWriterLock,
+  writeGuardDecision, withProjectMdWriterLock,
 } from './lifecycle-core.mjs';
 
 // Terminal statuses come from the shared vocabulary (SYN-005). This resolves
@@ -348,7 +348,6 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
   // preimage) so a blind re-stamp can't launder an unreconciled edit. Guard
   // runs before the archive append so a refusal leaves no orphan archive block.
   const absProjectMd = resolve(projectMdPath);
-  const sessionInventory = readSessionInventory(projectDir);
   withProjectMdWriterLock(projectDir, () => {
     let live;
     try { live = readFileSync(projectMdPath, 'utf8'); } catch { live = null; }
@@ -356,7 +355,7 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
     const cache = readProjectCache(projectDir);
     const cachedStamp = cache.files[absProjectMd];
     const classification = classifyProjectMdChange(cachedStamp, live);
-    const decision = writeGuardDecision({ cachedStamp, classification, projectDir, absPath: absProjectMd, sessionInventory });
+    const decision = writeGuardDecision({ cachedStamp, classification });
     if (!decision.proceed) { stats.refused = true; stats.refusedReason = 'pending-edit'; stats.refusedClassification = decision.classification; return; }
     if (live !== text) { stats.refused = true; stats.refusedReason = 'stale-preimage'; return; }
 

@@ -21,6 +21,12 @@ function setup() {
   mkdirSync(project, { recursive: true });
   mkdirSync(join(home, '.core'), { recursive: true });
   writeFileSync(join(project, 'PROJECT.md'), '# Project\n\n## What & Why\n\nThe thing.\n');
+  // A PROJECT.md CORE renders is stamped at creation (the render step calls the
+  // creation-baseline seam — lifecycle-detect stampCreatedBaseline --kind project).
+  // Absent that stamp every writer now fails closed on no-baseline (Hale's
+  // 2026-07-22 root fix), so establish the creation baseline here the way the
+  // real product does, exactly once, before any writer touches the file.
+  recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-01T00:00:00Z', home });
   return {
     root, project, home,
     globalCachePath: join(home, '.core', 'state-cache.json'),
@@ -64,6 +70,7 @@ test('recordProjectMdWrite merges into an existing per-project cache without clo
 test('recordProjectMdWrite tolerates a missing per-project cache file (creates it)', () => {
   const { root, project, home, projectCachePath } = setup();
   try {
+    rmSync(projectCachePath, { force: true }); // start from a genuinely-absent cache (setup pre-stamped one)
     recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-06T00:00:00Z', home });
     const cache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
     assert.equal(cache.files[join(project, 'PROJECT.md')].last_written_by, 'hot-section');
@@ -276,6 +283,7 @@ test('applyHotSection appends the block at EOF when `## What & Why` is missing',
   const { root, project, home } = setup();
   try {
     writeFileSync(join(project, 'PROJECT.md'), '# Project\n\nNo six-section shape here.\n');
+    recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-01T00:00:00Z', home }); // re-stamp the rewritten (CORE-authored) content
     applyHotSection(project, 'Fallback insertion point.', { now: '2026-06-06T00:00:00Z', home });
     const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
     assert.ok(pm.trim().endsWith(HOT_END), 'block landed at the end, not silently dropped');
