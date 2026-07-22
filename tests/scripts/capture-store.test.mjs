@@ -37,11 +37,16 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
   const stopFile = join(dir, 'stop');
 
   // Writer child: atomically rewrites the unit body with an incrementing epoch
-  // marker as fast as it can, until the stop file appears. It signals 'ready'
-  // over IPC after its FIRST completed atomic rename — a fixed sleep cannot
-  // prove the writer is live under full-suite CPU pressure (the 100ms sleep
-  // made this barrier proof nondeterministic; Hale's watchdog caught 0-epoch
-  // runs, 2026-07-17).
+  // marker as fast as it can, until the stop file appears. It signals its
+  // epoch over IPC after EVERY completed atomic rename, not just the first —
+  // the capture loop below requires at least one such signal to arrive DURING
+  // the observed window as direct proof the writer advanced while captures
+  // were being taken. A signal received once before the loop starts (the
+  // original design) proves only that the writer was alive at some point in
+  // the past, not that it stayed live for the window being tested; a fixed
+  // sleep proved even less (Hale's watchdog caught 0-epoch runs, 2026-07-17;
+  // Hale's follow-up, 2026-07-22, on why a single startup signal still isn't
+  // enough).
   const writer = `
     import { writeFileSync, renameSync, existsSync } from 'node:fs';
     const fm = ${JSON.stringify(fm)};
@@ -51,7 +56,7 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
       const tmp = ${JSON.stringify(unitPath)} + '.tmp';
       writeFileSync(tmp, fm + 'omega speedmaster epoch-' + epoch + ' body\\n');
       renameSync(tmp, ${JSON.stringify(unitPath)});
-      if (epoch === 1 && process.send) process.send('ready');
+      if (process.send) process.send(epoch);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
     }
   `;
@@ -59,15 +64,27 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
   let childErr = '';
   child.stderr.on('data', d => { childErr += d; });
   const childDone = new Promise(res => child.on('close', res));
+
+  let loopStarted = false;
+  let renamesSignaledDuringLoop = 0;
+  child.on('message', () => { if (loopStarted) renamesSignaledDuringLoop++; });
+
   await new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('writer never signaled ready')), 15000);
-    child.on('message', (m) => { if (m === 'ready') { clearTimeout(t); res(); } });
+    const onFirstMessage = () => { clearTimeout(t); child.off('message', onFirstMessage); res(); };
+    child.on('message', onFirstMessage);
     child.on('close', () => { clearTimeout(t); rej(new Error(`writer exited before ready: ${childErr}`)); });
   });
 
   try {
     let sawEpochs = new Set();
-    for (let i = 0; i < 25; i++) {
+    loopStarted = true;
+    // Bounded by wall-clock, not a fixed capture count — under contention the
+    // writer just needs more real time to get another scheduling slice, and a
+    // fixed iteration count was exactly what made this flaky under load.
+    const deadline = Date.now() + 20000;
+    let i = 0;
+    while (Date.now() < deadline && !(sawEpochs.size >= 2 && renamesSignaledDuringLoop >= 1)) {
       const cap = loadSnapshot(store, { captureBodies: true, retainRaw: true });
       const raw = cap.raw[UNIT_REL];
       assert.ok(raw, 'mutated unit present in the capture (writer renames atomically)');
@@ -86,9 +103,16 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
         .update(`${cap.index.source_sig}|enrichment:${cap.enrichments.digest}`).digest('hex'),
         'snapshotId is derived from the source signature plus valid enrichment identity');
       if (rawEpoch) sawEpochs.add(rawEpoch);
+      i++;
+      // Yield to the event loop so the child's queued IPC 'message' events
+      // actually get delivered — a tight synchronous loop starves them, which
+      // would make renamesSignaledDuringLoop stay 0 forever regardless of how
+      // long the deadline is (caught live: 121696 captures, 0 signals seen).
+      await new Promise((r) => setImmediate(r));
     }
-    assert.ok(sawEpochs.size >= 2,
-      `the barrier was live — captures observed ${sawEpochs.size} distinct epochs (writer stderr: ${childErr})`);
+    assert.ok(sawEpochs.size >= 2 && renamesSignaledDuringLoop >= 1,
+      `the barrier was live for the whole window — ${sawEpochs.size} distinct epochs across ${i} captures, ` +
+      `${renamesSignaledDuringLoop} writer renames signaled during the loop (writer stderr: ${childErr})`);
   } finally {
     writeFileSync(stopFile, '1');
     await childDone;
