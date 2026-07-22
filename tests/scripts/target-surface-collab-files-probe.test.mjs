@@ -1,10 +1,29 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { probe } from '../../plugins/core/skills/core/scripts/capability/target-surface-collab-files-probe.mjs';
+
+const DESCRIPTOR_PATH = join(process.cwd(), 'plugins/core/skills/core/schemas/harness-capability-descriptor.json');
+
+function withEnv(overrides, fn) {
+  const keys = Object.keys(overrides);
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  for (const k of keys) {
+    if (overrides[k] === undefined) delete process.env[k];
+    else process.env[k] = overrides[k];
+  }
+  try {
+    return fn();
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+}
 
 function git(args, cwd) {
   execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
@@ -38,4 +57,52 @@ test('M11: a mutation-kind surface with a failed write-proof degrades fail-close
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('the shipped descriptor no longer bakes in any one install\'s personal repo path or remote', () => {
+  const descriptor = JSON.parse(readFileSync(DESCRIPTOR_PATH, 'utf8'));
+  assert.equal(descriptor.surfaces.collab_files_repo, null, 'no personal default path ships in the descriptor');
+  assert.equal(descriptor.surfaces.collab_files_expected_remote, null, 'no personal default remote ships in the descriptor');
+  // Belt-and-suspenders: the raw file must not contain any specific personal
+  // github handle or absolute home-directory path baked in as a default.
+  const raw = readFileSync(DESCRIPTOR_PATH, 'utf8');
+  assert.doesNotMatch(raw, /dbatesai/, 'descriptor must not name a specific personal github handle');
+});
+
+test('with nothing configured anywhere (no override, no env var, no descriptor default), the probe reports UNKNOWN — not-applicable, not a silent default to someone\'s personal repo', async () => {
+  await withEnv({ CORE_COLLAB_FILES_REPO: undefined, CORE_COLLAB_FILES_EXPECTED_REMOTE: undefined }, async () => {
+    const row = await probe({ descriptor: { surfaces: {} } });
+    assert.equal(row.identity_status, 'UNKNOWN');
+    assert.equal(row.target_surface, null, 'never silently resolves to a default path');
+    const configEv = row.evidence.find((e) => e.source === 'config-check');
+    assert.ok(configEv, 'records why nothing ran');
+    assert.match(configEv.value, /CORE_COLLAB_FILES_REPO/, 'evidence names the env var a user would set');
+  });
+});
+
+test('CORE_COLLAB_FILES_REPO env var configures the probe per-installation, taking priority over the descriptor default', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'collab-files-probe-envvar-'));
+  git(['init', '-q'], dir);
+  git(['config', 'user.email', 't@t'], dir);
+  git(['config', 'user.name', 't'], dir);
+  git(['commit', '-q', '--allow-empty', '-m', 'init'], dir);
+  try {
+    await withEnv({ CORE_COLLAB_FILES_REPO: dir, CORE_COLLAB_FILES_EXPECTED_REMOTE: undefined }, async () => {
+      // Descriptor still declares some other (unrelated, non-existent) path — env var must win.
+      const row = await probe({ descriptor: { surfaces: { collab_files_repo: '/nonexistent/should-be-overridden' } } });
+      assert.equal(row.target_surface, dir, 'env var path used, not the descriptor default');
+      const existsEv = row.evidence.find((e) => e.source === 'repo-exists');
+      assert.equal(existsEv.value.exists, true);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a tilde-prefixed CORE_COLLAB_FILES_REPO env var expands against the real homedir, same as the descriptor path did', async () => {
+  await withEnv({ CORE_COLLAB_FILES_REPO: '~/this-almost-certainly-does-not-exist-core-probe-test', CORE_COLLAB_FILES_EXPECTED_REMOTE: undefined }, async () => {
+    const row = await probe({ descriptor: { surfaces: {} } });
+    assert.equal(row.target_surface, join(homedir(), 'this-almost-certainly-does-not-exist-core-probe-test'));
+    assert.equal(row.identity_status, 'DEGRADED', 'configured but the path does not exist on this machine');
+  });
 });

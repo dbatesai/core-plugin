@@ -1,7 +1,7 @@
 /**
  * target-surface-collab-files-probe.mjs — v2.6.0 target-surface capability.
  *
- * Proves that ~/files (or the configured equivalent) is
+ * Proves that this install's configured collab-files repo (if any) is
  * reachable, is the expected git repo, has a known remote, and has a
  * parseable working-tree state. Called by capability-probe.mjs when the
  * descriptor declares delegate: 'capability/target-surface-collab-files-probe.mjs'.
@@ -13,8 +13,20 @@
  *   4. Remote URL matches expected upstream
  *   5. Write capability: git push --dry-run succeeds, OR explicitly marked unproven
  *
- * Config source: descriptor's surfaces.collab_files_repo + surfaces.collab_files_expected_remote
- * (Option A per completion plan §1.2 — descriptor is the per-harness contract surface).
+ * Config source, in priority order:
+ *   1. opts.filesRepo / opts.expectedRemote        (test override)
+ *   2. CORE_COLLAB_FILES_REPO / CORE_COLLAB_FILES_EXPECTED_REMOTE   (per-installation env vars)
+ *   3. descriptor's surfaces.collab_files_repo / surfaces.collab_files_expected_remote
+ *      (Option A per completion plan §1.2 — descriptor is the per-harness contract surface)
+ *
+ * The descriptor ships with (3) unset (null) — this capability only applies to an
+ * install that actually uses a git-backed collab-files transport (see collab-plugin's
+ * `github:<repo>` transport), which is not every install. Earlier versions baked a
+ * specific personal repo path and remote into the shared descriptor as the (3) default,
+ * so every install — not just that one — silently probed connectivity to somebody
+ * else's private repo. Per-installation config now goes through (2); (3) stays as an
+ * opt-in descriptor override for an install that wants to bake in its own default,
+ * never as a value that ships pointing at anyone's personal repo.
  *
  * Identity_status:
  *   PASS    — all five proofs pass
@@ -68,16 +80,29 @@ export async function probe(opts = {}) {
   const observed_at = new Date().toISOString();
   const evidence = [];
 
-  // Read config from descriptor (Option A) with test-override support
+  // Resolve config per the priority order documented above the probe() entry point:
+  // test override > per-installation env var > descriptor surfaces (opt-in only).
   const surfaces = opts.descriptor?.surfaces || {};
-  const configuredRepo = opts.filesRepo || expandTilde(surfaces.collab_files_repo) || null;
-  const expectedRemote = opts.expectedRemote || surfaces.collab_files_expected_remote || null;
+  const configuredRepo = opts.filesRepo
+    || expandTilde(process.env.CORE_COLLAB_FILES_REPO)
+    || expandTilde(surfaces.collab_files_repo)
+    || null;
+  const expectedRemote = opts.expectedRemote
+    || process.env.CORE_COLLAB_FILES_EXPECTED_REMOTE
+    || surfaces.collab_files_expected_remote
+    || null;
 
   // --- Proof 1: files repo path exists ---
+  // Not every install uses a git-backed collab-files transport, so "unconfigured" is
+  // the expected default state, not a broken one. UNKNOWN is still the right
+  // identity_status for a mutation-kind capability nobody's set up — it correctly
+  // fails closed against any pre-action gate that requires this capability PASS —
+  // but the evidence should read as "not applicable to this install" rather than
+  // "something is wrong."
   if (!configuredRepo) {
     evidence.push({
       source: 'config-check',
-      value: 'surfaces.collab_files_repo not configured in descriptor',
+      value: 'not configured for this install — set CORE_COLLAB_FILES_REPO (and optionally CORE_COLLAB_FILES_EXPECTED_REMOTE) to enable, or configure surfaces.collab_files_repo in the descriptor',
       agrees_with_others: false,
       weight: 'conflicting',
     });

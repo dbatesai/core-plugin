@@ -2,9 +2,9 @@
   "schema_version": "1.0.0",
   "_doc": "Per-harness capability descriptor. capability-probe.mjs reads this to determine which capabilities each harness should probe and which per-harness probe script implements each row. Schema lives at sibling row-schema.md per DC-98 (schema-consumer coupling). Per-harness probe scripts are responsible for emitting full capability rows matching the schema.",
   "surfaces": {
-    "collab_files_repo": "~/files",
-    "collab_files_expected_remote": "git@github.com:dbatesai/files.git",
-    "_doc": "Target-surface config consumed by target-surface-collab-files-probe.mjs. Option A per completion plan §1.2: config lives in the descriptor (per-harness contract surface) rather than env vars or collab-plugin config. Each harness may legitimately differ in its files-repo path."
+    "collab_files_repo": null,
+    "collab_files_expected_remote": null,
+    "_doc": "Target-surface config consumed by target-surface-collab-files-probe.mjs. Unset (null) by default: this capability only applies to an install that actually uses a git-backed collab-files transport (see collab-plugin's `github:<repo>` transport), which is not every install. Per-installation config is set via the CORE_COLLAB_FILES_REPO / CORE_COLLAB_FILES_EXPECTED_REMOTE env vars, checked before these fields. These fields remain as an opt-in override for an install that wants to bake in its own default (Option A per completion plan §1.2) — they must never ship set to any one person's personal repo path or remote, since the descriptor is shared by every install of the plugin."
   },
   "harnesses": {
     "claude-code": {
