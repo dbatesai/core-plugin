@@ -52,7 +52,7 @@ import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import {
   extractEdges, parseIsoDate,
-  effectiveValidity, validAt, isInvalidated,
+  effectiveValidity, validAt, isInvalidated, iterArchivedUnits,
 } from './priority.mjs';
 import { iterActiveUnits } from './check-units.mjs';
 
@@ -300,7 +300,12 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
   if (argv.includes('--as-of')) {
     const date = opt('as-of');
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { process.stdout.write('bitemporal: --as-of needs a YYYY-MM-DD date\n'); process.exit(1); }
-    const ids = asOf(units, date);
+    // A point-in-time reconstruction is inherently a historical query -- it
+    // must see units retired-in-active enforcement relocated to archive/, or
+    // asOf() silently loses everything valid in the past that's since been
+    // physically moved (Hale's 2026-07-21 finding). --stamp/--metrics above
+    // stay on the active-only pool; only --as-of needs the merge.
+    const ids = asOf(units.concat(iterArchivedUnits(memoriesDir)), date);
     process.stdout.write(`bitemporal: ${ids.length} unit(s) valid as of ${date}\n`);
     for (const id of ids) process.stdout.write(`  ${id}\n`);
     process.exit(0);
