@@ -8,7 +8,7 @@ For the design reasoning behind any of this, see [ARCHITECTURE.md](ARCHITECTURE.
 
 ## Commands
 
-Six slash commands ship with the plugin: `/core` and five companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
+Eight slash commands ship with the plugin: `/core` and seven companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
 
 ### `/core`
 
@@ -59,13 +59,13 @@ Capture the emotional truth of a session as ASCII art.
 - **What it does:** renders how the session felt — not a status report, the actual vibe — and logs it to `~/.core/vibes/vibe-log.md`. Terminal-only, no browser.
 - **When to use:** "vibecheck," or whenever you want to mark the feel of a session.
 
-### `/export-obsidian`
+### `/metrics`
 
-Open what CORE knows as a browsable graph in Obsidian.
+A live, in-terminal proof that the memory system is actually working — no export, no file left behind.
 
-- **What it does:** decorates each unit file in `_memories/` in place with a generated, marker-isolated `[[wikilink]]` block, computed fresh from one atomic snapshot of the store each run. Point Obsidian at `_memories/` itself — there's no separate copy to go stale. Idempotent (only rewrites a file when its links actually changed) and fail-closed on a malformed marker state.
-- **When to use:** "let me see what you know," "open this in Obsidian," "can I browse the graph" — anytime seeing the connections matters more than being told about them.
-- **Writes:** the real unit files under `_memories/` — the generated block only, never your own writing above it.
+- **What it does:** builds a throwaway scratch store and proves the full write→validate→index→retrieve→suppress round trip fresh on every run, then reads this project's real validator counts, unit census, retrieval-log coverage, recognition-signal state, and calibration-pool progress. Renders a verdict (WORKING / WORKING — with caveats / DEGRADED / MACHINERY WORKING, NO STORE), a bar gauge per check, and a 1-3 sentence plain-voice summary — every number carrying an honest trust label (proven-live / direct / provisional).
+- **When to use:** "is memory working," "prove the memory system works," "can I trust the store," or any time you want evidence instead of a claim.
+- **Writes:** nothing — read-only against the real store; its own scratch store lives in the temp dir and is deleted before the command returns.
 
 ### `/metrics-package`
 
@@ -104,9 +104,9 @@ Supporting references live alongside them: `retrieval.md` (the four-tier ladder 
 The plugin ships the deterministic spine the commands run on — the surfaces where inference can't be trusted to be exact. You don't call these directly; the commands and protocols do. Grouped by what they're for:
 
 - **Memory store & retrieval** — `retrieve-context.mjs` (the live retriever: title ∪ body-BM25 over one request-scoped snapshot + one-hop edge expansion; `buildFinalContextPack` is the single implementation of the delivered context — ordering, tier labels, byte cap — that the per-turn hook, the `--pack` CLI mode, and the measurement harness all call; `buildRetrievalTrace` records a local-only per-request evidence trace), `bm25.mjs` (the body-search arm + tokenizer), `generate-summary-index.mjs` (the recursive path-bearing retrieval index + validating loader + `loadSnapshot` content-addressed snapshot identity), `select-relevant-units.mjs` (the reasoning-tier shortlist), `retrieval-harness.mjs` (offline recall measurement on the product path; its final-context arm scores delivered identities, byte cap included), `aggregate-receipt.mjs` (the privacy-safe evidence exporter: whitelist-built aggregate receipt + refusal scan; rows stay local), `priority.mjs` (the ranking function), `check-units.mjs` (schema + integrity validation), `graph-walk.mjs` (typed-edge traversal), `generate-decisions-index.mjs` / `generate-risks-index.mjs` / `generate-memory-index.mjs` (the indexes).
-- **`PROJECT.md` rendering & hygiene** — `hot-section.mjs` (the top-of-file "right now" block), `compact-project.mjs` (file-cap compaction), `demote-moves.mjs` / `demote-state-narrative.mjs` (tier discipline).
+- **`PROJECT.md` rendering & hygiene** — `hot-section.mjs` (the top-of-file "right now" block), `compact-project.mjs` (file-cap compaction), `demote-moves.mjs` / `demote-state-narrative.mjs` (tier discipline), `decorate-graph.mjs` (in-place Obsidian `[[wikilink]]` decoration of `_memories/`, run automatically at close and on-demand hygiene passes).
 - **Validity dimension** — `bitemporal.mjs` (the `t_valid`/`t_invalid` stamp, as-of queries, storage-health metrics), `impact-trace.mjs` (what an invalidation touches).
-- **Self-measurement** — `metrics-init.mjs`, `classify-turns.mjs`, `metrics-rollup.mjs`, `metrics-detectors.mjs`, `calibrate-classifier.mjs`, `log-event.mjs`, `record-retrieval-event.mjs`, `analyze-retrieval-quality.mjs`, `analyze-retrieval-skip.mjs`, `read-transcript.mjs`.
+- **Self-measurement** — `metrics-init.mjs`, `classify-turns.mjs`, `metrics-rollup.mjs`, `metrics-detectors.mjs`, `calibrate-classifier.mjs`, `metrics-check.mjs` (the `/metrics` live evidence check: round-trip probe + store health + calibration-pool progress), `log-event.mjs`, `record-retrieval-event.mjs`, `analyze-retrieval-quality.mjs`, `analyze-retrieval-skip.mjs`, `read-transcript.mjs`.
 - **Capability & identity** — `resolve-plugin-root.mjs`, `capability-probe.mjs`, `capability-history.mjs`, `record-capability-snapshot.mjs`, `analyze-capability-drift.mjs`, `workspace-fork-check.mjs`, `project-slug.mjs`, `write-visibility-canary.mjs`.
 - **Validation & integrity** — `validate.mjs` (retrieval-health runner), `orphan-detector.mjs` (every script reached, every protocol indexed), `audit-memory-boundary.mjs` (native-memory vs. CORE-store boundary).
 - **Multi-agent** — `adversarial-run-gate.mjs`, `validate-adversarial-artifacts.mjs`.

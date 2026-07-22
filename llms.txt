@@ -14,7 +14,7 @@ CORE is a single agent backed by a unit-based memory store (one fact per file, w
 
 - **Install (Claude Code):** `/plugin marketplace add dbatesai/core-plugin` then `/plugin install core@core`. From the terminal: `claude plugins marketplace add dbatesai/core-plugin` then `claude plugins install core@core`.
 - **Run:** type `/core` to start or resume a project. It loads your project context and prints a readiness summary before doing anything else.
-- **Companions:** `/finalize` (close a session), `/process-memory` (memory housekeeping on demand), `/register-sources` (point CORE at an outside data source), `/configure-project` (bootstrap and health-check a project), `/vibecheck` (capture the session's vibe), `/export-obsidian` (open the memory store as a browsable graph in Obsidian), `/metrics-package` (pull an anonymized stats package).
+- **Companions:** `/finalize` (close a session), `/process-memory` (memory housekeeping on demand), `/register-sources` (point CORE at an outside data source), `/configure-project` (bootstrap and health-check a project), `/vibecheck` (capture the session's vibe), `/metrics` (a live, in-terminal proof the memory system is working), `/metrics-package` (pull an anonymized stats package).
 
 ## Design
 

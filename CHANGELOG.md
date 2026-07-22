@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **First-run metrics disclosure.** A brand-new workspace's very first readiness summary now says, once, that CORE keeps a local, on-this-machine log of how well it's answering turn by turn — to help CORE improve — and that nothing about it is ever transmitted anywhere. Names both opt-outs (`CORE_METRICS_ENABLED=0`, or `metrics_enabled: false` in the project's `workspace.json`). Scripted (`metrics-disclosure.mjs`) rather than left to the agent to remember, and flagged in the workspace manifest so it fires exactly once per workspace and never again on later sessions.
+- **`/metrics`** — a live, in-terminal health check for the memory system, ported from a personal machine-local skill into the plugin proper. Builds a throwaway scratch store and proves the write→validate→index→retrieve→suppress round trip fresh on every run, then reads this project's real validator counts, unit census, retrieval-log coverage, recognition-signal state, and a new calibration-pool row — the classifier's labeled-turn count against its 100-turn calibration gate, and whether it has cleared it. Renders a verdict (WORKING / WORKING — with caveats / DEGRADED / MACHINERY WORKING, NO STORE), a 10-character bar gauge per row, and a 1-3 sentence plain-voice summary, every number carrying an honest trust label (proven-live / direct / provisional). Writes nothing — read-only against the real store, its own scratch store deleted before the command returns.
 
 ### Fixed
 - **The collab-files target-surface capability probe** no longer ships with a specific personal repo path and remote baked into the shared descriptor every install reads — every user's plugin install was probing connectivity to one particular person's private git repo by default. Per-installation config now goes through `CORE_COLLAB_FILES_REPO` / `CORE_COLLAB_FILES_EXPECTED_REMOTE` env vars, checked before the descriptor; the shipped descriptor now ships unconfigured (`null`), and an install with nothing configured reports the capability as not applicable rather than silently defaulting to someone else's repo.
@@ -17,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/export-obsidian`** — retired as a user-invoked command. The worker it ran (`decorate-graph.mjs`, in-place `[[wikilink]]` decoration of the memory store) is unchanged and still ships; it now runs automatically as part of the memory-hygiene pass in `/finalize` (session close) and `/process-memory` (on-demand hygiene), the same way `demote-moves.mjs` and `compact-project.mjs` already do. Point Obsidian at a project's `_memories/` directory at any time and the graph, backlinks, and note browsing are current without a manual step.
 
 ### Changed
-- **Companion-utility count** dropped from seven to six across the plugin manifests, README, USAGE, INSTALL, and llms.txt, reflecting `/export-obsidian`'s removal.
+- **Companion-utility count** dropped from seven to six with `/export-obsidian`'s removal above, then back up to seven with `/metrics` joining the roster — net unchanged at seven, but the lineup is different. Reflected across the plugin manifests, README, USAGE, INSTALL, and llms.txt.
 
 ## [3.13.1] — 2026-07-22
 
