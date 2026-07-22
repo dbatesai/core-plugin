@@ -193,6 +193,26 @@ export function loadSnapshot(storePath, { captureBodies = false, retainRaw = fal
 }
 
 /**
+ * stripGeneratedEdgesBlock — removes decorate-graph.mjs's generated
+ * [[wikilink]] block before a body ever reaches BM25. The block is
+ * CORE-generated metadata (unit ids, edge types), not content the unit is
+ * actually about, and letting it into the ranked body would skew relevance
+ * toward whatever a unit happens to link to rather than what it says.
+ *
+ * ONE definition, used by both loadUnitBodies (the index-only path) and
+ * captureStore's body derivation (the atomic-snapshot path decorate-graph.mjs
+ * and the live retriever/harness actually read) — Hale's 2026-07-21 finding:
+ * the two body-derivation sites duplicated the frontmatter-strip transform,
+ * and only one of them got the edges-block strip when it was first added.
+ */
+export function stripGeneratedEdgesBlock(body) {
+  const beginIdx = body.indexOf(EDGES_BEGIN);
+  const endIdx = body.indexOf(EDGES_END);
+  if (beginIdx === -1 || endIdx === -1 || endIdx < beginIdx) return body;
+  return (body.slice(0, beginIdx) + body.slice(endIdx + EDGES_END.length)).trim();
+}
+
+/**
  * loadUnitBodies — ONE owner for the unit-body walk (bm25's loadActiveBodies
  * delegates here). Files resolve through the index's per-unit `path` — the only
  * correct location for nested units. Returns [{id, tier, text}] where text is
@@ -206,17 +226,7 @@ export function loadUnitBodies(storePath, index) {
     if (!existsSync(fpath)) continue;
     let raw;
     try { raw = readFileSync(fpath, 'utf8'); } catch { continue; }
-    let body = raw.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
-    // Strip decorate-graph.mjs's generated [[wikilink]] block before it ever
-    // reaches BM25 — the block is CORE-generated metadata (unit ids, edge
-    // types), not content the unit is actually about, and letting it into the
-    // ranked body would skew relevance toward whatever a unit happens to
-    // link to rather than what it says.
-    const beginIdx = body.indexOf(EDGES_BEGIN);
-    const endIdx = body.indexOf(EDGES_END);
-    if (beginIdx !== -1 && endIdx !== -1 && endIdx > beginIdx) {
-      body = (body.slice(0, beginIdx) + body.slice(endIdx + EDGES_END.length)).trim();
-    }
+    const body = stripGeneratedEdgesBlock(raw.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim());
     const topics = (u.topics || []).join(' ');
     out.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
   }
@@ -390,7 +400,7 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
   for (const u of units) {
     const text = textByPath.get(u.path);
     if (text === undefined) continue;
-    const body = text.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+    const body = stripGeneratedEdgesBlock(text.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim());
     const topics = (u.topics || []).join(' ');
     bodies.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
     edges[u.id] = extractEdges({ fm: fmByPath.get(u.path) || {} });

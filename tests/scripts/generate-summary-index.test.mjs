@@ -179,3 +179,22 @@ test('loadUnitBodies strips the decorate-graph generated edges block from the BM
   assert.doesNotMatch(u.text, /CORE:BEGIN_EDGES/, 'generated marker must not reach the ranked body');
   assert.doesNotMatch(u.text, /\[\[dc-2\]\]/, 'generated wikilink must not reach the ranked body');
 });
+
+test('captureStore\'s bodies (the real product path) also strip the generated edges block (Hale\'s 2026-07-21 finding)', () => {
+  // loadSnapshot(...,{captureBodies:true}) -> captureStore() is what
+  // decorate-graph.mjs and the live retriever/harness actually read.
+  // loadUnitBodies (tested above) is a SEPARATE, index-only path -- fixing
+  // one without the other left the real product path contaminated.
+  const root = mkdtempSync(join(tmpdir(), 'core-idx-capture-edges-strip-'));
+  const mem = join(root, '_memories');
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'dc-1.md'),
+    `---\nid: dc-1\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1\n\nReal body content that should rank.\n\n${EDGES_BEGIN}\n## Related\n- cites: [[dc-2]]\n${EDGES_END}\n`);
+
+  const cap = loadSnapshot(root, { captureBodies: true });
+  const u = cap.bodies.find(b => b.id === 'dc-1');
+  assert.ok(u, 'dc-1 must appear in the capture');
+  assert.match(u.text, /Real body content that should rank/);
+  assert.doesNotMatch(u.text, /CORE:BEGIN_EDGES/, 'generated marker must not reach the capture body either');
+  assert.doesNotMatch(u.text, /\[\[dc-2\]\]/, 'generated wikilink must not reach the capture body either');
+});
