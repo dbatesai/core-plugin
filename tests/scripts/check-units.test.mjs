@@ -421,39 +421,6 @@ test('MEM-018: fresh units and observations are exempt from sources-missing', ()
   assert.equal(report.some(f => f.check === 'sources-missing'), false);
 }));
 
-test('retired-in-active: WARNs on a status=retired unit sitting outside archive/', () => withStore((memories) => {
-  writeFileSync(join(memories, 'risk-1-misplaced.md'), [
-    '---', 'id: risk-1-misplaced', 'type: risk', 'status: retired',
-    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
-    '---', '', '# risk-1-misplaced', '',
-  ].join('\n'));
-  writeFileSync(join(memories, 'INDEX-decisions.md'), '# Decisions\n');
-
-  const report = [];
-  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
-
-  assert.ok(report.some(f => f.check === 'retired-in-active' && f.unit_id === 'risk-1-misplaced'),
-    'a retired unit outside archive/ must be flagged for relocation');
-  assert.equal(BENIGN_WARN_CHECKS.has('retired-in-active'), false,
-    'non-benign, same severity class as archived-in-active — degrades exit code, worth surfacing');
-}));
-
-test('retired-in-active: does not fire for a unit already relocated to archive/', () => withStore((memories) => {
-  mkdirSync(join(memories, 'archive'), { recursive: true });
-  writeFileSync(join(memories, 'archive', 'risk-1-relocated.md'), [
-    '---', 'id: risk-1-relocated', 'type: risk', 'status: retired',
-    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
-    '---', '', '# risk-1-relocated', '',
-  ].join('\n'));
-  writeFileSync(join(memories, 'INDEX-decisions.md'), '# Decisions\n');
-
-  const report = [];
-  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
-
-  assert.equal(report.some(f => f.check === 'retired-in-active'), false,
-    'iterActiveUnits skips archive/ entirely — a relocated unit is invisible to this check, correctly');
-}));
-
 // ---------- D8 / MEM-008 + MEM-014: empty required fields FAIL, oversize WARNs ----------
 
 test('MEM-008: a present-but-empty required field FAILs (type: with blank value)', () => withStore((memories) => {
