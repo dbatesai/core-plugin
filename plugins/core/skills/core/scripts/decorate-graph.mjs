@@ -215,24 +215,37 @@ export function decorateStoreLocked(projectDir, opts = {}) {
 
 // ---------- CLI ----------
 
-function main(argv) {
+export function main(argv) {
   const positionals = argv.filter(a => !a.startsWith('--'));
   const projectDir = resolve(positionals[0] || process.cwd());
   const check = argv.includes('--check');
   const dryRun = check || argv.includes('--dry-run');
 
   const result = decorateStoreLocked(projectDir, { dryRun });
-  if (result.changed.length === 0) {
+
+  if (result.changed.length === 0 && result.refused.length === 0) {
     process.stdout.write(`decorate-graph: ${result.total_units} units, none needed a change (snapshot ${result.snapshot_id.slice(0, 12)}).\n`);
     return 0;
   }
 
-  const verb = dryRun ? 'would update' : 'updated';
-  process.stdout.write(`decorate-graph: ${verb} ${result.changed.length}/${result.total_units} unit(s) (snapshot ${result.snapshot_id.slice(0, 12)}):\n`);
-  for (const p of result.changed) process.stdout.write(`  ${p}\n`);
+  if (result.changed.length > 0) {
+    const verb = dryRun ? 'would update' : 'updated';
+    process.stdout.write(`decorate-graph: ${verb} ${result.changed.length}/${result.total_units} unit(s) (snapshot ${result.snapshot_id.slice(0, 12)}):\n`);
+    for (const p of result.changed) process.stdout.write(`  ${p}\n`);
+  }
 
-  if (check) return result.changed.length > 0 ? 1 : 0;
-  return 0;
+  // Every refusal is a real, user-actionable problem (a malformed marker
+  // state, or a stale-byte race) -- printing "none needed a change" while
+  // silently swallowing these was a genuine reporting gap (Hale's 2026-07-21
+  // finding). Always print them, and let a refusal alone still exit nonzero
+  // even outside --check, since it means a file was NOT decorated as asked.
+  if (result.refused.length > 0) {
+    process.stderr.write(`decorate-graph: ${result.refused.length} file(s) refused, need a manual look:\n`);
+    for (const r of result.refused) process.stderr.write(`  ${r.path}: ${r.reason}\n`);
+  }
+
+  if (check) return (result.changed.length > 0 || result.refused.length > 0) ? 1 : 0;
+  return result.refused.length > 0 ? 1 : 0;
 }
 
 const _cliEntry = (() => { try { return fileURLToPath(import.meta.url) === resolve(process.argv[1]); } catch { return false; } })();
