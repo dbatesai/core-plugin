@@ -37,37 +37,78 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
   const stopFile = join(dir, 'stop');
 
   // Writer child: atomically rewrites the unit body with an incrementing epoch
-  // marker as fast as it can, until the stop file appears. It signals 'ready'
-  // over IPC after its FIRST completed atomic rename — a fixed sleep cannot
-  // prove the writer is live under full-suite CPU pressure (the 100ms sleep
-  // made this barrier proof nondeterministic; Hale's watchdog caught 0-epoch
-  // runs, 2026-07-17).
+  // marker as fast as it can, until the stop file appears. It signals its
+  // epoch over IPC after every completed atomic rename. The capture loop
+  // proves liveness with a causal probe/ack handshake, not by counting
+  // messages that happen to be *delivered* after the loop starts: a message
+  // the writer already SENT before the window began can still arrive late
+  // (IPC delivery queuing) and be mistaken for in-window progress, which
+  // would satisfy a naive "any message after loopStarted" check without the
+  // writer having actually advanced during the observed window (Hale,
+  // 2026-07-22). Instead: the parent sends 'probe' only after the window
+  // starts; the writer can only reply with its current epoch once it has
+  // actually processed that probe, which is itself proof the reply's epoch
+  // value was read at a point strictly after the window began. Requiring one
+  // MORE epoch beyond that value is then genuine in-window advancement, not
+  // an artifact of delivery timing. (A fixed sleep proved even less than any
+  // of this — Hale's watchdog caught 0-epoch runs, 2026-07-17.)
   const writer = `
     import { writeFileSync, renameSync, existsSync } from 'node:fs';
     const fm = ${JSON.stringify(fm)};
     let epoch = 0;
+    let probeAcked = false;
+    process.on('message', (m) => {
+      if (m === 'probe' && !probeAcked) { probeAcked = true; if (process.send) process.send({ probeAckEpoch: epoch }); }
+    });
     while (!existsSync(${JSON.stringify(stopFile)})) {
       epoch++;
       const tmp = ${JSON.stringify(unitPath)} + '.tmp';
       writeFileSync(tmp, fm + 'omega speedmaster epoch-' + epoch + ' body\\n');
       renameSync(tmp, ${JSON.stringify(unitPath)});
-      if (epoch === 1 && process.send) process.send('ready');
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+      if (process.send) process.send({ epoch });
+      // setImmediate, not Atomics.wait: Atomics.wait blocks this thread at the
+      // OS level and starves this process's OWN event loop, so it would never
+      // actually get a chance to process the parent's incoming 'probe'
+      // message no matter how long the parent waits (reproduced live: the
+      // probe/ack handshake below hung until timeout with the old
+      // Atomics.wait spin).
+      await new Promise((r) => setImmediate(r));
     }
+    // Registering a 'message' listener refs the IPC channel for incoming
+    // delivery, so this process no longer exits on its own once the loop
+    // above ends -- it would just sit open waiting on the channel forever,
+    // hanging the parent's 'await childDone'. Exit explicitly (reproduced
+    // live: the whole test hung past its own timeout without this).
+    process.exit(0);
   `;
   const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   let childErr = '';
   child.stderr.on('data', d => { childErr += d; });
   const childDone = new Promise(res => child.on('close', res));
+
+  let probeAckEpoch = null;
+  let sawEpochStrictlyAfterAck = false;
+  child.on('message', (m) => {
+    if (m && typeof m === 'object' && 'probeAckEpoch' in m) probeAckEpoch = m.probeAckEpoch;
+    else if (m && typeof m === 'object' && 'epoch' in m && probeAckEpoch !== null && m.epoch > probeAckEpoch) sawEpochStrictlyAfterAck = true;
+  });
+
   await new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('writer never signaled ready')), 15000);
-    child.on('message', (m) => { if (m === 'ready') { clearTimeout(t); res(); } });
+    const onFirstMessage = (m) => { if (m && typeof m === 'object' && 'epoch' in m) { clearTimeout(t); child.off('message', onFirstMessage); res(); } };
+    child.on('message', onFirstMessage);
     child.on('close', () => { clearTimeout(t); rej(new Error(`writer exited before ready: ${childErr}`)); });
   });
 
   try {
     let sawEpochs = new Set();
-    for (let i = 0; i < 25; i++) {
+    child.send('probe'); // sent only now, strictly after the window begins
+    // Bounded by wall-clock, not a fixed capture count — under contention the
+    // writer just needs more real time to get another scheduling slice, and a
+    // fixed iteration count was exactly what made this flaky under load.
+    const deadline = Date.now() + 20000;
+    let i = 0;
+    while (Date.now() < deadline && !(sawEpochs.size >= 2 && sawEpochStrictlyAfterAck)) {
       const cap = loadSnapshot(store, { captureBodies: true, retainRaw: true });
       const raw = cap.raw[UNIT_REL];
       assert.ok(raw, 'mutated unit present in the capture (writer renames atomically)');
@@ -86,9 +127,16 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
         .update(`${cap.index.source_sig}|enrichment:${cap.enrichments.digest}`).digest('hex'),
         'snapshotId is derived from the source signature plus valid enrichment identity');
       if (rawEpoch) sawEpochs.add(rawEpoch);
+      i++;
+      // Yield to the event loop so the child's queued IPC 'message' events
+      // actually get delivered — a tight synchronous loop starves them, which
+      // would make sawEpochStrictlyAfterAck stay false forever regardless of
+      // how long the deadline is (caught live: 121696 captures, 0 signals seen).
+      await new Promise((r) => setImmediate(r));
     }
-    assert.ok(sawEpochs.size >= 2,
-      `the barrier was live — captures observed ${sawEpochs.size} distinct epochs (writer stderr: ${childErr})`);
+    assert.ok(sawEpochs.size >= 2 && sawEpochStrictlyAfterAck,
+      `the barrier was live for the whole window — ${sawEpochs.size} distinct epochs across ${i} captures, ` +
+      `causal in-window advancement past probe-ack epoch ${probeAckEpoch}: ${sawEpochStrictlyAfterAck} (writer stderr: ${childErr})`);
   } finally {
     writeFileSync(stopFile, '1');
     await childDone;
@@ -131,33 +179,51 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
   const targets = ['values-heritage', 'want-iconic-chronograph'];
   const bodyOf = (t) => `---\nid: ${UNIT_ID}\ntype: want\nstatus: active\nedges:\n  - {type: cites, target: ${t}}\n---\n\nomega speedmaster on sale wait body\n`;
 
-  // Same IPC ready-handshake as round-11: 'ready' after the FIRST completed
-  // atomic rename; a fixed sleep is not proof the writer is live (2026-07-17).
+  // Same causal probe/ack handshake as round-11 (see its comment for why a
+  // fixed sleep, a single startup signal, and "any message after a flag
+  // flips" are all insufficient proof of in-window liveness).
   const writer = `
     import { writeFileSync, renameSync, existsSync } from 'node:fs';
     const bodies = ${JSON.stringify(targets.map(bodyOf))};
     let i = 0;
+    let probeAcked = false;
+    process.on('message', (m) => {
+      if (m === 'probe' && !probeAcked) { probeAcked = true; if (process.send) process.send({ probeAckI: i }); }
+    });
     while (!existsSync(${JSON.stringify(stopFile)})) {
       const tmp = ${JSON.stringify(unitPath)} + '.tmp';
-      writeFileSync(tmp, bodies[i++ % 2]);
+      writeFileSync(tmp, bodies[i % 2]);
       renameSync(tmp, ${JSON.stringify(unitPath)});
-      if (i === 1 && process.send) process.send('ready');
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+      if (process.send) process.send({ i });
+      i++;
+      await new Promise((r) => setImmediate(r));
     }
+    process.exit(0); // see round-11: a 'message' listener refs the IPC channel, so exit explicitly
   `;
   const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   let childErr2 = '';
   child.stderr.on('data', d => { childErr2 += d; });
   const childDone = new Promise(res => child.on('close', res));
+
+  let probeAckI = null;
+  let sawIStrictlyAfterAck = false;
+  child.on('message', (m) => {
+    if (m && typeof m === 'object' && 'probeAckI' in m) probeAckI = m.probeAckI;
+    else if (m && typeof m === 'object' && 'i' in m && probeAckI !== null && m.i > probeAckI) sawIStrictlyAfterAck = true;
+  });
+
   await new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('edge writer never signaled ready')), 15000);
-    child.on('message', (m) => { if (m === 'ready') { clearTimeout(t); res(); } });
+    const onFirstMessage = (m) => { if (m && typeof m === 'object' && 'i' in m) { clearTimeout(t); child.off('message', onFirstMessage); res(); } };
+    child.on('message', onFirstMessage);
     child.on('close', () => { clearTimeout(t); rej(new Error(`edge writer exited before ready: ${childErr2}`)); });
   });
 
   try {
     const seenTargets = new Set();
-    for (let i = 0; i < 20; i++) {
+    child.send('probe'); // sent only now, strictly after the window begins
+    const deadline = Date.now() + 20000;
+    for (let i = 0; (Date.now() < deadline) && !(seenTargets.size >= 2 && sawIStrictlyAfterAck); i++) {
       const cap = loadSnapshot(store, { captureBodies: true, retainRaw: true });
       const trace = buildRetrievalTrace('omega speedmaster on sale', store, { topN: 3, snapshot: cap });
       assert.equal(trace.snapshot_id, cap.snapshotId, `iter ${i}: trace carries the capture's own id`);
@@ -180,9 +246,11 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
         assert.ok(trace.stages.top.some(t => t.id === f.id) || expandedIds.has(f.id),
           `iter ${i}: final contains only capture-derived results`);
       }
+      await new Promise((r) => setImmediate(r)); // let the writer's probe-ack/i messages actually get delivered
     }
-    assert.ok(seenTargets.size >= 2,
-      `the edge barrier was live — expansions observed both alternating targets (${[...seenTargets].join(',')})`);
+    assert.ok(seenTargets.size >= 2 && sawIStrictlyAfterAck,
+      `the edge barrier was live for the whole window — expansions observed both alternating targets ` +
+      `(${[...seenTargets].join(',')}), causal in-window advancement past probe-ack i=${probeAckI}: ${sawIStrictlyAfterAck}`);
   } finally {
     writeFileSync(stopFile, '1');
     await childDone;

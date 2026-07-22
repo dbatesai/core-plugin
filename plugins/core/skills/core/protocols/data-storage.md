@@ -343,7 +343,7 @@ You reason about three modes internally. In conversation with the user, plain la
 
 ### What triggers integrity uncertainty (the Mode B switch)
 
-- Destination is durable (PROJECT.md, dm-profile.md, canonical unit).
+- Destination is durable (PROJECT.md, dm-profile.md, canonical unit) — except a graduation writing a new, non-conflicting unit, which stays Mode A per "Mode A vs Mode B at graduation" above; that section's supersede/conflict trigger is the narrower rule for that specific action, not this general one.
 - Action would overwrite content the user authored.
 - New structural pattern the user hasn't endorsed.
 - Action is irreversible or hard to undo.
