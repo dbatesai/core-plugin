@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`hot-section.mjs`** no longer trusts a cache stamp that couldn't distinguish "the user edited PROJECT.md's real content" from "only the hot block changed" — a user-control-invariant bug.
 - **`close-pass.mjs`** no longer certifies a session closed when the LLM half of close recorded zero judgment ops.
 - **`mailbox.mjs`** fails closed instead of silently proceeding when gitignore leak-protection genuinely can't be established.
-- **`check-units.mjs` `archived-in-active` check** only recognized `status: archived`, missing the canonical shape (`archived: true`/`archived_at`, status unchanged) entirely; substring path matching could also false-positive on a top-level file merely named with "archive" in it. Now recognizes the canonical shape and checks an actual `archive/` path segment.
+- **`check-units.mjs` `archived-in-active` check** only recognized `status: archived`, missing the canonical shape (`archived: true`/`archived_at`, status unchanged) entirely; a full-path segment scan could also false-positive (an unrelated ancestor directory literally named "archive") or false-negative (a substring match on a top-level filename containing "archive"). Now recognizes the canonical shape and checks only the unit's immediate parent directory.
 
 ### Removed
 - **`analyze-source-pull-log.mjs`** and its tests — three-way consensus determined it was structurally dead code.
