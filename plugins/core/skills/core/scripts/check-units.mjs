@@ -337,8 +337,16 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     }
 
     const status = String(u.fm.status || '').toLowerCase();
-    if (status === 'archived' && !String(u.path).includes('archive'))
-      report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit has status=archived but is not in archive/ subdir' });
+    const inArchiveDir = String(u.path).split(/[\\/]/).includes('archive');
+    // Canonical archiving (hygiene.md) sets `archived: true` and does not
+    // require a status change -- a unit can be `status: active, archived:
+    // true` and this must still catch it left top-level. The legacy
+    // `status === 'archived'` form stays recognized too (Hale's 2026-07-22
+    // finding: checking status alone missed the canonical shape entirely,
+    // and a substring .includes('archive') could false-positive on a
+    // top-level file merely named with "archive" in it).
+    if ((u.fm.archived === true || status === 'archived') && !inArchiveDir)
+      report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit is archived (archived: true or status=archived) but is not in archive/ subdir' });
 
     // MEM-018: unknown provenance is now visible. An active, aged,
     // non-observation unit with no sources scores the degraded S default —

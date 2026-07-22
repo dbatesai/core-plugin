@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **`/export-obsidian`** — decorates the project's memory store in place with real Obsidian `[[wikilinks]]`, so `_memories/` itself opens directly as an Obsidian vault (graph view, backlinks, note browsing) — no separate export copy to go stale. Each unit gets a marker-delimited, auto-regenerated edges block computed from its own frontmatter, from one atomic snapshot of the store; retired/archived units and any edge pointing at one are excluded entirely. Idempotent (a unit is only rewritten when its block actually changed) and fails closed on a malformed marker state rather than guessing.
-- **`check-units.mjs` `retired-in-active` check** — flags a `status: retired` unit still sitting outside `_memories/archive/`, so retirement gets physically enforced instead of drifting.
 - **`CORE_REASONING_ARM`** — a test-only environment-variable control (`automatic`/`deterministic-only`/`always-on`) that lets the memory-efficacy pilot force which reasoning-escalation behavior runs on a given trial. `automatic` (the default, whether set explicitly or left unset) stays byte-identical to previously shipped behavior.
 - **Mailbox unread-count nudge** — a per-turn hook surfaces the unread `_mailbox/` count so backlogs can't silently accumulate unnoticed.
 - **PROJECT.md size-pressure fallback** — `demote-moves.mjs` now escalates to a shorter age floor for one run when PROJECT.md is over its cap and the normal floor can't keep up with a fast-moving project.
+- **`generate-skills-manifest.mjs`** — enumerates every shipped skill's public command and invocability from existing `SKILL.md` frontmatter, so a downstream overlay can diff against a generated manifest instead of hand-maintaining an allowlist. Also documents the `REFRESH-HOLD` convention (`references/refresh-hold-convention.md`) for gating an overlay's refresh on a named, evidenced blocker.
 
 ### Fixed
 - **Five real defects found in an independent audit**, each with a regression test: anti-resurrection wasn't fully structural (a cache staleness check was byte-only, so a unit past its own expiration date could keep serving from a stale cache); the aggregate-receipt privacy scanner had two path-refusal bypasses and could leak a project-specific identifier prefix through its "generic vocabulary" boundary; a lock-release failure could go completely unsurfaced; the mailbox's archive step could silently overwrite an already-archived message with the same name; the artifact-identity CLI's directory-export mode didn't record which computation method produced its output.
@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`hot-section.mjs`** no longer trusts a cache stamp that couldn't distinguish "the user edited PROJECT.md's real content" from "only the hot block changed" — a user-control-invariant bug.
 - **`close-pass.mjs`** no longer certifies a session closed when the LLM half of close recorded zero judgment ops.
 - **`mailbox.mjs`** fails closed instead of silently proceeding when gitignore leak-protection genuinely can't be established.
+- **`check-units.mjs` `archived-in-active` check** only recognized `status: archived`, missing the canonical shape (`archived: true`/`archived_at`, status unchanged) entirely; substring path matching could also false-positive on a top-level file merely named with "archive" in it. Now recognizes the canonical shape and checks an actual `archive/` path segment.
 
 ### Removed
 - **`analyze-source-pull-log.mjs`** and its tests — three-way consensus determined it was structurally dead code.

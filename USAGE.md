@@ -63,9 +63,9 @@ Capture the emotional truth of a session as ASCII art.
 
 Open what CORE knows as a browsable graph in Obsidian.
 
-- **What it does:** exports the memory store as a read-only projection — markdown files with generated frontmatter-derived links and a manifest — that opens directly as an Obsidian vault and is simultaneously OKF v0.1-draft conformant. Graph view, backlinks, note browsing, all computed fresh from one atomic snapshot of the store each run.
+- **What it does:** decorates each unit file in `_memories/` in place with a generated, marker-isolated `[[wikilink]]` block, computed fresh from one atomic snapshot of the store each run. Point Obsidian at `_memories/` itself — there's no separate copy to go stale. Idempotent (only rewrites a file when its links actually changed) and fail-closed on a malformed marker state.
 - **When to use:** "let me see what you know," "open this in Obsidian," "can I browse the graph" — anytime seeing the connections matters more than being told about them.
-- **Writes:** `_okf-export/` — disposable and regenerated each run; edits to the exported files never flow back to the real store.
+- **Writes:** the real unit files under `_memories/` — the generated block only, never your own writing above it.
 
 ### `/metrics-package`
 

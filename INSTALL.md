@@ -33,7 +33,7 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
 | `/metrics-package` | Export an anonymized memory-efficacy statistics package (zip on your Desktop) — feedback data for improving CORE; contains no real project content. |
-| `/export-obsidian` | Export the current project's memory store as an Obsidian-browsable vault (and OKF v0.1-draft-conformant bundle) so you can visually explore the graph, backlinks, and notes. Read-only projection — never touches the live store. |
+| `/export-obsidian` | Decorate the current project's memory store in place with real `[[wikilinks]]` so you can open `_memories/` directly in Obsidian and browse the graph, backlinks, and notes. Idempotent, marker-isolated from your own writing — no separate export folder. |
 
 ### Shipped hooks (installed with the plugin)
 
