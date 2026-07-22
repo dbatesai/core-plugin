@@ -252,7 +252,23 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir
 
 // ---------- Public API ----------
 
-export function applyHotSection(projectDir, text, { now, allowOverBudget = false, home } = {}) {
+// applyHotSection() below keeps its long-standing return shape (just the
+// updated text string) for every existing caller/test. applyHotSectionWithOutcome()
+// is the SAME implementation, additionally surfacing `applied` and
+// `stampOutcome` — added 2026-07-22 (Hale's CLI-contract-truth finding) so
+// `cmdApply` can tell "content wrote AND stamp landed" apart from "content
+// wrote but the attribution stamp failed" instead of always reporting full
+// success. Do not duplicate the write logic between the two — one shared
+// core, two return shapes.
+export function applyHotSectionWithOutcome(projectDir, text, opts = {}) {
+  return applyHotSectionCore(projectDir, text, opts);
+}
+
+export function applyHotSection(projectDir, text, opts = {}) {
+  return applyHotSectionCore(projectDir, text, opts).updated;
+}
+
+function applyHotSectionCore(projectDir, text, { now, allowOverBudget = false, home } = {}) {
   const tokens = estimateTokens(text);
   if (tokens > HOT_SECTION_TOKEN_BUDGET && !allowOverBudget) {
     logEvent(projectDir, 'retrieval-log.jsonl', {
@@ -329,7 +345,7 @@ export function applyHotSection(projectDir, text, { now, allowOverBudget = false
       `recovery-required: a reconcile/re-stamp is owed before the next render.\n`
     );
   }
-  return updated;
+  return { updated, applied, stampOutcome };
 }
 
 export function currentHotSection(projectDir) {
@@ -347,20 +363,34 @@ export function currentHotSection(projectDir) {
     .trim();
 }
 
-export function clearHotSection(projectDir, { now, home } = {}) {
+// Same shared-core pattern as applyHotSection/applyHotSectionWithOutcome
+// above: clearHotSection() keeps its long-standing string return for
+// existing callers; clearHotSectionWithOutcome() additionally surfaces
+// `cleared` and `stampOutcome` for cmdClear (Hale, 2026-07-22).
+export function clearHotSectionWithOutcome(projectDir, opts = {}) {
+  return clearHotSectionCore(projectDir, opts);
+}
+
+export function clearHotSection(projectDir, opts = {}) {
+  return clearHotSectionCore(projectDir, opts).updated;
+}
+
+function clearHotSectionCore(projectDir, { now, home } = {}) {
   return withProjectMdWriterLock(projectDir, () => {
     const { path, text: original } = readProjectMd(projectDir);
     const scan = findExistingBlock(original);
     // Strict marker refusal, same as applyHotSection (Hale's point 4): never
     // clear over a malformed/ambiguous marker state.
     if (!scan.ok) throw malformedHotMarkersError(resolve(path));
-    if (!scan.block) return original;
+    if (!scan.block) return { updated: original, cleared: false, stampOutcome: null };
     // Same authorship-boundary check as applyHotSection: a clear also
     // rewrites (removes) the generated region and re-stamps — it must not
     // do so over a human-authored region that already diverged unreconciled.
     assertReconciled(projectDir, resolve(path), original);
     const updated = original.slice(0, scan.block.start) + original.slice(scan.block.end);
-    if (updated !== original) {
+    let stampOutcome = null;
+    const cleared = updated !== original;
+    if (cleared) {
       // Live-preimage CAS (Hale's point 2).
       const live = readFileSync(path, 'utf8');
       if (live !== original) throw needsReconciliationError(resolve(path), 'stale-preimage');
@@ -369,9 +399,9 @@ export function clearHotSection(projectDir, { now, home } = {}) {
       // never stamped the cache, leaving `last_hash`/`outside_hash` permanently
       // stale after a clear — edit-detection would then misread the clear
       // itself as an unattributed change on the very next check.
-      recordProjectMdWrite(path, { now, home });
+      stampOutcome = recordProjectMdWrite(path, { now, home });
     }
-    return updated;
+    return { updated, cleared, stampOutcome };
   });
 }
 
@@ -493,8 +523,9 @@ function cmdApply(args) {
     process.stderr.write('error: no synthesis text provided (use --text "..." or --file PATH, or pipe to stdin)\n');
     return 2;
   }
+  let result;
   try {
-    applyHotSection(projectDir, text);
+    result = applyHotSectionWithOutcome(projectDir, text);
   } catch (e) {
     if (e.code === 'NEEDS_RECONCILIATION' || e.code === 'MALFORMED_HOT_MARKERS') {
       process.stderr.write(`hot-section: refusing to apply — ${e.message}\n`);
@@ -502,7 +533,28 @@ function cmdApply(args) {
     }
     throw e;
   }
-  process.stdout.write(`PROJECT.md: hot section applied (${text.trim().split('\n').length} lines).\n`);
+  const lines = text.trim().split('\n').length;
+  // Content-write success and attribution-stamp success are TWO different
+  // facts (Hale, 2026-07-22): the stderr warning above already told a human
+  // the stamp failed, but a hook/caller reading exit code + stdout alone used
+  // to see plain success either way. Do NOT roll back the content write —
+  // it already happened and stays — but the machine-readable contract must
+  // stop calling this a clean success.
+  if (result.applied && result.stampOutcome && result.stampOutcome.stamped === false) {
+    process.stdout.write(
+      `PROJECT.md: hot section applied (${lines} lines), but the attribution stamp FAILED — ` +
+      `partial success, recovery required.\n`
+    );
+    process.stdout.write(JSON.stringify({
+      content_write: 'ok',
+      attribution_stamp: 'failed',
+      outcome: result.stampOutcome.outcome,
+      reason: result.stampOutcome.reason,
+      recovery: result.stampOutcome.recovery || 'recovery-required',
+    }) + '\n');
+    return 1;
+  }
+  process.stdout.write(`PROJECT.md: hot section applied (${lines} lines).\n`);
   return 0;
 }
 
@@ -516,8 +568,9 @@ function cmdCurrent(args) {
 function cmdClear(args) {
   const projectDir = resolveProjectDir(args.positionals[0]);
   const before = readProjectMd(projectDir).text;
+  let result;
   try {
-    clearHotSection(projectDir);
+    result = clearHotSectionWithOutcome(projectDir);
   } catch (e) {
     if (e.code === 'NEEDS_RECONCILIATION' || e.code === 'MALFORMED_HOT_MARKERS') {
       process.stderr.write(`hot-section: refusing to clear — ${e.message}\n`);
@@ -526,8 +579,32 @@ function cmdClear(args) {
     throw e;
   }
   const after = readProjectMd(projectDir).text;
-  if (before === after) process.stdout.write('No hot section present; nothing to clear.\n');
-  else process.stdout.write('PROJECT.md: hot section cleared.\n');
+  if (before === after) {
+    process.stdout.write('No hot section present; nothing to clear.\n');
+    return 0;
+  }
+  // Same content-write-vs-attribution-stamp distinction as cmdApply (Hale,
+  // 2026-07-22): the clear already happened and stays — never rolled back —
+  // but a failed stamp must not read as clean success on exit code + stdout.
+  if (result.cleared && result.stampOutcome && result.stampOutcome.stamped === false) {
+    process.stderr.write(
+      `hot-section: WROTE PROJECT.md (cleared) but the authorship stamp failed ` +
+      `(${result.stampOutcome.outcome}: ${result.stampOutcome.reason}) — attribution unknown, ` +
+      `recovery-required: a reconcile/re-stamp is owed before the next render.\n`
+    );
+    process.stdout.write(
+      'PROJECT.md: hot section cleared, but the attribution stamp FAILED — partial success, recovery required.\n'
+    );
+    process.stdout.write(JSON.stringify({
+      content_write: 'ok',
+      attribution_stamp: 'failed',
+      outcome: result.stampOutcome.outcome,
+      reason: result.stampOutcome.reason,
+      recovery: result.stampOutcome.recovery || 'recovery-required',
+    }) + '\n');
+    return 1;
+  }
+  process.stdout.write('PROJECT.md: hot section cleared.\n');
   return 0;
 }
 

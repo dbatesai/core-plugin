@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   renderBar, computeRows, buildNarrative, renderReport, parseRecognitionSignal,
-  checkCalibrationPool, checkGoldRegression, checkLiveRetrievalProxy,
+  checkCalibrationPool, checkGoldRegression, checkLiveRetrievalProxy, gatherMetrics,
   BAR_WIDTH, FILLED_CHAR, EMPTY_CHAR, FAILED_CHAR, TRUST, SECTION,
 } from '../../plugins/core/skills/core/scripts/metrics-check.mjs';
 
@@ -30,8 +30,20 @@ test('renderBar: boundary — exactly 5% rounds UP to 1 filled block, not 0', ()
   assert.equal(renderBar(5), FILLED_CHAR.repeat(1) + EMPTY_CHAR.repeat(9));
 });
 
-test('renderBar: boundary — just under 5% stays at 0 filled blocks', () => {
-  assert.equal(renderBar(4.9), EMPTY_CHAR.repeat(10));
+test('renderBar: boundary — just under 5% floors to 1 filled block, not 0 (low-but-present, not masked as absent)', () => {
+  assert.equal(renderBar(4.9), FILLED_CHAR.repeat(1) + EMPTY_CHAR.repeat(9));
+});
+
+test('renderBar: a genuinely non-zero low percentage (3%) renders 1 filled block minimum, never 0 (the zero-masking bug)', () => {
+  assert.equal(renderBar(3), FILLED_CHAR.repeat(1) + EMPTY_CHAR.repeat(9));
+});
+
+test('renderBar: a tiny fractional percentage (0.4%) still floors to 1 filled block, not 0', () => {
+  assert.equal(renderBar(0.4), FILLED_CHAR.repeat(1) + EMPTY_CHAR.repeat(9));
+});
+
+test('renderBar: exact 0% still renders fully empty — zero and low-but-present must stay visually distinct', () => {
+  assert.equal(renderBar(0), EMPTY_CHAR.repeat(10));
 });
 
 test('renderBar: boundary — exactly 15% rounds UP to 2 filled blocks, not 1', () => {
@@ -82,7 +94,11 @@ test('parseRecognitionSignal: empty/missing text is unavailable', () => {
 });
 
 // ---------------------------------------------------------------------------
-// computeRows — eight rows across three evidence-class sections.
+// computeRows — seven rows across FOUR evidence-class sections (2026-07-22,
+// Hale's slice-1 revise: mechanics / retrieval-regression / measurement-
+// readiness / user-benefit; retrieval-log coverage and tier-distribution
+// moved OUT of regression into mechanics as plain-count instrumentation;
+// recognition + calibration moved into their own readiness section).
 // ---------------------------------------------------------------------------
 
 function baseOut(overrides = {}) {
@@ -105,13 +121,14 @@ function baseOut(overrides = {}) {
   };
 }
 
-test('computeRows: returns eight rows across mechanics/regression/benefit sections', () => {
+test('computeRows: returns seven rows across mechanics/regression/readiness/benefit sections', () => {
   const rows = computeRows(baseOut());
-  assert.equal(rows.length, 8);
-  const bySection = { mechanics: 0, regression: 0, benefit: 0 };
+  assert.equal(rows.length, 7);
+  const bySection = { mechanics: 0, regression: 0, readiness: 0, benefit: 0 };
   for (const r of rows) bySection[r.section]++;
-  assert.equal(bySection.mechanics, 2);
-  assert.equal(bySection.regression, 5);
+  assert.equal(bySection.mechanics, 3);
+  assert.equal(bySection.regression, 1);
+  assert.equal(bySection.readiness, 2);
   assert.equal(bySection.benefit, 1);
 });
 
@@ -148,22 +165,23 @@ test('computeRows: unit integrity is (clean/total) with 1 attention warning out 
   assert.ok(Math.abs(ui.pct - expectedPct) < 1e-9);
 });
 
-test('computeRows: retrieval-log coverage caps at 100%, tagged regression, labeled capture volume', () => {
-  const out = baseOut({
-    store: {
-      present: true, schema: { exit: 0 }, integrity: { fail: 0 },
-      warning_triage: { informational: 0, routine_upkeep: 0, attention: 0, attention_items: [] },
-      census: { total: 5 }, retrieval_log: { files: 5, rows: 40 },
-    },
-  });
-  const rows = computeRows(out);
-  const cov = rows.find((r) => r.label === 'Retrieval-log coverage');
-  assert.equal(cov.pct, 100);
-  assert.equal(cov.section, SECTION.REGRESSION);
-  assert.match(cov.value, /capture volume, not correctness/);
+test('computeRows: calibration pool is labeled_count/min_needed, direct trust, tagged readiness', () => {
+  const rows = computeRows(baseOut({ calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false } }));
+  const cal = rows.find((r) => r.label === 'Calibration pool');
+  assert.equal(cal.pct, 22);
+  assert.equal(cal.trust, TRUST.DIRECT);
+  assert.equal(cal.value, '22/100 labeled');
+  assert.equal(cal.section, SECTION.READINESS);
 });
 
-test('computeRows: recognition signal bar is INVERTED (100 - rec-fail rate), tagged regression', () => {
+test('computeRows: calibration unavailable falls back to 0/100 without crashing', () => {
+  const rows = computeRows(baseOut({ calibration: {} }));
+  const cal = rows.find((r) => r.label === 'Calibration pool');
+  assert.equal(cal.value, '0/100 labeled');
+  assert.equal(cal.pct, 0);
+});
+
+test('computeRows: recognition signal bar is INVERTED (100 - rec-fail rate), tagged readiness', () => {
   const out = baseOut({
     store: {
       ...baseOut().store,
@@ -174,24 +192,8 @@ test('computeRows: recognition signal bar is INVERTED (100 - rec-fail rate), tag
   const rec = rows.find((r) => r.label === 'Recognition signal');
   assert.equal(rec.pct, 50); // 100 - 50
   assert.equal(rec.trust, TRUST.PROVISIONAL);
-  assert.equal(rec.section, SECTION.REGRESSION);
+  assert.equal(rec.section, SECTION.READINESS);
   assert.match(rec.value, /50% rec-fail/);
-});
-
-test('computeRows: calibration pool is labeled_count/min_needed, direct trust, tagged regression', () => {
-  const rows = computeRows(baseOut({ calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false } }));
-  const cal = rows.find((r) => r.label === 'Calibration pool');
-  assert.equal(cal.pct, 22);
-  assert.equal(cal.trust, TRUST.DIRECT);
-  assert.equal(cal.value, '22/100 labeled');
-  assert.equal(cal.section, SECTION.REGRESSION);
-});
-
-test('computeRows: calibration unavailable falls back to 0/100 without crashing', () => {
-  const rows = computeRows(baseOut({ calibration: {} }));
-  const cal = rows.find((r) => r.label === 'Calibration pool');
-  assert.equal(cal.value, '0/100 labeled');
-  assert.equal(cal.pct, 0);
 });
 
 test('computeRows: no store present renders "no store" and zero pct for store-dependent rows', () => {
@@ -201,11 +203,68 @@ test('computeRows: no store present renders "no store" and zero pct for store-de
   assert.equal(ui.pct, 0);
 });
 
-// --- Gold-set Recall@K row: present-with-evidence vs honestly-absent. ---
+// --- Telemetry capture row (MECHANICS): replaces the old percentage-based
+// "Retrieval-log coverage" + "Live retrieval proxy" regression rows with a
+// single COUNTS-ONLY, no-gauge mechanics/instrumentation row (Hale, 2026-07-22
+// slice-1 revise: "rows÷days is an invalid denominator... show counts"). ---
 
-test('computeRows: gold-set Recall@K absent renders NOT_EVALUATED with a plain reason, never silently omitted', () => {
+test('computeRows: Telemetry capture is a no-gauge MECHANICS row with plain counts, no percentage claim', () => {
+  const rows = computeRows(baseOut({
+    regression: {
+      liveProxy: {
+        available: true, days: 36, retrievalEvents: 266,
+        t1Pct: 99, t2Pct: 1, t3Pct: 0,
+        topEscalationTopic: 'agents-md', topEscalationRate: 100,
+        rejected: { current: { count: 0, by_code: {} }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 0 },
+      },
+    },
+  }));
+  const tel = rows.find((r) => r.label === 'Telemetry capture');
+  assert.ok(tel, 'the row must exist');
+  assert.equal(tel.section, SECTION.MECHANICS);
+  assert.equal(tel.noGauge, true);
+  assert.match(tel.value, /266 typed events \/ 36 days/);
+  assert.match(tel.value, /closure denominator unavailable/);
+  assert.match(tel.value, /T1 99%\/T2 1%\/T3 0% mix/);
+  assert.match(tel.value, /'agents-md' needed Tier 2\+ 100%/);
+});
+
+test('computeRows: Telemetry capture names rejected-row counts by schema tier when present', () => {
+  const rows = computeRows(baseOut({
+    regression: {
+      liveProxy: {
+        available: true, days: 1, retrievalEvents: 1,
+        t1Pct: 100, t2Pct: 0, t3Pct: 0, topEscalationTopic: null, topEscalationRate: null,
+        rejected: { current: { count: 2, by_code: { 'invalid-tier': 2 } }, legacy: { count: 1, by_code: { 'legacy-missing-tier': 1 } }, other: { count: 0, by_code: {} }, total: 3 },
+      },
+    },
+  }));
+  const tel = rows.find((r) => r.label === 'Telemetry capture');
+  assert.match(tel.value, /3 row\(s\) rejected/);
+  assert.match(tel.value, /2 current-schema/);
+  assert.match(tel.value, /1 legacy/);
+});
+
+test('computeRows: Telemetry capture shows "0 rejected" plainly when nothing was rejected', () => {
   const rows = computeRows(baseOut());
-  const gold = rows.find((r) => r.label === 'Gold-set Recall@K');
+  const tel = rows.find((r) => r.label === 'Telemetry capture');
+  assert.match(tel.value, /0 rejected/);
+});
+
+test('computeRows: Telemetry capture absent still renders an honest absence, no-gauge', () => {
+  const rows = computeRows(baseOut());
+  const tel = rows.find((r) => r.label === 'Telemetry capture');
+  assert.match(tel.value, /no retrieval events recorded/);
+  assert.equal(tel.noGauge, true);
+});
+
+// --- Gold-set snapshot row (REGRESSION): present-with-evidence vs honestly-
+// absent. Trust is `provisional` — a live run does not validate its own
+// reference answers (Hale, 2026-07-22 slice-1 revise, item 5). ---
+
+test('computeRows: gold-set snapshot absent renders NOT_EVALUATED with a plain reason, never silently omitted', () => {
+  const rows = computeRows(baseOut());
+  const gold = rows.find((r) => r.label === 'Gold-set snapshot');
   assert.ok(gold, 'the row must exist even with zero evidence');
   assert.equal(gold.trust, TRUST.NOT_EVALUATED);
   assert.equal(gold.pct, 0);
@@ -213,62 +272,38 @@ test('computeRows: gold-set Recall@K absent renders NOT_EVALUATED with a plain r
   assert.equal(gold.section, SECTION.REGRESSION);
 });
 
-test('computeRows: gold-set Recall@K present renders proven-live with real numbers', () => {
+test('computeRows: gold-set snapshot present renders PROVISIONAL trust (execution live, reference authority provisional)', () => {
   const rows = computeRows(baseOut({
     regression: { gold: { available: true, n: 22, storeUnits: 300, context3_r3: 0.6818, ranking_r10: 0.8182, bm25_r10: 0.8182 } },
   }));
-  const gold = rows.find((r) => r.label === 'Gold-set Recall@K (n=22)');
+  const gold = rows.find((r) => r.label === 'Gold-set snapshot (n=22)');
   assert.ok(gold, 'label must include n= when evidence is present');
-  assert.equal(gold.trust, TRUST.PROVEN_LIVE);
+  assert.equal(gold.trust, TRUST.PROVISIONAL, 'never proven-live — a live run does not validate its own answer key');
   assert.equal(gold.pct, 68);
+  assert.match(gold.value, /execution proven-live/);
+  assert.match(gold.value, /reference authority provisional/);
+  assert.match(gold.value, /no preregistered pass threshold/);
   assert.match(gold.value, /R@3 68%/);
   assert.match(gold.value, /ranking R@10 82%/);
-  assert.match(gold.value, /directional, small gold set/);
 });
 
 test('computeRows: gold-set harness failure surfaces its reason as NOT_EVALUATED, not a crash', () => {
   const rows = computeRows(baseOut({
     regression: { gold: { available: false, reason: 'gold-set harness run failed: missing authority tier on unit x' } },
   }));
-  const gold = rows.find((r) => r.label === 'Gold-set Recall@K');
+  const gold = rows.find((r) => r.label === 'Gold-set snapshot');
   assert.equal(gold.trust, TRUST.NOT_EVALUATED);
   assert.match(gold.value, /harness run failed/);
 });
 
-// --- Live retrieval proxy row: present-with-evidence vs honestly-absent. ---
+// --- Matched-comparison row (BENEFIT): always present, always honestly
+// "not evaluated". Renamed from "User-benefit evidence" per Hale's exact
+// target shape. ---
 
-test('computeRows: live retrieval proxy absent renders NOT_EVALUATED with a plain reason', () => {
+test('computeRows: Matched comparison row is always present and always says plainly nothing measures it', () => {
   const rows = computeRows(baseOut());
-  const proxy = rows.find((r) => r.label === 'Live retrieval proxy');
-  assert.ok(proxy);
-  assert.equal(proxy.trust, TRUST.NOT_EVALUATED);
-  assert.equal(proxy.pct, 0);
-  assert.match(proxy.value, /no live retrieval events recorded/);
-});
-
-test('computeRows: live retrieval proxy present renders proxy trust with tier distribution and top escalation topic', () => {
-  const rows = computeRows(baseOut({
-    regression: {
-      liveProxy: {
-        available: true, days: 19, retrievalEvents: 241,
-        t1Pct: 99, t2Pct: 1, t3Pct: 0,
-        topEscalationTopic: 'metrics', topEscalationRate: 20,
-      },
-    },
-  }));
-  const proxy = rows.find((r) => r.label === 'Live retrieval proxy');
-  assert.equal(proxy.trust, TRUST.PROXY);
-  assert.equal(proxy.pct, 99);
-  assert.match(proxy.value, /T1 99%/);
-  assert.match(proxy.value, /'metrics' needed Tier 2\+ 20%/);
-});
-
-// --- User-benefit row: always present, always honestly "not evaluated". ---
-
-test('computeRows: user-benefit row is always present and always says plainly nothing measures it', () => {
-  const rows = computeRows(baseOut());
-  const benefit = rows.find((r) => r.label === 'User-benefit evidence');
-  assert.ok(benefit, 'user-benefit row must never be silently omitted');
+  const benefit = rows.find((r) => r.label === 'Matched comparison');
+  assert.ok(benefit, 'benefit row must never be silently omitted');
   assert.equal(benefit.section, SECTION.BENEFIT);
   assert.equal(benefit.trust, TRUST.NOT_EVALUATED);
   assert.equal(benefit.pct, 0);
@@ -287,7 +322,7 @@ function sentenceCount(text) {
   return text.trim().split(/(?<=[.!?])\s+/).filter(Boolean).length;
 }
 
-test('buildNarrative: WORKING with no caveats stays within 1-3 sentences and names all three evidence classes', () => {
+test('buildNarrative: WORKING with no caveats stays within 1-3 sentences and names all evidence classes', () => {
   const n = buildNarrative(baseOut());
   assert.ok(sentenceCount(n) <= 3, `expected <=3 sentences, got: ${n}`);
   assert.ok(sentenceCount(n) >= 1);
@@ -321,15 +356,16 @@ test('buildNarrative: names the calibration pool count and gate', () => {
   assert.match(n, /clears 100 labeled turns/);
 });
 
-test('buildNarrative: mentions the gold-set and live-proxy numbers when present', () => {
+test('buildNarrative: mentions the telemetry-capture and gold-set-snapshot numbers when present, never as a passing gate', () => {
   const n = buildNarrative(baseOut({
     regression: {
       gold: { available: true, n: 22, context3_r3: 0.68 },
-      liveProxy: { available: true, retrievalEvents: 260, t1Pct: 99 },
+      liveProxy: { available: true, retrievalEvents: 260, days: 36, t1Pct: 99, t2Pct: 1, t3Pct: 0 },
     },
   }));
+  assert.match(n, /telemetry capture shows 260 typed events across 36 days/);
   assert.match(n, /delivered top-3 recall at 68%/);
-  assert.match(n, /260 events shows 99% resolving at Tier 1/);
+  assert.match(n, /not a passing gate/);
 });
 
 test('buildNarrative: always states user benefit is unmeasured, never implies the other classes cover it', () => {
@@ -338,36 +374,47 @@ test('buildNarrative: always states user benefit is unmeasured, never implies th
 });
 
 // ---------------------------------------------------------------------------
-// renderReport — full assembled text: MECHANICS-scoped verdict heading,
-// three sectioned blocks (8 rows total), and a quoted narrative.
+// renderReport — full assembled text: MECHANICS-scoped verdict heading, four
+// labeled evidence-class sections (2026-07-22, Hale's slice-1 revise), a
+// no-gauge Telemetry-capture row, and a quoted narrative.
 // ---------------------------------------------------------------------------
 
-test('renderReport: verdict heading is scoped to MECHANICS, not the whole system', () => {
+test('renderReport: verdict heading is scoped to MECHANICS and reads HEALTHY, not the whole system', () => {
   const text = renderReport(baseOut(), { workspaceName: 'demo-project' });
   const lines = text.split('\n');
-  assert.equal(lines[0], 'MECHANICS: WORKING');
+  assert.equal(lines[0], 'MECHANICS: HEALTHY');
   assert.equal(lines[2], 'CORE Memory Health — demo-project');
 });
 
-test('renderReport: renders eight bar-gauge rows total, across three labeled sections', () => {
+test('renderReport: renders six gauged rows (Telemetry capture has no gauge) across four labeled sections', () => {
   const text = renderReport(baseOut(), { workspaceName: 'demo-project' });
   const rowLines = text.split('\n').filter((l) => l.includes('[') && l.includes(']'));
-  assert.equal(rowLines.length, 8);
-  assert.match(text, /Retrieval regression — separate evidence class, NOT covered by the verdict above:/);
-  assert.match(text, /User benefit — separate evidence class, NOT covered by the verdict above:/);
+  assert.equal(rowLines.length, 6, 'seven total rows minus the one no-gauge Telemetry-capture row');
+  assert.match(text, /^RETRIEVAL REGRESSION: PROVISIONAL$/m);
+  assert.match(text, /^MEASUREMENT READINESS$/m);
+  assert.match(text, /^USER BENEFIT: NOT EVALUATED$/m);
+  assert.match(text, /Telemetry capture/);
   assert.ok(text.trim().endsWith('"'), 'narrative is quoted');
 });
 
-test('renderReport: WORKING-WITH-CAVEATS displays the caveats verdict phrase, still MECHANICS-scoped', () => {
+test('renderReport: the Telemetry capture row renders with no bracket/bar, unlike every other row', () => {
+  const text = renderReport(baseOut(), { workspaceName: 'demo-project' });
+  const telemetryLine = text.split('\n').find((l) => l.startsWith('Telemetry capture'));
+  assert.ok(telemetryLine, 'the row must render');
+  assert.doesNotMatch(telemetryLine, /[█░✗]/, 'no gauge glyph of any kind');
+  assert.doesNotMatch(telemetryLine, /\[.*\]/, 'no bracket pair either');
+});
+
+test('renderReport: WORKING-WITH-CAVEATS displays as HEALTHY — with caveats, still MECHANICS-scoped', () => {
   const out = baseOut({
     store: { ...baseOut().store, warning_triage: { informational: 0, routine_upkeep: 0, attention: 1, attention_items: ['x'] } },
     verdict: 'WORKING-WITH-CAVEATS',
   });
   const text = renderReport(out);
-  assert.equal(text.split('\n')[0], 'MECHANICS: WORKING — with caveats');
+  assert.equal(text.split('\n')[0], 'MECHANICS: HEALTHY — with caveats');
 });
 
-test('renderReport: never claims retrieval regression or user benefit inside the verdict heading', () => {
+test('renderReport: never claims retrieval regression or user benefit inside the mechanics verdict heading', () => {
   const text = renderReport(baseOut(), { workspaceName: 'demo-project' });
   const heading = text.split('\n')[0];
   assert.doesNotMatch(heading, /retrieval|benefit/i);
@@ -509,6 +556,95 @@ test('checkLiveRetrievalProxy: real retrieval-log rows produce a genuine tier-di
     assert.equal(r.t1Pct, 50);
     assert.equal(r.t2Pct, 50);
     assert.equal(r.topEscalationTopic, 'alpha');
+    assert.equal(r.rejected.total, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Retrieval-event schema validation surfacing (2026-07-22, evidence-lifecycle
+// slice 2, revised per Hale's "use producer schema and isolate legacy": a
+// malformed row must be REJECTED and COUNTED with a CLOSED code, split
+// current/legacy — never silently dropped, never a raw echoed value.
+// ---------------------------------------------------------------------------
+
+test('checkLiveRetrievalProxy: a malformed current-schema row is rejected, counted by code, and excluded from the tier math', () => {
+  const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-proxy-malformed-'));
+  try {
+    const day = join(root, '_sessions', '2026-07-22');
+    mkdirSync(day, { recursive: true });
+    const rows = [
+      { ts: '2026-07-22T10:00:00Z', kind: 'retrieval', schema_version: '1.0.0', trigger: 'session-start', intent_topics: ['alpha'], tier_reached: 1, escalation_path: [1], units_retrieved: [{ id: 'u1', tier: 1 }] },
+      { ts: '2026-07-22T11:00:00Z', kind: 'retrieval', schema_version: '1.0.0', trigger: 'session-start', intent_topics: ['alpha'], tier_reached: 99, escalation_path: [1, 99], units_retrieved: [] }, // malformed
+    ];
+    writeFileSync(join(day, 'retrieval-log.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    const r = checkLiveRetrievalProxy(root);
+    assert.equal(r.available, true);
+    assert.equal(r.retrievalEvents, 1, 'the malformed row must not inflate the valid count');
+    assert.equal(r.rejected.total, 1);
+    assert.equal(r.rejected.current.count, 1);
+    assert.equal(r.rejected.current.by_code['invalid-tier'], 1);
+    assert.equal(r.t1Pct, 100, 'the malformed tier_reached:99 must never get bucketed as a valid tier');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('checkLiveRetrievalProxy: an all-malformed corpus is unavailable but honestly names the rejected count by code (not indistinguishable from truly-empty)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-proxy-allbad-'));
+  try {
+    const day = join(root, '_sessions', '2026-07-22');
+    mkdirSync(day, { recursive: true });
+    writeFileSync(join(day, 'retrieval-log.jsonl'), JSON.stringify({ kind: 'retrieval', units_retrieved: [{ id: 'u1' }] }) + '\n'); // versionless, legacy, missing tier
+
+    const r = checkLiveRetrievalProxy(root);
+    assert.equal(r.available, false);
+    assert.equal(r.rejected.total, 1);
+    assert.equal(r.rejected.legacy.by_code['legacy-missing-tier'], 1);
+    assert.match(r.reason, /1 row\(s\) rejected/);
+    assert.match(r.reason, /legacy-missing-tier/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('computeRows: Telemetry capture row names the rejected-row count by schema tier when present', () => {
+  const rows = computeRows(baseOut({
+    regression: {
+      liveProxy: {
+        available: true, days: 1, retrievalEvents: 1,
+        t1Pct: 100, t2Pct: 0, t3Pct: 0, topEscalationTopic: null, topEscalationRate: null,
+        rejected: { current: { count: 2, by_code: { 'invalid-tier': 2 } }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 2 },
+      },
+    },
+  }));
+  const tel = rows.find((r) => r.label === 'Telemetry capture');
+  assert.match(tel.value, /2 row\(s\) rejected/);
+  assert.match(tel.value, /2 current-schema/);
+});
+
+test('gatherMetrics: real end-to-end run surfaces a rejected row in the rendered Telemetry capture row', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-gather-rejected-'));
+  try {
+    mkdirSync(join(root, '_memories'), { recursive: true }); // retrieval_log is only computed when a store is present
+    const day = join(root, '_sessions', '2026-07-22');
+    mkdirSync(day, { recursive: true });
+    const rows = [
+      { ts: '2026-07-22T10:00:00Z', kind: 'retrieval', tier_reached: 1, intent_topics: ['alpha'], units_retrieved: [{ id: 'u1' }] },
+      { ts: '2026-07-22T11:00:00Z', kind: 'retrieval', units_retrieved: [{ id: 'u2' }] }, // malformed: no tier_reached
+    ];
+    writeFileSync(join(day, 'retrieval-log.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+    const out = await gatherMetrics(root);
+    assert.equal(out.store.retrieval_log.files, 1, 'the raw capture-presence scan still counts the file');
+    assert.equal(out.store.retrieval_log.rows, 2, 'and both raw lines, with no schema judgement of its own');
+    assert.equal(out.regression.liveProxy.rejected.total, 1, 'schema validation + rejection counting comes from checkLiveRetrievalProxy');
+    assert.equal(out.regression.liveProxy.rejected.legacy.by_code['legacy-missing-tier'], 1);
+    assert.match(out.report, /Telemetry capture/);
+    assert.match(out.report, /1 row\(s\) rejected/);
+    assert.match(out.report, /1 legacy/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

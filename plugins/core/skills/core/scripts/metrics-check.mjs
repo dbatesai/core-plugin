@@ -79,11 +79,20 @@ export const FAILED_CHAR = '✗';
  * JS's Math.round rounds positive .5 up — so 5% -> 1 filled block (rounds up
  * from the 0/1 boundary), 15% -> 2 filled blocks (rounds up from the 1/2
  * boundary), 73% -> 7 filled blocks (7.3 rounds down), 0% -> 0, 100% -> 10.
+ *
+ * Non-zero floor (2026-07-22): plain rounding sends anything below the first
+ * bin's midpoint (0% < pct < 5%) to 0 filled blocks — a real-but-low signal
+ * like 3% then renders identically to a hard 0%/absent state, with no visual
+ * difference between "present but weak" and "nothing at all". No half-block
+ * glyph exists anywhere else in this codebase to borrow (checked), so instead
+ * of introducing a new one, any pct that is genuinely > 0 floors to at least
+ * 1 filled block; only an exact 0% still renders fully empty.
  */
 export function renderBar(pct, { failed = false } = {}) {
   if (failed) return FAILED_CHAR.repeat(BAR_WIDTH);
   const clamped = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
-  const filled = Math.max(0, Math.min(BAR_WIDTH, Math.round(clamped / (100 / BAR_WIDTH))));
+  let filled = Math.max(0, Math.min(BAR_WIDTH, Math.round(clamped / (100 / BAR_WIDTH))));
+  if (filled === 0 && clamped > 0) filled = 1; // low-but-present must be visually distinct from zero/absent
   return FILLED_CHAR.repeat(filled) + EMPTY_CHAR.repeat(BAR_WIDTH - filled);
 }
 
@@ -99,16 +108,29 @@ export const TRUST = {
 // ============================================================
 // Evidence-class contract (2026-07-22, Hale's metrics-evidence-lifecycle
 // synthesis, accepted by Keel — see the mailbox thread
-// "accept-metrics-evidence-contract-first-slice"). Three honest classes,
-// never blended into one verdict:
-//   mechanics   — proven store mechanics: round-trip proof + unit integrity.
-//   regression  — does retrieval itself work well, over real or gold-set
-//                 queries? Everything here is a proxy or a small directional
-//                 gold-set measurement, NEVER user-benefit evidence.
+// "accept-metrics-evidence-contract-first-slice"; REVISED the same day per
+// Hale's slice-1 follow-up review "evidence classes still mixed" — capture
+// volume/tier-mix is a mechanics/instrumentation fact, not regression
+// evidence, and recognition/calibration are a measurement-READINESS gate,
+// not regression either). Four honest classes, never blended into one
+// verdict:
+//   mechanics   — proven store mechanics + instrumentation health: round-trip
+//                 proof, unit integrity, and telemetry capture counts (never
+//                 a percentage — there is no valid eligible-hook denominator
+//                 to divide by).
+//   regression  — does retrieval itself work well against a reference
+//                 answer key? Currently exactly one signal: a live gold-set
+//                 snapshot run, honestly labeled provisional (the execution
+//                 is live/proven, but the answer key is a small, Keel-
+//                 authored, directional set with no preregistered pass
+//                 threshold — a regression SNAPSHOT, not a passing GATE).
+//   readiness   — is the measurement instrumentation itself ready to be
+//                 trusted? Recognition signal + the calibration pool that
+//                 gates it. Neither is retrieval regression or user benefit.
 //   benefit     — does any of this measurably help the user? Nothing in this
 //                 codebase answers that yet; the row says so plainly.
 // ============================================================
-export const SECTION = { MECHANICS: 'mechanics', REGRESSION: 'regression', BENEFIT: 'benefit' };
+export const SECTION = { MECHANICS: 'mechanics', REGRESSION: 'regression', READINESS: 'readiness', BENEFIT: 'benefit' };
 
 // ============================================================
 // Recognition-signal parsing
@@ -207,14 +229,33 @@ export async function checkGoldRegression(project, { goldPath = join(resolve(pro
 // PASS/FAIL, never user benefit. Read-only, no new capture.
 // ============================================================
 
+// Renders a {count, by_code} bucket as a short CLOSED-vocabulary summary —
+// e.g. "invalid-tier: 1, missing-tier: 2". Codes are safe to interpolate
+// anywhere (rendered report, --json, a future package surface); the raw
+// values that failed validation never are (Hale, 2026-07-22).
+function formatRejectionCodes(bucket) {
+  return Object.entries(bucket?.by_code || {}).sort((a, b) => b[1] - a[1]).map(([code, n]) => `${code}: ${n}`).join(', ');
+}
+
 export function checkLiveRetrievalProxy(project) {
   let events;
   try { events = loadRetrievalEvents(project, { allTime: true }); }
   catch (e) { return { available: false, reason: `could not read retrieval logs: ${String(e).slice(0, 120)}` }; }
 
   const report = buildRetrievalQualityReport(events);
+  const rejected = report.rejected || { current: { count: 0, by_code: {} }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 0 };
   if (!report.total_events || !report.retrieval_events) {
-    return { available: false, reason: 'no retrieval events recorded for this project yet' };
+    // Even with zero valid events, a nonzero rejected count is real evidence —
+    // say so instead of reporting an absence indistinguishable from "nothing
+    // ever ran" (2026-07-22, evidence-lifecycle slice 2).
+    const reason = rejected.total > 0
+      ? `no VALID retrieval events recorded — ${rejected.total} row(s) rejected (${[
+          rejected.current.count > 0 ? `current-schema: ${formatRejectionCodes(rejected.current)}` : null,
+          rejected.legacy.count > 0 ? `legacy: ${formatRejectionCodes(rejected.legacy)}` : null,
+          rejected.other.count > 0 ? `unreadable: ${formatRejectionCodes(rejected.other)}` : null,
+        ].filter(Boolean).join('; ')})`
+      : 'no retrieval events recorded for this project yet';
+    return { available: false, reason, rejected };
   }
   const td = report.tier_distribution;
   const topEscalation = (report.tier_escalation || [])[0] || null;
@@ -222,6 +263,7 @@ export function checkLiveRetrievalProxy(project) {
     available: true,
     days: report.sessions,
     retrievalEvents: report.retrieval_events,
+    rejected,
     t1Pct: Math.round((td.t1?.pct ?? 0) * 100),
     t2Pct: Math.round((td.t2?.pct ?? 0) * 100),
     t3Pct: Math.round((td.t3?.pct ?? 0) * 100),
@@ -264,27 +306,54 @@ export function computeRows(out) {
     value: !out.store?.present ? 'no store' : `${attention} warning${attention === 1 ? '' : 's'}`,
   });
 
-  // ---- RETRIEVAL REGRESSION: does retrieval itself work well, over real or
-  // gold-set queries? Every row here is a proxy or a small directional
-  // gold-set number — never mechanics, never user benefit. ----
-
-  // 3. Retrieval-log coverage — rows/files as a direct percentage, capped at
-  // 100% (a session can log more than one retrieval row per file, which is
-  // healthy, not "over-covered" — the cap keeps the bar meaningful). This
-  // counts capture volume, not retrieval correctness — the value string says
-  // so, so the number can't be misread as a quality score.
-  const files = out.store?.retrieval_log?.files ?? 0;
-  const logRows = out.store?.retrieval_log?.rows ?? 0;
-  const coveragePct = files > 0 ? Math.min(100, (logRows / files) * 100) : 0;
+  // 3. Telemetry capture — REPLACES the old "Retrieval-log coverage" percentage
+  // (Hale, 2026-07-22 slice-1 revise: "rows÷days is an invalid denominator...
+  // remove the gauge/percentage... show counts"). There is no eligible-hook
+  // receipt to divide by, so this row is COUNTS ONLY — noGauge:true skips the
+  // bar entirely rather than render a bracket that would silently imply a
+  // valid percentage. Tier mix (previously its own "Live retrieval proxy"
+  // regression row) folds in here too: it is a mechanism/instrumentation
+  // diagnostic, not a regression claim, per Hale's item 3. Malformed-row
+  // rejection counts (closed codes only) live here as well — capture health
+  // is a mechanics concern.
+  const proxy = out.regression?.liveProxy || {};
+  const rejected = proxy.rejected || { current: { count: 0, by_code: {} }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 0 };
+  const rejectedNote = rejected.total > 0
+    ? `; ${rejected.total} row(s) rejected (${[
+        rejected.current.count > 0 ? `${rejected.current.count} current-schema` : null,
+        rejected.legacy.count > 0 ? `${rejected.legacy.count} legacy` : null,
+        rejected.other.count > 0 ? `${rejected.other.count} unreadable` : null,
+      ].filter(Boolean).join(', ')})`
+    : '; 0 rejected';
+  let telemetryValue;
+  if (proxy.available) {
+    const worst = proxy.topEscalationTopic
+      ? `; '${proxy.topEscalationTopic}' needed Tier 2+ ${proxy.topEscalationRate}% of the time`
+      : '';
+    telemetryValue = `${proxy.retrievalEvents} typed events / ${proxy.days} days; closure denominator unavailable; T1 ${proxy.t1Pct}%/T2 ${proxy.t2Pct}%/T3 ${proxy.t3Pct}% mix${worst}${rejectedNote}`;
+  } else {
+    telemetryValue = `${proxy.reason || 'no retrieval events recorded for this project yet'}${rejectedNote}`;
+  }
   rows.push({
-    section: SECTION.REGRESSION,
-    label: 'Retrieval-log coverage',
-    pct: coveragePct,
+    section: SECTION.MECHANICS,
+    label: 'Telemetry capture',
+    pct: 0,
     trust: TRUST.DIRECT,
-    value: files > 0 ? `${Math.round(coveragePct)}% (capture volume, not correctness)` : 'no session logs yet',
+    noGauge: true,
+    value: telemetryValue,
   });
 
-  // 4. Gold-set Recall@K — real regression evidence when a project has a
+  // ---- RETRIEVAL REGRESSION: does retrieval work well against a reference
+  // answer key? Currently exactly one signal exists — a live gold-set
+  // snapshot — and it is labeled `provisional`, never `proven-live`: the
+  // EXECUTION is genuinely live (retrieveContext + buildFinalContextPack run
+  // for real, this run), but the reference set is a small, Keel-authored,
+  // directional answer key with no preregistered pass/fail threshold. A live
+  // run does not independently validate its own expected answers (Hale,
+  // 2026-07-22 slice-1 revise, item 5) — this is a regression SNAPSHOT, not a
+  // passing GATE. ----
+
+  // 4. Gold-set snapshot — real regression evidence when a project has a
   // pre-registered gold set; an honest absence otherwise.
   const gold = out.regression?.gold || {};
   if (gold.available) {
@@ -297,46 +366,28 @@ export function computeRows(out) {
     ].filter(Boolean).join(', ');
     rows.push({
       section: SECTION.REGRESSION,
-      label: `Gold-set Recall@K (n=${gold.n})`,
+      label: `Gold-set snapshot (n=${gold.n})`,
       pct: r3Pct,
-      trust: TRUST.PROVEN_LIVE,
-      value: `delivered top-3 R@3 ${r3Pct}%${extra ? `; ${extra}` : ''} — directional, small gold set`,
+      trust: TRUST.PROVISIONAL,
+      value: `execution proven-live (retrieveContext + buildFinalContextPack, this run); reference authority provisional (Keel-authored, directional, n=${gold.n}, no preregistered pass threshold); delivered top-3 R@3 ${r3Pct}%${extra ? `; ${extra}` : ''}`,
     });
   } else {
     rows.push({
       section: SECTION.REGRESSION,
-      label: 'Gold-set Recall@K',
+      label: 'Gold-set snapshot',
       pct: 0,
       trust: TRUST.NOT_EVALUATED,
       value: gold.reason || 'no gold-set regression evidence recorded for this project',
     });
   }
 
-  // 5. Live retrieval-quality proxy — tier-escalation/dip-back signal from
-  // real retrieval-log rows, when any exist.
-  const proxy = out.regression?.liveProxy || {};
-  if (proxy.available) {
-    const worst = proxy.topEscalationTopic
-      ? `; '${proxy.topEscalationTopic}' needed Tier 2+ ${proxy.topEscalationRate}% of the time`
-      : '';
-    rows.push({
-      section: SECTION.REGRESSION,
-      label: 'Live retrieval proxy',
-      pct: proxy.t1Pct,
-      trust: TRUST.PROXY,
-      value: `T1 ${proxy.t1Pct}% / T2 ${proxy.t2Pct}% / T3 ${proxy.t3Pct}% over ${proxy.retrievalEvents} events / ${proxy.days}d${worst}`,
-    });
-  } else {
-    rows.push({
-      section: SECTION.REGRESSION,
-      label: 'Live retrieval proxy',
-      pct: 0,
-      trust: TRUST.NOT_EVALUATED,
-      value: proxy.reason || 'no live retrieval events recorded for this project',
-    });
-  }
+  // ---- MEASUREMENT READINESS: is the instrumentation itself ready to be
+  // trusted? Neither of these two rows is retrieval regression or user
+  // benefit — recognition is a provisional need/failure classifier, and
+  // calibration is the readiness gate that governs it (Hale, 2026-07-22
+  // slice-1 revise, item 4). ----
 
-  // 6. Recognition signal — INVERTED on purpose: the underlying number is a
+  // 5. Recognition signal — INVERTED on purpose: the underlying number is a
   // FAILURE rate (rec-fail-tier-0), so a bigger number is worse. The bar shows
   // (100 - rate) so a fuller bar always reads as "healthier" like every other
   // row here, even though the raw metric it's built from is a failure rate.
@@ -351,17 +402,16 @@ export function computeRows(out) {
   } else if (recognition.reason) {
     recValue = recognition.reason;
   }
-  rows.push({ section: SECTION.REGRESSION, label: 'Recognition signal', pct: recPct, trust: TRUST.PROVISIONAL, value: recValue });
+  rows.push({ section: SECTION.READINESS, label: 'Recognition signal', pct: recPct, trust: TRUST.PROVISIONAL, value: recValue });
 
-  // 7. Calibration pool — labeled turns / 100, straightforward. This is the
-  // classifier's own readiness gate for the recognition signal above, so it
-  // lives in the same evidence class, not under mechanics.
+  // 6. Calibration pool — labeled turns / 100, straightforward. This is the
+  // classifier's own readiness gate for the recognition signal above.
   const cal = out.calibration || {};
   const labeled = cal.available ? (cal.labeled_count ?? 0) : 0;
   const minNeeded = cal.available ? (cal.min_needed ?? 100) : 100;
   const calPct = minNeeded > 0 ? Math.min(100, (labeled / minNeeded) * 100) : 0;
   rows.push({
-    section: SECTION.REGRESSION,
+    section: SECTION.READINESS,
     label: 'Calibration pool',
     pct: calPct,
     trust: TRUST.DIRECT,
@@ -374,7 +424,7 @@ export function computeRows(out) {
   // classes cover it. ----
   rows.push({
     section: SECTION.BENEFIT,
-    label: 'User-benefit evidence',
+    label: 'Matched comparison',
     pct: 0,
     trust: TRUST.NOT_EVALUATED,
     value: 'no matched memory-on/off comparison exists — nothing currently measures whether this helps',
@@ -413,30 +463,34 @@ export function buildNarrative(out) {
     return 'The plugin machinery round-trips clean on a scratch store, but this project has no _memories/ store yet — there is nothing here to measure.';
   }
 
+  // s1 — mechanics + telemetry capture (an instrumentation fact, not
+  // regression evidence — Hale, 2026-07-22 slice-1 revise).
+  const proxy = out.regression?.liveProxy || {};
   let s1 = 'Mechanics are proven and working';
+  if (proxy.available) {
+    s1 += `; telemetry capture shows ${proxy.retrievalEvents} typed events across ${proxy.days} days (${proxy.t1Pct}%/${proxy.t2Pct}%/${proxy.t3Pct}% T1/T2/T3 mix)`;
+  }
   s1 += attention > 0 ? `, though ${attention} warning${attention === 1 ? '' : 's'} need${attention === 1 ? 's' : ''} a look.` : '.';
 
-  // Retrieval regression — combine whatever real evidence exists (gold-set
-  // Recall@K, the live retrieval-log proxy, the recognition signal, the
-  // calibration gate); never claim more than what actually ran.
+  // s2 — retrieval regression (a provisional SNAPSHOT, never a passing gate)
+  // plus measurement readiness (recognition + calibration): related but
+  // distinct evidence classes, both honestly bounded, combined into one
+  // sentence to stay within the 1-3 sentence cap.
   const gold = out.regression?.gold || {};
-  const proxy = out.regression?.liveProxy || {};
   const parts = [];
   if (gold.available) {
-    parts.push(`a gold-set Recall@K check (n=${gold.n}, directional) puts delivered top-3 recall at ${Math.round((gold.context3_r3 ?? 0) * 100)}%`);
-  }
-  if (proxy.available) {
-    parts.push(`live retrieval-log analysis over ${proxy.retrievalEvents} events shows ${proxy.t1Pct}% resolving at Tier 1`);
+    parts.push(`a provisional gold-set snapshot (n=${gold.n}, Keel-authored, directional, no pass threshold) puts delivered top-3 recall at ${Math.round((gold.context3_r3 ?? 0) * 100)}% — a regression snapshot, not a passing gate`);
+  } else {
+    parts.push('no gold-set regression snapshot exists for this project yet');
   }
   if (recognition.available) {
     const trend = recognition.arrow === '↑' ? 'down' : recognition.arrow === '↓' ? 'up' : 'steady';
     const worthLook = recognition.arrow === '↑' ? ' (worth a look)' : '';
-    parts.push(`recognition is trending ${trend} this session${worthLook}`);
-  } else if (!gold.available && !proxy.available) {
-    parts.push('recognition has no signal yet this session');
+    parts.push(`measurement readiness: recognition is trending ${trend} this session${worthLook}, and the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`);
+  } else {
+    parts.push(`measurement readiness: recognition has no signal yet this session, and the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`);
   }
-  parts.push(`the classifier stays unofficial until the calibration pool clears ${minNeeded} labeled turns — currently ${labeled}`);
-  const s2Body = parts.join(', and ') + '.';
+  const s2Body = parts.join('; ') + '.';
   const s2 = `Retrieval regression: ${s2Body.charAt(0).toUpperCase()}${s2Body.slice(1)}`;
 
   const s3 = "Whether any of this actually helps you get better answers hasn't been measured yet — no matched memory-on/off comparison exists.";
@@ -448,22 +502,31 @@ export function buildNarrative(out) {
 // Full report render — verdict heading, visual block, narrative.
 // ============================================================
 
+// Display text for the MECHANICS heading only — 'HEALTHY' replaces the old
+// 'WORKING' wording per Hale's slice-1 revise (matching his exact target
+// shape: "MECHANICS: HEALTHY"). The internal out.verdict KEYS are unchanged
+// ('WORKING'/'WORKING-WITH-CAVEATS'/...) — only this presentation layer
+// changed, so nothing that branches on out.verdict needed to move.
 const VERDICT_DISPLAY = {
-  'WORKING': 'WORKING',
-  'WORKING-WITH-CAVEATS': 'WORKING — with caveats',
+  'WORKING': 'HEALTHY',
+  'WORKING-WITH-CAVEATS': 'HEALTHY — with caveats',
   'DEGRADED': 'DEGRADED',
   'MACHINERY-WORKING-NO-STORE': 'MACHINERY WORKING, NO STORE',
 };
 
 const LABEL_WIDTH = 26;
 const TRUST_WIDTH = 14;
+// Width of the "[bar] " segment every gauged row renders ('[' + BAR_WIDTH + ']' + ' ').
+const GAUGE_WIDTH = BAR_WIDTH + 3;
 
-// Section headers for the two evidence classes that sit BELOW the verdict
-// heading and are explicitly not covered by it (item 5 of the metrics-
-// evidence contract: no word up top may imply proof this deep).
+// Section headers below the mechanics heading — each names its OWN evidence
+// class and its OWN honest status word, so no single word at the top can be
+// misread as covering evidence three sections down (Hale, 2026-07-22
+// slice-1 revise: match this shape exactly).
 const SECTION_HEADER = {
-  [SECTION.REGRESSION]: 'Retrieval regression — separate evidence class, NOT covered by the verdict above:',
-  [SECTION.BENEFIT]: 'User benefit — separate evidence class, NOT covered by the verdict above:',
+  [SECTION.REGRESSION]: 'RETRIEVAL REGRESSION: PROVISIONAL',
+  [SECTION.READINESS]: 'MEASUREMENT READINESS',
+  [SECTION.BENEFIT]: 'USER BENEFIT: NOT EVALUATED',
 };
 
 export function renderReport(out, { workspaceName } = {}) {
@@ -476,16 +539,20 @@ export function renderReport(out, { workspaceName } = {}) {
   lines.push('');
 
   const renderRow = (row) => {
-    const bar = renderBar(row.pct, { failed: row.failed });
-    return `${row.label.padEnd(LABEL_WIDTH)}[${bar}] ${row.trust.padEnd(TRUST_WIDTH)} ${row.value}`;
+    // noGauge rows (e.g. Telemetry capture) render NO bracket/bar at all —
+    // there is no valid denominator to turn into a percentage, so the space
+    // stays blank rather than imply one (Hale, 2026-07-22: "remove the
+    // gauge/percentage... show counts").
+    const gauge = row.noGauge ? ' '.repeat(GAUGE_WIDTH) : `[${renderBar(row.pct, { failed: row.failed })}] `;
+    return `${row.label.padEnd(LABEL_WIDTH)}${gauge}${row.trust.padEnd(TRUST_WIDTH)} ${row.value}`;
   };
 
-  const bySection = { [SECTION.MECHANICS]: [], [SECTION.REGRESSION]: [], [SECTION.BENEFIT]: [] };
+  const bySection = { [SECTION.MECHANICS]: [], [SECTION.REGRESSION]: [], [SECTION.READINESS]: [], [SECTION.BENEFIT]: [] };
   for (const row of rows) (bySection[row.section] ||= []).push(row);
 
   for (const row of bySection[SECTION.MECHANICS]) lines.push(renderRow(row));
 
-  for (const section of [SECTION.REGRESSION, SECTION.BENEFIT]) {
+  for (const section of [SECTION.REGRESSION, SECTION.READINESS, SECTION.BENEFIT]) {
     lines.push('');
     lines.push(SECTION_HEADER[section]);
     for (const row of bySection[section]) lines.push(renderRow(row));
@@ -589,8 +656,17 @@ ${body}
     }
     out.store.census = census;
 
-    // retrieval-log coverage (the honesty number)
-    let rows = 0, retrievalShaped = 0, files = 0;
+    // retrieval-log RAW capture presence — a simple "is anything being
+    // written at all" count (files/rows), deliberately with NO schema
+    // judgement of its own. Schema validation, rejection counting, and the
+    // rendered Telemetry-capture row all source from checkLiveRetrievalProxy()
+    // below instead, which reuses analyze-retrieval-quality.mjs's loadEvents()
+    // /buildReport() — the ONE canonical validator and rejection-counter.
+    // Keeping a second, independent per-row validity check here (as an
+    // earlier version of this code did) is exactly the "weaker parallel
+    // schema" anti-pattern Hale's slice-2 review flagged; this scan no longer
+    // attempts one (2026-07-22).
+    let rows = 0, files = 0;
     const sessions = join(cwd, '_sessions');
     if (existsSync(sessions)) {
       for (const d of readdirSync(sessions)) {
@@ -598,14 +674,12 @@ ${body}
         if (!existsSync(log)) continue;
         files++;
         for (const line of readFileSync(log, 'utf8').split('\n')) {
-          if (!line.trim()) continue;
-          rows++;
-          try { if (JSON.parse(line).units_retrieved) retrievalShaped++; } catch { /* unparseable counts as row only */ }
+          if (line.trim()) rows++;
         }
       }
     }
-    out.store.retrieval_log = { files, rows, retrieval_shaped: retrievalShaped,
-      note: 'rows/files is capture volume, not retrieval correctness — the per-turn hook does emit real typed events (see the retrieval-regression rows below for what those events actually show)' };
+    out.store.retrieval_log = { files, rows,
+      note: 'raw line/file count only — capture presence, not schema validity or retrieval correctness (see the Telemetry capture row for the validated, rejection-counted breakdown)' };
 
     // recognition / trend signal state
     try {

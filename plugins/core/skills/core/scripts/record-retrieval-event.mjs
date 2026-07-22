@@ -12,6 +12,14 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, sanitizeAttributeValue } from './log-event.mjs';
 
+// Stamped on every row this producer writes from 2026-07-22 onward (Hale's
+// metrics-evidence-lifecycle slice-2 review: a reader validating retrieval
+// rows needs to tell "written under the current, fully-enforced producer
+// contract" apart from "predates this contract entirely" — bump this only
+// when normalizeRetrievalEvent()'s REQUIRED-field contract changes in a way
+// that would reject rows a prior version accepted).
+export const RETRIEVAL_EVENT_SCHEMA_VERSION = '1.0.0';
+
 export const VALID_TRIGGERS = new Set([
   'session-start',
   'mid-conversation',
@@ -125,7 +133,14 @@ export function normalizeRetrievalEvent(event) {
   }
   if (event.retrieval_id !== undefined) requireString(event.retrieval_id, 'retrieval_id');
 
-  return { ...event, kind: 'retrieval', intent_topics: intentTopics, escalation_path: escalationPath, units_retrieved: unitsRetrieved };
+  return {
+    ...event,
+    kind: 'retrieval',
+    schema_version: RETRIEVAL_EVENT_SCHEMA_VERSION, // always OUR stamp, never a caller-supplied value
+    intent_topics: intentTopics,
+    escalation_path: escalationPath,
+    units_retrieved: unitsRetrieved,
+  };
 }
 
 // Returns { record, written, write_outcome } — `written` is the authoritative

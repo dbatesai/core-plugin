@@ -493,3 +493,83 @@ test('CLI: apply exits 1 and reports refusal on stderr when PROJECT.md needs rec
     assert.doesNotMatch(current, /Second synthesis/, 'the blocked write must never land via the CLI either');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// ---------------------------------------------------------------------------
+// Stamp-failure CLI contract (2026-07-22, Hale's finding: "cli_exit: 0" when
+// the content write landed but the authorship stamp failed — a hook/caller
+// reading exit code + stdout alone saw full success either way). The content
+// write must NEVER be rolled back; the machine contract (exit code + a
+// structured receipt) must stop calling this a clean success.
+// ---------------------------------------------------------------------------
+
+test('applyHotSectionWithOutcome surfaces stampOutcome.stamped:false without throwing or losing the content write', async () => {
+  const { applyHotSectionWithOutcome } = await import('../../plugins/core/skills/core/scripts/hot-section.mjs');
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const { root, project, home } = setup();
+  try {
+    const lockPath = join(project, '_memories', '_lib', '.state-cache.lock');
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    const held = acquireFileLock(lockPath);
+    assert.ok(held.ok, 'test setup: must be able to hold the lock');
+    let result;
+    try {
+      result = applyHotSectionWithOutcome(project, 'Generated hot text.', { home });
+    } finally {
+      releaseFileLock(lockPath, held.nonce);
+    }
+    assert.equal(result.applied, true, 'the content write itself happened');
+    assert.equal(result.stampOutcome.stamped, false, 'the stamp could not land while the lock was held');
+    assert.equal(result.updated.includes('Generated hot text.'), true, 'the returned text reflects the real write, not a rollback');
+    const onDisk = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.match(onDisk, /Generated hot text\./, 'the content write is NOT rolled back');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI apply: a stamp failure (lock held) exits NONZERO and never reports a contradictory clean success', async () => {
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const { root, project, home } = setup();
+  try {
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    const lockPath = join(project, '_memories', '_lib', '.state-cache.lock');
+    const held = acquireFileLock(lockPath);
+    assert.ok(held.ok, 'test setup: must be able to hold the lock');
+
+    const res = spawnSync(process.execPath, [SCRIPT, 'apply', project, '--text', 'Generated hot text.'], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home }, timeout: 5000,
+    });
+    releaseFileLock(lockPath, held.nonce);
+
+    const onDisk = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.match(onDisk, /Generated hot text\./, 'content write happened — this is Hale\'s "do not roll back" requirement');
+    assert.notEqual(res.status, 0, 'the CLI must exit NONZERO when the attribution stamp failed (the exact bug: it used to exit 0)');
+    assert.match(res.stderr, /attribution unknown|recovery-required/i, 'the human-readable warning still fires');
+    // The exact regression this test guards: exit 0 AND a stdout line reading as
+    // plain, unqualified success is a "contradictory success" a caller cannot see through.
+    const contradictorySuccess = res.status === 0 && /hot section applied/i.test(String(res.stdout || ''));
+    assert.equal(contradictorySuccess, false, 'never both exit 0 AND an unqualified "hot section applied" success line');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI clear: a stamp failure (lock held) exits NONZERO, still removes the block, and never reports a contradictory clean success', async () => {
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const { root, project, home } = setup();
+  try {
+    applyHotSection(project, 'To be cleared.', { now: '2026-07-22T00:00:00Z', home });
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    const lockPath = join(project, '_memories', '_lib', '.state-cache.lock');
+    const held = acquireFileLock(lockPath);
+    assert.ok(held.ok, 'test setup: must be able to hold the lock');
+
+    const res = spawnSync(process.execPath, [SCRIPT, 'clear', project], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home }, timeout: 5000,
+    });
+    releaseFileLock(lockPath, held.nonce);
+
+    const onDisk = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.doesNotMatch(onDisk, /To be cleared\./, 'the block removal happened — not rolled back');
+    assert.notEqual(res.status, 0, 'the CLI must exit NONZERO when the attribution stamp failed on a clear too');
+    assert.match(res.stderr, /attribution unknown|recovery-required/i);
+    const contradictorySuccess = res.status === 0 && /hot section cleared/i.test(String(res.stdout || ''));
+    assert.equal(contradictorySuccess, false, 'never both exit 0 AND an unqualified "hot section cleared" success line');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
