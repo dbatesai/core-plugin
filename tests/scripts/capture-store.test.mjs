@@ -222,7 +222,16 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
   try {
     const seenTargets = new Set();
     child.send('probe'); // sent only now, strictly after the window begins
-    const deadline = Date.now() + 20000;
+    // 45s, not 20s: Meridian found this window flakes ~1-in-6 on real Windows
+    // hardware (including the very first cold run) even though it's already
+    // wall-clock- not iteration-bounded -- Windows process scheduling can
+    // give both the writer and this reader loop meaningfully fewer turns per
+    // wall-clock second than macOS/Linux, so the SAME correctness proof needs
+    // more real time there to reliably observe both alternating targets. The
+    // causal probe/ack half (sawIStrictlyAfterAck) was already unaffected --
+    // IPC ordering held every time on his box; only the "both targets seen"
+    // statistical half needed headroom (2026-07-22).
+    const deadline = Date.now() + 45000;
     for (let i = 0; (Date.now() < deadline) && !(seenTargets.size >= 2 && sawIStrictlyAfterAck); i++) {
       const cap = loadSnapshot(store, { captureBodies: true, retainRaw: true });
       const trace = buildRetrievalTrace('omega speedmaster on sale', store, { topN: 3, snapshot: cap });
