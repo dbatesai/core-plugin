@@ -26,6 +26,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { buildIndex as buildDecisionsIndex } from './generate-decisions-index.mjs';
 import { buildIndex as buildRisksIndex } from './generate-risks-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
+import { hashText, stampFiles } from './state-cache.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
 export const PROJECT_SOFT_CAP_BYTES = 70000;
@@ -54,10 +55,10 @@ function cleanGhosts(memoriesDir, apply) {
 
 /**
  * @param {string} projectPath
- * @param {{ apply?: boolean, now?: string }} opts
+ * @param {{ apply?: boolean, now?: string, home?: string }} opts
  * @returns {{ ranOps: string[], notes: string[], unitsChanged: boolean, narration: string }}
  */
-export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString() } = {}) {
+export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString(), home } = {}) {
   const root = resolve(projectPath);
   const mem = join(root, '_memories');
   const ledgerPath = join(mem, '_maintenance-state.json');
@@ -79,9 +80,33 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   const unitsChanged = ledger.last_sig !== sig || ghosts.length > 0;
   if (unitsChanged) {
     if (apply) {
-      atomicWriteFileSync(join(mem, 'INDEX-decisions.md'), buildDecisionsIndex(mem));
-      atomicWriteFileSync(join(mem, 'INDEX-risks.md'), buildRisksIndex(mem));
+      // Stamp the state cache for every generated file this pass actually
+      // rewrites, in the same operation as the write (Hale's finding,
+      // 2026-07-22 — same pattern decorate-graph.mjs and hot-section.mjs
+      // use: a script that rewrites a file on the user's behalf must record
+      // that in code, not rely on the agent remembering to update the cache
+      // by hand). These files are fully machine-generated with no
+      // human-authored region to preserve, so a plain whole-file hash is
+      // enough — no marker-delimited-block split needed here.
+      const stampEntries = [];
+
+      const decisionsPath = join(mem, 'INDEX-decisions.md');
+      const decisionsText = buildDecisionsIndex(mem);
+      atomicWriteFileSync(decisionsPath, decisionsText);
+      stampEntries.push({ path: decisionsPath, hash: hashText(decisionsText), lastWrittenBy: 'maintenance-run' });
+
+      const risksPath = join(mem, 'INDEX-risks.md');
+      const risksText = buildRisksIndex(mem);
+      atomicWriteFileSync(risksPath, risksText);
+      stampEntries.push({ path: risksPath, hash: hashText(risksText), lastWrittenBy: 'maintenance-run' });
+
       generateSummaryIndex(root);
+      const summaryPath = join(mem, '_lib', 'unit-summaries.json');
+      try {
+        stampEntries.push({ path: summaryPath, hash: hashText(readFileSync(summaryPath, 'utf8')), lastWrittenBy: 'maintenance-run' });
+      } catch { /* best-effort: a stamp we can't compute never blocks the regen itself */ }
+
+      stampFiles(root, stampEntries, { now, home });
     }
     ranOps.push('decisions-index', 'risks-index', 'summary-index');
   }

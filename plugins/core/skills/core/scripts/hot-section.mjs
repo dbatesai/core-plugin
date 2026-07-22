@@ -25,15 +25,14 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, realpathSync, mkdirSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { resolve, join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
 import { logEvent } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { withFileLock } from './file-lock.mjs';
+import { hashText, stampFile } from './state-cache.mjs';
 
 export const HOT_BEGIN = '<!-- HOT-SECTION:BEGIN -->';
 export const HOT_END = '<!-- HOT-SECTION:END -->';
@@ -112,7 +111,7 @@ export function hashOutsideHotBlock(text) {
   const t = String(text || '');
   const block = findExistingBlock(t);
   const outside = block ? t.slice(0, block.start) + t.slice(block.end) : t;
-  return createHash('sha256').update(outside, 'utf8').digest('hex').slice(0, 16);
+  return hashText(outside);
 }
 
 /**
@@ -137,38 +136,19 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir
   const currentText = (() => {
     try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
   })();
-  const stamp = {
-    last_hash: createHash('sha256').update(currentText, 'utf8').digest('hex').slice(0, 16),
-    outside_hash: hashOutsideHotBlock(currentText),
-    last_written: now || nowIso(),
-    last_written_by: 'hot-section',
-  };
-
-  // Per-project cache — the write of record. Single-owner, so no lock needed.
-  const projectCachePath = join(dirname(resolve(projectMdPath)), '_memories', '_lib', 'state-cache.json');
-  try {
-    mkdirSync(dirname(projectCachePath), { recursive: true });
-    let cache;
-    try { cache = JSON.parse(readFileSync(projectCachePath, 'utf8')); } catch { cache = { files: {} }; }
-    if (!cache || typeof cache !== 'object') cache = { files: {} };
-    if (!cache.files || typeof cache.files !== 'object') cache.files = {};
-    cache.files[projectMdPath] = stamp;
-    atomicWriteFileSync(projectCachePath, JSON.stringify(cache, null, 2) + '\n');
-  } catch { /* best-effort: a cache-write failure never blocks the synthesis */ }
-
-  // One-release migration: prune this file's entry from the global cache under
-  // the lock, so a stale global stamp can't shadow the per-project one.
-  const globalCachePath = join(home, '.core', 'state-cache.json');
-  try {
-    withFileLock(join(home, '.core', 'state-cache.lock'), () => {
-      let cache;
-      try { cache = JSON.parse(readFileSync(globalCachePath, 'utf8')); } catch { cache = null; }
-      if (cache?.files && projectMdPath in cache.files) {
-        delete cache.files[projectMdPath];
-        atomicWriteFileSync(globalCachePath, JSON.stringify(cache, null, 2) + '\n');
-      }
-    }, { retries: 3, retryDelayMs: 50 });
-  } catch { /* best-effort — a held lock just defers the prune to the next stamp */ }
+  const projectDir = dirname(resolve(projectMdPath));
+  // Shared stamp-and-prune plumbing lives in state-cache.mjs (extracted
+  // 2026-07-22 so decorate-graph.mjs didn't need a second copy of the same
+  // lock/prune logic). The domain-specific piece — hashing OUTSIDE the hot
+  // block so a later mismatch can be classified correctly — stays here,
+  // passed through as `extra.outside_hash`.
+  stampFile(
+    projectDir,
+    resolve(projectMdPath),
+    hashText(currentText),
+    'hot-section',
+    { now, home, extra: { outside_hash: hashOutsideHotBlock(currentText) } },
+  );
 }
 
 // ---------- Public API ----------

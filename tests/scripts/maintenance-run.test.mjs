@@ -4,6 +4,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMaintenance } from '../../plugins/core/skills/core/scripts/maintenance-run.mjs';
+import { hashText } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
+
+// Isolated HOME so the state-cache global-prune step never touches the real
+// developer ~/.core during tests (mirrors decorate-graph.test.mjs / hot-section.test.mjs).
+function testHome(root) {
+  const home = join(root, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  return home;
+}
 
 // DC-110 M1: mechanical maintenance is signature-gated (regen only when units changed),
 // narrated (never silent), and ledger-recorded (the cadence data for the M2 observe step).
@@ -98,4 +107,55 @@ test('dry-run does not write the ledger or indexes', () => {
   assert.ok(!existsSync(join(root, '_memories', '_maintenance-state.json')), 'no ledger on dry-run');
   assert.ok(!existsSync(join(root, '_memories', 'INDEX-decisions.md')), 'no index on dry-run');
   assert.ok(res.ranOps.length > 0, 'still reports what it would do');
+});
+
+// ---- state-cache stamping (Hale's finding, 2026-07-22): maintenance-run
+// writes INDEX-decisions.md, INDEX-risks.md, and the summary index on the
+// user's behalf — those writes must be stamped in code, same pattern as
+// decorate-graph.mjs and hot-section.mjs, so edit-detection never
+// misclassifies them as a between-session user edit. ----
+
+test('runMaintenance stamps the state cache for every generated file it writes, with the correct new hash', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  writeUnit(root, 'risk-1-bar', { type: 'risk', title: 'A risk', mtime: 1000 });
+  runMaintenance(root, { now: '2026-06-28T00:00:00Z', home });
+
+  const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+  const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+
+  const decisionsPath = join(root, '_memories', 'INDEX-decisions.md');
+  const risksPath = join(root, '_memories', 'INDEX-risks.md');
+  const summaryPath = join(root, '_memories', '_lib', 'unit-summaries.json');
+
+  for (const p of [decisionsPath, risksPath, summaryPath]) {
+    const entry = cache.files[p];
+    assert.ok(entry, `${p} has a state-cache entry after runMaintenance`);
+    assert.equal(entry.last_written_by, 'maintenance-run', `${p} stamped as CORE-authored`);
+    assert.equal(entry.last_written, '2026-06-28T00:00:00Z');
+    assert.equal(entry.last_hash, hashText(readFileSync(p, 'utf8')), `${p} cached hash matches the actual on-disk bytes`);
+  }
+});
+
+test('an unchanged store does not re-stamp the state cache (no regen ran, nothing to stamp)', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  runMaintenance(root, { now: '2026-06-28T00:00:00Z', home });
+  const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+  const firstStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[join(root, '_memories', 'INDEX-decisions.md')].last_written;
+
+  const res = runMaintenance(root, { now: '2026-06-28T01:00:00Z', home });
+  assert.strictEqual(res.unitsChanged, false, 'sanity: nothing changed, so no regen ran');
+  const secondStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[join(root, '_memories', 'INDEX-decisions.md')].last_written;
+  assert.equal(secondStamp, firstStamp, 'the cache entry is untouched when the underlying file was never rewritten');
+});
+
+test('dry-run does not write the state cache either', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  runMaintenance(root, { apply: false, now: '2026-06-28T00:00:00Z', home });
+  assert.ok(!existsSync(join(root, '_memories', '_lib', 'state-cache.json')), 'dry run must not stamp — nothing was actually written');
 });

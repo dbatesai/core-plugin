@@ -38,6 +38,7 @@ import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
+import { hashText, stampFiles } from './state-cache.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 
 export { EDGES_BEGIN, EDGES_END };
@@ -143,6 +144,50 @@ export function decorateUnitText(text, unitId, edges, activeById) {
 }
 
 /**
+ * hashOutsideEdgesBlock — content hash of a unit's text with the
+ * marker-delimited edges block excluded, so a later mismatch against the
+ * cached stamp can tell "decorate-graph regenerated its own block" from "a
+ * human edited this unit" — same construction as hot-section.mjs's
+ * hashOutsideHotBlock for PROJECT.md's hot section. decorate-graph never
+ * touches anything outside EDGES_BEGIN/EDGES_END by construction (see
+ * decorateUnitText), so if this hash still matches the cached one, nothing
+ * outside the edges block changed regardless of what last_written_by claims.
+ *
+ * A malformed marker state (findExistingEdgesBlock returns {ok:false}) hashes
+ * the WHOLE text as "outside" — decorateStore refuses to touch (and never
+ * stamps) a malformed file anyway, so this path only matters for a stamp
+ * that predates a marker corruption introduced by something other than this
+ * script, which correctly falls through to "outside changed" on comparison.
+ */
+export function hashOutsideEdgesBlock(text) {
+  const t = String(text || '');
+  const scan = findExistingEdgesBlock(t);
+  const block = scan.ok ? scan.block : null;
+  const outside = block ? t.slice(0, block.start) + t.slice(block.end) : t;
+  return hashText(outside);
+}
+
+/**
+ * classifyUnitChange — deterministic classifier for a unit-file hash
+ * mismatch against the cached stamp, mirroring hot-section.mjs's
+ * classifyProjectMdChange for PROJECT.md's hot block. Returns:
+ *   'no-baseline'        — no cached outside_hash to compare against (older
+ *                          cache entry predating this fix, or never stamped).
+ *   'edges-block-only'   — everything outside the edges block is
+ *                          byte-identical to the last recorded write; safe to
+ *                          treat as CORE's own decoration regardless of the
+ *                          whole-file hash mismatch.
+ *   'outside-changed'    — content outside the edges block changed since the
+ *                          last stamp. decorate-graph.mjs cannot have
+ *                          produced this; MUST be treated as a genuine user
+ *                          edit.
+ */
+export function classifyUnitChange(cachedStamp, currentText) {
+  if (!cachedStamp || typeof cachedStamp.outside_hash !== 'string') return 'no-baseline';
+  return hashOutsideEdgesBlock(currentText) === cachedStamp.outside_hash ? 'edges-block-only' : 'outside-changed';
+}
+
+/**
  * decorateStore — the store-wide pass. One atomic snapshot (same
  * loadSnapshot(..., {captureBodies:true, retainRaw:true}) render-okf-export
  * uses), so ids/edges/raw bytes all derive from the same read — no
@@ -151,7 +196,7 @@ export function decorateUnitText(text, unitId, edges, activeById) {
  * Only ever touches top-level active units (loadSnapshot's own population);
  * archive/ is out of scope by construction, matching iterActiveUnits.
  */
-export function decorateStore(projectDir, { dryRun = false } = {}) {
+export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
   const cap = loadSnapshot(projectDir, { captureBodies: true, retainRaw: true });
   const units = cap.index.units;
   const activeById = new Map(units.map(u => [u.id, u]));
@@ -160,6 +205,7 @@ export function decorateStore(projectDir, { dryRun = false } = {}) {
   const changed = [];
   const unchanged = [];
   const refused = [];
+  const stampEntries = [];
   for (const u of units) {
     const raw = cap.raw?.[u.path];
     if (raw === undefined) continue; // scaffolding/unreadable — nothing to decorate
@@ -190,9 +236,22 @@ export function decorateStore(projectDir, { dryRun = false } = {}) {
         continue;
       }
       atomicWriteFileSync(filePath, updated);
+      // Stamp the state cache in the same operation, so next session's
+      // edit-detection recognizes this as CORE's own write rather than a
+      // between-session user edit (Hale's finding, 2026-07-22 — this used to
+      // be a prose instruction telling the AGENT to update the cache by
+      // hand; that's now code, matching hot-section.mjs's precedent).
+      stampEntries.push({
+        path: filePath,
+        hash: hashText(updated),
+        lastWrittenBy: 'decorate-graph',
+        extra: { outside_hash: hashOutsideEdgesBlock(updated) },
+      });
     }
     changed.push(u.path);
   }
+
+  if (!dryRun && stampEntries.length > 0) stampFiles(projectDir, stampEntries, { now, home });
 
   return {
     snapshot_id: cap.snapshotId,
