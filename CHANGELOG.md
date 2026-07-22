@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.1] — 2026-07-22
+
+### Fixed
+- **`source_sha` provenance metadata** in both shipped plugin manifests was stamped at version-bump time and never re-stamped, even though 36 more commits landed on `next` before the v3.13.0 PR actually merged — the tagged artifact carried a `source_sha` 33 commits stale relative to what it actually packaged. This is not cosmetic: `answer-close-hook.mjs` and `retrieve-context-hook.mjs` both read this field and stamp it as `producer_sha` on every retrieval-outcome and answer-close-outcome row, so the v3.13.0 tag was writing every such row with the wrong producer commit. Corrected to the actual packaged commit.
+- **Plugin manifest descriptions** still described `/export-obsidian` as producing an "OKF-conformant memory export" (the design superseded in v3.13.0 by in-place decoration) and undercounted the companion-utility list (five named where seven ship, missing `/metrics-package` and `/export-obsidian`). Corrected in `plugins/core/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
+
 ## [3.13.0] — 2026-07-21
 
 ### Added
