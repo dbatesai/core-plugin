@@ -161,6 +161,59 @@ test('export-obsidian: fully retired — no shipped skill, no lingering command 
   }
 });
 
+// The 2026-07-22 direct-verification backstop (David's direction: startup must ensure all
+// data is indexed and processed, not just infer it from close-pass bookkeeping). These guard
+// the same "op is really wired, not a phantom string" invariant as the decorate-graph tests
+// above, applied to the new unconditional startup step rather than the close-time wiring.
+test('startup: decoration + index refresh backstop runs for real (not --dry-run/--check), guarded like every script call', () => {
+  const s = read('skills', 'core', 'protocols', 'startup.md');
+  assert.match(s, /node "\$\{CORE_ROOT\}\/skills\/core\/scripts\/decorate-graph\.mjs" <project> \\/,
+    'startup must invoke decorate-graph.mjs directly, not just describe it');
+  assert.match(s, /node "\$\{CORE_ROOT\}\/skills\/core\/scripts\/maintenance-run\.mjs" <project> --json \\/,
+    'startup must invoke maintenance-run.mjs directly, not just describe it');
+
+  const backstop = s.indexOf('Decoration + index refresh backstop');
+  assert.ok(backstop > 0, 'the backstop step must exist');
+  const block = s.slice(backstop, backstop + 1500);
+  assert.ok(!/decorate-graph\.mjs[^\n]*--dry-run/.test(block), 'decoration must run for real, never --dry-run, at startup');
+  assert.ok(!/decorate-graph\.mjs[^\n]*--check/.test(block), 'decoration must run for real, never --check, at startup');
+  assert.match(block, /\[ -n "\$CORE_ROOT" \] && \[ -d "\$CORE_ROOT\/skills\/core\/scripts" \] &&/,
+    'the decoration/index calls must be guarded exactly like every other script call in this file');
+});
+
+test('startup: the backstop step sits right after the integrity probe and before the retrieval ladder', () => {
+  const s = read('skills', 'core', 'protocols', 'startup.md');
+  const integrity = s.indexOf('Integrity probe before loading');
+  const backstop = s.indexOf('Decoration + index refresh backstop');
+  const ladder = s.indexOf('The v2 load uses the retrieval ladder');
+  const catchUp = s.indexOf('## Startup catch-up');
+  assert.ok(integrity > 0 && backstop > 0 && ladder > 0 && catchUp > 0, 'all four anchors must exist');
+  assert.ok(backstop > integrity, 'the backstop must come after the integrity probe');
+  assert.ok(backstop < ladder, 'the backstop must run before the tiered retrieval ladder reads any unit content');
+  assert.ok(backstop < catchUp, 'the backstop must run before (and independent of) the close-pass catch-up bookkeeping');
+});
+
+test('startup: the backstop is framed as unconditional and independent of close-pass bookkeeping, not a duplicate of it', () => {
+  const s = read('skills', 'core', 'protocols', 'startup.md');
+  const backstop = s.indexOf('Decoration + index refresh backstop');
+  const catchUp = s.indexOf('## Startup catch-up');
+  const block = s.slice(backstop, catchUp);
+  assert.match(block, /unconditionally/, 'must state the step runs unconditionally');
+  assert.match(block, /independent of whatever the close-pass ledger believes happened/i,
+    'must state independence from close-pass bookkeeping explicitly');
+  assert.match(block, /backstop, not a replacement/, 'must state this is additive to, not a replacement for, /finalize and /process-memory wiring');
+  assert.match(block, /feedback_readiness_only_escalations/, 'must narrate per the only-escalate convention, not routine housekeeping');
+});
+
+test('startup: maintenance-run.mjs is the real index-regeneration entry point (matches /finalize\'s own "folded into maintenance-run" convention)', async () => {
+  // Guards against reinventing raw generate-*-index.mjs calls in the new step when the
+  // codebase already has one canonical, signature-gated bundling entry point for this.
+  const { runMaintenance } = await import('../../plugins/core/skills/core/scripts/maintenance-run.mjs');
+  assert.equal(typeof runMaintenance, 'function', 'maintenance-run.mjs must export runMaintenance');
+  const f = read('skills', 'finalize', 'SKILL.md');
+  assert.match(f, /folded into `maintenance-run`/, 'finalize must still treat maintenance-run as the single index-regen entry point');
+});
+
 test('codex: the exit-hook drop names startup-catch-up as the equivalent', () => {
   const c = read('skills', 'core', 'harnesses', 'codex.md');
   assert.match(c, /close-pass/i, 'codex adapter must carry the close-pass drop');
