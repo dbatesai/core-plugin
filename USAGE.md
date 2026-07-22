@@ -61,9 +61,9 @@ Capture the emotional truth of a session as ASCII art.
 
 ### `/metrics`
 
-A live, in-terminal proof that the memory system is actually working — no export, no file left behind.
+A live, in-terminal proof of what's actually working — and an honest account of what isn't measured yet.
 
-- **What it does:** builds a throwaway scratch store and proves the full write→validate→index→retrieve→suppress round trip fresh on every run, then reads this project's real validator counts, unit census, retrieval-log coverage, recognition-signal state, and calibration-pool progress. Renders a verdict (WORKING / WORKING — with caveats / DEGRADED / MACHINERY WORKING, NO STORE), a bar gauge per check, and a 1-3 sentence plain-voice summary — every number carrying an honest trust label (proven-live / direct / provisional).
+- **What it does:** reports three separate evidence classes, never blended into one verdict. **Mechanics** (the verdict line, `MECHANICS: WORKING` / `WORKING — with caveats` / `DEGRADED` / `MACHINERY WORKING, NO STORE`): builds a throwaway scratch store and proves the full write→validate→index→retrieve→suppress round trip fresh on every run, plus this project's real validator counts and unit census. **Retrieval regression** (its own section below the verdict — never covered by it): retrieval-log coverage, a live gold-set Recall@K run against the project's own pre-registered gold set when one exists, the live retrieval-quality proxy, the recognition signal, and calibration-pool progress. **User benefit** (its own section): honestly `not-evaluated` — nothing in CORE currently runs a matched memory-on/off comparison, so this row says so plainly rather than implying the other two classes cover it. A bar gauge per row, a 1-3 sentence plain-voice summary speaking to all three classes, and every number carrying an honest trust label (proven-live / direct / proxy / provisional / not-evaluated).
 - **When to use:** "is memory working," "prove the memory system works," "can I trust the store," or any time you want evidence instead of a claim.
 - **Writes:** nothing — read-only against the real store; its own scratch store lives in the temp dir and is deleted before the command returns.
 
