@@ -18,12 +18,13 @@
  * CLI:  node metrics-rollup.mjs <project> [--json] [--today YYYY-MM-DD]
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION } from './classify-turns.mjs';
+import { dedupeClassifiedByDay, formatDedupeNote } from './metrics-dedupe.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
 
@@ -54,14 +55,33 @@ function readClassified(dir, date) {
   }).filter(Boolean);
 }
 
+/**
+ * Read EVERY daily classified file (ascending date order) and return the
+ * replay-deduped per-day view plus store-wide dedupe stats. Store-wide, not
+ * per-file, because a session re-processed on a later date appends the same
+ * turns under a new date — only a whole-store pass keeps totals stable under
+ * that replay (Hale's replay-identity falsifier). The store is small (daily
+ * JSONL, one row per classified turn), so the full read is cheap.
+ */
+function readClassifiedDeduped(dir) {
+  let files = [];
+  try {
+    files = readdirSync(dir)
+      .filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
+      .sort();
+  } catch { files = []; }
+  const daysInput = files.map((f) => ({ day: f.slice(0, 10), rows: readClassified(dir, f.slice(0, 10)) }));
+  return dedupeClassifiedByDay(daysInput);
+}
+
 function rate(records, state) {
   if (!records.length) return null;
   const n = records.filter((r) => r.state === state).length;
   return { n, total: records.length, pct: n / records.length };
 }
 
-/** Trailing 7-day average rate of `state`, excluding `today`. */
-function trailingAvg(classifiedDir, today, state, days = 7) {
+/** Trailing 7-day average rate of `state`, excluding `today`, over the deduped per-day view. */
+function trailingAvg(dedupedDays, today, state, days = 7) {
   const dates = [];
   const base = new Date(today + 'T00:00:00Z');
   for (let i = 1; i <= days; i++) {
@@ -71,8 +91,7 @@ function trailingAvg(classifiedDir, today, state, days = 7) {
   }
   const rates = [];
   for (const date of dates) {
-    const recs = readClassified(classifiedDir, date);
-    const r = rate(recs, state);
+    const r = rate(dedupedDays[date] || [], state);
     if (r) rates.push(r.pct);
   }
   if (!rates.length) return null;
@@ -88,30 +107,41 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
   const metaDir = operationalMetricsDir(wid, { home });
   const classifiedDir = join(metaDir, 'classified');
 
-  const todayRecs = readClassified(classifiedDir, date);
+  // Read-side replay dedupe (metrics-dedupe.mjs): the classified store is
+  // append-only, so re-processed sessions appear more than once. Aggregate
+  // over the deduped view; surface the dedupe stats, never bury them.
+  const { days: dedupedDays, stats: dedupe } = readClassifiedDeduped(classifiedDir);
+  const todayRecs = dedupedDays[date] || [];
   const dist = {};
   for (const r of todayRecs) dist[r.state] = (dist[r.state] || 0) + 1;
   const headline = rate(todayRecs, HEADLINE);
-  const avg = trailingAvg(classifiedDir, date, HEADLINE);
+  const avg = trailingAvg(dedupedDays, date, HEADLINE);
 
   // Phase 3: read calibration state to determine whether to drop PROVISIONAL tag.
   const calState = readCalibrationState(metaDir);
   const provisional = !calState.is_calibrated;
   const provisionalTag = provisional ? ' [PROVISIONAL — classifier uncalibrated]' : '';
 
+  // Visible in the one-line signal whenever the dedupe actually changed the
+  // numbers (dropped rows or conflicts); always present in JSON + daily md.
+  const lossy = dedupe.rows_read !== dedupe.rows_kept || dedupe.conflicts > 0;
+  const dedupeTag = lossy
+    ? ` [replay-dedupe: ${dedupe.rows_read}→${dedupe.rows_kept} store-wide${dedupe.conflicts ? `, ${dedupe.conflicts} conflict${dedupe.conflicts === 1 ? '' : 's'}` : ''}]`
+    : '';
+
   let signal;
   if (!todayRecs.length) {
     // provisionalTag is '' when calibrated; the old `|| ' [PROVISIONAL]'` fallback
     // re-added the tag on a calibrated workspace, mislabeling honest metrics (M5).
-    signal = `metrics: no classified turns for ${date} yet${provisionalTag}`;
+    signal = `metrics: no classified turns for ${date} yet${dedupeTag}${provisionalTag}`;
   } else {
     const todayPct = Math.round(headline.pct * 100);
     const avgStr = avg == null ? 'n/a (no prior 7d)' : `${Math.round(avg * 100)}%`;
     const arrow = avg == null ? '' : headline.pct > avg + 0.02 ? ' ↑' : headline.pct < avg - 0.02 ? ' ↓' : ' ≈';
-    signal = `${HEADLINE}: ${headline.n}/${headline.total} turns today (${todayPct}%) vs 7-day avg ${avgStr}${arrow}${provisionalTag}`;
+    signal = `${HEADLINE}: ${headline.n}/${headline.total} turns today (${todayPct}%) vs 7-day avg ${avgStr}${arrow}${dedupeTag}${provisionalTag}`;
   }
 
-  return { date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg, provisional, calibrated: calState.is_calibrated, signal, metaDir };
+  return { date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg, provisional, calibrated: calState.is_calibrated, dedupe, signal, metaDir };
 }
 
 export function writeRollup(r) {
@@ -127,6 +157,7 @@ export function writeRollup(r) {
       '',
       `Headline ${HEADLINE} rate: ${r.headline ? `${r.headline.n}/${r.headline.total} (${Math.round(r.headline.pct * 100)}%)` : 'n/a'}`,
       `Trailing 7-day avg: ${r.trailing_avg == null ? 'n/a' : `${Math.round(r.trailing_avg * 100)}%`}`,
+      ...(r.dedupe ? [`Replay-dedupe (store-wide): ${formatDedupeNote(r.dedupe)}`] : []),
       '',
       '## State distribution (today)',
       ...Object.entries(r.distribution).sort((a, b) => b[1] - a[1]).map(([s, n]) => `- ${s}: ${n}`),

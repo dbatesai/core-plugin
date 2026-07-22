@@ -171,3 +171,94 @@ test('MET-013: detector output (anticipation-gap) can never reach the headline s
     rmSync(project, { recursive: true, force: true });
   }
 });
+
+// ============================================================
+// Read-side replay dedupe (metrics-dedupe.mjs wiring, 2026-07-22 —
+// Hale's replay-identity falsifier: reprocessing the same
+// (harness, session, turn, producer version) leaves totals unchanged)
+// ============================================================
+
+const ident = (over = {}) => ({
+  schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+  harness: 'claude-code', provisional: true, session_id: 'sess-replay', ...over,
+});
+
+test('replay dedupe: a session processed twice in one day yields the same rollup as once', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rollup-replay-'));
+  const project = mkdtempSync(join(tmpdir(), 'rollup-replay-proj-'));
+  try {
+    const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+    mkdirSync(dir, { recursive: true });
+    const once = [
+      ident({ turn_idx: 0, state: 'rec-fail-tier-0' }),
+      ident({ turn_idx: 1, state: 'tier-0-win' }),
+      ident({ turn_idx: 2, state: 'tier-0-win' }),
+      ident({ turn_idx: 3, state: 'tier-1-3-win' }),
+    ];
+    const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    writeFileSync(join(dir, '2026-06-02.jsonl'), lines(once));
+    const clean = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    writeFileSync(join(dir, '2026-06-02.jsonl'), lines([...once, ...once])); // replay: same session appended again
+    const replayed = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    assert.deepEqual(replayed.distribution, clean.distribution, 'state distribution stable under replay');
+    assert.deepEqual(replayed.headline, clean.headline, 'headline rate stable under replay');
+    assert.equal(replayed.dedupe.replays_dropped, 4);
+    assert.match(replayed.signal, /replay-dedupe: 8→4 store-wide/, 'dedupe surfaced in the one-line signal');
+    assert.match(replayed.signal, /rec-fail-tier-0: 1\/4 turns today \(25%\)/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('replay dedupe: newer classifier_version wins; conflicts are counted and visible in signal + daily md', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rollup-conflict-'));
+  const project = mkdtempSync(join(tmpdir(), 'rollup-conflict-proj-'));
+  try {
+    const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '2026-06-02.jsonl'), [
+      // turn 0: classified under 0.2.0, then re-classified under 0.3.0 → newest wins, counted once
+      JSON.stringify(ident({ turn_idx: 0, classifier_version: '0.2.0', state: 'tier-0-win' })),
+      JSON.stringify(ident({ turn_idx: 0, classifier_version: '0.3.0', state: 'rec-fail-tier-0' })),
+      // turn 1: same versions, contradictory states → last-written wins, conflict counted
+      JSON.stringify(ident({ turn_idx: 1, state: 'tier-1-3-win' })),
+      JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
+    ].join('\n') + '\n');
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    assert.equal(r.headline.total, 2, 'two turns, not four rows');
+    assert.deepEqual(r.distribution, { 'rec-fail-tier-0': 2 });
+    assert.equal(r.dedupe.superseded_dropped, 1);
+    assert.equal(r.dedupe.conflicts, 1);
+    assert.match(r.signal, /1 conflict/, 'conflict visible in the signal');
+    const md = readFileSync(join(r.metaDir, 'rollups', 'daily', '2026-06-02.md'), 'utf8');
+    assert.match(md, /Replay-dedupe \(store-wide\): 4 rows read, 2 after replay-dedupe \(1 replay, 1 superseded, 1 conflict\)/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('replay dedupe: a cross-date replay does not double-count today or the trailing window', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rollup-xdate-'));
+  const project = mkdtempSync(join(tmpdir(), 'rollup-xdate-proj-'));
+  try {
+    const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+    mkdirSync(dir, { recursive: true });
+    const sess = [ident({ turn_idx: 0, state: 'tier-0-win' }), ident({ turn_idx: 1, state: 'tier-0-win' })];
+    const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    // Session captured on 06-01, replayed identically at a catch-up on 06-02;
+    // a fresh session (different id) also ran on 06-02.
+    writeFileSync(join(dir, '2026-06-01.jsonl'), lines(sess));
+    writeFileSync(join(dir, '2026-06-02.jsonl'),
+      lines([...sess, ident({ session_id: 'sess-fresh', turn_idx: 0, state: 'rec-fail-tier-0' })]));
+    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    // The replayed turns attribute once (to the winning, later row); the fresh turn is separate.
+    assert.equal(r.headline.total, 3, 'today = 2 replay-winning turns + 1 fresh turn, no double count');
+    assert.equal(r.dedupe.replays_dropped, 2);
+    assert.equal(r.dedupe.rows_kept, 3);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});

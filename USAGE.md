@@ -8,7 +8,7 @@ For the design reasoning behind any of this, see [ARCHITECTURE.md](ARCHITECTURE.
 
 ## Commands
 
-Eight slash commands ship with the plugin: `/core` and seven companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
+Nine slash commands ship with the plugin: `/core` and eight companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
 
 ### `/core`
 
@@ -75,6 +75,14 @@ Pull an anonymized stats package showing how well the memory is actually working
 - **When to use:** "pull the memory stats," "export a metrics package," or whenever you want shareable evidence of how the memory system is performing.
 - **Writes:** a zip file to `~/Desktop/`.
 
+### `/memory-view`
+
+Browse what CORE knows — the unit graph, full unit bodies, edges and backlinks, plus the memory-health section — as one self-contained, read-only page, published as a **private** hosted artifact so you can open it in the Claude app on desktop or phone.
+
+- **What it does:** generates a single HTML snapshot from the project's memory store (active units by default; archive and per-topic exclusions are explicit choices), then shows you a preflight manifest — unit count, byte count, scope, snapshot id, and a sensitivity warning — and publishes **only after you confirm**. Every publish is explicit and individually confirmed; there is no standing consent and it never runs at startup, close, or on a schedule. The page itself is stamped point-in-time and read-only, with the generating plugin version and store snapshot id in the banner. Each generation writes a local receipt (`~/.core/workspaces/<id>/artifact-receipts/`) recording exactly what was generated for publish and when.
+- **When to use:** "publish the memory view," "refresh the memory artifact," "let me browse the graph on my phone," or any time seeing the store beats being told about it. On a harness with no artifact surface (Codex), it generates the same page locally and gives you the file path instead — no faking.
+- **Writes:** the HTML file to the scratch path you choose (never into the project or the store — the store is read-only to this flow) and the local receipt. Unit content never routes into the anonymized `/metrics-package` export.
+
 ---
 
 ## Additional reference
@@ -104,7 +112,7 @@ Supporting references live alongside them: `retrieval.md` (the four-tier ladder 
 The plugin ships the deterministic spine the commands run on — the surfaces where inference can't be trusted to be exact. You don't call these directly; the commands and protocols do. Grouped by what they're for:
 
 - **Memory store & retrieval** — `retrieve-context.mjs` (the live retriever: title ∪ body-BM25 over one request-scoped snapshot + one-hop edge expansion; `buildFinalContextPack` is the single implementation of the delivered context — ordering, tier labels, byte cap — that the per-turn hook, the `--pack` CLI mode, and the measurement harness all call; `buildRetrievalTrace` records a local-only per-request evidence trace), `bm25.mjs` (the body-search arm + tokenizer), `generate-summary-index.mjs` (the recursive path-bearing retrieval index + validating loader + `loadSnapshot` content-addressed snapshot identity), `select-relevant-units.mjs` (the reasoning-tier shortlist), `retrieval-harness.mjs` (offline recall measurement on the product path; its final-context arm scores delivered identities, byte cap included), `aggregate-receipt.mjs` (the privacy-safe evidence exporter: whitelist-built aggregate receipt + refusal scan; rows stay local), `priority.mjs` (the ranking function), `check-units.mjs` (schema + integrity validation), `graph-walk.mjs` (typed-edge traversal), `generate-decisions-index.mjs` / `generate-risks-index.mjs` / `generate-memory-index.mjs` (the indexes).
-- **`PROJECT.md` rendering & hygiene** — `hot-section.mjs` (the top-of-file "right now" block), `compact-project.mjs` (file-cap compaction), `demote-moves.mjs` / `demote-state-narrative.mjs` (tier discipline), `decorate-graph.mjs` (in-place Obsidian `[[wikilink]]` decoration of `_memories/`, run automatically at close and on-demand hygiene passes).
+- **`PROJECT.md` rendering & hygiene** — `hot-section.mjs` (the top-of-file "right now" block), `compact-project.mjs` (file-cap compaction), `demote-moves.mjs` / `demote-state-narrative.mjs` (tier discipline), `decorate-graph.mjs` (in-place Obsidian `[[wikilink]]` decoration of `_memories/`, run automatically at close and on-demand hygiene passes), `render-browse-artifact.mjs` (the `/memory-view` generator: one self-contained, read-only HTML snapshot of the store plus the preflight manifest and local receipt — it never uploads anything itself).
 - **Validity dimension** — `bitemporal.mjs` (the `t_valid`/`t_invalid` stamp, as-of queries, storage-health metrics), `impact-trace.mjs` (what an invalidation touches).
 - **Self-measurement** — `metrics-init.mjs`, `classify-turns.mjs`, `metrics-rollup.mjs`, `metrics-detectors.mjs`, `calibrate-classifier.mjs`, `metrics-check.mjs` (the `/metrics` live evidence check: round-trip probe + store health + calibration-pool progress), `log-event.mjs`, `record-retrieval-event.mjs`, `analyze-retrieval-quality.mjs`, `analyze-retrieval-skip.mjs`, `read-transcript.mjs`.
 - **Capability & identity** — `resolve-plugin-root.mjs`, `capability-probe.mjs`, `capability-history.mjs`, `record-capability-snapshot.mjs`, `analyze-capability-drift.mjs`, `workspace-fork-check.mjs`, `project-slug.mjs`, `write-visibility-canary.mjs`.

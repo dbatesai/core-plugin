@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
-  buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging,
+  buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging, workspaceMetrics,
 } from '../../plugins/core/skills/core/scripts/metrics-package.mjs';
 
 // Planted tripwires — distinctive strings that MUST NOT survive into any package byte.
@@ -383,5 +383,40 @@ test('separate-log outcomes join by authority: conflict at equal authority resol
     const stats = retrievalStats(root, makeSeal('cafe'.repeat(8)));
     const day = stats.days['2026-07-17'];
     assert.deepEqual(day.outcomes, { useful: 1 }, 'stronger evidence wins r-1; r-2 conflict resolves unknown and stays out of denominators');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('workspace recognition dedupes replayed classified rows before counting, and ships numeric dedupe stats', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-dedupe-'));
+  try {
+    const home = join(root, 'home');
+    const clsDir = join(home, '.core', 'workspaces', 'ws-dedupe', 'metrics', 'classified');
+    mkdirSync(clsDir, { recursive: true });
+    const ident = (over = {}) => ({
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+      harness: 'claude-code', provisional: true, session_id: 'sess-pkg', ...over,
+    });
+    const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    // 07-01: a session classified once (2 turns), then fully replayed at a
+    // catch-up on 07-08 — plus one 07-08 re-classification under a NEWER
+    // classifier and one same-version contradiction.
+    writeFileSync(join(clsDir, '2026-07-01.jsonl'), lines([
+      ident({ turn_idx: 0, state: 'tier-0-win' }),
+      ident({ turn_idx: 1, classifier_version: '0.2.0', state: 'tier-1-3-win' }),
+    ]));
+    writeFileSync(join(clsDir, '2026-07-08.jsonl'), lines([
+      ident({ turn_idx: 0, state: 'tier-0-win' }), // pure replay, same state
+      ident({ turn_idx: 0, state: 'rec-fail-tier-0' }), // same key, different state → conflict
+      ident({ turn_idx: 1, state: 'rec-fail-tier-0' }), // newer classifier supersedes the 0.2.0 row
+    ]));
+    const w = workspaceMetrics(home, 'ws-dedupe');
+    assert.equal(w.recognition.available, true);
+    const totalTurns = Object.values(w.recognition.days).reduce((n, d) => n + d.turns, 0);
+    assert.equal(totalTurns, 2, '5 rows collapse to 2 turns — totals stable under replay');
+    assert.equal(w.recognition.days['2026-07-01'].turns, 0, 'replayed rows attribute to the winning later day');
+    assert.deepEqual(w.recognition.days['2026-07-08'].states, { 'rec-fail-tier-0': 2 });
+    assert.deepEqual(w.recognition.replay_dedupe, {
+      rows_read: 5, rows_kept: 2, replays_dropped: 2, superseded_dropped: 1, conflicts: 1, unkeyed_kept: 0,
+    }, 'dedupe stats ship as plain numbers');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

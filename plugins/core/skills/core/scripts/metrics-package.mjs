@@ -45,6 +45,7 @@ import { loadUnit } from './priority.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
 import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
+import { dedupeClassifiedByDay } from './metrics-dedupe.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'metrics-package-salt';
@@ -534,10 +535,19 @@ export function workspaceMetrics(home, workspaceId) {
   const recognition = { available: false, reason: 'no classified turn files', _trust: TRUST.PROVISIONAL, _trust_basis: 'classifier has not cleared its calibration gate — trends only, never levels', days: {} };
   const clsDir = join(wsDir, 'metrics', 'classified');
   if (existsSync(clsDir)) {
+    // Read-side replay dedupe (metrics-dedupe.mjs): the classified store is
+    // append-only, so re-processed sessions appear more than once. Dedupe
+    // store-wide (a replay can land in a later date file) BEFORE counting;
+    // winners keep the day of the surviving row. Stats ship as numbers only —
+    // no free text — so the whitelist boundary is untouched.
+    const daysInput = [];
     for (const f of readdirSync(clsDir).sort()) {
       const day = isoDay(f);
       if (!day || !f.endsWith('.jsonl')) continue;
-      const { rows } = readJsonlSafe(join(clsDir, f));
+      daysInput.push({ day, rows: readJsonlSafe(join(clsDir, f)).rows });
+    }
+    const { days: dedupedDays, stats } = dedupeClassifiedByDay(daysInput);
+    for (const [day, rows] of Object.entries(dedupedDays)) {
       const states = {};
       let provisional = 0;
       for (const r of rows) {
@@ -552,7 +562,18 @@ export function workspaceMetrics(home, workspaceId) {
         provisional_share: rows.length ? round3(provisional / rows.length) : null,
       };
     }
-    if (Object.keys(recognition.days).length) { recognition.available = true; delete recognition.reason; }
+    if (Object.keys(recognition.days).length) {
+      recognition.available = true;
+      delete recognition.reason;
+      recognition.replay_dedupe = {
+        rows_read: stats.rows_read,
+        rows_kept: stats.rows_kept,
+        replays_dropped: stats.replays_dropped,
+        superseded_dropped: stats.superseded_dropped,
+        conflicts: stats.conflicts,
+        unkeyed_kept: stats.unkeyed_kept,
+      };
+    }
   }
 
   let calibration = { available: false, reason: 'no calibration-state.json' };

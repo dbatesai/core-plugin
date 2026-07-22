@@ -72,6 +72,8 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // import-only, no entry guard). 53 → 54 (2026-07-22): lifecycle-detect.mjs,
   // the executable user-authorship-boundary preflight (Hale's fix) — a
   // genuinely-new CLI tool with its own entry point (lifecycle-core.mjs is
-  // import-only, no entry guard). Still target one shared isCliEntry() helper.
-  assert.ok(n <= 54, `CLI-entry-guard occurrences grew past baseline 54 (target: one shared helper): ${n}`);
+  // import-only, no entry guard). 54 → 55 (2026-07-22): render-browse-artifact.mjs,
+  // the /memory-view snapshot-page generator — a genuinely-new CLI tool with its
+  // own entry point, not a copy. Still target one shared isCliEntry() helper.
+  assert.ok(n <= 55, `CLI-entry-guard occurrences grew past baseline 55 (target: one shared helper): ${n}`);
 });

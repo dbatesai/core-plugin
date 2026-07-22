@@ -32,7 +32,9 @@ export function buildReportMd({ manifest, projects }) {
     lines.push(`- **Store:** ${numOr(h.units_total)} units, ${numOr(h.edges_total)} edges · ${numOr(h.edges_per_active_unit)} edges/active unit · orphan rate ${pct(h.orphan_rate)} *(direct)*`);
     lines.push(`- **Retrieval:** ${numOr(h.retrieval_events_total)} logged events · escalation past lexical ${pct(h.escalation_rate)} · dip-back rate ${h.dip_back_rate != null ? pct(h.dip_back_rate) : `unobserved (0/${numOr(h.retrieval_events_total,'0')} rows carry the field)`} · ${numOr(h.miss_total, '0')} misses *(proxy — corpus not yet fully product-emitted)*`);
     lines.push(`- **Validator:** ${numOr(h.warn_total)} warnings, ${numOr(h.fail_total, '0')} failures *(direct)*`);
-    lines.push(`- **Recognition:** latest rec-fail rate ${h.recfail_latest_rate != null ? pct(h.recfail_latest_rate) : `withheld (sample ${numOr(h.recfail_latest_sample, '0')} turns < 20 floor)`} *(provisional — uncalibrated classifier)*`);
+    const rd = proj.blocks['workspace-metrics']?.recognition?.replay_dedupe;
+    const rdNote = rd ? ` · replay-dedupe ${rd.rows_read}→${rd.rows_kept} rows (${rd.superseded_dropped} superseded, ${rd.conflicts} conflicts)` : '';
+    lines.push(`- **Recognition:** latest rec-fail rate ${h.recfail_latest_rate != null ? pct(h.recfail_latest_rate) : `withheld (sample ${numOr(h.recfail_latest_sample, '0')} turns < 20 floor)`}${rdNote} *(provisional — uncalibrated classifier)*`);
     lines.push(`- **PROJECT.md:** ${h.project_md_bytes != null ? `${Math.round(h.project_md_bytes / 1024)}KB` : '—'}`);
     lines.push('');
     if (proj.deltas?.available) {
@@ -199,6 +201,8 @@ export function buildReportHtml({ manifest, projects }) {
       const weekKeys = Object.keys(w.recognition.weeks).sort();
       recLine = lineChart('rec-fail-tier-0 turns per week (PROVISIONAL — uncalibrated)',
         weekKeys.map(week => ({ label: week, value: (w.recognition.weeks[week].states['rec-fail-tier-0'] || 0) })));
+      const rd = w.recognition.replay_dedupe;
+      if (rd) recLine += `<div class="note">Replay-dedupe: ${esc(rd.rows_read)} classified rows read, ${esc(rd.rows_kept)} kept (${esc(rd.replays_dropped)} replays, ${esc(rd.superseded_dropped)} superseded, ${esc(rd.conflicts)} conflicts, ${esc(rd.unkeyed_kept)} unkeyed kept).</div>`;
     }
 
     const deltas = proj.deltas?.available

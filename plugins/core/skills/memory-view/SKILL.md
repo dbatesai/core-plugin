@@ -1,0 +1,64 @@
+---
+name: memory-view
+description: Generate a self-contained, read-only HTML snapshot of the current project's CORE memory store — interactive unit graph, full unit reading pane with edges and backlinks, and the four-evidence-class memory-health section — then walk the user through an explicit, preflight-confirmed publish of it as a PRIVATE hosted artifact (or hand them the local file path on harnesses with no artifact surface). Use whenever the user asks to "publish the memory view", "refresh the memory artifact", "show me what you know as a page I can open on my phone", "let me browse the memory graph without a terminal", or any request to see the unit graph/store contents from the Claude app rather than from disk. Do NOT use for the in-terminal health check (that's /metrics), for the anonymized shareable stats export (that's /metrics-package), or for editing memory (nothing published here is editable — PROJECT.md remains the editing surface). NEVER run this automatically — not at startup, not at /finalize or session close, not on any schedule; it runs only when the user explicitly asks.
+user-invocable: true
+allowed-tools:
+  - Read
+  - Bash
+  - Artifact
+---
+
+# `/memory-view` — publish a read-only snapshot of what CORE knows
+
+One self-contained HTML page — unit graph, unit bodies, edges, backlinks, memory-health section — generated from the project's `_memories/` store and published as a **private** hosted artifact so the user can browse it from the Claude app on desktop or phone. This page embeds **real memory-unit bodies**. Uploading it is a disclosure boundary (Hale's seven conditions, 2026-07-22, all binding), so the flow below is not a suggestion: **every publish is explicitly user-triggered, preflight-confirmed, verified private, and receipted. No exceptions, ever.**
+
+**The script is the only generator.** `scripts/render-browse-artifact.mjs` (in the core skill's `scripts/` directory) reads the store through the same snapshot loader decoration uses, writes the HTML, prints the preflight manifest, and writes the local receipt. It never uploads anything — publishing is YOUR step, and only after the user's go-ahead. Never hand-assemble or edit the HTML; never publish a file this script didn't just generate.
+
+**Script path resolution.** Resolve `CORE_ROOT` the same way `/metrics` does: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/memory-view/SKILL.md` — that prefix is the plugin root. Reuse the `CORE_ROOT` startup already resolved this session if you have it. If you cannot resolve a concrete root, say so plainly and stop — never run `node` against a guessed path.
+
+## Step 1 — generate the snapshot locally
+
+Resolve scope from the user's words: default is **active units only** (condition 7 — content minimization). "Everything including the archive" → `--scope all-including-archive`. "Leave out <topic>" → `--exclude-topic <topic>` (repeatable). Never widen scope beyond what the user asked for.
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" <project-dir> \
+  --out <scratch-path>/core-memory-browse.html [--scope ...] [--exclude-topic ...]
+```
+
+`--out` goes to a scratch/temp location — **never inside the project, never inside `_memories/`** (the script refuses the latter itself). The store is read-only to this whole flow. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2.
+
+## Step 2 — show the manifest, get explicit consent (EVERY time)
+
+Before ANY publish, show the user, plainly: the **unit count**, the **byte count**, the **scope** (and anything excluded), the **snapshot id**, and the **sensitivity warning verbatim**. Then ask for an explicit go-ahead for **this** publish.
+
+- This happens on **every** publish, including a routine "refresh the memory artifact" of the same page to the same URL. There is **no standing consent** — a yes last time authorizes nothing this time.
+- Never publish at startup, at `/finalize`/session close, on a schedule, from a hook, or as a side effect of any other task. The user asks; you show the manifest; the user confirms; only then do you publish. (Conditions 1 + 2.)
+- If the user does not clearly confirm, stop. The local file exists; tell them its path and that nothing left the machine.
+
+## Step 3 — publish private, verify private
+
+Publish the generated HTML via the harness's artifact capability as a **private** page (on Claude Code that is the Artifact tool; artifacts start private — republish to the same file path/URL to keep a stable link).
+
+Required checks, stated because they are conditions, not habits (condition 3):
+
+- **Verify the artifact is private at publish time.** If the harness cannot confirm visibility, treat the publish as failed: say so, and do not hand the user a URL as if it were private.
+- **No silent sharing carryover on republish.** If this artifact URL existed before, its sharing setting may have been broadened since — re-verify privacy on every republish; never assume the previous state held.
+
+**Harness honesty (DC-75 — the cross-harness capability contract):** on a harness with no artifact surface (Codex today), say so by name and fall back to the local file: give the user the exact `--out` path and how to open it. Never fake a publish, never claim a hosted URL that does not exist.
+
+## Step 4 — receipt and the honest revocation story
+
+After a publish (or a declined one), confirm the **local receipt** was written — the manifest names its path (`~/.core/workspaces/<workspace-id>/artifact-receipts/<timestamp>.json`); it is the audit record of exactly what was generated for publish, when, at which snapshot (condition 4 + Antigravity's persistence refinement). If the script reported the receipt failed to write, surface that and do not publish until one lands.
+
+Then tell the user the deletion path, honestly: they can delete the artifact from their artifact gallery at claude.ai (or ask you to overwrite it with an empty page first), **and** deleting a hosted artifact may not scrub hosted copies or caches instantly — say that plainly rather than implying deletion is instant and total. The receipt stays on their machine as the record of what went up.
+
+## Boundary that never moves
+
+**Unit content never routes into the anonymized `/metrics-package` export** (condition 5). Structurally it can't — the exporter builds from a disjoint numeric/pseudonym allowlist and never reads unit bodies — and behaviorally you must never "borrow" this page's embedded content for any export, summary package, or shared aggregate. This page is the one deliberate, per-publish, user-confirmed disclosure of real unit bodies; nothing else inherits it.
+
+## Self-healing rails
+
+- **No `_memories/` store here:** say so; offer `/core` to start one. Nothing to publish.
+- **No `workspace.json`:** the receipt falls back to `~/.core/artifact-receipts/` and the manifest flags it (`receipt_fallback: true`) — mention it, don't hide it.
+- **Store feels too big to publish whole:** that's what scope selection is for — suggest `--exclude-topic` or staying with the active-only default rather than skipping the preflight.
+- **Metrics gathering failed during generation:** the page carries an honest "metrics not gathered" line instead of the health section; the snapshot is still valid to publish.
