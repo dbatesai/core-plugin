@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { buildSkillsManifest, SKILLS_MANIFEST_VERSION } from '../../plugins/core/skills/core/scripts/generate-skills-manifest.mjs';
 
 function scratchPlugin(skills) {
@@ -63,7 +64,7 @@ test('manifest_version is stamped so a consumer can detect a shape change', () =
 });
 
 test('the real shipped skills tree enumerates cleanly, command is exactly the SKILL.md name with a leading slash', () => {
-  const realRoot = join(new URL('../../plugins/core', import.meta.url).pathname);
+  const realRoot = fileURLToPath(new URL('../../plugins/core', import.meta.url));
   const manifest = buildSkillsManifest(realRoot);
   assert.ok(manifest.skills.length >= 9, 'every shipped skill directory is present');
   const core = manifest.skills.find(s => s.dir === 'core');
