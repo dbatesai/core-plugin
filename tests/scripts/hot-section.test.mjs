@@ -5,8 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import {
   applyHotSection, recordProjectMdWrite, HOT_BEGIN, HOT_END,
+  currentHotSection, clearHotSection, candidatesForSynthesis,
+  HOT_SECTION_TOKEN_BUDGET, hashOutsideHotBlock, classifyProjectMdChange,
 } from '../../plugins/core/skills/core/scripts/hot-section.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/hot-section.mjs', import.meta.url));
@@ -67,6 +70,76 @@ test('recordProjectMdWrite tolerates a missing per-project cache file (creates i
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// ---------- Hale's hot-section-edit-attribution finding (2026-07-21) ----------
+//
+// `last_written_by: hot-section` alone is a stale label: it proves who wrote the
+// PREVIOUSLY cached bytes, not the CURRENT ones. A user edit made after a hot-section
+// apply would carry that same stale label at the next check and get silently
+// misclassified as CORE's own synthesis — a direct violation of the user-control
+// invariant (a user edit must never be silently discarded). These tests exercise the
+// deterministic replacement: `outside_hash` + `classifyProjectMdChange`, which hashes
+// only the content outside the hot-section markers — hot-section.mjs never touches
+// that region by construction, so a mismatch there can only be a user edit.
+
+test("classifyProjectMdChange: a user edit outside the hot block after a hot-section apply reads as 'outside-changed', not hot-block-only", () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'Right now: shipping the thing.', { now: '2026-06-06T00:00:00Z', home });
+    const cachedStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[join(project, 'PROJECT.md')];
+    assert.match(cachedStamp.outside_hash, /^[0-9a-f]{16}$/, 'the stamp records an outside-block hash');
+
+    // The user edits PROJECT.md outside the markers — the exact scenario the old
+    // last_written_by-only check would have silently misattributed to CORE.
+    const current = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    const userEdited = current.replace('The thing.', 'The thing, but I changed this myself.');
+    assert.notEqual(userEdited, current, 'sanity: the edit actually changed the text');
+
+    const verdict = classifyProjectMdChange(cachedStamp, userEdited);
+    assert.equal(verdict, 'outside-changed',
+      'a change outside the hot block must never read as hot-block-only, regardless of the stale last_written_by label');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('classifyProjectMdChange: a second, later hot-section apply (only the marker block changes) reads as hot-block-only', () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'Right now: first synthesis.', { now: '2026-06-06T00:00:00Z', home });
+    const cachedStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[join(project, 'PROJECT.md')];
+
+    const updatedText = applyHotSection(project, 'Right now: second synthesis, nothing outside changed.', { now: '2026-06-06T01:00:00Z', home });
+    const verdict = classifyProjectMdChange(cachedStamp, updatedText);
+    assert.equal(verdict, 'hot-block-only', 'a real hot-section-only change is correctly recognized as safe');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('classifyProjectMdChange: no cached outside_hash (older/missing stamp) reports no-baseline rather than guessing', () => {
+  assert.equal(classifyProjectMdChange(null, 'anything'), 'no-baseline');
+  assert.equal(classifyProjectMdChange({ last_written_by: 'hot-section' }, 'anything'), 'no-baseline',
+    'a pre-fix stamp with no outside_hash must not be silently trusted as hot-block-only');
+});
+
+test('hashOutsideHotBlock: identical regardless of what changes INSIDE the markers', () => {
+  const withBlockA = `# Project\n${HOT_BEGIN}\nfoo\n${HOT_END}\n\nbody text\n`;
+  const withBlockB = `# Project\n${HOT_BEGIN}\nbar bar bar\n${HOT_END}\n\nbody text\n`;
+  assert.equal(hashOutsideHotBlock(withBlockA), hashOutsideHotBlock(withBlockB));
+});
+
+test('clearHotSection stamps recordProjectMdWrite so edit-detection state stays truthful after a clear (Hale, second finding)', () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'Right now: shipping the thing.', { now: '2026-06-06T00:00:00Z', home });
+    clearHotSection(project, { now: '2026-06-06T02:00:00Z', home });
+
+    const cache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
+    const entry = cache.files[join(project, 'PROJECT.md')];
+    assert.equal(entry.last_written, '2026-06-06T02:00:00Z', 'the clear re-stamps the cache, not just the earlier apply');
+
+    const actualHash = createHash('sha256')
+      .update(readFileSync(join(project, 'PROJECT.md'), 'utf8'), 'utf8').digest('hex').slice(0, 16);
+    assert.equal(entry.last_hash, actualHash, 'cached hash matches the post-clear file — no longer permanently stale');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('recordProjectMdWrite prunes the file entry from the GLOBAL cache (one-release migration), preserving others', () => {
   const { root, project, home, globalCachePath, projectCachePath } = setup();
   try {
@@ -114,5 +187,223 @@ test('apply reads stdin when neither --text nor --file is given', () => {
     assert.equal(res.status, 0, `apply via stdin exits 0 (stderr: ${res.stderr})`);
     const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
     assert.ok(pm.includes(prose), 'stdin prose lands in PROJECT.md');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---- coverage additions (2026-07-20, iteration ~71): currentHotSection,
+// clearHotSection, candidatesForSynthesis, applyHotSection's over-budget
+// throw, and the CLI subcommands were entirely untested. Real gaps, not
+// speculative — these are exported functions with no test at all before
+// this batch. ----
+
+function writeUnit(memoriesDir, id, { type = 'observation', status = 'active', topics = [], title = 'A title', updated = '2026-06-01' } = {}) {
+  mkdirSync(memoriesDir, { recursive: true });
+  const fm = [
+    '---',
+    `id: ${id}`,
+    `type: ${type}`,
+    `status: ${status}`,
+    `updated: ${updated}`,
+    `topics: [${topics.join(', ')}]`,
+    '---',
+    '',
+    `# ${title}`,
+    '',
+    'Body text.',
+  ].join('\n');
+  writeFileSync(join(memoriesDir, `${id}.md`), fm);
+}
+
+test('currentHotSection returns empty string when no hot block is present', () => {
+  const { root, project } = setup();
+  try {
+    assert.equal(currentHotSection(project), '');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('currentHotSection round-trips the composed body, stripping the heading and footer', () => {
+  const { root, project, home } = setup();
+  try {
+    applyHotSection(project, 'The actual synthesis prose.', { now: '2026-06-06T00:00:00Z', home });
+    assert.equal(currentHotSection(project), 'The actual synthesis prose.');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('clearHotSection is a no-op when no hot block is present', () => {
+  const { root, project } = setup();
+  try {
+    const before = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    const returned = clearHotSection(project);
+    assert.equal(returned, before, 'unchanged content returned');
+    assert.equal(readFileSync(join(project, 'PROJECT.md'), 'utf8'), before, 'file untouched');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('clearHotSection removes an existing block', () => {
+  const { root, project, home } = setup();
+  try {
+    applyHotSection(project, 'Ephemeral.', { now: '2026-06-06T00:00:00Z', home });
+    clearHotSection(project);
+    const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.ok(!pm.includes(HOT_BEGIN) && !pm.includes(HOT_END), 'markers gone');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('applyHotSection throws HOT_SECTION_OVER_BUDGET for oversized text, and skips the write', () => {
+  const { root, project, home } = setup();
+  try {
+    const huge = 'x'.repeat(Math.ceil(HOT_SECTION_TOKEN_BUDGET / 0.30) + 100);
+    assert.throws(
+      () => applyHotSection(project, huge, { now: '2026-06-06T00:00:00Z', home }),
+      (err) => err.code === 'HOT_SECTION_OVER_BUDGET' && err.tokens > HOT_SECTION_TOKEN_BUDGET,
+    );
+    const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.ok(!pm.includes(HOT_BEGIN), 'no partial write happened on the over-budget path');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('applyHotSection with allowOverBudget:true writes oversized text anyway', () => {
+  const { root, project, home } = setup();
+  try {
+    const huge = 'x'.repeat(Math.ceil(HOT_SECTION_TOKEN_BUDGET / 0.30) + 100);
+    applyHotSection(project, huge, { now: '2026-06-06T00:00:00Z', home, allowOverBudget: true });
+    const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.ok(pm.includes(HOT_BEGIN), 'escape hatch writes despite exceeding budget');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('applyHotSection appends the block at EOF when `## What & Why` is missing', () => {
+  const { root, project, home } = setup();
+  try {
+    writeFileSync(join(project, 'PROJECT.md'), '# Project\n\nNo six-section shape here.\n');
+    applyHotSection(project, 'Fallback insertion point.', { now: '2026-06-06T00:00:00Z', home });
+    const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.ok(pm.trim().endsWith(HOT_END), 'block landed at the end, not silently dropped');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('candidatesForSynthesis returns [] when _memories/ is absent or empty', () => {
+  const { root, project } = setup();
+  try {
+    assert.deepEqual(candidatesForSynthesis(project), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('candidatesForSynthesis ranks active units, excludes non-active status, and respects --top', () => {
+  const { root, project } = setup();
+  try {
+    const memoriesDir = join(project, '_memories');
+    writeUnit(memoriesDir, 'obs-alpha', { title: 'Alpha finding', topics: ['x'], updated: '2026-06-01' });
+    writeUnit(memoriesDir, 'obs-beta', { title: 'Beta finding', topics: ['x'], updated: '2026-06-05' });
+    writeUnit(memoriesDir, 'obs-retired', { status: 'retired', title: 'Should not appear' });
+    const cands = candidatesForSynthesis(project, { top: 1 });
+    assert.equal(cands.length, 1, '--top caps the result count');
+    assert.ok(cands.every(c => c.id !== 'obs-retired'), 'non-active units excluded');
+    assert.ok(cands[0].title.length > 0, 'title extracted from the unit body');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: candidates subcommand prints "(no candidates ...)" against an empty store, exits 0', () => {
+  const { root, project, home } = setup();
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, 'candidates', project], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /no candidates/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: candidates --json emits parseable JSON', () => {
+  const { root, project, home } = setup();
+  try {
+    writeUnit(join(project, '_memories'), 'obs-json', { title: 'JSON path' });
+    const res = spawnSync(process.execPath, [SCRIPT, 'candidates', project, '--json'], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 0);
+    const parsed = JSON.parse(res.stdout);
+    assert.equal(parsed[0].id, 'obs-json');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: current subcommand prints nothing against an empty PROJECT.md, exits 0', () => {
+  const { root, project, home } = setup();
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, 'current', project], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, '');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: clear subcommand reports "nothing to clear" when no block exists', () => {
+  const { root, project, home } = setup();
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, 'clear', project], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /nothing to clear/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: apply with no --text/--file and empty stdin exits 2 with an error, writes nothing', () => {
+  const { root, project, home } = setup();
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, 'apply', project], {
+      encoding: 'utf8', input: '', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /no synthesis text provided/);
+    const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.ok(!pm.includes(HOT_BEGIN), 'no write happened on the error path');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: unknown subcommand exits 2 with usage on stderr', () => {
+  const { root, project, home } = setup();
+  try {
+    const res = spawnSync(process.execPath, [SCRIPT, 'bogus', project], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /unknown subcommand/);
+    assert.match(res.stderr, /Usage:/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: --help prints usage and exits 0', () => {
+  const res = spawnSync(process.execPath, [SCRIPT, '--help'], { encoding: 'utf8' });
+  assert.equal(res.status, 0);
+  assert.match(res.stdout, /Usage:/);
+});
+
+test('CLI: candidates human-readable path prints rank, id, title, and topics for each candidate', () => {
+  const { root, project, home } = setup();
+  try {
+    writeUnit(join(project, '_memories'), 'obs-human', { title: 'Human-readable line', topics: ['a', 'b'] });
+    const res = spawnSync(process.execPath, [SCRIPT, 'candidates', project], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /\[1\] obs-human/);
+    assert.match(res.stdout, /Human-readable line/);
+    assert.match(res.stdout, /topics: a, b/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: clear subcommand reports success and actually removes the block', () => {
+  const { root, project, home } = setup();
+  try {
+    applyHotSection(project, 'To be cleared.', { now: '2026-06-06T00:00:00Z', home });
+    const res = spawnSync(process.execPath, [SCRIPT, 'clear', project], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /hot section cleared/);
+    const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.ok(!pm.includes(HOT_BEGIN), 'block actually gone');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

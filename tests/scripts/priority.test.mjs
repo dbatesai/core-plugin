@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import {
   effectiveValidity, validAt, isInvalidated, parseIsoDate,
   parseFrontmatter, normalizeNewlines, _todayFromArg,
-  rankUnits, main as priorityMain,
+  rankUnits, main as priorityMain, iterArchivedUnits,
   score, signalS, NO_SOURCES_DEFAULT_S,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
@@ -131,6 +131,56 @@ test('SOD-003: the CLI ranking inherits the filter (invalidated id absent from -
     const [, out] = quiet(process.stdout, () => priorityMain([mem, '--today', '2026-06-09', '--top', '10']));
     assert.match(out, /dc-live/);
     assert.doesNotMatch(out, /dc-dead/, 'main() must not rank an invalidated unit');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('iterArchivedUnits: returns units physically relocated to archive/', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'priority-archive-'));
+  try {
+    const mem = join(dir, '_memories');
+    const archive = join(mem, 'archive');
+    mkdirSync(archive, { recursive: true });
+    writeFileSync(join(archive, 'risk-1-archived.md'),
+      '---\nid: risk-1-archived\ntype: risk\nstatus: active\narchived: true\narchived_at: 2026-05-30\ncreated: 2026-01-01\nupdated: 2026-01-01\ntopics: [a]\n---\n\n# archived\n');
+    const units = iterArchivedUnits(mem);
+    assert.deepEqual(units.map(u => u.id), ['risk-1-archived']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('iterArchivedUnits: no archive/ subdir at all returns empty, not a throw (ENOENT-only tolerance)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'priority-archive-absent-'));
+  try {
+    const mem = join(dir, '_memories');
+    mkdirSync(mem, { recursive: true });
+    assert.deepEqual(iterArchivedUnits(mem), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("iterArchivedUnits: malformed (frontmatter-less) archive content is excluded, not ranked (Hale's 2026-07-22 finding)", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'priority-archive-malformed-'));
+  try {
+    const mem = join(dir, '_memories');
+    const archive = join(mem, 'archive');
+    mkdirSync(archive, { recursive: true });
+    writeFileSync(join(archive, 'broken.md'), 'no frontmatter here at all\n');
+    const units = iterArchivedUnits(mem);
+    const broken = units.find(u => u.id === 'broken');
+    assert.ok(broken && broken.fm._load_error, 'malformed archive unit is tagged _load_error, same as a top-level malformed unit');
+    const ranked = rankUnits(mem, { today: parseIsoDate('2026-06-09'), includeInvalidated: true });
+    assert.ok(ranked.every(([, u]) => u.id !== 'broken'), 'malformed archive unit must not appear in ranked output');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('SOD-003: includeInvalidated:true reaches a unit physically relocated to archive/ (Hale\'s 2026-07-21 finding)', () => {
+  const { dir, mem } = rankVault();
+  try {
+    mkdirSync(join(mem, 'archive'), { recursive: true });
+    writeFileSync(join(mem, 'archive', 'dc-relocated.md'),
+      '---\nid: dc-relocated\ntype: decision\nstatus: active\narchived: true\narchived_at: 2026-05-30\ncreated: 2026-01-01\nupdated: 2026-01-01\ntopics: [a]\n---\n\n# relocated\n');
+    const withInvalid = rankUnits(mem, { today: parseIsoDate('2026-06-09'), includeInvalidated: true }).map(([, u]) => u.id);
+    assert.ok(withInvalid.includes('dc-relocated'), 'an archived unit must still be reachable via includeInvalidated');
+    const withoutInvalid = rankUnits(mem, { today: parseIsoDate('2026-06-09') }).map(([, u]) => u.id);
+    assert.ok(!withoutInvalid.includes('dc-relocated'), 'default ranking still excludes archive/ entirely');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

@@ -294,7 +294,7 @@ export function exportWorksheet({ project: _project, harness, classifiedDir, cal
     });
   });
   writeFileSync(jsonlPath, jsonlRows.join('\n') + '\n', { mode: 0o600 });
-  chmodSync(jsonlPath, 0o600);
+  try { chmodSync(jsonlPath, 0o600); } catch { /* windows: mode is advisory */ }
   writeFileSync(predictionsPath, JSON.stringify({
     schema_version: CALIBRATION_VERSION,
     classifier_version: CLASSIFIER_VERSION,
@@ -303,7 +303,7 @@ export function exportWorksheet({ project: _project, harness, classifiedDir, cal
     nonce,
     predictions,
   }, null, 2) + '\n', { mode: 0o600 });
-  chmodSync(predictionsPath, 0o600);
+  try { chmodSync(predictionsPath, 0o600); } catch { /* windows: mode is advisory */ }
 
   // Write Markdown companion (human-readable labeling guide).
   const guide = [

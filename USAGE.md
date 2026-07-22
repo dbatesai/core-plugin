@@ -59,6 +59,22 @@ Capture the emotional truth of a session as ASCII art.
 - **What it does:** renders how the session felt — not a status report, the actual vibe — and logs it to `~/.core/vibes/vibe-log.md`. Terminal-only, no browser.
 - **When to use:** "vibecheck," or whenever you want to mark the feel of a session.
 
+### `/export-obsidian`
+
+Open what CORE knows as a browsable graph in Obsidian.
+
+- **What it does:** decorates each unit file in `_memories/` in place with a generated, marker-isolated `[[wikilink]]` block, computed fresh from one atomic snapshot of the store each run. Point Obsidian at `_memories/` itself — there's no separate copy to go stale. Idempotent (only rewrites a file when its links actually changed) and fail-closed on a malformed marker state.
+- **When to use:** "let me see what you know," "open this in Obsidian," "can I browse the graph" — anytime seeing the connections matters more than being told about them.
+- **Writes:** the real unit files under `_memories/` — the generated block only, never your own writing above it.
+
+### `/metrics-package`
+
+Pull an anonymized stats package showing how well the memory is actually working.
+
+- **What it does:** builds a zip on the Desktop with retrieval, recognition, store-health, hygiene, and capability statistics — numbers, dates, fixed vocabulary, and salted pseudonyms only. Real project content never enters it by construction.
+- **When to use:** "pull the memory stats," "export a metrics package," or whenever you want shareable evidence of how the memory system is performing.
+- **Writes:** a zip file to `~/Desktop/`.
+
 ---
 
 ## Additional reference
@@ -94,6 +110,5 @@ The plugin ships the deterministic spine the commands run on — the surfaces wh
 - **Capability & identity** — `resolve-plugin-root.mjs`, `capability-probe.mjs`, `capability-history.mjs`, `record-capability-snapshot.mjs`, `analyze-capability-drift.mjs`, `workspace-fork-check.mjs`, `project-slug.mjs`, `write-visibility-canary.mjs`.
 - **Validation & integrity** — `validate.mjs` (retrieval-health runner), `orphan-detector.mjs` (every script reached, every protocol indexed), `audit-memory-boundary.mjs` (native-memory vs. CORE-store boundary).
 - **Multi-agent** — `adversarial-run-gate.mjs`, `validate-adversarial-artifacts.mjs`.
-- **External sources** — `analyze-source-pull-log.mjs`.
 - **Instruction surface (staged)** — `contract-format.mjs`, `generate-agents-md.mjs`, `generate-claude-md.mjs`, `migrate-to-contract.mjs`, `configure-project.mjs`.
 - **Helpers** — `frontmatter-flat.mjs`, `fs-atomic.mjs`.

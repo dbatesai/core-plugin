@@ -1,7 +1,7 @@
 {
   "name": "core",
-  "version": "3.12.0",
-  "description": "CORE is a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis; reaches for multi-agent adversarial analysis when stakes warrant. Use CORE for project work where continuity matters: ongoing development, architecture decisions, risk surfacing, decision tracking. Ships with six companion utilities (finalize, process-memory, register-sources, vibecheck, configure-project) that CORE invokes internally and can be invoked directly.",
+  "version": "3.13.0",
+  "description": "CORE is a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis; reaches for multi-agent adversarial analysis when stakes warrant. Use CORE for project work where continuity matters: ongoing development, architecture decisions, risk surfacing, decision tracking. Ships with seven companion utilities (finalize, process-memory, register-sources, vibecheck, configure-project, metrics-package, export-obsidian) that CORE invokes internally and can be invoked directly.",
   "author": {
     "name": "David Bates",
     "email": "david_bates@mac.com",
@@ -23,7 +23,7 @@
   "interface": {
     "displayName": "CORE",
     "shortDescription": "Project intelligence with a critic baked in",
-    "longDescription": "CORE is a single agent that knows your project across sessions. It maintains a unit-based memory architecture in your project folder, renders a six-section project synthesis (state, people, moves, decisions and risks), surfaces decisions and risks proactively, and challenges overconfidence. When stakes warrant, it reaches for multi-agent adversarial analysis with explicit anti-convergence discipline. Ships with five companion utilities (/finalize, /process-memory, /register-sources, /vibecheck, /configure-project) that CORE invokes internally and that you can also call directly.",
+    "longDescription": "CORE is a single agent that knows your project across sessions. It maintains a unit-based memory architecture in your project folder, renders a six-section project synthesis (state, people, moves, decisions and risks), surfaces decisions and risks proactively, and challenges overconfidence. When stakes warrant, it reaches for multi-agent adversarial analysis with explicit anti-convergence discipline. Ships with seven companion utilities (/finalize, /process-memory, /register-sources, /vibecheck, /configure-project, /metrics-package, /export-obsidian) that CORE invokes internally and that you can also call directly.",
     "developerName": "David Bates",
     "category": "Productivity",
     "capabilities": [
@@ -40,5 +40,5 @@
     "brandColor": "#1F2937",
     "screenshots": []
   },
-  "source_sha": "750cb2f90ddc16c14f67ad9b66b4a68bfcf7cd5d"
+  "source_sha": "c56a2713db80abb5ed674de346f53a273cd1a3c2"
 }

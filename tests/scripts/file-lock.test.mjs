@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, utimesSync, rmSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -125,6 +125,48 @@ test('withFileLock throws LOCK_HELD after retry budget on a live contended lock'
     (e) => e.code === 'LOCK_HELD'
   );
   releaseFileLock(lock, got.nonce);
+});
+
+// K12 (Hale's audit, 2026-07-16): the finally block used to discard
+// releaseFileLock's return value entirely, so a real release failure (another
+// process already superseded/GC'd the generation, a filesystem error) was
+// indistinguishable from success to every caller.
+test('K12: a genuine release failure is never silent when fn() succeeds — it becomes the thrown error', () => {
+  const lock = tmpLock();
+  assert.throws(
+    () => withFileLock(lock, () => {
+      // Simulate another process superseding/GC'ing our generation while we
+      // still hold it (renaming to .done is exactly what a real release does)
+      // — by the time withFileLock's own release runs, the generation is gone.
+      const live = currentLockFile(lock);
+      
+      renameSync(live, `${live}.done`);
+      return 'fn-succeeded';
+    }),
+    (e) => e.code === 'LOCK_RELEASE_FAILED' && e.lockPath === lock && e.releaseResult && e.releaseResult.released === false,
+    'a release failure after a successful fn() must surface as a real thrown error, not silent success',
+  );
+});
+
+test('K12: a real fn() error still propagates (unmasked) even when release also fails, with the release failure attached', () => {
+  const lock = tmpLock();
+  assert.throws(
+    () => withFileLock(lock, () => {
+      const live = currentLockFile(lock);
+      
+      renameSync(live, `${live}.done`);
+      throw new Error('the-real-failure');
+    }),
+    (e) => e.message === 'the-real-failure' && e.lockReleaseFailure && e.lockReleaseFailure.released === false,
+    'fn()\'s real error must still be what propagates — a lock-release problem must never mask it',
+  );
+});
+
+test('K12 control: a clean release (fn succeeds, release succeeds) still returns fn\'s value with no throw', () => {
+  const lock = tmpLock();
+  const result = withFileLock(lock, () => 'clean-result');
+  assert.equal(result, 'clean-result');
+  assert.equal(currentLockFile(lock), null, 'lock genuinely released on the happy path');
 });
 
 // The v2 design's three-process corner (Hale, 2026-07-15) is structurally gone in
@@ -261,6 +303,54 @@ test('race A/B/C: C can never acquire during a revived owner\'s wrong-owner rele
   assert.equal(rC.status, 3, `C was refused on every attempt (stderr: ${rC.stderr})`);
   assert.equal(currentLockFile(lock), bFile, 'B still holds the current generation');
   assert.equal(readFileSync(bFile, 'utf8'), bBytes, 'B\'s lock byte-identical throughout');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// K12 (Hale's re-audit, 2026-07-19): a delayed acquirer's maxN snapshot can go
+// stale mid-acquisition — a full concurrent acquire+release cycle completing
+// entirely inside the snapshot-to-create window used to resurrect an already-
+// retired generation number instead of a fresh one, corrupting the numbering
+// invariant and producing later 'not-owner' release failures (1/8, 2/10 under
+// load). CORE_FILELOCK_TEST_DELAY_MS widens that window deterministically so
+// this is reproduced on demand rather than left to scheduler luck.
+test('K12: a stale maxN snapshot is caught post-win and backed off, never silently resurrected', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'file-lock-k12-'));
+  const lock = join(dir, 'stale-target.lock');
+  const snapshotTaken = join(dir, 'snapshot-taken');
+  // A shared "go" start barrier alone doesn't guarantee WHICH process's first
+  // listGenerations() read happens first — that flaked on a loaded Windows CI
+  // runner (both processes start at roughly the same wall-clock moment, but
+  // "roughly" isn't a happens-before guarantee). Instead: the slow child signals
+  // the INSTANT its snapshot is taken (CORE_FILELOCK_TEST_SIGNAL_FILE, written
+  // inside acquireFileLock before the held check or the sleep); the fast child
+  // waits on that exact signal before it does anything. That's a real
+  // happens-before, not a timing coincidence.
+  const slowChild = `
+    import { acquireFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
+    const got = acquireFileLock(${JSON.stringify(lock)});
+    process.stdout.write(JSON.stringify(got));
+    process.exit(got.ok ? 0 : (got.reason === 'stale-target' ? 9 : 1));
+  `;
+  const fastChild = `
+    import { acquireFileLock, releaseFileLock } from ${JSON.stringify('file://' + LOCK_MODULE)};
+    import { existsSync } from 'node:fs';
+    while (!existsSync(${JSON.stringify(snapshotTaken)})) { /* wait for the slow child's snapshot to be taken */ }
+    let got;
+    for (let i = 0; i < 500 && !(got = acquireFileLock(${JSON.stringify(lock)})).ok; i++) { /* spin for the create race */ }
+    if (!got || !got.ok) process.exit(2);
+    const rel = releaseFileLock(${JSON.stringify(lock)}, got.nonce);
+    process.exit(rel.released ? 0 : 3);
+  `;
+  const slow = spawnAsync(['--input-type=module', '-e', slowChild],
+    { CORE_FILELOCK_TEST_DELAY_MS: '1500', CORE_FILELOCK_TEST_SIGNAL_FILE: snapshotTaken });
+  const fast = spawnAsync(['--input-type=module', '-e', fastChild]);
+  const [slowResult, fastResult] = await Promise.all([slow, fast]);
+  assert.equal(fastResult.status, 0, `fast child completed a clean acquire+release cycle inside the delayed child's window (stderr: ${fastResult.stderr})`);
+  assert.equal(slowResult.status, 9, `delayed child detected the stale target and backed off instead of resurrecting a used generation number (stdout: ${slowResult.stdout}, stderr: ${slowResult.stderr})`);
+  // Once backed off, a normal retry must succeed cleanly at a fresh, non-colliding generation — proving the numbering invariant survived.
+  const retry = acquireFileLock(lock);
+  assert.ok(retry.ok, 'a clean retry after the backoff succeeds');
+  assert.ok(retry.gen > 1, `retry lands on a generation strictly above the completed one (got gen ${retry.gen})`);
   rmSync(dir, { recursive: true, force: true });
 });
 

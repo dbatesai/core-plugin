@@ -20,6 +20,7 @@ const { buildAggregateReceipt, refusalScan, collectForbiddenStrings, validateRec
   await import(pathToFileURL(join(SCRIPTS, 'aggregate-receipt.mjs')).href);
 const { runHarness, runTierPolicySweep } =
   await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
+const { VALID_TYPES } = await import(pathToFileURL(join(SCRIPTS, 'unit-vocab.mjs')).href);
 
 const GOLD = { queries: [
   { id: 'q1', query: 'omega speedmaster sale', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] },
@@ -88,6 +89,70 @@ test('A2 refusal: filesystem paths are refused even when not in the forbidden vo
     /filesystem path/,
   );
   assert.ok(refusalScan({ note: 'rates only', r3: 0.73 }, new Set()));
+});
+
+// K09 (Hale's audit, 2026-07-16): two real bypasses in the embedded-path branch.
+test('K09: a colon-preceded embedded path is refused (the boundary class was missing ":")', () => {
+  assert.throws(
+    () => refusalScan({ note: 'path:/Users/dbates/secret.md' }, new Set()),
+    /filesystem path/,
+    'a path immediately after "path:" must refuse, not slip through',
+  );
+  assert.throws(
+    () => refusalScan({ note: 'location:/private/tmp/store' }, new Set()),
+    /filesystem path/,
+  );
+});
+
+test('K09: an embedded (non-leading) Windows drive-letter path is refused, not just a leading one', () => {
+  assert.throws(
+    () => refusalScan({ note: 'see C:\\Users\\dbates\\secret' }, new Set()),
+    /filesystem path/,
+    'an embedded drive-letter path must refuse even when it is not the first thing in the string',
+  );
+  assert.throws(
+    () => refusalScan({ note: '(D:\\projects\\bblens\\_memories)' }, new Set()),
+    /filesystem path/,
+  );
+});
+
+test('K09 control: isPathShaped still passes benign strings with colons and no path', () => {
+  assert.equal(isPathShaped('ratio: 0.73'), false);
+  assert.equal(isPathShaped('time: 12:34'), false);
+  assert.equal(isPathShaped('policy: P0'), false);
+});
+
+test('K09: unit_type_counts only accepts CORE\'s closed type vocabulary, not an arbitrary project-specific prefix', async () => {
+  const { report } = await realReportAndSweep();
+  const poisoned = { ...report, mix: { 'bblens': 12, decision: 3 } }; // a real project-id-prefix leak shape
+  assert.throws(() => buildAggregateReceipt(poisoned), /REFUSED.*unit_type_counts/s);
+});
+
+// K09 re-audit (Hale, 2026-07-19): the prior version of this test hardcoded its
+// own copy of the type list, so it passed even after the source's own copy
+// silently omitted real types (open-question, premise) -- the test proved the
+// implementation agreed with itself, not with CORE's actual vocabulary. Fixed
+// by driving the positive case from the same VALID_TYPES import the source
+// now uses, so a future canonical type can never silently become unexportable
+// again without this test catching it.
+test('K09: unit_type_counts accepts every real closed-vocabulary type (driven from VALID_TYPES itself) plus "other"', async () => {
+  const { report } = await realReportAndSweep();
+  const mix = Object.fromEntries([...VALID_TYPES, 'other'].map(t => [t, 1]));
+  const clean = { ...report, mix };
+  const receipt = buildAggregateReceipt(clean);
+  assert.equal(Object.keys(receipt.corpus.unit_type_counts).length, VALID_TYPES.size + 1);
+  for (const t of VALID_TYPES) assert.ok(t in receipt.corpus.unit_type_counts, `${t} must be exportable`);
+});
+
+test('K09: unitTypeMix derives from the real type field, not an id-prefix guess', async () => {
+  const { unitTypeMix } = await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
+  const index = { units: [
+    { id: 'bblens-refresh-defect', type: 'observation' },
+    { id: 'watches-preference', type: 'decision' },
+    { id: 'no-type-unit', type: '' },
+  ] };
+  const { mix } = unitTypeMix(index);
+  assert.deepEqual(mix, { observation: 1, decision: 1, other: 1 }, 'project-specific id prefixes (bblens-, watches-) must never appear as mix keys');
 });
 
 test('A2 CLI: writes a receipt from a report file; refusal is exit 2', async () => {

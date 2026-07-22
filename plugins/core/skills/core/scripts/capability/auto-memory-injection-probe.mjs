@@ -31,6 +31,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { mapProjectPathToSlug } from '../project-slug.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'auto-memory-injection';
@@ -39,15 +40,21 @@ export const CANARY = '## Recent activity';
 
 /**
  * Map an absolute cwd to the Claude Code project-memory directory name.
- * Claude Code replaces every '/' in the absolute path with '-'.
+ * Claude Code replaces every '/', '\', '.', and ':' in the absolute path with '-'.
  * /Users/dbates/Documents/Projects/CORE → -Users-dbates-Documents-Projects-CORE
  */
 export function mappedMemoryPath(cwd, home = homedir()) {
-  // Map both POSIX and Windows separators to dash, and build the path with explicit
-  // forward slashes. path.join emits backslashes on Windows, which breaks the slug
-  // shape Claude Code's projects folder uses and the cross-platform tests; Node's fs
-  // accepts forward slashes on Windows, so a '/'-joined path still reads fine.
-  const mapped = String(cwd).replace(/[/\\]/g, '-');
+  // Build the path with explicit forward slashes (path.join emits backslashes on
+  // Windows, which breaks the slug shape Claude Code's projects folder uses and the
+  // cross-platform tests; Node's fs accepts forward slashes on Windows, so a
+  // '/'-joined path still reads fine). The slug itself MUST come from the one
+  // canonical encoder (project-slug.mjs) -- this file used to hand-roll its own
+  // `.replace(/[/\\]/g, '-')`, which missed the Windows drive colon and any dot in
+  // the path. Meridian (Windows harness) reproduced the resulting false-DEGRADED on
+  // a real box, 2026-07-20: the probe reported memory not visible while the real
+  // startup canary echoed clean. The mechanism worked; only this hand-rolled
+  // duplicate encoder was wrong.
+  const mapped = mapProjectPathToSlug(cwd);
   return [home, '.claude', 'projects', mapped, 'memory', 'MEMORY.md'].join('/');
 }
 

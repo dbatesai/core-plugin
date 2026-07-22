@@ -49,6 +49,23 @@ import { logHookEvent } from './hook-log.mjs';
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
 
+/**
+ * Truncate `str` to at most `maxBytes` UTF-8 bytes without splitting a
+ * multi-byte character (or a surrogate pair) mid-sequence. String.slice
+ * counts UTF-16 code units, not bytes — wrong for a byte-budget contract on
+ * any non-ASCII content (K-series UTF-8 byte-cap fix, Hale's re-audit 2026-07-19).
+ */
+export function truncateUtf8(str, maxBytes) {
+  const buf = Buffer.from(str, 'utf8');
+  if (buf.length <= maxBytes) return str;
+  let end = maxBytes;
+  // Back off while sitting on a UTF-8 continuation byte (10xxxxxx = 0x80-0xBF)
+  // — that means `end` is mid-sequence; the first non-continuation byte at or
+  // before `end` is where a complete character boundary actually is.
+  while (end > 0 && (buf[end] & 0xC0) === 0x80) end--;
+  return buf.subarray(0, end).toString('utf8');
+}
+
 // Producer identity for outcome rows — read from the plugin manifest so the
 // version can never fork from the shipped identity; 'unknown' is honest when
 // the manifest is unreadable (packaged layouts vary).
@@ -75,6 +92,24 @@ const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 // rather than emitted (tests assert every path lands in-vocabulary).
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
 export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'trace-write-failed', 'hook-log-write-failed'];
+
+// CORE_REASONING_ARM (2026-07-19): a test-only control for the preregistered
+// three-arm efficacy pilot (Hale + Antigravity + Keel convergence). 'automatic'
+// is the unchanged shipped default -- the directive fires only on a true Tier 1
+// zero-hit, exactly as before this existed. 'deterministic-only' and 'always-on'
+// exist ONLY so the pilot can force a real, distinguishable behavioral
+// difference per arm; no real user should ever set this. An explicit but
+// unrecognized value throws rather than silently falling back to 'automatic' --
+// a test harness that thinks it requested one arm and silently got another
+// would invalidate the pilot, so wrong input must be loud, not swallowed.
+export const REASONING_ARMS = ['automatic', 'deterministic-only', 'always-on'];
+export function resolveReasoningArm(rawValue) {
+  if (rawValue === undefined || rawValue === '') return 'automatic';
+  if (!REASONING_ARMS.includes(rawValue)) {
+    throw new Error(`CORE_REASONING_ARM must be one of ${REASONING_ARMS.join('/')}, got ${JSON.stringify(rawValue)}`);
+  }
+  return rawValue;
+}
 
 export function receipt(action, reason, extra = {}) {
   const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
@@ -126,6 +161,7 @@ export async function main() {
   // and emits the canonical per-turn retrieval event from the same run, so the
   // telemetry corpus is product-emitted, not agent-behavior-dependent.
   let trace = null;
+  let requestedArm = 'automatic';
   const configuredCap = Number(process.env.CORE_RETRIEVAL_BYTE_CAP);
   const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
     ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
@@ -137,16 +173,62 @@ export async function main() {
     // gets caught at all). Same pattern as CORE_FILELOCK_NO_LINK: an explicit,
     // self-documenting test seam, never read in normal operation.
     if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
+    // Resolved INSIDE this try (Hale catch, 2026-07-19): a throw here used to
+    // land outside every try/catch in this function, so it escaped all the
+    // way to the outer main().catch(() => process.exit(0)) with no receipt()
+    // call at all -- exit 0 was correct (never block the turn) but the
+    // promised typed pipeline-error row silently never got written. Resolving
+    // it here reuses the exact same fault seam as buildRetrievalTrace instead
+    // of inventing a second one.
+    requestedArm = resolveReasoningArm(process.env.CORE_REASONING_ARM);
     trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
   } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
   if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
+  const zeroHit = final.length === 0;
+  const shouldEmitDirective = requestedArm === 'always-on' ? true
+    : requestedArm === 'deterministic-only' ? false
+    : zeroHit; // 'automatic' — unchanged shipped default
   // Telemetry outcome for the single terminal receipt (priority: pipeline
   // failure > event-write > trace-write > opt-out > ok).
   let telemetryReason = 'ok';
   let retrievalId = null;
   let outcomeNote = null; // bounded note when the post-answer outcome close failed
+  let reasoningDirective = '';
+  // Built unconditionally, BEFORE the metrics-gated block below and BEFORE the
+  // event record inside it (second Hale catch, 2026-07-19): the first fix
+  // moved this construction inside the `metricsEnabled()` branch so the
+  // recorded directive_fired field could reflect the real outcome -- but that
+  // put actual DELIVERED CONTENT behind a telemetry-only gate. With
+  // CORE_METRICS_ENABLED=0, automatic zero-hit escalation and always-on
+  // delivery silently stopped firing at all -- opting out of telemetry must
+  // never change what the user's turn actually receives. Building it here,
+  // unconditionally, fixes that while still keeping it ahead of the event
+  // record (which lives inside the metrics branch and reads this value) so
+  // directive_fired still reflects the real constructed outcome, not intent.
+  if (shouldEmitDirective) {
+    try {
+      const shards = selectCandidates(prompt, store, { shardSize: 80 });
+      if (shards.length) {
+        const unitsTotal = shards[0].units_total;
+        // Pilot self-invocation finding (2026-07-21, real-invocation probe):
+        // the internal test-control env var name leaking into model-facing
+        // text ("CORE_REASONING_ARM=always-on forces...") reads as a
+        // fabricated/self-referential instruction to a fresh model with no
+        // established trust in this session -- three real Claude Code
+        // invocations independently flagged content built this way as a
+        // likely prompt injection. Describe the forced case in the same
+        // plain, non-mechanism-revealing register as the honest zero-hit
+        // case; the requestedArm value itself has no legitimate reason to
+        // appear in what the model reads.
+        const why = zeroHit
+          ? 'Tier 1 found no lexical context.'
+          : 'An explicit escalation request forces escalation regardless of Tier 1 result.';
+        reasoningDirective = `CORE reasoning escalation required: ${why} Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
+      }
+    } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
+  }
   // Deferred-write inputs for the NEW pending marker (Hale audit, 2026-07-17,
   // hazard: "creates pending state before delivery"). The marker must only be
   // persisted once this turn's context is actually confirmed delivered to the
@@ -267,6 +349,17 @@ export async function main() {
         candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
         selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
+        // Gated on the env var being EXPLICITLY set (Hale catch, 2026-07-19),
+        // not on the resolved arm differing from 'automatic'. An ordinary
+        // user who never touches CORE_REASONING_ARM still gets zero new
+        // fields -- byte-identical to before this existed. But the pilot's
+        // "escalation-only" arm (the preregistration's name for today's
+        // shipped default behavior) legitimately requests 'automatic'
+        // explicitly, and the prior condition gave that arm no observable
+        // receipt at all -- every escalation-only trial would have spoiled
+        // under the runner's own fail-closed contract, since there was
+        // nothing to check requested_arm against.
+        ...(process.env.CORE_REASONING_ARM !== undefined ? { requested_arm: requestedArm, directive_fired: Boolean(reasoningDirective) } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
       // Stage the pending-marker write for AFTER delivery is confirmed below
@@ -309,20 +402,32 @@ export async function main() {
     telemetryReason = 'pipeline-error'; // fail-open by contract — surfaced in the terminal receipt below
   }
 
-  let reasoningDirective = '';
-  if (final.length === 0) {
-    try {
-      const shards = selectCandidates(prompt, store, { shardSize: 80 });
-      if (shards.length) {
-        const unitsTotal = shards[0].units_total;
-        reasoningDirective = `CORE reasoning escalation required: Tier 1 found no lexical context. Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
-      }
-    } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
-  }
-
   const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
-  if (trace.pack && trace.pack.text) process.stdout.write(trace.pack.text);
-  else if (reasoningDirective) process.stdout.write(reasoningDirective.slice(0, OUTPUT_BYTE_CAP));
+  // Both can be true at once now (always-on can force the directive even when
+  // Tier 1 also found hits) — before CORE_REASONING_ARM existed this was
+  // structurally impossible (the directive only ever fired on zero-hit), so
+  // the old if/else-if silently dropping one of them was never reachable.
+  // Deliver both, directive appended after the pack, still under the same cap.
+  //
+  // Hale's re-audit, 2026-07-19: buildFinalContextPack already budgets
+  // packText in real UTF-8 bytes (Buffer.byteLength), but this final combine
+  // step used to re-truncate with String.slice(0, OUTPUT_BYTE_CAP) — .slice
+  // counts UTF-16 code units, not bytes, so appending reasoningDirective and
+  // re-slicing could both exceed the preregistered byte budget on non-ASCII
+  // content AND split a multi-byte character (or a surrogate pair) mid-
+  // sequence, corrupting the delivered payload. It also always used the
+  // hardcoded 2048 constant rather than the effective `byteCap` (which can be
+  // smaller via CORE_RETRIEVAL_BYTE_CAP), silently ignoring a tighter
+  // configured budget. truncateUtf8 trims on a real byte offset and backs off
+  // to the nearest complete UTF-8 sequence boundary instead of cutting blind.
+  const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
+  if (packText && reasoningDirective) {
+    process.stdout.write(truncateUtf8(packText + reasoningDirective, byteCap));
+  } else if (packText) {
+    process.stdout.write(packText);
+  } else if (reasoningDirective) {
+    process.stdout.write(truncateUtf8(reasoningDirective, byteCap));
+  }
 
   // NOW persist the pending marker — after delivery, never before (Hale
   // audit, 2026-07-17). Only when something was actually injected: a marker
@@ -343,7 +448,11 @@ export async function main() {
   let reason;
   if (reasoningDirective) {
     action = 'delivered';
-    reason = 'no-hit';
+    // 'no-hit' is only honest for the true zero-hit case (unchanged from
+    // before this control existed). always-on can now force the directive
+    // even when Tier 1 found real hits -- reporting 'no-hit' there would be
+    // a fabrication, so fall back to the actual telemetry outcome instead.
+    reason = zeroHit ? 'no-hit' : telemetryReason;
   } else if (injected) {
     action = 'delivered';
     reason = telemetryReason;

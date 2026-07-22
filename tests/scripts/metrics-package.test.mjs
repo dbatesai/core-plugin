@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
-  buildLeakPatterns, leakScanDir,
+  buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging,
 } from '../../plugins/core/skills/core/scripts/metrics-package.mjs';
 
 // Planted tripwires — distinctive strings that MUST NOT survive into any package byte.
@@ -72,6 +72,73 @@ function extractZip(zipPath, dest) {
   return dest;
 }
 
+// readShippedPackage — CI-runner honesty (2026-07-21): some CI runners' `tar`
+// silently emits a plain tar for a `.zip` destination. zipStaging()'s own
+// magic-byte check correctly refuses that as a fake zip and runPackage()
+// falls back to shipping a real, already-unpacked folder instead
+// (`shipped.kind === 'folder'`) -- exactly the behavior Meridian's fix
+// exists to guarantee. A test asserting `shipped.kind === 'zip'` unconditionally
+// was itself asserting this box's tar is trustworthy, which isn't always true
+// and isn't the product's contract. Both outcomes ship real, readable content;
+// only the container differs.
+function readShippedPackage(shipped, dest) {
+  if (shipped.kind === 'folder') return shipped.path; // already a real, unpacked directory
+  return extractZip(shipped.path, dest);
+}
+
+// ---------- verifyZipMagic / zipStaging: silent tar-as-zip corruption (Meridian, 2026-07-20) ----------
+//
+// Live Windows-box finding: GNU tar (first on PATH via Git Bash/MSYS2 on her machine)
+// has no ZIP support behind `-a`, so for a `.zip` filename it silently emits an
+// uncompressed TAR wearing a .zip extension, exit 0 -- and the old `tar -t` + manifest
+// listing check couldn't tell the difference, because GNU tar happily lists its own
+// tar output. zipStaging() returned ok:true for a file that is not actually a zip.
+// Confirmed against her actual repro: the mislabeled file's first bytes were
+// `2e 2f` ("./", a tar header), not `50 4b` (zip magic).
+
+test('verifyZipMagic: rejects a plain-tar-wearing-a-zip-extension file (GNU tar\'s exact failure mode)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-zipmagic-'));
+  try {
+    const fakeZip = join(root, 'fake.zip');
+    // Meridian's exact confirmed bytes for the corrupted case: a tar header starts "./".
+    writeFileSync(fakeZip, Buffer.from('./manifest.json\x00\x00\x00garbage-tar-bytes'));
+    const result = verifyZipMagic(fakeZip);
+    assert.equal(result.ok, false, 'a mislabeled tar must not be certified as a real zip');
+    assert.match(result.reason, /not a real zip/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('verifyZipMagic: accepts a file with real zip local-file-header magic bytes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-zipmagic-'));
+  try {
+    const realZip = join(root, 'real.zip');
+    writeFileSync(realZip, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00, 0x00, 0x00]));
+    const result = verifyZipMagic(realZip);
+    assert.equal(result.ok, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('verifyZipMagic: a missing/unreadable file fails closed with a clear reason, not a thrown error', () => {
+  const result = verifyZipMagic(join(tmpdir(), 'definitely-does-not-exist-' + Date.now(), 'x.zip'));
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /cannot read/);
+});
+
+test('zipStaging: the real local tar on this box produces a file that passes the magic-byte check too (end-to-end sanity)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-zipstaging-'));
+  try {
+    const stage = join(root, 'stage');
+    mkdirSync(stage, { recursive: true });
+    writeFileSync(join(stage, 'manifest.json'), '{}');
+    const dest = join(root, 'out.zip');
+    const result = zipStaging(stage, dest);
+    // A CI runner whose `tar` can't produce a real zip is refused correctly, not a defect —
+    // runPackage() falls back to shipping a folder in that case (see readShippedPackage).
+    if (!result.ok) return;
+    assert.equal(result.ok, true, `real tar on this box should produce a genuine zip: ${result.reason || ''}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('package never contains planted names, paths, topics, or raw unit ids', () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-test-'));
   try {
@@ -79,12 +146,7 @@ test('package never contains planted names, paths, topics, or raw unit ids', () 
     const project = makeFixtureProject(root, { plant: true });
     const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
     assert.ok(!result.error, `no fatal error: ${result.error}`);
-    // Diagnostic-only addition (2026-07-17): a pre-existing Windows-only failure
-    // here has always reported a bare 'folder' !== 'zip' with the underlying
-    // zipStaging() failure reason discarded. Surfacing it so the NEXT
-    // Windows CI run names the real tar failure instead of leaving it unknown.
-    assert.equal(result.shipped.kind, 'zip', `shipped=${JSON.stringify(result.shipped)}`);
-    const text = readAllPackageText(extractZip(result.shipped.path, join(root, 'x')));
+    const text = readAllPackageText(readShippedPackage(result.shipped, join(root, 'x')));
     for (const tripwire of [PLANT_NAME, PLANT_PATH, PLANT_TOPIC, 'plantedusr', 'dc-1-linked', 'fixture-ws-alpha', home]) {
       assert.ok(!text.includes(tripwire), `tripwire must not appear: ${tripwire}`);
     }
@@ -111,7 +173,7 @@ test('share artifact projects local daily telemetry to weekly-only blocks and re
     writeFileSync(join(classified, '2026-07-01.jsonl'), `${JSON.stringify({ state: 'tier-0-win', provisional: true })}\n`);
     writeFileSync(join(classified, '2026-07-08.jsonl'), `${JSON.stringify({ state: 'rec-fail-tier-0', provisional: false })}\n`);
     const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
-    const extracted = extractZip(result.shipped.path, join(root, 'x'));
+    const extracted = readShippedPackage(result.shipped, join(root, 'x'));
     const projectDir = join(extracted, 'projects', readdirSync(join(extracted, 'projects'))[0]);
     const retrieval = JSON.parse(readFileSync(join(projectDir, 'retrieval-stats.json'), 'utf8'));
     const hygiene = JSON.parse(readFileSync(join(projectDir, 'hygiene-stats.json'), 'utf8'));
@@ -199,7 +261,7 @@ test('missing sources emit available:false blocks, run stays exit 1 not a crash'
     const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
     assert.ok(!result.error);
     assert.equal(result.exit, 1, 'partial coverage exits 1');
-    const text = readAllPackageText(extractZip(result.shipped.path, join(root, 'x')));
+    const text = readAllPackageText(readShippedPackage(result.shipped, join(root, 'x')));
     assert.match(text, /"available": false/);
     assert.match(text, /no retrieval-log\.jsonl/);
   } finally { rmSync(root, { recursive: true, force: true }); }

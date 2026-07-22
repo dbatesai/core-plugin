@@ -97,13 +97,49 @@ function nowIso() {
 // release, readers take the UNION of per-project + global (newer last_written
 // wins); each stamp also prunes its file's entry from the global cache under the
 // lock, so the union converges to per-project.
+// Content outside the marker-delimited hot block, hashed on its own (Hale's
+// hot-section-edit-attribution finding, 2026-07-21). `last_written_by:
+// hot-section` alone is NOT trustworthy evidence for a later hash mismatch —
+// it only says who wrote the PREVIOUS cached bytes, not the current ones. A
+// legitimate user edit made after a hot-section apply would carry that same
+// stale label and get silently misclassified as CORE's own synthesis,
+// directly violating the user-control invariant. This hash is the actual,
+// mechanically-verifiable signal: hot-section.mjs never touches anything
+// outside its own markers, by construction, so if this hash still matches
+// the cached one, nothing outside the hot block changed — full stop,
+// regardless of what `last_written_by` claims.
+export function hashOutsideHotBlock(text) {
+  const t = String(text || '');
+  const block = findExistingBlock(t);
+  const outside = block ? t.slice(0, block.start) + t.slice(block.end) : t;
+  return createHash('sha256').update(outside, 'utf8').digest('hex').slice(0, 16);
+}
+
+/**
+ * Deterministic classifier for a PROJECT.md hash mismatch against the cached
+ * stamp (DC-77: this is a critical trust-boundary decision, not something to
+ * leave to prose interpretation). Returns:
+ *   'no-baseline'       — no cached outside_hash to compare against (older
+ *                          cache entry predating this fix, or never stamped).
+ *   'hot-block-only'     — everything outside the hot block is byte-identical
+ *                          to the last recorded write; safe to treat as
+ *                          CORE's own synthesis regardless of the mismatch.
+ *   'outside-changed'    — content outside the hot block changed since the
+ *                          last stamp. hot-section.mjs cannot have produced
+ *                          this; MUST be treated as a possible user edit.
+ */
+export function classifyProjectMdChange(cachedStamp, currentText) {
+  if (!cachedStamp || typeof cachedStamp.outside_hash !== 'string') return 'no-baseline';
+  return hashOutsideHotBlock(currentText) === cachedStamp.outside_hash ? 'hot-block-only' : 'outside-changed';
+}
+
 export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir() } = {}) {
+  const currentText = (() => {
+    try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
+  })();
   const stamp = {
-    last_hash: (() => {
-      let content = '';
-      try { content = readFileSync(projectMdPath, 'utf8'); } catch { /* empty */ }
-      return createHash('sha256').update(content, 'utf8').digest('hex').slice(0, 16);
-    })(),
+    last_hash: createHash('sha256').update(currentText, 'utf8').digest('hex').slice(0, 16),
+    outside_hash: hashOutsideHotBlock(currentText),
     last_written: now || nowIso(),
     last_written_by: 'hot-section',
   };
@@ -198,12 +234,19 @@ export function currentHotSection(projectDir) {
     .trim();
 }
 
-export function clearHotSection(projectDir) {
+export function clearHotSection(projectDir, { now, home } = {}) {
   const { path, text: original } = readProjectMd(projectDir);
   const existing = findExistingBlock(original);
   if (!existing) return original;
   const updated = original.slice(0, existing.start) + original.slice(existing.end);
-  if (updated !== original) atomicWriteFileSync(path, updated);
+  if (updated !== original) {
+    atomicWriteFileSync(path, updated);
+    // Hale's second finding, same audit: clearHotSection wrote PROJECT.md but
+    // never stamped the cache, leaving `last_hash`/`outside_hash` permanently
+    // stale after a clear — edit-detection would then misread the clear
+    // itself as an unattributed change on the very next check.
+    recordProjectMdWrite(path, { now, home });
+  }
   return updated;
 }
 

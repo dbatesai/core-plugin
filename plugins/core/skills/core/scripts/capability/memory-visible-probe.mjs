@@ -35,6 +35,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { mapProjectPathToSlug } from '../project-slug.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-visible-in-agent-context';
@@ -68,9 +69,12 @@ function resolveWorkspaceId(cwd) {
   return null;
 }
 
-function resolveTranscript(cwd, home, override) {
+export function resolveTranscript(cwd, home, override) {
   if (override) return existsSync(override) ? override : null;
-  const mapped = cwd.replace(/\//g, '-');
+  // Was a hand-rolled `.replace(/\//g, '-')` -- missed the Windows drive colon and
+  // any dot in the path, same bug family as auto-memory-injection-probe.mjs. Use
+  // the one canonical encoder (Meridian's live-box repro, 2026-07-20).
+  const mapped = mapProjectPathToSlug(cwd);
   const dir = join(home, '.claude', 'projects', mapped);
   if (!existsSync(dir)) return null;
   const files = readdirSync(dir).filter((f) => f.endsWith('.jsonl'));

@@ -38,6 +38,8 @@ import { fileURLToPath } from 'node:url';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadValidEnrichments } from './enrichment-sidecar.mjs';
+import { truncate as sharedTruncate } from './text-truncate.mjs';
+import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -49,9 +51,16 @@ function isCandidateName(name) {
 }
 
 // Directories the recursive walk descends into: anything not starting with `_`
-// (skips _lib, _validation) — same convention as the file filter.
+// (skips _lib, _validation) — same convention as the file filter. `archive/`
+// is excluded by name (Hale's 2026-07-21 finding): a top-level retired unit
+// is suppressed from active results by status, but an archived unit is a
+// separate, physical relocation out of the active tree — before this
+// exclusion the walk still descended into archive/, so the source signature
+// and any consumer reading the raw walk (not just the status-filtered index)
+// could still see archived content. Path exclusion is the actual boundary
+// for archived units; status filtering is what does the job for retired ones.
 function isCandidateDir(name) {
-  return !name.startsWith('_');
+  return !name.startsWith('_') && name !== 'archive';
 }
 
 /**
@@ -141,7 +150,15 @@ export function loadFreshIndex(storePath) {
   if (existsSync(indexPath)) {
     try {
       const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
-      if (idx && idx.source_sig !== undefined &&
+      // K04 (Hale's audit): source_sig is a pure content hash — it only changes
+      // when file BYTES change, so a unit valid at generation time but past its
+      // own t_invalid date now would keep serving from cache forever if nothing
+      // else in the store happens to be edited. next_invalidation_at is the
+      // earliest such date baked in at generation time; once `now` reaches it,
+      // the cache is stale regardless of whether any byte has moved.
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const timeStale = idx && idx.next_invalidation_at && todayIso >= idx.next_invalidation_at;
+      if (idx && !timeStale && idx.source_sig !== undefined &&
           idx.source_sig === computeSourceSignature(root) &&
           // Every record validated — id/path shape, path containment, uniqueness.
           // A partially-broken cache is regenerated, never partially trusted.
@@ -177,6 +194,26 @@ export function loadSnapshot(storePath, { captureBodies = false, retainRaw = fal
 }
 
 /**
+ * stripGeneratedEdgesBlock — removes decorate-graph.mjs's generated
+ * [[wikilink]] block before a body ever reaches BM25. The block is
+ * CORE-generated metadata (unit ids, edge types), not content the unit is
+ * actually about, and letting it into the ranked body would skew relevance
+ * toward whatever a unit happens to link to rather than what it says.
+ *
+ * ONE definition, used by both loadUnitBodies (the index-only path) and
+ * captureStore's body derivation (the atomic-snapshot path decorate-graph.mjs
+ * and the live retriever/harness actually read) — Hale's 2026-07-21 finding:
+ * the two body-derivation sites duplicated the frontmatter-strip transform,
+ * and only one of them got the edges-block strip when it was first added.
+ */
+export function stripGeneratedEdgesBlock(body) {
+  const beginIdx = body.indexOf(EDGES_BEGIN);
+  const endIdx = body.indexOf(EDGES_END);
+  if (beginIdx === -1 || endIdx === -1 || endIdx < beginIdx) return body;
+  return (body.slice(0, beginIdx) + body.slice(endIdx + EDGES_END.length)).trim();
+}
+
+/**
  * loadUnitBodies — ONE owner for the unit-body walk (bm25's loadActiveBodies
  * delegates here). Files resolve through the index's per-unit `path` — the only
  * correct location for nested units. Returns [{id, tier, text}] where text is
@@ -190,7 +227,7 @@ export function loadUnitBodies(storePath, index) {
     if (!existsSync(fpath)) continue;
     let raw;
     try { raw = readFileSync(fpath, 'utf8'); } catch { continue; }
-    const body = raw.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+    const body = stripGeneratedEdgesBlock(raw.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim());
     const topics = (u.topics || []).join(' ');
     out.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
   }
@@ -211,9 +248,16 @@ export function deriveSummary(body) {
   return '';
 }
 
-function truncate(text, maxLen = SUMMARY_MAX) {
-  const t = String(text ?? '');
-  return t.length <= maxLen ? t : t.slice(0, maxLen - 1).trimEnd() + '…';
+// Found while regression-testing the K-series UTF-8 byte-cap fix (retrieve-
+// context-hook.mjs), 2026-07-19: this is the actual source of the corruption
+// that fix's test caught (`.slice(0, maxLen - 1)` counted UTF-16 code units
+// and could orphan a surrogate pair). An independent review the same day
+// found two more hand-duplicated copies of this exact bug
+// (generate-decisions-index.mjs, generate-risks-index.mjs) that a same-file
+// fix here didn't reach — collapsed all three into text-truncate.mjs so
+// there's no second copy left to drift.
+export function truncate(text, maxLen = SUMMARY_MAX) {
+  return sharedTruncate(text, maxLen);
 }
 
 // Active = status missing or literally 'active'. Anything else (retired, archived,
@@ -259,6 +303,7 @@ function authorityTier(fm, rel) {
 export function captureStore(storePath, { retainRaw = false } = {}) {
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
+  let nextInvalidationAt = null; // K04: earliest still-future t_invalid among included candidates
 
   // ONE read per file.
   const raws = [];
@@ -295,6 +340,17 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     // check alone missed a `status: active` unit with a past t_invalid, which
     // then leaked into per-turn retrieval (the read path this index feeds).
     if (isInvalidated({ id, fm, body }, now)) continue;
+    // K04 (Hale's audit, 2026-07-16): the cache staleness check in loadFreshIndex
+    // is byte-only (source_sig, a content hash) — it never re-fires just because
+    // calendar time passed, so a unit included here as valid (t_invalid in the
+    // future) silently keeps serving as valid past its own t_invalid date if no
+    // file's bytes change in the meantime. Track the earliest such date so the
+    // loader can force a regenerate once `now` reaches it, independent of content
+    // hashing — anti-resurrection needs to be time-aware, not just byte-aware.
+    if (fm.t_invalid && /^\d{4}-\d{2}-\d{2}/.test(String(fm.t_invalid))) {
+      const iv = String(fm.t_invalid).slice(0, 10);
+      if (!nextInvalidationAt || iv < nextInvalidationAt) nextInvalidationAt = iv;
+    }
     textByPath.set(rel, text);
     candidates.push({
       id,
@@ -329,6 +385,7 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     count: units.length,
     generated: '',
     source_sig,
+    next_invalidation_at: nextInvalidationAt, // K04: forces a regenerate at this date even if bytes are unchanged
     degraded: conflicts.length > 0,
     duplicate_conflicts: conflicts,
     units,
@@ -344,7 +401,7 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
   for (const u of units) {
     const text = textByPath.get(u.path);
     if (text === undefined) continue;
-    const body = text.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim();
+    const body = stripGeneratedEdgesBlock(text.replace(/\r\n?/g, '\n').replace(/^---\n[\s\S]*?\n---\n?/, '').trim());
     const topics = (u.topics || []).join(' ');
     bodies.push({ id: u.id, tier: u.tier || 'canonical', text: `${u.summary}\n${topics}\n${body}`.trim() });
     edges[u.id] = extractEdges({ fm: fmByPath.get(u.path) || {} });

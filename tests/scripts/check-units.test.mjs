@@ -421,6 +421,60 @@ test('MEM-018: fresh units and observations are exempt from sources-missing', ()
   assert.equal(report.some(f => f.check === 'sources-missing'), false);
 }));
 
+test('archived-in-active: WARNs on canonical archived metadata (archived: true) left top-level (Hale\'s 2026-07-22 finding)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'risk-1-canonical.md'), [
+    '---', 'id: risk-1-canonical', 'type: risk', 'status: active',
+    'archived: true', 'archived_at: 2026-05-30',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    '---', '', '# risk-1-canonical', '',
+  ].join('\n'));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+  assert.ok(report.some(f => f.check === 'archived-in-active' && f.unit_id === 'risk-1-canonical'),
+    'canonical archived metadata (archived: true), not just status=archived, must be caught');
+}));
+
+test('archived-in-active: does NOT fire for a plain top-level status=retired unit (retire and archive stay independent)', () => withStore((memories) => {
+  writeFileSync(join(memories, 'risk-2-retired.md'), [
+    '---', 'id: risk-2-retired', 'type: risk', 'status: retired',
+    'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+    '---', '', '# risk-2-retired', '',
+  ].join('\n'));
+
+  const report = [];
+  checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+  assert.equal(report.some(f => f.check === 'archived-in-active'), false,
+    'a retired-but-not-archived unit is the documented, expected shape -- must not WARN');
+}));
+
+test("archived-in-active: an unrelated ancestor directory literally named 'archive' does not suppress the warning (Hale's 2026-07-22 finding)", () => {
+  // The project itself sits under .../archive/<project>/ -- nothing to do
+  // with this store's own _memories/archive/ subdirectory. A full-path
+  // segment scan would false-positive here; only the immediate parent of
+  // the unit file should count.
+  const parent = mkdtempSync(join(tmpdir(), 'check-units-outer-'));
+  const root = join(parent, 'archive', 'project');
+  try {
+    const memories = join(root, '_memories');
+    mkdirSync(memories, { recursive: true });
+    writeFileSync(join(memories, 'risk-3-canonical.md'), [
+      '---', 'id: risk-3-canonical', 'type: risk', 'status: active',
+      'archived: true', 'archived_at: 2026-05-30',
+      'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
+      '---', '', '# risk-3-canonical', '',
+    ].join('\n'));
+
+    const report = [];
+    checkIntegrity(iterActiveUnits(memories), memories, new Date(Date.UTC(2026, 5, 9)), report);
+
+    assert.ok(report.some(f => f.check === 'archived-in-active' && f.unit_id === 'risk-3-canonical'),
+      'a unit directly under _memories/ (not _memories/archive/) must still warn, even under an ancestor path named "archive"');
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
 // ---------- D8 / MEM-008 + MEM-014: empty required fields FAIL, oversize WARNs ----------
 
 test('MEM-008: a present-but-empty required field FAILs (type: with blank value)', () => withStore((memories) => {

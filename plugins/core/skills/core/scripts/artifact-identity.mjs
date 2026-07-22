@@ -110,6 +110,7 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
   const oid = treeOid(repo, ref, subdir);
   const { content_manifest_sha256, file_count } = manifestFromGit(repo, ref, subdir);
   return {
+    mode: 'git', // K17 (Hale's audit, 2026-07-16): mode-blind — see directoryIdentity below
     ref,
     subdir,
     tree_oid: oid,
@@ -126,13 +127,38 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
   };
 }
 
+/**
+ * K17 (Hale's audit, 2026-07-16; re-audited 2026-07-19): "mode-blind" — the
+ * CLI's --dir output was a bare manifestHash() result with no field naming
+ * which computation path produced it. The first fix added a `mode` field but
+ * also embedded the canonical absolute local directory in `dir` and in
+ * `reproduce.content_manifest` — Hale's re-audit demonstrated this fails
+ * CORE's OWN refusal-scan boundary (aggregate-receipt.mjs's isPathShaped):
+ * a machine-local path is not part of the content identity, varies by
+ * machine, and is exactly the kind of non-reconstructive-evidence violation
+ * that boundary exists to catch. Fixed: `mode` alone makes the output
+ * self-describing without publishing the local filesystem layout; the
+ * reproduce command uses a location-neutral `<dir>` placeholder.
+ */
+export function directoryIdentity(dir) {
+  const { content_manifest_sha256, file_count } = manifestFromDirectory(dir);
+  return {
+    mode: 'directory',
+    content_manifest_sha256,
+    file_count,
+    reproduce: {
+      content_manifest: 'node artifact-identity.mjs --dir <dir>',
+    },
+  };
+}
+
 function main(argv) {
   const dirIdx = argv.indexOf('--dir');
   const json = argv.includes('--json');
   if (dirIdx >= 0) {
-    const out = manifestFromDirectory(argv[dirIdx + 1]);
+    const out = directoryIdentity(argv[dirIdx + 1]);
     process.stdout.write(json ? JSON.stringify(out, null, 2) + '\n'
-      : `content_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\n`);
+      : `mode ${out.mode}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\n`);
     return 0;
   }
   const subIdx = argv.indexOf('--subdir');
@@ -150,7 +176,7 @@ function main(argv) {
   try { out = artifactIdentity(repo, ref, subdir); }
   catch (e) { process.stderr.write(`artifact-identity: ${e.message}\n`); return 1; }
   process.stdout.write(json ? JSON.stringify(out, null, 2) + '\n'
-    : `tree_oid ${out.tree_oid}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\nreproduce: ${out.reproduce.tree_oid}\n`);
+    : `mode ${out.mode}\ntree_oid ${out.tree_oid}\ncontent_manifest_sha256 ${out.content_manifest_sha256} (${out.file_count} files)\nreproduce: ${out.reproduce.tree_oid}\n`);
   return 0;
 }
 

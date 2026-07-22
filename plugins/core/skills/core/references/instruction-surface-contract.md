@@ -61,13 +61,6 @@ Net effect: a Codex user without a contract can end up with no instruction surfa
 
 ## Remaining caveats
 
-The public README/ARCHITECTURE rewrite this section used to track shipped with the v3.6.0–v3.7.0 public-docs overhaul. Still open: `audit-memory-boundary.mjs` shipped (memory-authority audit, sampled, read-only) and runs in `/finalize` and `/process-memory`, but its conflict-detection scope is deliberately deferred — describe it as shipped-with-conflict-detection-deferred, not complete.
+The public README/ARCHITECTURE rewrite this section used to track shipped with the v3.6.0–v3.7.0 public-docs overhaul. Still open: `audit-memory-boundary.mjs` ships as a memory-authority audit (sampled, read-only) and runs in `/finalize` and `/process-memory`, but its conflict-detection scope is deliberately deferred — describe it as shipped-with-conflict-detection-deferred, not complete.
 
-`instruction-surface-adapter.mjs` is **dry-run only**: every `--apply` is refused by design
-("content-generation not implemented in this slice; the live-write path is David-gated"). The
-adopt workflow above describes the *contract-generator* path (`generate-<harness>-md.mjs`),
-which does write; the *adapter* — inventorying instruction surfaces and planning CORE-block
-upserts across them — plans but never mutates. The full deferred list lives in the `RESIDUALS`
-export at the top of that script; keep that list and this note in sync when a slice lands. A
-wrapper author wanting a CORE-owned block injected into an arbitrary surface today does it by
-hand from the adapter's emitted plan.
+A separate instruction-surface adapter (inventorying arbitrary surfaces and planning CORE-block upserts across them) was explored and retired: everything it was reaching for is already covered by the contract-generator path above (`generate-<harness>-md.mjs`), which actually writes. A wrapper author wanting a CORE-owned block injected into a harness surface uses that path.

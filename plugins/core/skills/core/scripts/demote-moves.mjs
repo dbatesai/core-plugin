@@ -38,6 +38,7 @@ import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
+import { PROJECT_MD_CAP_BYTES } from './compact-project.mjs';
 
 // Terminal statuses come from the shared vocabulary (SYN-005): retired/archived/
 // superseded. 'resolved'/'closed' were never schema statuses and no longer gate;
@@ -46,6 +47,16 @@ export { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 export const CLOSE_AGE_DAYS = 30;
 export const LARGE_BATCH_WARNING_THRESHOLD = 20;
+
+// Size-pressure fallback (2026-07-21): the age floor above is tuned for a
+// project whose Moves growth is slower than 30 days. A fast-moving project
+// can stay over PROJECT.md's hard cap indefinitely even with this gate
+// working exactly as designed, because nothing ages out fast enough. When
+// PROJECT.md is over its hard cap AND a normal-floor pass finds zero
+// candidates, retry with this shorter floor for that run only — the same
+// shape as LARGE_BATCH_WARNING_THRESHOLD (an escalation keyed off observed
+// file state, not a change to the default floor for normally-sized projects).
+export const SIZE_PRESSURE_AGE_DAYS = 7;
 export const ARCHIVE_FILE = 'PROJECT-ARCHIVE.md';
 export const ARCHIVE_MOVES_HEADING = '## §Moves';
 
@@ -196,7 +207,7 @@ export function extractMostRecentDate(text, today = null) {
  * terminal status, then age from max(updated:/created:) across them. Preserved
  * behind --strict for callers that want the conservative behavior.
  */
-function classifyBulletStrict(bullet, memoriesDir, todayIso) {
+function classifyBulletStrict(bullet, memoriesDir, todayIso, ageFloorDays) {
   const refs = extractBackingUnitRefs(bullet.text);
   if (refs.length === 0) return { decision: 'keep', reason: 'no-backing-units' };
   const units = refs.map(id => readUnit(memoriesDir, id));
@@ -207,10 +218,10 @@ function classifyBulletStrict(bullet, memoriesDir, todayIso) {
   if (dates.length === 0) return { decision: 'keep', reason: 'no-updated-dates' };
   const maxUpdated = dates[dates.length - 1];
   const age = ageInDays(maxUpdated, todayIso);
-  // A malformed date yields NaN; `NaN < CLOSE_AGE_DAYS` is false, which would fall
+  // A malformed date yields NaN; `NaN < ageFloorDays` is false, which would fall
   // through to demote — silently dropping a possibly-recent item off the agenda.
   // Treat an un-ageable date as "keep", same as no date at all.
-  if (!Number.isFinite(age) || age < CLOSE_AGE_DAYS) return { decision: 'keep', reason: Number.isFinite(age) ? 'too-recent' : 'unparseable-date', maxUpdated, ageDays: age };
+  if (!Number.isFinite(age) || age < ageFloorDays) return { decision: 'keep', reason: Number.isFinite(age) ? 'too-recent' : 'unparseable-date', maxUpdated, ageDays: age };
   return { decision: 'demote', maxUpdated, ageDays: age, refs, ageSource: 'backing-unit' };
 }
 
@@ -220,7 +231,7 @@ function classifyBulletStrict(bullet, memoriesDir, todayIso) {
  *  Review 2026-06-02d HIGH, reproduced by two reviewers). */
 const STUB_RE = /→\s*see\s+`?PROJECT-ARCHIVE\.md\s+§Moves/;
 
-export function classifyBullet(bullet, projectDir, { today, strict = false } = {}) {
+export function classifyBullet(bullet, projectDir, { today, strict = false, ageFloorDays = CLOSE_AGE_DAYS } = {}) {
   if (bullet.checkbox !== 'x') {
     return { decision: 'keep', reason: 'not-closed' };
   }
@@ -230,7 +241,7 @@ export function classifyBullet(bullet, projectDir, { today, strict = false } = {
   const memoriesDir = join(projectDir, '_memories');
   const todayIso = today || todayUTC();
 
-  if (strict) return classifyBulletStrict(bullet, memoriesDir, todayIso);
+  if (strict) return classifyBulletStrict(bullet, memoriesDir, todayIso, ageFloorDays);
 
   // Loosened default: a completed item is done. Age it by the date in the
   // bullet text (completion proxy) first; fall back to cited-unit dates only
@@ -249,7 +260,7 @@ export function classifyBullet(bullet, projectDir, { today, strict = false } = {
     return { decision: 'keep', reason: 'no-age-signal', refs };
   }
   const age = ageInDays(maxUpdated, todayIso);
-  if (!Number.isFinite(age) || age < CLOSE_AGE_DAYS) {
+  if (!Number.isFinite(age) || age < ageFloorDays) {
     // NaN (malformed date) keeps the item rather than silently demoting it.
     return { decision: 'keep', reason: Number.isFinite(age) ? 'too-recent' : 'unparseable-date', maxUpdated, ageDays: age, ageSource };
   }
@@ -328,14 +339,39 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   }
 
   const bullets = parseBullets(moves);
-  const demotions = [];
-  const kept = [];
-  for (const bullet of bullets) {
-    const result = classifyBullet(bullet, projectDir, { today: todayIso, strict });
-    if (result.decision === 'demote') {
-      demotions.push({ bullet, result, title: extractBulletTitle(bullet.text) });
-    } else {
-      kept.push({ bullet, result });
+
+  function classifyAll(ageFloorDays) {
+    const demos = [];
+    const keeps = [];
+    for (const bullet of bullets) {
+      const result = classifyBullet(bullet, projectDir, { today: todayIso, strict, ageFloorDays });
+      if (result.decision === 'demote') demos.push({ bullet, result, title: extractBulletTitle(bullet.text) });
+      else keeps.push({ bullet, result });
+    }
+    return { demos, keeps };
+  }
+
+  let { demos: demotions, keeps: kept } = classifyAll(CLOSE_AGE_DAYS);
+  let sizePressureApplied = false;
+  let ageFloorDays = CLOSE_AGE_DAYS;
+
+  // Size-pressure fallback: when the file is over its hard cap, check the
+  // shorter floor regardless of what the normal floor already found — a
+  // shorter floor is a strict superset (age >= floor demotes; 7 <= 30, so
+  // everything the 30-day floor catches, the 7-day floor also catches, plus
+  // anything 7-29 days old). Gating on "the normal floor found nothing" (the
+  // original design, Hale's catch 2026-07-21) let a single old item mask
+  // every other item still over cap: one 93-day bullet would demote, the
+  // escalation would never fire, and dozens of 10-29-day bullets would sit
+  // untouched on a file still massively over cap.
+  const sizeBytes = Buffer.byteLength(text, 'utf8');
+  if (sizeBytes > PROJECT_MD_CAP_BYTES) {
+    const escalated = classifyAll(SIZE_PRESSURE_AGE_DAYS);
+    if (escalated.demos.length > demotions.length) {
+      demotions = escalated.demos;
+      kept = escalated.keeps;
+      sizePressureApplied = true;
+      ageFloorDays = SIZE_PRESSURE_AGE_DAYS;
     }
   }
 
@@ -350,6 +386,10 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
     })),
     dryRun,
   };
+  if (sizePressureApplied) {
+    stats.sizePressureApplied = true;
+    stats.ageFloorDays = ageFloorDays;
+  }
 
   logEvent(projectDir, 'hygiene-log.jsonl', {
     kind: 'demote-moves',
@@ -357,6 +397,8 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
     kept: stats.kept,
     dry_run: dryRun,
     candidates: stats.candidates,
+    size_pressure_applied: sizePressureApplied,
+    age_floor_days: ageFloorDays,
   }, { today: todayIso });
 
   const largeBatch = demotions.length >= LARGE_BATCH_WARNING_THRESHOLD;
@@ -462,6 +504,9 @@ export function main(argv) {
   const mode = dryRun ? ' (dry-run)' : stats.held ? ' (HELD — nothing written)' : '';
   const verb = stats.held ? 'would demote' : 'demoted';
   process.stdout.write(`demote-moves${mode}: ${stats.demoted} ${verb}, ${stats.kept} kept.\n`);
+  if (stats.sizePressureApplied) {
+    process.stdout.write(`  size-pressure: PROJECT.md is over cap and the ${CLOSE_AGE_DAYS}-day floor found nothing — escalated to a ${stats.ageFloorDays}-day floor for this run.\n`);
+  }
   if (stats.candidates && stats.candidates.length) {
     for (const c of stats.candidates) {
       process.stdout.write(`  • ${c.title}  (age ${c.ageDays}d)\n`);

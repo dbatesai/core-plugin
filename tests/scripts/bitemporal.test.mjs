@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadUnit } from '../../plugins/core/skills/core/scripts/priority.mjs';
+import { loadUnit, iterArchivedUnits } from '../../plugins/core/skills/core/scripts/priority.mjs';
+import { iterActiveUnits } from '../../plugins/core/skills/core/scripts/check-units.mjs';
 import {
   effectiveValidity, validAt, isInvalidated, classifySupersessions,
   planSupersessionStamps, setFrontmatterField, applySupersessionStamps,
@@ -225,6 +226,30 @@ test('asOf returns the set valid at a date', () => {
   ];
   assert.deepEqual(asOf(units, '2026-03-15'), ['a', 'b'], 'a and b valid mid-March; c not yet');
   assert.deepEqual(asOf(units, '2026-05-01'), ['b'], 'a invalidated, c not yet');
+});
+
+test('CLI-equivalent pool (iterActiveUnits + iterArchivedUnits) reconstructs history through a physically relocated unit (Hale\'s 2026-07-21 finding)', () => {
+  withStore({
+    'dc-live.md': '---\nid: dc-live\ntype: decision\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-01-01\ntopics: [a]\n---\n\n# live\n',
+  }, (mem) => {
+    mkdirSync(join(mem, 'archive'), { recursive: true });
+    writeFileSync(join(mem, 'archive', 'dc-relocated.md'),
+      // archived_at deliberately later than t_invalid: archiving and
+      // invalidation are independent actions on independent timelines
+      // (Hale's 2026-07-22 finding) -- a shared date could read as if one
+      // caused the other.
+      '---\nid: dc-relocated\ntype: decision\nstatus: active\narchived: true\narchived_at: 2026-04-15\ncreated: 2026-01-01\nupdated: 2026-01-01\nt_invalid: 2026-04-01\ntopics: [a]\n---\n\n# relocated\n');
+
+    // What the real CLI's --as-of branch does: merge active + archived pools.
+    const pool = iterActiveUnits(mem).concat(iterArchivedUnits(mem));
+    const ids = asOf(pool, '2026-02-01');
+    assert.ok(ids.includes('dc-relocated'), 'an archived unit must still be reconstructable at a past date');
+
+    // iterActiveUnits alone (the pre-fix behavior) must NOT see it -- proves
+    // the fix is the concat, not some other accidental path.
+    const activeOnlyIds = asOf(iterActiveUnits(mem), '2026-02-01');
+    assert.ok(!activeOnlyIds.includes('dc-relocated'), 'iterActiveUnits alone still excludes archive/ by design');
+  });
 });
 
 // ============================================================

@@ -2,14 +2,17 @@
  * orphan-detector.mjs — definition-of-done enforcement for the plugin.
  *
  * CORE kept building mechanisms and never wiring them in (the "last-mile" debt:
- * metrics-init, adversarial-run-gate, instruction-surface-adapter, generate-agents-md,
- * clusters.md). The rule adopted to stop it: a mechanism isn't done until a skill
+ * metrics-init, adversarial-run-gate, generate-agents-md, clusters.md — a fifth
+ * example, instruction-surface-adapter.mjs, was never wired and has since been
+ * removed rather than kept staged). The rule adopted to stop it: a mechanism isn't done until a skill
  * invokes it AND a test asserts the wiring. This script is the standing check.
  *
  * It flags two kinds of orphan:
- *   1. A `scripts/**.mjs` file that nothing reaches — not named in any skill/
- *      protocol/reference `.md` (the prose the agent reads to invoke it), and not
- *      imported (transitively) by a script that IS reached.
+ *   1. A `scripts/**.mjs` OR `hooks/*.mjs` file that nothing reaches — not named
+ *      in any skill/protocol/reference `.md` or hook manifest (`hooks.json`,
+ *      `hooks-codex.json` — the ACTUAL registration surface for a hook entry
+ *      point, prose is not how a hook gets invoked), and not imported
+ *      (transitively) by a file that IS reached.
  *   2. A `protocols/*.md` file not listed in the SKILL.md protocol index (so it
  *      never loads).
  *
@@ -17,6 +20,15 @@
  * NOT neglect. Such items go on ALLOWLIST with a documented reason and a pointer
  * to the decision that gates their activation. The detector still PRINTS them every
  * run so they stay visible and don't rot silently — "tracked, not forgotten."
+ *
+ * Logged gap, fixed 2026-07-19 (Antigravity's catch during the D1 security fix,
+ * 2026-07-18): hook files were entirely absent from the scan, so a scripts/
+ * utility imported ONLY from a hook was structurally invisible to the import
+ * closure, and genuine hook-level dead code could accumulate unflagged. Hook
+ * files are now scanned symmetrically with scripts/, seeded as wired from
+ * BOTH hook manifests (not skill prose), with their import edges followed the
+ * same way. No currently-shipped file changed reachability status — this
+ * closes a structural blind spot, not a live incident.
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  *
@@ -34,14 +46,6 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
-  // select-relevant-units.mjs left this allowlist 2026-07-17: DC-117 resolved
-  // Gate G3 and references/retrieval.md §Tier 3 step 1 now names it on the
-  // product path (shortlist --max 100 before any Explore subagent).
-  'instruction-surface-adapter.mjs': {
-    reason: 'Deliberately-staged v3.0 instruction-surface system (dry-run core; --apply is David-gated + content-generation not implemented). Activation is tied to the pending "does the contract→generator system still earn its complexity at N=2 surfaces" decision (PROJECT.md §State). Wire or retire when that decides.',
-    allowlistDate: '2026-06-09',
-    reviewBy: '2026-09-09',
-  },
   'retrieval-harness.mjs': {
     reason: 'Offline Recall@K gold harness (DC-113 Tier-A T1; arms trimmed to model-free per DC-114) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the DC-115 measurement ceremony (Crest\'s shared harness is the BBLens twin). Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
     allowlistDate: '2026-07-07',
@@ -80,18 +84,36 @@ export function resolveCoreRoot({ coreRootArg, scriptUrl } = {}) {
 export function findOrphans({ coreRoot, allowlist = ALLOWLIST, today = new Date() } = {}) {
   const skillsDir = join(coreRoot, 'skills');
   const scriptsRoot = join(coreRoot, 'skills', 'core', 'scripts');
+  const hooksRoot = join(coreRoot, 'skills', 'core', 'hooks');
 
   const scripts = walk(scriptsRoot, '.mjs');
+  // Logged gap (2026-07-18, Antigravity's catch during the D1 security fix):
+  // the transitive-closure walk used to only follow scripts/*.mjs import
+  // chains, so a scripts/ utility imported ONLY from a hook file was
+  // structurally invisible — allowlisted rather than fixed, to avoid
+  // scope-creeping that security patch. Fixed here: hook files are scanned
+  // for imports the same way scripts are, so a hook-only import chain is
+  // followed correctly, and a hook file itself is now a checkable object
+  // (genuine hook-level dead code no longer accumulates unflagged).
+  const hookFiles = walk(hooksRoot, '.mjs');
+  const allMjs = [...scripts, ...hookFiles];
+
   // The surfaces that reach a script in production: prose the agent reads (.md)
   // AND data files that name scripts for dynamic dispatch (.json — e.g. the
   // capability descriptor's `delegate` fields invoke `capability/*.mjs`). Tests
   // are excluded — a script referenced only by a test is dormant in production.
   const docs = [...walk(skillsDir, '.md'), ...walk(skillsDir, '.json')];
-  const docText = docs.map((d) => safeRead(d)).join('\n');
+  // Hook entry points are reached via the hook MANIFESTS (hooks.json for
+  // Claude, hooks-codex.json for Codex), which live in a `hooks/` dir
+  // SIBLING to `skills/` — never scanned by the skillsDir walk above. Without
+  // this, every hook file would read as unreachable regardless of the import
+  // fix, since skill/protocol/reference prose is not how a hook gets invoked.
+  const hookManifests = [join(coreRoot, 'hooks', 'hooks.json'), join(coreRoot, 'hooks', 'hooks-codex.json')];
+  const docText = [...docs.map(safeRead), ...hookManifests.map(safeRead)].join('\n');
 
-  // Import graph: which script imports which (relative ./X.mjs or ../X.mjs).
-  const importsOf = new Map(); // script basename -> Set of imported basenames
-  for (const s of scripts) {
+  // Import graph: which file imports which (relative ./X.mjs or ../X.mjs).
+  const importsOf = new Map(); // basename -> Set of imported basenames
+  for (const s of allMjs) {
     const src = safeRead(s);
     const imported = new Set();
     const re = /(?:import[^'"]*from\s*|import\(\s*)['"]([^'"]+\.mjs)['"]/g;
@@ -100,16 +122,17 @@ export function findOrphans({ coreRoot, allowlist = ALLOWLIST, today = new Date(
     importsOf.set(basename(s), imported);
   }
 
-  // Seed: scripts named in skill/protocol/reference prose (by full basename).
-  // Match on a boundary, not a bare substring: a plain includes('init.mjs') would
-  // falsely mark init.mjs reachable just because the prose mentions metrics-init.mjs.
+  // Seed: files named in skill/protocol/reference prose OR a hook manifest
+  // (by full basename). Match on a boundary, not a bare substring: a plain
+  // includes('init.mjs') would falsely mark init.mjs reachable just because
+  // the prose mentions metrics-init.mjs.
   const wired = new Set();
   const boundary = (name) => new RegExp(`(^|[^\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`);
-  for (const s of scripts) {
+  for (const s of allMjs) {
     const name = basename(s);
     if (boundary(name).test(docText)) wired.add(name);
   }
-  // Transitive closure: anything imported by a wired script is wired.
+  // Transitive closure: anything imported by a wired file is wired.
   let grew = true;
   while (grew) {
     grew = false;
@@ -125,7 +148,7 @@ export function findOrphans({ coreRoot, allowlist = ALLOWLIST, today = new Date(
   const allowlisted = [];
   const staleAllowlisted = [];
   const todayIso = today.toISOString().slice(0, 10);
-  for (const s of scripts) {
+  for (const s of allMjs) {
     const name = basename(s);
     if (wired.has(name)) continue;
     const entry = allowlistEntry(allowlist, name);
@@ -152,7 +175,7 @@ export function findOrphans({ coreRoot, allowlist = ALLOWLIST, today = new Date(
     allowlisted,
     staleAllowlisted,
     wiredCount: wired.size,
-    scriptCount: scripts.length,
+    scriptCount: allMjs.length,
   };
 }
 

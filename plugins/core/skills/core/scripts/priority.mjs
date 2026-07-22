@@ -436,16 +436,43 @@ export function iterUnits(memoriesDir) {
 }
 
 /**
+ * iterArchivedUnits — the ONE archive-aware companion to iterUnits, for the
+ * explicit-history modes only (Hale's 2026-07-21 finding). Archiving a unit
+ * (a separate, independent action from retiring it — see hygiene.md) is what
+ * physically relocates it to `archive/`, but iterUnits is top-level-only by
+ * design (default retrieval must stay non-recursive, per
+ * ARCHITECTURE.md/data-storage.md). Once a unit is archived, it silently
+ * disappeared from every "--include-invalid" / cold-history caller too, not
+ * just default retrieval -- that's a real regression for a memory product
+ * whose MVP is complete recall, not a side effect of the archive action
+ * itself. Callers that mean to see cold history (rankUnits with
+ * includeInvalidated:true, graph-walk's same flag, bitemporal's
+ * inherently-historical queries) merge this in; default, non-invalidated
+ * retrieval never calls this function.
+ */
+export function iterArchivedUnits(memoriesDir) {
+  try {
+    return iterUnits(join(memoriesDir, 'archive'));
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
+/**
  * Rank every loadable, currently-valid unit (SOD-003). The bi-temporal
  * suppression invariant — default retrieval excludes invalidated units
  * (ARCHITECTURE.md, data-storage.md) — is applied HERE so every consumer
  * (the CLI, generate-memory-index, any wrapper) inherits it instead of
- * re-deriving it. Cold history stays reachable with includeInvalidated:true.
+ * re-deriving it. Cold history stays reachable with includeInvalidated:true,
+ * which also merges in archive/ (iterArchivedUnits) so an archived unit
+ * stays reachable for an explicit historical query.
  * @returns {Array<[number, object]>} [score, unit] pairs, descending.
  */
 export function rankUnits(memoriesDir, { sessionTopics = [], today = null, includeInvalidated = false } = {}) {
   const t = today || _todayUTC();
-  const ranked = iterUnits(memoriesDir)
+  const pool = includeInvalidated ? iterUnits(memoriesDir).concat(iterArchivedUnits(memoriesDir)) : iterUnits(memoriesDir);
+  const ranked = pool
     .filter(u => !u.fm._load_error)
     .filter(u => includeInvalidated || isActiveStatus(u.fm))
     .filter(u => includeInvalidated || !isInvalidated(u, t))

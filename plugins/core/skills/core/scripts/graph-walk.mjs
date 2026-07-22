@@ -33,7 +33,7 @@ import {
 } from './priority.mjs';
 import { isActiveStatus } from './unit-vocab.mjs';
 
-function resolveTarget(target, memoriesDir, includeObservations = false) {
+function resolveTarget(target, memoriesDir, includeObservations = false, includeInvalidated = false) {
   const t = target.trim();
   const direct = resolve(t);
   if (existsSync(direct)) return direct;
@@ -42,6 +42,16 @@ function resolveTarget(target, memoriesDir, includeObservations = false) {
   if (existsSync(c1)) return c1;
   const c2 = join(memoriesDir, t);
   if (existsSync(c2)) return c2;
+  // Archive is out of scope for a default walk (Hale's 2026-07-22 finding):
+  // an archived unit can carry status:active with no t_invalid, so neither
+  // downstream suppression check (isInvalidated / isActiveStatus) would ever
+  // catch it -- resolving the path at all is what has to be gated, not just
+  // whether it later surfaces. Cold-history walks (includeInvalidated:true)
+  // still need it, same as the inverse-edge archive scan below.
+  if (includeInvalidated) {
+    const c3 = join(memoriesDir, 'archive', `${stem}.md`);
+    if (existsSync(c3)) return c3;
+  }
   if (includeObservations) {
     // SYN-007: edges pointing into observations/<YYYY-MM>/ resolved to null.
     const obsRoot = join(memoriesDir, 'observations');
@@ -61,7 +71,7 @@ function resolveTarget(target, memoriesDir, includeObservations = false) {
 // Build an inverse edge index: target-stem -> [{sourcePath, sourceId, edgeType}].
 // Top-level scan by default; includeObservations also scans observations/ and
 // its month subdirs (SYN-007) so observation units can appear as inbound neighbors.
-export function buildInverseEdgeIndex(memoriesDir, { includeObservations = false } = {}) {
+export function buildInverseEdgeIndex(memoriesDir, { includeObservations = false, includeInvalidated = false } = {}) {
   const inverse = new Map();
   const scanDir = (dir) => {
     let files;
@@ -87,6 +97,11 @@ export function buildInverseEdgeIndex(memoriesDir, { includeObservations = false
     try { months = readdirSync(obsRoot, { withFileTypes: true }); } catch { months = []; }
     for (const m of months) if (m.isDirectory()) scanDir(join(obsRoot, m.name));
   }
+  // Cold-history walks (--include-invalid) need an archived unit's OWN
+  // outgoing edges indexed too, so traversal can continue FROM a retired
+  // unit that got physically relocated -- not just resolve edges pointing
+  // AT it (resolveTarget's job). Default walks never scan archive/.
+  if (includeInvalidated) scanDir(join(memoriesDir, 'archive'));
   return inverse;
 }
 
@@ -116,7 +131,7 @@ export function walk(seedPath, {
   const mDir = resolve(memoriesDir);
   const seed = loadUnit(seedPath);
   const seedResolved = resolve(String(seedPath));
-  const inverse = buildInverseEdgeIndex(mDir, { includeObservations });
+  const inverse = buildInverseEdgeIndex(mDir, { includeObservations, includeInvalidated });
 
   // Validity-suppression: a unit whose t_invalid is in the past is excluded from
   // the "currently valid" candidate set — the same rule that suppresses retired
@@ -130,7 +145,7 @@ export function walk(seedPath, {
   const queue = []; // [hop, path, edgeType, sourceId, direction]
 
   for (const e of extractEdges(seed)) {
-    const tp = resolveTarget(e.target, mDir, includeObservations);
+    const tp = resolveTarget(e.target, mDir, includeObservations, includeInvalidated);
     if (tp && !visited.has(resolve(tp))) {
       queue.push([1, tp, e.type, seed.id, 'outbound']);
     }
@@ -178,7 +193,7 @@ export function walk(seedPath, {
 
     if (hop < hops) {
       for (const e of extractEdges(unit)) {
-        const tp = resolveTarget(e.target, mDir, includeObservations);
+        const tp = resolveTarget(e.target, mDir, includeObservations, includeInvalidated);
         if (tp && !visited.has(resolve(tp))) {
           queue.push([hop + 1, tp, e.type, unit.id, 'outbound']);
         }

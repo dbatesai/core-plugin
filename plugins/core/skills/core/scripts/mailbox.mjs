@@ -30,10 +30,21 @@
  * registered id or a path to a real project. An unresolved target FAILS LOUD
  * (exit 2) — a comms channel must never silently drop a message.
  *
+ * Self-caught 2026-07-20: `list`/`read`/`archive` used to resolve <project>
+ * with a bare `resolve()` instead of the registry-aware resolveTarget() that
+ * `post --to` already used -- a workspace id (e.g. an id NOT containing '/'
+ * or '.') silently resolved relative to the CALLER'S cwd instead of through
+ * the registry, and a wrong/unregistered id landed on a nonexistent
+ * directory and printed "no unread messages" instead of failing loud. That
+ * is indistinguishable from a genuinely empty mailbox and is exactly the
+ * silent-drop the FAILS LOUD invariant above was supposed to rule out --
+ * caught only because a 172-message backlog turned out to be sitting
+ * unseen behind it. All three ops now route through resolveTarget() too.
+ *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only, macOS + Windows.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, renameSync, linkSync, unlinkSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, linkSync, unlinkSync, realpathSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -113,7 +124,7 @@ function parseName(name) {
 
 /** Unread messages: *.md in _mailbox/ (not archive/, not dotfiles). Missing dir → []. */
 export function listMessages(projectPath) {
-  const dir = mailboxDir(resolve(projectPath));
+  const dir = mailboxDir(resolveTarget(projectPath));
   let names;
   try { names = readdirSync(dir); } catch { return []; }
   const out = [];
@@ -137,17 +148,44 @@ export function listMessages(projectPath) {
 }
 
 export function readMessage(projectPath, file) {
-  const full = join(mailboxDir(resolve(projectPath)), basename(file));
+  const full = join(mailboxDir(resolveTarget(projectPath)), basename(file));
   return readFileSync(full, 'utf8');
+}
+
+// K16 (Hale's audit, 2026-07-16): archiveMessage renamed straight onto
+// `join(archiveDir, basename(file))` with no collision check — a bare
+// filesystem rename onto an existing path silently REPLACES it. The inbox's
+// own collision guard (atomicCreate, below) only scopes to the inbox
+// directory, never to archive/, so two distinct messages that happen to slug
+// to the same <from>--<topic>--<date> basename (one already archived, a
+// second one posted and archived later) would silently destroy the first
+// archived message on the second archive — a real loss of comms history,
+// exactly the kind of thing this channel exists to preserve. Fixed:
+// disambiguate the destination the same way atomicCreate disambiguates the
+// inbox, never overwrite an existing archived file.
+// Atomic move via link-then-unlink (same technique atomicCreate uses below):
+// linkSync fails EEXIST rather than silently replacing, closing the TOCTOU
+// gap a check-then-renameSync would leave open under concurrent archiving.
+function moveNonColliding(src, dir, filename) {
+  const dot = filename.lastIndexOf('.');
+  const base = dot > 0 ? filename.slice(0, dot) : filename;
+  const ext = dot > 0 ? filename.slice(dot) : '';
+  for (let i = 0; i < 1000; i++) {
+    const candidate = i === 0 ? filename : `${base}-${i + 1}${ext}`;
+    try { linkSync(src, join(dir, candidate)); unlinkSync(src); return candidate; }
+    catch (e) { if (e.code !== 'EEXIST') throw e; }
+  }
+  throw new Error(`archiveMessage: too many filename collisions in ${dir} for ${filename}`);
 }
 
 /** Move a message to archive/ (mark read). Idempotent: already-archived/absent → no-op. */
 export function archiveMessage(projectPath, file) {
-  const proj = resolve(projectPath);
+  const proj = resolveTarget(projectPath);
   const src = join(mailboxDir(proj), basename(file));
   if (!existsSync(src)) return false; // already archived or never existed
-  mkdirSync(archiveDir(proj), { recursive: true });
-  renameSync(src, join(archiveDir(proj), basename(file)));
+  const dir = archiveDir(proj);
+  mkdirSync(dir, { recursive: true });
+  moveNonColliding(src, dir, basename(file));
   return true;
 }
 
@@ -189,19 +227,30 @@ function realish() { return (process.hrtime.bigint().toString(36) + (_seq++).toS
  * potentially cross-project-sensitive inbound comms; unlike the memory store it must
  * never be committed/pushed. Idempotent append to <project>/.gitignore.
  */
+// Fail-closed (Hale's finding, 2026-07-21): the old version swallowed every
+// failure here — a `.gitignore` that couldn't be read OR written (e.g. it's a
+// directory, or the tree is read-only in a way that isn't a plain ENOENT on a
+// missing file) silently fell through, and postMessage() still wrote the
+// mailbox content with no leak protection actually established. Returns
+// normally on success; THROWS when protection can't be verified, so the
+// caller (postMessage) can refuse rather than write unprotected content.
 function ensureGitignored(project) {
   const gi = join(project, '.gitignore');
   let cur = '';
-  try { cur = readFileSync(gi, 'utf8'); } catch { /* none yet */ }
-  if (/^_mailbox\/?\s*$/m.test(cur)) return;
+  try { cur = readFileSync(gi, 'utf8'); } catch (e) {
+    if (!e || e.code !== 'ENOENT') throw new Error(`cannot verify .gitignore leak protection at ${gi}: ${e.message}`);
+  }
+  if (/^_mailbox\/?\s*$/m.test(cur)) return; // already protected — nothing to write
   const add = (cur && !cur.endsWith('\n') ? '\n' : '') + '_mailbox/\n';
-  try { writeFileSync(gi, cur + add); } catch { /* read-only tree — best effort */ }
+  try { writeFileSync(gi, cur + add); } catch (e) {
+    throw new Error(`cannot establish _mailbox/ gitignore leak protection at ${gi}: ${e.message}`);
+  }
 }
 
 /** Post a message into a target project's mailbox. Returns the written filename. */
 export function postMessage({ to, from, topic, body, date }) {
   const target = resolveTarget(to, { forWrite: true });
-  ensureGitignored(target);
+  ensureGitignored(target); // throws (fail-closed) rather than let an unwritten mailbox proceed unprotected
   const d = date || new Date().toISOString().slice(0, 10);
   const base = `${slugify(from, 'sender')}--${slugify(topic, 'message')}--${d}`;
   const front = `---\nfrom: ${from}\ntopic: ${topic}\ndate: ${d}\n---\n\n`;

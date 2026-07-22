@@ -181,7 +181,12 @@ test('DC-94a: each classified record is stamped with proxy_version', () => {
     assert.equal(r.records[0].turn_evidence.user_text, 'hello');
     assert.equal(r.records[0].turn_evidence.assistant_text, 'The answer is 42.');
     const classifiedFile = join(home, '.core', 'workspaces', 'ct-pv-ws', 'metrics', 'classified', '2026-06-01.jsonl');
-    assert.equal(statSync(classifiedFile).mode & 0o777, 0o600, 'raw calibration evidence is owner-only');
+    // Windows: chmod cannot express owner-only (only toggles read-only), so
+    // mode stays 0o666 regardless -- structurally unsatisfiable there, not a
+    // regression (Meridian, 2026-07-21).
+    if (process.platform !== 'win32') {
+      assert.equal(statSync(classifiedFile).mode & 0o777, 0o600, 'raw calibration evidence is owner-only');
+    }
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });

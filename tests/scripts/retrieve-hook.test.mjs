@@ -180,11 +180,132 @@ test('empty result is an honest no-hit at the tier actually run — never a fabr
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// CORE_REASONING_ARM (2026-07-19): the preregistered three-arm efficacy pilot
+// control. 'automatic' must be provably byte-identical to today's behavior
+// (every test above this block already proves that — none of them set the
+// var). These tests exercise the two new arms and the fail-closed contract.
+
+test('CORE_REASONING_ARM=deterministic-only suppresses the directive even on a true zero-hit', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-det-')));
+  try {
+    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'deterministic-only' }, root);
+    assert.doesNotMatch(out, /CORE reasoning escalation required/, 'deterministic-only must never emit the Tier 3 directive');
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, 'deterministic-only');
+    assert.equal(evt.directive_fired, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CORE_REASONING_ARM=always-on forces the directive even when Tier 1 found real hits', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-always-')));
+  try {
+    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'always-on' }, root);
+    assert.match(out, /widget/i, 'the real hit content must still be delivered, not silently dropped');
+    assert.match(out, /CORE reasoning escalation required/, 'always-on must force the directive even with hits present');
+    assert.match(out, /forces escalation regardless of Tier 1 result/, 'the forced case must not claim a fabricated zero-hit reason');
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, 'always-on');
+    assert.equal(evt.directive_fired, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CORE_REASONING_ARM=always-on with no hits: directive fires, reason stays honestly no-hit', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-always-nohit-')));
+  try {
+    runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'always-on' }, root);
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, 'always-on');
+    assert.equal(evt.directive_fired, true);
+    assert.equal(evt.result, 'no-hit', 'zero-hit is still honestly reported at the event-log level regardless of arm');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// UTF-8 byte-cap fix (Hale's re-audit, 2026-07-19): the final pack+directive
+// combine step used to re-truncate with String.slice(0, 2048) — UTF-16 code
+// units, not bytes — which can both exceed the preregistered 2048-byte budget
+// on non-ASCII content and split a multi-byte character (or a surrogate pair)
+// mid-sequence. A dense-emoji unit body forces the packText close to the cap
+// on its own, so appending the forced reasoning directive (always-on) pushes
+// the combine step over budget and exercises the exact truncation boundary.
+test('K-series UTF-8 fix: dense multi-byte content + forced directive stays within the real byte budget with no corrupted (replacement-char) truncation', () => {
+  const root = mkdtempSync(join(trustedTestTmpRoot(), 'rh-utf8-'));
+  const store = join(root, '_memories');
+  mkd(store, { recursive: true });
+  wf(join(root, 'PROJECT.md'), '# T\n');
+  // 600 four-byte emoji = 2400 raw UTF-8 bytes in the body alone — comfortably
+  // past the 2048 cap on its own, entirely multi-byte, so any byte-unaware
+  // truncation is very likely to land mid-character.
+  const emojiFiller = '🎯'.repeat(600);
+  wf(join(store, 'dc-1-widget.md'),
+    `---\nid: dc-1-widget\ntype: decision\nstatus: active\ncreated: 2026-07-01\ntopics:\n  - widget\n---\n\nWidget decision body. ${emojiFiller}\n`);
+  try {
+    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_REASONING_ARM: 'always-on' }, root);
+    assert.ok(Buffer.byteLength(out, 'utf8') <= 2048, `delivered payload must respect the real UTF-8 byte budget (got ${Buffer.byteLength(out, 'utf8')} bytes)`);
+    assert.ok(!out.includes('�'), 'no replacement-character corruption from a mid-sequence split');
+    assert.match(out, /CORE reasoning escalation required/, 'the forced directive must still be present, not silently dropped by the fix');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CORE_REASONING_ARM unset behaves identically to "automatic" (no requested_arm/directive_fired fields at all)', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-unset-')));
+  try {
+    runHook('widget decision', { CORE_METRICS_ENABLED: '1' }, root);
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, undefined, 'ordinary retrieval-log rows must stay byte-identical to before this control existed');
+    assert.equal(evt.directive_fired, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Hale catch (2026-07-19, blueprint review): the preregistration's
+// "escalation-only" arm IS today's shipped default behavior -- the pilot
+// legitimately requests it by explicitly setting CORE_REASONING_ARM=automatic
+// (not by leaving the var unset, which is what a real user does). The prior
+// gate (`requestedArm !== 'automatic'`) gave that explicit request no
+// observable receipt at all, so the runner's own fail-closed contract would
+// have spoiled every escalation-only trial with nothing to check against.
+test('CORE_REASONING_ARM=automatic (explicit) DOES get an observable receipt, unlike leaving it unset', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-explicit-automatic-')));
+  try {
+    runHook('widget decision', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'automatic' }, root);
+    const [evt] = readEventRows(root);
+    assert.equal(evt.requested_arm, 'automatic', 'an explicit pilot request for the escalation-only arm must be auditable, not indistinguishable from an ordinary user who never set the var');
+    assert.equal(evt.directive_fired, false, 'a real hit exists, so automatic does not escalate -- same behavior as unset, but now observable');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('metrics opt-out means zero telemetry rows', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-')));
   try {
     runHook('widget decision', { CORE_METRICS_ENABLED: '0' }, root);
     assert.equal(readEventRows(root).length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// Hale catch (2026-07-19, second review pass): the directive_fired ordering
+// fix moved directive construction inside the metricsEnabled() branch, which
+// meant CORE_METRICS_ENABLED=0 silently suppressed the Tier 3 escalation
+// directive itself -- not just its telemetry row. Opting out of telemetry
+// must never change what the user's turn actually receives. These two prove
+// the delivered directive is independent of the metrics flag; none of the
+// tests above this point combined metrics-off with a case that should still
+// escalate, which is exactly why this regression shipped once already.
+
+test('metrics-off automatic zero-hit still escalates (telemetry opt-out must not suppress retrieval behavior)', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-zerohit-')));
+  try {
+    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '0' }, root);
+    assert.match(out, /CORE reasoning escalation required/, 'the directive must still fire with metrics off');
+    assert.equal(readEventRows(root).length, 0, 'no telemetry row, but the delivered content is unaffected');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('metrics-off CORE_REASONING_ARM=always-on still forces the directive', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-alwayson-')));
+  try {
+    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_REASONING_ARM: 'always-on' }, root);
+    assert.match(out, /widget/i, 'real hit content still delivered');
+    assert.match(out, /CORE reasoning escalation required/, 'always-on must still force the directive with metrics off');
+    assert.equal(readEventRows(root).length, 0, 'no telemetry row, but the delivered content is unaffected');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -219,6 +340,14 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
     // via the explicit CORE_TEST_FORCE_PIPELINE_ERROR seam and runs the real
     // subprocess end to end — fail-open proven, not assumed.
     { name: 'pipeline-error-genuine-crash', env: { CORE_TEST_FORCE_PIPELINE_ERROR: '1' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
+    // Hale catch, 2026-07-19: resolveReasoningArm's throw originally landed
+    // OUTSIDE every try/catch in main(), so it escaped to the outer
+    // main().catch(() => process.exit(0)) with no receipt() call at all —
+    // exit 0 was right (never block the turn) but the promised typed
+    // pipeline-error row silently never got written. The standalone garbage-
+    // value test only checked exit/stdout, which is exactly why it missed
+    // this; this table-driven branch checks the actual hook-log receipt.
+    { name: 'reasoning-arm-invalid-genuine-crash', env: { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'not-a-real-arm' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
     { name: 'store-unavailable', env: {}, prompt: 'widget', expect: { action: 'skip', reason: 'store-unavailable' }, needStore: false, setup: (root) => { wf(join(root, '_memories'), 'not a directory'); } },
     { name: 'no-hit', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'zzqx unmatchable quark', expect: { action: 'delivered', reason: 'no-hit' } },
     { name: 'delivery-failed', env: { CORE_RETRIEVAL_BYTE_CAP: '0' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'delivery-failed' } },

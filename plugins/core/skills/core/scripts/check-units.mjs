@@ -30,7 +30,7 @@
  */
 
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { resolve, join, basename } from 'node:path';
+import { resolve, join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.mjs';
 
@@ -337,8 +337,20 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     }
 
     const status = String(u.fm.status || '').toLowerCase();
-    if (status === 'archived' && !String(u.path).includes('archive'))
-      report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit has status=archived but is not in archive/ subdir' });
+    // The immediate parent only (Hale's 2026-07-22 finding): a full-path
+    // segment scan false-positives when the project itself sits under some
+    // unrelated ancestor directory named "archive" -- that has nothing to do
+    // with this unit store's own archive/ subdirectory.
+    const inArchiveDir = basename(dirname(String(u.path))) === 'archive';
+    // Canonical archiving (hygiene.md) sets `archived: true` and does not
+    // require a status change -- a unit can be `status: active, archived:
+    // true` and this must still catch it left top-level. The legacy
+    // `status === 'archived'` form stays recognized too (Hale's 2026-07-22
+    // finding: checking status alone missed the canonical shape entirely,
+    // and a substring .includes('archive') could false-positive on a
+    // top-level file merely named with "archive" in it).
+    if ((u.fm.archived === true || status === 'archived') && !inArchiveDir)
+      report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit is archived (archived: true or status=archived) but is not in archive/ subdir' });
 
     // MEM-018: unknown provenance is now visible. An active, aged,
     // non-observation unit with no sources scores the degraded S default —

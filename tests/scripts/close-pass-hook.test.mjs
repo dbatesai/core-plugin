@@ -134,19 +134,25 @@ test('buildChildEnv: sets CORE_CLOSE_ENVELOPE so headless /finalize knows the ru
   assert.equal(env.CORE_CLOSE_ENVELOPE, '1', 'the envelope signal must be set so the agent does not double-run begin/finish/maintenance');
 });
 
-test('runClose: deterministic envelope writes a CLOSED marker even if the LLM half is a no-op', async () => {
+// Revised 2026-07-21 (Hale's root-cause catch): the deterministic ENVELOPE mechanics
+// (lock taken, marker written, maintenance-run recorded, lock released) are still
+// guaranteed regardless of what the LLM half does -- that invariant is real and stays
+// tested here. What changed: a no-op LLM half no longer gets falsely certified as a
+// complete `closed` session. The prior version of this test asserted marker.status ===
+// 'closed' for a fully no-op child, which was itself the bug this session fixed.
+test('runClose: the deterministic envelope (lock/marker/maintenance-run) always runs, but a no-op LLM half is honestly marked failed, not falsely closed', async () => {
   const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
   const store = mkdtempSync(join(tmpdir(), 'close-run-test-'));
   mkdirSync(join(store, '_memories'), { recursive: true });
   writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"t"}');
   let spawned = false;
   const r = cp.runClose(store, { spawnFinalize: () => { spawned = true; } });
-  assert.ok(r.ok, 'runClose should complete');
   assert.ok(spawned, 'the LLM /finalize half is invoked');
+  assert.equal(r.ok, false, 'a no-op LLM half must not be certified as a complete close');
   const marker = JSON.parse(readFileSync(join(store, '_memories', '_close-marker.json'), 'utf8'));
-  assert.equal(marker.status, 'closed', 'the marker MUST be closed — the whole point vs LLM discretion');
-  assert.ok(marker.ops['maintenance-run'], 'mechanical maintenance was recorded deterministically');
-  assert.ok(!existsSync(join(store, '_memories', '_close.lock')), 'lock released on finish');
+  assert.equal(marker.status, 'failed', 'the marker honestly reflects the incomplete close, not a false closed');
+  assert.ok(marker.ops['maintenance-run'], 'mechanical maintenance was still recorded deterministically -- the envelope ran');
+  assert.ok(!existsSync(join(store, '_memories', '_close.lock')), 'lock is still released on finish, regardless of outcome');
   rmSync(store, { recursive: true, force: true });
 });
 

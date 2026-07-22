@@ -7,11 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.13.0] — 2026-07-21
+
+### Added
+- **`/export-obsidian`** — decorates the project's memory store in place with real Obsidian `[[wikilinks]]`, so `_memories/` itself opens directly as an Obsidian vault (graph view, backlinks, note browsing) — no separate export copy to go stale. Each unit gets a marker-delimited, auto-regenerated edges block computed from its own frontmatter, from one atomic snapshot of the store; retired/archived units and any edge pointing at one are excluded entirely. Idempotent (a unit is only rewritten when its block actually changed) and fails closed on a malformed marker state rather than guessing.
+- **`CORE_REASONING_ARM`** — a test-only environment-variable control (`automatic`/`deterministic-only`/`always-on`) that lets the memory-efficacy pilot force which reasoning-escalation behavior runs on a given trial. `automatic` (the default, whether set explicitly or left unset) stays byte-identical to previously shipped behavior.
+- **Mailbox unread-count nudge** — a per-turn hook surfaces the unread `_mailbox/` count so backlogs can't silently accumulate unnoticed.
+- **PROJECT.md size-pressure fallback** — `demote-moves.mjs` now escalates to a shorter age floor for one run when PROJECT.md is over its cap and the normal floor can't keep up with a fast-moving project.
+
+### Fixed
+- **Five real defects found in an independent audit**, each with a regression test: anti-resurrection wasn't fully structural (a cache staleness check was byte-only, so a unit past its own expiration date could keep serving from a stale cache); the aggregate-receipt privacy scanner had two path-refusal bypasses and could leak a project-specific identifier prefix through its "generic vocabulary" boundary; a lock-release failure could go completely unsurfaced; the mailbox's archive step could silently overwrite an already-archived message with the same name; the artifact-identity CLI's directory-export mode didn't record which computation method produced its output.
+- **Windows path/encoding correctness**: two capability probes were mis-mapping a Windows drive-colon path to the wrong memory location; `/metrics-package` could silently ship a corrupt zip on a GNU-tar box with no warning; `retrieve-context --query` swallowed an unrecognized flag as the query instead of failing loud. All three confirmed live against a real installed Windows cache, still broken in the prior release.
+- **`hot-section.mjs`** no longer trusts a cache stamp that couldn't distinguish "the user edited PROJECT.md's real content" from "only the hot block changed" — a user-control-invariant bug.
+- **`close-pass.mjs`** no longer certifies a session closed when the LLM half of close recorded zero judgment ops.
+- **`mailbox.mjs`** fails closed instead of silently proceeding when gitignore leak-protection genuinely can't be established.
+- **`check-units.mjs` `archived-in-active` check** only recognized `status: archived`, missing the canonical shape (`archived: true`/`archived_at`, status unchanged) entirely; a full-path segment scan could also false-positive (an unrelated ancestor directory literally named "archive") or false-negative (a substring match on a top-level filename containing "archive"). Now recognizes the canonical shape and checks only the unit's immediate parent directory.
+
+### Removed
+- **`analyze-source-pull-log.mjs`** and its tests — three-way consensus determined it was structurally dead code.
+- **`instruction-surface-adapter.mjs`** and its test — a dry-run-only v3.0 instruction-surface system with no real caller in the product (no command, no hook). Its core mutation path was a permanent stub that always refused. Everything it was reaching for — writing a CORE-owned block into a harness instruction surface — is already covered by the CONTRACT.md generator system (`generate-claude-md.mjs`/`generate-agents-md.mjs`), which actually writes.
+- **`render-okf-export.mjs`** and its test — superseded by the in-place `[[wikilink]]` decoration described above; the separate export folder it produced is gone along with it.
+
+### Changed
+- **`/orient` shim** now carries an explicit 2026-08-15 sunset date.
+
+### Docs
+- Corrected two v3.12.0 release-note inaccuracies found in post-release review (Hale, 2026-07-19): the `producer_sha` scope claim below now says "recorded retrieval-outcome row" (the actual scope) instead of "telemetry row"; the Codex manifest's companion-utilities count and list are now consistent with the Claude manifest (six, including `/metrics-package`). The immutable `v3.12.0` tag is unchanged — these are forward corrections on `next`.
+
 ## [3.12.0] — 2026-07-18
 
 ### Added
 - **Reasoning-tier retrieval (DC-117)** — the retrieval path can selectively escalate to a deeper reasoning tier instead of running one-size-fits-all; shipped and tested, no calibrated measurement yet of its effect on retrieval quality.
-- **Self-identifying build provenance (`source_sha`)** — `/cut-release` now stamps the exact source commit a release packages into both plugin manifests, and every telemetry row can carry the matching `producer_sha`. This release is the first to carry a real (non-`"unknown"`) value.
+- **Self-identifying build provenance (`source_sha`)** — `/cut-release` now stamps the exact source commit a release packages into both plugin manifests, and every recorded retrieval-outcome row can carry the matching `producer_sha`. This release is the first to carry a real (non-`"unknown"`) value.
 - **Governed outcome-tracking core** — write-time enrichment, a terminal correctness stack, and a production outcome-writer for retrieval/answer outcomes. Schema-valid and covered by hostile-negative and fault-injection tests; not yet exercised on an installed artifact in production — that proof is the next step now that a real `source_sha` exists to anchor it.
 
 ### Changed

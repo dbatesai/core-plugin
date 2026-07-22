@@ -423,11 +423,24 @@ export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = 
   return { text: out, bytes: Buffer.byteLength(out, 'utf8'), accepted, excluded, warnings };
 }
 
-function main(argv) {
+export function main(argv) {
   const pack = argv.includes('--pack');
-  const args = argv.filter(a => a !== '--top' && a !== '--pack');
   const topIdx = argv.indexOf('--top');
   const topN = topIdx >= 0 ? Number(argv[topIdx + 1]) || 3 : 3;
+  // Strip recognized flags AND --top's own value, leaving positional args.
+  const args = argv.filter((a, i) => a !== '--top' && a !== '--pack' && !(topIdx >= 0 && i === topIdx + 1));
+  // Meridian's finding (live Windows box, 2026-07-20): an unrecognized flag like a
+  // fat-fingered `--query` used to fall straight into the positional args and get
+  // silently treated as the literal query text, returning a confident top result
+  // for garbage input with no error or abstention signal. Since the CLI must
+  // invoke the exact same function agents use (Train A A4), a silently-corrupted
+  // query here is a silently-corrupted measurement anywhere this CLI is used to
+  // probe delivered bytes. Fail loud on any unrecognized `--` flag instead.
+  const unrecognized = args.filter(a => a.startsWith('--'));
+  if (unrecognized.length) {
+    process.stderr.write(`error: unrecognized flag(s) ${unrecognized.join(', ')} -- did you mean to pass the query as a plain positional argument? usage: retrieve-context.mjs <storePath> "<query>" [--top N] [--pack]\n`);
+    return 2;
+  }
   const storePath = args[0];
   const query = args[1] || '';
   if (!storePath) { process.stderr.write('usage: retrieve-context.mjs <storePath> "<query>" [--top N] [--pack]\n'); return 2; }
