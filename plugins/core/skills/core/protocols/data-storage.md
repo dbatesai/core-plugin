@@ -256,9 +256,7 @@ The graduation subagent — both paths — can invoke Tier 3 retrieval (Explore)
 
 ### Mode A vs Mode B at graduation
 
-Almost all graduations are Mode A — including the ordinary case where the new unit supersedes or conflicts with an existing one. The subagent resolves it: writes the unit, adds the `supersedes`/`conflicts-with` edge, updates the superseded unit's status, and narrates the outcome to the main agent, which narrates to the user. Deciding which of two claims is current truth is exactly the judgment call graduation exists to make — routing it to the user by default would make "graduate" mean "ask," not "decide."
-
-Mode B is reserved for the genuinely rare case: the conflict is with content the user personally authored (not agent-written — overwriting their own words is different from resolving between two agent-graduated facts), or the conflict is truly irreconcilable — dates, sources, and context don't settle which claim holds, and guessing risks planting a wrong fact as canonical. When that happens, the graduation subagent surfaces the conflict to the main agent; the main agent surfaces it to the user; the unit doesn't land until the user confirms.
+Most graduations are Mode A — the subagent completes, writes the unit, narrates the outcome to the main agent which narrates to the user. Mode B fires when the graduated unit would supersede or conflict with an existing canonical unit. The graduation subagent surfaces the conflict to the main agent; the main agent surfaces it to the user; the unit doesn't land until the user confirms.
 
 Full matrix at `references/model-assignments.md`.
 
