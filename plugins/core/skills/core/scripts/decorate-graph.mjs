@@ -22,10 +22,12 @@
 //   3. Idempotent: a unit's file is only rewritten when its computed block
 //      differs from what's already on disk.
 //
-// Anti-resurrection note: retired/archived units are relocated to
-// `_memories/archive/` (enforced by check-units.mjs's `retired-in-active`/
-// `archived-in-active` rules) and are OUT of loadSnapshot's active-unit
-// population, so this script never decorates them and never links to them.
+// Anti-resurrection note: a top-level retired unit (status: retired) is kept
+// in place and excluded by status filtering; an archived unit is physically
+// relocated to `_memories/archive/` (check-units.mjs's `archived-in-active`
+// rule flags one left behind) and excluded by path. Either way it's OUT of
+// loadSnapshot's active-unit population, so this script never decorates it
+// and never links to it.
 //
 // CLI:
 //   node decorate-graph.mjs <project-dir> [--check] [--dry-run]

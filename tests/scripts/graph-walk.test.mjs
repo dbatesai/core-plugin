@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { walk } from '../../plugins/core/skills/core/scripts/graph-walk.mjs';
@@ -65,15 +65,22 @@ test('includeInvalidated:true brings cold history back into the candidate set', 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('includeInvalidated:true reaches an edge target physically relocated to archive/ (Hale\'s 2026-07-21 finding)', () => {
+test('includeInvalidated:true reaches an archived, historically-invalidated edge target (Hale\'s 2026-07-21 finding)', () => {
   const { dir, mem } = vault();
   try {
     const archive = join(mem, 'archive');
     mkdirSync(archive, { recursive: true });
-    renameSync(join(mem, 'b-invalid.md'), join(archive, 'b-invalid.md'));
+    // Canonical archive fixture (archived:true/archived_at, no status:retired
+    // implying archiving is what invalidated it) that also carries a genuine
+    // t_invalid, since historical inclusion under includeInvalidated is the
+    // actual behavior this test exercises.
+    const original = readFileSync(join(mem, 'b-invalid.md'), 'utf8');
+    rmSync(join(mem, 'b-invalid.md'));
+    writeFileSync(join(archive, 'b-invalid.md'),
+      original.replace('t_invalid: 2026-05-28', 't_invalid: 2026-05-28\narchived: true\narchived_at: 2026-05-29'));
 
     const withInvalid = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY, includeInvalidated: true }).map(c => c.unit_id);
-    assert.ok(withInvalid.includes('b-invalid'), 'edge target relocated to archive/ must still resolve and surface with includeInvalidated');
+    assert.ok(withInvalid.includes('b-invalid'), 'archived edge target must still resolve and surface with includeInvalidated');
 
     const withoutInvalid = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY }).map(c => c.unit_id);
     assert.ok(!withoutInvalid.includes('b-invalid'), 'default walk still excludes it');

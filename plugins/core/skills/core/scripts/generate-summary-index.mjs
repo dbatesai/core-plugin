@@ -52,12 +52,13 @@ function isCandidateName(name) {
 
 // Directories the recursive walk descends into: anything not starting with `_`
 // (skips _lib, _validation) — same convention as the file filter. `archive/`
-// is excluded by name (Hale's 2026-07-21 finding): retired/archived units are
-// suppressed from active results by status today, but the walk still visited
-// them, so the source signature and any consumer that reads the raw walk
-// (not just the status-filtered index) could still see archived content.
-// Physical relocation is only a real anti-resurrection boundary once nothing
-// in the active-data path descends into archive/ at all.
+// is excluded by name (Hale's 2026-07-21 finding): a top-level retired unit
+// is suppressed from active results by status, but an archived unit is a
+// separate, physical relocation out of the active tree — before this
+// exclusion the walk still descended into archive/, so the source signature
+// and any consumer reading the raw walk (not just the status-filtered index)
+// could still see archived content. Path exclusion is the actual boundary
+// for archived units; status filtering is what does the job for retired ones.
 function isCandidateDir(name) {
   return !name.startsWith('_') && name !== 'archive';
 }

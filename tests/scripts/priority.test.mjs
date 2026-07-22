@@ -141,7 +141,7 @@ test('iterArchivedUnits: returns units physically relocated to archive/', () => 
     const archive = join(mem, 'archive');
     mkdirSync(archive, { recursive: true });
     writeFileSync(join(archive, 'risk-1-archived.md'),
-      '---\nid: risk-1-archived\ntype: risk\nstatus: retired\ncreated: 2026-01-01\nupdated: 2026-01-01\ntopics: [a]\n---\n\n# archived\n');
+      '---\nid: risk-1-archived\ntype: risk\nstatus: active\narchived: true\narchived_at: 2026-05-30\ncreated: 2026-01-01\nupdated: 2026-01-01\ntopics: [a]\n---\n\n# archived\n');
     const units = iterArchivedUnits(mem);
     assert.deepEqual(units.map(u => u.id), ['risk-1-archived']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -176,9 +176,9 @@ test('SOD-003: includeInvalidated:true reaches a unit physically relocated to ar
   try {
     mkdirSync(join(mem, 'archive'), { recursive: true });
     writeFileSync(join(mem, 'archive', 'dc-relocated.md'),
-      '---\nid: dc-relocated\ntype: decision\nstatus: retired\ncreated: 2026-01-01\nupdated: 2026-01-01\nt_invalid: 2026-02-01\ntopics: [a]\n---\n\n# relocated\n');
+      '---\nid: dc-relocated\ntype: decision\nstatus: active\narchived: true\narchived_at: 2026-05-30\ncreated: 2026-01-01\nupdated: 2026-01-01\ntopics: [a]\n---\n\n# relocated\n');
     const withInvalid = rankUnits(mem, { today: parseIsoDate('2026-06-09'), includeInvalidated: true }).map(([, u]) => u.id);
-    assert.ok(withInvalid.includes('dc-relocated'), 'a retired unit physically moved to archive/ must still be reachable via includeInvalidated');
+    assert.ok(withInvalid.includes('dc-relocated'), 'an archived unit must still be reachable via includeInvalidated');
     const withoutInvalid = rankUnits(mem, { today: parseIsoDate('2026-06-09') }).map(([, u]) => u.id);
     assert.ok(!withoutInvalid.includes('dc-relocated'), 'default ranking still excludes archive/ entirely');
   } finally { rmSync(dir, { recursive: true, force: true }); }

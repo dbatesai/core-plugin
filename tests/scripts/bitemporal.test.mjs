@@ -234,12 +234,12 @@ test('CLI-equivalent pool (iterActiveUnits + iterArchivedUnits) reconstructs his
   }, (mem) => {
     mkdirSync(join(mem, 'archive'), { recursive: true });
     writeFileSync(join(mem, 'archive', 'dc-relocated.md'),
-      '---\nid: dc-relocated\ntype: decision\nstatus: retired\ncreated: 2026-01-01\nupdated: 2026-01-01\nt_invalid: 2026-04-01\ntopics: [a]\n---\n\n# relocated\n');
+      '---\nid: dc-relocated\ntype: decision\nstatus: active\narchived: true\narchived_at: 2026-04-01\ncreated: 2026-01-01\nupdated: 2026-01-01\nt_invalid: 2026-04-01\ntopics: [a]\n---\n\n# relocated\n');
 
     // What the real CLI's --as-of branch does: merge active + archived pools.
     const pool = iterActiveUnits(mem).concat(iterArchivedUnits(mem));
     const ids = asOf(pool, '2026-02-01');
-    assert.ok(ids.includes('dc-relocated'), 'a unit physically relocated to archive/ must still be reconstructable at a past date');
+    assert.ok(ids.includes('dc-relocated'), 'an archived unit must still be reconstructable at a past date');
 
     // iterActiveUnits alone (the pre-fix behavior) must NOT see it -- proves
     // the fix is the concat, not some other accidental path.
