@@ -215,7 +215,7 @@ export function decorateStoreLocked(projectDir, opts = {}) {
 
 // ---------- CLI ----------
 
-export function main(argv) {
+function main(argv) {
   const positionals = argv.filter(a => !a.startsWith('--'));
   const projectDir = resolve(positionals[0] || process.cwd());
   const check = argv.includes('--check');

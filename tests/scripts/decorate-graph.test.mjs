@@ -7,22 +7,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
-const { decorateStore, decorateUnitText, findExistingEdgesBlock, renderEdgesBlock, EDGES_BEGIN, EDGES_END, main } =
+const { decorateStore, decorateUnitText, findExistingEdgesBlock, renderEdgesBlock, EDGES_BEGIN, EDGES_END } =
   await import(pathToFileURL(join(SCRIPTS, 'decorate-graph.mjs')).href);
-
-function quiet(fn) {
-  const origOut = process.stdout.write, origErr = process.stderr.write;
-  const out = [], err = [];
-  process.stdout.write = (c) => { out.push(String(c)); return true; };
-  process.stderr.write = (c) => { err.push(String(c)); return true; };
-  try { return [fn(), out.join(''), err.join('')]; } finally { process.stdout.write = origOut; process.stderr.write = origErr; }
-}
+const CLI_PATH = join(SCRIPTS, 'decorate-graph.mjs');
 
 function fixtureStore() {
   const root = mkdtempSync(join(tmpdir(), 'decorate-graph-'));
@@ -217,7 +211,7 @@ test('decorateUnitText is CRLF-safe (Meridian\'s Windows review, 2026-07-21)', (
   assert.match(removed, /Body with CRLF\.\r\n/, 'human-authored CRLF line endings survive block removal');
 });
 
-test('main() prints and exits nonzero on a refused (malformed-marker) file, instead of silently reporting success (Hale\'s 2026-07-21 finding)', () => {
+test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stderr, with no false-success claim on stdout (Hale's 2026-07-22 test-boundary finding)", () => {
   const root = mkdtempSync(join(tmpdir(), 'decorate-graph-cli-refuse-'));
   try {
     const mem = join(root, '_memories');
@@ -225,22 +219,9 @@ test('main() prints and exits nonzero on a refused (malformed-marker) file, inst
     writeFileSync(join(mem, 'dc-1-bad.md'),
       `---\nid: dc-1-bad\ntype: decision\nstatus: active\n---\n\n# dc-1-bad\n\n${EDGES_BEGIN}\nHUMAN-MUST-SURVIVE\n`);
 
-    const [exitCode, out, err] = quiet(() => main([root]));
-    assert.notEqual(exitCode, 0, 'a refusal must not report success');
-    assert.doesNotMatch(out, /none needed a change/, 'must not claim nothing happened when a file was refused');
-    assert.match(err, /dc-1-bad\.md/, 'the refused file must be named');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('main() reports success cleanly when nothing needs a change and nothing is refused', () => {
-  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-cli-clean-'));
-  try {
-    const mem = join(root, '_memories');
-    mkdirSync(mem, { recursive: true });
-    writeFileSync(join(mem, 'dc-1.md'), '---\nid: dc-1\ntype: decision\nstatus: active\n---\n\n# dc-1\n\nBody.\n');
-
-    const [exitCode, out] = quiet(() => main([root]));
-    assert.equal(exitCode, 0);
-    assert.match(out, /none needed a change/);
+    const result = spawnSync(process.execPath, [CLI_PATH, root], { encoding: 'utf8' });
+    assert.equal(result.status, 1, 'a refusal must exit nonzero');
+    assert.doesNotMatch(result.stdout, /none needed a change/, 'must not claim nothing happened when a file was refused');
+    assert.match(result.stderr, /dc-1-bad\.md/, 'the refused file must be named on stderr');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
