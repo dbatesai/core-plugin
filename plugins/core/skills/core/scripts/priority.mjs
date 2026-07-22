@@ -450,20 +450,12 @@ export function iterUnits(memoriesDir) {
  * non-invalidated retrieval never calls this function.
  */
 export function iterArchivedUnits(memoriesDir) {
-  const archiveDir = join(memoriesDir, 'archive');
-  const units = [];
-  let entries;
-  try { entries = readdirSync(archiveDir).sort(); } catch { return units; }
-  for (const fname of entries) {
-    if (!fname.endsWith('.md')) continue;
-    if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
-    try {
-      units.push(loadUnit(join(archiveDir, fname)));
-    } catch (e) {
-      process.stderr.write(`warn: archive/${fname}: failed to load (${e && e.message ? e.message : e}) — excluded\n`);
-    }
+  try {
+    return iterUnits(join(memoriesDir, 'archive'));
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return [];
+    throw e;
   }
-  return units;
 }
 
 /**

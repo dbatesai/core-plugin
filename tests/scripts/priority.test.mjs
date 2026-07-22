@@ -147,6 +147,30 @@ test('iterArchivedUnits: returns units physically relocated to archive/', () => 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('iterArchivedUnits: no archive/ subdir at all returns empty, not a throw (ENOENT-only tolerance)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'priority-archive-absent-'));
+  try {
+    const mem = join(dir, '_memories');
+    mkdirSync(mem, { recursive: true });
+    assert.deepEqual(iterArchivedUnits(mem), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("iterArchivedUnits: malformed (frontmatter-less) archive content is excluded, not ranked (Hale's 2026-07-22 finding)", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'priority-archive-malformed-'));
+  try {
+    const mem = join(dir, '_memories');
+    const archive = join(mem, 'archive');
+    mkdirSync(archive, { recursive: true });
+    writeFileSync(join(archive, 'broken.md'), 'no frontmatter here at all\n');
+    const units = iterArchivedUnits(mem);
+    const broken = units.find(u => u.id === 'broken');
+    assert.ok(broken && broken.fm._load_error, 'malformed archive unit is tagged _load_error, same as a top-level malformed unit');
+    const ranked = rankUnits(mem, { today: parseIsoDate('2026-06-09'), includeInvalidated: true });
+    assert.ok(ranked.every(([, u]) => u.id !== 'broken'), 'malformed archive unit must not appear in ranked output');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('SOD-003: includeInvalidated:true reaches a unit physically relocated to archive/ (Hale\'s 2026-07-21 finding)', () => {
   const { dir, mem } = rankVault();
   try {
