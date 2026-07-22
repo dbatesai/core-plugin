@@ -259,8 +259,15 @@ test('MEM-013: crash-retry does not duplicate the archive block', () => {
     '- [x] **Old thing 2026-03-01** — done.', '', '## Notes', ''].join('\n');
   writeFileSync(join(dir, 'PROJECT.md'), original);
 
-  demoteMoves(dir, { today: TODAY });               // completes: archive + stub
+  demoteMoves(dir, { today: TODAY });               // completes: archive + stub + baseline stamp
   writeFileSync(join(dir, 'PROJECT.md'), original); // simulate crash AFTER archive append, BEFORE PROJECT.md write
+  // The PROJECT.md write and its baseline stamp are now COUPLED under one lock
+  // (Hale's 2026-07-22 boundary fix): a crash "before the PROJECT.md write"
+  // means neither the write NOR the stamp landed. Clear the state-cache so the
+  // simulated crash state is coherent — otherwise a stamp with no matching
+  // PROJECT.md content correctly reads as an unreconciled external revert and
+  // the writer refuses (which is the right behaviour, just not this crash's).
+  rmSync(join(dir, '_memories', '_lib'), { recursive: true, force: true });
   const retry = demoteMoves(dir, { today: TODAY });
 
   assert.equal(retry.demoted, 1, 'retry still stubs the bullet');

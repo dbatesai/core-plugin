@@ -39,6 +39,7 @@ import { loadSnapshot } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { hashText, stampFiles, readProjectCache } from './state-cache.mjs';
+import { writeGuardDecision, readSessionInventory } from './lifecycle-core.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 
 export { EDGES_BEGIN, EDGES_END };
@@ -214,6 +215,11 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
   // was never observed, attributed, or propagated. See
   // classifyUnitChange below for what "already diverged" means.
   const preWriteCache = readProjectCache(projectDir);
+  // Session-start inventory drives Hale's point-8 no-baseline distinction: a
+  // unit that pre-existed the session with no cache stamp is held; a unit that
+  // appeared this session (a freshly-graduated one) gets its first, safe
+  // decoration. Read once for the whole store pass.
+  const sessionInventory = readSessionInventory(projectDir);
 
   const changed = [];
   const unchanged = [];
@@ -249,8 +255,16 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     // must not touch it or launder it into a fresh stamp.
     const cachedStamp = preWriteCache.files[filePath];
     const classification = classifyUnitChange(cachedStamp, text);
-    if (cachedStamp && classification !== 'edges-block-only') {
-      needsReconciliation.push({ path: u.path, classification });
+    // Shared refuse-or-proceed rule (lifecycle-core.mjs) — identical logic to
+    // hot-section and compact-project. Same behaviour as before for a stamped
+    // file (refuse on 'outside-changed'/'no-baseline'); the only change is
+    // Hale's point-8 no-baseline handling for a file with NO stamp at all — a
+    // pre-existing-uncached unit is now held instead of silently decorated.
+    const decision = writeGuardDecision({
+      cachedStamp, classification, projectDir, absPath: filePath, sessionInventory,
+    });
+    if (!decision.proceed) {
+      needsReconciliation.push({ path: u.path, classification: decision.classification });
       continue;
     }
 
@@ -283,7 +297,11 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     changed.push(u.path);
   }
 
-  if (!dryRun && stampEntries.length > 0) stampFiles(projectDir, stampEntries, { now, home });
+  // Truthful stamp-failure surfacing (Hale's point 6): the unit files landed
+  // on disk; if their authorship stamp didn't, report attribution-unknown so
+  // the caller surfaces it, rather than reporting a clean decoration.
+  let stampOutcome = { stamped: true };
+  if (!dryRun && stampEntries.length > 0) stampOutcome = stampFiles(projectDir, stampEntries, { now, home });
 
   return {
     snapshot_id: cap.snapshotId,
@@ -292,6 +310,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     unchanged_count: unchanged.length,
     refused,
     needs_reconciliation: needsReconciliation,
+    attribution: stampOutcome && stampOutcome.stamped === false ? stampOutcome : { stamped: true },
     dry_run: dryRun,
   };
 }
@@ -348,8 +367,19 @@ function main(argv) {
     for (const r of result.needs_reconciliation) process.stderr.write(`  ${r.path}: ${r.classification}\n`);
   }
 
-  if (check) return (result.changed.length > 0 || result.refused.length > 0 || result.needs_reconciliation.length > 0) ? 1 : 0;
-  return (result.refused.length > 0 || result.needs_reconciliation.length > 0) ? 1 : 0;
+  // Attribution failure (Hale's point 6): files wrote but a baseline stamp
+  // didn't land. Never report clean success over an unknown-authorship state.
+  const attributionFailed = result.attribution && result.attribution.stamped === false;
+  if (attributionFailed) {
+    process.stderr.write(
+      `decorate-graph: WROTE unit files but the authorship stamp failed ` +
+      `(${result.attribution.outcome}: ${result.attribution.reason}) — attribution unknown, ` +
+      `recovery-required before the next lifecycle pass trusts these files.\n`
+    );
+  }
+
+  if (check) return (result.changed.length > 0 || result.refused.length > 0 || result.needs_reconciliation.length > 0 || attributionFailed) ? 1 : 0;
+  return (result.refused.length > 0 || result.needs_reconciliation.length > 0 || attributionFailed) ? 1 : 0;
 }
 
 const _cliEntry = (() => { try { return fileURLToPath(import.meta.url) === resolve(process.argv[1]); } catch { return false; } })();

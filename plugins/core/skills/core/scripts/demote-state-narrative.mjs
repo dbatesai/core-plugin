@@ -37,6 +37,11 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
 import { extractBackingUnitRefs } from './demote-moves.mjs';
+import { readProjectCache } from './state-cache.mjs';
+import { classifyProjectMdChange, recordProjectMdWrite } from './hot-section.mjs';
+import {
+  writeGuardDecision, readSessionInventory, withProjectMdWriterLock,
+} from './lifecycle-core.mjs';
 
 // Terminal statuses come from the shared vocabulary (SYN-005). This resolves
 // the 2026-05-27 criteria-vs-corpus mismatch noted here previously: 'retired'
@@ -331,19 +336,53 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
 
   if (!apply || demotions.length === 0) return stats;
 
-  const archivePath = ensureArchiveFile(projectDir);
-  const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));
-  if (freshDemotions.length) {
-    const block = renderArchiveBlock(freshDemotions, todayIso);
-    appendToArchiveState(archivePath, block);
-  }
-
   const newState = rewriteStateWithStubs(state, bullets, demotions, todayIso);
   const beforeState = text.indexOf(state);
   const afterState = beforeState + state.length;
   const newText = text.slice(0, beforeState) + newState + text.slice(afterState);
-  // M4: PROJECT.md written last + atomically — see the matching note in demote-moves.mjs.
-  atomicWriteFileSync(projectMdPath, newText);
+
+  // Shared PROJECT.md writer lock + edit gate + live-preimage CAS + re-stamp
+  // (Hale's points 2/6/7, 2026-07-22) — identical pattern to demote-moves.mjs:
+  // re-stamp so the next PROJECT.md writer sees a coherent baseline, but only
+  // on a clean baseline (guard first, refuse on a pending edit or stale
+  // preimage) so a blind re-stamp can't launder an unreconciled edit. Guard
+  // runs before the archive append so a refusal leaves no orphan archive block.
+  const absProjectMd = resolve(projectMdPath);
+  const sessionInventory = readSessionInventory(projectDir);
+  withProjectMdWriterLock(projectDir, () => {
+    let live;
+    try { live = readFileSync(projectMdPath, 'utf8'); } catch { live = null; }
+    if (live === null) { stats.refused = true; stats.refusedReason = 'unreadable-under-lock'; return; }
+    const cache = readProjectCache(projectDir);
+    const cachedStamp = cache.files[absProjectMd];
+    const classification = classifyProjectMdChange(cachedStamp, live);
+    const decision = writeGuardDecision({ cachedStamp, classification, projectDir, absPath: absProjectMd, sessionInventory });
+    if (!decision.proceed) { stats.refused = true; stats.refusedReason = 'pending-edit'; stats.refusedClassification = decision.classification; return; }
+    if (live !== text) { stats.refused = true; stats.refusedReason = 'stale-preimage'; return; }
+
+    const archivePath = ensureArchiveFile(projectDir);
+    const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));
+    if (freshDemotions.length) {
+      const block = renderArchiveBlock(freshDemotions, todayIso);
+      appendToArchiveState(archivePath, block);
+    }
+    atomicWriteFileSync(projectMdPath, newText);
+    const outcome = recordProjectMdWrite(projectMdPath);
+    if (outcome && outcome.stamped === false) stats.attribution = outcome;
+  });
+
+  if (stats.refused) {
+    process.stderr.write(
+      `demote-state-narrative: refusing to write — ${stats.refusedReason}` +
+      `${stats.refusedClassification ? ` (${stats.refusedClassification})` : ''}. Nothing changed; ` +
+      `reconcile any unreconciled PROJECT.md edit first.\n`
+    );
+    logEvent(projectDir, 'hygiene-log.jsonl', {
+      kind: 'demote-state-refused',
+      reason: stats.refusedReason,
+      classification: stats.refusedClassification || null,
+    }, { today: todayIso });
+  }
 
   return stats;
 }
@@ -372,7 +411,11 @@ export function main(argv) {
 
   if (asJson) {
     process.stdout.write(JSON.stringify(stats, null, 2) + '\n');
-    return 0;
+    return stats.refused ? 1 : 0;
+  }
+  if (stats.refused) {
+    process.stdout.write(`demote-state-narrative: refused (${stats.refusedReason}) — nothing written.\n`);
+    return 1;
   }
   const verb = apply ? 'demoted' : 'would demote';
   const mode = apply ? '' : ' (dry-run; pass --apply to write)';

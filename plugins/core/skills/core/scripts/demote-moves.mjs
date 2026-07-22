@@ -39,6 +39,11 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, todayUTC } from './log-event.mjs';
 import { PROJECT_MD_CAP_BYTES } from './compact-project.mjs';
+import { readProjectCache } from './state-cache.mjs';
+import { classifyProjectMdChange, recordProjectMdWrite } from './hot-section.mjs';
+import {
+  writeGuardDecision, readSessionInventory, withProjectMdWriterLock,
+} from './lifecycle-core.mjs';
 
 // Terminal statuses come from the shared vocabulary (SYN-005): retired/archived/
 // superseded. 'resolved'/'closed' were never schema statuses and no longer gate;
@@ -430,22 +435,65 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
     return stats;
   }
 
-  const archivePath = ensureArchiveFile(projectDir);
-  const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));
-  if (freshDemotions.length) {
-    const block = renderArchiveBlock(freshDemotions, todayIso);
-    appendToArchiveMoves(archivePath, block);
-  }
-
   const newMoves = rewriteMovesWithStubs(moves, bullets, demotions, todayIso);
   const beforeMoves = text.indexOf(moves);
   const afterMoves = beforeMoves + moves.length;
   const newText = text.slice(0, beforeMoves) + newMoves + text.slice(afterMoves);
-  // M4: PROJECT.md (the irreplaceable user surface) is written LAST and atomically.
-  // Archive append already happened above — order is deliberate: on any failure here,
-  // PROJECT.md is either old-intact or new-complete (rename is atomic), and the worst
-  // crash outcome is a harmless extra archive block, never a truncated PROJECT.md.
-  atomicWriteFileSync(projectMdPath, newText);
+
+  // Shared PROJECT.md writer lock + edit gate + live-preimage CAS + re-stamp
+  // (Hale's points 2/6/7, 2026-07-22). Two reasons this writer now stamps and
+  // guards like compact-project/hot-section, where before it did neither:
+  //   1. Re-stamp is REQUIRED, not optional. The baseline outside_hash covers
+  //      everything outside the hot block, so a §Moves rewrite here invalidates
+  //      it for the very next writer (compact-project runs right after in
+  //      /finalize) — which would then falsely read a CORE change as an
+  //      unreconciled user edit and refuse. Stamping the new baseline keeps the
+  //      chain of PROJECT.md writers coherent.
+  //   2. But a blind re-stamp would LAUNDER any unreconciled edit elsewhere in
+  //      PROJECT.md (a user's §State/§Decisions change nobody reconciled). So
+  //      re-stamp ONLY on a clean baseline: guard first, refuse byte-identically
+  //      on a pending edit or a stale preimage, and leave no orphan archive
+  //      block (the guard runs BEFORE the archive append).
+  const absProjectMd = resolve(projectMdPath);
+  const sessionInventory = readSessionInventory(projectDir);
+  withProjectMdWriterLock(projectDir, () => {
+    let live;
+    try { live = readFileSync(projectMdPath, 'utf8'); } catch { live = null; }
+    if (live === null) { stats.refused = true; stats.refusedReason = 'unreadable-under-lock'; return; }
+    const cache = readProjectCache(projectDir);
+    const cachedStamp = cache.files[absProjectMd];
+    const classification = classifyProjectMdChange(cachedStamp, live);
+    const decision = writeGuardDecision({ cachedStamp, classification, projectDir, absPath: absProjectMd, sessionInventory });
+    if (!decision.proceed) { stats.refused = true; stats.refusedReason = 'pending-edit'; stats.refusedClassification = decision.classification; return; }
+    if (live !== text) { stats.refused = true; stats.refusedReason = 'stale-preimage'; return; }
+
+    // Guard cleared — safe to append the archive and write PROJECT.md last.
+    // M4 order preserved: on a crash after the archive append, the worst case
+    // is a harmless extra archive block (MEM-013 alreadyArchived dedups it),
+    // never a truncated PROJECT.md.
+    const archivePath = ensureArchiveFile(projectDir);
+    const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));
+    if (freshDemotions.length) {
+      const block = renderArchiveBlock(freshDemotions, todayIso);
+      appendToArchiveMoves(archivePath, block);
+    }
+    atomicWriteFileSync(projectMdPath, newText);
+    const outcome = recordProjectMdWrite(projectMdPath);
+    if (outcome && outcome.stamped === false) stats.attribution = outcome;
+  });
+
+  if (stats.refused) {
+    process.stderr.write(
+      `demote-moves: refusing to write — ${stats.refusedReason}` +
+      `${stats.refusedClassification ? ` (${stats.refusedClassification})` : ''}. Nothing changed; ` +
+      `reconcile any unreconciled PROJECT.md edit first.\n`
+    );
+    logEvent(projectDir, 'hygiene-log.jsonl', {
+      kind: 'demote-moves-refused',
+      reason: stats.refusedReason,
+      classification: stats.refusedClassification || null,
+    }, { today: todayIso });
+  }
 
   return stats;
 }
@@ -499,7 +547,11 @@ export function main(argv) {
 
   if (asJson) {
     process.stdout.write(JSON.stringify(stats, null, 2) + '\n');
-    return 0;
+    return stats.refused ? 1 : 0;
+  }
+  if (stats.refused) {
+    process.stdout.write(`demote-moves: refused (${stats.refusedReason}) — nothing written.\n`);
+    return 1;
   }
   const mode = dryRun ? ' (dry-run)' : stats.held ? ' (HELD — nothing written)' : '';
   const verb = stats.held ? 'would demote' : 'demoted';

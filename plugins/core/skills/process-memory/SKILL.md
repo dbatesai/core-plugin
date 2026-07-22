@@ -152,7 +152,15 @@ The script is the only writer of the generated block — it sits between `<!-- C
 
 ## Step 5 — PROJECT.md tier discipline (DC-85 Phase 1b + 1c)
 
-Run three scripts in order — demote-moves first, then compact-project, then demote-state-narrative. The first two auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs). The third is dry-run-default in v1 per DC-93 — only `--apply` writes.
+**Lifecycle preflight FIRST — the user-authorship boundary (Hale's 2026-07-22 fix).** Before any PROJECT.md writer runs, classify the store's files against the last CORE baseline. This closes the exact gap Hale caught: `/process-memory` used to auto-invoke `compact-project.mjs` with NO edit-detection gate, so an unreconciled user correction to a §Decisions entry got compacted away silently.
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" "<project>" --json
+```
+
+Handle each classification before writing: `pending-edit` → reconcile it first (propagate the user's edit back to the source unit, fire anti-resurrection for removals) — do NOT run the writers over it; `malformed` → surface by name, a manual marker fix is needed; `no-baseline` with `safeFirstWrite:false` → a pre-existing, never-reconciled file (surface it, don't auto-write over it); `missing`/`read-only` → surface plainly. Only `clean`/`generated-only`, and `no-baseline` with `safeFirstWrite:true`, are safe to write. The detector is preflight/reporting — the writers below ALSO self-refuse at their own boundary (each rechecks its live preimage and the shared PROJECT.md lock immediately before its atomic write), so a skipped preflight degrades safely rather than opening the hole again.
+
+Then run three scripts in order — demote-moves first, then compact-project, then demote-state-narrative. The first two auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs). The third is dry-run-default in v1 per DC-93 — only `--apply` writes. Each shares one PROJECT.md writer lock and re-stamps the baseline after its write, so they compose without falsely reading each other's changes as user edits; a writer that prints a `refused` line (pending-edit / stale-preimage) wrote nothing — reconcile and re-run rather than forcing past it.
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/demote-moves.mjs" "<project>"

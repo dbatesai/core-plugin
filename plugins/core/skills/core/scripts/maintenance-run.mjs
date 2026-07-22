@@ -106,7 +106,14 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
         stampEntries.push({ path: summaryPath, hash: hashText(readFileSync(summaryPath, 'utf8')), lastWrittenBy: 'maintenance-run' });
       } catch { /* best-effort: a stamp we can't compute never blocks the regen itself */ }
 
-      stampFiles(root, stampEntries, { now, home });
+      const stampOutcome = stampFiles(root, stampEntries, { now, home });
+      // Truthful stamp-failure surfacing (Hale's point 6): the indexes wrote
+      // but their attribution stamp didn't. These are machine-generated files
+      // with no human region, so it's lower-stakes than a mixed-ownership
+      // write — but still report it rather than claim a clean maintenance run.
+      if (stampOutcome && stampOutcome.stamped === false) {
+        notes.push(`index attribution stamp failed (${stampOutcome.outcome}: ${stampOutcome.reason}) — recovery-required`);
+      }
     }
     ranOps.push('decisions-index', 'risks-index', 'summary-index');
   }

@@ -76,9 +76,24 @@ export function readProjectCache(projectDir) {
 /**
  * stampFiles — record one or more file writes as CORE's own authorship, in
  * the project-local cache, then prune the same absolute paths from the
- * residual global cache under its lock. Best-effort throughout: a
- * cache-write failure must never block or fail the caller's real write,
- * which has already happened by the time this runs.
+ * residual global cache under its lock. The cache write must never THROW —
+ * the caller's real content write has already landed by the time this runs,
+ * so a failure here must not blow up the caller — but it must NOT be swallowed
+ * silently either (Hale's point 6, 2026-07-22): a content write that succeeds
+ * while the baseline stamp fails means the file's on-disk bytes and its
+ * recorded authorship have diverged. Reported, not hidden.
+ *
+ * Returns a truthful outcome:
+ *   { stamped: true }
+ *       The baseline landed. Attribution is correct.
+ *   { stamped: false, outcome: 'attribution-unknown', recovery: 'recovery-required', reason }
+ *       The content write already happened but the stamp did NOT land (lock
+ *       timeout, disk error, EPERM under sync/AV). The file's authorship is now
+ *       unknown: next lifecycle pass will see its content hash disagree with
+ *       the (stale or absent) baseline and correctly treat it as unreconciled —
+ *       i.e. it fails CLOSED on its own, which is the safe direction. The caller
+ *       surfaces this so a human knows a re-stamp/reconcile is owed. No
+ *       cross-file transaction is claimed or needed.
  *
  * @param {string} projectDir
  * @param {Array<{path: string, hash: string, lastWrittenBy: string, extra?: object}>} entries
@@ -87,9 +102,10 @@ export function readProjectCache(projectDir) {
  *   `last_hash`; `extra` merges additional fields into the stamp (e.g.
  *   `outside_hash` for a marker-delimited-block classifier).
  * @param {{now?: string, home?: string}} [opts]
+ * @returns {{stamped: boolean, outcome?: string, recovery?: string, reason?: string}}
  */
 export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) {
-  if (!Array.isArray(entries) || entries.length === 0) return;
+  if (!Array.isArray(entries) || entries.length === 0) return { stamped: true };
   const ts = now || nowIso();
   const cachePath = projectCachePath(projectDir);
 
@@ -99,9 +115,10 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
   // not just other instances of itself. Reuses the same withFileLock
   // primitive every other lock in this codebase uses (Hale's finding,
   // 2026-07-22 — 29/40 entries survived an unlocked 40-concurrent-process
-  // stamp probe). Best-effort throughout, same as before: a lock-acquire
-  // failure or cache-write failure must never block or fail the caller's
-  // real write, which has already happened by the time this runs.
+  // stamp probe). A lock-acquire or cache-write failure never THROWS into the
+  // caller (the underlying content write already happened), but it IS now
+  // reported truthfully instead of silently swallowed (Hale's point 6).
+  let stampOutcome = { stamped: true };
   try {
     mkdirSync(dirname(cachePath), { recursive: true });
     withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
@@ -116,11 +133,21 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
       }
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n');
     }, { retries: 20, retryDelayMs: 50 });
-  } catch { /* best-effort: a cache-write failure never blocks the underlying write */ }
+  } catch (e) {
+    stampOutcome = {
+      stamped: false,
+      outcome: 'attribution-unknown',
+      recovery: 'recovery-required',
+      reason: (e && (e.code || e.message)) ? String(e.code || e.message) : 'stamp-failed',
+    };
+  }
 
   // One-release migration prune (matches recordProjectMdWrite's original
   // behavior): drop these paths from the global cache under the lock, so a
-  // stale global stamp can't shadow the fresher per-project one.
+  // stale global stamp can't shadow the fresher per-project one. A prune
+  // failure is genuinely best-effort — a held lock just defers the prune to
+  // the next stamp and can't corrupt attribution — so it does NOT downgrade a
+  // successful project-local stamp.
   const globalCachePath = join(home, '.core', 'state-cache.json');
   try {
     withFileLock(join(home, '.core', 'state-cache.lock'), () => {
@@ -134,9 +161,12 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
       if (changed) atomicWriteFileSync(globalCachePath, JSON.stringify(gcache, null, 2) + '\n');
     }, { retries: 3, retryDelayMs: 50 });
   } catch { /* best-effort — a held lock just defers the prune to the next stamp */ }
+
+  return stampOutcome;
 }
 
-/** Convenience single-file wrapper around stampFiles. */
+/** Convenience single-file wrapper around stampFiles. Returns the same
+ *  truthful outcome (Hale's point 6). */
 export function stampFile(projectDir, path, hash, lastWrittenBy, { now, home, extra } = {}) {
-  stampFiles(projectDir, [{ path, hash, lastWrittenBy, extra }], { now, home });
+  return stampFiles(projectDir, [{ path, hash, lastWrittenBy, extra }], { now, home });
 }
