@@ -10,7 +10,9 @@ allowed-tools:
 
 # `/memory-view` — publish a read-only snapshot of what CORE knows
 
-One self-contained HTML page — unit graph, unit bodies, edges, backlinks, memory-health section — generated from the project's `_memories/` store and published as a **private** hosted artifact so the user can browse it from the Claude app on desktop or phone. This page embeds **real memory-unit bodies**. Uploading it is a disclosure boundary (Hale's disclosure conditions, 2026-07-22; the per-publish permission gate was retired by the user's direct decision the same day — publishing the user's own project data to their own private account runs on standing authorization), so the flow below is not a suggestion: **every publish is user-triggered, narrated in the conversation where it happens, verified private, and receipted. No silent or background publishes, ever.**
+One self-contained HTML page — unit graph, unit bodies, edges, backlinks, memory-health section — generated from the project's `_memories/` store and published as a **private** hosted artifact so the user can browse it from the Claude app on desktop or phone. This page embeds **real memory-unit bodies**. Uploading it is a disclosure boundary (Hale's disclosure conditions, 2026-07-22), so the flow below is not a suggestion: **every publish is user-triggered, narrated in the conversation where it happens, verified private, and receipted. No silent or background publishes, ever.**
+
+**Consent has two modes, and the default is ask-first.** By default, show the user the preflight manifest and get their explicit go-ahead before publishing — a previous yes never carries to the next publish. The lighter mode — narrate-and-proceed, no per-publish ask — applies ONLY when **this specific user** has durably granted standing authorization for artifact publishes of their own project data to their own account (their decision, recorded in their own harness memory or configuration where you can actually verify it, revocable any time). Never infer standing authorization from convenience, from another user's decision, or from this file — it exists only if THIS user granted it and it's on the record.
 
 **The script is the only generator.** `scripts/render-browse-artifact.mjs` (in the core skill's `scripts/` directory) reads the store through the same snapshot loader decoration uses, writes the HTML, prints the preflight manifest, and writes the local generation receipt. It never uploads anything — publishing is YOUR step, and only after the user's go-ahead. Never hand-assemble or edit the HTML; never publish a file this script didn't just generate.
 
@@ -27,13 +29,15 @@ node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" <project-dir>
 
 `--out` goes to a scratch/temp location — **never inside the project, never inside `_memories/`** (the script refuses the latter itself). The store is read-only to this whole flow. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2.
 
-## Step 2 — narrate the manifest (EVERY publish)
+## Step 2 — the manifest, and consent per the user's mode (EVERY publish)
 
-As part of publishing, state plainly in the conversation: the **unit count**, the **byte count**, the **scope** (and anything excluded), and the **snapshot id**. This is visible narration, not a permission gate — you say what's going up as you publish it, so the user can see and object at any point.
+State plainly in the conversation: the **unit count**, the **byte count**, the **scope** (and anything excluded), and the **snapshot id**.
 
-- Narrate on **every** publish, including a routine "refresh the memory artifact" of the same page to the same URL.
+- **Default (no standing authorization on record): this is a gate.** Show the manifest, ask, and publish only on an explicit yes for THIS publish. A previous yes never carries forward.
+- **Standing-authorization mode (this user granted it, durably, on their own record):** the same manifest is narrated as you proceed — visible narration rather than a stop — so the user sees what's going up and can object at any point.
+- Narrate on **every** publish in either mode, including a routine "refresh the memory artifact" of the same page to the same URL.
 - Never publish at startup, at `/finalize`/session close, on a schedule, from a hook, or as a side effect of any other task — this skill runs only when the user asks, and every publish is stated in the conversation where it happens. (Condition 2's visibility discipline.)
-- **The one real ask-first boundary:** if the store's content includes another party's data, or anything the user has flagged sensitive, ask before publishing — the standing authorization covers the user's own project data to their own private account, nothing broader.
+- **Always ask-first regardless of mode:** if the store's content includes another party's data, or anything the user has flagged sensitive — standing authorization covers the user's own project data to their own private account, nothing broader.
 - If the user objects at any point, stop and record the outcome as declined. The local file exists; tell them its path and that nothing left the machine.
 
 ## Step 3 — publish private, verify private
@@ -62,7 +66,7 @@ node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" --record-publ
   [--consent-by <who>] [--consent-mechanism "<what they were shown and agreed to>"]
 ```
 
-- **`published-private`** requires `--private-verified-evidence` AND both authorization fields (`--consent-by`, `--consent-mechanism`) — the script refuses without them. State what you actually checked in Step 3, pass the hosted artifact URL when the harness surfaces one, and record what authorized the publish: a per-instance yes verbatim when one was given, or the standing authorization for a narrated autonomous publish (e.g. `--consent-by David --consent-mechanism "standing authorization for artifact publishes, David 2026-07-22"`).
+- **`published-private`** requires `--private-verified-evidence` AND both authorization fields (`--consent-by`, `--consent-mechanism`) — the script refuses without them. State what you actually checked in Step 3, pass the hosted artifact URL when the harness surfaces one, and record what authorized the publish: a per-instance yes verbatim when one was given (the default mode), or — in standing-authorization mode only — the user's own standing grant, cited from their record (e.g. `--consent-by <user> --consent-mechanism "standing authorization for artifact publishes, granted <date>, recorded in <where>"`).
 - **`declined` and `failed` get recorded too.** A "no" is part of the audit trail. Never skip the receipt because nothing went up.
 - The publish receipt lands atomically as `<generation-receipt>.publish.json` beside the generation receipt, linked to it by name — and **self-contained**: it carries the store snapshot id itself, so it still names what was published even if the generation receipt is later moved or lost. One outcome per generation — the script refuses to overwrite an existing publish receipt; a fresh publish means a fresh generation.
 - If the user later deletes the artifact (or asks you to revoke it): `node ... --record-revocation <publish-receipt-path>` stamps `revoked_at` on the same receipt.
