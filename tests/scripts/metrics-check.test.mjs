@@ -792,6 +792,33 @@ test('rich-context: one plain-language mechanics line when the stream is on', ()
   assert.match(row.value, /saved locally/);
   assert.match(row.value, /7 row\(s\) \/ 2 day\(s\)/);
   assert.match(row.value, /rich_context_capture/); // tells the user how to turn it off
+  // Exact disclosure (Hale ea140b0 item 6): a 4 KiB head on no-hit, NOT full text.
+  assert.match(row.value, /4 KiB/);
+  assert.match(row.value, /not the full text/);
+  assert.doesNotMatch(row.value, /full query and delivered-context text/, 'the overstated wording is gone');
   // and it actually renders into the report text under the MECHANICS heading
   assert.match(renderReport(out), /Rich-context capture/);
+});
+
+// ACCEPTANCE Hale-ea140b0 item 5 — the two REQUIRED effective-state renders.
+test('ACCEPTANCE Hale-ea140b0 item 5: rich-on / metrics-on renders ON (effective)', () => {
+  const out = baseOut({
+    mechanics: { ...baseOut().mechanics, rich_context: { enabled: true, effective: true, inactiveReason: null, rows: 3, days: 1 } },
+  });
+  const row = computeRows(out).find((r) => r.label === 'Rich-context capture');
+  assert.ok(row, 'effective-on ⇒ a visible line');
+  assert.match(row.value, /ON for this project/);
+  assert.doesNotMatch(row.value, /configured on, but inactive/);
+  assert.match(renderReport(out), /ON for this project/);
+});
+
+test('ACCEPTANCE Hale-ea140b0 item 5: rich-on / metrics-off renders configured-on-but-inactive, never ON', () => {
+  const out = baseOut({
+    mechanics: { ...baseOut().mechanics, rich_context: { enabled: true, effective: false, inactiveReason: 'aggregate metrics disabled', rows: 0, days: 0 } },
+  });
+  const row = computeRows(out).find((r) => r.label === 'Rich-context capture');
+  assert.ok(row, 'configured-on ⇒ a visible line even when inactive');
+  assert.match(row.value, /configured on, but inactive: aggregate metrics disabled/);
+  assert.doesNotMatch(row.value, /^ON for this project/, 'must NOT claim ON when capture is impossible');
+  assert.match(renderReport(out), /configured on, but inactive: aggregate metrics disabled/);
 });

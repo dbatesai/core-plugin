@@ -443,13 +443,24 @@ export function computeRows(out) {
   // item 4; visible-active-state + independent disable).
   const rc = mech.rich_context || {};
   if (rc.enabled) {
+    // EFFECTIVE STATE, not the bare flag (Hale ea140b0 item 5). The hook only
+    // writes rich rows inside the aggregate-metrics branch, so a configured-on
+    // flag with metrics off captures NOTHING — say exactly that rather than "ON".
+    // `effective === false` is the explicit inactive signal; absent/true reads as
+    // effective (so a stats object that predates the field still renders "ON").
+    const isEffective = rc.effective !== false;
     rows.push({
       section: SECTION.MECHANICS,
       label: 'Rich-context capture',
       pct: 0,
       trust: TRUST.DIRECT,
       noGauge: true,
-      value: `ON for this project — full query and delivered-context text is being saved locally (${rc.rows} row(s) / ${rc.days} day(s)); turn off by removing "rich_context_capture": true from this project's workspace.json`,
+      // Exact disclosure (item 6): a 4 KiB head of query + delivered context, on
+      // synchronous no-hit only — NOT "full text". Turn-off points at the
+      // machine-local per-user workspace meta (item 2), not the project pointer.
+      value: isEffective
+        ? `ON for this project — on a synchronous no-hit, a 4 KiB head of your query text and of the delivered context (not the full text) is saved locally: ${rc.rows} row(s) / ${rc.days} day(s). Turn off by removing "rich_context_capture": true from your machine-local workspace meta (~/.core/workspaces/<id>/workspace.json).`
+        : `configured on, but inactive: aggregate metrics disabled — CORE writes nothing to the rich-context stream while metrics capture is off (CORE_METRICS_ENABLED=0 or metrics_enabled:false). It is set on in your machine-local workspace meta ("rich_context_capture": true) but will capture nothing until aggregate metrics are re-enabled.`,
     });
   }
 

@@ -64,12 +64,16 @@ test('exporter never emits rich-context content (planted canary tripwire)', () =
     const project = makeProject(root);
     const home = makeHome(root);
     // Capture a real rich-context row carrying the canary in its query text.
+    // force:true bypasses the per-user opt-in gate (which now lives in the
+    // machine-local manifest, not this project pointer) — this canary test is
+    // about exporter isolation, not the opt-in resolution, so it plants a row
+    // unconditionally.
     const cap = captureRichContext(project, {
       query_text: `debug this: ${CANARY}`,
       context_pack_head: `context with ${CANARY} inside`,
       verdict: 'no-hit', retrieval_id: 'rid-x', session_id: 's', harness: 'claude-code',
       tier_reached: 1, escalation_path: [1], producer_version: 'v', producer_sha: 'sha',
-    });
+    }, { force: true });
     assert.equal(cap.captured, true, 'canary row captured into the rich-context stream');
     // Confirm the canary really is on disk under _metrics/rich-context (so a
     // negative package result means true isolation, not a mis-plant).

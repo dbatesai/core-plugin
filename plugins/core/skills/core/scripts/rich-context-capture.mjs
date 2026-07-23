@@ -19,21 +19,29 @@
  * sources; `_metrics/rich-context/` is not among them) and permanently guarded by
  * a canary tripwire test.
  *
- * SENSITIVITY: this is the materially more sensitive stream — it saves the user's
- * literal query text and the literal delivered context. So, unlike the aggregate
- * metrics stream (default-ON per DC-107), this one is:
- *   - OFF by default. Active ONLY when the project's `workspace.json` carries
- *     `"rich_context_capture": true` (per-project, explicit) — mirroring how
- *     `metrics_enabled` is read, but with the opposite default.
+ * SENSITIVITY: this is the materially more sensitive stream — it saves a bounded
+ * head (4 KiB) of the user's literal query text and of the literal delivered
+ * context, on a synchronous no-hit. So, unlike the aggregate metrics stream
+ * (default-ON per DC-107), this one is:
+ *   - OFF by default. Active ONLY when the MACHINE-LOCAL, PER-USER workspace meta
+ *     (`~/.core/workspaces/<id>/workspace.json`) carries `"rich_context_capture":
+ *     true`. It is deliberately NOT read from the project-root `workspace.json`
+ *     pointer (Hale ea140b0 item 2): that file travels with a copied or shared
+ *     project, so a project-root flag would let one user's sensitive-capture
+ *     choice ride along into a teammate's or a copied workspace. The switch lives
+ *     with the user's own machine, never with the shared project tree.
  *   - independently disableable (its own flag; disabling it never touches metrics,
- *     enabling metrics never enables it),
+ *     enabling metrics never enables it). Note the hook only WRITES when aggregate
+ *     metrics are also on, so the /metrics render reports EFFECTIVE state, not just
+ *     the configured flag (item 5).
  *   - retained 30 days by default (retention runs through maintenance-run.mjs),
  *   - purgeable on an explicit user ask (`--purge`).
  *
  * SHIPPED-DEFAULT SAFETY (risk-24): the safe posture is the shipped default. A
  * stranger installing core-plugin gets this stream OFF; enabling it is each user's
- * own explicit choice on their own project. No personal authorization is ever
- * baked into the shipped code path.
+ * own explicit choice, recorded only in that user's own machine-local workspace
+ * meta. No personal authorization is ever baked into the shipped code path, and no
+ * project-root flag can activate it.
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  *
@@ -42,21 +50,29 @@
  * the AppData redirect on Windows+OneDrive). It lives inside the same
  * already-redirected `_metrics` area as the rest of the metrics substrate.
  *
- * Concurrency: appends route through `withFileLock` (the append-interleaving
- * discipline accepted from Antigravity, refined by Hale — not a PIPE_BUF claim,
- * but portable crash/concurrency safety for large JSONL rows from concurrent
- * writers).
+ * Concurrency: appends, retention deletion, and purge ALL route through ONE
+ * exclusion lock (Hale ea140b0 item 4) whose path is a STABLE SIBLING OUTSIDE the
+ * purged directory (`<storage-base>/.rich-context.lock`, never inside
+ * `<storage-base>/rich-context/`). A purge removes the whole stream directory, so
+ * a lock kept inside it could be unlinked out from under a mid-flight writer; a
+ * sibling lock cannot be. The shared lock serializes the three ops against each
+ * other, so a purge or retention delete can never race an in-progress append
+ * (no lost or torn rows, no delete-while-appending). The lock is portable
+ * crash/concurrency safety for large JSONL rows from concurrent writers (the
+ * append-interleaving discipline accepted from Antigravity, refined by Hale — not
+ * a PIPE_BUF claim).
  *
  * Failure-mode discipline: never throws on the capture path. A capture that can't
  * be written is reported and dropped — it must never block or crash the turn.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
+import { resolveStoragePath, resolveWorkspaceId, metricsEnabled } from './log-event.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
 // reader misread rows (same discipline as record-retrieval-event.mjs).
@@ -75,9 +91,32 @@ export const RICH_CONTEXT_MAX_FIELD_BYTES = 4096;
 // no purge/retention op can ever target anything but this stream's own files.
 export const RICH_CONTEXT_DIRNAME = 'rich-context';
 
-// Outcome verdicts worth enriching. 'noisy' is included for completeness (a
-// later human/agent judgment can record it) even though the synchronous
-// in-hook seam can only observe 'no-hit'/'miss'/'corrective-retry' directly.
+// Owner-only filesystem modes for the sensitive surface (Hale ea140b0 item 3).
+// This stream holds literal query text and delivered context, so the directory
+// and its row files are locked to the owning user: dir 0700, files 0600. These
+// are asserted on create AND re-asserted on every append. chmod is best-effort:
+// Windows only honors the read-only bit and some network/synced filesystems
+// reject chmod outright, so a failed hardening never fails the capture — but on
+// every POSIX filesystem that supports it, the modes are enforced.
+export const RICH_CONTEXT_DIR_MODE = 0o700;
+export const RICH_CONTEXT_FILE_MODE = 0o600;
+
+// Closed vocabulary for the rich-capture status surfaced on the retrieval hook's
+// terminal operational receipt (Hale ea140b0 item 6). A status code — never raw
+// query/context content — so a capture outcome (including a silent-until-now
+// failure) is observable on the existing receipt without leaking the sensitive
+// payload the stream exists to hold.
+export const RICH_CAPTURE_STATUS = new Set([
+  'captured', 'disabled', 'project-dir-missing', 'invalid-row', 'capture-failed', 'error',
+]);
+
+// Outcome verdicts a row may carry. Only 'no-hit' is written by the synchronous
+// in-hook capture seam (Hale ea140b0 item 1): a corrective retry is evidence
+// about the PRIOR retrieval's outcome, and this seam holds the CURRENT retrieval's
+// id/query/pack, so labeling the current retrieval 'corrective-retry' would bind
+// the evidence to the wrong subject. The retry trigger is therefore dropped from
+// in-hook capture; 'miss'/'noisy'/'corrective-retry' remain valid verdicts ONLY
+// for a later human/agent judgment recorded out of band, never the live hook.
 export const RICH_CONTEXT_VERDICTS = new Set(['miss', 'no-hit', 'noisy', 'corrective-retry', 'unknown']);
 
 const DATE_FILE_RE = /^(\d{4})-(\d{2})-(\d{2})\.jsonl$/;
@@ -86,13 +125,31 @@ const DATE_FILE_RE = /^(\d{4})-(\d{2})-(\d{2})\.jsonl$/;
 const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
 /**
+ * Machine-local, per-user workspace meta path for a project (Hale ea140b0 item 2).
+ * This is the MANIFEST file — `~/.core/workspaces/<id>/workspace.json` — the same
+ * per-user operational-meta surface that metrics-disclosure.mjs reads/writes, NOT
+ * the project-root `workspace.json` pointer (which travels with a copied/shared
+ * project). homedir() honors HOME/USERPROFILE, so a test can redirect it.
+ */
+export function userWorkspaceMetaPath(projectDir, { workspaceId } = {}) {
+  const wsId = workspaceId || resolveWorkspaceId(projectDir);
+  return join(homedir(), '.core', 'workspaces', wsId, 'workspace.json');
+}
+
+/**
  * Is the opt-in rich-context stream active for this project?
  *
  * OFF by default. Precedence (first match wins):
  *   1. env `CORE_RICH_CONTEXT_CAPTURE` false (0/false/no/off) → OFF (hard opt-out).
  *   2. env `CORE_RICH_CONTEXT_CAPTURE` true  (1/true/yes/on)  → ON  (test/force).
- *   3. `<project>/workspace.json` `"rich_context_capture": true` → ON (the real switch).
+ *   3. MACHINE-LOCAL per-user workspace meta (`~/.core/workspaces/<id>/workspace.json`)
+ *      `"rich_context_capture": true` → ON (the real switch).
  *   4. default → OFF.
+ *
+ * The switch is read ONLY from the machine-local per-user manifest, NEVER from the
+ * project-root `workspace.json` pointer: that pointer travels with a copied or
+ * shared project, so honoring a flag there would let one user's sensitive-capture
+ * choice ride into a teammate's copy. A project-root flag is therefore ignored.
  *
  * Contrast metricsEnabled(), which defaults ON — this stream is more sensitive,
  * so its default is the opposite.
@@ -103,11 +160,11 @@ export function richContextCaptureEnabled({ project, env = process.env } = {}) {
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
     try {
-      const p = JSON.parse(readFileSync(join(project, 'workspace.json'), 'utf8'));
-      if (p && p.rich_context_capture === true) return true;
-    } catch { /* fall through to default-off */ }
+      const m = JSON.parse(readFileSync(userWorkspaceMetaPath(project), 'utf8'));
+      if (m && m.rich_context_capture === true) return true;
+    } catch { /* no per-user manifest / not set → fall through to default-off */ }
   }
-  return false; // default-OFF — the sensitive stream is opt-in only
+  return false; // default-OFF — the sensitive stream is opt-in only, per user
 }
 
 /** Absolute dir for this project's rich-context stream. */
@@ -115,9 +172,21 @@ export function richContextDir(projectDir, { workspaceId } = {}) {
   return join(resolveStoragePath(projectDir, { workspaceId }), RICH_CONTEXT_DIRNAME);
 }
 
-/** Stable lock path for the stream — one writer at a time across processes. */
+/**
+ * The ONE exclusion lock shared by append, retention deletion, and purge (Hale
+ * ea140b0 item 4). It lives as a STABLE SIBLING of the stream dir — directly
+ * under the storage base, OUTSIDE `rich-context/` — so a purge that removes the
+ * whole `rich-context/` directory can never unlink the lock out from under a
+ * mid-append writer. All three ops acquire this same path, serializing them.
+ */
 export function richContextLockPath(projectDir, { workspaceId } = {}) {
-  return join(richContextDir(projectDir, { workspaceId }), '.rich-context.lock');
+  return join(resolveStoragePath(projectDir, { workspaceId }), '.rich-context.lock');
+}
+
+/** chmod best-effort — never fails the caller (Windows/synced-FS honor only some
+ * bits). Used to assert owner-only modes on create and re-assert on every append. */
+function hardenPath(target, mode) {
+  try { chmodSync(target, mode); } catch { /* best-effort: not every FS supports chmod */ }
 }
 
 /**
@@ -204,11 +273,16 @@ export function captureRichContext(projectDir, input, { workspaceId, now, env = 
     const record = { ts: now || new Date().toISOString(), ...row };
     const dir = richContextDir(projectDir, { workspaceId: wsId });
     const file = join(dir, `${todayUTC(now)}.jsonl`);
-    mkdirSync(dir, { recursive: true });
     withFileLock(richContextLockPath(projectDir, { workspaceId: wsId }), () => {
-      // Import fs lazily-free: appendFileSync via a fresh require would break the
-      // single-writer discipline; use the already-imported primitives.
+      // mkdir + append + hardening all happen INSIDE the shared lock (item 4): a
+      // concurrent purge that removes the dir can never race between our mkdir and
+      // our append, and the owner-only modes (item 3) are asserted on create and
+      // RE-asserted on every append, so a file that predates this hardening — or
+      // one a purge/retention cycle recreated — is corrected every time we write.
+      mkdirSync(dir, { recursive: true, mode: RICH_CONTEXT_DIR_MODE });
+      hardenPath(dir, RICH_CONTEXT_DIR_MODE);
       appendLine(file, JSON.stringify(record));
+      hardenPath(file, RICH_CONTEXT_FILE_MODE);
     });
     return { captured: true, path: file, row: record };
   } catch (e) {
@@ -218,6 +292,24 @@ export function captureRichContext(projectDir, input, { workspaceId, now, env = 
 
 // Small append helper kept separate so the lock body stays a one-liner.
 function appendLine(file, line) { appendFileSync(file, line + '\n'); }
+
+/**
+ * Map a captureRichContext() result to a CLOSED status code for the retrieval
+ * hook's terminal operational receipt (Hale ea140b0 item 6). Returns a code from
+ * RICH_CAPTURE_STATUS only — the free-text `reason` (which can embed an error
+ * message) is reduced to its leading token, so a capture outcome — including a
+ * failure that used to be swallowed silently — is observable WITHOUT echoing any
+ * raw query or context content onto the receipt.
+ */
+export function richCaptureStatusCode(result) {
+  if (!result || typeof result !== 'object') return 'error';
+  if (result.captured) return 'captured';
+  // Reduce the free-text reason to a leading token, then fold onto the closed set.
+  const head = String(result.reason || 'error').split(/[:\s]/)[0];
+  if (head === 'capture-disabled') return 'disabled';
+  if (RICH_CAPTURE_STATUS.has(head)) return head;
+  return 'capture-failed';
+}
 
 // ---------- read-side helpers (for /metrics visible-active-state) ----------
 
@@ -236,10 +328,21 @@ export function listRichContextFiles(projectDir, { workspaceId } = {}) {
 /**
  * Cheap census for the /metrics mechanics line: whether the stream is on, and
  * how much is captured. Row count is a line count (no per-row parse).
+ *
+ * EFFECTIVE STATE (Hale ea140b0 item 5): the retrieve-context hook only WRITES
+ * rich rows inside the `metricsEnabled()` branch — the sensitive stream is nested
+ * under the aggregate-metrics master switch. So the configured flag alone can be
+ * ON while nothing can ever be captured. This reports both the configured flag
+ * (`enabled`) and the EFFECTIVE state (`effective` = flag AND aggregate metrics
+ * on), plus an honest `inactiveReason` when configured-on-but-inactive, so the
+ * /metrics render can say exactly that instead of a bare "ON".
  */
 export function richContextStats(projectDir, { workspaceId, env = process.env } = {}) {
   const wsId = workspaceId || resolveWorkspaceId(projectDir);
   const enabled = richContextCaptureEnabled({ project: projectDir, env });
+  const metricsOn = metricsEnabled({ project: projectDir, env });
+  const effective = enabled && metricsOn;
+  const inactiveReason = enabled && !metricsOn ? 'aggregate metrics disabled' : null;
   const files = listRichContextFiles(projectDir, { workspaceId: wsId });
   let rows = 0;
   for (const { file } of files) {
@@ -247,7 +350,7 @@ export function richContextStats(projectDir, { workspaceId, env = process.env } 
       for (const line of readFileSync(file, 'utf8').split('\n')) if (line.trim()) rows++;
     } catch { /* unreadable file contributes no rows */ }
   }
-  return { enabled, days: files.length, rows, dir: richContextDir(projectDir, { workspaceId: wsId }) };
+  return { enabled, effective, inactiveReason, days: files.length, rows, dir: richContextDir(projectDir, { workspaceId: wsId }) };
 }
 
 // ---------- deletion ops (retention + purge) ----------
@@ -302,16 +405,30 @@ export function runRichContextRetention(projectDir, {
 
   if (!apply) return { ran: true, cutoff, ...base };
 
-  for (const file of base.candidates) {
-    try {
-      assertInsideRichContext(file, dir); // refuse anything outside the stream dir
-      rmSync(file, { force: true });
-      if (existsSync(file)) { base.verified = false; }
-      else base.deleted.push(file);
-    } catch (e) {
-      base.verified = false;
-      base.kept.push(`${file} (retention-error: ${String(e && e.message).slice(0, 80)})`);
-    }
+  // Delete under the SHARED lock (item 4): a concurrent append can never be
+  // mid-write on a file this loop unlinks, and a concurrent purge can't remove
+  // the dir out from under us. Retention only targets files strictly older than
+  // the cutoff, and a writer only ever touches TODAY's file — but the shared lock
+  // makes the no-delete-while-appending guarantee hold regardless of policy.
+  try {
+    withFileLock(richContextLockPath(projectDir, { workspaceId: wsId }), () => {
+      for (const file of base.candidates) {
+        try {
+          assertInsideRichContext(file, dir); // refuse anything outside the stream dir
+          rmSync(file, { force: true });
+          if (existsSync(file)) { base.verified = false; }
+          else base.deleted.push(file);
+        } catch (e) {
+          base.verified = false;
+          base.kept.push(`${file} (retention-error: ${String(e && e.message).slice(0, 80)})`);
+        }
+      }
+    });
+  } catch (e) {
+    // Couldn't acquire the shared lock within budget (contended). Honest, not
+    // silent: nothing was deleted, and the pass reports itself unverified.
+    base.verified = false;
+    base.kept.push(`(retention-lock-unavailable: ${String(e && e.code || e && e.message).slice(0, 40)})`);
   }
   return { ran: true, cutoff, ...base };
 }
@@ -337,7 +454,14 @@ export function purgeRichContext(projectDir, { apply = true, workspaceId, env = 
   if (!existed) return { purged: true, dir, existed: false };
   if (!apply) return { purged: false, reason: 'dry-run', dir, existed: true };
   try {
-    rmSync(dir, { recursive: true, force: true });
+    // Purge under the SHARED lock (item 4). The lock lives OUTSIDE `dir` (a
+    // sibling under the storage base), so removing `dir` recursively never
+    // unlinks the lock itself; and a concurrent writer either finished before
+    // us (its row is in a file we then remove — an expected purge) or waits
+    // behind us and recreates the dir cleanly afterward — never a torn write.
+    withFileLock(richContextLockPath(projectDir, { workspaceId: wsId }), () => {
+      rmSync(dir, { recursive: true, force: true });
+    });
     if (existsSync(dir)) return { purged: false, reason: 'delete-unverified', dir, existed: true };
     return { purged: true, dir, existed: true };
   } catch (e) {

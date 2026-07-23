@@ -40,7 +40,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 export const NOTICE_TEXT = [
   "One thing worth knowing since this is a brand-new project: CORE keeps a local, on-this-machine log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically, it stays on this machine, and none of it goes anywhere else.",
   "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `workspace.json`.",
-  "There's also an optional, more detailed capture you can turn ON if you ever want to debug why a retrieval went wrong — it saves the literal text of your query and the context CORE delivered, locally, for that turn. It is OFF by default and only turns on if you add `rich_context_capture: true` to this project's `workspace.json`; it's kept for 30 days and you can purge it at any time.",
+  "There's also an optional, more detailed capture you can turn ON if you ever want to debug why a retrieval went wrong — when a retrieval finds nothing, it saves locally a 4 KiB head of your query text and of the context CORE delivered (a bounded excerpt, not the full text, and only on those no-hit turns). It is OFF by default and only turns on if YOU add `rich_context_capture: true` to your own machine-local workspace meta (`~/.core/workspaces/<id>/workspace.json`) — never the project's `workspace.json`, so the choice can't travel with a copied or shared project. It stays on this machine, is kept for 30 days, and you can purge it at any time.",
 ].join('\n\n');
 
 /**
