@@ -76,6 +76,7 @@ import { fileURLToPath } from 'node:url';
 import { readinessReport } from './calibrate-classifier.mjs';
 import { runHarness } from './retrieval-harness.mjs';
 import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQualityReport } from './analyze-retrieval-quality.mjs';
+import { richContextStats } from './rich-context-capture.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -402,6 +403,23 @@ export function computeRows(out) {
     value: telemetryValue,
   });
 
+  // 3b. Rich-context capture — VISIBLE ACTIVE STATE. The opt-in stream saves
+  // literal query + delivered-context text locally, so when it is ON the user
+  // must see one plain-language line saying so and how to turn it off. When
+  // OFF (the default) NOTHING renders here (Hale metrics-evidence contract,
+  // item 4; visible-active-state + independent disable).
+  const rc = mech.rich_context || {};
+  if (rc.enabled) {
+    rows.push({
+      section: SECTION.MECHANICS,
+      label: 'Rich-context capture',
+      pct: 0,
+      trust: TRUST.DIRECT,
+      noGauge: true,
+      value: `ON for this project — full query and delivered-context text is being saved locally (${rc.rows} row(s) / ${rc.days} day(s)); turn off by removing "rich_context_capture": true from this project's workspace.json`,
+    });
+  }
+
   // ---- RETRIEVAL REGRESSION: does retrieval work well against a reference
   // answer key? Currently exactly one signal exists — a live gold-set
   // snapshot — and it is labeled `provisional`, never `proven-live`: the
@@ -648,7 +666,7 @@ export async function gatherMetrics(cwd, { home = homedir() } = {}) {
     producer: producerIdentity(),
     generated_at: new Date().toISOString(),
     project: cwd,
-    mechanics: { status: null, probe: {}, store: {}, telemetry: {} },
+    mechanics: { status: null, probe: {}, store: {}, telemetry: {}, rich_context: {} },
     regression: { gold: {} },
     readiness: { recognition_signal: null, calibration: {} },
     benefit: {
@@ -798,6 +816,10 @@ ${body}
   // regression.liveProxy placement contradicted the render's classification).
   out.regression.gold = await checkGoldRegression(cwd);
   mech.telemetry = checkLiveRetrievalProxy(cwd);
+  // Opt-in rich-context capture state — a mechanics/instrumentation fact. Only
+  // rendered when the stream is ON (the visible-active-state line); silent when
+  // off, which is the default (Hale metrics-evidence contract, item 4).
+  mech.rich_context = richContextStats(cwd);
 
   // ---- mechanics status: hard evidence only; routine upkeep never demotes
   // it. Scoped to mechanics (mech.status), never an umbrella claim. ----

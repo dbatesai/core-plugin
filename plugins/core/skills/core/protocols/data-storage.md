@@ -312,6 +312,17 @@ Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYY
 
 The startup protocol surfaces the signals that matter from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
 
+### Two capture streams, one exporter boundary
+
+Metrics capture is physically two separate streams, and they are never mixed:
+
+| Stream | What it holds | Default | Exporter |
+|---|---|---|---|
+| **Closed-schema metrics** | `retrieval-log.jsonl` / `outcome-log.jsonl` and the derived rollups — counts, tiers, verdicts, identities. No prompts, no diffs, no unit bodies, no paths, no raw errors. | **ON** (DC-107), opt-out via `metrics_enabled: false` or `CORE_METRICS_ENABLED=0`. | `metrics-package.mjs` reads this and anonymizes it into the shareable package. |
+| **Rich-context capture** | `<metrics-storage-base>/rich-context/<date>.jsonl` — the literal query text and the delivered context-pack head for a *bad* retrieval outcome (miss / no-hit / corrective-retry), plus its identities and tier path. For local human/agent debugging only; no model inference runs over it (DC-114). | **OFF**, opt-in via `rich_context_capture: true` in the project's `workspace.json`. | **None.** `metrics-package.mjs` has no import path or read path into `rich-context/`; a permanent canary tripwire test asserts the built package bytes never contain a planted rich-context string. |
+
+The rich stream is the materially more sensitive one, so it is opt-in with **visible active state** (`/metrics` shows one plain-language line whenever it is ON, and renders nothing when off), **independent disable** (its own flag; toggling it never touches the metrics stream), **30-day retention** (runs inside `maintenance-run.mjs` with dry-run + deletion proof), and **purge on explicit ask** (`maintenance-run.mjs --purge-rich-context`, or `rich-context-capture.mjs --purge`). All rich-stream deletion is scoped by path assertion to `<metrics-storage-base>/rich-context/` only — it can never target a user memory unit or `PROJECT.md`. The single writer is `scripts/rich-context-capture.mjs`; the one wired trigger seam is `retrieve-context-hook.mjs`, where the query, the delivered pack, the tier path, the producer identity, and the bad-outcome signal all coexist in one run. Writes append under `withFileLock`.
+
 ---
 
 ## Priority function

@@ -27,6 +27,8 @@ import { buildIndex as buildDecisionsIndex } from './generate-decisions-index.mj
 import { buildIndex as buildRisksIndex } from './generate-risks-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { hashText, stampFiles } from './state-cache.mjs';
+import { resolveWorkspaceId } from './log-event.mjs';
+import { runRichContextRetention, purgeRichContext, RICH_CONTEXT_DEFAULT_RETENTION_DAYS } from './rich-context-capture.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
 export const PROJECT_SOFT_CAP_BYTES = 70000;
@@ -127,6 +129,28 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
     }
   }
 
+  // 3.5 Rich-context retention (opt-in stream only). Deletes CORE's OWN
+  // captured rows older than the 30-day window — scoped strictly to
+  // <metrics-storage-base>/rich-context/ by rich-context-capture.mjs's own path
+  // assertions; it never touches user memory units or PROJECT.md. Honors
+  // dry-run: apply:false reports what WOULD be deleted and removes nothing, with
+  // the same deletion-proof discipline as the rest of maintenance.
+  try {
+    const rc = runRichContextRetention(root, { apply, now, windowDays: RICH_CONTEXT_DEFAULT_RETENTION_DAYS, workspaceId: resolveWorkspaceId(root) });
+    if (rc.ran) {
+      if (apply && rc.deleted.length) {
+        ranOps.push('rich-context-retention');
+        notes.push(`rich-context retention: deleted ${rc.deleted.length} row file(s) older than ${rc.windowDays}d (cutoff ${rc.cutoff})${rc.verified ? ', verified gone' : ' — WARNING: some deletions unverified'}`);
+      } else if (!apply && rc.candidates.length) {
+        notes.push(`rich-context retention (dry-run): ${rc.candidates.length} row file(s) older than ${rc.windowDays}d would be deleted (cutoff ${rc.cutoff})`);
+      } else if (apply && !rc.verified) {
+        notes.push('rich-context retention: some deletions unverified — recovery-required');
+      }
+    }
+  } catch (e) {
+    notes.push(`rich-context retention skipped (${String(e && e.message).slice(0, 60)})`);
+  }
+
   // 4. Update the cadence ledger (per-op run counts = the "observe cadence" data for DC-110 M2).
   const ops = (ledger.ops && typeof ledger.ops === 'object') ? ledger.ops : {};
   for (const op of ranOps) {
@@ -159,7 +183,23 @@ function main(argv) {
   const json = argv.includes('--json');
   const dryRun = argv.includes('--dry-run');
   const projectPath = argv.find(a => !a.startsWith('--'));
-  if (!projectPath) { process.stderr.write('usage: maintenance-run.mjs <projectPath> [--json] [--dry-run]\n'); return 2; }
+  if (!projectPath) { process.stderr.write('usage: maintenance-run.mjs <projectPath> [--json] [--dry-run] [--purge-rich-context]\n'); return 2; }
+
+  // --purge-rich-context: destructive, explicit, and standalone (never part of a
+  // routine run). The confirmation contract is prose-level — the SKILL/protocol
+  // require an explicit user ask before this is invoked; the flag does the
+  // mechanical part only, behind rich-context-capture.mjs's directory-name
+  // assertion so it can only ever remove <storage-base>/rich-context/. Respects
+  // --dry-run (reports the target, deletes nothing).
+  if (argv.includes('--purge-rich-context')) {
+    const res = purgeRichContext(projectPath, { apply: !dryRun, workspaceId: resolveWorkspaceId(projectPath) });
+    if (json) process.stdout.write(JSON.stringify(res) + '\n');
+    else if (res.purged) process.stdout.write(`Purged the rich-context capture stream: ${res.dir}\n`);
+    else if (res.reason === 'dry-run') process.stdout.write(`Would purge the rich-context capture stream: ${res.dir}\n`);
+    else process.stdout.write(`Rich-context purge did not run: ${res.reason} (${res.dir})\n`);
+    return res.purged || res.reason === 'dry-run' ? 0 : 2;
+  }
+
   const res = runMaintenance(projectPath, { apply: !dryRun });
   if (json) process.stdout.write(JSON.stringify(res) + '\n');
   else process.stdout.write(res.narration + '\n');

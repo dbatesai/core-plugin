@@ -734,7 +734,7 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
 
     // ---- mechanics: round-trip probe, store integrity, telemetry, and the
     // mechanics-scoped machine status (never an umbrella claim).
-    assert.deepEqual(Object.keys(out.mechanics).sort(), ['probe', 'status', 'store', 'telemetry']);
+    assert.deepEqual(Object.keys(out.mechanics).sort(), ['probe', 'rich_context', 'status', 'store', 'telemetry']);
     assert.ok(['WORKING', 'WORKING-WITH-CAVEATS', 'DEGRADED', 'MACHINERY-WORKING-NO-STORE'].includes(out.mechanics.status));
     assert.equal(typeof out.mechanics.probe.round_trip, 'boolean');
     assert.equal(out.mechanics.store.present, true);
@@ -762,4 +762,36 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Rich-context capture — the VISIBLE ACTIVE STATE line (Hale metrics-evidence
+// contract, item 4): renders one plain-language mechanics line when the opt-in
+// stream is ON, and NOTHING when it is off (the default).
+// ---------------------------------------------------------------------------
+
+test('rich-context: no mechanics row when the stream is off (or absent)', () => {
+  const rowsAbsent = computeRows(baseOut());
+  assert.ok(!rowsAbsent.some((r) => r.label === 'Rich-context capture'), 'absent rich_context ⇒ no row');
+  const rowsOff = computeRows(baseOut({
+    mechanics: { ...baseOut().mechanics, rich_context: { enabled: false, rows: 0, days: 0 } },
+  }));
+  assert.ok(!rowsOff.some((r) => r.label === 'Rich-context capture'), 'disabled ⇒ no row');
+});
+
+test('rich-context: one plain-language mechanics line when the stream is on', () => {
+  const out = baseOut({
+    mechanics: { ...baseOut().mechanics, rich_context: { enabled: true, rows: 7, days: 2 } },
+  });
+  const rows = computeRows(out);
+  const row = rows.find((r) => r.label === 'Rich-context capture');
+  assert.ok(row, 'enabled ⇒ exactly one visible-active-state row');
+  assert.equal(row.section, SECTION.MECHANICS);
+  assert.equal(row.noGauge, true, 'no bar/percentage — a state line, not a metric');
+  assert.match(row.value, /ON for this project/);
+  assert.match(row.value, /saved locally/);
+  assert.match(row.value, /7 row\(s\) \/ 2 day\(s\)/);
+  assert.match(row.value, /rich_context_capture/); // tells the user how to turn it off
+  // and it actually renders into the report text under the MECHANICS heading
+  assert.match(renderReport(out), /Rich-context capture/);
 });

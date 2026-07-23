@@ -42,6 +42,7 @@ import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { recordRetrievalOutcome, pendingOutcomePath } from '../scripts/record-retrieval-outcome.mjs';
 import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
+import { captureRichContext, richContextCaptureEnabled, shouldEnrichRichContext } from '../scripts/rich-context-capture.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
 import { logHookEvent } from './hook-log.mjs';
@@ -263,6 +264,9 @@ export async function main() {
       // the same causal-evidence defect under a different mapping).
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
       retrievalId = randomUUID();
+      // Hoisted so the OPT-IN rich-context capture below can see the
+      // corrective-retry signal computed inside the fallback-close block.
+      let retryDetected = false;
 
       // FALLBACK inferred-closure path (Hale's 303df39 mechanism + the nine
       // freeze-rejection corrections). Superseded on BOTH harnesses now by a
@@ -301,6 +305,7 @@ export async function main() {
             const prevTerms = new Set(prev.query_terms || []);
             const overlap = queryTermsEarly.length ? queryTermsEarly.filter((t) => prevTerms.has(t)).length / queryTermsEarly.length : 0;
             const retryShaped = overlap >= 0.6 && queryTermsEarly.length >= 3;
+            retryDetected = retryShaped; // seen by the rich-context capture below
             // Hale audit, 2026-07-17: reusing retrieval_id AS the answer_turn_id
             // fabricates identity — the two are different concepts (which
             // retrieval ran vs. which answer turn closed it). This inferred
@@ -362,6 +367,42 @@ export async function main() {
         ...(process.env.CORE_REASONING_ARM !== undefined ? { requested_arm: requestedArm, directive_fired: Boolean(reasoningDirective) } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
+
+      // OPT-IN rich-context capture (Hale metrics-evidence contract, item 4).
+      // OFF by default; active only when this project's workspace.json carries
+      // rich_context_capture:true. When a retrieval outcome is BAD in a way we
+      // can see synchronously — a zero-hit result, or a corrective-retry shape
+      // — the closed-schema row above records THAT but not WHY. This captures
+      // the query text + delivered context locally so the developer can debug
+      // the failure with full context. Structurally isolated from the package
+      // exporter (it never reads _metrics/rich-context/). Fail-open: a capture
+      // failure must never block or crash the turn, exactly like telemetry.
+      // Gated INSIDE the metrics-on branch on purpose: the rich stream is
+      // strictly more sensitive than the aggregate stream, so you cannot be
+      // capturing it while having opted out of all local capture — while its
+      // own flag still disables it independently (metrics stays on).
+      try {
+        const zeroHit = final.length === 0;
+        if (richContextCaptureEnabled({ project: store }) && shouldEnrichRichContext({ zeroHit, retryShaped: retryDetected })) {
+          const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
+          const turnId = harness === 'codex'
+            ? (typeof payload.turn_id === 'string' && payload.turn_id.trim() ? payload.turn_id.trim() : null)
+            : (typeof payload.prompt_id === 'string' && payload.prompt_id.trim() ? payload.prompt_id.trim() : null);
+          captureRichContext(store, {
+            retrieval_id: retrievalId,
+            session_id: sessionId,
+            turn_id: turnId,
+            harness,
+            verdict: zeroHit ? 'no-hit' : 'corrective-retry',
+            tier_reached: 1,
+            escalation_path: [1],
+            producer_version: PRODUCER_VERSION,
+            producer_sha: PRODUCER_SHA,
+            query_text: prompt,
+            context_pack_head: packText,
+          });
+        }
+      } catch { /* fail-open: rich capture never blocks the turn */ }
       // Stage the pending-marker write for AFTER delivery is confirmed below
       // (Hale audit, 2026-07-17, hazard: "creates pending state before
       // delivery") — writing it here, before this turn's context has even

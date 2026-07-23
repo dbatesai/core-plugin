@@ -1,10 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { runMaintenance } from '../../plugins/core/skills/core/scripts/maintenance-run.mjs';
 import { hashText } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
+
+const MAINT_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
+  'plugins', 'core', 'skills', 'core', 'scripts', 'maintenance-run.mjs');
 
 // Isolated HOME so the state-cache global-prune step never touches the real
 // developer ~/.core during tests (mirrors decorate-graph.test.mjs / hot-section.test.mjs).
@@ -158,4 +163,52 @@ test('dry-run does not write the state cache either', () => {
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
   runMaintenance(root, { apply: false, now: '2026-06-28T00:00:00Z', home });
   assert.ok(!existsSync(join(root, '_memories', '_lib', 'state-cache.json')), 'dry run must not stamp — nothing was actually written');
+});
+
+// ---- rich-context retention (opt-in stream), wired into the op sequence ----
+
+function plantRichContext(root, dateName) {
+  const dir = join(root, '_metrics', 'rich-context');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${dateName}.jsonl`);
+  writeFileSync(file, JSON.stringify({ kind: 'rich-context', schema_version: '1.0.0', query_text: 'q' }) + '\n');
+  return file;
+}
+
+test('maintenance retention: dry-run reports old rich-context files but deletes nothing', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  const oldFile = plantRichContext(root, '2020-01-01');
+  const res = runMaintenance(root, { apply: false, now: '2026-06-28T00:00:00Z', home });
+  assert.ok(res.notes.some((n) => /rich-context retention \(dry-run\).*would be deleted/.test(n)), 'dry-run surfaces the pending deletion');
+  assert.ok(existsSync(oldFile), 'dry-run deletes nothing');
+});
+
+test('maintenance retention: apply deletes old rich-context rows, keeps recent, narrates it', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  const oldFile = plantRichContext(root, '2020-01-01');
+  const recentFile = plantRichContext(root, '2099-01-01');
+  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  assert.ok(!existsSync(oldFile), 'old rich-context row deleted');
+  assert.ok(existsSync(recentFile), 'recent rich-context row kept');
+  assert.ok(res.notes.some((n) => /rich-context retention: deleted 1 row file/.test(n)), 'the deletion is narrated with a proof count');
+});
+
+test('--purge-rich-context CLI removes the whole stream dir and nothing else', () => {
+  const root = makeProject();
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  const richDir = join(root, '_metrics', 'rich-context');
+  plantRichContext(root, '2026-06-01');
+  // dry-run first: reports, deletes nothing
+  const dry = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--purge-rich-context', '--dry-run'], { encoding: 'utf8' });
+  assert.match(dry, /Would purge/);
+  assert.ok(existsSync(richDir), 'dry-run purge deletes nothing');
+  // real purge
+  const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--purge-rich-context'], { encoding: 'utf8' });
+  assert.match(out, /Purged the rich-context capture stream/);
+  assert.ok(!existsSync(richDir), 'stream dir removed');
+  assert.ok(existsSync(join(root, '_memories')), 'memory store untouched');
 });

@@ -82,5 +82,8 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // extracting the duplicated truthful-producer-identity logic into one owner
   // (artifact-receipts.mjs, the receipts consolidation, needs no
   // import.meta.url at all). Still target one shared isCliEntry() helper.
-  assert.ok(n <= 57, `CLI-entry-guard occurrences grew past baseline 57 (target: one shared helper): ${n}`);
+  // 57 -> 58 (2026-07-23): rich-context-capture.mjs, the opt-in rich-context
+  // capture stream's single writer + retention/purge CLI — a genuinely-new CLI
+  // tool with its own entry point, not a copy.
+  assert.ok(n <= 58, `CLI-entry-guard occurrences grew past baseline 58 (target: one shared helper): ${n}`);
 });
