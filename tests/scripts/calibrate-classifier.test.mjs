@@ -181,12 +181,14 @@ test('writeCalibrationState + readCalibrationState round-trip', () => {
   withTmp((dir) => {
     const state = {
       schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+      classified_schema_version: '1.0.0',
       is_calibrated: true, provisional: false, labeled_count: 150, overall_precision: 0.82,
     };
     writeCalibrationState(dir, state);
     const back = readCalibrationState(dir);
     assert.equal(back.is_calibrated, true);
     assert.equal(back.overall_precision, 0.82);
+    assert.equal(back.classified_schema_version, '1.0.0', 'the distinct classified-schema leg round-trips');
   });
 });
 

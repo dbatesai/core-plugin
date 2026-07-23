@@ -702,13 +702,13 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
     writeFileSync(join(day, 'retrieval-log.jsonl'),
       JSON.stringify({ ts: '2026-07-22T10:00:00Z', kind: 'retrieval', schema_version: '1.0.0', trigger: 'session-start', intent_topics: ['alpha'], tier_reached: 1, escalation_path: [1], units_retrieved: [{ id: 'u1', tier: 1 }] }) + '\n');
 
+    // Fix 8 (Hale item 8): --json emits EXACTLY ONE JSON document — no human
+    // report on the same stream — so the whole stdout parses as JSON.
     const stdout = execFileSync('node', [SCRIPT, root, '--json'], { encoding: 'utf8', timeout: 120000 });
-
-    // The CLI prints the rendered report, a blank line, then the JSON object.
-    const jsonStart = stdout.indexOf('\n\n{');
-    assert.ok(jsonStart > 0, 'expected rendered report followed by a JSON object');
-    const rendered = stdout.slice(0, jsonStart);
-    const out = JSON.parse(stdout.slice(jsonStart + 2));
+    assert.doesNotThrow(() => JSON.parse(stdout), '--json stdout must be a single valid JSON document');
+    const out = JSON.parse(stdout);
+    // The default (no flag) run prints the human report and nothing else.
+    const rendered = execFileSync('node', [SCRIPT, root], { encoding: 'utf8', timeout: 120000 }).replace(/\n$/, '');
 
     // ---- exact top-level shape: the four classes + identity + run metadata,
     // nothing else — in particular NO umbrella verdict and NO top-level

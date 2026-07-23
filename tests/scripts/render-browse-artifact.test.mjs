@@ -29,6 +29,22 @@ const {
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'render-browse-artifact.mjs');
 
+// Fix 9 (Hale item 9): the shared provenance helper fails closed on a dirty
+// plugin tree — so real renders only produce a source_sha (and only succeed)
+// when the working tree is clean. Detect state once; render-dependent tests
+// assert the right contract either way (skip-with-reason when dirty, since the
+// renderer correctly refuses). On a clean checkout (CI, post-commit) they run.
+function pluginTreeIsClean() {
+  try {
+    return execFileSync('git', ['-C', SCRIPTS, 'status', '--porcelain', '--',
+      join(SCRIPTS, '..', '..', '..')], { encoding: 'utf8' }).trim().length === 0;
+  } catch { return false; }
+}
+const TREE_CLEAN = pluginTreeIsClean();
+// A render-dependent test: runs only when the tree is clean (renderer needs a
+// real SHA), otherwise skips with the fail-closed reason.
+const rtest = (name, fn) => test(name, TREE_CLEAN ? {} : { skip: 'plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree' }, fn);
+
 // Stub metrics provider: tests never run the live subprocess probe suite —
 // the metrics object only needs the fields the page consumes.
 const stubMetrics = async () => ({ report: 'STUB METRICS REPORT (four evidence classes)', mechanics: { status: 'WORKING' } });
@@ -72,7 +88,7 @@ async function generate(root, home, opts = {}) {
 
 // ---------- embedding + provenance ----------
 
-test('embeds active units with bodies, edges, and snapshot provenance header', async () => {
+rtest('embeds active units with bodies, edges, and snapshot provenance header', async () => {
   const { root, home } = fixtureProject();
   try {
     const { manifest, html } = await generate(root, home);
@@ -101,7 +117,7 @@ test('embeds active units with bodies, edges, and snapshot provenance header', a
 
 // ---------- zero external references ----------
 
-test('generated chrome carries zero external references; unit-body URLs survive only as embedded data', async () => {
+rtest('generated chrome carries zero external references; unit-body URLs survive only as embedded data', async () => {
   const { root, home } = fixtureProject();
   try {
     const { html } = await generate(root, home);
@@ -125,7 +141,7 @@ test('generated chrome carries zero external references; unit-body URLs survive 
 
 // ---------- scope filtering ----------
 
-test('default scope excludes archived and retired units (same filtering as decoration)', async () => {
+rtest('default scope excludes archived and retired units (same filtering as decoration)', async () => {
   const { root, home } = fixtureProject();
   try {
     const { html, manifest } = await generate(root, home);
@@ -140,7 +156,7 @@ test('default scope excludes archived and retired units (same filtering as decor
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('--scope all-including-archive embeds archived + retired units, marked non-active', async () => {
+rtest('--scope all-including-archive embeds archived + retired units, marked non-active', async () => {
   const { root, home } = fixtureProject();
   try {
     const { html, manifest } = await generate(root, home, { scope: 'all-including-archive' });
@@ -156,7 +172,7 @@ test('--scope all-including-archive embeds archived + retired units, marked non-
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('--exclude-topic removes matching units and counts them in the manifest', async () => {
+rtest('--exclude-topic removes matching units and counts them in the manifest', async () => {
   const { root, home } = fixtureProject();
   try {
     const { html, manifest } = await generate(root, home, { excludeTopics: ['Confidential-Client'] });
@@ -171,7 +187,7 @@ test('--exclude-topic removes matching units and counts them in the manifest', a
 
 // ---------- manifest ↔ content agreement ----------
 
-test('preflight manifest matches the embedded content and the actual bytes on disk', async () => {
+rtest('preflight manifest matches the embedded content and the actual bytes on disk', async () => {
   const { root, home } = fixtureProject();
   try {
     const { manifest, html, outPath } = await generate(root, home);
@@ -191,7 +207,7 @@ test('preflight manifest matches the embedded content and the actual bytes on di
 
 // ---------- receipt ----------
 
-test('writes a local receipt under the workspace with content identical to the manifest', async () => {
+rtest('writes a local receipt under the workspace with content identical to the manifest', async () => {
   const { root, home } = fixtureProject();
   try {
     const { manifest, receiptWritten } = await generate(root, home);
@@ -204,7 +220,7 @@ test('writes a local receipt under the workspace with content identical to the m
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('no workspace.json → receipt still written to the flagged fallback location', async () => {
+rtest('no workspace.json → receipt still written to the flagged fallback location', async () => {
   const { root, home } = fixtureProject({ workspace: false });
   try {
     const { manifest, receiptWritten } = await generate(root, home);
@@ -231,7 +247,7 @@ function snapshotBytes(dir) {
   return out;
 }
 
-test('generation never writes to _memories/ — store byte-identical before and after', async () => {
+rtest('generation never writes to _memories/ — store byte-identical before and after', async () => {
   const { root, mem, home } = fixtureProject();
   try {
     // Warm the loader's derived cache first (its documented behavior on every
@@ -282,7 +298,7 @@ test('CLI: rejects an unknown --scope', () => {
 
 // ---------- producer identity (Hale condition 6 — truthfulness falsifier) ----------
 
-test('falsifier: in a git checkout the emitted source SHA equals git rev-parse HEAD and never the manifest stamp', async (t) => {
+test('falsifier: in a CLEAN git checkout the emitted source SHA equals git rev-parse HEAD and never the manifest stamp; a DIRTY tree fails closed (fix 9)', async (t) => {
   let head;
   try {
     head = execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -291,10 +307,17 @@ test('falsifier: in a git checkout the emitted source SHA equals git rev-parse H
     return;
   }
   const identity = producerIdentity();
-  assert.equal(identity.source_sha, head, 'emitted source SHA is the REAL current tree HEAD');
-  assert.equal(identity.source_sha_from, 'git');
   const manifestSha = JSON.parse(
     readFileSync(join(SCRIPTS, '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8')).source_sha;
+  if (!TREE_CLEAN) {
+    // Fix 9: a dirty plugin tree must fail closed — no clean HEAD stamp, and NOT
+    // a silent fallback to the release-stamped manifest value.
+    assert.equal(identity.source_sha, null, 'dirty tree ⇒ no source_sha');
+    assert.equal(identity.source_sha_from, null);
+    return;
+  }
+  assert.equal(identity.source_sha, head, 'emitted source SHA is the REAL current tree HEAD');
+  assert.equal(identity.source_sha_from, 'git');
   if (manifestSha && manifestSha !== head) {
     assert.notEqual(identity.source_sha, manifestSha,
       'must not silently fall back to the older release-stamped manifest value');
@@ -350,7 +373,7 @@ test('installed tree (no .git): stamped manifest identity used; no SHA at all: f
 
 // ---------- post-publish receipt (Hale correction 2) ----------
 
-test('--record-publish published-private: atomic linked receipt with consent + privacy evidence', async () => {
+rtest('--record-publish published-private: atomic linked receipt with consent + privacy evidence', async () => {
   const { root, home } = fixtureProject();
   try {
     const { manifest } = await generate(root, home);
@@ -384,7 +407,7 @@ test('--record-publish published-private: atomic linked receipt with consent + p
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('--record-publish declined and failed leave records too; published_at and verification stay null', async () => {
+rtest('--record-publish declined and failed leave records too; published_at and verification stay null', async () => {
   const { root, home } = fixtureProject();
   try {
     const gen1 = (await generate(root, home, { now: () => new Date('2026-07-22T01:00:00.000Z') })).manifest.receipt_path;
@@ -405,7 +428,7 @@ test('--record-publish declined and failed leave records too; published_at and v
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('--record-publish refusals: missing evidence for published-private, bad status, bad generation receipt', async () => {
+rtest('--record-publish refusals: missing evidence for published-private, bad status, bad generation receipt', async () => {
   const { root, home } = fixtureProject();
   try {
     const { manifest } = await generate(root, home);
@@ -462,7 +485,7 @@ test('--record-revocation stamps revoked_at and preserves a manually-authored re
 
 // ---------- graph interaction (pointer-capture click regression guard) ----------
 
-test('node selection survives pointer capture: pointerup-threshold path present, dead svg click binding gone', async () => {
+rtest('node selection survives pointer capture: pointerup-threshold path present, dead svg click binding gone', async () => {
   const { root, home } = fixtureProject();
   try {
     const { html } = await generate(root, home);
@@ -479,7 +502,7 @@ test('node selection survives pointer capture: pointerup-threshold path present,
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('CLI: stdout is exactly one JSON manifest with the stable shape', () => {
+rtest('CLI: stdout is exactly one JSON manifest with the stable shape', () => {
   const { root, home } = fixtureProject();
   try {
     const out = join(root, 'out', 'v.html');

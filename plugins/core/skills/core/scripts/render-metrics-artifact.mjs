@@ -64,7 +64,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { gatherMetrics, parseRecognitionSignal } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
-import { generationReceiptLocation, runRecordCli } from './artifact-receipts.mjs';
+import { generationReceiptLocation, runRecordCli, artifactContentDigest } from './artifact-receipts.mjs';
 
 export const METRICS_ARTIFACT_MANIFEST_SCHEMA_VERSION = '1.0.0';
 export const METRICS_ARTIFACT_CONTENT_CLASS = 'aggregates-only';
@@ -657,6 +657,9 @@ export async function renderMetricsArtifact(projectDir, {
     content_class: METRICS_ARTIFACT_CONTENT_CLASS,
     content_note: METRICS_ARTIFACT_CONTENT_NOTE,
     total_bytes: Buffer.byteLength(html),
+    // Exact-byte identity of the generated page — the publish receipt copies
+    // this and binds the publish to these specific bytes (Hale item 7).
+    artifact_sha256: artifactContentDigest(html),
     out_path: outAbs,
     receipt_path: receiptPath,
     receipt_fallback: workspaceId === null,

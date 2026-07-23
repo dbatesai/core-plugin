@@ -10,7 +10,7 @@ test('M5: a calibrated workspace with no turns must not mislabel the signal PROV
   withClassified({}, ({ home, project }) => {
     const metaDir = join(home, '.core', 'workspaces', WID, 'metrics');
     writeFileSync(join(metaDir, 'calibration-state.json'),
-      JSON.stringify({ is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION }));
+      JSON.stringify({ is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION }));
     const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, true, 'calibration state read as calibrated');
     assert.doesNotMatch(r.signal, /PROVISIONAL/, 'the no-turns signal must not claim provisional once calibrated');
@@ -102,7 +102,7 @@ function writeCalState(home, state) {
 
 test('rollup drops PROVISIONAL when calibration is cleared at the current classifier version', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, overall_precision: 0.82 });
+    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION, overall_precision: 0.82 });
     const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, true);
     assert.doesNotMatch(r.signal, /PROVISIONAL/, 'calibrated signal drops the tag');
@@ -124,6 +124,22 @@ test('rollup keeps PROVISIONAL when calibration was run against a stale proxy ve
     const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, false);
     assert.match(r.signal, /PROVISIONAL/);
+  });
+});
+
+test('ACCEPTANCE Hale-2026-07-23 item 5 (exact-triple calibration): a calibration bound to a DIFFERENT classified-row schema cannot clear PROVISIONAL', () => {
+  // The falsifier: calibration validated only classifier/proxy, so a record
+  // taken against a different classified-row schema (here 9.9.9) still cleared
+  // the tag for the current 1.0.0 cohort. The distinct classified_schema_version
+  // leg now binds calibration to the exact instrument triple.
+  withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
+    writeCalState(home, {
+      is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION,
+      classified_schema_version: '9.9.9', overall_precision: 0.99,
+    });
+    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    assert.equal(r.calibrated, false, 'classified-schema mismatch ⇒ treat as uncalibrated');
+    assert.match(r.signal, /PROVISIONAL/, 'a calibration against a different row schema cannot clear the tag');
   });
 });
 
@@ -217,28 +233,30 @@ test('replay dedupe: a session processed twice in one day yields the same rollup
   }
 });
 
-test('replay dedupe: newer classifier_version wins; conflicts are counted and visible in signal + daily md', () => {
+test('ACCEPTANCE Hale-2026-07-23 item 2 (rollup): a same-instrument contradiction is EXCLUDED from the numerator AND denominator, visibly counted', () => {
   const home = mkdtempSync(join(tmpdir(), 'rollup-conflict-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-conflict-proj-'));
   try {
     const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '2026-06-02.jsonl'), [
-      // turn 0: classified under 0.2.0, then re-classified under 0.3.0 → newest wins, counted once
+      // turn 0: an old-instrument row (0.2.0) → out of cohort, coverage gap.
       JSON.stringify(ident({ turn_idx: 0, classifier_version: '0.2.0', state: 'tier-0-win' })),
-      JSON.stringify(ident({ turn_idx: 0, classifier_version: '0.3.0', state: 'rec-fail-tier-0' })),
-      // turn 1: same versions, contradictory states → last-written wins, conflict counted
+      // turn 0 (current instrument): the aggregateable row.
+      JSON.stringify(ident({ turn_idx: 0, state: 'rec-fail-tier-0' })),
+      // turn 1: same instrument, contradictory states → conflict, excluded entirely.
       JSON.stringify(ident({ turn_idx: 1, state: 'tier-1-3-win' })),
       JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
     ].join('\n') + '\n');
     const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
-    assert.equal(r.headline.total, 2, 'two turns, not four rows');
-    assert.deepEqual(r.distribution, { 'rec-fail-tier-0': 2 });
-    assert.equal(r.dedupe.superseded_dropped, 1);
-    assert.equal(r.dedupe.conflicts, 1);
+    assert.equal(r.headline.total, 1, 'only the one non-conflicting current-cohort turn is in the denominator');
+    assert.deepEqual(r.distribution, { 'rec-fail-tier-0': 1 }, 'the conflicting turn is not in the distribution');
+    assert.equal(r.dedupe.superseded_dropped, 0, 'no cross-instrument supersession');
+    assert.equal(r.dedupe.conflicts, 1, 'the contradiction is counted');
+    assert.equal(r.coverage_gap.rows_excluded, 1, 'the 0.2.0 row is a coverage gap');
     assert.match(r.signal, /1 conflict/, 'conflict visible in the signal');
     const md = readFileSync(join(r.metaDir, 'rollups', 'daily', '2026-06-02.md'), 'utf8');
-    assert.match(md, /Replay-dedupe \(store-wide\): 4 rows read, 2 after replay-dedupe \(1 replay, 1 superseded, 1 conflict\)/);
+    assert.match(md, /1 conflict excluded/, 'daily md reports the conflict as excluded');
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
@@ -265,7 +283,7 @@ test("Hale's mixed-instrument falsifier: calibrated-true must not aggregate a 0.
       // Current-instrument row.
       JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
     ].join('\n') + '\n');
-    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, overall_precision: 0.82 });
+    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION, overall_precision: 0.82 });
     const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
     assert.equal(r.calibrated, true, 'calibration itself reads true at the current version');
     assert.equal(r.headline.total, 1, 'ONLY the current-cohort row aggregates — never both instruments');
@@ -288,23 +306,25 @@ test('cohort gate: a fully current-instrument store reports a zero gap, honestly
     assert.equal(r.coverage_gap.rows_excluded, 0);
     assert.doesNotMatch(r.signal, /outside cohort/, 'no gap tag when there is no gap');
     const md = readFileSync(join(r.metaDir, 'rollups', 'daily', '2026-06-02.md'), 'utf8');
-    assert.match(md, /Instrument cohort 1\.0\.0\/0\.3\.0\/p2: all deduped rows in cohort/);
+    assert.match(md, /Instrument cohort 1\.0\.0\/0\.3\.0\/p2: all in-cohort rows aggregated/);
   });
 });
 
-test('cross-date attribution policy is explicit in the JSON and the daily markdown', () => {
+test('cross-date attribution policy (immutable observation day) is explicit in the JSON and the daily markdown', () => {
   withClassified({ '2026-06-02': ['tier-0-win'] }, ({ home, project }) => {
     const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
-    assert.equal(r.day_attribution, 'replay-day');
-    assert.match(r.day_attribution_note, /replayed sessions attribute to the replay's day/);
+    assert.equal(r.day_attribution, 'observation-day');
+    assert.match(r.day_attribution_note, /earliest\/original observation day/);
+    assert.match(r.day_attribution_note, /turns today.*user turns first observed that day/);
     const md = readFileSync(join(r.metaDir, 'rollups', 'daily', '2026-06-02.md'), 'utf8');
-    assert.match(md, /Day attribution: replayed sessions attribute to the replay's day/);
+    assert.match(md, /Day attribution: replayed sessions keep their earliest\/original observation day/);
   });
 });
 
-test('equal-rank conflict: both input orders inside one day produce the same rollup winner', () => {
-  // Hale item 3 verification: reversing the two contradictory rows must not
-  // reverse the aggregate. Same day ⇒ lexicographically smaller state wins.
+test('ACCEPTANCE Hale-2026-07-23 item 2 (order-independence): a same-day contradiction is excluded under BOTH input orders, conflict counted either way', () => {
+  // Reversing the two contradictory rows must not flip the aggregate. The
+  // corrected policy invents no winner at all — the group is excluded and
+  // counted as a conflict regardless of order.
   const states = [
     [ident({ turn_idx: 0, state: 'tier-1-3-win' }), ident({ turn_idx: 0, state: 'rec-fail-tier-0' })],
     [ident({ turn_idx: 0, state: 'rec-fail-tier-0' }), ident({ turn_idx: 0, state: 'tier-1-3-win' })],
@@ -322,13 +342,14 @@ test('equal-rank conflict: both input orders inside one day produce the same rol
       rmSync(project, { recursive: true, force: true });
     }
   });
-  assert.deepEqual(results[0].distribution, results[1].distribution, 'winner independent of input order');
-  assert.deepEqual(results[0].distribution, { 'rec-fail-tier-0': 1 });
+  assert.deepEqual(results[0].distribution, results[1].distribution, 'aggregate independent of input order');
+  assert.deepEqual(results[0].distribution, {}, 'the contradiction is excluded, not resolved to a state');
+  assert.equal(results[0].headline, null, 'no aggregateable turn today');
   assert.equal(results[0].dedupe.conflicts, 1);
   assert.equal(results[1].dedupe.conflicts, 1, 'the conflict stays visible under both orders');
 });
 
-test('replay dedupe: a cross-date replay does not double-count today or the trailing window', () => {
+test('ACCEPTANCE Hale-2026-07-23 item 3 (rollup): a cross-date replay attributes to the EARLIEST observation day; today counts only turns first observed today', () => {
   const home = mkdtempSync(join(tmpdir(), 'rollup-xdate-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-xdate-proj-'));
   try {
@@ -336,16 +357,17 @@ test('replay dedupe: a cross-date replay does not double-count today or the trai
     mkdirSync(dir, { recursive: true });
     const sess = [ident({ turn_idx: 0, state: 'tier-0-win' }), ident({ turn_idx: 1, state: 'tier-0-win' })];
     const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
-    // Session captured on 06-01, replayed identically at a catch-up on 06-02;
+    // Session first observed 06-01, replayed identically at a catch-up on 06-02;
     // a fresh session (different id) also ran on 06-02.
     writeFileSync(join(dir, '2026-06-01.jsonl'), lines(sess));
     writeFileSync(join(dir, '2026-06-02.jsonl'),
       lines([...sess, ident({ session_id: 'sess-fresh', turn_idx: 0, state: 'rec-fail-tier-0' })]));
     const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
-    // The replayed turns attribute once (to the winning, later row); the fresh turn is separate.
-    assert.equal(r.headline.total, 3, 'today = 2 replay-winning turns + 1 fresh turn, no double count');
+    // The replayed turns stay on their earliest day (06-01); today (06-02) counts
+    // ONLY the turn first observed today.
+    assert.equal(r.headline.total, 1, 'today = the 1 fresh turn only; replayed turns stay on 06-01');
     assert.equal(r.dedupe.replays_dropped, 2);
-    assert.equal(r.dedupe.rows_kept, 3);
+    assert.equal(r.dedupe.rows_kept, 3, 'store-wide: 2 turns under 06-01 + 1 under 06-02');
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });

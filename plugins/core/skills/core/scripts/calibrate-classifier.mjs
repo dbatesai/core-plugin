@@ -35,7 +35,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { todayUTC, resolveWorkspaceId, operationalMetricsDir } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { CLASSIFIER_VERSION, PROXY_VERSION } from './classify-turns.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 
 export const CALIBRATION_VERSION = '1.0.0';
 export const PRECISION_THRESHOLD = 0.7;
@@ -76,6 +76,12 @@ export function emptyCalibrationState() {
     schema_version: CALIBRATION_VERSION,
     classifier_version: CLASSIFIER_VERSION,
     proxy_version: PROXY_VERSION,
+    // The schema of the CLASSIFIED ROWS this calibration measures against — a
+    // distinct leg of the instrument triple, NOT the calibration-file schema
+    // above. Consumers (metrics-rollup) bind exact-triple calibration to this
+    // field so a calibration taken against a different row schema can't claim
+    // to describe the current instrument (Hale item 5, 2026-07-23).
+    classified_schema_version: CLASSIFIED_SCHEMA_VERSION,
     is_calibrated: false,
     provisional: true,
     labeled_count: 0,
@@ -94,7 +100,9 @@ export function readCalibrationState(metaDir) {
   if (!existsSync(f)) return emptyCalibrationState();
   try {
     const state = JSON.parse(readFileSync(f, 'utf8'));
-    if (state.classifier_version !== CLASSIFIER_VERSION || state.proxy_version !== PROXY_VERSION) {
+    if (state.classifier_version !== CLASSIFIER_VERSION
+      || state.proxy_version !== PROXY_VERSION
+      || state.classified_schema_version !== CLASSIFIED_SCHEMA_VERSION) {
       return { ...emptyCalibrationState(), invalidated_stale_state: true };
     }
     return state;
@@ -466,13 +474,18 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
   };
   const previous = readCalibrationState(metaDir);
   const previousByHarness = previous.classifier_version === CLASSIFIER_VERSION
-    && previous.proxy_version === PROXY_VERSION ? previous.by_harness || {} : {};
+    && previous.proxy_version === PROXY_VERSION
+    && previous.classified_schema_version === CLASSIFIED_SCHEMA_VERSION ? previous.by_harness || {} : {};
   const byHarness = { ...previousByHarness, [harness]: harnessState };
   const allHarnessesCalibrated = CALIBRATION_HARNESSES.every((name) => byHarness[name]?.is_calibrated === true);
   const state = {
     schema_version: CALIBRATION_VERSION,
     classifier_version: CLASSIFIER_VERSION,
     proxy_version: PROXY_VERSION,
+    // Distinct instrument-triple leg: the classified-row schema calibration was
+    // measured against (Hale item 5, 2026-07-23). metrics-rollup binds
+    // exact-triple calibration to this, never to schema_version above.
+    classified_schema_version: CLASSIFIED_SCHEMA_VERSION,
     is_calibrated: allHarnessesCalibrated,
     provisional: !allHarnessesCalibrated,
     labeled_count: Object.values(byHarness).reduce((sum, item) => sum + (item.labeled_count || 0), 0),

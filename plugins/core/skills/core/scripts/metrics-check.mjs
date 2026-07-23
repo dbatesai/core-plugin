@@ -38,8 +38,10 @@
  * Output (default): the rendered report — a MECHANICS-scoped verdict heading,
  * sectioned blocks of 10-char bar gauges (one gauge per row, one section per
  * evidence class), and a 1-3 sentence narrative that speaks to all the
- * classes, never just the first. Pass --json to also dump the canonical data
- * object. Its top-level structure IS the four-evidence-class taxonomy
+ * classes, never just the first. Pass --json to emit EXACTLY the canonical data
+ * object as a single JSON document instead of the report (nothing else on the
+ * stream, so the output is valid JSON that render-metrics-artifact --json-in can
+ * consume directly). Its top-level structure IS the four-evidence-class taxonomy
  * (2026-07-22, Hale's slice acceptance revise — the machine consumer must
  * receive the SAME taxonomy the human report renders, never a different one):
  *
@@ -831,7 +833,11 @@ if (isCliEntry) {
   const positional = args.find((a) => !a.startsWith('--'));
   const cwd = positional ? join(positional) : process.cwd();
   const out = await gatherMetrics(cwd);
-  process.stdout.write(out.report + '\n');
-  if (wantsJson) process.stdout.write('\n' + JSON.stringify(out, null, 2) + '\n');
+  // --json emits EXACTLY ONE JSON document and nothing else (Hale item 8,
+  // 2026-07-23): the human report and the JSON on one stream made saved stdout
+  // invalid JSON, so `render-metrics-artifact --json-in` could not consume the
+  // real product output. Default (no flag) prints the human report.
+  if (wantsJson) process.stdout.write(JSON.stringify(out, null, 2) + '\n');
+  else process.stdout.write(out.report + '\n');
   process.exit(0);
 }

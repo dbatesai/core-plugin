@@ -33,8 +33,36 @@ const {
   METRICS_ARTIFACT_MANIFEST_SCHEMA_VERSION, METRICS_ARTIFACT_CONTENT_CLASS, METRICS_ARTIFACT_CONTENT_NOTE,
 } = await import(pathToFileURL(join(SCRIPTS, 'render-metrics-artifact.mjs')).href);
 const { truthfulProducerIdentity } = await import(pathToFileURL(join(SCRIPTS, 'artifact-provenance.mjs')).href);
-const { publishReceiptPathFor } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
+const { publishReceiptPathFor, artifactContentDigest } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'render-metrics-artifact.mjs');
+
+// Fix 9 (Hale item 9) makes the shared provenance helper FAIL CLOSED on a dirty
+// plugin tree — HEAD no longer names the executing bytes. So the real-render
+// tests below only get a source_sha (and can render) when the tree is clean; on
+// a dirty working tree the renderer correctly refuses. Detect the state once so
+// the provenance-dependent tests assert the RIGHT contract either way.
+function pluginTreeIsClean() {
+  try {
+    const out = execFileSync('git', ['-C', SCRIPTS, 'status', '--porcelain', '--',
+      join(SCRIPTS, '..', '..', '..')], { encoding: 'utf8' });
+    return out.trim().length === 0;
+  } catch { return false; } // not a git checkout ⇒ no source_sha anyway
+}
+const TREE_CLEAN = pluginTreeIsClean();
+
+// A valid hand-built generation receipt (full schema: kind, schema_version,
+// generated_at, artifact_sha256) so receipt tests are independent of the
+// renderer / tree state.
+function writeGenerationReceipt(genPath, { kind = 'core-metrics-artifact-preflight', html = '<html>hi</html>', overrides = {} } = {}) {
+  writeFileSync(genPath, JSON.stringify({
+    kind,
+    schema_version: '1.0.0',
+    generated_at: '2026-07-23T00:00:00.000Z',
+    artifact_sha256: artifactContentDigest(html),
+    ...overrides,
+  }));
+  return artifactContentDigest(html);
+}
 
 // ---------------------------------------------------------------------------
 // Canonical four-class fixture — the exact shape gatherMetrics()/--json emits.
@@ -304,7 +332,30 @@ test('memory files needing attention render counts, warn gauge, and census tiles
 
 // ---------- CLI: --json-in replay path + manifest contract ----------
 
-test('CLI --json-in: renders from a pre-captured canonical object; manifest is aggregates-only and receipted', () => {
+test('ACCEPTANCE Hale-2026-07-23 item 8 (real pipeline): render-metrics --json-in consumes the ACTUAL metrics-check --json producer output', (t) => {
+  if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
+  const METRICS_CHECK = join(SCRIPTS, 'metrics-check.mjs');
+  const { root, home } = fixtureProject();
+  try {
+    mkdirSync(join(root, '_memories'), { recursive: true });
+    // 1. The REAL producer: metrics-check --json. Its stdout must be exactly
+    //    one JSON document (fix 8) — save it verbatim, no hand-editing.
+    const produced = execFileSync('node', [METRICS_CHECK, root, '--json'], { encoding: 'utf8', timeout: 120000 });
+    assert.doesNotThrow(() => JSON.parse(produced), 'the producer stdout is a single JSON document');
+    const capturedPath = join(root, 'captured-metrics.json');
+    writeFileSync(capturedPath, produced);
+    // 2. The renderer consumes that exact producer output through --json-in.
+    const out = join(root, 'out', 'from-real-json.html');
+    const res = spawnSync(process.execPath, [CLI_PATH, root, '--out', out, '--json-in', capturedPath, '--home', home], { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    const manifest = JSON.parse(res.stdout);
+    assert.equal(manifest.data_source, 'json-in');
+    assert.ok(existsSync(out), 'the page rendered from the real producer output');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI --json-in: renders from a pre-captured canonical object; manifest is aggregates-only and receipted', (t) => {
+  if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
   const { root, home } = fixtureProject();
   try {
     const dataPath = join(root, 'metrics.json');
@@ -337,7 +388,8 @@ test('CLI --json-in: renders from a pre-captured canonical object; manifest is a
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('CLI usage errors: missing --out, malformed --json-in, --out inside the store', () => {
+test('CLI usage errors: missing --out, malformed --json-in, --out inside the store', (t) => {
+  if (!TREE_CLEAN) { t.skip('plugin tree dirty — malformed --json-in check runs after the fail-closed provenance gate (fix 9); exercised on a clean tree'); return; }
   const { root, home } = fixtureProject();
   try {
     mkdirSync(join(root, '_memories'), { recursive: true });
@@ -364,7 +416,8 @@ test('CLI usage errors: missing --out, malformed --json-in, --out inside the sto
 
 // ---------- live path (real gatherMetrics against a tiny store) ----------
 
-test('CLI live path: real gatherMetrics run produces a truthful manifest and page', () => {
+test('CLI live path: real gatherMetrics run produces a truthful manifest and page', (t) => {
+  if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
   const { root, home } = fixtureProject();
   try {
     const mem = join(root, '_memories');
@@ -387,7 +440,7 @@ test('CLI live path: real gatherMetrics run produces a truthful manifest and pag
 
 // ---------- shared provenance helper ----------
 
-test('truthfulProducerIdentity: in a git checkout, the SHA is the real HEAD and the script name is the caller\'s', async (t) => {
+test('truthfulProducerIdentity: in a CLEAN git checkout, the SHA is the real HEAD and the script name is the caller\'s', async (t) => {
   let head;
   try {
     head = execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -397,15 +450,52 @@ test('truthfulProducerIdentity: in a git checkout, the SHA is the real HEAD and 
   }
   const id = truthfulProducerIdentity('some-generator.mjs');
   assert.equal(id.script, 'some-generator.mjs');
-  assert.equal(id.source_sha, head);
-  assert.equal(id.source_sha_from, 'git');
+  if (TREE_CLEAN) {
+    assert.equal(id.source_sha, head, 'clean tree ⇒ real HEAD');
+    assert.equal(id.source_sha_from, 'git');
+  } else {
+    // Fix 9: a dirty tree must fail closed — HEAD does not name the executing bytes.
+    assert.equal(id.source_sha, null, 'dirty tree ⇒ no clean HEAD stamp (fail closed)');
+    assert.equal(id.source_sha_from, null);
+  }
 });
 
-test('renderer producer in the page footer names the generating script and the live SHA source', async (t) => {
-  let head;
+test('ACCEPTANCE Hale-2026-07-23 item 9 (dirty-tree provenance): pluginTreeDirty is true on a modified tracked file and false when committed, and identity fails closed while dirty', async (t) => {
+  const { execFileSync: exec } = await import('node:child_process');
+  const { pluginTreeDirty } = await import(pathToFileURL(join(SCRIPTS, 'artifact-provenance.mjs')).href);
+  // Controlled fixture: a throwaway git repo with a plugin-root-shaped subtree.
+  const repo = mkdtempSync(join(tmpdir(), 'prov-dirty-'));
   try {
-    head = execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const pluginRoot = join(repo, 'plugins', 'core');
+    const scriptsDir = join(pluginRoot, 'skills', 'core', 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    const tracked = join(scriptsDir, 'x.mjs');
+    writeFileSync(tracked, 'export const a = 1;\n');
+    const git = (...args) => exec('git', ['-C', repo, ...args], { stdio: 'ignore' });
+    git('init', '-q');
+    git('config', 'user.email', 't@t'); git('config', 'user.name', 't');
+    git('add', '-A'); git('commit', '-q', '-m', 'init');
+    // Clean: no changes under the plugin root.
+    assert.equal(pluginTreeDirty(repo, pluginRoot), false, 'a committed tree is not dirty');
+    // Dirty: modify a tracked file under the plugin root.
+    writeFileSync(tracked, 'export const a = 2;\n');
+    assert.equal(pluginTreeDirty(repo, pluginRoot), true, 'a modified tracked file makes the tree dirty');
+    // Dirty: an untracked file under the plugin root also counts.
+    git('checkout', '--', 'plugins');
+    writeFileSync(join(scriptsDir, 'untracked.mjs'), 'x\n');
+    assert.equal(pluginTreeDirty(repo, pluginRoot), true, 'an untracked file under the plugin root makes the tree dirty');
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+  // And end-to-end: on THIS repo, identity fails closed iff the tree is dirty.
+  const id = truthfulProducerIdentity('some-generator.mjs');
+  if (!TREE_CLEAN) assert.equal(id.source_sha, null, 'dirty working tree ⇒ identity fails closed');
+});
+
+test('renderer producer in the page footer names the generating script and the live SHA source (clean tree)', async (t) => {
+  try {
+    execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
   } catch { t.skip('not running from a git checkout'); return; }
+  if (!TREE_CLEAN) { t.skip('plugin tree is dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
+  const head = execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const { root, home } = fixtureProject();
   try {
     const dataPath = join(root, 'metrics.json');
@@ -428,7 +518,8 @@ async function generateMetricsReceipt() {
   return { root, home, genPath: manifest.receipt_path };
 }
 
-test('--record-publish on a metrics generation receipt lands kind core-metrics-artifact-publish, self-contained', async () => {
+test('--record-publish on a metrics generation receipt lands kind core-metrics-artifact-publish, self-contained', async (t) => {
+  if (!TREE_CLEAN) { t.skip('plugin tree dirty — real render is fail-closed by design (fix 9); receipt behavior also covered tree-independently by the item-7 acceptance tests'); return; }
   const { root, genPath } = await generateMetricsReceipt();
   try {
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
@@ -452,9 +543,11 @@ test('--record-publish on a metrics generation receipt lands kind core-metrics-a
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('published-private REFUSES to record without a consent record (--consent-by + --consent-mechanism)', async () => {
-  const { root, genPath } = await generateMetricsReceipt();
+test('published-private REFUSES to record without a consent record (--consent-by + --consent-mechanism)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'receipts-consent-'));
+  const genPath = join(dir, 'gen.json');
   try {
+    writeGenerationReceipt(genPath);
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
       '--generation-receipt', genPath, '--status', 'published-private',
       '--private-verified-evidence', 'gallery shows private'],
@@ -462,20 +555,20 @@ test('published-private REFUSES to record without a consent record (--consent-by
     assert.equal(res.status, 2);
     assert.match(res.stderr, /--consent-by and --consent-mechanism/);
     assert.ok(!existsSync(publishReceiptPathFor(genPath)), 'refusal writes nothing');
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('browse-kind publish receipt copies snapshot_id from the generation receipt (self-contained after deletion)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'receipts-snapshot-'));
   const genPath = join(dir, '2026-07-22T21-00-00-000Z.json');
   try {
-    writeFileSync(genPath, JSON.stringify({
+    writeGenerationReceipt(genPath, {
       kind: 'core-memory-browse-preflight',
-      generated_at: '2026-07-22T21:00:00.000Z',
-      snapshot_id: 'snap-abc123def456',
-    }));
+      overrides: { generated_at: '2026-07-22T21:00:00.000Z', snapshot_id: 'snap-abc123def456' },
+    });
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
       '--generation-receipt', genPath, '--status', 'published-private',
+      '--artifact-url', 'https://claude.ai/code/artifact/browse-1',
       '--private-verified-evidence', 'verified private in gallery',
       '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
       { encoding: 'utf8' });
@@ -488,9 +581,11 @@ test('browse-kind publish receipt copies snapshot_id from the generation receipt
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('declined outcomes record without consent flags; unknown generation kinds are refused', async () => {
-  const { root, genPath } = await generateMetricsReceipt();
+test('declined outcomes record without consent flags; unknown generation kinds are refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'receipts-declined-'));
+  const genPath = join(dir, 'gen.json');
   try {
+    writeGenerationReceipt(genPath);
     const declined = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
       '--generation-receipt', genPath, '--status', 'declined'], { encoding: 'utf8' });
     assert.equal(declined.status, 0, declined.stderr);
@@ -498,20 +593,26 @@ test('declined outcomes record without consent flags; unknown generation kinds a
     assert.equal(receipt.publish_status, 'declined');
     assert.equal(receipt.published_at, null);
 
-    const bogusPath = join(root, 'bogus.json');
+    const bogusPath = join(dir, 'bogus.json');
     writeFileSync(bogusPath, JSON.stringify({ kind: 'not-a-real-kind' }));
     const bogus = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
       '--generation-receipt', bogusPath, '--status', 'declined'], { encoding: 'utf8' });
     assert.equal(bogus.status, 2);
     assert.match(bogus.stderr, /not a generation receipt/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('--record-revocation stamps revoked_at on a metrics publish receipt', async () => {
-  const { root, genPath } = await generateMetricsReceipt();
+test('--record-revocation stamps revoked_at on a PUBLISHED-PRIVATE receipt, then refuses a double revoke', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'receipts-revoke-'));
+  const genPath = join(dir, '2026-07-23T02-00-00-000Z.json');
   try {
-    spawnSync(process.execPath, [CLI_PATH, '--record-publish',
-      '--generation-receipt', genPath, '--status', 'failed'], { encoding: 'utf8' });
+    writeGenerationReceipt(genPath);
+    const pub = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published-private',
+      '--artifact-url', 'https://claude.ai/code/artifact/rev-1',
+      '--private-verified-evidence', 'gallery shows private',
+      '--consent-by', 'David', '--consent-mechanism', 'explicit yes'], { encoding: 'utf8' });
+    assert.equal(pub.status, 0, pub.stderr);
     const p = publishReceiptPathFor(genPath);
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
@@ -519,12 +620,92 @@ test('--record-revocation stamps revoked_at on a metrics publish receipt', async
     const again = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
     assert.equal(again.status, 2);
     assert.match(again.stderr, /already revoked/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------- ACCEPTANCE: Hale 2026-07-23 item 7 — receipt hardening ----------
+
+test('ACCEPTANCE Hale-2026-07-23 item 7a: a forged generation receipt with no content digest is REFUSED (full schema, not just kind)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'receipts-forged-'));
+  try {
+    // A blob with a VALID kind but no content digest — the old check passed on
+    // kind alone; full-schema validation refuses it.
+    const noDigest = join(dir, 'no-digest.json');
+    writeFileSync(noDigest, JSON.stringify({
+      kind: 'core-metrics-artifact-preflight', schema_version: '1.0.0', generated_at: '2026-07-23T00:00:00.000Z',
+    }));
+    const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', noDigest, '--status', 'published-private',
+      '--artifact-url', 'https://claude.ai/code/artifact/x',
+      '--private-verified-evidence', 'ev', '--consent-by', 'D', '--consent-mechanism', 'm'],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /artifact_sha256/, 'a receipt with no content digest cannot bind a publish');
+    assert.ok(!existsSync(publishReceiptPathFor(noDigest)));
+
+    // And a kind-only blob is refused too (fails on the first missing field).
+    const kindOnly = join(dir, 'kind-only.json');
+    writeFileSync(kindOnly, JSON.stringify({ kind: 'core-metrics-artifact-preflight' }));
+    const res2 = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', kindOnly, '--status', 'declined'], { encoding: 'utf8' });
+    assert.equal(res2.status, 2);
+    assert.match(res2.stderr, /schema_version|generation receipt/, 'a kind-only blob is not a valid generation receipt');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('ACCEPTANCE Hale-2026-07-23 item 7b: the artifact content digest is copied into the publish receipt', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'receipts-digest-'));
+  const genPath = join(dir, 'gen.json');
+  try {
+    const digest = writeGenerationReceipt(genPath, { html: '<html>exact bytes</html>' });
+    const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published-private',
+      '--artifact-url', 'https://claude.ai/code/artifact/d',
+      '--private-verified-evidence', 'ev', '--consent-by', 'D', '--consent-mechanism', 'm'],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    const receipt = JSON.parse(readFileSync(publishReceiptPathFor(genPath), 'utf8'));
+    assert.equal(receipt.artifact_sha256, digest, 'the exact-byte identity binds the publish to the content');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('ACCEPTANCE Hale-2026-07-23 item 7c: published-private REFUSES a null artifact_url', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'receipts-nourl-'));
+  const genPath = join(dir, 'gen.json');
+  try {
+    writeGenerationReceipt(genPath);
+    const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published-private',
+      '--private-verified-evidence', 'ev', '--consent-by', 'D', '--consent-mechanism', 'm'],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /--artifact-url/, 'a private publish that names no hosted URL is not published-private');
+    assert.ok(!existsSync(publishReceiptPathFor(genPath)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('ACCEPTANCE Hale-2026-07-23 item 7d: a declined/failed receipt can NEVER be marked revoked', () => {
+  for (const status of ['declined', 'failed']) {
+    const dir = mkdtempSync(join(tmpdir(), `receipts-${status}-`));
+    const genPath = join(dir, 'gen.json');
+    try {
+      writeGenerationReceipt(genPath);
+      const rec = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+        '--generation-receipt', genPath, '--status', status], { encoding: 'utf8' });
+      assert.equal(rec.status, 0, rec.stderr);
+      const p = publishReceiptPathFor(genPath);
+      const rev = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
+      assert.equal(rev.status, 2, `revoking a ${status} record must be refused`);
+      assert.match(rev.stderr, /only a 'published-private' record can be revoked/);
+      assert.equal(JSON.parse(readFileSync(p, 'utf8')).revoked_at, null, 'no revocation stamp on a non-published record');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  }
 });
 
 // ---------- no-workspace fallback ----------
 
-test('no workspace.json: receipt lands in the flagged fallback location', async () => {
+test('no workspace.json: receipt lands in the flagged fallback location', async (t) => {
+  if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
   const { root, home } = fixtureProject({ workspace: false });
   try {
     const dataPath = join(root, 'metrics.json');

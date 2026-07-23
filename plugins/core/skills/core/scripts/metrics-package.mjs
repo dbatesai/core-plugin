@@ -557,7 +557,10 @@ export function workspaceMetrics(home, workspaceId) {
       classifier_version: CLASSIFIER_VERSION,
       proxy_version: PROXY_VERSION,
     });
+    let aggregateableRows = 0;
     for (const [day, rows] of Object.entries(dedupedDays)) {
+      if (!rows.length) continue; // empty day-keys survive dedupe; they are not aggregateable rows
+      aggregateableRows += rows.length;
       const states = {};
       let provisional = 0;
       for (const r of rows) {
@@ -572,28 +575,39 @@ export function workspaceMetrics(home, workspaceId) {
         provisional_share: rows.length ? round3(provisional / rows.length) : null,
       };
     }
-    if (Object.keys(recognition.days).length) {
+    // The exact instrument cohort and coverage gap are always visible when a
+    // classified store exists — an old-only store must report the gap, not hide
+    // it behind unavailability. Values are fixed constants, counts, and
+    // version-shaped labels only — whitelist-safe.
+    recognition.instrument_cohort = cohort;
+    recognition.coverage_gap = {
+      rows_excluded: coverageGap.rows_excluded,
+      versions: coverageGap.versions,
+    };
+    recognition.replay_dedupe = {
+      rows_read: stats.rows_read,
+      rows_kept: stats.rows_kept,
+      replays_dropped: stats.replays_dropped,
+      superseded_dropped: stats.superseded_dropped,
+      conflicts: stats.conflicts,
+      unkeyed_kept: stats.unkeyed_kept,
+    };
+    // Availability reflects AGGREGATEABLE in-cohort rows, not day-key count
+    // (Hale item 6, 2026-07-23): the deduper preserves empty day-keys, so an
+    // old-only store — every row excluded by the cohort gate — has day-keys but
+    // zero countable turns. That store is UNAVAILABLE-with-a-coverage-gap, never
+    // available-with-zero-turns.
+    if (aggregateableRows > 0) {
       recognition.available = true;
       delete recognition.reason;
-      recognition.replay_dedupe = {
-        rows_read: stats.rows_read,
-        rows_kept: stats.rows_kept,
-        replays_dropped: stats.replays_dropped,
-        superseded_dropped: stats.superseded_dropped,
-        conflicts: stats.conflicts,
-        unkeyed_kept: stats.unkeyed_kept,
-      };
-      // The exact instrument cohort the day/week counts aggregate, plus every
-      // deduped row excluded for being outside it (Hale 2026-07-22: a mixed-
-      // instrument store must never ship as one aggregate). Values are fixed
-      // constants, counts, and version-shaped labels only — whitelist-safe.
-      recognition.instrument_cohort = cohort;
-      recognition.coverage_gap = {
-        rows_excluded: coverageGap.rows_excluded,
-        versions: coverageGap.versions,
-      };
-      // Fixed-vocabulary policy stamp: replayed sessions attribute to the replay's day.
-      recognition.day_attribution = 'replay-day';
+      // Fixed-vocabulary policy stamp: replayed sessions keep their earliest
+      // observation day (immutable observation day).
+      recognition.day_attribution = 'observation-day';
+    } else {
+      recognition.available = false;
+      recognition.reason = coverageGap.rows_excluded
+        ? `no in-cohort classified rows (${coverageGap.rows_excluded} row${coverageGap.rows_excluded === 1 ? '' : 's'} excluded — see coverage_gap)`
+        : 'no classified turns in the current instrument cohort';
     }
   }
 

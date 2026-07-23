@@ -28,24 +28,29 @@ import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from '
 
 const HEADLINE = 'rec-fail-tier-0';
 
-// Cross-date attribution — EXPLICIT POLICY (Hale item 4, 2026-07-22):
-// replayed sessions attribute to the replay's day. The surviving row's own
-// file date is where its turns count; a session captured on day X and
-// replayed (re-classified) on day Y counts once, under day Y. Chosen over
-// first-observation-day-wins because the winner IS the authoritative
-// judgment and its date is when that judgment was produced — attributing it
-// to the loser's day would stamp one row's evidence with another row's
-// timestamp. Totals stay stable under replay either way; this keeps row and
-// date traveling together. Stated in the rollup JSON and the daily markdown.
-const DAY_ATTRIBUTION = 'replay-day';
-const DAY_ATTRIBUTION_NOTE = "replayed sessions attribute to the replay's day (the winning row keeps its own file's date)";
+// Cross-date attribution — EXPLICIT POLICY (Hale item 3, 2026-07-23 correction):
+// IMMUTABLE OBSERVATION DAY. A replayed session keeps its EARLIEST/original
+// observation day; replay never moves history forward. A turn first observed on
+// day X and re-classified on day Y counts once, under day X — the day the user
+// need actually occurred, not the day a classification was re-produced. So
+// "turns today" means user turns first observed today, never processing
+// activity. Stated in the rollup JSON and the daily markdown.
+const DAY_ATTRIBUTION = 'observation-day';
+const DAY_ATTRIBUTION_NOTE = 'replayed sessions keep their earliest/original observation day; "turns today" means user turns first observed that day, never re-processing activity';
 
 /**
  * Read calibration state and decide whether the rollup may drop the PROVISIONAL
- * tag. A calibration only counts if it was run against the CURRENT classifier
- * version — calibrate at v0.1.0, then improve the classifier, and the old
- * precision number no longer describes what's running. Version mismatch ⇒ treat
- * as uncalibrated (the R-1 honesty spine: never launder stale confidence).
+ * tag. A calibration only counts if it was run against the CURRENT instrument
+ * TRIPLE — classifier version, proxy version, AND the classified-row schema
+ * version. Calibrate at one instrument, then change any leg of the triple, and
+ * the old precision number no longer describes what's running. Any mismatch ⇒
+ * treat as uncalibrated (the R-1 honesty spine: never launder stale confidence).
+ *
+ * The distinct `classified_schema_version` field is the schema of the CLASSIFIED
+ * ROWS the calibration was measured against (written by calibrate-classifier.mjs).
+ * The state's own `schema_version` is the calibration-FILE schema and is NOT a
+ * substitute — binding to it would let a calibration taken against a different
+ * row schema still claim exact-triple calibration (Hale item 5).
  */
 function readCalibrationState(metaDir) {
   const f = join(metaDir, 'calibration-state.json');
@@ -53,7 +58,9 @@ function readCalibrationState(metaDir) {
   let s;
   try { s = JSON.parse(readFileSync(f, 'utf8')); } catch { return { is_calibrated: false, provisional: true }; }
   if (s.is_calibrated
-      && (s.classifier_version !== CLASSIFIER_VERSION || s.proxy_version !== PROXY_VERSION)) {
+      && (s.classifier_version !== CLASSIFIER_VERSION
+        || s.proxy_version !== PROXY_VERSION
+        || s.classified_schema_version !== CLASSIFIED_SCHEMA_VERSION)) {
     return { ...s, is_calibrated: false, provisional: true, version_mismatch: true };
   }
   return s;

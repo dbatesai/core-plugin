@@ -401,33 +401,40 @@ test('workspace recognition dedupes replayed classified rows before counting, an
       harness: 'claude-code', provisional: true, session_id: 'sess-pkg', ...over,
     });
     const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
-    // 07-01: a session classified once (2 turns), then fully replayed at a
-    // catch-up on 07-08 — plus one 07-08 re-classification under a NEWER
-    // classifier and one same-version contradiction.
+    // 07-01: a 2-turn session (current instrument), plus one out-of-cohort
+    // 0.2.0 row. 07-08: the same two turns replayed identically at a catch-up,
+    // a genuinely-new turn2, and a same-instrument contradiction on turn3.
     writeFileSync(join(clsDir, '2026-07-01.jsonl'), lines([
       ident({ turn_idx: 0, state: 'tier-0-win' }),
-      ident({ turn_idx: 1, classifier_version: '0.2.0', state: 'tier-1-3-win' }),
+      ident({ turn_idx: 1, state: 'rec-fail-tier-0' }),
+      ident({ turn_idx: 9, classifier_version: '0.2.0', state: 'tier-1-3-win' }), // out of cohort → gap
     ]));
     writeFileSync(join(clsDir, '2026-07-08.jsonl'), lines([
-      ident({ turn_idx: 0, state: 'tier-0-win' }), // pure replay, same state
-      ident({ turn_idx: 0, state: 'rec-fail-tier-0' }), // same key, different state → conflict
-      ident({ turn_idx: 1, state: 'rec-fail-tier-0' }), // newer classifier supersedes the 0.2.0 row
+      ident({ turn_idx: 0, state: 'tier-0-win' }), // pure replay of 07-01 turn0
+      ident({ turn_idx: 1, state: 'rec-fail-tier-0' }), // pure replay of 07-01 turn1
+      ident({ turn_idx: 2, state: 'tier-0-win' }), // genuinely new turn, first seen 07-08
+      ident({ turn_idx: 3, state: 'tier-0-win' }), // turn3: contradiction ...
+      ident({ turn_idx: 3, state: 'rec-fail-tier-0' }), // ... excluded, counted as a conflict
     ]));
     const w = workspaceMetrics(home, 'ws-dedupe');
     assert.equal(w.recognition.available, true);
     const totalTurns = Object.values(w.recognition.days).reduce((n, d) => n + d.turns, 0);
-    assert.equal(totalTurns, 2, '5 rows collapse to 2 turns — totals stable under replay');
-    assert.equal(w.recognition.days['2026-07-01'].turns, 0, 'replayed rows attribute to the winning later day');
-    assert.deepEqual(w.recognition.days['2026-07-08'].states, { 'rec-fail-tier-0': 2 });
+    assert.equal(totalTurns, 3, 'replays collapse; turn3 is a conflict (excluded); 3 aggregateable turns remain');
+    // IMMUTABLE OBSERVATION DAY: the replayed turns stay on their earliest day.
+    assert.equal(w.recognition.days['2026-07-01'].turns, 2, 'replayed turns stay on their earliest observation day');
+    assert.deepEqual(w.recognition.days['2026-07-01'].states, { 'tier-0-win': 1, 'rec-fail-tier-0': 1 });
+    assert.equal(w.recognition.days['2026-07-08'].turns, 1, 'only the genuinely-new turn is first-observed 07-08');
+    assert.deepEqual(w.recognition.days['2026-07-08'].states, { 'tier-0-win': 1 });
     assert.deepEqual(w.recognition.replay_dedupe, {
-      rows_read: 5, rows_kept: 2, replays_dropped: 2, superseded_dropped: 1, conflicts: 1, unkeyed_kept: 0,
-    }, 'dedupe stats ship as plain numbers');
+      rows_read: 7, rows_kept: 3, replays_dropped: 2, superseded_dropped: 0, conflicts: 1, unkeyed_kept: 0,
+    }, 'dedupe stats ship as plain numbers; the conflict is counted, never a winner');
     assert.deepEqual(w.recognition.instrument_cohort, {
       schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
     }, 'the cohort the counts aggregate is stated');
-    assert.deepEqual(w.recognition.coverage_gap, { rows_excluded: 0, versions: {} },
-      'every survivor here is current-instrument, and the gap says so');
-    assert.equal(w.recognition.day_attribution, 'replay-day', 'attribution policy is stamped, not implicit');
+    assert.deepEqual(w.recognition.coverage_gap, {
+      rows_excluded: 1, versions: { 'schema=1.0.0 classifier=0.2.0 proxy=2': 1 },
+    }, 'the out-of-cohort 0.2.0 row is an explicit gap');
+    assert.equal(w.recognition.day_attribution, 'observation-day', 'attribution policy is stamped, not implicit');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -450,10 +457,34 @@ test("workspace recognition: Hale's mixed-instrument falsifier — an old-instru
     assert.equal(w.recognition.available, true);
     assert.equal(w.recognition.days['2026-07-08'].turns, 1, 'only the current-cohort row counts');
     assert.deepEqual(w.recognition.days['2026-07-08'].states, { 'rec-fail-tier-0': 1 });
-    assert.equal(w.recognition.replay_dedupe.rows_kept, 2, 'both rows survive dedupe — the gate is what excludes');
+    assert.equal(w.recognition.replay_dedupe.rows_kept, 1, 'cohort-first: only the in-cohort row reaches dedupe');
     assert.deepEqual(w.recognition.coverage_gap, {
       rows_excluded: 1,
       versions: { 'schema=1.0.0 classifier=0.2.0 proxy=2': 1 },
     }, 'the excluded instrument is named and counted');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('ACCEPTANCE Hale-2026-07-23 item 6 (package availability): an old-only store reports UNAVAILABLE-with-a-coverage-gap, never available-with-zero-turns', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-oldonly-'));
+  try {
+    const home = join(root, 'home');
+    const clsDir = join(home, '.core', 'workspaces', 'ws-oldonly', 'metrics', 'classified');
+    mkdirSync(clsDir, { recursive: true });
+    // Every row is a retired 0.2.0 instrument — nothing in the current cohort.
+    writeFileSync(join(clsDir, '2026-07-08.jsonl'), [
+      JSON.stringify({ schema_version: '1.0.0', classifier_version: '0.2.0', proxy_version: 2, harness: 'claude-code', session_id: 'sess-old', turn_idx: 0, state: 'tier-0-win' }),
+      JSON.stringify({ schema_version: '1.0.0', classifier_version: '0.2.0', proxy_version: 2, harness: 'claude-code', session_id: 'sess-old', turn_idx: 1, state: 'rec-fail-tier-0' }),
+    ].join('\n') + '\n');
+    const w = workspaceMetrics(home, 'ws-oldonly');
+    assert.equal(w.recognition.available, false, 'no aggregateable cohort rows ⇒ unavailable, not available-with-zero-turns');
+    assert.match(w.recognition.reason, /no in-cohort classified rows/);
+    assert.deepEqual(w.recognition.days, {}, 'no day carries a phantom turns:0 entry');
+    assert.deepEqual(w.recognition.coverage_gap, {
+      rows_excluded: 2, versions: { 'schema=1.0.0 classifier=0.2.0 proxy=2': 2 },
+    }, 'the coverage gap stays visible even when unavailable');
+    assert.deepEqual(w.recognition.instrument_cohort, {
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+    });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

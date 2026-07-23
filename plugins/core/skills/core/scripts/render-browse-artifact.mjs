@@ -77,6 +77,7 @@ import { truthfulProducerIdentity } from './artifact-provenance.mjs';
 import {
   PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor,
   recordPublishOutcome, recordRevocation, runRecordCli, generationReceiptLocation,
+  artifactContentDigest,
 } from './artifact-receipts.mjs';
 
 export const BROWSE_MANIFEST_SCHEMA_VERSION = '1.0.0';
@@ -700,6 +701,9 @@ export async function renderBrowseArtifact(projectDir, {
     supplemental_count: collected.supplementalCount,
     excluded_by_topic_count: collected.excludedByTopic,
     total_bytes: Buffer.byteLength(html),
+    // Exact-byte identity of the generated page — the publish receipt copies
+    // this and binds the publish to these specific bytes (Hale item 7).
+    artifact_sha256: artifactContentDigest(html),
     metrics_included: metrics.available,
     out_path: outAbs,
     receipt_path: receiptPath,
