@@ -85,5 +85,8 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // 57 -> 58 (2026-07-23): rich-context-capture.mjs, the opt-in rich-context
   // capture stream's single writer + retention/purge CLI — a genuinely-new CLI
   // tool with its own entry point, not a copy.
-  assert.ok(n <= 58, `CLI-entry-guard occurrences grew past baseline 58 (target: one shared helper): ${n}`);
+  // 58 -> 59 (2026-07-23): self-test-round.mjs, the /self-test round manager
+  // (new-round/register/run/status) — a genuinely-new CLI tool with its own
+  // entry point, not a copy.
+  assert.ok(n <= 59, `CLI-entry-guard occurrences grew past baseline 59 (target: one shared helper): ${n}`);
 });

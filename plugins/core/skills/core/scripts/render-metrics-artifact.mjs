@@ -240,13 +240,30 @@ function searchQuizRow(regression) {
     const widen = rankingPct != null
       ? ` Widening to the top 10 results (before they're trimmed down to the final three), the right answer appeared <b class="num">${rankingPct}%</b> of the time.`
       : '';
+    // A frozen blind self-test round earns a richer, more honest line: it also
+    // covers questions the store should NOT be able to answer, and it watches
+    // for the store being tuned to its own test.
+    const fromRound = typeof gold.source === 'string' && gold.source.startsWith('self-test');
+    let selfTestBits = '';
+    if (fromRound) {
+      const trap = gold.forbidden_rate != null
+        ? ` It also includes questions the store deliberately can't answer — where the right behavior is saying &ldquo;nothing stored about that&rdquo; — and a wrong answer surfaced on <b class="num">${pctInt(gold.forbidden_rate * 100)}%</b> of those (lower is better).`
+        : '';
+      const delta = gold.old_vs_new_delta != null
+        ? ` Compared with the earlier rounds on the same store, this round's questions scored <b class="num">${gold.old_vs_new_delta >= 0 ? '+' : ''}${pctInt(gold.old_vs_new_delta * 100)}</b> points different — a large positive gap would hint the store was tuned to the older questions.`
+        : '';
+      selfTestBits = trap + delta;
+    }
+    const keySource = fromRound
+      ? 'a separate agent wrote the questions blind — reading only the stored facts, never the search code — and the set was mechanically checked and frozen before scoring'
+      : 'the agent wrote both the questions and the answer key';
     return row({
       label: 'Search quiz',
       chipHtml: chip('prov', 'provisional'),
       gaugeHtml: gaugeBar(r3Pct, 'a'),
       bodyHtml:
-        val(`<b>The right memory landed in the top 3 results for <span class="num">${hits} of ${n}</span> quiz questions (${r3Pct}%).</b> The quiz: ${n} questions, each with a known correct memory as its answer, run against the real search machinery while building this page.${widen}`) +
-        valMore(`<b>The caveat, plainly:</b> the agent wrote both the questions and the answer key. A self-written quiz is a useful direction check, but it can't prove the search is good — that's why this line is tagged provisional, and why ${r3Pct}% is &ldquo;a snapshot,&rdquo; not a passing grade. No pass/fail bar was ever agreed in advance.`),
+        val(`<b>The right memory landed in the top 3 results for <span class="num">${hits} of ${n}</span> quiz questions (${r3Pct}%).</b> The quiz: ${n} questions, each with a known correct memory as its answer, run against the real search machinery while building this page.${widen}${selfTestBits}`) +
+        valMore(`<b>The caveat, plainly:</b> ${keySource}. A self-generated quiz is a useful direction check, but it can't prove the search is good — that's why this line is tagged provisional, and why ${r3Pct}% is &ldquo;a snapshot,&rdquo; not a passing grade. No pass/fail bar was ever agreed in advance.`),
     });
   }
   const reason = String(gold.reason || '');

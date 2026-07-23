@@ -75,6 +75,7 @@ import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readinessReport } from './calibrate-classifier.mjs';
 import { runHarness } from './retrieval-harness.mjs';
+import { newestRegisteredRound, measureRound } from './self-test-round.mjs';
 import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQualityReport } from './analyze-retrieval-quality.mjs';
 import { richContextStats } from './rich-context-capture.mjs';
 
@@ -251,8 +252,39 @@ export function checkCalibrationPool(project, { home = homedir() } = {}) {
 // ============================================================
 
 export async function checkGoldRegression(project, { goldPath = join(resolve(project), '_tests', 'retrieval-gold-set.json') } = {}) {
+  // Prefer a frozen blind self-test round when one exists — it is the honest
+  // instrument: pre-registered, includes the unanswerable/false-premise classes,
+  // and carries the old-vs-new overfitting detector. The static legacy gold set
+  // is the fallback only when no round has been registered.
+  const round = newestRegisteredRound(project);
+  if (round) {
+    try {
+      // measureRound is read-only — /metrics must not litter the round dir.
+      const { record } = await measureRound(project, round.round);
+      const byKind = {};
+      for (const [k, v] of Object.entries(record.breakdown.byKind || {})) byKind[k] = v.r10;
+      return {
+        available: true,
+        source: `self-test round ${record.round}`,
+        n: record.n_queries,
+        storeUnits: record.store_units,
+        // The self-test headline is the ranking-arm R@10; keep the same field
+        // names the render already consumes so the row renders unchanged.
+        context3_r3: record.breakdown.context3_r3,
+        ranking_r10: record.headline,
+        bm25_r10: record.results?.bm25?.recall?.[10] ?? null,
+        forbidden_rate: record.breakdown.forbiddenRate,
+        by_kind: byKind,
+        old_vs_new_delta: record.old_vs_new?.delta ?? null,
+        prior_mean: record.old_vs_new?.prior_mean ?? null,
+        stale_gold: record.stale_gold || [],
+      };
+    } catch (e) {
+      return { available: false, reason: `self-test round ${round.round} run failed: ${String(e && e.message || e).slice(0, 160)}` };
+    }
+  }
   if (!existsSync(goldPath)) {
-    return { available: false, reason: 'no _tests/retrieval-gold-set.json in this project — nothing exercises Recall@K here yet' };
+    return { available: false, reason: 'no self-test round and no _tests/retrieval-gold-set.json in this project — nothing exercises Recall@K here yet' };
   }
   try {
     const out = await runHarness(project, goldPath);
@@ -261,6 +293,7 @@ export async function checkGoldRegression(project, { goldPath = join(resolve(pro
     const bm25R10 = out.results.bm25?.recall?.[10] ?? null;
     return {
       available: true,
+      source: 'legacy static gold set',
       n: out.nQueries,
       storeUnits: out.total,
       context3_r3: context3R3,
@@ -437,16 +470,34 @@ export function computeRows(out) {
     const r3Pct = Math.round((gold.context3_r3 ?? 0) * 100);
     const rankingPct = gold.ranking_r10 != null ? Math.round(gold.ranking_r10 * 100) : null;
     const bm25Pct = gold.bm25_r10 != null ? Math.round(gold.bm25_r10 * 100) : null;
+    const fromRound = gold.source && gold.source.startsWith('self-test');
     const extra = [
       rankingPct != null ? `ranking R@10 ${rankingPct}%` : null,
       bm25Pct != null ? `bm25 R@10 ${bm25Pct}%` : null,
     ].filter(Boolean).join(', ');
+    // A frozen self-test round earns the richer, more honest line: the per-kind
+    // breakdown (including the "nothing stored about that" trap-leak rate) and
+    // the old-vs-new delta that watches for overfitting. Still provisional —
+    // the answer key is self-authored — but no longer a single static number.
+    let selfTestBits = '';
+    if (fromRound) {
+      const kinds = Object.entries(gold.by_kind || {})
+        .map(([k, v]) => `${k} ${v == null ? '—' : Math.round(v * 100) + '%'}`).join(', ');
+      const trap = gold.forbidden_rate != null ? `; unanswerable trap-leak ${Math.round(gold.forbidden_rate * 100)}% (lower better)` : '';
+      const delta = gold.old_vs_new_delta != null
+        ? `; old-vs-new delta ${gold.old_vs_new_delta >= 0 ? '+' : ''}${Math.round(gold.old_vs_new_delta * 100)}pts (overfitting detector)`
+        : '; old-vs-new delta not available yet (needs a prior round)';
+      selfTestBits = `${kinds ? `; by kind: ${kinds}` : ''}${trap}${delta}`;
+    }
+    const provenance = fromRound
+      ? `blind pre-registered self-test round (${gold.source.replace('self-test round ', 'round ')}), directional, n=${gold.n}, no preregistered pass threshold`
+      : `static legacy set, directional, n=${gold.n}, no preregistered pass threshold`;
     rows.push({
       section: SECTION.REGRESSION,
       label: `Gold-set snapshot (n=${gold.n})`,
       pct: r3Pct,
       trust: TRUST.PROVISIONAL,
-      value: `execution proven-live (retrieveContext + buildFinalContextPack, this run); reference authority provisional (Keel-authored, directional, n=${gold.n}, no preregistered pass threshold); delivered top-3 R@3 ${r3Pct}%${extra ? `; ${extra}` : ''}`,
+      value: `execution proven-live (retrieveContext + buildFinalContextPack, this run); reference authority provisional (${provenance}); delivered top-3 R@3 ${r3Pct}%${extra ? `; ${extra}` : ''}${selfTestBits}`,
     });
   } else {
     rows.push({
@@ -563,7 +614,12 @@ export function buildNarrative(out) {
   const gold = out.regression?.gold || {};
   const parts = [];
   if (gold.available) {
-    parts.push(`a provisional gold-set snapshot (n=${gold.n}, Keel-authored, directional, no pass threshold) puts delivered top-3 recall at ${Math.round((gold.context3_r3 ?? 0) * 100)}% — a regression snapshot, not a passing gate`);
+    const src = gold.source && gold.source.startsWith('self-test')
+      ? `blind pre-registered ${gold.source}` : 'directional static gold set';
+    const deltaBit = (gold.source && gold.source.startsWith('self-test') && gold.old_vs_new_delta != null)
+      ? `, and the old-vs-new delta (the overfitting watch) sits at ${gold.old_vs_new_delta >= 0 ? '+' : ''}${Math.round(gold.old_vs_new_delta * 100)} points`
+      : '';
+    parts.push(`a provisional gold-set snapshot (n=${gold.n}, ${src}, directional, no pass threshold) puts delivered top-3 recall at ${Math.round((gold.context3_r3 ?? 0) * 100)}% — a regression snapshot, not a passing gate${deltaBit}`);
   } else {
     parts.push('no gold-set regression snapshot exists for this project yet');
   }

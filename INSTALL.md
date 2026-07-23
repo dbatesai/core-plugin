@@ -35,6 +35,7 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/metrics` | A live, in-terminal proof the memory system is working — round-trip probe, store health, calibration-pool progress. No export, writes nothing. |
 | `/metrics-package` | Export an anonymized memory-efficacy statistics package (zip on your Desktop) — feedback data for improving CORE; contains no real project content. |
 | `/memory-view` | Browse what CORE knows as one read-only page — graph, unit bodies, backlinks, health section. Published as a private artifact only after you confirm the preflight manifest; never automatic. |
+| `/self-test` | Run the blind, round-based memory self-test on this project's own store — a separate agent authors fresh questions (including ones the store deliberately can't answer) reading only the stored facts, the set is mechanically verified and frozen, then the real retrieval path is scored against it with an old-vs-new-round overfitting check. Feeds `/metrics`. |
 
 ### Shipped hooks (installed with the plugin)
 
@@ -116,7 +117,7 @@ test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
 test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 ```
 
-Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics`, `metrics-package`, `memory-view`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
+Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics`, `metrics-package`, `memory-view`, `self-test`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
 
 One difference from Claude Code worth knowing: Codex CLI 0.144.5+ supports plugin-bundled lifecycle hooks (SessionStart proven live 2026-07-17; the per-turn UserPromptSubmit hook is bundled but not yet proven compatible on Codex — payload mapping under validation), and plugin hooks are skipped until their definition is explicitly trusted. Until the per-turn path is proven, write-safety guards on Codex rest on the agent's own discipline (`harnesses/codex.md §hook-register` has the detail and the reopen conditions).
 

@@ -31,7 +31,11 @@
  * over time; treat cross-corpus raw numbers as suspect.
  *
  * Gold-set schema (JSON): { queries: [ {id, query, rung, expected:[ids], forbidden:[ids]} ] }
- * rung ∈ literal | category | value | cross-domain.
+ * rung ∈ literal | category | value | cross-domain | temporal | abstention.
+ * (temporal + abstention were added for the blind self-test, self-test-round.mjs —
+ * the field treats them as table-stakes memory abilities. abstention scores through
+ * the existing expected:[] + forbiddenRate path with no scorer change; the enum just
+ * had to admit the label so per-rung reporting can name it.)
  *
  * Per DC-77 ships with the plugin; per DC-80 .mjs only.
  *
@@ -249,9 +253,14 @@ function renderText(out) {
     if (r.unavailable) { lines.push(`${name.padEnd(9)} (arm unavailable)`); continue; }
     lines.push(`${name.padEnd(9)} ${fmt(r.recall[5])} ${fmt(r.recall[10])} ${fmt(r.recall[30])} ${fmt(r.recall[100])}  ${fmt(r.mrr)}  ${fmt(r.forbiddenRate)}`);
   }
-  // Per-rung R@10, the rung where lexical is known to collapse.
+  // Per-rung R@10, the rung where lexical is known to collapse. Only rungs
+  // actually present in the results are shown, so the extended enum (temporal,
+  // abstention) surfaces on self-test sets without cluttering a classic 4-rung run.
   lines.push('\nR@10 by rung:');
-  const rungs = ['literal', 'category', 'value', 'cross-domain'];
+  const RUNG_ORDER = ['literal', 'category', 'value', 'cross-domain', 'temporal', 'abstention'];
+  const present = new Set();
+  for (const r of Object.values(out.results)) for (const k of Object.keys(r.perRung || {})) present.add(k);
+  const rungs = RUNG_ORDER.filter(r => present.has(r));
   lines.push(`arm       ${rungs.map(x => x.slice(0, 8).padEnd(8)).join(' ')}`);
   for (const [name, r] of Object.entries(out.results)) {
     if (r.unavailable) continue;
@@ -314,7 +323,10 @@ export function validateGold(gold) {
 }
 
 // The closed difficulty-rung vocabulary (header contract, line "rung ∈ …").
-export const GOLD_RUNGS = new Set(['literal', 'category', 'value', 'cross-domain']);
+// temporal + abstention were added deliberately (not defaulted) for the blind
+// self-test — the fail-closed contract this enum enforces is exactly "extend the
+// enum deliberately, don't default", which this is.
+export const GOLD_RUNGS = new Set(['literal', 'category', 'value', 'cross-domain', 'temporal', 'abstention']);
 
 /**
  * assertKnownTiers — evaluator-side fail-closed authority enum (A5, Crest correction
