@@ -13,13 +13,21 @@
  *   - Condition 2 (preflight manifest): stdout is exactly one JSON object —
  *     unit count, byte count, scopes, snapshot id, and a fixed sensitivity
  *     warning — for the agent to show the user BEFORE any publish.
- *   - Condition 4 (audit trail): the same manifest is written as a local
- *     receipt under `~/.core/workspaces/<workspace_id>/artifact-receipts/`.
+ *   - Condition 4 (audit trail): TWO receipts, distinct in kind. The
+ *     preflight-GENERATION receipt (this manifest, written before consent)
+ *     lands under `~/.core/workspaces/<workspace_id>/artifact-receipts/` and
+ *     records what was generated and offered — never what went up. The
+ *     POST-PUBLISH receipt (`--record-publish`) is written after the consent/
+ *     publish step resolves and records the actual outcome — declined,
+ *     failed, or published-private with privacy-verification evidence — as
+ *     `<generation-receipt>.publish.json` beside it; `--record-revocation`
+ *     later stamps `revoked_at` on it.
  *   - Condition 6 (snapshot provenance): the page header carries an
  *     unmissable "POINT-IN-TIME SNAPSHOT — READ-ONLY" banner with the
- *     generated-at timestamp, producer identity (plugin version + source_sha
- *     from the manifest, same convention as metrics-check.mjs), and the
- *     store snapshot id.
+ *     generated-at timestamp, truthful producer identity (in a git source
+ *     checkout: the REAL `git rev-parse HEAD` of the tree this script runs
+ *     from; in an installed tree: the stamped manifest identity; neither →
+ *     fail closed, never an unknown-sha render), and the store snapshot id.
  *   - Condition 7 (content minimization): `--scope active` (default) embeds
  *     active units only — the same loadSnapshot population decoration uses;
  *     `--scope all-including-archive` must be chosen explicitly;
@@ -42,23 +50,35 @@
  *        [--scope active|all-including-archive] [--exclude-topic <t>]...
  *        [--no-metrics] [--home <dir>]
  *
+ *   node render-browse-artifact.mjs --record-publish
+ *        --generation-receipt <path> --status declined|failed|published-private
+ *        [--artifact-url <url>] [--private-verified-evidence <s>]
+ *        [--consent-by <who>] [--consent-mechanism <s>] [--note <s>]
+ *
+ *   node render-browse-artifact.mjs --record-revocation <publish-receipt-path>
+ *
  *   --out is REQUIRED — there is deliberately no default output location.
  *   --home is a test-isolation override for the receipt root (defaults to
  *   the real home directory); the fixture suites use it so a test run never
  *   touches the developer's ~/.core.
  *
- * Exit codes: 0 generated + manifest printed; 2 usage error (missing --out,
- * bad --scope, --out inside _memories/); 1 fatal failure.
+ * Exit codes: 0 success (manifest/receipt printed); 2 usage error (missing
+ * --out, bad --scope, --out inside _memories/, bad record-mode input);
+ * 1 fatal failure (including fail-closed producer identity).
  */
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, resolve, dirname, basename, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
 import { producerIdentity as metricsProducerIdentity, gatherMetrics } from './metrics-check.mjs';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const BROWSE_MANIFEST_SCHEMA_VERSION = '1.0.0';
+export const PUBLISH_RECEIPT_SCHEMA_VERSION = '1.0.0';
+export const PUBLISH_STATUSES = ['declined', 'failed', 'published-private'];
 
 // Fixed sensitivity warning (Hale condition 2) — one string, stable across
 // runs, so the skill can relay it verbatim and tests can assert it exactly.
@@ -68,10 +88,46 @@ export const SENSITIVITY_WARNING =
   'count, byte count, and scope, then give an explicit go-ahead for THIS publish. There is no ' +
   'standing consent: a previous yes never carries to the next publish.';
 
+const _moduleDir = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Truthful producer identity (Hale condition 6, 2026-07-22 HOLD correction 1).
+ *
+ * In a source Git checkout, the page must carry the REAL current tree identity
+ * — `git rev-parse HEAD` of the plugin source tree this script actually runs
+ * from — never a stale release stamp. Resolution starts from the executing
+ * module's realpath (the same realpath-from-module discipline
+ * resolve-plugin-root.mjs documents; cwd is never consulted). The SHA is only
+ * accepted if THIS script file is tracked in that repo, which guards against
+ * an installed copy that happens to sit inside an unrelated Git repo
+ * inheriting that repo's SHA as false provenance.
+ *
+ * In an installed/package tree (no git checkout), the stamped manifest
+ * identity is used, as before. If NEITHER source can establish a SHA,
+ * `source_sha` stays null and renderBrowseArtifact fails closed — no
+ * "unknown-sha" page is ever rendered for publish.
+ *
+ * `source_sha_from` says which source won: 'git' | 'manifest' | null.
+ */
 export function producerIdentity() {
-  // Same manifest-sourced identity convention as metrics-check.mjs, with this
-  // script's own name in the `script` field.
-  return { ...metricsProducerIdentity(), script: 'render-browse-artifact.mjs' };
+  const identity = { ...metricsProducerIdentity(), script: 'render-browse-artifact.mjs', source_sha_from: null };
+  let realDir;
+  try { realDir = realpathSync(_moduleDir); } catch { realDir = _moduleDir; }
+  try {
+    const head = execFileSync('git', ['-C', realDir, 'rev-parse', 'HEAD'],
+      { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
+    // Provenance guard: the HEAD SHA describes this script only if this
+    // script is tracked in that repo.
+    execFileSync('git', ['-C', realDir, 'ls-files', '--error-unmatch', join(realDir, 'render-browse-artifact.mjs')],
+      { stdio: 'ignore' });
+    if (/^[0-9a-f]{40}$/.test(head)) {
+      identity.source_sha = head;
+      identity.source_sha_from = 'git';
+      return identity;
+    }
+  } catch { /* not a source checkout (or no git binary) — fall through to the stamped manifest */ }
+  identity.source_sha_from = identity.source_sha ? 'manifest' : null;
+  return identity;
 }
 
 // ============================================================
@@ -522,10 +578,6 @@ export function buildArtifactHtml({ units, meta }) {
   svg.querySelectorAll('circle[data-unit]').forEach(function (c) {
     circleByid[c.getAttribute('data-unit')] = c;
   });
-  svg.addEventListener('click', function (e) {
-    var c = e.target.closest && e.target.closest('circle[data-unit]');
-    if (c) select(c.getAttribute('data-unit'));
-  });
   var lastHighlight = null;
   function highlightNode(id) {
     if (lastHighlight) { lastHighlight.setAttribute('stroke', 'none'); }
@@ -535,19 +587,34 @@ export function buildArtifactHtml({ units, meta }) {
 
   var view = { x: 0, y: 0, k: 1 };
   function applyView() { g.setAttribute('transform', 'translate(' + view.x + ',' + view.y + ') scale(' + view.k + ')'); }
+  // Click-to-select vs drag-to-pan: setPointerCapture (needed for smooth pan)
+  // makes the browser retarget the derived click event to the capturing SVG
+  // root, so a plain 'click' listener never sees the circle — selection would
+  // silently never fire. Instead: remember the ORIGINAL pointerdown target
+  // and treat a low-movement pointerdown→pointerup as the click.
   var dragging = null;
   svg.addEventListener('pointerdown', function (e) {
-    dragging = { px: e.clientX, py: e.clientY, ox: view.x, oy: view.y };
+    dragging = { px: e.clientX, py: e.clientY, ox: view.x, oy: view.y,
+      target: e.target, moved: 0 };
     svg.setPointerCapture(e.pointerId);
   });
   svg.addEventListener('pointermove', function (e) {
     if (!dragging) return;
+    dragging.moved = Math.max(dragging.moved,
+      Math.abs(e.clientX - dragging.px) + Math.abs(e.clientY - dragging.py));
     var scale = W / svg.getBoundingClientRect().width;
     view.x = dragging.ox + (e.clientX - dragging.px) * scale;
     view.y = dragging.oy + (e.clientY - dragging.py) * scale;
     applyView();
   });
-  svg.addEventListener('pointerup', function () { dragging = null; });
+  svg.addEventListener('pointerup', function () {
+    if (dragging && dragging.moved < 5) {
+      var t = dragging.target;
+      var c = t && t.closest && t.closest('circle[data-unit]');
+      if (c) select(c.getAttribute('data-unit'));
+    }
+    dragging = null;
+  });
   svg.addEventListener('wheel', function (e) {
     e.preventDefault();
     var rect = svg.getBoundingClientRect();
@@ -610,9 +677,18 @@ export async function renderBrowseArtifact(projectDir, {
     throw Object.assign(new Error(`unknown --scope '${scope}' (valid: active, all-including-archive)`), { code: 'BAD_SCOPE' });
   }
 
+  // Fail closed on producer identity BEFORE reading the store or writing
+  // anything: a page whose provenance cannot be established must never be
+  // rendered for publish (Hale condition 6 — no "unknown-sha" render).
+  const producer = producerIdentity();
+  if (!producer.source_sha) {
+    throw Object.assign(new Error(
+      'cannot establish producer identity: not a git source checkout and the plugin manifest carries no source_sha — ' +
+      'failing closed rather than rendering a page with unknown provenance'), { code: 'NO_SOURCE_SHA' });
+  }
+
   const generatedAt = now().toISOString();
   const collected = collectUnits(root, { scope, excludeTopics });
-  const producer = producerIdentity();
 
   let metrics;
   if (metricsProvider === null) {
@@ -685,7 +761,129 @@ export async function renderBrowseArtifact(projectDir, {
   return { manifest, html, receiptWritten };
 }
 
+// ============================================================
+// Post-publish receipt (Hale correction 2, 2026-07-22 HOLD) — separate from
+// the preflight-generation receipt above. The generation receipt records what
+// was generated and offered; THIS record is the audit trail of what actually
+// happened at the consent/publish boundary — including declined and failed
+// outcomes, so a "no" leaves a record too. Schema matches the manually-
+// authored first real receipt at
+// ~/.core/workspaces/core-framework/artifact-receipts/2026-07-22T22-41-34-360Z.publish.json
+// (same field names; extra fields in hand-written receipts are preserved on
+// revocation). File lands atomically as `<generation-receipt>.publish.json`
+// beside the generation receipt, linked by basename.
+// ============================================================
+
+export function publishReceiptPathFor(generationReceiptPath) {
+  const p = resolve(generationReceiptPath);
+  return p.endsWith('.json') ? p.slice(0, -'.json'.length) + '.publish.json' : p + '.publish.json';
+}
+
+export function recordPublishOutcome({
+  generationReceiptPath, status, artifactUrl = null,
+  privateVerifiedEvidence = null, consentBy = null, consentMechanism = null,
+  note = null, now = () => new Date(),
+} = {}) {
+  if (!PUBLISH_STATUSES.includes(status)) {
+    throw Object.assign(new Error(`--status must be one of: ${PUBLISH_STATUSES.join(', ')} (got '${status}')`), { code: 'BAD_STATUS' });
+  }
+  const genPath = resolve(generationReceiptPath);
+  let gen;
+  try { gen = JSON.parse(readFileSync(genPath, 'utf8')); }
+  catch (e) {
+    throw Object.assign(new Error(`cannot read generation receipt ${genPath}: ${e.message}`), { code: 'BAD_GENERATION_RECEIPT' });
+  }
+  if (gen.kind !== 'core-memory-browse-preflight') {
+    throw Object.assign(new Error(`${genPath} is not a generation receipt (kind '${gen.kind}', expected 'core-memory-browse-preflight')`), { code: 'BAD_GENERATION_RECEIPT' });
+  }
+  if (status === 'published-private' && !privateVerifiedEvidence) {
+    throw Object.assign(new Error(
+      "--status published-private requires --private-verified-evidence — state how privacy was actually confirmed (condition 3); without evidence the publish is 'failed', not 'published-private'"), { code: 'EVIDENCE_REQUIRED' });
+  }
+  const outPath = publishReceiptPathFor(genPath);
+  if (existsSync(outPath)) {
+    throw Object.assign(new Error(`publish receipt already exists at ${outPath} — one outcome per generation; use --record-revocation to revoke, or regenerate for a new publish`), { code: 'RECEIPT_EXISTS' });
+  }
+  const at = now().toISOString();
+  const receipt = {
+    kind: 'core-memory-browse-publish',
+    schema_version: PUBLISH_RECEIPT_SCHEMA_VERSION,
+    generation_receipt: basename(genPath),
+    publish_status: status,
+    recorded_at: at,
+    published_at: status === 'published-private' ? at : null,
+    artifact_url: artifactUrl,
+    consent: (consentBy || consentMechanism)
+      ? { granted_by: consentBy, granted_at: at, mechanism: consentMechanism }
+      : null,
+    private_verified: status === 'published-private'
+      ? { at, evidence: privateVerifiedEvidence }
+      : null,
+    revoked_at: null,
+    ...(note ? { note } : {}),
+  };
+  atomicWriteFileSync(outPath, JSON.stringify(receipt, null, 2) + '\n');
+  return { receipt, path: outPath };
+}
+
+export function recordRevocation(publishReceiptPath, { now = () => new Date() } = {}) {
+  const p = resolve(publishReceiptPath);
+  let receipt;
+  try { receipt = JSON.parse(readFileSync(p, 'utf8')); }
+  catch (e) {
+    throw Object.assign(new Error(`cannot read publish receipt ${p}: ${e.message}`), { code: 'BAD_PUBLISH_RECEIPT' });
+  }
+  if (receipt.kind !== 'core-memory-browse-publish') {
+    throw Object.assign(new Error(`${p} is not a publish receipt (kind '${receipt.kind}', expected 'core-memory-browse-publish')`), { code: 'BAD_PUBLISH_RECEIPT' });
+  }
+  if (receipt.revoked_at) {
+    throw Object.assign(new Error(`publish receipt ${p} is already revoked (revoked_at ${receipt.revoked_at})`), { code: 'ALREADY_REVOKED' });
+  }
+  receipt.revoked_at = now().toISOString();
+  atomicWriteFileSync(p, JSON.stringify(receipt, null, 2) + '\n');
+  return { receipt, path: p };
+}
+
 // ---------- CLI ----------
+
+const RECORD_USAGE_CODES = new Set([
+  'BAD_STATUS', 'BAD_GENERATION_RECEIPT', 'EVIDENCE_REQUIRED',
+  'RECEIPT_EXISTS', 'BAD_PUBLISH_RECEIPT', 'ALREADY_REVOKED', 'BAD_OPTION', 'MISSING_ARG',
+]);
+
+function recordCli(argv) {
+  const opts = {};
+  let mode = null;
+  try {
+    for (let i = 0; i < argv.length; i++) {
+      const a = argv[i];
+      if (a === '--record-publish') mode = 'publish';
+      else if (a === '--record-revocation') { mode = 'revoke'; opts.publishReceiptPath = argv[++i]; }
+      else if (a === '--generation-receipt') opts.generationReceiptPath = argv[++i];
+      else if (a === '--status') opts.status = argv[++i];
+      else if (a === '--artifact-url') opts.artifactUrl = argv[++i];
+      else if (a === '--private-verified-evidence') opts.privateVerifiedEvidence = argv[++i];
+      else if (a === '--consent-by') opts.consentBy = argv[++i];
+      else if (a === '--consent-mechanism') opts.consentMechanism = argv[++i];
+      else if (a === '--note') opts.note = argv[++i];
+      else throw Object.assign(new Error(`unknown option ${a} in record mode`), { code: 'BAD_OPTION' });
+    }
+    let result;
+    if (mode === 'publish') {
+      if (!opts.generationReceiptPath) throw Object.assign(new Error('--record-publish requires --generation-receipt <path>'), { code: 'MISSING_ARG' });
+      if (!opts.status) throw Object.assign(new Error('--record-publish requires --status declined|failed|published-private'), { code: 'MISSING_ARG' });
+      result = recordPublishOutcome(opts);
+    } else {
+      if (!opts.publishReceiptPath) throw Object.assign(new Error('--record-revocation requires the publish receipt path'), { code: 'MISSING_ARG' });
+      result = recordRevocation(opts.publishReceiptPath);
+    }
+    process.stdout.write(JSON.stringify({ publish_receipt_path: result.path, receipt: result.receipt }, null, 2) + '\n');
+    return 0;
+  } catch (e) {
+    process.stderr.write(`render-browse-artifact: ${e.message}\n`);
+    return RECORD_USAGE_CODES.has(e.code) ? 2 : 1;
+  }
+}
 
 function parseArgs(argv) {
   const opts = { excludeTopics: [], scope: 'active', outPath: null, home: null, noMetrics: false };
@@ -705,6 +903,9 @@ function parseArgs(argv) {
 }
 
 async function main(argv) {
+  if (argv.includes('--record-publish') || argv.includes('--record-revocation')) {
+    return recordCli(argv);
+  }
   let opts;
   try { opts = parseArgs(argv); } catch (e) {
     process.stderr.write(`render-browse-artifact: ${e.message}\n`);
@@ -729,12 +930,28 @@ async function main(argv) {
       process.stderr.write(`render-browse-artifact: ${e.message}\n`);
       return 2;
     }
+    if (e.code === 'NO_SOURCE_SHA') {
+      // Fail closed for publish: no HTML was written, no manifest printed.
+      process.stderr.write(`render-browse-artifact: ${e.message}\n`);
+      return 1;
+    }
     process.stderr.write(`render-browse-artifact: failed — ${e.stack || e}\n`);
     return 1;
   }
 }
 
-const _cliEntry = (() => { try { return fileURLToPath(import.meta.url) === resolve(process.argv[1]); } catch { return false; } })();
+// Entry check compares REAL paths on both sides: Node realpaths the main
+// module (import.meta.url is /private/var/... on macOS) while argv[1] may be
+// the symlinked spelling (/var/folders/...). A naive string compare silently
+// skips main() and exits 0 having done nothing — a lying instrument.
+const _cliEntry = (() => {
+  try {
+    const self = fileURLToPath(import.meta.url);
+    const invoked = resolve(process.argv[1] || '');
+    if (self === invoked) return true;
+    try { return self === realpathSync(invoked); } catch { return false; }
+  } catch { return false; }
+})();
 if (_cliEntry) {
   process.exit(await main(process.argv.slice(2)));
 }

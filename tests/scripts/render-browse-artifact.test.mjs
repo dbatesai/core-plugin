@@ -14,17 +14,17 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, cpSync } from 'node:fs';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const {
   renderBrowseArtifact, collectUnits, buildArtifactHtml, SENSITIVITY_WARNING,
-  BROWSE_MANIFEST_SCHEMA_VERSION,
+  BROWSE_MANIFEST_SCHEMA_VERSION, producerIdentity, publishReceiptPathFor,
 } = await import(pathToFileURL(join(SCRIPTS, 'render-browse-artifact.mjs')).href);
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'render-browse-artifact.mjs');
@@ -277,6 +277,205 @@ test('CLI: rejects an unknown --scope', () => {
       { encoding: 'utf8' });
     assert.equal(res.status, 2);
     assert.match(res.stderr, /unknown --scope/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- producer identity (Hale condition 6 — truthfulness falsifier) ----------
+
+test('falsifier: in a git checkout the emitted source SHA equals git rev-parse HEAD and never the manifest stamp', async (t) => {
+  let head;
+  try {
+    head = execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    t.skip('not running from a git checkout — falsifier only applies to source checkouts');
+    return;
+  }
+  const identity = producerIdentity();
+  assert.equal(identity.source_sha, head, 'emitted source SHA is the REAL current tree HEAD');
+  assert.equal(identity.source_sha_from, 'git');
+  const manifestSha = JSON.parse(
+    readFileSync(join(SCRIPTS, '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8')).source_sha;
+  if (manifestSha && manifestSha !== head) {
+    assert.notEqual(identity.source_sha, manifestSha,
+      'must not silently fall back to the older release-stamped manifest value');
+  }
+  // …and the rendered page + manifest carry the real SHA, not the stamp.
+  const { root, home } = fixtureProject();
+  try {
+    const { html, manifest } = await generate(root, home);
+    assert.equal(manifest.producer.source_sha, head);
+    assert.ok(html.includes(head.slice(0, 12)), 'banner carries the real tree SHA');
+    if (manifestSha && manifestSha !== head) {
+      assert.ok(!html.includes(manifestSha.slice(0, 12)), 'stale stamped SHA absent from the page');
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('installed tree (no .git): stamped manifest identity used; no SHA at all: fail closed, nothing rendered', async () => {
+  // Copy the whole plugin tree (plugins/core) outside any git repo — tmpdir.
+  const pluginCopy = mkdtempSync(join(tmpdir(), 'browse-plugin-copy-'));
+  const { root, home } = fixtureProject();
+  const cli = join(pluginCopy, 'skills', 'core', 'scripts', 'render-browse-artifact.mjs');
+  const manifestPath = join(pluginCopy, '.claude-plugin', 'plugin.json');
+  try {
+    cpSync(join(SCRIPTS, '..', '..', '..'), pluginCopy, { recursive: true });
+    // Phase 1: manifest carries source_sha → manifest identity, honestly labeled.
+    const out1 = join(root, 'out', 'installed.html');
+    const res1 = spawnSync(process.execPath, [cli, root, '--out', out1, '--no-metrics', '--home', home],
+      { encoding: 'utf8' });
+    assert.equal(res1.status, 0, res1.stderr);
+    const m1 = JSON.parse(res1.stdout);
+    const stamped = JSON.parse(readFileSync(manifestPath, 'utf8')).source_sha;
+    assert.ok(stamped, 'fixture precondition: plugin.json carries a stamped source_sha');
+    assert.equal(m1.producer.source_sha, stamped, 'installed tree uses the stamped manifest identity');
+    assert.equal(m1.producer.source_sha_from, 'manifest');
+    assert.ok(readFileSync(out1, 'utf8').includes(stamped.slice(0, 12)));
+    // Phase 2: strip the stamp → neither git nor manifest → fail closed.
+    const pj = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    delete pj.source_sha;
+    writeFileSync(manifestPath, JSON.stringify(pj, null, 2));
+    const out2 = join(root, 'out', 'no-identity.html');
+    const res2 = spawnSync(process.execPath, [cli, root, '--out', out2, '--no-metrics', '--home', home],
+      { encoding: 'utf8' });
+    assert.notEqual(res2.status, 0, 'nonzero exit when no SHA can be established');
+    assert.match(res2.stderr, /cannot establish producer identity/);
+    assert.ok(!existsSync(out2), 'no page written');
+    assert.equal(res2.stdout.trim(), '', 'no manifest printed');
+    assert.doesNotMatch(res2.stdout + res2.stderr, /unknown-sha/, 'no unknown-sha render');
+  } finally {
+    rmSync(pluginCopy, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------- post-publish receipt (Hale correction 2) ----------
+
+test('--record-publish published-private: atomic linked receipt with consent + privacy evidence', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const { manifest } = await generate(root, home);
+    const genPath = manifest.receipt_path;
+    const args = [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published-private',
+      '--artifact-url', 'https://claude.ai/code/artifact/test-0000',
+      '--private-verified-evidence', 'gallery shows private; share menu never opened',
+      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'];
+    const res = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.publish_receipt_path, publishReceiptPathFor(genPath));
+    assert.ok(out.publish_receipt_path.endsWith('.publish.json'), 'lands beside the generation receipt');
+    const receipt = JSON.parse(readFileSync(out.publish_receipt_path, 'utf8'));
+    assert.equal(receipt.kind, 'core-memory-browse-publish');
+    assert.equal(receipt.generation_receipt, basename(genPath), 'linked to the generation receipt by name');
+    assert.equal(receipt.publish_status, 'published-private');
+    assert.ok(receipt.published_at, 'published_at set');
+    assert.equal(receipt.artifact_url, 'https://claude.ai/code/artifact/test-0000');
+    assert.equal(receipt.private_verified.evidence, 'gallery shows private; share menu never opened');
+    assert.ok(receipt.private_verified.at);
+    assert.equal(receipt.consent.granted_by, 'David');
+    assert.equal(receipt.revoked_at, null);
+    // Atomic write leaves no temp residue beside the receipts.
+    assert.ok(!readdirSync(dirname(genPath)).some((f) => f.includes('.tmp-')), 'no temp files left behind');
+    // One outcome per generation: a second record is refused.
+    const res2 = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    assert.equal(res2.status, 2);
+    assert.match(res2.stderr, /already exists/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('--record-publish declined and failed leave records too; published_at and verification stay null', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const gen1 = (await generate(root, home, { now: () => new Date('2026-07-22T01:00:00.000Z') })).manifest.receipt_path;
+    const gen2 = (await generate(root, home, { now: () => new Date('2026-07-22T02:00:00.000Z') })).manifest.receipt_path;
+    for (const [genPath, status] of [[gen1, 'declined'], [gen2, 'failed']]) {
+      const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+        '--generation-receipt', genPath, '--status', status], { encoding: 'utf8' });
+      assert.equal(res.status, 0, res.stderr);
+      const receipt = JSON.parse(readFileSync(publishReceiptPathFor(genPath), 'utf8'));
+      assert.equal(receipt.publish_status, status);
+      assert.equal(receipt.published_at, null, `${status}: nothing went up`);
+      assert.equal(receipt.private_verified, null);
+      assert.equal(receipt.artifact_url, null);
+      assert.ok(receipt.recorded_at, 'the decision itself is timestamped');
+      assert.equal(receipt.generation_receipt, basename(genPath));
+      assert.equal(receipt.revoked_at, null);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('--record-publish refusals: missing evidence for published-private, bad status, bad generation receipt', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const { manifest } = await generate(root, home);
+    const genPath = manifest.receipt_path;
+    const noEvidence = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published-private'], { encoding: 'utf8' });
+    assert.equal(noEvidence.status, 2);
+    assert.match(noEvidence.stderr, /private-verified-evidence/);
+    assert.ok(!existsSync(publishReceiptPathFor(genPath)), 'refusal writes nothing');
+    const badStatus = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published'], { encoding: 'utf8' });
+    assert.equal(badStatus.status, 2);
+    assert.match(badStatus.stderr, /--status must be one of/);
+    const badGen = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', join(root, 'nope.json'), '--status', 'declined'], { encoding: 'utf8' });
+    assert.equal(badGen.status, 2);
+    assert.match(badGen.stderr, /cannot read generation receipt/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('--record-revocation stamps revoked_at and preserves a manually-authored receipt (extra fields intact)', () => {
+  // Fixture mirrors the shape of the real hand-written first publish receipt
+  // (2026-07-22T22-41-34-360Z.publish.json) including its extra fields —
+  // schema compatibility means the manual record stays a valid citizen.
+  const dir = mkdtempSync(join(tmpdir(), 'browse-revoke-'));
+  const p = join(dir, '2026-07-22T22-41-34-360Z.publish.json');
+  try {
+    writeFileSync(p, JSON.stringify({
+      kind: 'core-memory-browse-publish',
+      schema_version: '1.0.0',
+      generation_receipt: '2026-07-22T22-41-34-360Z.json',
+      publish_status: 'published-private',
+      published_at: '2026-07-22T22:47:00Z',
+      artifact_url: 'https://claude.ai/code/artifact/614ae328-0cb8-4c4a-95fe-d4a798f21a00',
+      consent: { granted_by: 'David', granted_at: '2026-07-22T22:46:00Z', mechanism: 'explicit yes on the rendered preflight manifest' },
+      private_verified: { at: '2026-07-22T22:47:00Z', evidence: 'publish tool confirms artifacts are private unless shared' },
+      known_defect_at_publish: 'stale producer sha at publish time',
+      revoked_at: null,
+      note: 'manually authored by Keel',
+    }, null, 2));
+    const res = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    const receipt = JSON.parse(readFileSync(p, 'utf8'));
+    assert.ok(receipt.revoked_at, 'revoked_at stamped');
+    assert.equal(receipt.known_defect_at_publish, 'stale producer sha at publish time', 'manual extra field preserved');
+    assert.equal(receipt.note, 'manually authored by Keel');
+    assert.equal(receipt.publish_status, 'published-private', 'original outcome untouched');
+    // Double revocation is refused.
+    const res2 = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
+    assert.equal(res2.status, 2);
+    assert.match(res2.stderr, /already revoked/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------- graph interaction (pointer-capture click regression guard) ----------
+
+test('node selection survives pointer capture: pointerup-threshold path present, dead svg click binding gone', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const { html } = await generate(root, home);
+    // Pointer capture retargets derived click events to the SVG root, so an
+    // svg 'click' selection binding can never see the circle — it must not exist.
+    assert.ok(!html.includes("svg.addEventListener('click'"), 'no svg click-selection binding');
+    // Selection now rides pointerup with a small movement threshold, using
+    // the ORIGINAL pointerdown target.
+    assert.match(html, /dragging\.moved < 5/, 'movement threshold present');
+    assert.match(html, /dragging\.target/, 'original pointerdown target used for selection');
+    assert.match(html, /closest\('circle\[data-unit\]'\)/, 'circle lookup still present');
+    // The list pane keeps its plain container click binding (no capture there).
+    assert.ok(html.includes("listEl.addEventListener('click'"), 'list pane click binding intact');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

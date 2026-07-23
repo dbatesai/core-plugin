@@ -12,7 +12,7 @@ allowed-tools:
 
 One self-contained HTML page — unit graph, unit bodies, edges, backlinks, memory-health section — generated from the project's `_memories/` store and published as a **private** hosted artifact so the user can browse it from the Claude app on desktop or phone. This page embeds **real memory-unit bodies**. Uploading it is a disclosure boundary (Hale's seven conditions, 2026-07-22, all binding), so the flow below is not a suggestion: **every publish is explicitly user-triggered, preflight-confirmed, verified private, and receipted. No exceptions, ever.**
 
-**The script is the only generator.** `scripts/render-browse-artifact.mjs` (in the core skill's `scripts/` directory) reads the store through the same snapshot loader decoration uses, writes the HTML, prints the preflight manifest, and writes the local receipt. It never uploads anything — publishing is YOUR step, and only after the user's go-ahead. Never hand-assemble or edit the HTML; never publish a file this script didn't just generate.
+**The script is the only generator.** `scripts/render-browse-artifact.mjs` (in the core skill's `scripts/` directory) reads the store through the same snapshot loader decoration uses, writes the HTML, prints the preflight manifest, and writes the local generation receipt. It never uploads anything — publishing is YOUR step, and only after the user's go-ahead. Never hand-assemble or edit the HTML; never publish a file this script didn't just generate.
 
 **Script path resolution.** Resolve `CORE_ROOT` the same way `/metrics` does: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/memory-view/SKILL.md` — that prefix is the plugin root. Reuse the `CORE_ROOT` startup already resolved this session if you have it. If you cannot resolve a concrete root, say so plainly and stop — never run `node` against a guessed path.
 
@@ -46,15 +46,31 @@ Required checks, stated because they are conditions, not habits (condition 3):
 
 **Harness honesty (DC-75 — the cross-harness capability contract):** on a harness with no artifact surface (Codex today), say so by name and fall back to the local file: give the user the exact `--out` path and how to open it. Never fake a publish, never claim a hosted URL that does not exist.
 
-## Step 4 — receipt and the honest revocation story
+## Step 4 — record the outcome (every consent decision leaves a record)
 
-After a publish (or a declined one), confirm the **local receipt** was written — the manifest names its path (`~/.core/workspaces/<workspace-id>/artifact-receipts/<timestamp>.json`); it is the audit record of exactly what was generated for publish, when, at which snapshot (condition 4 + Antigravity's persistence refinement). If the script reported the receipt failed to write, surface that and do not publish until one lands.
+Two receipts, two different claims. The receipt written at generation time (`~/.core/workspaces/<workspace-id>/artifact-receipts/<timestamp>.json`) is the **preflight-generation receipt**: it records what was generated and offered for publish — it is **never** a record of what went up, because it is written before consent. If the script reported it failed to write, surface that and do not publish until one lands.
 
-Then tell the user the deletion path, honestly: they can delete the artifact from their artifact gallery at claude.ai (or ask you to overwrite it with an empty page first), **and** deleting a hosted artifact may not scrub hosted copies or caches instantly — say that plainly rather than implying deletion is instant and total. The receipt stays on their machine as the record of what went up.
+After the publish step resolves — published, **declined by the user, or failed** — you MUST record the outcome as a **publish receipt** (condition 4's actual audit trail):
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" --record-publish \
+  --generation-receipt <receipt_path from the manifest> \
+  --status published-private|declined|failed \
+  [--artifact-url <hosted URL>] \
+  [--private-verified-evidence "<how privacy was actually confirmed>"] \
+  [--consent-by <who>] [--consent-mechanism "<what they were shown and agreed to>"]
+```
+
+- **`published-private`** requires `--private-verified-evidence` — the script refuses without it; state what you actually checked in Step 3, pass the hosted artifact URL when the harness surfaces one, and record who consented on which manifest.
+- **`declined` and `failed` get recorded too.** A "no" is part of the audit trail. Never skip the receipt because nothing went up.
+- The publish receipt lands atomically as `<generation-receipt>.publish.json` beside the generation receipt, linked to it by name. One outcome per generation — the script refuses to overwrite an existing publish receipt; a fresh publish means a fresh generation.
+- If the user later deletes the artifact (or asks you to revoke it): `node ... --record-revocation <publish-receipt-path>` stamps `revoked_at` on the same receipt.
+
+Then tell the user the deletion path, honestly: they can delete the artifact from their artifact gallery at claude.ai (or ask you to overwrite it with an empty page first), **and** deleting a hosted artifact may not scrub hosted copies or caches instantly — say that plainly rather than implying deletion is instant and total. The **publish receipt** — not the generation manifest — stays on their machine as the record of what actually went up.
 
 ## Boundary that never moves
 
-**Unit content never routes into the anonymized `/metrics-package` export** (condition 5). Structurally it can't — the exporter builds from a disjoint numeric/pseudonym allowlist and never reads unit bodies — and behaviorally you must never "borrow" this page's embedded content for any export, summary package, or shared aggregate. This page is the one deliberate, per-publish, user-confirmed disclosure of real unit bodies; nothing else inherits it.
+**Unit content never routes into the anonymized `/metrics-package` export** (condition 5). Structurally it can't — the exporter builds from a disjoint numeric/pseudonym allowlist and never exports or routes unit bodies (its census does read whole unit files; no body content survives into package bytes — the planted-body tripwire test proves it) — and behaviorally you must never "borrow" this page's embedded content for any export, summary package, or shared aggregate. This page is the one deliberate, per-publish, user-confirmed disclosure of real unit bodies; nothing else inherits it.
 
 ## Self-healing rails
 
