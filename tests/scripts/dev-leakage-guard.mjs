@@ -110,6 +110,13 @@ export const PATTERNS = [
     re: /brine-wren-cedar-axiom-inlet-grove/g,
     appliesTo: () => true,
   },
+  // --- personal email, any form, whole tree (Antigravity's 868915d review gap) ---
+  {
+    name: 'personal-email',
+    klass: 'personal-identity',
+    re: /david[._-]?bates\d*@[a-z0-9.-]+/gi,
+    appliesTo: () => true,
+  },
   // --- absolute personal path in the shipped product surface (any username) ---
   {
     name: 'abs-user-path-in-product',
@@ -131,6 +138,19 @@ export const PATTERNS = [
     re: /\bDavid\b/g,
     appliesTo: (p) => isMarkdown(p) && notChangelog(p),
   },
+  // --- names in shipped JSON config/schema files (Antigravity's 868915d review
+  // gap: configs are product surface, not documentation — a name in a schema
+  // default or manifest description ships to every install). Owner/author
+  // fields in the manifests are allowlisted; nothing else earns a name.
+  // NOTE: .mjs source strings are NOT yet scanned — gated on the pending
+  // ruling over ~80 design-provenance code comments; scanning source before
+  // that ruling would bury real hits under known-benign rationale comments.
+  {
+    name: 'name-in-json-config',
+    klass: 'personal-identity',
+    re: /\b(Keel|Hale|Antigravity|Crest|Meridian|Tideline|David)\b/g,
+    appliesTo: (p) => p.endsWith('.json'),
+  },
 ];
 
 /**
@@ -140,9 +160,11 @@ export const PATTERNS = [
  */
 export const ALLOWLIST = [
   // Repo owner / copyright fields — the plugin's genuine identity, not a leak.
-  { file: '.claude-plugin/marketplace.json', patterns: ['personal-name'], reason: 'marketplace owner field — legitimate author identity' },
-  { file: 'plugins/core/.claude-plugin/plugin.json', patterns: ['personal-name'], reason: 'plugin.json author field — legitimate author identity' },
-  { file: 'plugins/core/.codex-plugin/plugin.json', patterns: ['personal-name'], reason: 'codex plugin.json author/developer fields — legitimate author identity' },
+  // Author name + email in the manifests are deliberate public authorship
+  // metadata (npm-convention author fields), not accidental leakage.
+  { file: '.claude-plugin/marketplace.json', patterns: ['personal-name', 'name-in-json-config', 'personal-email'], reason: 'marketplace owner field — legitimate author identity (name + email are deliberate authorship metadata)' },
+  { file: 'plugins/core/.claude-plugin/plugin.json', patterns: ['personal-name', 'name-in-json-config', 'personal-email'], reason: 'plugin.json author field — legitimate author identity (name + email are deliberate authorship metadata)' },
+  { file: 'plugins/core/.codex-plugin/plugin.json', patterns: ['personal-name', 'name-in-json-config', 'personal-email'], reason: 'codex plugin.json author/developer fields — legitimate author identity (name + email are deliberate authorship metadata)' },
   { file: 'LICENSE', patterns: ['personal-name'], reason: 'MIT copyright holder — legitimate' },
   { file: 'plugins/core/LICENSE', patterns: ['personal-name'], reason: 'MIT copyright holder — legitimate' },
 
