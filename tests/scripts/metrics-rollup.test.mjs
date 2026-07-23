@@ -25,7 +25,13 @@ function withClassified(byDate, fn) {
   const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
   mkdirSync(dir, { recursive: true });
   for (const [date, states] of Object.entries(byDate)) {
-    const lines = states.map((state, i) => JSON.stringify({ state, provisional: true, turn_idx: i }));
+    // Rows carry the CURRENT instrument stamps: the cohort gate (Hale
+    // 2026-07-22) aggregates only rows produced by the running
+    // (schema, classifier, proxy) triple — exactly what classify-turns writes.
+    const lines = states.map((state, i) => JSON.stringify({
+      schema_version: CLASSIFIED_SCHEMA_VERSION, classifier_version: CLASSIFIER_VERSION,
+      proxy_version: PROXY_VERSION, state, provisional: true, turn_idx: i,
+    }));
     writeFileSync(join(dir, `${date}.jsonl`), lines.join('\n') + '\n');
   }
   try { return fn({ home, project }); }
@@ -86,7 +92,7 @@ test('readOrientSignal returns null when no signal has been written', () => {
 
 // ---- Calibration gate (Phase 3): PROVISIONAL clears only when calibrated AND version-matched ----
 
-import { CLASSIFIER_VERSION, PROXY_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
 function writeCalState(home, state) {
   const dir = join(home, '.core', 'workspaces', WID, 'metrics');
@@ -237,6 +243,89 @@ test('replay dedupe: newer classifier_version wins; conflicts are counted and vi
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   }
+});
+
+// ============================================================
+// Instrument-cohort gate (Hale's 2026-07-22 REVISE addendum): calibration is
+// validated against the CURRENT (schema, classifier, proxy) triple, so the
+// aggregate may contain ONLY rows produced by that triple. An old-instrument
+// row with no newer counterpart survives dedupe — it must land in the
+// coverage gap, never in the numbers.
+// ============================================================
+
+test("Hale's mixed-instrument falsifier: calibrated-true must not aggregate a 0.2.0-era survivor", () => {
+  const home = mkdtempSync(join(tmpdir(), 'rollup-cohort-'));
+  const project = mkdtempSync(join(tmpdir(), 'rollup-cohort-proj-'));
+  try {
+    const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '2026-06-02.jsonl'), [
+      // 0.2.0-only row: different turn, NO newer counterpart — survives dedupe.
+      JSON.stringify(ident({ turn_idx: 0, classifier_version: '0.2.0', state: 'tier-0-win' })),
+      // Current-instrument row.
+      JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
+    ].join('\n') + '\n');
+    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, overall_precision: 0.82 });
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    assert.equal(r.calibrated, true, 'calibration itself reads true at the current version');
+    assert.equal(r.headline.total, 1, 'ONLY the current-cohort row aggregates — never both instruments');
+    assert.deepEqual(r.distribution, { 'rec-fail-tier-0': 1 }, 'the 0.2.0 judgment is not in the distribution');
+    assert.deepEqual(r.cohort, { schema_version: CLASSIFIED_SCHEMA_VERSION, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION });
+    assert.equal(r.coverage_gap.rows_excluded, 1, 'the old-instrument survivor is an explicit gap');
+    assert.deepEqual(r.coverage_gap.versions, { 'schema=1.0.0 classifier=0.2.0 proxy=2': 1 });
+    assert.match(r.signal, /instrument cohort .*1 row outside cohort EXCLUDED/, 'gap visible in the one-line signal');
+    const md = readFileSync(join(r.metaDir, 'rollups', 'daily', '2026-06-02.md'), 'utf8');
+    assert.match(md, /Instrument cohort 1\.0\.0\/0\.3\.0\/p2: 1 row outside cohort EXCLUDED from aggregates \(1× schema=1\.0\.0 classifier=0\.2\.0 proxy=2\)/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('cohort gate: a fully current-instrument store reports a zero gap, honestly', () => {
+  withClassified({ '2026-06-02': ['tier-0-win', 'rec-fail-tier-0'] }, ({ home, project }) => {
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    assert.equal(r.coverage_gap.rows_excluded, 0);
+    assert.doesNotMatch(r.signal, /outside cohort/, 'no gap tag when there is no gap');
+    const md = readFileSync(join(r.metaDir, 'rollups', 'daily', '2026-06-02.md'), 'utf8');
+    assert.match(md, /Instrument cohort 1\.0\.0\/0\.3\.0\/p2: all deduped rows in cohort/);
+  });
+});
+
+test('cross-date attribution policy is explicit in the JSON and the daily markdown', () => {
+  withClassified({ '2026-06-02': ['tier-0-win'] }, ({ home, project }) => {
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    assert.equal(r.day_attribution, 'replay-day');
+    assert.match(r.day_attribution_note, /replayed sessions attribute to the replay's day/);
+    const md = readFileSync(join(r.metaDir, 'rollups', 'daily', '2026-06-02.md'), 'utf8');
+    assert.match(md, /Day attribution: replayed sessions attribute to the replay's day/);
+  });
+});
+
+test('equal-rank conflict: both input orders inside one day produce the same rollup winner', () => {
+  // Hale item 3 verification: reversing the two contradictory rows must not
+  // reverse the aggregate. Same day ⇒ lexicographically smaller state wins.
+  const states = [
+    [ident({ turn_idx: 0, state: 'tier-1-3-win' }), ident({ turn_idx: 0, state: 'rec-fail-tier-0' })],
+    [ident({ turn_idx: 0, state: 'rec-fail-tier-0' }), ident({ turn_idx: 0, state: 'tier-1-3-win' })],
+  ];
+  const results = states.map((rows) => {
+    const home = mkdtempSync(join(tmpdir(), 'rollup-order-'));
+    const project = mkdtempSync(join(tmpdir(), 'rollup-order-proj-'));
+    try {
+      const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, '2026-06-02.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+      return buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(project, { recursive: true, force: true });
+    }
+  });
+  assert.deepEqual(results[0].distribution, results[1].distribution, 'winner independent of input order');
+  assert.deepEqual(results[0].distribution, { 'rec-fail-tier-0': 1 });
+  assert.equal(results[0].dedupe.conflicts, 1);
+  assert.equal(results[1].dedupe.conflicts, 1, 'the conflict stays visible under both orders');
 });
 
 test('replay dedupe: a cross-date replay does not double-count today or the trailing window', () => {

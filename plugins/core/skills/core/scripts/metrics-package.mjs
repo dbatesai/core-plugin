@@ -45,7 +45,8 @@ import { loadUnit } from './priority.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
 import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
-import { dedupeClassifiedByDay } from './metrics-dedupe.mjs';
+import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'metrics-package-salt';
@@ -535,18 +536,27 @@ export function workspaceMetrics(home, workspaceId) {
   const recognition = { available: false, reason: 'no classified turn files', _trust: TRUST.PROVISIONAL, _trust_basis: 'classifier has not cleared its calibration gate — trends only, never levels', days: {} };
   const clsDir = join(wsDir, 'metrics', 'classified');
   if (existsSync(clsDir)) {
-    // Read-side replay dedupe (metrics-dedupe.mjs): the classified store is
-    // append-only, so re-processed sessions appear more than once. Dedupe
-    // store-wide (a replay can land in a later date file) BEFORE counting;
-    // winners keep the day of the surviving row. Stats ship as numbers only —
-    // no free text — so the whitelist boundary is untouched.
+    // Read-side replay dedupe + instrument-cohort gate (metrics-dedupe.mjs):
+    // the classified store is append-only, so re-processed sessions appear
+    // more than once, and rows from retired classifier/proxy versions survive
+    // when never re-classified. Dedupe store-wide (a replay can land in a
+    // later date file), then count ONLY the current-instrument cohort;
+    // out-of-cohort survivors ship as an explicit coverage gap. Winners keep
+    // the day of the surviving row (replay-day attribution). Everything ships
+    // as numbers plus version-shaped labels (non-version-shaped values fold
+    // to 'other' inside the dedupe module) — the whitelist boundary is
+    // untouched.
     const daysInput = [];
     for (const f of readdirSync(clsDir).sort()) {
       const day = isoDay(f);
       if (!day || !f.endsWith('.jsonl')) continue;
       daysInput.push({ day, rows: readJsonlSafe(join(clsDir, f)).rows });
     }
-    const { days: dedupedDays, stats } = dedupeClassifiedByDay(daysInput);
+    const { days: dedupedDays, stats, cohort, coverage_gap: coverageGap } = cohortClassifiedByDay(daysInput, {
+      schema_version: CLASSIFIED_SCHEMA_VERSION,
+      classifier_version: CLASSIFIER_VERSION,
+      proxy_version: PROXY_VERSION,
+    });
     for (const [day, rows] of Object.entries(dedupedDays)) {
       const states = {};
       let provisional = 0;
@@ -573,6 +583,17 @@ export function workspaceMetrics(home, workspaceId) {
         conflicts: stats.conflicts,
         unkeyed_kept: stats.unkeyed_kept,
       };
+      // The exact instrument cohort the day/week counts aggregate, plus every
+      // deduped row excluded for being outside it (Hale 2026-07-22: a mixed-
+      // instrument store must never ship as one aggregate). Values are fixed
+      // constants, counts, and version-shaped labels only — whitelist-safe.
+      recognition.instrument_cohort = cohort;
+      recognition.coverage_gap = {
+        rows_excluded: coverageGap.rows_excluded,
+        versions: coverageGap.versions,
+      };
+      // Fixed-vocabulary policy stamp: replayed sessions attribute to the replay's day.
+      recognition.day_attribution = 'replay-day';
     }
   }
 

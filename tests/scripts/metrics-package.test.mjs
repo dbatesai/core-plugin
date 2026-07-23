@@ -9,6 +9,7 @@ import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
   buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging, workspaceMetrics,
 } from '../../plugins/core/skills/core/scripts/metrics-package.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
 // Planted tripwires — distinctive strings that MUST NOT survive into any package byte.
 const PLANT_NAME = 'ZephyrCorpMeltdown';
@@ -170,8 +171,11 @@ test('share artifact projects local daily telemetry to weekly-only blocks and re
     writeFileSync(join(secondWeek, 'hygiene-log.jsonl'), `${JSON.stringify({ kind: 'maintenance-run' })}\n`);
     const classified = join(home, '.core', 'workspaces', 'fixture-ws-alpha', 'metrics', 'classified');
     mkdirSync(classified, { recursive: true });
-    writeFileSync(join(classified, '2026-07-01.jsonl'), `${JSON.stringify({ state: 'tier-0-win', provisional: true })}\n`);
-    writeFileSync(join(classified, '2026-07-08.jsonl'), `${JSON.stringify({ state: 'rec-fail-tier-0', provisional: false })}\n`);
+    // Current-instrument stamps: the cohort gate (Hale 2026-07-22) only
+    // aggregates rows produced by the running (schema, classifier, proxy).
+    const stamp = { schema_version: CLASSIFIED_SCHEMA_VERSION, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION };
+    writeFileSync(join(classified, '2026-07-01.jsonl'), `${JSON.stringify({ ...stamp, state: 'tier-0-win', provisional: true })}\n`);
+    writeFileSync(join(classified, '2026-07-08.jsonl'), `${JSON.stringify({ ...stamp, state: 'rec-fail-tier-0', provisional: false })}\n`);
     const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
     const extracted = readShippedPackage(result.shipped, join(root, 'x'));
     const projectDir = join(extracted, 'projects', readdirSync(join(extracted, 'projects'))[0]);
@@ -418,5 +422,38 @@ test('workspace recognition dedupes replayed classified rows before counting, an
     assert.deepEqual(w.recognition.replay_dedupe, {
       rows_read: 5, rows_kept: 2, replays_dropped: 2, superseded_dropped: 1, conflicts: 1, unkeyed_kept: 0,
     }, 'dedupe stats ship as plain numbers');
+    assert.deepEqual(w.recognition.instrument_cohort, {
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+    }, 'the cohort the counts aggregate is stated');
+    assert.deepEqual(w.recognition.coverage_gap, { rows_excluded: 0, versions: {} },
+      'every survivor here is current-instrument, and the gap says so');
+    assert.equal(w.recognition.day_attribution, 'replay-day', 'attribution policy is stamped, not implicit');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("workspace recognition: Hale's mixed-instrument falsifier — an old-instrument survivor lands in the coverage gap, never the counts", () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-cohort-'));
+  try {
+    const home = join(root, 'home');
+    const clsDir = join(home, '.core', 'workspaces', 'ws-cohort', 'metrics', 'classified');
+    mkdirSync(clsDir, { recursive: true });
+    const ident = (over = {}) => ({
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+      harness: 'claude-code', provisional: true, session_id: 'sess-cohort', ...over,
+    });
+    writeFileSync(join(clsDir, '2026-07-08.jsonl'), [
+      // 0.2.0-only observation: no newer counterpart, survives dedupe — must NOT be counted.
+      JSON.stringify(ident({ turn_idx: 0, classifier_version: '0.2.0', state: 'tier-0-win' })),
+      JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
+    ].join('\n') + '\n');
+    const w = workspaceMetrics(home, 'ws-cohort');
+    assert.equal(w.recognition.available, true);
+    assert.equal(w.recognition.days['2026-07-08'].turns, 1, 'only the current-cohort row counts');
+    assert.deepEqual(w.recognition.days['2026-07-08'].states, { 'rec-fail-tier-0': 1 });
+    assert.equal(w.recognition.replay_dedupe.rows_kept, 2, 'both rows survive dedupe — the gate is what excludes');
+    assert.deepEqual(w.recognition.coverage_gap, {
+      rows_excluded: 1,
+      versions: { 'schema=1.0.0 classifier=0.2.0 proxy=2': 1 },
+    }, 'the excluded instrument is named and counted');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -51,6 +51,13 @@ import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, 
 // correctly invalidates a calibration cleared under the old behavior.
 export const CLASSIFIER_VERSION = '0.3.0';
 
+// The classified-record schema version stamped on every row. Exported so the
+// read side (metrics-rollup.mjs, metrics-package.mjs) can select the exact
+// current-instrument cohort (schema, classifier, proxy) before aggregating —
+// Hale's 2026-07-22 finding: validating calibration against current constants
+// while aggregating rows from ANY version silently mixes instruments.
+export const CLASSIFIED_SCHEMA_VERSION = '1.0.0';
+
 // The in-context PROXY version, distinct from the classifier version. Proxy v1 was the
 // original `.includes` substring test that over-fired on a large PROJECT.md (any term
 // whose letters appeared anywhere read as "in context"). Proxy v2 is the current
@@ -277,7 +284,7 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   const date = today || todayUTC();
   const wid = workspaceId || resolveWorkspaceId(project);
   const records = classified.map((c) => ({
-    schema_version: '1.0.0',
+    schema_version: CLASSIFIED_SCHEMA_VERSION,
     classifier_version: CLASSIFIER_VERSION,
     proxy_version: PROXY_VERSION, // DC-94a: versions the in-context proxy so calibration invalidates across proxy changes
     harness,

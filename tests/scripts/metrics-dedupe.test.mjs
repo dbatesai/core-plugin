@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  dedupeClassifiedRows, dedupeClassifiedByDay,
-  dedupeDetectorRows, formatDedupeNote,
+  dedupeClassifiedRows, dedupeClassifiedByDay, cohortClassifiedByDay,
+  dedupeDetectorRows, formatDedupeNote, formatCoverageGapNote,
 } from '../../plugins/core/skills/core/scripts/metrics-dedupe.mjs';
+
+const COHORT = { schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2 };
 
 const row = (over = {}) => ({
   schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
@@ -69,14 +71,39 @@ test('proxy_version breaks classifier-version ties; missing proxy_version loses 
 
 // ---------- classified: genuine conflicts ----------
 
-test('same full key with different state keeps last-written and counts the conflict visibly', () => {
-  const first = row({ state: 'tier-1-3-win' });
-  const second = row({ state: 'rec-fail-tier-0' });
-  const { rows, stats } = dedupeClassifiedRows([first, second]);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].state, 'rec-fail-tier-0', 'last-written wins (the later run saw the fuller transcript)');
-  assert.equal(stats.replays_dropped, 1);
-  assert.equal(stats.conflicts, 1, 'the disagreement is counted, never silent');
+test('same full key with different state resolves deterministically and counts the conflict visibly', () => {
+  // Hale item 3 (2026-07-22): the winner must NOT depend on input order.
+  // Same day ⇒ lexicographically smaller state wins ('rec-fail-tier-0' <
+  // 'tier-1-3-win') — for the current vocabulary that is also the
+  // conservative reading (contradictions never resolve toward the win).
+  const a = row({ state: 'tier-1-3-win' });
+  const b = row({ state: 'rec-fail-tier-0' });
+  for (const order of [[a, b], [b, a]]) {
+    const { rows, stats } = dedupeClassifiedRows(order);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].state, 'rec-fail-tier-0', 'same winner under BOTH input orders');
+    assert.equal(stats.replays_dropped, 1);
+    assert.equal(stats.conflicts, 1, 'the disagreement is counted, never silent');
+  }
+});
+
+test('equal-rank conflict across dates: the later-dated file wins regardless of read order', () => {
+  // The file date is data; a catch-up replay on a later day is the later
+  // observation (and matches replay-day attribution). Feed the days in
+  // ascending order but verify the WINNER is date-chosen, not order-chosen,
+  // by checking the same winner emerges when the later day holds either state.
+  const forward = dedupeClassifiedByDay([
+    { day: '2026-07-01', rows: [row({ state: 'tier-0-win' })] },
+    { day: '2026-07-08', rows: [row({ state: 'rec-fail-tier-0' })] },
+  ]);
+  assert.equal(forward.days['2026-07-08'].length, 1);
+  assert.equal(forward.days['2026-07-08'][0].state, 'rec-fail-tier-0', 'later-dated row wins');
+  assert.equal(forward.stats.conflicts, 1);
+  const swappedStates = dedupeClassifiedByDay([
+    { day: '2026-07-01', rows: [row({ state: 'rec-fail-tier-0' })] },
+    { day: '2026-07-08', rows: [row({ state: 'tier-0-win' })] },
+  ]);
+  assert.equal(swappedStates.days['2026-07-08'][0].state, 'tier-0-win', 'date decides, not the state tiebreak');
 });
 
 // ---------- classified: identity boundaries ----------
@@ -123,6 +150,70 @@ test('every input day key survives in the output, even when emptied by dedupe', 
     { day: '2026-07-21', rows: [row()] },
   ]);
   assert.deepEqual(Object.keys(days).sort(), ['2026-07-20', '2026-07-21']);
+});
+
+// ---------- classified: instrument-cohort gate (Hale 2026-07-22 addendum) ----------
+
+test("Hale's mixed-instrument falsifier: an old-version row with no newer counterpart never crosses into the cohort", () => {
+  // One 0.2.0-only row (different turn — no 0.3.0 counterpart to supersede
+  // it) plus one 0.3.0 row. Before the cohort gate both survived dedupe and
+  // both were aggregated. Now: only the 0.3.0 row is in the cohort; the
+  // 0.2.0 row is an explicit coverage gap, never silently counted.
+  const { days, stats, cohort, coverage_gap } = cohortClassifiedByDay([{
+    day: '2026-07-22',
+    rows: [
+      row({ turn_idx: 0, classifier_version: '0.2.0', state: 'tier-0-win' }),
+      row({ turn_idx: 1, classifier_version: '0.3.0', state: 'rec-fail-tier-0' }),
+    ],
+  }], COHORT);
+  assert.equal(stats.rows_kept, 2, 'both rows survive dedupe (no supersession without a same-turn newer row)');
+  assert.equal(days['2026-07-22'].length, 1, 'only the current-instrument row may aggregate');
+  assert.equal(days['2026-07-22'][0].classifier_version, '0.3.0');
+  assert.deepEqual(cohort, COHORT);
+  assert.equal(coverage_gap.rows_excluded, 1);
+  assert.deepEqual(coverage_gap.versions, { 'schema=1.0.0 classifier=0.2.0 proxy=2': 1 });
+});
+
+test('cohort gate: cross-version supersession still applies before the gate', () => {
+  // Same turn re-classified under the newer instrument: the old row is
+  // superseded (dropped by dedupe), the new row aggregates, and the gap is 0.
+  const { days, stats, coverage_gap } = cohortClassifiedByDay([{
+    day: '2026-07-22',
+    rows: [
+      row({ turn_idx: 0, classifier_version: '0.2.0', state: 'tier-0-win' }),
+      row({ turn_idx: 0, classifier_version: '0.3.0', state: 'rec-fail-tier-0' }),
+    ],
+  }], COHORT);
+  assert.equal(stats.superseded_dropped, 1);
+  assert.equal(days['2026-07-22'].length, 1);
+  assert.equal(coverage_gap.rows_excluded, 0, 'a superseded row is corrected, not a gap');
+});
+
+test('cohort gate: unkeyed and version-less rows cannot sneak into the aggregate either', () => {
+  const { days, coverage_gap } = cohortClassifiedByDay([{
+    day: '2026-07-22',
+    rows: [
+      { state: 'tier-0-win' }, // no identity, no versions — kept by dedupe, outside the cohort
+      row({ session_id: 'no-session-context', classifier_version: '0.2.0' }), // unkeyed old instrument
+      row({ turn_idx: 5 }), // in-cohort
+    ],
+  }], COHORT);
+  assert.equal(days['2026-07-22'].length, 1, 'only the in-cohort row aggregates');
+  assert.equal(coverage_gap.rows_excluded, 2);
+  assert.deepEqual(coverage_gap.versions, {
+    'schema=1.0.0 classifier=0.2.0 proxy=2': 1,
+    'schema=other classifier=other proxy=other': 1,
+  }, 'non-version-shaped values fold to other — whitelist-safe labels');
+});
+
+test('formatCoverageGapNote reads honestly in the gap and all-clear cases', () => {
+  const gap = formatCoverageGapNote({
+    cohort: COHORT,
+    coverage_gap: { rows_excluded: 2, versions: { 'schema=1.0.0 classifier=0.2.0 proxy=2': 2 } },
+  });
+  assert.equal(gap, 'instrument cohort 1.0.0/0.3.0/p2: 2 rows outside cohort EXCLUDED from aggregates (2× schema=1.0.0 classifier=0.2.0 proxy=2)');
+  const clean = formatCoverageGapNote({ cohort: COHORT, coverage_gap: { rows_excluded: 0, versions: {} } });
+  assert.equal(clean, 'instrument cohort 1.0.0/0.3.0/p2: all deduped rows in cohort');
 });
 
 // ---------- detectors ----------

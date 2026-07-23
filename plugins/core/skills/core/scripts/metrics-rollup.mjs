@@ -23,10 +23,22 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
-import { CLASSIFIER_VERSION, PROXY_VERSION } from './classify-turns.mjs';
-import { dedupeClassifiedByDay, formatDedupeNote } from './metrics-dedupe.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
+import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from './metrics-dedupe.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
+
+// Cross-date attribution — EXPLICIT POLICY (Hale item 4, 2026-07-22):
+// replayed sessions attribute to the replay's day. The surviving row's own
+// file date is where its turns count; a session captured on day X and
+// replayed (re-classified) on day Y counts once, under day Y. Chosen over
+// first-observation-day-wins because the winner IS the authoritative
+// judgment and its date is when that judgment was produced — attributing it
+// to the loser's day would stamp one row's evidence with another row's
+// timestamp. Totals stay stable under replay either way; this keeps row and
+// date traveling together. Stated in the rollup JSON and the daily markdown.
+const DAY_ATTRIBUTION = 'replay-day';
+const DAY_ATTRIBUTION_NOTE = "replayed sessions attribute to the replay's day (the winning row keeps its own file's date)";
 
 /**
  * Read calibration state and decide whether the rollup may drop the PROVISIONAL
@@ -57,13 +69,17 @@ function readClassified(dir, date) {
 
 /**
  * Read EVERY daily classified file (ascending date order) and return the
- * replay-deduped per-day view plus store-wide dedupe stats. Store-wide, not
- * per-file, because a session re-processed on a later date appends the same
- * turns under a new date — only a whole-store pass keeps totals stable under
- * that replay (Hale's replay-identity falsifier). The store is small (daily
+ * replay-deduped, COHORT-GATED per-day view plus store-wide dedupe stats and
+ * the coverage gap. Store-wide, not per-file, because a session re-processed
+ * on a later date appends the same turns under a new date — only a
+ * whole-store pass keeps totals stable under that replay (Hale's
+ * replay-identity falsifier). The cohort gate (Hale's 2026-07-22 addendum)
+ * then keeps only rows produced by the CURRENT instrument — the same
+ * (schema, classifier, proxy) triple calibration is validated against;
+ * everything else is reported, never counted. The store is small (daily
  * JSONL, one row per classified turn), so the full read is cheap.
  */
-function readClassifiedDeduped(dir) {
+function readClassifiedCohort(dir) {
   let files = [];
   try {
     files = readdirSync(dir)
@@ -71,7 +87,11 @@ function readClassifiedDeduped(dir) {
       .sort();
   } catch { files = []; }
   const daysInput = files.map((f) => ({ day: f.slice(0, 10), rows: readClassified(dir, f.slice(0, 10)) }));
-  return dedupeClassifiedByDay(daysInput);
+  return cohortClassifiedByDay(daysInput, {
+    schema_version: CLASSIFIED_SCHEMA_VERSION,
+    classifier_version: CLASSIFIER_VERSION,
+    proxy_version: PROXY_VERSION,
+  });
 }
 
 function rate(records, state) {
@@ -107,10 +127,12 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
   const metaDir = operationalMetricsDir(wid, { home });
   const classifiedDir = join(metaDir, 'classified');
 
-  // Read-side replay dedupe (metrics-dedupe.mjs): the classified store is
-  // append-only, so re-processed sessions appear more than once. Aggregate
-  // over the deduped view; surface the dedupe stats, never bury them.
-  const { days: dedupedDays, stats: dedupe } = readClassifiedDeduped(classifiedDir);
+  // Read-side replay dedupe + instrument-cohort gate (metrics-dedupe.mjs):
+  // the classified store is append-only, so re-processed sessions appear more
+  // than once, and old-instrument rows survive when never re-classified.
+  // Aggregate ONLY the deduped current-cohort view; surface the dedupe stats
+  // and the coverage gap, never bury either.
+  const { days: dedupedDays, stats: dedupe, cohort, coverage_gap: coverageGap } = readClassifiedCohort(classifiedDir);
   const todayRecs = dedupedDays[date] || [];
   const dist = {};
   for (const r of todayRecs) dist[r.state] = (dist[r.state] || 0) + 1;
@@ -128,20 +150,30 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
   const dedupeTag = lossy
     ? ` [replay-dedupe: ${dedupe.rows_read}→${dedupe.rows_kept} store-wide${dedupe.conflicts ? `, ${dedupe.conflicts} conflict${dedupe.conflicts === 1 ? '' : 's'}` : ''}]`
     : '';
+  // Coverage gap is a correctness signal, not a footnote: whenever any row
+  // was excluded for being outside the current instrument cohort, say so in
+  // the one-liner too (always present in JSON + daily md).
+  const gapTag = coverageGap.rows_excluded ? ` [${formatCoverageGapNote({ cohort, coverage_gap: coverageGap })}]` : '';
 
   let signal;
   if (!todayRecs.length) {
     // provisionalTag is '' when calibrated; the old `|| ' [PROVISIONAL]'` fallback
     // re-added the tag on a calibrated workspace, mislabeling honest metrics (M5).
-    signal = `metrics: no classified turns for ${date} yet${dedupeTag}${provisionalTag}`;
+    signal = `metrics: no classified turns for ${date} yet${dedupeTag}${gapTag}${provisionalTag}`;
   } else {
     const todayPct = Math.round(headline.pct * 100);
     const avgStr = avg == null ? 'n/a (no prior 7d)' : `${Math.round(avg * 100)}%`;
     const arrow = avg == null ? '' : headline.pct > avg + 0.02 ? ' ↑' : headline.pct < avg - 0.02 ? ' ↓' : ' ≈';
-    signal = `${HEADLINE}: ${headline.n}/${headline.total} turns today (${todayPct}%) vs 7-day avg ${avgStr}${arrow}${dedupeTag}${provisionalTag}`;
+    signal = `${HEADLINE}: ${headline.n}/${headline.total} turns today (${todayPct}%) vs 7-day avg ${avgStr}${arrow}${dedupeTag}${gapTag}${provisionalTag}`;
   }
 
-  return { date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg, provisional, calibrated: calState.is_calibrated, dedupe, signal, metaDir };
+  return {
+    date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg,
+    provisional, calibrated: calState.is_calibrated, dedupe,
+    cohort, coverage_gap: coverageGap,
+    day_attribution: DAY_ATTRIBUTION, day_attribution_note: DAY_ATTRIBUTION_NOTE,
+    signal, metaDir,
+  };
 }
 
 export function writeRollup(r) {
@@ -158,6 +190,8 @@ export function writeRollup(r) {
       `Headline ${HEADLINE} rate: ${r.headline ? `${r.headline.n}/${r.headline.total} (${Math.round(r.headline.pct * 100)}%)` : 'n/a'}`,
       `Trailing 7-day avg: ${r.trailing_avg == null ? 'n/a' : `${Math.round(r.trailing_avg * 100)}%`}`,
       ...(r.dedupe ? [`Replay-dedupe (store-wide): ${formatDedupeNote(r.dedupe)}`] : []),
+      ...(r.cohort ? [(() => { const n = formatCoverageGapNote(r); return n.charAt(0).toUpperCase() + n.slice(1); })()] : []),
+      ...(r.day_attribution_note ? [`Day attribution: ${r.day_attribution_note}.`] : []),
       '',
       '## State distribution (today)',
       ...Object.entries(r.distribution).sort((a, b) => b[1] - a[1]).map(([s, n]) => `- ${s}: ${n}`),
