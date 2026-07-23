@@ -61,12 +61,12 @@ export function collectForbiddenStrings(report, sweep = null) {
 // /private/tmp, /Users, /Volumes, …), home shorthand, Windows drive letters,
 // and UNC (\\server\share). Leading-anchored OR embedded after a delimiter.
 //
-// K09 (Hale's audit, 2026-07-16): two real bypasses in the embedded-path branch.
+// K09 (audit, 2026-07-16): two real bypasses in the embedded-path branch.
 // (1) The boundary-character class before an embedded path didn't include ':',
-// so "path:/Users/dbates/x" (a very common separator — "note:", "file:",
+// so "path:/Users/<user>/x" (a very common separator — "note:", "file:",
 // "location:") slipped through undetected. (2) The embedded alternatives only
 // covered POSIX well-known roots and UNC (\\server) — an embedded (non-leading)
-// Windows drive-letter path like "see C:\Users\dbates\x" was never checked at
+// Windows drive-letter path like "see C:\Users\<user>\x" was never checked at
 // all; the drive-letter form was only tested at the string's very start. Both
 // fixed: ':' added to the boundary class, and the embedded drive-letter form
 // added as its own alternative alongside the POSIX-root and UNC ones.

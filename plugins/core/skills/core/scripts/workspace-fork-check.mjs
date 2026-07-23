@@ -41,7 +41,7 @@ export function slugify(name) {
 // now the schema + manifest writer all use `path`. `project_path` was a minority
 // patch (it was what the schema documented while reality used `path`), and a
 // `project_path`-keyed entry invisible to a `path`-only read is what re-forked a
-// workspace on every startup (Meridian, R11, 2026-05-31: local-llm-build-r11 ->
+// workspace on every startup (observed on a Windows box, 2026-05-31: a workspace re-forked ->
 // -2 -> -3 ...). This read stays tolerant of legacy `project_path` for back-compat
 // (the planned v3.8.0 removal did not happen; the fallback stays until a dedicated
 // migration drops it). `path` is preferred.

@@ -9,7 +9,7 @@
   "harnesses": {
     "claude-code": {
       "probe_script": "claude-code-capability-probe.mjs",
-      "_doc": "Partly empirical — anti-anchoring claim still trust-based (R-17 DEGRADED-by-mechanism per session 48). R-17 closure is not-before-v2.9.0 and requires physical anti-anchoring validation/consumer enforcement (Hale-ratified 2026-05-29); native Workflow/Agent isolation:worktree is a candidate primitive.",
+      "_doc": "Partly empirical — anti-anchoring claim still trust-based (R-17 DEGRADED-by-mechanism per session 48). R-17 closure is not-before-v2.9.0 and requires physical anti-anchoring validation/consumer enforcement (peer-ratified 2026-05-29); native Workflow/Agent isolation:worktree is a candidate primitive.",
       "capabilities": [
         {
           "capability_id": "plugin-root-resolution",
@@ -83,14 +83,14 @@
     }
   },
   "consumer_actions": {
-    "_doc": "Named pre-action gates. Each lists the capability_ids it requires in PASS state, plus operation-scoped gates the runner enforces per HC critique evt-202605271310 (identity PASS alone is NOT a mutation permit). Stable enum codes for mutation_block_reason: 'authority_not_allowed' when allowed_authorities check fails; 'harness_mismatch' when consuming_harness is not in allowed_harnesses; 'consuming_harness_unknown' when consuming_harness is unknown but the action requires a known harness; 'consuming_harness_signal_weak' when the row's signal_weight is weak but the action requires strong; 'identity-{degraded|not-yet|unknown}' when identity itself doesn't reach PASS.",
+    "_doc": "Named pre-action gates. Each lists the capability_ids it requires in PASS state, plus operation-scoped gates the runner enforces per the identity-vs-mutation critique (identity PASS alone is NOT a mutation permit). Stable enum codes for mutation_block_reason: 'authority_not_allowed' when allowed_authorities check fails; 'harness_mismatch' when consuming_harness is not in allowed_harnesses; 'consuming_harness_unknown' when consuming_harness is unknown but the action requires a known harness; 'consuming_harness_signal_weak' when the row's signal_weight is weak but the action requires strong; 'identity-{degraded|not-yet|unknown}' when identity itself doesn't reach PASS.",
     "collab-files-mutating": {
       "requires_pass": ["plugin-root-resolution", "target-surface-collab-files"],
       "allowed_authorities": ["canonical-source", "installed-cache"],
       "allowed_harnesses": ["claude-code", "codex"],
       "allowed_signal_weight": "strong",
-      "target_surface": "~/files/collabs/",
-      "description": "Event-write to ~/files/collabs/ via collab-plugin's gitCommitPush(). Requires strong signal (not just CODEX_THREAD_ID alone) because it writes to the shared files transport."
+      "target_surface": "<collab-files-repo>/collabs/",
+      "description": "Event-write to the configured collab-files transport's collabs/ path (see surfaces.collab_files_repo / CORE_COLLAB_FILES_REPO) via collab-plugin's gitCommitPush(). Requires strong signal (not just CODEX_THREAD_ID alone) because it writes to a shared transport. Never bake in any one person's personal repo path here."
     },
     "project-memory-write": {
       "requires_pass": ["plugin-root-resolution"],

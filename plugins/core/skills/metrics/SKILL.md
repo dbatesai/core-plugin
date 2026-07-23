@@ -10,7 +10,7 @@ allowed-tools:
 
 # `/metrics` — is the memory system working, with proof
 
-The point of this skill: someone runs it and can **confidently say what's proven and what isn't**, in ten seconds of reading. Every number in the output was measured during THIS run or carries a label saying exactly how much to trust it. Never soften a failure; never let a proxy number dress up as proof; never let mechanics evidence stand in for retrieval quality, retrieval quality stand in for measurement readiness, or any of those stand in for user benefit — those are four separate evidence classes and this skill reports them as four separate, honestly-labeled sections. **The 2026-07-22 evidence-class fix (two passes, same day):** the single umbrella `WORKING` verdict used to silently cover retrieval regression and user benefit too — it never had real proof for either. The first pass split it into three sections; a same-day peer review (Hale) caught that the new "Retrieval regression" section was STILL mixing three different kinds of claim — a capture-volume percentage with an invalid denominator, a mechanism diagnostic (tier distribution), and a measurement-readiness gate (recognition/calibration) — none of which are actually regression evidence. The verdict now reads `MECHANICS: HEALTHY` and covers mechanics only; telemetry capture is a plain-count instrumentation fact under mechanics (no percentage — there's no valid denominator to divide by); the one real regression signal (a gold-set snapshot) gets its own section labeled `PROVISIONAL`, never a passing gate; recognition/calibration get their own `MEASUREMENT READINESS` section; and user benefit stays last, always `NOT EVALUATED`.
+The point of this skill: someone runs it and can **confidently say what's proven and what isn't**, in ten seconds of reading. Every number in the output was measured during THIS run or carries a label saying exactly how much to trust it. Never soften a failure; never let a proxy number dress up as proof; never let mechanics evidence stand in for retrieval quality, retrieval quality stand in for measurement readiness, or any of those stand in for user benefit — those are four separate evidence classes and this skill reports them as four separate, honestly-labeled sections. **The 2026-07-22 evidence-class fix (two passes, same day):** the single umbrella `WORKING` verdict used to silently cover retrieval regression and user benefit too — it never had real proof for either. The first pass split it into three sections; a same-day peer review caught that the new "Retrieval regression" section was STILL mixing three different kinds of claim — a capture-volume percentage with an invalid denominator, a mechanism diagnostic (tier distribution), and a measurement-readiness gate (recognition/calibration) — none of which are actually regression evidence. The verdict now reads `MECHANICS: HEALTHY` and covers mechanics only; telemetry capture is a plain-count instrumentation fact under mechanics (no percentage — there's no valid denominator to divide by); the one real regression signal (a gold-set snapshot) gets its own section labeled `PROVISIONAL`, never a passing gate; recognition/calibration get their own `MEASUREMENT READINESS` section; and user benefit stays last, always `NOT EVALUATED`.
 
 **The script is the only renderer.** `scripts/metrics-check.mjs` (in the core skill's `scripts/` directory) gathers every number AND renders the final report text — the verdict heading, the bar gauges, the narrative. It prints the finished report on stdout; relay it verbatim. Never hand-compute a bar, re-word the narrative, or round a number yourself — the render is prescriptive code so two runs against the same data always read identically.
 
@@ -45,7 +45,7 @@ Unit integrity (293)      [█████████░] direct         1 warn
 Telemetry capture                      direct         269 typed events / 36 days; closure denominator unavailable; T1 99%/T2 1%/T3 0% mix; 0 rejected
 
 RETRIEVAL REGRESSION: PROVISIONAL
-Gold-set snapshot (n=22)  [███████░░░] provisional    execution proven-live (retrieveContext + buildFinalContextPack, this run); reference authority provisional (Keel-authored, directional, n=22, no preregistered pass threshold); delivered top-3 R@3 68%; ranking R@10 82%, bm25 R@10 82%
+Gold-set snapshot (n=22)  [███████░░░] provisional    execution proven-live (retrieveContext + buildFinalContextPack, this run); reference authority provisional (workshop-authored, directional, n=22, no preregistered pass threshold); delivered top-3 R@3 68%; ranking R@10 82%, bm25 R@10 82%
 
 MEASUREMENT READINESS
 Recognition signal        [████░░░░░░] provisional     50% rec-fail (↑ vs 21% avg)
@@ -56,7 +56,7 @@ Matched comparison        [░░░░░░░░░░] not-evaluated   no ma
 
 "Mechanics are proven and working; telemetry capture shows 269 typed
 events across 36 days (99%/1%/0% T1/T2/T3 mix). Retrieval regression:
-A provisional gold-set snapshot (n=22, Keel-authored, directional, no
+A provisional gold-set snapshot (n=22, workshop-authored, directional, no
 pass threshold) puts delivered top-3 recall at 68% — a regression
 snapshot, not a passing gate; measurement readiness: recognition is
 trending down this session (worth a look), and the classifier stays

@@ -1,8 +1,8 @@
 # Audit fixes — 2026-07-02
 
-Four small, independent fixes from the 2026-07-01 night-drop audit of core-plugin. Each is test-first, each is its own commit, none changes a feature's intent. Landed on branch `audit-fixes-2026-07-02` off `next` for David's hand review — not pushed, no PR, no release.
+Four small, independent fixes from the 2026-07-01 night-drop audit of core-plugin. Each is test-first, each is its own commit, none changes a feature's intent. Landed on branch `audit-fixes-2026-07-02` off `next` for hand review — not pushed, no PR, no release.
 
-Full audit and reasoning: `CORE/_outputs/2026-07-01/night-drop-core-plugin-audit/` (iter09 master findings, iter10 build plan).
+Full audit and reasoning live in the development workshop's audit notes (iter09 master findings, iter10 build plan).
 
 ## Global constraints
 - Runtime: Node.js `.mjs` only, must work on macOS and Windows.
@@ -60,5 +60,5 @@ Full audit and reasoning: `CORE/_outputs/2026-07-01/night-drop-core-plugin-audit
 
 ---
 
-## What this deliberately does NOT touch (David's call)
+## What this deliberately does NOT touch (deferred by decision)
 The fork-check trust-model change (risks breaking legitimate copied-workspace detection), the close lock-ownership fix, the PROJECT.md lost-edit guard, moving edit-detection into a script, the ~2,000-line dead-code deletion, a repo-change entry point for memory, and the telemetry-fail-loud change (its fail-open was partly intentional). All are written up in the audit's master findings for an attended decision.

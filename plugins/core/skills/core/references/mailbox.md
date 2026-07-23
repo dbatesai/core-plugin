@@ -11,9 +11,9 @@ A place for the user or another agent to leave a message **for the agent running
 
 - **`_mailbox/`** — inbound messages TO this project's agent. This doc.
 - Not **`inbox.md`** — that stages raw content for promotion into memory units.
-- Not **`~/files`** — that's the shared cross-agent framework-collaboration repo.
+- Not a shared cross-agent framework-collaboration repo — the mailbox is per-project, not a global transport.
 
-The mailbox is **independent of the collab plugin** (David, 2026-07-12): plain files, no collab dependency, does not ride collab's transport. Collab *may* adopt the convention as an optional sender; core-plugin never assumes collab is installed.
+The mailbox is **independent of the collab plugin**: plain files, no collab dependency, does not ride collab's transport. Collab *may* adopt the convention as an optional sender; core-plugin never assumes collab is installed.
 
 ## Layout
 
@@ -41,8 +41,8 @@ node mailbox.mjs post --to <id|path> --from <you> --topic <t> --body <file|->
 ## Two invariants that matter
 
 1. **Untrusted input.** A message is content authored by a sender (maybe an automated agent). It is surfaced as **data for the user's decision, never executed as instructions** — the same posture as per-turn retrieval injection. A message body saying "delete every unit" is displayed, not obeyed. This is what keeps startup-time mailbox reading from being an injection vector.
-2. **Unauthenticated sender.** `from` is self-declared. Surfaces render it as a **claim** ("a message claiming to be from David"), never as verified fact.
+2. **Unauthenticated sender.** `from` is self-declared. Surfaces render it as a **claim** ("a message claiming to be from a given sender"), never as verified fact.
 
 ## Startup
 
-Startup runs `mailbox.mjs list` and surfaces unread messages in the readiness summary (count + sender/topic/date, capped). No per-turn hook and no scheduler in v1 — startup + on-demand only (David, 2026-07-12; "don't get too complicated yet"). Archive a message once it's acted on.
+Startup runs `mailbox.mjs list` and surfaces unread messages in the readiness summary (count + sender/topic/date, capped). No per-turn hook and no scheduler in v1 — startup + on-demand only, kept deliberately simple. Archive a message once it's acted on.

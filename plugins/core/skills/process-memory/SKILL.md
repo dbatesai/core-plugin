@@ -152,7 +152,7 @@ The script is the only writer of the generated block — it sits between `<!-- C
 
 ## Step 5 — PROJECT.md tier discipline (DC-85 Phase 1b + 1c)
 
-**Lifecycle preflight FIRST — the user-authorship boundary (Hale's 2026-07-22 fix).** Before any PROJECT.md writer runs, classify the store's files against the last CORE baseline. This closes the exact gap Hale caught: `/process-memory` used to auto-invoke `compact-project.mjs` with NO edit-detection gate, so an unreconciled user correction to a §Decisions entry got compacted away silently.
+**Lifecycle preflight FIRST — the user-authorship boundary (the 2026-07-22 fix).** Before any PROJECT.md writer runs, classify the store's files against the last CORE baseline. This closes the exact gap a later audit caught: `/process-memory` used to auto-invoke `compact-project.mjs` with NO edit-detection gate, so an unreconciled user correction to a §Decisions entry got compacted away silently.
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" "<project>" --json
