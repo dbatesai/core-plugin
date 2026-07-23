@@ -1,0 +1,538 @@
+/**
+ * render-metrics-artifact — the /metrics artifact-page generator.
+ * Covers:
+ *   - page structure from the approved 2026-07-22 prototype: four
+ *     plain-question sections, trust-tag legend, snapshot banner, both theme
+ *     token blocks, reduced-motion-respecting gauges, hatched empty states;
+ *   - plain-language guarantee: no bare metric jargon in the page chrome;
+ *   - zero external references (same grep standard as the browse generator;
+ *     this page additionally carries no <script> at all);
+ *   - state variants: no-gold-set honesty, rejected-row explanation,
+ *     calibrated-classifier wording, degraded machinery, no-store, absent
+ *     telemetry/recognition;
+ *   - CLI contract: --out required, --json-in replay path, manifest shape
+ *     (content_class aggregates-only), generation receipt;
+ *   - shared helpers: truthful provenance (artifact-provenance.mjs) and the
+ *     generalized publish receipts (artifact-receipts.mjs) — including Hale's
+ *     e0a808f revise: self-contained snapshot identity copied into the
+ *     publish receipt, and published-private refusing to record without a
+ *     consent record (--consent-by + --consent-mechanism), for BOTH kinds.
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, unlinkSync } from 'node:fs';
+import { spawnSync, execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
+  'plugins', 'core', 'skills', 'core', 'scripts');
+const {
+  renderMetricsArtifact, buildMetricsArtifactHtml, sanitizeForEmbed,
+  METRICS_ARTIFACT_MANIFEST_SCHEMA_VERSION, METRICS_ARTIFACT_CONTENT_CLASS, METRICS_ARTIFACT_CONTENT_NOTE,
+} = await import(pathToFileURL(join(SCRIPTS, 'render-metrics-artifact.mjs')).href);
+const { truthfulProducerIdentity } = await import(pathToFileURL(join(SCRIPTS, 'artifact-provenance.mjs')).href);
+const { publishReceiptPathFor } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
+const CLI_PATH = join(SCRIPTS, 'render-metrics-artifact.mjs');
+
+// ---------------------------------------------------------------------------
+// Canonical four-class fixture — the exact shape gatherMetrics()/--json emits.
+// ---------------------------------------------------------------------------
+
+function canonicalMetrics(mutate = () => {}) {
+  const m = {
+    schema_version: '1.0.0',
+    producer: { script: 'metrics-check.mjs', plugin: 'core', plugin_version: '3.13.1', source_sha: 'd'.repeat(40) },
+    generated_at: '2026-07-22T20:00:00.000Z',
+    project: '/tmp/fixture-project',
+    mechanics: {
+      status: 'WORKING',
+      probe: {
+        validate: { pass: true, exit: 0 },
+        retrieve: { pass: true, evidence: 'probe-live-fact' },
+        suppress_retired: { pass: true, evidence: 'zero output (retired never indexed)' },
+        round_trip: true,
+      },
+      store: {
+        present: true,
+        schema: { exit: 0, pass: 290, warn: 0, fail: 0 },
+        integrity: { exit: 0, pass: 290, warn: 0, fail: 0 },
+        warning_triage: { informational: 0, routine_upkeep: 0, attention: 0, attention_items: [] },
+        census: { active: 285, retired: 1, archived: 0, superseded: 3, other: 1, total: 290 },
+        retrieval_log: { files: 37, rows: 277 },
+      },
+      telemetry: {
+        available: true, days: 37, retrievalEvents: 277,
+        rejected: { current: { count: 0, by_code: {} }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 0 },
+        t1Pct: 99, t2Pct: 1, t3Pct: 0,
+        topEscalationTopic: 'agent-config', topEscalationRate: 100,
+      },
+    },
+    regression: {
+      gold: { available: true, n: 22, storeUnits: 290, context3_r3: 15 / 22, ranking_r10: 18 / 22, bm25_r10: 18 / 22 },
+    },
+    readiness: {
+      recognition_signal: { text: 'rec-fail-tier-0: 3/6 turns today (50%) vs 7-day avg 21% ↑ [PROVISIONAL]', age_hours: 1 },
+      calibration: { available: true, labeled_count: 0, min_needed: 100, is_calibrated: false, overall_precision: null, notes: '' },
+    },
+    benefit: { status: 'not-evaluated', reason: 'no matched memory-on/off comparison exists — nothing currently measures whether this helps' },
+    caveats: [],
+  };
+  mutate(m);
+  return m;
+}
+
+const PRODUCER = {
+  script: 'render-metrics-artifact.mjs', plugin: 'core', plugin_version: '3.13.1',
+  source_sha: 'a'.repeat(40), source_sha_from: 'git',
+};
+
+function page(mutate) {
+  return buildMetricsArtifactHtml(canonicalMetrics(mutate), { projectName: 'fixture-project', producer: PRODUCER });
+}
+
+// The chrome = everything except the embedded raw-data <pre> (the one place
+// machine field names legitimately appear, clearly labeled as machine data).
+function chromeOf(html) {
+  return html.replace(/<pre class="mono">[\s\S]*?<\/pre>/, '');
+}
+
+function scratchHome(prefix) {
+  return mkdtempSync(join(tmpdir(), prefix));
+}
+
+function fixtureProject({ workspace = true } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'metrics-artifact-'));
+  if (workspace) writeFileSync(join(root, 'workspace.json'), JSON.stringify({ workspace_id: 'metrics-test-ws' }));
+  const home = join(root, 'home');
+  mkdirSync(home, { recursive: true });
+  return { root, home };
+}
+
+// ---------- structure (the prototype is the spec) ----------
+
+test('page carries the four plain-question sections, legend, banner, verdict, and both theme blocks', () => {
+  const html = page();
+  assert.match(html, /1 &middot; Does the machinery work\?/);
+  assert.match(html, /2 &middot; How good is the memory search\?/);
+  assert.match(html, /3 &middot; Can we trust CORE's self-measurements\?/);
+  assert.match(html, /4 &middot; Does any of this actually help you\?/);
+  assert.match(html, /How to read the colored tags on each line/);
+  assert.match(html, /SNAPSHOT &mdash; DOES NOT UPDATE ITSELF/);
+  assert.match(html, /Ask the agent to republish for fresh numbers\./);
+  assert.match(html, /The storage machinery works\./, 'mechanics verdict, plainly scoped');
+  assert.match(html, /Search quality and real usefulness are judged separately below\./);
+  // Theme system: system preference + explicit override in both directions.
+  assert.match(html, /@media \(prefers-color-scheme: dark\)/);
+  assert.match(html, /:root\[data-theme="dark"\]/);
+  assert.match(html, /:root\[data-theme="light"\]/);
+  // Reduced motion respected: the only animation is opt-in via no-preference.
+  assert.match(html, /@media \(prefers-reduced-motion:no-preference\)/);
+  // Trust tags on rows.
+  assert.match(html, /<span class="chip good">proven-live<\/span>/);
+  assert.match(html, /<span class="chip prov">provisional<\/span>/);
+  assert.match(html, /<span class="chip crit">not-evaluated<\/span>/);
+});
+
+test('gauges render from the data; empty states render hatched, never as a zero bar', () => {
+  const html = page();
+  // Quiz gauge: 15/22 = 68% accent bar.
+  assert.match(html, /<i class="a" style="width:68%">/);
+  // Round-trip pass: full good bar. Recognition estimate: 50% warn bar.
+  assert.match(html, /<i class="g" style="width:100%">/);
+  assert.match(html, /<i class="w" style="width:50%">/);
+  // Hatched empty state: calibration at 0 labeled + the never-evaluated benefit row.
+  assert.ok((html.match(/<div class="gauge empty"><\/div>/g) || []).length >= 2, 'hatched empty gauges present');
+});
+
+test('every number is explained in its sentence; no bare metric jargon in the chrome', () => {
+  const chrome = chromeOf(page());
+  // The prototype's explained renderings.
+  assert.match(chrome, /15 of 22<\/span> quiz questions \(68%\)/);
+  assert.match(chrome, /each with a known correct memory as its answer/);
+  assert.match(chrome, /Widening to the top 10 results/);
+  assert.match(chrome, /answered without checking its memory when it probably should have/);
+  assert.match(chrome, /a human needs to hand-check 100 of its judgments/);
+  assert.match(chrome, /answered by the fast first-pass search/);
+  assert.match(chrome, /every record is well-formed — none were malformed or thrown out/);
+  assert.match(chrome, /memory turned on and turned off/);
+  // Banned insider vocabulary (David's explicit plain-language correction).
+  for (const banned of ['R@3', 'R@10', 'Recall', 'rec-fail', 'bm25', 'BM25', 'tier-0', 'Tier 2', 'gold set', 'gold-set', 'context3', 'calibration pool']) {
+    assert.ok(!chrome.includes(banned), `chrome must not contain bare jargon '${banned}'`);
+  }
+});
+
+test('zero external references; no JavaScript at all', () => {
+  const html = page();
+  assert.doesNotMatch(html, /https?:\/\//, 'no http(s) URL anywhere');
+  assert.doesNotMatch(html, /<link[\s>]/i, 'no <link> elements');
+  assert.doesNotMatch(html, /@import/i, 'no CSS imports');
+  assert.doesNotMatch(html, /url\(/i, 'no CSS url() references');
+  assert.doesNotMatch(html, /\bsrc\s*=/i, 'no src= attributes');
+  assert.doesNotMatch(html, /fetch\s*\(/, 'no fetch calls');
+  assert.doesNotMatch(html, /XMLHttpRequest|WebSocket|EventSource/, 'no network APIs');
+  assert.doesNotMatch(html, /<script/i, 'static page — no script elements at all');
+  assert.doesNotMatch(html, /@font-face/i, 'no font loading');
+});
+
+test('raw-data block embeds the canonical object minus report text and unit-id lists', () => {
+  const metrics = canonicalMetrics((m) => {
+    m.report = 'TERMINAL RENDER TEXT MUST NOT EMBED';
+    m.mechanics.store.warning_triage.attention = 2;
+    m.mechanics.store.warning_triage.attention_items = ['stale-edge: [dc-9-secret-unit-id]', 'bad-status: [obs-8-x]'];
+    m.caveats = ['2 warning(s) need a look: stale-edge: [dc-9-secret-unit-id]'];
+  });
+  const clean = sanitizeForEmbed(metrics);
+  assert.equal(clean.report, undefined, 'terminal report text omitted');
+  assert.equal(clean.mechanics.store.warning_triage.attention_items, undefined, 'unit-id list omitted');
+  assert.equal(clean.mechanics.store.warning_triage.attention_items_omitted, 2, 'count kept in its place');
+  assert.ok(!JSON.stringify(clean).includes('dc-9-secret-unit-id'), 'no unit id survives into the embed');
+  const html = buildMetricsArtifactHtml(metrics, { projectName: 'p', producer: PRODUCER });
+  assert.ok(!html.includes('MUST NOT EMBED'));
+  assert.ok(!html.includes('dc-9-secret-unit-id'));
+  assert.match(html, /&quot;schema_version&quot;/, 'canonical object otherwise embedded');
+});
+
+// ---------- state variants ----------
+
+test('no-gold-set project renders its honest-absence sentence with a hatched gauge', () => {
+  const html = page((m) => {
+    m.regression.gold = { available: false, reason: 'no _tests/retrieval-gold-set.json in this project — nothing exercises Recall@K here yet' };
+  });
+  assert.match(html, /Never measured for this project\./);
+  assert.match(html, /doesn't have that answer key yet/);
+  const chrome = chromeOf(html);
+  assert.ok(!chrome.includes('Recall@K'), 'raw reason jargon never rendered for the absence state');
+  const quizSection = html.split('2 &middot; How good is the memory search?')[1].split('<section>')[0];
+  assert.match(quizSection, /gauge empty/, 'absence renders hatched, not a zero bar');
+});
+
+test('a failed quiz run says so plainly instead of pretending absence', () => {
+  const html = page((m) => {
+    m.regression.gold = { available: false, reason: 'gold-set harness run failed: ENOENT boom' };
+  });
+  assert.match(html, /The quiz could not be run this time\./);
+  assert.match(html, /running it failed, so no measurement happened/);
+});
+
+test('nonzero rejected count renders its plain-language explanation', () => {
+  const html = page((m) => {
+    m.mechanics.telemetry.rejected = {
+      current: { count: 1, by_code: { 'invalid-tier': 1 } },
+      legacy: { count: 2, by_code: { 'missing-field': 2 } },
+      other: { count: 0, by_code: {} }, total: 3,
+    };
+  });
+  assert.match(html, /threw out <b class="num">3<\/b> records whose format was broken/);
+  assert.match(html, /1 in the current record format, 2 in an older record format/);
+  assert.match(html, /broken records are counted, never silently ignored/);
+});
+
+test('all-rejected telemetry is reported as broken record-keeping, not as absence', () => {
+  const html = page((m) => {
+    m.mechanics.telemetry = {
+      available: false,
+      reason: 'no VALID retrieval events recorded — 2 row(s) rejected (current-schema: invalid-tier: 2)',
+      rejected: { current: { count: 2, by_code: { 'invalid-tier': 2 } }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 2 },
+    };
+  });
+  assert.match(html, /Lookup records exist, but every one of them is broken\./);
+  assert.match(html, /different from having no records at all/);
+});
+
+test('calibrated-classifier state renders the verified wording in BOTH readiness rows', () => {
+  const html = page((m) => {
+    m.readiness.calibration = { available: true, labeled_count: 120, min_needed: 100, is_calibrated: true, overall_precision: 0.874, notes: '' };
+  });
+  assert.match(html, /The grader has passed its verification: a human hand-checked <span class="num">120<\/span> of its judgments/);
+  assert.match(html, /the human reviewer agreed with it <b class="num">87%<\/b> of the time/);
+  assert.match(html, /has passed its human verification \(next line\), so the number carries real weight/);
+  assert.ok(!html.includes('smoke alarm'), 'uncalibrated caveat gone once verified');
+  assert.ok(!html.includes('stays officially unverified'), 'unverified wording gone once verified');
+});
+
+test('partial calibration pool renders progress with the unverified caveat intact', () => {
+  const html = page((m) => {
+    m.readiness.calibration = { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false, overall_precision: null, notes: '' };
+  });
+  assert.match(html, /hand-checked <span class="num">22 of the 100<\/span> grader judgments/);
+  assert.match(html, /stays officially unverified/);
+  assert.match(html, /<i class="a" style="width:22%">/);
+  assert.match(html, /treat this as a smoke alarm, not a diagnosis/);
+});
+
+test('DEGRADED machinery leads with what broke, in a red verdict', () => {
+  const html = page((m) => {
+    m.mechanics.status = 'DEGRADED';
+    m.mechanics.probe.round_trip = false;
+    m.mechanics.probe.retrieve = { pass: false, evidence: '' };
+  });
+  assert.match(html, /class="verdict crit"/);
+  assert.match(html, /The storage machinery has a real problem\./);
+  assert.match(html, /searching could not find the memory again/);
+  assert.match(html, /no other number on this page can be trusted/);
+  assert.match(html, /<i class="c" style="width:100%">/, 'failure renders a full crit bar, not a low score');
+});
+
+test('no-store project renders the honest no-store verdict and row', () => {
+  const html = page((m) => {
+    m.mechanics.status = 'MACHINERY-WORKING-NO-STORE';
+    m.mechanics.store = { present: false };
+    m.mechanics.telemetry = { available: false, reason: 'no retrieval events recorded for this project yet' };
+    m.regression.gold = { available: false, reason: 'no _tests/retrieval-gold-set.json in this project — nothing exercises Recall@K here yet' };
+    m.readiness.recognition_signal = null;
+  });
+  assert.match(html, /The machinery works, but this project has no memory store yet\./);
+  assert.match(html, /No memory store exists in this project yet\./);
+  assert.match(html, /No lookup records yet\./);
+  assert.match(html, /No estimate yet\./);
+});
+
+test('memory files needing attention render counts, warn gauge, and census tiles', () => {
+  const html = page((m) => {
+    m.mechanics.status = 'WORKING-WITH-CAVEATS';
+    m.mechanics.store.warning_triage.attention = 3;
+  });
+  assert.match(html, /3 of 290 memory files need attention\./);
+  assert.match(html, /the other 287 passed everything/);
+  assert.match(html, /class="verdict warn"/);
+  assert.match(html, /3 stored memories failed a consistency check/);
+  assert.match(html, /<div class="t">in use<\/div><div class="v">285<\/div>/);
+  assert.match(html, /<div class="t">replaced by newer<\/div><div class="v">3<\/div>/);
+});
+
+// ---------- CLI: --json-in replay path + manifest contract ----------
+
+test('CLI --json-in: renders from a pre-captured canonical object; manifest is aggregates-only and receipted', () => {
+  const { root, home } = fixtureProject();
+  try {
+    const dataPath = join(root, 'metrics.json');
+    writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
+    const out = join(root, 'out', 'metrics.html');
+    const res = spawnSync(process.execPath, [CLI_PATH, root, '--out', out, '--json-in', dataPath, '--home', home], { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    const manifest = JSON.parse(res.stdout);
+    assert.equal(manifest.kind, 'core-metrics-artifact-preflight');
+    assert.equal(manifest.schema_version, METRICS_ARTIFACT_MANIFEST_SCHEMA_VERSION);
+    assert.equal(manifest.content_class, 'aggregates-only');
+    assert.equal(manifest.content_class, METRICS_ARTIFACT_CONTENT_CLASS);
+    assert.equal(manifest.content_note, METRICS_ARTIFACT_CONTENT_NOTE);
+    assert.equal(manifest.data_source, 'json-in');
+    assert.equal(manifest.data_generated_at, '2026-07-22T20:00:00.000Z');
+    assert.equal(manifest.workspace_id, 'metrics-test-ws');
+    assert.equal(manifest.receipt_fallback, false);
+    // Lighter than browse — deliberately no unit-count/sensitivity machinery.
+    assert.ok(!('unit_count' in manifest), 'no unit-count machinery');
+    assert.ok(!('sensitivity_warning' in manifest), 'no sensitivity machinery');
+    const onDisk = readFileSync(out);
+    assert.equal(manifest.total_bytes, onDisk.length, 'total_bytes == real file size');
+    assert.match(onDisk.toString('utf8'), /1 &middot; Does the machinery work\?/);
+    // Generation receipt written under the workspace, content == manifest.
+    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'workspaces', 'metrics-test-ws', 'artifact-receipts')));
+    assert.deepEqual(JSON.parse(readFileSync(manifest.receipt_path, 'utf8')), manifest);
+    // Truthful renderer identity, distinct from the data producer.
+    assert.equal(manifest.producer.script, 'render-metrics-artifact.mjs');
+    assert.equal(manifest.data_producer.script, 'metrics-check.mjs');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI usage errors: missing --out, malformed --json-in, --out inside the store', () => {
+  const { root, home } = fixtureProject();
+  try {
+    mkdirSync(join(root, '_memories'), { recursive: true });
+    const noOut = spawnSync(process.execPath, [CLI_PATH, root, '--home', home], { encoding: 'utf8' });
+    assert.equal(noOut.status, 2);
+    assert.match(noOut.stderr, /--out/);
+
+    const badJson = join(root, 'bad.json');
+    writeFileSync(badJson, JSON.stringify({ hello: 'not canonical' }));
+    const bad = spawnSync(process.execPath,
+      [CLI_PATH, root, '--out', join(root, 'out', 'x.html'), '--json-in', badJson, '--home', home], { encoding: 'utf8' });
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /not a canonical metrics object/);
+    assert.ok(!existsSync(join(root, 'out', 'x.html')), 'nothing written on a refused input');
+
+    const dataPath = join(root, 'metrics.json');
+    writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
+    const inStore = spawnSync(process.execPath,
+      [CLI_PATH, root, '--out', join(root, '_memories', 'x.html'), '--json-in', dataPath, '--home', home], { encoding: 'utf8' });
+    assert.equal(inStore.status, 2);
+    assert.match(inStore.stderr, /refusing --out inside the memory store/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- live path (real gatherMetrics against a tiny store) ----------
+
+test('CLI live path: real gatherMetrics run produces a truthful manifest and page', () => {
+  const { root, home } = fixtureProject();
+  try {
+    const mem = join(root, '_memories');
+    mkdirSync(mem, { recursive: true });
+    writeFileSync(join(mem, 'obs-1-fixture.md'),
+      '---\nid: obs-1-fixture\ntype: observation\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-01-01\nlast-reviewed: 2026-01-01\ntopics: [fixture]\nconfidence-level: sourced\nedges: []\n---\n\n# obs-1-fixture\n\nA fixture fact.\n');
+    const out = join(root, 'out', 'live.html');
+    const res = spawnSync(process.execPath, [CLI_PATH, root, '--out', out, '--home', home], { encoding: 'utf8', timeout: 120000 });
+    assert.equal(res.status, 0, res.stderr);
+    const manifest = JSON.parse(res.stdout);
+    assert.equal(manifest.data_source, 'live');
+    assert.ok(manifest.mechanics_status, 'mechanics status recorded');
+    assert.ok(manifest.data_generated_at, 'data timestamp from the live gather');
+    const html = readFileSync(out, 'utf8');
+    assert.match(html, /Passed, demonstrated just now\./, 'live round-trip proof rendered');
+    assert.match(html, /4 &middot; Does any of this actually help you\?/);
+    assert.match(html, /Never measured\./, 'benefit honesty intact on a live run');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- shared provenance helper ----------
+
+test('truthfulProducerIdentity: in a git checkout, the SHA is the real HEAD and the script name is the caller\'s', async (t) => {
+  let head;
+  try {
+    head = execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch {
+    t.skip('not running from a git checkout');
+    return;
+  }
+  const id = truthfulProducerIdentity('some-generator.mjs');
+  assert.equal(id.script, 'some-generator.mjs');
+  assert.equal(id.source_sha, head);
+  assert.equal(id.source_sha_from, 'git');
+});
+
+test('renderer producer in the page footer names the generating script and the live SHA source', async (t) => {
+  let head;
+  try {
+    head = execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch { t.skip('not running from a git checkout'); return; }
+  const { root, home } = fixtureProject();
+  try {
+    const dataPath = join(root, 'metrics.json');
+    writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
+    const { manifest, html } = await renderMetricsArtifact(root, { outPath: join(root, 'out', 'v.html'), jsonIn: dataPath, home });
+    assert.equal(manifest.producer.source_sha, head, 'renderer identity is the REAL current tree HEAD');
+    assert.equal(manifest.producer.source_sha_from, 'git');
+    assert.ok(html.includes(head.slice(0, 12)), 'page footer carries the real tree SHA');
+    assert.match(html, /read live from the source checkout/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- shared publish receipts (both kinds through one helper) ----------
+
+async function generateMetricsReceipt() {
+  const { root, home } = fixtureProject();
+  const dataPath = join(root, 'metrics.json');
+  writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
+  const { manifest } = await renderMetricsArtifact(root, { outPath: join(root, 'out', 'v.html'), jsonIn: dataPath, home });
+  return { root, home, genPath: manifest.receipt_path };
+}
+
+test('--record-publish on a metrics generation receipt lands kind core-metrics-artifact-publish, self-contained', async () => {
+  const { root, genPath } = await generateMetricsReceipt();
+  try {
+    const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published-private',
+      '--artifact-url', 'https://claude.ai/code/artifact/test-1111',
+      '--private-verified-evidence', 'gallery shows private; share menu never opened',
+      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    const receiptPath = publishReceiptPathFor(genPath);
+    // Self-containment (Hale's e0a808f revise): delete the generation receipt,
+    // the publish receipt must still carry the snapshot identity on its own.
+    unlinkSync(genPath);
+    const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
+    assert.equal(receipt.kind, 'core-metrics-artifact-publish');
+    assert.equal(receipt.publish_status, 'published-private');
+    assert.equal(receipt.data_generated_at, '2026-07-22T20:00:00.000Z', 'data-gathering instant copied into the receipt');
+    assert.ok(receipt.generation_generated_at, 'generation instant copied into the receipt');
+    assert.equal(receipt.snapshot_id, null, 'metrics pages have no store snapshot — recorded honestly as null');
+    assert.equal(receipt.consent.granted_by, 'David');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('published-private REFUSES to record without a consent record (--consent-by + --consent-mechanism)', async () => {
+  const { root, genPath } = await generateMetricsReceipt();
+  try {
+    const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published-private',
+      '--private-verified-evidence', 'gallery shows private'],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 2);
+    assert.match(res.stderr, /--consent-by and --consent-mechanism/);
+    assert.ok(!existsSync(publishReceiptPathFor(genPath)), 'refusal writes nothing');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('browse-kind publish receipt copies snapshot_id from the generation receipt (self-contained after deletion)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'receipts-snapshot-'));
+  const genPath = join(dir, '2026-07-22T21-00-00-000Z.json');
+  try {
+    writeFileSync(genPath, JSON.stringify({
+      kind: 'core-memory-browse-preflight',
+      generated_at: '2026-07-22T21:00:00.000Z',
+      snapshot_id: 'snap-abc123def456',
+    }));
+    const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'published-private',
+      '--private-verified-evidence', 'verified private in gallery',
+      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    unlinkSync(genPath);
+    const receipt = JSON.parse(readFileSync(publishReceiptPathFor(genPath), 'utf8'));
+    assert.equal(receipt.kind, 'core-memory-browse-publish', 'kind mapped from the generation kind');
+    assert.equal(receipt.snapshot_id, 'snap-abc123def456', 'snapshot id survives on its own');
+    assert.equal(receipt.generation_generated_at, '2026-07-22T21:00:00.000Z');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('declined outcomes record without consent flags; unknown generation kinds are refused', async () => {
+  const { root, genPath } = await generateMetricsReceipt();
+  try {
+    const declined = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'declined'], { encoding: 'utf8' });
+    assert.equal(declined.status, 0, declined.stderr);
+    const receipt = JSON.parse(readFileSync(publishReceiptPathFor(genPath), 'utf8'));
+    assert.equal(receipt.publish_status, 'declined');
+    assert.equal(receipt.published_at, null);
+
+    const bogusPath = join(root, 'bogus.json');
+    writeFileSync(bogusPath, JSON.stringify({ kind: 'not-a-real-kind' }));
+    const bogus = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', bogusPath, '--status', 'declined'], { encoding: 'utf8' });
+    assert.equal(bogus.status, 2);
+    assert.match(bogus.stderr, /not a generation receipt/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('--record-revocation stamps revoked_at on a metrics publish receipt', async () => {
+  const { root, genPath } = await generateMetricsReceipt();
+  try {
+    spawnSync(process.execPath, [CLI_PATH, '--record-publish',
+      '--generation-receipt', genPath, '--status', 'failed'], { encoding: 'utf8' });
+    const p = publishReceiptPathFor(genPath);
+    const res = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    assert.ok(JSON.parse(readFileSync(p, 'utf8')).revoked_at);
+    const again = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
+    assert.equal(again.status, 2);
+    assert.match(again.stderr, /already revoked/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- no-workspace fallback ----------
+
+test('no workspace.json: receipt lands in the flagged fallback location', async () => {
+  const { root, home } = fixtureProject({ workspace: false });
+  try {
+    const dataPath = join(root, 'metrics.json');
+    writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
+    const { manifest, receiptWritten } = await renderMetricsArtifact(root, { outPath: join(root, 'out', 'v.html'), jsonIn: dataPath, home });
+    assert.equal(receiptWritten, true);
+    assert.equal(manifest.receipt_fallback, true);
+    assert.equal(manifest.workspace_id, null);
+    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'artifact-receipts')));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

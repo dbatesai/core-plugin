@@ -74,6 +74,13 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // genuinely-new CLI tool with its own entry point (lifecycle-core.mjs is
   // import-only, no entry guard). 54 → 55 (2026-07-22): render-browse-artifact.mjs,
   // the /memory-view snapshot-page generator — a genuinely-new CLI tool with its
-  // own entry point, not a copy. Still target one shared isCliEntry() helper.
-  assert.ok(n <= 55, `CLI-entry-guard occurrences grew past baseline 55 (target: one shared helper): ${n}`);
+  // own entry point, not a copy. 55 → 57 (2026-07-22, metrics artifact):
+  // render-metrics-artifact.mjs, the /metrics artifact-page generator — a
+  // genuinely-new CLI tool with its own entry point; and
+  // artifact-provenance.mjs, which uses import.meta.url for realpath-from-
+  // module resolution (not an entry guard) — it is itself a CONSOLIDATION,
+  // extracting the duplicated truthful-producer-identity logic into one owner
+  // (artifact-receipts.mjs, the receipts consolidation, needs no
+  // import.meta.url at all). Still target one shared isCliEntry() helper.
+  assert.ok(n <= 57, `CLI-entry-guard occurrences grew past baseline 57 (target: one shared helper): ${n}`);
 });

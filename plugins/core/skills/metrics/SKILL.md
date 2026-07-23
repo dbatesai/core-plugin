@@ -1,10 +1,11 @@
 ---
 name: metrics
-description: Run an evidence-first health check of the CORE memory system for the project in the current directory, and present FOUR SEPARATE, honestly-labeled evidence classes — never one blended verdict — mechanics (a live round-trip PROOF, write→validate→index→retrieve→suppress on a throwaway store, fresh every run, this store's validator counts and unit census, plus plain-count telemetry capture — never a percentage), retrieval regression (a provisional gold-set snapshot when the project has a pre-registered gold set — the run is live, the reference answer key is not), measurement readiness (the recognition signal and the calibration pool that gates it), and user benefit (honestly "not evaluated" — nothing in this codebase measures that yet). Every line carries an honest trust label (proven-live / direct / proxy / provisional / not-evaluated). Use whenever the user runs /metrics, asks "is memory working", "prove the memory system works", "memory health", "show me the memory metrics", "can I trust the store", or wants evidence rather than claims about storage and retrieval. Do NOT use for general project status (that's PROJECT.md) or for full hygiene passes (/process-memory).
+description: Run an evidence-first health check of the CORE memory system for the project in the current directory, and present it artifact-first on harnesses with an artifact surface — a rich, self-contained, plain-language HTML page generated mechanically from the same canonical data and published, with visible narration, as a private hosted artifact — with the compact terminal render as the quick view and the fallback. Reports FOUR SEPARATE, honestly-labeled evidence classes — never one blended verdict — mechanics (a live round-trip PROOF, write→validate→index→retrieve→suppress on a throwaway store, fresh every run, this store's validator counts and unit census, plus plain-count telemetry capture — never a percentage), retrieval regression (a provisional gold-set snapshot when the project has a pre-registered gold set — the run is live, the reference answer key is not), measurement readiness (the recognition signal and the calibration pool that gates it), and user benefit (honestly "not evaluated" — nothing in this codebase measures that yet). Every line carries an honest trust label (proven-live / direct / proxy / provisional / not-evaluated). Use whenever the user runs /metrics, asks "is memory working", "prove the memory system works", "memory health", "show me the memory metrics", "can I trust the store", or wants evidence rather than claims about storage and retrieval. Do NOT use for general project status (that's PROJECT.md) or for full hygiene passes (/process-memory).
 user-invocable: true
 allowed-tools:
   - Read
   - Bash
+  - Artifact
 ---
 
 # `/metrics` — is the memory system working, with proof
@@ -30,9 +31,9 @@ The script gathers evidence for four separate classes — see "Evidence classes"
 3. **Measurement readiness** — is the instrumentation itself ready to be trusted? The recognition signal (a provisional need/failure classifier) and the calibration pool that gates it. Neither is retrieval regression or user benefit.
 4. **User benefit** — always renders, and always honestly says "not evaluated": nothing in this codebase currently runs a matched memory-on/off comparison, so there is no evidence to report yet.
 
-## Step 2 — relay the result verbatim
+## Step 2 — relay the terminal report verbatim (the quick view)
 
-Print exactly what the script printed on stdout — nothing added, nothing reworded. It has this shape (numbers illustrative; a project with no gold set or no retrieval history gets an honest absence line instead of the Gold-set-snapshot/Telemetry-capture rows below):
+Print exactly what the script printed on stdout — nothing added, nothing reworded. This inline render is the **quick/terminal view**: it always runs, it is never removed, and it is the whole answer for a quick check or on a harness with no artifact surface. The richer display is the artifact page in Step 4. It has this shape (numbers illustrative; a project with no gold set or no retrieval history gets an honest absence line instead of the Gold-set-snapshot/Telemetry-capture rows below):
 
 ```
 MECHANICS: HEALTHY
@@ -95,4 +96,28 @@ Trust labels mean exactly this, and say so if asked: **proven-live** = demonstra
 
 The script writes this for you — it's part of the report, in quotes, right after the bars. Its rules, so you can sanity-check it or explain it if asked: every label and number is explained in the sentence it appears in; it speaks to mechanics (incl. telemetry capture), retrieval regression, measurement readiness, and user benefit on a normal run — never just the first; and if the verdict is DEGRADED it leads with what failed and the single next action instead of anything else, with nothing appended about the other classes that turn (a mechanics failure means nothing else here is trustworthy to discuss yet). Never pad it beyond the three sentences, never cite the recognition signal or telemetry capture as user-benefit proof, never claim retrieval correctness from the telemetry-capture row (it counts events, not correctness), and never let the gold-set snapshot read as more than what it is — a small, directional, provisional product-path regression check, not a passing gate and not a claim that the answer helped anyone.
 
-Never: pad the reply with sections beyond verdict/four-class-blocks/narrative, hand-edit the bars or narrative text, claim user-benefit evidence exists when the row says it doesn't, claim the gold-set snapshot is `proven-live` (it is `provisional`), or run the check against a guessed `CORE_ROOT`.
+## Step 4 — the artifact display (the primary display on harnesses that have one)
+
+On a harness with an artifact surface (Claude Code today), the full report displays **artifact-first**: a self-contained, plain-language HTML page — the four sections as plain questions, every number explained in its sentence, an honest trust tag on every line — generated mechanically from the SAME canonical four-class object the terminal render consumes (one taxonomy, never a second). Publish it as the primary display whenever the user runs `/metrics` for more than a quick glance — **narrate-and-proceed** (David's standing authorization, 2026-07-22): no per-publish permission gate; you state what you're publishing as you do it, and the receipts record it:
+
+1. **Generate locally:**
+   ```bash
+   node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> \
+     --out <scratch-path>/core-metrics.html
+   ```
+   `--out` goes to a scratch/temp location — never inside the project, never inside `_memories/` (the script refuses the latter itself). Add `--json-in <path>` to render from a pre-captured `--json` object instead of re-running the check. The script never uploads anything.
+2. **Narrate the manifest in-flow.** Stdout is a lightweight preflight manifest (JSON): `content_class: "aggregates-only"` with its fixed content note (this page embeds aggregate numbers and topic-level labels only — no unit bodies, no unit ids, so there is no unit-count/sensitivity machinery to review), byte count, generated-at, and the truthful producer identity (real git commit in a source checkout, release-manifest identity in an installed tree — the script fails closed rather than render unknown provenance). State the content class, byte count, and identity plainly as part of publishing — visible narration, not a permission gate.
+3. **Publish, privately, and report the URL.** Publish via the Artifact tool as a **private** page; republish to the same file path to keep a stable URL. **The one real ask-first boundary:** if the page would carry another party's data, or anything the user has flagged sensitive, ask before publishing — the standing authorization covers the user's own project data to their own private account, nothing broader. And never publish in the background or on a schedule without narrating it — the discipline is visibility, every publish stated in the conversation where it happens.
+4. **Record the outcome** — the same audit-trail mechanism `/memory-view` uses, shared code, same receipts directory:
+   ```bash
+   node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" --record-publish \
+     --generation-receipt <receipt_path from the manifest> \
+     --status published-private|declined|failed \
+     [--artifact-url <url>] [--private-verified-evidence "<how privacy was confirmed>"] \
+     [--consent-by <who>] [--consent-mechanism "<what authorized this publish>"]
+   ```
+   `published-private` requires the evidence AND the authorization fields — the script refuses without them. For a narrated autonomous publish, record the standing authorization itself (e.g. `--consent-by David --consent-mechanism "standing authorization for artifact publishes, David 2026-07-22"`); a per-instance yes goes in verbatim when one was given. Declined and failed get recorded too. The publish receipt lands as `<generation-receipt>.publish.json` with kind `core-metrics-artifact-publish`, self-contained (it carries the snapshot identity itself, not just a pointer to the generation receipt).
+
+**On Codex (no artifact surface — DC-75, the cross-harness capability contract):** say so by name and fall back to the local file — give the user the exact `--out` path and how to open it. Never fake a publish, never claim a hosted URL that does not exist. The terminal render from Step 2 remains the primary display there.
+
+Never: pad the reply with sections beyond verdict/four-class-blocks/narrative, hand-edit the bars or narrative text, claim user-benefit evidence exists when the row says it doesn't, claim the gold-set snapshot is `proven-live` (it is `provisional`), run the check against a guessed `CORE_ROOT`, publish without narrating it in the conversation, hand-assemble or edit the generated HTML, or let the artifact page and the terminal render source different data objects.

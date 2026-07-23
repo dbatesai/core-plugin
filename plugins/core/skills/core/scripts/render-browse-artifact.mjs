@@ -66,68 +66,44 @@
  * --out, bad --scope, --out inside _memories/, bad record-mode input);
  * 1 fatal failure (including fail-closed producer identity).
  */
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, realpathSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname, basename, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
-import { producerIdentity as metricsProducerIdentity, gatherMetrics } from './metrics-check.mjs';
-import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { gatherMetrics } from './metrics-check.mjs';
+import { truthfulProducerIdentity } from './artifact-provenance.mjs';
+import {
+  PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor,
+  recordPublishOutcome, recordRevocation, runRecordCli, generationReceiptLocation,
+} from './artifact-receipts.mjs';
 
 export const BROWSE_MANIFEST_SCHEMA_VERSION = '1.0.0';
-export const PUBLISH_RECEIPT_SCHEMA_VERSION = '1.0.0';
-export const PUBLISH_STATUSES = ['declined', 'failed', 'published-private'];
+// Re-exported so existing consumers (skill docs, tests) keep one import site;
+// the implementations moved to the shared artifact-receipts.mjs when the
+// metrics artifact generator became their second consumer (2026-07-22).
+export { PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor, recordPublishOutcome, recordRevocation };
 
 // Fixed sensitivity warning (Hale condition 2) — one string, stable across
 // runs, so the skill can relay it verbatim and tests can assert it exactly.
 export const SENSITIVITY_WARNING =
   'SENSITIVITY: this file embeds the FULL BODIES of the memory units counted above — real project ' +
-  'content, not anonymized. Publishing uploads that content to a hosted service. Review the unit ' +
-  'count, byte count, and scope, then give an explicit go-ahead for THIS publish. There is no ' +
-  'standing consent: a previous yes never carries to the next publish.';
-
-const _moduleDir = dirname(fileURLToPath(import.meta.url));
+  'content, not anonymized. Publishing uploads that content to a hosted service. State the unit ' +
+  'count, byte count, and scope in the conversation when publishing — every publish is narrated, ' +
+  'receipted, and private by default. Content carrying another party\'s data, or anything the user ' +
+  'has flagged sensitive, still needs an explicit go-ahead before it goes up.';
 
 /**
- * Truthful producer identity (Hale condition 6, 2026-07-22 HOLD correction 1).
- *
- * In a source Git checkout, the page must carry the REAL current tree identity
- * — `git rev-parse HEAD` of the plugin source tree this script actually runs
- * from — never a stale release stamp. Resolution starts from the executing
- * module's realpath (the same realpath-from-module discipline
- * resolve-plugin-root.mjs documents; cwd is never consulted). The SHA is only
- * accepted if THIS script file is tracked in that repo, which guards against
- * an installed copy that happens to sit inside an unrelated Git repo
- * inheriting that repo's SHA as false provenance.
- *
- * In an installed/package tree (no git checkout), the stamped manifest
- * identity is used, as before. If NEITHER source can establish a SHA,
- * `source_sha` stays null and renderBrowseArtifact fails closed — no
- * "unknown-sha" page is ever rendered for publish.
- *
- * `source_sha_from` says which source won: 'git' | 'manifest' | null.
+ * Truthful producer identity (Hale condition 6, 2026-07-22 HOLD correction 1):
+ * real git HEAD in a source checkout (tracked-file guarded), stamped manifest
+ * identity in an installed tree, fail closed with neither. The implementation
+ * lives in the shared artifact-provenance.mjs (extracted 2026-07-22 when the
+ * metrics artifact generator became its second consumer); this wrapper stamps
+ * this generator's own script name into the identity.
  */
 export function producerIdentity() {
-  const identity = { ...metricsProducerIdentity(), script: 'render-browse-artifact.mjs', source_sha_from: null };
-  let realDir;
-  try { realDir = realpathSync(_moduleDir); } catch { realDir = _moduleDir; }
-  try {
-    const head = execFileSync('git', ['-C', realDir, 'rev-parse', 'HEAD'],
-      { stdio: ['ignore', 'pipe', 'ignore'], encoding: 'utf8' }).trim();
-    // Provenance guard: the HEAD SHA describes this script only if this
-    // script is tracked in that repo.
-    execFileSync('git', ['-C', realDir, 'ls-files', '--error-unmatch', join(realDir, 'render-browse-artifact.mjs')],
-      { stdio: 'ignore' });
-    if (/^[0-9a-f]{40}$/.test(head)) {
-      identity.source_sha = head;
-      identity.source_sha_from = 'git';
-      return identity;
-    }
-  } catch { /* not a source checkout (or no git binary) — fall through to the stamped manifest */ }
-  identity.source_sha_from = identity.source_sha ? 'manifest' : null;
-  return identity;
+  return truthfulProducerIdentity('render-browse-artifact.mjs');
 }
 
 // ============================================================
@@ -643,18 +619,6 @@ export function buildArtifactHtml({ units, meta }) {
 // Orchestration — generate, manifest, receipt.
 // ============================================================
 
-function sanitizeTimestamp(iso) {
-  // Windows filenames cannot carry ':'; keep the ISO instant readable.
-  return String(iso).replace(/[:.]/g, '-');
-}
-
-function readWorkspaceId(projectDir) {
-  try {
-    const ws = JSON.parse(readFileSync(join(resolve(projectDir), 'workspace.json'), 'utf8'));
-    return typeof ws.workspace_id === 'string' && ws.workspace_id.trim() ? ws.workspace_id : null;
-  } catch { return null; }
-}
-
 export async function renderBrowseArtifact(projectDir, {
   outPath,
   scope = 'active',
@@ -719,11 +683,8 @@ export async function renderBrowseArtifact(projectDir, {
   mkdirSync(dirname(outAbs), { recursive: true });
   writeFileSync(outAbs, html);
 
-  const workspaceId = readWorkspaceId(root);
-  const receiptDir = workspaceId
-    ? join(home, '.core', 'workspaces', workspaceId, 'artifact-receipts')
-    : join(home, '.core', 'artifact-receipts'); // no workspace.json — keep the audit trail anyway, flagged below
-  const receiptPath = join(receiptDir, `${sanitizeTimestamp(generatedAt)}.json`);
+  // No workspace.json → the flagged fallback location; the audit trail is kept anyway.
+  const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({ home, projectDir: root, generatedAt });
 
   const manifest = {
     kind: 'core-memory-browse-preflight',
@@ -764,126 +725,15 @@ export async function renderBrowseArtifact(projectDir, {
 // ============================================================
 // Post-publish receipt (Hale correction 2, 2026-07-22 HOLD) — separate from
 // the preflight-generation receipt above. The generation receipt records what
-// was generated and offered; THIS record is the audit trail of what actually
-// happened at the consent/publish boundary — including declined and failed
-// outcomes, so a "no" leaves a record too. Schema matches the manually-
-// authored first real receipt at
-// ~/.core/workspaces/core-framework/artifact-receipts/2026-07-22T22-41-34-360Z.publish.json
-// (same field names; extra fields in hand-written receipts are preserved on
-// revocation). File lands atomically as `<generation-receipt>.publish.json`
-// beside the generation receipt, linked by basename.
+// was generated and offered; the publish receipt is the audit trail of what
+// actually happened at the consent/publish boundary — including declined and
+// failed outcomes, so a "no" leaves a record too. Implementation shared with
+// every artifact generator via artifact-receipts.mjs (kind mapping:
+// core-memory-browse-preflight -> core-memory-browse-publish); re-exported
+// above so this module stays the browse flow's single import site.
 // ============================================================
 
-export function publishReceiptPathFor(generationReceiptPath) {
-  const p = resolve(generationReceiptPath);
-  return p.endsWith('.json') ? p.slice(0, -'.json'.length) + '.publish.json' : p + '.publish.json';
-}
-
-export function recordPublishOutcome({
-  generationReceiptPath, status, artifactUrl = null,
-  privateVerifiedEvidence = null, consentBy = null, consentMechanism = null,
-  note = null, now = () => new Date(),
-} = {}) {
-  if (!PUBLISH_STATUSES.includes(status)) {
-    throw Object.assign(new Error(`--status must be one of: ${PUBLISH_STATUSES.join(', ')} (got '${status}')`), { code: 'BAD_STATUS' });
-  }
-  const genPath = resolve(generationReceiptPath);
-  let gen;
-  try { gen = JSON.parse(readFileSync(genPath, 'utf8')); }
-  catch (e) {
-    throw Object.assign(new Error(`cannot read generation receipt ${genPath}: ${e.message}`), { code: 'BAD_GENERATION_RECEIPT' });
-  }
-  if (gen.kind !== 'core-memory-browse-preflight') {
-    throw Object.assign(new Error(`${genPath} is not a generation receipt (kind '${gen.kind}', expected 'core-memory-browse-preflight')`), { code: 'BAD_GENERATION_RECEIPT' });
-  }
-  if (status === 'published-private' && !privateVerifiedEvidence) {
-    throw Object.assign(new Error(
-      "--status published-private requires --private-verified-evidence — state how privacy was actually confirmed (condition 3); without evidence the publish is 'failed', not 'published-private'"), { code: 'EVIDENCE_REQUIRED' });
-  }
-  const outPath = publishReceiptPathFor(genPath);
-  if (existsSync(outPath)) {
-    throw Object.assign(new Error(`publish receipt already exists at ${outPath} — one outcome per generation; use --record-revocation to revoke, or regenerate for a new publish`), { code: 'RECEIPT_EXISTS' });
-  }
-  const at = now().toISOString();
-  const receipt = {
-    kind: 'core-memory-browse-publish',
-    schema_version: PUBLISH_RECEIPT_SCHEMA_VERSION,
-    generation_receipt: basename(genPath),
-    publish_status: status,
-    recorded_at: at,
-    published_at: status === 'published-private' ? at : null,
-    artifact_url: artifactUrl,
-    consent: (consentBy || consentMechanism)
-      ? { granted_by: consentBy, granted_at: at, mechanism: consentMechanism }
-      : null,
-    private_verified: status === 'published-private'
-      ? { at, evidence: privateVerifiedEvidence }
-      : null,
-    revoked_at: null,
-    ...(note ? { note } : {}),
-  };
-  atomicWriteFileSync(outPath, JSON.stringify(receipt, null, 2) + '\n');
-  return { receipt, path: outPath };
-}
-
-export function recordRevocation(publishReceiptPath, { now = () => new Date() } = {}) {
-  const p = resolve(publishReceiptPath);
-  let receipt;
-  try { receipt = JSON.parse(readFileSync(p, 'utf8')); }
-  catch (e) {
-    throw Object.assign(new Error(`cannot read publish receipt ${p}: ${e.message}`), { code: 'BAD_PUBLISH_RECEIPT' });
-  }
-  if (receipt.kind !== 'core-memory-browse-publish') {
-    throw Object.assign(new Error(`${p} is not a publish receipt (kind '${receipt.kind}', expected 'core-memory-browse-publish')`), { code: 'BAD_PUBLISH_RECEIPT' });
-  }
-  if (receipt.revoked_at) {
-    throw Object.assign(new Error(`publish receipt ${p} is already revoked (revoked_at ${receipt.revoked_at})`), { code: 'ALREADY_REVOKED' });
-  }
-  receipt.revoked_at = now().toISOString();
-  atomicWriteFileSync(p, JSON.stringify(receipt, null, 2) + '\n');
-  return { receipt, path: p };
-}
-
 // ---------- CLI ----------
-
-const RECORD_USAGE_CODES = new Set([
-  'BAD_STATUS', 'BAD_GENERATION_RECEIPT', 'EVIDENCE_REQUIRED',
-  'RECEIPT_EXISTS', 'BAD_PUBLISH_RECEIPT', 'ALREADY_REVOKED', 'BAD_OPTION', 'MISSING_ARG',
-]);
-
-function recordCli(argv) {
-  const opts = {};
-  let mode = null;
-  try {
-    for (let i = 0; i < argv.length; i++) {
-      const a = argv[i];
-      if (a === '--record-publish') mode = 'publish';
-      else if (a === '--record-revocation') { mode = 'revoke'; opts.publishReceiptPath = argv[++i]; }
-      else if (a === '--generation-receipt') opts.generationReceiptPath = argv[++i];
-      else if (a === '--status') opts.status = argv[++i];
-      else if (a === '--artifact-url') opts.artifactUrl = argv[++i];
-      else if (a === '--private-verified-evidence') opts.privateVerifiedEvidence = argv[++i];
-      else if (a === '--consent-by') opts.consentBy = argv[++i];
-      else if (a === '--consent-mechanism') opts.consentMechanism = argv[++i];
-      else if (a === '--note') opts.note = argv[++i];
-      else throw Object.assign(new Error(`unknown option ${a} in record mode`), { code: 'BAD_OPTION' });
-    }
-    let result;
-    if (mode === 'publish') {
-      if (!opts.generationReceiptPath) throw Object.assign(new Error('--record-publish requires --generation-receipt <path>'), { code: 'MISSING_ARG' });
-      if (!opts.status) throw Object.assign(new Error('--record-publish requires --status declined|failed|published-private'), { code: 'MISSING_ARG' });
-      result = recordPublishOutcome(opts);
-    } else {
-      if (!opts.publishReceiptPath) throw Object.assign(new Error('--record-revocation requires the publish receipt path'), { code: 'MISSING_ARG' });
-      result = recordRevocation(opts.publishReceiptPath);
-    }
-    process.stdout.write(JSON.stringify({ publish_receipt_path: result.path, receipt: result.receipt }, null, 2) + '\n');
-    return 0;
-  } catch (e) {
-    process.stderr.write(`render-browse-artifact: ${e.message}\n`);
-    return RECORD_USAGE_CODES.has(e.code) ? 2 : 1;
-  }
-}
 
 function parseArgs(argv) {
   const opts = { excludeTopics: [], scope: 'active', outPath: null, home: null, noMetrics: false };
@@ -904,7 +754,7 @@ function parseArgs(argv) {
 
 async function main(argv) {
   if (argv.includes('--record-publish') || argv.includes('--record-revocation')) {
-    return recordCli(argv);
+    return runRecordCli(argv, { label: 'render-browse-artifact' });
   }
   let opts;
   try { opts = parseArgs(argv); } catch (e) {
