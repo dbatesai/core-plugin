@@ -157,6 +157,15 @@ test('rejected_top is bounded to TURN_CAPTURE_MAX_REJECTED entries', () => {
   assert.equal(row.rejected_top[0].id, 'u-0');
 });
 
+test('the cutoff candidate score (first dropped beyond the bound) is recorded for tail density (Agy, Gate A)', () => {
+  const many = Array.from({ length: 50 }, (_, i) => ({ id: `u-${i}`, score: 50 - i, source_stage: 'ranked' }));
+  const row = normalizeTurnEvidenceRow(goodRow({ rejected_top: many }));
+  assert.equal(row.rejected_cutoff_score, 50 - TURN_CAPTURE_MAX_REJECTED, 'score of the 21st candidate');
+  // nothing dropped → null, honestly
+  const small = normalizeTurnEvidenceRow(goodRow());
+  assert.equal(small.rejected_cutoff_score, null);
+});
+
 test('prompt_text byte-capped at TURN_CAPTURE_MAX_PROMPT_BYTES with honest truncation record', () => {
   const huge = 'x'.repeat(TURN_CAPTURE_MAX_PROMPT_BYTES + 5000);
   const row = normalizeTurnEvidenceRow(goodRow({ prompt_text: huge }));
@@ -239,6 +248,28 @@ test('health counts attempts on success too', () => {
     const health = readCaptureHealth(project);
     assert.equal(health.attempts, 2);
     assert.equal(health.failures, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('health tracks consecutive failures and a success resets the streak (Agy tripwire floor, Gate A)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-streak-'));
+  try {
+    const project = makeProject(root);
+    const env = cleanEnv();
+    assert.equal(captureTurnEvidence(project, goodRow(), { env, now: '2026-07-24T21:00:00Z' }).written, true);
+    // squat the stream dir to force failures
+    rmSync(turnCaptureDir(project), { recursive: true, force: true });
+    writeFileSync(turnCaptureDir(project), 'squatter');
+    captureTurnEvidence(project, goodRow(), { env, now: '2026-07-24T21:00:01Z' });
+    captureTurnEvidence(project, goodRow(), { env, now: '2026-07-24T21:00:02Z' });
+    assert.equal(readCaptureHealth(project).consecutive_failures, 2);
+    // clear the squatter — a success resets the streak, failures total stays
+    rmSync(turnCaptureDir(project), { force: true });
+    assert.equal(captureTurnEvidence(project, goodRow(), { env, now: '2026-07-24T21:00:03Z' }).written, true);
+    const health = readCaptureHealth(project);
+    assert.equal(health.consecutive_failures, 0);
+    assert.equal(health.failures, 2);
+    assert.equal(health.attempts, 4);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

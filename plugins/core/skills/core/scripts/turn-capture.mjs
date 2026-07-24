@@ -162,13 +162,20 @@ export function normalizeTurnEvidenceRow(input) {
     };
   });
 
-  const rejected = (Array.isArray(input.rejected_top) ? input.rejected_top : [])
+  const rejectedAll = Array.isArray(input.rejected_top) ? input.rejected_top : [];
+  const rejected = rejectedAll
     .slice(0, TURN_CAPTURE_MAX_REJECTED)
     .map((r) => ({
       id: strOrNull(r && r.id, 200),
       score: numOrNull(r && r.score),
       source_stage: strOrNull(r && r.source_stage, 40),
     }));
+  // Tail density (Agy, Gate A): the score of the FIRST candidate the bound
+  // dropped, so a reader knows how hot the truncated tail was. Null when
+  // nothing was dropped.
+  const rejectedCutoffScore = rejectedAll.length > TURN_CAPTURE_MAX_REJECTED
+    ? numOrNull(rejectedAll[TURN_CAPTURE_MAX_REJECTED] && rejectedAll[TURN_CAPTURE_MAX_REJECTED].score)
+    : null;
 
   const truncation = input.truncation && typeof input.truncation === 'object'
     ? {
@@ -196,6 +203,7 @@ export function normalizeTurnEvidenceRow(input) {
     pack_text_truncated: pack.truncated,
     delivered,
     rejected_top: rejected,
+    rejected_cutoff_score: rejectedCutoffScore,
     truncation,
     store_signature: strOrNull(input.store_signature, 120),
     producer_version: strOrNull(input.producer_version, 24) || 'unknown',
@@ -233,13 +241,19 @@ function bumpHealth(projectDir, wsId, { failed, reason, ts }) {
     const base = resolveStoragePath(projectDir, { workspaceId: wsId });
     mkdirSync(base, { recursive: true });
     const file = join(base, HEALTH_FILENAME);
-    let health = { attempts: 0, failures: 0, last_failure_reason: null, last_failure_ts: null };
+    let health = { attempts: 0, failures: 0, consecutive_failures: 0, last_failure_reason: null, last_failure_ts: null };
     try { health = { ...health, ...JSON.parse(readFileSync(file, 'utf8')) }; } catch { /* fresh */ }
     health.attempts += 1;
     if (failed) {
       health.failures += 1;
+      // Streak feeds the tripwire floor (Agy, Gate A): "10% failure rate with
+      // ≥20 attempts, OR 3 consecutive failures" — the streak catches a
+      // hard-dead recorder in a short session where the rate floor can't.
+      health.consecutive_failures = (health.consecutive_failures || 0) + 1;
       health.last_failure_reason = String(reason || 'unknown').slice(0, 200);
       health.last_failure_ts = ts;
+    } else {
+      health.consecutive_failures = 0;
     }
     writeFileSync(file, JSON.stringify(health) + '\n');
     hardenPath(file, TURN_CAPTURE_FILE_MODE);
@@ -249,7 +263,7 @@ function bumpHealth(projectDir, wsId, { failed, reason, ts }) {
 /** Read the capture-health counters. Missing → zeros. */
 export function readCaptureHealth(projectDir, { workspaceId } = {}) {
   const file = join(resolveStoragePath(projectDir, { workspaceId }), HEALTH_FILENAME);
-  const zero = { attempts: 0, failures: 0, last_failure_reason: null, last_failure_ts: null };
+  const zero = { attempts: 0, failures: 0, consecutive_failures: 0, last_failure_reason: null, last_failure_ts: null };
   try { return { ...zero, ...JSON.parse(readFileSync(file, 'utf8')) }; } catch { return zero; }
 }
 
