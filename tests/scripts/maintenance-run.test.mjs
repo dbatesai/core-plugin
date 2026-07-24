@@ -217,6 +217,26 @@ test('--purge-turn-capture CLI removes the whole stream dir and nothing else', (
   assert.ok(existsSync(join(root, '_memories')), 'memory store untouched');
 });
 
+test('scorecard op: pins a scorecard when unpinned judgments exist, skips when nothing new', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  // nothing to pin → op does not run
+  let res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  assert.ok(!res.ranOps.includes('scorecard-computation'), 'no inputs → no scorecard');
+  // plant a judgment row → op pins one scorecard
+  const base = join(root, '_metrics');
+  mkdirSync(base, { recursive: true });
+  writeFileSync(join(base, 'judgment-log.jsonl'),
+    JSON.stringify({ kind: 'hindsight-judgment', retrieval_id: 'r1', ts: '2026-06-27T00:00:00Z', verdict: 'hit-right', judge_version: '1.0.0' }) + '\n');
+  res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  assert.ok(res.ranOps.includes('scorecard-computation'), 'unpinned judgment → scorecard pinned');
+  assert.ok(existsSync(join(base, 'scorecard-log.jsonl')), 'scorecard log written');
+  // second run with nothing new → skip
+  res = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home });
+  assert.ok(!res.ranOps.includes('scorecard-computation'), 'pinned already → skip');
+});
+
 test('legacy sweep: a leftover rich-context stream from the retired mechanism is removed on apply', () => {
   const root = makeProject();
   const home = testHome(root);

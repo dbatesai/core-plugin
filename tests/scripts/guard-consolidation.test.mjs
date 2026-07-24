@@ -93,5 +93,8 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // producer-identity.mjs, which uses import.meta.url only for module-relative
   // manifest resolution (not an entry guard) and is itself a CONSOLIDATION —
   // one owner for the previously-triplicated producer-identity manifest read.
-  assert.ok(n <= 60, `CLI-entry-guard occurrences grew past baseline 60 (target: one shared helper): ${n}`);
+  // 60 -> 61 (2026-07-24, v3.14.0 Link 3): scorecard.mjs, the pinned-
+  // conclusions log (--pin for the maintenance cadence, --latest for readers)
+  // — a genuinely-new CLI tool with its own entry point, not a copy.
+  assert.ok(n <= 61, `CLI-entry-guard occurrences grew past baseline 61 (target: one shared helper): ${n}`);
 });

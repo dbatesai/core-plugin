@@ -30,6 +30,7 @@ import { hashText, stampFiles } from './state-cache.mjs';
 import { resolveWorkspaceId } from './log-event.mjs';
 import { runTurnCaptureRetention, purgeTurnCapture, turnCaptureDir, TURN_CAPTURE_RETENTION_DAYS } from './turn-capture.mjs';
 import { resolveStoragePath } from './log-event.mjs';
+import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
 import { regradeNewestRound } from './self-test-round.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
@@ -168,6 +169,27 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
       }
     } catch (e) {
       notes.push(`rich-context legacy sweep skipped (${String(e && e.message).slice(0, 60)})`);
+    }
+  }
+
+  // 3.7 Scorecard computation (v3.14.0 Link 3): pin one immutable conclusions
+  // row when a judgment or self-test result postdates the last pinned card.
+  // Gated by shouldComputeScorecard (no new inputs → silent skip); failure
+  // never blocks the pass.
+  if (apply) {
+    try {
+      if (shouldComputeScorecard(root)) {
+        const card = computeScorecard(root, { now });
+        const pinRes = appendScorecard(root, card);
+        if (pinRes.written) {
+          ranOps.push('scorecard-computation');
+          notes.push(`scorecard pinned: ${card.hindsight.judged_turns} judged turn(s), self-test headline ${card.self_test.headline ?? 'n/a'}`);
+        } else {
+          notes.push(`scorecard pin failed (${pinRes.reason})`);
+        }
+      }
+    } catch (e) {
+      notes.push(`scorecard computation skipped (${String(e && e.message).slice(0, 60)})`);
     }
   }
 
