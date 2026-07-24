@@ -104,7 +104,6 @@ function canonicalMetrics(mutate = () => {}) {
       recognition_signal: { text: 'rec-fail-tier-0: 3/6 turns today (50%) vs 7-day avg 21% ↑ [PROVISIONAL]', age_hours: 1 },
       calibration: { available: true, labeled_count: 0, min_needed: 100, is_calibrated: false, overall_precision: null, notes: '' },
     },
-    benefit: { status: 'not-evaluated', reason: 'no matched memory-on/off comparison exists — nothing currently measures whether this helps' },
     caveats: [],
   };
   mutate(m);
@@ -145,7 +144,7 @@ test('page carries the four plain-question sections, legend, banner, verdict, an
   assert.match(html, /1 &middot; Does the machinery work\?/);
   assert.match(html, /2 &middot; How good is the memory search\?/);
   assert.match(html, /3 &middot; Can we trust CORE's self-measurements\?/);
-  assert.match(html, /4 &middot; Does any of this actually help you\?/);
+  assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section removed per DC-129');
   assert.match(html, /How to read the colored tags on each line/);
   assert.match(html, /SNAPSHOT &mdash; DOES NOT UPDATE ITSELF/);
   assert.match(html, /Ask the agent to republish for fresh numbers\./);
@@ -160,7 +159,6 @@ test('page carries the four plain-question sections, legend, banner, verdict, an
   // Trust tags on rows.
   assert.match(html, /<span class="chip good">proven-live<\/span>/);
   assert.match(html, /<span class="chip prov">provisional<\/span>/);
-  assert.match(html, /<span class="chip crit">not-evaluated<\/span>/);
 });
 
 test('gauges render from the data; empty states render hatched, never as a zero bar', () => {
@@ -170,8 +168,8 @@ test('gauges render from the data; empty states render hatched, never as a zero 
   // Round-trip pass: full good bar. Recognition estimate: 50% warn bar.
   assert.match(html, /<i class="g" style="width:100%">/);
   assert.match(html, /<i class="w" style="width:50%">/);
-  // Hatched empty state: calibration at 0 labeled + the never-evaluated benefit row.
-  assert.ok((html.match(/<div class="gauge empty"><\/div>/g) || []).length >= 2, 'hatched empty gauges present');
+  // Hatched empty state: calibration at 0 labeled.
+  assert.ok((html.match(/<div class="gauge empty"><\/div>/g) || []).length >= 1, 'hatched empty gauge present');
 });
 
 test('every number is explained in its sentence; no bare metric jargon in the chrome', () => {
@@ -184,7 +182,6 @@ test('every number is explained in its sentence; no bare metric jargon in the ch
   assert.match(chrome, /a human needs to hand-check 100 of its judgments/);
   assert.match(chrome, /answered by the fast first-pass search/);
   assert.match(chrome, /every record is well-formed — none were malformed or thrown out/);
-  assert.match(chrome, /memory turned on and turned off/);
   // Banned insider vocabulary (David's explicit plain-language correction).
   for (const banned of ['R@3', 'R@10', 'Recall', 'rec-fail', 'bm25', 'BM25', 'tier-0', 'Tier 2', 'gold set', 'gold-set', 'context3', 'calibration pool']) {
     assert.ok(!chrome.includes(banned), `chrome must not contain bare jargon '${banned}'`);
@@ -433,8 +430,7 @@ test('CLI live path: real gatherMetrics run produces a truthful manifest and pag
     assert.ok(manifest.data_generated_at, 'data timestamp from the live gather');
     const html = readFileSync(out, 'utf8');
     assert.match(html, /Passed, demonstrated just now\./, 'live round-trip proof rendered');
-    assert.match(html, /4 &middot; Does any of this actually help you\?/);
-    assert.match(html, /Never measured\./, 'benefit honesty intact on a live run');
+    assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section stays gone on a live run (DC-129)');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

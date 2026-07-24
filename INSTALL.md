@@ -32,10 +32,10 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/register-sources` | Point CORE at outside data that should feed the project's memory. |
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
-| `/metrics` | A live, in-terminal proof the memory system is working — round-trip probe, store health, calibration-pool progress. No export, writes nothing. |
-| `/metrics-package` | Export an anonymized memory-efficacy statistics package (zip on your Desktop) — feedback data for improving CORE; contains no real project content. |
+| `/metrics` | The one door to memory health. Default: three plain-language answers (storing the right memories? loading them when needed? passing its own blind test?) from pinned history. Modes: `/metrics full` (complete instrument readout), `/metrics export` (anonymized stats zip), `/metrics self-test` (a blind test round now). |
 | `/memory-view` | Browse what CORE knows as one read-only page — graph, unit bodies, backlinks, health section. Published as a private artifact only after you confirm the preflight manifest; never automatic. |
-| `/self-test` | Run the blind, round-based memory self-test on this project's own store — a separate agent authors fresh questions (including ones the store deliberately can't answer) reading only the stored facts, the set is mechanically verified and frozen, then the real retrieval path is scored against it with an old-vs-new-round overfitting check. Feeds `/metrics`. |
+| `/metrics-package` | Deprecated shim (removal v3.15.0) — now `/metrics export`. |
+| `/self-test` | Deprecated shim (removal v3.15.0) — now `/metrics self-test`. |
 
 ### Shipped hooks (installed with the plugin)
 

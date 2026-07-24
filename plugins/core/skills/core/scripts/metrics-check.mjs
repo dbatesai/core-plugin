@@ -78,6 +78,8 @@ import { runHarness } from './retrieval-harness.mjs';
 import { newestRegisteredRound, measureRound } from './self-test-round.mjs';
 import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQualityReport } from './analyze-retrieval-quality.mjs';
 import { turnCaptureStats } from './turn-capture.mjs';
+import { latestScorecards } from './scorecard.mjs';
+import { evaluateTripwires } from './metrics-tripwires.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -179,10 +181,14 @@ export const TRUST = {
 //   readiness   — is the measurement instrumentation itself ready to be
 //                 trusted? Recognition signal + the calibration pool that
 //                 gates it. Neither is retrieval regression or user benefit.
-//   benefit     — does any of this measurably help the user? Nothing in this
-//                 codebase answers that yet; the row says so plainly.
+//
+// (A fourth class — user benefit — rendered "not evaluated" through v3.13.x.
+// REMOVED per DC-129, 2026-07-24: measuring what the user did with delivered
+// answers is unobservable, so the question left scope by decision rather than
+// by gap. The honest row's job was done; keeping it would imply the question
+// is still open.)
 // ============================================================
-export const SECTION = { MECHANICS: 'mechanics', REGRESSION: 'regression', READINESS: 'readiness', BENEFIT: 'benefit' };
+export const SECTION = { MECHANICS: 'mechanics', REGRESSION: 'regression', READINESS: 'readiness' };
 
 // ============================================================
 // Recognition-signal parsing
@@ -553,20 +559,6 @@ export function computeRows(out) {
     value: `${labeled}/${minNeeded} labeled`,
   });
 
-  // ---- USER BENEFIT: does any of this measurably help the user? Nothing in
-  // this codebase answers that yet — no matched memory-on/off comparison, no
-  // independent outcome labels. Say so plainly; never imply the other
-  // classes cover it. The row sources the canonical benefit class directly
-  // (same status word, same reason string) — never a parallel copy. ----
-  const benefit = out.benefit || {};
-  rows.push({
-    section: SECTION.BENEFIT,
-    label: 'Matched comparison',
-    pct: 0,
-    trust: benefit.status || TRUST.NOT_EVALUATED,
-    value: benefit.reason || 'no matched memory-on/off comparison exists — nothing currently measures whether this helps',
-  });
-
   return rows;
 }
 
@@ -640,9 +632,7 @@ export function buildNarrative(out) {
   const s2Body = parts.join('; ') + '.';
   const s2 = `Retrieval regression: ${s2Body.charAt(0).toUpperCase()}${s2Body.slice(1)}`;
 
-  const s3 = "Whether any of this actually helps you get better answers hasn't been measured yet — no matched memory-on/off comparison exists.";
-
-  return `${s1} ${s2} ${s3}`;
+  return `${s1} ${s2}`;
 }
 
 // ============================================================
@@ -675,7 +665,6 @@ const GAUGE_WIDTH = BAR_WIDTH + 3;
 const SECTION_HEADER = {
   [SECTION.REGRESSION]: 'RETRIEVAL REGRESSION: PROVISIONAL',
   [SECTION.READINESS]: 'MEASUREMENT READINESS',
-  [SECTION.BENEFIT]: 'USER BENEFIT: NOT EVALUATED',
 };
 
 export function renderReport(out, { workspaceName } = {}) {
@@ -696,12 +685,12 @@ export function renderReport(out, { workspaceName } = {}) {
     return `${row.label.padEnd(LABEL_WIDTH)}${gauge}${row.trust.padEnd(TRUST_WIDTH)} ${row.value}`;
   };
 
-  const bySection = { [SECTION.MECHANICS]: [], [SECTION.REGRESSION]: [], [SECTION.READINESS]: [], [SECTION.BENEFIT]: [] };
+  const bySection = { [SECTION.MECHANICS]: [], [SECTION.REGRESSION]: [], [SECTION.READINESS]: [] };
   for (const row of rows) (bySection[row.section] ||= []).push(row);
 
   for (const row of bySection[SECTION.MECHANICS]) lines.push(renderRow(row));
 
-  for (const section of [SECTION.REGRESSION, SECTION.READINESS, SECTION.BENEFIT]) {
+  for (const section of [SECTION.REGRESSION, SECTION.READINESS]) {
     lines.push('');
     lines.push(SECTION_HEADER[section]);
     for (const row of bySection[section]) lines.push(renderRow(row));
@@ -732,10 +721,6 @@ export async function gatherMetrics(cwd, { home = homedir() } = {}) {
     mechanics: { status: null, probe: {}, store: {}, telemetry: {}, turn_capture: {} },
     regression: { gold: {} },
     readiness: { recognition_signal: null, calibration: {} },
-    benefit: {
-      status: TRUST.NOT_EVALUATED,
-      reason: 'no matched memory-on/off comparison exists — nothing currently measures whether this helps',
-    },
     caveats: [],
   };
   const mech = out.mechanics;
@@ -904,6 +889,98 @@ ${body}
 }
 
 // ============================================================
+// Answer-shaped default view (v3.14.0 Component 6)
+// ============================================================
+//
+// The `/metrics` DEFAULT: David's three outcome questions, one sentence each,
+// the single number that matters per line, a trend word — sourced from the
+// latest PINNED scorecard and the tripwire state. Presentation only: no fresh
+// computation, no live re-scoring (that's exactly the determinism split — the
+// user-facing view reads stored conclusions). The full instrument panel stays
+// behind `/metrics full`.
+
+/** Everything the answer view reads, gathered from stored surfaces only. */
+export function gatherAnswers(projectDir) {
+  let cards = [];
+  try { cards = latestScorecards(projectDir, 2); } catch { cards = []; }
+  let tripwires = { healthy: true, tripped: [] };
+  try { tripwires = evaluateTripwires(projectDir); } catch { /* silence is honest here */ }
+  let capture = { enabled: true };
+  try { capture = turnCaptureStats(projectDir); } catch { /* default shape above */ }
+  return { project: projectDir, cards, tripwires, capture };
+}
+
+function pct(x) { return `${Math.round(x * 100)}%`; }
+
+/** Render the three-question view. Pure; takes gatherAnswers() output. */
+export function renderAnswerView({ project, cards, tripwires, capture }) {
+  const newest = cards[0] || null;
+  const prev = cards[1] || null;
+  const name = String(project || '').split(/[\\/]/).filter(Boolean).pop() || 'this project';
+  const checked = newest ? newest.ts.slice(0, 16).replace('T', ' ') + ' UTC' : 'never';
+  const L = [];
+  L.push(`Memory health — ${name}`.padEnd(50) + `checked ${checked}`);
+  L.push('');
+
+  const h = newest && newest.hindsight;
+  const judged = h ? h.judged_turns : 0;
+  const captureOff = capture && capture.enabled === false;
+
+  // Q1 — storing the right memories (storage-gap rate, mechanical grade).
+  let storing;
+  if (captureOff) {
+    storing = 'not measured — turn capture is off for this project, so nothing records what each conversation needed.';
+  } else if (!judged) {
+    storing = 'not yet measured — evidence is being captured; grading runs with regular maintenance.';
+  } else {
+    const gaps = h.storage_gap;
+    const verdict = gaps === 0 ? 'YES' : gaps / judged <= 0.10 ? 'MOSTLY' : 'NO';
+    storing = `${verdict} — ${gaps === 0 ? `no gaps found in ${judged} graded turns` : `${gaps} of ${judged} graded turns needed something no stored memory contains`}`;
+  }
+  L.push(`Is it storing the right memories?    ${storing}`);
+
+  // Q2 — loading them when needed (hit rate, mechanical grade).
+  let loading;
+  if (captureOff) {
+    loading = 'not measured — turn capture is off (see above).';
+  } else if (!judged) {
+    loading = 'not yet measured — grading needs captured evidence first.';
+  } else {
+    const rate = h.hit_right / judged;
+    const verdict = rate >= 0.95 ? 'YES' : rate >= 0.75 ? 'MOSTLY' : 'NO';
+    loading = `${verdict} (mechanical grade) — right memories ${pct(rate)} of turns; ${h.hindsight_miss} missed, ${h.noise} noisy`;
+  }
+  L.push(`Is it loading them when you need?    ${loading}`);
+
+  // Q3 — the blind self-test, with a trend word vs the previous pinned card.
+  let blind;
+  const head = newest && newest.self_test && newest.self_test.headline;
+  if (typeof head !== 'number') {
+    blind = 'not yet run — a blind test round has not been graded for this project.';
+  } else {
+    const prevHead = prev && prev.self_test && prev.self_test.headline;
+    let trend = '';
+    if (typeof prevHead === 'number') {
+      const delta = Math.round((head - prevHead) * 100);
+      trend = delta > 0 ? ` (up ${delta} from last check)`
+        : delta < 0 ? ` (down ${-delta} from last check — watching, not alarming)`
+        : ' (steady)';
+    }
+    blind = `${pct(head)}${trend}`;
+  }
+  L.push(`Does it pass its own blind test?     ${blind}`);
+  L.push('');
+
+  // The attention surface: tripwires, or earned quiet.
+  if (tripwires && tripwires.tripped && tripwires.tripped.length) {
+    for (const t of tripwires.tripped) L.push(`Needs your attention: ${t.message}`);
+  } else {
+    L.push('Nothing needs your attention right now.');
+  }
+  return L.join('\n');
+}
+
+// ============================================================
 // CLI entry
 // ============================================================
 
@@ -917,6 +994,13 @@ if (isCliEntry) {
   const wantsJson = args.includes('--json');
   const positional = args.find((a) => !a.startsWith('--'));
   const cwd = positional ? join(positional) : process.cwd();
+  // --answers: the /metrics DEFAULT view — pinned conclusions only, no live
+  // gather (fast, deterministic, plain-language). Everything else below is
+  // the `/metrics full` instrument panel.
+  if (args.includes('--answers')) {
+    process.stdout.write(renderAnswerView(gatherAnswers(cwd)) + '\n');
+    process.exit(0);
+  }
   const out = await gatherMetrics(cwd);
   // --json emits EXACTLY ONE JSON document and nothing else (Hale item 8,
   // 2026-07-23): the human report and the JSON on one stream made saved stdout

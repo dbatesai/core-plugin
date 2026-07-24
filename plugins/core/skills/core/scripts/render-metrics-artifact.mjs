@@ -361,24 +361,10 @@ function graderVerificationRow(readiness) {
   });
 }
 
-// ---- Section 4: user benefit ----
-function realBenefitRow(benefit) {
-  const status = benefit?.status || 'not-evaluated';
-  if (status === 'not-evaluated') {
-    return row({
-      label: 'Real-benefit test',
-      chipHtml: chip('crit', 'not-evaluated'),
-      gaugeHtml: gaugeEmpty(),
-      bodyHtml: val("<b>Never measured.</b> The honest test would be: run the same kinds of sessions with memory turned on and turned off, and have someone judge which answers were better — without knowing which was which. That comparison has never been done, so today, nobody can say with evidence whether CORE's memory makes your answers better. Building this test is a named item on the metrics roadmap."),
-    });
-  }
-  return row({
-    label: 'Real-benefit test',
-    chipHtml: chip('prov', escapeHtml(status)),
-    gaugeHtml: gaugeEmpty(),
-    bodyHtml: val(escapeHtml(String(benefit?.reason || 'no details recorded'))),
-  });
-}
+// (Section 4 — user benefit — REMOVED per DC-129, 2026-07-24: the matched
+// on/off comparison is unobservable, so the question left scope by decision.
+// The honest "never measured" row's job is done; keeping it would imply the
+// question is still open.)
 
 // ---- The verdict block, scoped to mechanics exactly like the terminal heading ----
 function verdictBlock(mech) {
@@ -579,12 +565,6 @@ ${forgotToCheckRow(metrics.readiness)}
 ${graderVerificationRow(metrics.readiness)}
 </section>
 
-<section>
-  <div class="sechead"><h2>4 &middot; Does any of this actually help you?</h2>
-    <span class="note">The question that matters most &mdash; stated honestly instead of implied by the green checkmarks above.</span></div>
-${realBenefitRow(metrics.benefit)}
-</section>
-
 <details><summary>The raw data behind this page (the machine-readable object it was generated from; terminal-report text and unit-id lists omitted &mdash; this page stays aggregate-only)</summary>
 <pre class="mono">${embedded}</pre></details>
 
@@ -601,7 +581,7 @@ ${realBenefitRow(metrics.benefit)}
 // ============================================================
 
 function validateCanonicalMetrics(obj, source) {
-  const missing = ['schema_version', 'mechanics', 'regression', 'readiness', 'benefit', 'generated_at']
+  const missing = ['schema_version', 'mechanics', 'regression', 'readiness', 'generated_at']
     .filter((k) => !(obj && typeof obj === 'object' && k in obj));
   if (missing.length) {
     throw Object.assign(new Error(

@@ -133,26 +133,22 @@ function baseOut(overrides = {}) {
       recognition_signal: null,
       calibration: { available: true, labeled_count: 22, min_needed: 100, is_calibrated: false },
     },
-    benefit: {
-      status: TRUST.NOT_EVALUATED,
-      reason: 'no matched memory-on/off comparison exists — nothing currently measures whether this helps',
-    },
     caveats: [],
     ...overrides,
   };
 }
 
-test('computeRows: returns eight rows across mechanics/regression/readiness/benefit sections', () => {
-  // Eight as of v3.14.0: the turn-capture state line ALWAYS renders (default-ON
-  // stream — ON shows the disclosure, OFF confirms the opt-out took effect).
+test('computeRows: returns seven rows across mechanics/regression/readiness sections', () => {
+  // Seven as of v3.14.0: the turn-capture state line ALWAYS renders (+1), and
+  // the benefit row is REMOVED per DC-129 (-1, the question left scope by
+  // decision, not by gap).
   const rows = computeRows(baseOut());
-  assert.equal(rows.length, 8);
-  const bySection = { mechanics: 0, regression: 0, readiness: 0, benefit: 0 };
+  assert.equal(rows.length, 7);
+  const bySection = { mechanics: 0, regression: 0, readiness: 0 };
   for (const r of rows) bySection[r.section]++;
   assert.equal(bySection.mechanics, 4);
   assert.equal(bySection.regression, 1);
   assert.equal(bySection.readiness, 2);
-  assert.equal(bySection.benefit, 1);
 });
 
 test('computeRows: round-trip PASS renders 100% proven-live, tagged mechanics', () => {
@@ -324,19 +320,14 @@ test('computeRows: gold-set harness failure surfaces its reason as NOT_EVALUATED
   assert.match(gold.value, /harness run failed/);
 });
 
-// --- Matched-comparison row (BENEFIT): always present, always honestly
-// "not evaluated". Renamed from "User-benefit evidence" per Hale's exact
-// target shape. ---
+// --- Benefit row REMOVED (DC-129, 2026-07-24): user-benefit measurement left
+// scope by decision. The row must be GONE, not renamed or softened. ---
 
-test('computeRows: Matched comparison row is always present and always says plainly nothing measures it', () => {
+test('computeRows: no benefit/matched-comparison row exists anymore (DC-129)', () => {
   const rows = computeRows(baseOut());
-  const benefit = rows.find((r) => r.label === 'Matched comparison');
-  assert.ok(benefit, 'benefit row must never be silently omitted');
-  assert.equal(benefit.section, SECTION.BENEFIT);
-  assert.equal(benefit.trust, TRUST.NOT_EVALUATED);
-  assert.equal(benefit.pct, 0);
-  assert.equal(benefit.failed, undefined, 'absence is not a FAIL glyph — it is an empty bar');
-  assert.match(benefit.value, /nothing currently measures whether this helps/);
+  assert.ok(!rows.some((r) => r.label === 'Matched comparison'), 'the benefit row is removed, not renamed');
+  assert.ok(!rows.some((r) => r.section === 'benefit'), 'no row in a benefit section');
+  assert.ok(!('BENEFIT' in SECTION), 'the SECTION vocabulary no longer carries BENEFIT');
 });
 
 // ---------------------------------------------------------------------------
@@ -356,7 +347,6 @@ test('buildNarrative: WORKING with no caveats stays within 1-3 sentences and nam
   assert.ok(sentenceCount(n) >= 1);
   assert.match(n, /Mechanics are proven and working/);
   assert.match(n, /Retrieval regression:/);
-  assert.match(n, /hasn't been measured yet/);
 });
 
 test('buildNarrative: DEGRADED leads with what failed and does not pad with regression/benefit sentences', () => {
@@ -400,9 +390,9 @@ test('buildNarrative: mentions the telemetry-capture and gold-set-snapshot numbe
   assert.match(n, /not a passing gate/);
 });
 
-test('buildNarrative: always states user benefit is unmeasured, never implies the other classes cover it', () => {
+test('buildNarrative: no benefit sentence remains (DC-129 — out of scope by decision)', () => {
   const n = buildNarrative(baseOut());
-  assert.match(n, /no matched memory-on\/off comparison exists/);
+  assert.doesNotMatch(n, /memory-on\/off|hasn't been measured/);
 });
 
 // ---------------------------------------------------------------------------
@@ -418,13 +408,13 @@ test('renderReport: verdict heading is scoped to MECHANICS and reads HEALTHY, no
   assert.equal(lines[2], 'CORE Memory Health — demo-project');
 });
 
-test('renderReport: renders six gauged rows (Telemetry capture has no gauge) across four labeled sections', () => {
+test('renderReport: renders five gauged rows across three labeled sections (benefit gone per DC-129)', () => {
   const text = renderReport(baseOut(), { workspaceName: 'demo-project' });
   const rowLines = text.split('\n').filter((l) => l.includes('[') && l.includes(']'));
-  assert.equal(rowLines.length, 6, 'seven total rows minus the one no-gauge Telemetry-capture row');
+  assert.equal(rowLines.length, 5, 'seven total rows minus the two no-gauge rows (Telemetry capture, Turn capture)');
   assert.match(text, /^RETRIEVAL REGRESSION: PROVISIONAL$/m);
   assert.match(text, /^MEASUREMENT READINESS$/m);
-  assert.match(text, /^USER BENEFIT: NOT EVALUATED$/m);
+  assert.doesNotMatch(text, /USER BENEFIT/, 'the benefit section is removed, not relabeled');
   assert.match(text, /Telemetry capture/);
   assert.ok(text.trim().endsWith('"'), 'narrative is quoted');
 });
@@ -716,7 +706,7 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
     // nothing else — in particular NO umbrella verdict and NO top-level
     // probe/store/calibration.
     assert.deepEqual(Object.keys(out).sort(), [
-      'benefit', 'caveats', 'generated_at', 'mechanics', 'producer', 'project',
+      'caveats', 'generated_at', 'mechanics', 'producer', 'project',
       'readiness', 'regression', 'report', 'schema_version',
     ]);
     assert.ok(!('verdict' in out), 'the old umbrella verdict field must be absent');
@@ -751,9 +741,8 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
     // ---- readiness: recognition + calibration, together, as their own class.
     assert.deepEqual(Object.keys(out.readiness).sort(), ['calibration', 'recognition_signal']);
 
-    // ---- benefit: structured not-evaluated status, not just report prose.
-    assert.equal(out.benefit.status, 'not-evaluated');
-    assert.match(out.benefit.reason, /no matched memory-on\/off comparison exists/);
+    // ---- benefit: GONE per DC-129 — the key must not exist at all.
+    assert.ok(!('benefit' in out), 'the benefit class is removed from the canonical object');
 
     // ---- single source of truth: the report string in the JSON is exactly
     // what the CLI rendered, and re-rendering FROM the emitted object

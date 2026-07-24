@@ -1,124 +1,96 @@
 ---
 name: metrics
-description: Run an evidence-first health check of the CORE memory system for the project in the current directory, and present it artifact-first on harnesses with an artifact surface — a rich, self-contained, plain-language HTML page generated mechanically from the same canonical data and published, with visible narration, as a private hosted artifact — with the compact terminal render as the quick view and the fallback. Reports FOUR SEPARATE, honestly-labeled evidence classes — never one blended verdict — mechanics (a live round-trip PROOF, write→validate→index→retrieve→suppress on a throwaway store, fresh every run, this store's validator counts and unit census, plus plain-count telemetry capture — never a percentage), retrieval regression (a provisional gold-set snapshot when the project has a pre-registered gold set — the run is live, the reference answer key is not), measurement readiness (the recognition signal and the calibration pool that gates it), and user benefit (honestly "not evaluated" — nothing in this codebase measures that yet). Every line carries an honest trust label (proven-live / direct / proxy / provisional / not-evaluated). Use whenever the user runs /metrics, asks "is memory working", "prove the memory system works", "memory health", "show me the memory metrics", "can I trust the store", or wants evidence rather than claims about storage and retrieval. Do NOT use for general project status (that's PROJECT.md) or for full hygiene passes (/process-memory).
+description: The ONE door to the CORE memory system's health and measurement surface. Default output is answer-shaped — the three questions that matter (is it storing the right memories, is it loading them when you need them, does it pass its own blind test), one plain sentence each, sourced from pinned scorecards with an honest trust label and a nothing-needs-your-attention line (or the escalation that replaces it). Modes behind the same door — "/metrics full" (the complete instrument readout — live round-trip PROOF on a throwaway store, validator counts, telemetry, gold-set snapshot, recognition/calibration — every line trust-labeled, artifact-first on harnesses with an artifact surface), "/metrics export" (the fully anonymized memory-efficacy zip on the Desktop — what /metrics-package used to do), "/metrics self-test" (author-verify-run a blind test round now — what /self-test used to do). Use whenever the user runs /metrics (any mode), asks "is memory working", "prove the memory system works", "memory health", "show me the memory metrics", "can I trust the store", "test the memory on this project", "run a blind retrieval self-test", "export a metrics package", "make an anonymized report I can share", or wants evidence rather than claims about storage and retrieval. Do NOT use for general project status (that's PROJECT.md) or full hygiene passes (/process-memory).
 user-invocable: true
 allowed-tools:
   - Read
   - Bash
+  - Glob
+  - Task
   - Artifact
 ---
 
-# `/metrics` — is the memory system working, with proof
+# `/metrics` — the one door to memory health
 
-The point of this skill: someone runs it and can **confidently say what's proven and what isn't**, in ten seconds of reading. Every number in the output was measured during THIS run or carries a label saying exactly how much to trust it. Never soften a failure; never let a proxy number dress up as proof; never let mechanics evidence stand in for retrieval quality, retrieval quality stand in for measurement readiness, or any of those stand in for user benefit — those are four separate evidence classes and this skill reports them as four separate, honestly-labeled sections. **The 2026-07-22 evidence-class fix (two passes, same day):** the single umbrella `WORKING` verdict used to silently cover retrieval regression and user benefit too — it never had real proof for either. The first pass split it into three sections; a same-day peer review caught that the new "Retrieval regression" section was STILL mixing three different kinds of claim — a capture-volume percentage with an invalid denominator, a mechanism diagnostic (tier distribution), and a measurement-readiness gate (recognition/calibration) — none of which are actually regression evidence. The verdict now reads `MECHANICS: HEALTHY` and covers mechanics only; telemetry capture is a plain-count instrumentation fact under mechanics (no percentage — there's no valid denominator to divide by); the one real regression signal (a gold-set snapshot) gets its own section labeled `PROVISIONAL`, never a passing gate; recognition/calibration get their own `MEASUREMENT READINESS` section; and user benefit stays last, always `NOT EVALUATED`.
+The point: someone runs it and can **confidently say what's proven and what isn't** in ten seconds of reading. Every number was measured mechanically or carries a label saying exactly how much to trust it. Never soften a failure; never let a proxy dress up as proof.
 
-**The script is the only renderer.** `scripts/metrics-check.mjs` (in the core skill's `scripts/` directory) gathers every number AND renders the final report text — the verdict heading, the bar gauges, the narrative. It prints the finished report on stdout; relay it verbatim. Never hand-compute a bar, re-word the narrative, or round a number yourself — the render is prescriptive code so two runs against the same data always read identically.
+**One door, four modes (v3.14.0, the single-door ruling):** the plain `/metrics` default answers the three outcome questions from stored conclusions; `full` opens the instrument panel; `export` produces the anonymized shareable package; `self-test` runs a deliberate blind test round now. `/self-test` and `/metrics-package` still exist as deprecation shims that point here (removal scheduled v3.15.0).
 
-**Script path resolution.** Resolve `CORE_ROOT` the same way `/metrics-package` does: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/metrics/SKILL.md` — that prefix is the plugin root. Reuse the `CORE_ROOT` startup already resolved this session if you have it. If you cannot resolve a concrete root, say so plainly and stop — never run `node` against a guessed path.
+**Script path resolution (all modes).** Take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/metrics/SKILL.md` — that prefix is the plugin root (`CORE_ROOT`). Reuse the `CORE_ROOT` startup already resolved this session if you have it. If you cannot resolve a concrete root, say so plainly and stop — never run `node` against a guessed path.
 
-## Step 1 — run the check
+---
+
+## Default mode — the answer view
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/metrics-check.mjs" <project-dir> --answers
+```
+
+Relay stdout **verbatim** — it is already the finished, plain-language view. It reads ONLY pinned conclusions (the scorecard history the maintenance cadence writes) plus the tripwire state — no live recomputation, so two reads of the same history always say the same thing. Its shape:
+
+```
+Memory health — <project>                          checked <when>
+
+Is it storing the right memories?    YES — no gaps found in 124 graded turns
+Is it loading them when you need?    MOSTLY (mechanical grade) — right memories 89% of turns; 6 missed, 4 noisy
+Does it pass its own blind test?     82% (down 3 from last check — watching, not alarming)
+
+Nothing needs your attention right now.
+```
+
+- **"mechanical grade"** is a real limit, not decoration: the grading re-runs the same text search with the full question in hindsight — it measures whether the right stored text was found, not whether the answer was semantically right. Say so if asked.
+- Degradation is honest: before any grading exists the lines read "not yet measured"; a user who turned capture off sees "turn capture is off" instead of a pretend verdict; a tripped wire replaces the last line with a plain-language escalation naming the likely locus.
+- If the user wants any depth beyond this — numbers, proofs, history — that's `full`, below. Offer it in one line, don't dump it unasked.
+
+## `full` mode — the instrument panel
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/metrics-check.mjs" <project-dir>
 ```
 
-(`<project-dir>` defaults to the current directory. The script needs the CORE plugin installed — it calls the plugin's own validator, retriever, retrieval-harness, retrieval-quality analyzer, and calibration-readiness check directly, so the proof exercises the real product path, not a reimplementation. Takes a couple of seconds longer than before when the project has a gold set, because it now runs a real Recall@K pass live — see Mechanics vs Retrieval regression below. Add `--json` to also get the full data object after the rendered report, if you need a specific number the report doesn't show.)
+**The script is the only renderer** — it gathers every number AND renders the report (verdict heading, bar gauges, narrative). Relay it verbatim; never hand-compute a bar, re-word the narrative, or round a number. Add `--json` for the machine object (`render-metrics-artifact --json-in` consumes it).
 
-The script gathers evidence for four separate classes — see "Evidence classes" below for what each one can and cannot claim:
+The report covers **three separately-labeled evidence classes** — never one blended verdict:
 
-1. **Mechanics** — builds a throwaway scratch store in the temp dir, writes synthetic units through the plugin's own scripts, and proves the full round trip: a fact is written, validates clean, gets indexed, is retrieved by content, and a retired fact stays suppressed. Fresh every run, scratch deleted after. Plus this project's real validator pass/warn/fail counts, unit census by status, and telemetry-capture counts (typed retrieval events / calendar days, tier mix, and any rejected malformed rows — schema-validated via `analyze-retrieval-quality.mjs`'s reuse of the canonical producer contract, never a percentage claim).
-2. **Retrieval regression** — exactly one signal today: a LIVE gold-set snapshot run via `retrieval-harness.mjs` against the project's own pre-registered gold set at `_tests/retrieval-gold-set.json`, when one exists (genuinely exercised this run, on the shipped product retrieval functions — not a simulator). Labeled `provisional`, never `proven-live`: the execution is real, but the reference answer key is a small, project-authored, directional set with no preregistered pass/fail threshold — a regression *snapshot*, not a passing *gate*.
-3. **Measurement readiness** — is the instrumentation itself ready to be trusted? The recognition signal (a provisional need/failure classifier) and the calibration pool that gates it. Neither is retrieval regression or user benefit.
-4. **User benefit** — always renders, and always honestly says "not evaluated": nothing in this codebase currently runs a matched memory-on/off comparison, so there is no evidence to report yet.
+1. **Mechanics** — a live round-trip PROOF on a throwaway scratch store (write → validate → index → retrieve → suppress, fresh every run), this store's validator counts and unit census, telemetry capture counts (never a percentage — no valid denominator), and the **turn-capture state line**, which ALWAYS renders: ON shows the plain-language disclosure (each turn's prompt and delivered memory context saved locally for later grading — never exported, auto-deleted after 30 days) with volumes, write-failure health, and every off-switch (`CORE_TURN_CAPTURE=0`, `"turn_capture": false` in the project's `workspace.json`, master `CORE_METRICS_ENABLED=0`); OFF confirms the opt-out took effect and names the consequence (no evidence for grading). See `protocols/data-storage.md` §"Two capture streams" for the full contract.
+2. **Retrieval regression** — the newest blind self-test round when one exists (per-kind breakdown, trap-leak rate, old-vs-new overfitting delta), else the small static gold set. Labeled `provisional`, never `proven-live`: the execution is live, the answer key's authority is not independently established. A regression *snapshot*, never a passing *gate*.
+3. **Measurement readiness** — the recognition signal (inverted bar: fuller = healthier) and the calibration pool gating it.
 
-## Step 2 — relay the terminal report verbatim (the quick view)
+*(A fourth class — user benefit — rendered "not evaluated" through v3.13.x. REMOVED per DC-129: the matched on/off comparison is unobservable, so the question left scope by decision, not by gap. Never resurrect the row; if asked, say exactly that.)*
 
-Print exactly what the script printed on stdout — nothing added, nothing reworded. This inline render is the **quick/terminal view**: it always runs, it is never removed, and it is the whole answer for a quick check or on a harness with no artifact surface. The richer display is the artifact page in Step 4. It has this shape (numbers illustrative; a project with no gold set or no retrieval history gets an honest absence line instead of the Gold-set-snapshot/Telemetry-capture rows below):
+The **verdict heading is scoped to mechanics only** (`MECHANICS: HEALTHY` / `HEALTHY — with caveats` / `DEGRADED` / `MACHINERY WORKING, NO STORE`) — never read it as covering the other classes. Trust labels: **proven-live** = demonstrated this run on the real product path; **direct** = real measurement read from disk, not exercised this run; **proxy** = a stand-in signal, never a correctness proof; **provisional** = the instrument or its reference isn't independently validated; **not-evaluated** = no instrument exists for this project yet.
 
-```
-MECHANICS: HEALTHY
+**Artifact display (harnesses with an artifact surface):** the full report displays artifact-first — a self-contained plain-language HTML page from the SAME canonical object:
 
-CORE Memory Health — <workspace-name>
-
-Round-trip proof          [██████████] proven-live    PASS
-Unit integrity (293)      [█████████░] direct         1 warning
-Telemetry capture                      direct         269 typed events / 36 days; closure denominator unavailable; T1 99%/T2 1%/T3 0% mix; 0 rejected
-
-RETRIEVAL REGRESSION: PROVISIONAL
-Gold-set snapshot (n=22)  [███████░░░] provisional    execution proven-live (retrieveContext + buildFinalContextPack, this run); reference authority provisional (workshop-authored, directional, n=22, no preregistered pass threshold); delivered top-3 R@3 68%; ranking R@10 82%, bm25 R@10 82%
-
-MEASUREMENT READINESS
-Recognition signal        [████░░░░░░] provisional     50% rec-fail (↑ vs 21% avg)
-Calibration pool          [██░░░░░░░░] direct          22/100 labeled
-
-USER BENEFIT: NOT EVALUATED
-Matched comparison        [░░░░░░░░░░] not-evaluated   no matched memory-on/off comparison exists — nothing currently measures whether this helps
-
-"Mechanics are proven and working; telemetry capture shows 269 typed
-events across 36 days (99%/1%/0% T1/T2/T3 mix). Retrieval regression:
-A provisional gold-set snapshot (n=22, workshop-authored, directional, no
-pass threshold) puts delivered top-3 recall at 68% — a regression
-snapshot, not a passing gate; measurement readiness: recognition is
-trending down this session (worth a look), and the classifier stays
-unofficial until the calibration pool clears 100 labeled turns —
-currently 22. Whether any of this actually helps you get better answers
-hasn't been measured yet — no matched memory-on/off comparison exists."
+```bash
+node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> --out <scratch-path>/core-metrics.html
 ```
 
-**The verdict line is scoped to mechanics only** — it reads `MECHANICS: <state>`, one of:
-- **MECHANICS: HEALTHY** — round trip proven live, schema clean, zero integrity failures, zero attention-tier warnings.
-- **MECHANICS: HEALTHY — with caveats** — round trip proven, no failures, but attention-tier warnings exist. Look at the row that shows them.
-- **MECHANICS: DEGRADED** — a hard check failed. The narrative leads with which one, and nothing else is appended that turn.
-- **MECHANICS: MACHINERY WORKING, NO STORE** — the plugin round-trips fine but this project has no memory store.
+Narrate the printed manifest (content class `aggregates-only`, byte count, producer identity), publish **private** via the Artifact tool, keep a stable URL by republishing the same path, and record the outcome with `--record-publish` (the script refuses `published-private` without evidence + authorization fields). Consent: ask-first by default; narrate-and-proceed only under this user's own durably-recorded standing authorization. On Codex (no artifact surface — DC-75): say so by name, give the `--out` path, never fake a publish.
 
-**Never read the verdict as covering retrieval regression, measurement readiness, or user benefit** — it never did have real proof for any of those, and now it says so structurally: those three evidence classes render in their own labeled sections below the verdict, each with its own honest status word, never folded into the mechanics heading.
+## `export` mode — the anonymized package (was `/metrics-package`)
 
-### Evidence classes and what each row means
-
-**Mechanics** (proven store mechanics + instrumentation health — nothing about retrieval quality or user benefit):
-- **Round-trip proof** — binary: full bar + PASS on success; the bar renders in a distinct fail glyph (never a partial fill) on failure, so a broken round trip can't be mistaken for "just a low score."
-- **Unit integrity (N)** — the percentage of the store's N units carrying no attention-tier warning.
-- **Telemetry capture** — a **no-gauge, counts-only** row (no bracket/bar at all — there is no valid eligible-hook denominator to turn into a percentage): typed retrieval events / calendar days, the T1/T2/T3 tier mix (a mechanism diagnostic, not a regression claim), the top Tier-2+ escalation topic when one exists, and rejected-row counts split by schema tier (`current-schema` rows are checked against the full producer contract in `record-retrieval-event.mjs`; `legacy` rows predate schema versioning and get a narrower compatibility check; either kind that fails validation is REJECTED and counted with a closed reason code, never silently dropped or silently folded into a passing count).
-- **Rich-context capture** — a **conditional** no-gauge line that renders ONLY when the user has turned on the opt-in rich-context stream (`rich_context_capture: true` in the **machine-local per-user workspace meta** `~/.core/workspaces/<id>/workspace.json`, never the project pointer). It reports **effective** state, not the bare flag: when the flag is on AND aggregate metrics are on, it says in plain language that a 4 KiB head of the query and delivered-context text is saved locally on synchronous no-hit turns (not the full text), gives the row/day counts, and states how to turn it off; when the flag is on but aggregate metrics are OFF, it says exactly "configured on, but inactive: aggregate metrics disabled" — because the hook only writes rich rows inside the metrics branch, so nothing can be captured. When off (the default) nothing renders here. This stream is off by default, physically separate from the aggregate metrics, and NEVER read by the package exporter; see `protocols/data-storage.md` §"Two capture streams" for the full contract.
-
-**Retrieval regression** (does retrieval work well against a reference answer key? — real evidence when it exists, an honest absence otherwise; never `proven-live`, never cite this class as user benefit):
-- **Gold-set snapshot (n=N)** — a genuine, live run of `retrieval-harness.mjs` against the project's own pre-registered gold set at `_tests/retrieval-gold-set.json`, using the actual shipped retrieval functions (not a simulator). Reports the delivered top-3 recall (`context3` arm) plus the pre-expansion ranking and BM25 arms at R@10. Trust is `provisional`, not `proven-live`: the EXECUTION is genuinely live this run, but the reference answer key is a small, project-authored, directional set with no preregistered pass/fail threshold — a live run does not independently validate its own expected answers. A project with no gold set renders this row as `not-evaluated` with the plain reason, never silently dropped.
-
-**Measurement readiness** (is the instrumentation itself ready to be trusted? — neither row here is retrieval regression or user benefit):
-- **Recognition signal** — **inverted on purpose**: the underlying number is a *failure* rate (rec-fail-tier-0), so the bar shows `100 − rate` — a fuller bar always means healthier, same as every other row, even though the number quoted next to it is a failure rate.
-- **Calibration pool** — labeled turns out of the 100-turn calibration gate that governs the recognition signal above, straightforward.
-
-**User benefit** (does any of this measurably help the user? — always renders, always honest):
-- **Matched comparison** — always `not-evaluated`. No matched memory-on/off comparison exists anywhere in this codebase yet, so this row can never legitimately say anything else. If a future slice adds a real matched-outcome receipt, this row is where it will render — until then, it states the absence plainly.
-
-Trust labels mean exactly this, and say so if asked: **proven-live** = demonstrated during this run on the real product path (round-trip proof — the only row that still earns this label); **direct** = a real measurement, read from disk, but not exercised this run; **proxy** = a real signal that stands in for quality, never itself a correctness proof; **provisional** = either the instrument itself is uncalibrated, or (gold-set snapshot) the execution is live but the reference answer key's authority is not independently established — never full evidence; **not-evaluated** = no instrument exists for this project yet, or the evidence class has no real backing anywhere in this codebase — the row says which, plainly.
-
-## Step 3 — the narrative (1–3 sentences, plain voice)
-
-The script writes this for you — it's part of the report, in quotes, right after the bars. Its rules, so you can sanity-check it or explain it if asked: every label and number is explained in the sentence it appears in; it speaks to mechanics (incl. telemetry capture), retrieval regression, measurement readiness, and user benefit on a normal run — never just the first; and if the verdict is DEGRADED it leads with what failed and the single next action instead of anything else, with nothing appended about the other classes that turn (a mechanics failure means nothing else here is trustworthy to discuss yet). Never pad it beyond the three sentences, never cite the recognition signal or telemetry capture as user-benefit proof, never claim retrieval correctness from the telemetry-capture row (it counts events, not correctness), and never let the gold-set snapshot read as more than what it is — a small, directional, provisional product-path regression check, not a passing gate and not a claim that the answer helped anyone.
-
-## Step 4 — the artifact display (the primary display on harnesses that have one)
-
-On a harness with an artifact surface (Claude Code today), the full report displays **artifact-first**: a self-contained, plain-language HTML page — the four sections as plain questions, every number explained in its sentence, an honest trust tag on every line — generated mechanically from the SAME canonical four-class object the terminal render consumes (one taxonomy, never a second). Publish it as the primary display whenever the user runs `/metrics` for more than a quick glance. Consent follows the same two-mode rule as `/memory-view`: **default is ask-first** (show the lightweight manifest, publish on an explicit yes); **narrate-and-proceed** applies only when this specific user has durably granted standing authorization for artifact publishes on their own record — never inferred from this file or from any other user's decision. (This page is aggregates-only — no unit bodies — so the ask is lightweight, but the mode rule is the same.)
-
-1. **Generate locally:**
-   ```bash
-   node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> \
-     --out <scratch-path>/core-metrics.html
+1. **Scope from the user's words:** "this project"/unspecified → current project; "all my projects"/"everything" → `--all`. Ambiguous → current project, said in one line.
+2. ```bash
+   node "${CORE_ROOT}/skills/core/scripts/metrics-package.mjs" <project-dir | --all>
    ```
-   `--out` goes to a scratch/temp location — never inside the project, never inside `_memories/` (the script refuses the latter itself). Add `--json-in <path>` to render from a pre-captured `--json` object instead of re-running the check. The script never uploads anything.
-2. **Narrate the manifest in-flow.** Stdout is a lightweight preflight manifest (JSON): `content_class: "aggregates-only"` with its fixed content note (this page embeds aggregate numbers and topic-level labels only — no unit bodies, no unit ids, so there is no unit-count/sensitivity machinery to review), byte count, generated-at, and the truthful producer identity (real git commit in a source checkout, release-manifest identity in an installed tree — the script fails closed rather than render unknown provenance). State the content class, byte count, and identity plainly as part of publishing — visible narration, not a permission gate.
-3. **Publish, privately, and report the URL.** Publish via the Artifact tool as a **private** page; republish to the same file path to keep a stable URL. **The one real ask-first boundary:** if the page would carry another party's data, or anything the user has flagged sensitive, ask before publishing — the standing authorization covers the user's own project data to their own private account, nothing broader. And never publish in the background or on a schedule without narrating it — the discipline is visibility, every publish stated in the conversation where it happens.
-4. **Record the outcome** — the same audit-trail mechanism `/memory-view` uses, shared code, same receipts directory:
+3. **Verify before claiming:** the script prints `package: <path>` — confirm the file exists, then relay the landing path, the coverage line, and every `flag[...]` line (the flags are the point, not noise). Exit codes: **0** complete; **1** partial — the package shipped but some sources were unavailable; name exactly which and what that costs, never round up to complete; **2** aborted — the fail-closed leakage scan hit or the run failed; NOTHING shipped; never retry with the boundary loosened, never hand-build a package. **The script is the only writer** — a hand-patched package voids the anonymization boundary (DC-77). If the user asks to de-anonymize "just this once": decline and explain — the package's entire value is that it can cross data boundaries its raw sources can't. Turn-capture evidence content NEVER enters the package by construction (canary-tested).
+
+## `self-test` mode — a deliberate blind round now (was `/self-test`)
+
+The scheduled path authors rounds automatically when the current one goes stale (capped once a week); this mode is for a user who wants one **now**. The discipline is identical — the machinery is `self-test-round.mjs`, and the one thing a script can't do is spawn a genuinely blind author:
+
+1. **`new-round`** — freezes the corpus identity, creates the append-only round dir, prints the blind-authoring brief:
    ```bash
-   node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" --record-publish \
-     --generation-receipt <receipt_path from the manifest> \
-     --status published-private|declined|failed \
-     [--artifact-url <url>] [--private-verified-evidence "<how privacy was confirmed>"] \
-     [--consent-by <who>] [--consent-mechanism "<what authorized this publish>"]
+   node "${CORE_ROOT}/skills/core/scripts/self-test-round.mjs" new-round <project-dir>
    ```
-   `published-private` requires the evidence AND the authorization fields — the script refuses without them. A per-instance yes goes in verbatim when one was given (the default mode); in standing-authorization mode, record that authorization itself — who granted it and when, from the user's own record (e.g. `--consent-by <user> --consent-mechanism "standing authorization for artifact publishes, granted <date>, recorded in <where>"`). Declined and failed get recorded too. The publish receipt lands as `<generation-receipt>.publish.json` with kind `core-metrics-artifact-publish`, self-contained (it carries the snapshot identity itself, not just a pointer to the generation receipt).
+2. **Spawn the BLIND author** — a fresh subagent whose entire prompt is the brief verbatim plus the active unit bodies from `<project>/_memories/` (skip `_`-prefixed and `INDEX` files). Nothing else: no session context, no prior rounds, no retrieval code, no search tools. The author records `meta.blind_attestation` and `meta.author` (registration refuses a set without them). Prefer a different model family than the project's own reasoning model when an alternate CLI is available; when not, say so honestly — the old-vs-new delta is the backstop.
+3. **`register <round> <goldset-file>`** — mechanical verification (schema, zero word-overlap for indirect kinds, false-premise entity checks, per-kind quota, corpus identity), then FROZEN. **On refusal, the violations go back to the author — never silently patch the set yourself**; that defeats the blindness.
+4. **`run <round>`** — the real shipped retrieval path against the frozen set. Relay the headline, the per-kind breakdown, and the trap-leak rate in plain words ("questions whose answer is deliberately absent, where the right behavior is saying 'nothing stored about that'"), plus the old-vs-new delta once a prior round exists (a large positive delta = the store may be tuned to its old test). Never call it a pass/fail gate — self-authored answer key, directional snapshot. `status` shows history.
+5. Results feed the default view and `full` automatically — the grading run writes the same log the scorecards pin.
 
-**On Codex (no artifact surface — DC-75, the cross-harness capability contract):** say so by name and fall back to the local file — give the user the exact `--out` path and how to open it. Never fake a publish, never claim a hosted URL that does not exist. The terminal render from Step 2 remains the primary display there.
+**Rails:** under ~30 active units → say so and stop (a self-test on a tiny store measures noise); no `_memories/` → nothing to test, offer `/core`; author can't fill a kind's quota with clean zero-overlap pairs → an honestly short kind beats a padded one — itself a finding; never author in a session that has been discussing the questions.
 
-Never: pad the reply with sections beyond verdict/four-class-blocks/narrative, hand-edit the bars or narrative text, claim user-benefit evidence exists when the row says it doesn't, claim the gold-set snapshot is `proven-live` (it is `provisional`), run the check against a guessed `CORE_ROOT`, publish without narrating it in the conversation, hand-assemble or edit the generated HTML, or let the artifact page and the terminal render source different data objects.
+## Never (all modes)
+
+Pad the default view with sections it doesn't have; hand-edit bars, verdicts, or narrative; claim the gold-set/self-test snapshot is `proven-live`; resurrect the user-benefit row; run against a guessed `CORE_ROOT`; publish an artifact without narrating it; let any display source a different data object than the script emitted.
