@@ -10,6 +10,7 @@ import { hashText } from '../../plugins/core/skills/core/scripts/state-cache.mjs
 import { newRound, register, SELF_TEST_LOG_FILENAME } from '../../plugins/core/skills/core/scripts/self-test-round.mjs';
 import { loadSnapshot } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
 import { captureTurnEvidence, computeStoreSignature } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
+import { TRIPWIRE_THRESHOLDS } from '../../plugins/core/skills/core/scripts/metrics-tripwires.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAINT_SCRIPT = join(HERE, '..', '..',
@@ -260,6 +261,34 @@ test('scorecard op: pins a scorecard when unpinned judgments exist, skips when n
   // second run with nothing new → skip
   res = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home });
   assert.ok(!res.ranOps.includes('scorecard-computation'), 'pinned already → skip');
+});
+
+test('pinned scorecards carry the live tripwire thresholds (visible-goalposts rule)', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  const base = join(root, '_metrics');
+  mkdirSync(base, { recursive: true });
+  writeFileSync(join(base, 'judgment-log.jsonl'),
+    JSON.stringify({ kind: 'hindsight-judgment', retrieval_id: 'r1', ts: '2026-06-27T00:00:00Z', verdict: 'hit-right', judge_version: '1.0.0' }) + '\n');
+  runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  const card = JSON.parse(readFileSync(join(base, 'scorecard-log.jsonl'), 'utf8').trim().split('\n')[0]);
+  assert.equal(card.thresholds.self_test_drop, TRIPWIRE_THRESHOLDS.self_test_drop);
+  assert.equal(card.thresholds.capture_consecutive_failures, TRIPWIRE_THRESHOLDS.capture_consecutive_failures);
+});
+
+test('auto-author trigger: a stale round emits one narrated note and stamps the weekly cap', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  // cold start: no round at all → due → note + cap stamp
+  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  assert.ok(res.notes.some((n) => /self-test round/.test(n) && /due|stale|cold start|exists yet/.test(n)),
+    `expected an authoring-due note, got: ${JSON.stringify(res.notes)}`);
+  // second pass inside the cap window → no repeat note
+  const res2 = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home });
+  assert.ok(!res2.notes.some((n) => /self-test round/.test(n) && /due|stale|cold start|exists yet/.test(n)),
+    'weekly cap suppresses a repeat trigger');
 });
 
 test('legacy sweep: a leftover rich-context stream from the retired mechanism is removed on apply', () => {

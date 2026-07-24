@@ -32,6 +32,8 @@ import { runTurnCaptureRetention, purgeTurnCapture, turnCaptureDir, TURN_CAPTURE
 import { resolveStoragePath } from './log-event.mjs';
 import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
 import { judgeUnjudgedTurns } from './hindsight-judge.mjs';
+import { TRIPWIRE_THRESHOLDS } from './metrics-tripwires.mjs';
+import { shouldAuthorFreshRound, markAutoAuthorTriggered } from './self-test-round.mjs';
 import { regradeNewestRound } from './self-test-round.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
@@ -198,7 +200,9 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   if (apply) {
     try {
       if (shouldComputeScorecard(root)) {
-        const card = computeScorecard(root, { now });
+        // Thresholds stamped from the live single source so a threshold
+        // change is visible in scorecard history (visible-goalposts rule).
+        const card = computeScorecard(root, { now, thresholds: TRIPWIRE_THRESHOLDS });
         const pinRes = appendScorecard(root, card);
         if (pinRes.written) {
           ranOps.push('scorecard-computation');
@@ -209,6 +213,24 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
       }
     } catch (e) {
       notes.push(`scorecard computation skipped (${String(e && e.message).slice(0, 60)})`);
+    }
+  }
+
+  // 3.8 Self-test staleness trigger (v3.14.0 Link 4b): when the newest round
+  // is stale (corpus growth / session age / no round yet), emit ONE narrated
+  // note that fresh-round authoring is due — the authoring itself stays a real
+  // blind subagent step the protocol schedules, never run from here. The
+  // weekly hard cap (DC-129) lives inside the assessment and is stamped when
+  // the trigger fires, so a repeat pass inside the cap stays silent.
+  if (apply) {
+    try {
+      const staleness = shouldAuthorFreshRound(root, { now });
+      if (staleness.due) {
+        markAutoAuthorTriggered(root, { now });
+        notes.push(`self-test round authoring is due (${staleness.reason}) — schedule a fresh blind round; capped to once per week`);
+      }
+    } catch (e) {
+      notes.push(`self-test staleness check skipped (${String(e && e.message).slice(0, 60)})`);
     }
   }
 

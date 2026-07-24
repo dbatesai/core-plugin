@@ -668,6 +668,76 @@ export async function regradeNewestRound(project, { snapshot } = {}) {
   return record;
 }
 
+// ---------------- Link 4b: staleness-triggered fresh-round authoring ----------------
+
+// Growth/age triggers + the DC-129 weekly hard cap. Pure — every input
+// injected so the policy is exhaustively testable; shouldAuthorFreshRound
+// below wires the real surfaces.
+export const ROUND_STALENESS = Object.freeze({
+  growth_fraction: 0.20,   // corpus grew >20% past the round's frozen unit count
+  max_sessions: 10,        // more than this many session-days since registration
+  trigger_cap_days: 7,     // hard cap: at most one auto-author trigger per week (DC-129)
+});
+
+export function assessRoundStaleness({ registeredAt, hasResult, sessionDatesAfter, currentUnits, frozenUnits, lastTriggerTs, now }) {
+  // The weekly cap suppresses EVERY trigger path, including cold start —
+  // auto-authoring spawns a real subagent, so the cap is the cost guard.
+  if (lastTriggerTs) {
+    const elapsedDays = (new Date(now).getTime() - new Date(lastTriggerTs).getTime()) / 86400000;
+    if (elapsedDays < ROUND_STALENESS.trigger_cap_days) {
+      return { due: false, reason: `weekly cap: last auto-author trigger ${elapsedDays.toFixed(1)}d ago` };
+    }
+  }
+  if (!registeredAt) return { due: true, reason: 'no registered round exists yet (cold start)' };
+  if (!hasResult) return { due: false, reason: 'newest round is unfinished (registered, never run) — run it before authoring another' };
+  if (typeof currentUnits === 'number' && typeof frozenUnits === 'number' && frozenUnits > 0
+    && currentUnits > frozenUnits * (1 + ROUND_STALENESS.growth_fraction)) {
+    return { due: true, reason: `corpus grew ${currentUnits} vs ${frozenUnits} frozen (>${ROUND_STALENESS.growth_fraction * 100}%)` };
+  }
+  if (typeof sessionDatesAfter === 'number' && sessionDatesAfter > ROUND_STALENESS.max_sessions) {
+    return { due: true, reason: `${sessionDatesAfter} sessions since the round was registered (max ${ROUND_STALENESS.max_sessions})` };
+  }
+  return { due: false, reason: 'round is fresh' };
+}
+
+const AUTO_AUTHOR_STATE = 'auto-author-state.json';
+
+/** Real-surface wrapper: reads the newest registered round, its results, the
+ * session-date count, the live unit count, and the trigger-cap marker. */
+export function shouldAuthorFreshRound(project, { now = new Date().toISOString() } = {}) {
+  const newest = newestRegisteredRound(project);
+  let frozenUnits = null;
+  let hasResult = false;
+  let sessionDatesAfter = 0;
+  if (newest) {
+    const res = latestResult(project, newest.round);
+    hasResult = Boolean(res);
+    if (res && typeof res.store_units === 'number') frozenUnits = res.store_units;
+    const regDate = String(newest.prereg && newest.prereg.registered_at || '').slice(0, 10);
+    try {
+      sessionDatesAfter = readdirSync(join(resolve(project), '_sessions'))
+        .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && d > regDate).length;
+    } catch { sessionDatesAfter = 0; }
+  }
+  let currentUnits = null;
+  try { currentUnits = loadSnapshot(resolve(project)).total; } catch { /* no snapshot → skip growth check */ }
+  let lastTriggerTs = null;
+  try { lastTriggerTs = JSON.parse(readFileSync(join(selfTestDir(project), AUTO_AUTHOR_STATE), 'utf8')).last_trigger_ts || null; } catch { /* never triggered */ }
+  return assessRoundStaleness({
+    registeredAt: newest ? (newest.prereg && newest.prereg.registered_at) || 'unknown' : null,
+    hasResult, sessionDatesAfter, currentUnits, frozenUnits, lastTriggerTs, now,
+  });
+}
+
+/** Stamp the weekly-cap marker when a trigger is emitted. */
+export function markAutoAuthorTriggered(project, { now = new Date().toISOString() } = {}) {
+  try {
+    mkdirSync(selfTestDir(project), { recursive: true });
+    writeFileSync(join(selfTestDir(project), AUTO_AUTHOR_STATE), JSON.stringify({ last_trigger_ts: now }) + '\n');
+    return true;
+  } catch { return false; }
+}
+
 // Newest run record on disk for a round, or null.
 export function latestResult(project, round) {
   const dir = roundDir(project, round);
