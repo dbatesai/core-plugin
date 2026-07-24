@@ -1,15 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync, rmSync, cpSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { runMaintenance } from '../../plugins/core/skills/core/scripts/maintenance-run.mjs';
 import { hashText } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
+import { newRound, register, SELF_TEST_LOG_FILENAME } from '../../plugins/core/skills/core/scripts/self-test-round.mjs';
+import { loadSnapshot } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
 
-const MAINT_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
+const HERE = dirname(fileURLToPath(import.meta.url));
+const MAINT_SCRIPT = join(HERE, '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'maintenance-run.mjs');
+const SELF_TEST_FIXTURE = join(HERE, '..', 'fixtures', 'obligation3-store');
 
 // Isolated HOME so the state-cache global-prune step never touches the real
 // developer ~/.core during tests (mirrors decorate-graph.test.mjs / hot-section.test.mjs).
@@ -211,4 +215,81 @@ test('--purge-rich-context CLI removes the whole stream dir and nothing else', (
   assert.match(out, /Purged the rich-context capture stream/);
   assert.ok(!existsSync(richDir), 'stream dir removed');
   assert.ok(existsSync(join(root, '_memories')), 'memory store untouched');
+});
+
+// ── self-test auto-regrade wired into the CLI cadence (holistic-redesign §3d) ──
+
+function selfTestFixtureStore() {
+  const dir = mkdtempSync(join(tmpdir(), 'core-maint-selftest-'));
+  cpSync(SELF_TEST_FIXTURE, dir, { recursive: true });
+  return dir;
+}
+function readSelfTestLogRows(store) {
+  const sessionsDir = join(store, '_sessions');
+  if (!existsSync(sessionsDir)) return [];
+  const rows = [];
+  for (const date of readdirSync(sessionsDir)) {
+    const p = join(sessionsDir, date, SELF_TEST_LOG_FILENAME);
+    if (!existsSync(p)) continue;
+    for (const line of readFileSync(p, 'utf8').trim().split('\n').filter(Boolean)) rows.push(JSON.parse(line));
+  }
+  return rows;
+}
+
+test('CLI: with a registered self-test round, maintenance-run auto-regrades and logs it', () => {
+  const root = selfTestFixtureStore();
+  try {
+    newRound(root);
+    const snapshotId = loadSnapshot(root, { captureBodies: true }).snapshotId;
+    const gold = {
+      meta: { round: 1, authoring_snapshot_id: snapshotId, author: 't', blind_attestation: 'x' },
+      queries: [{ id: 'q1', query: 'omega speedmaster sale', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] }],
+    };
+    const goldPath = join(root, 'gold.json');
+    writeFileSync(goldPath, JSON.stringify(gold));
+    const regResult = register(root, 1, goldPath);
+    assert.ok(regResult.ok, `register should pass: ${JSON.stringify(regResult.violations)}`);
+
+    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json'], { encoding: 'utf8' });
+    const parsed = JSON.parse(out);
+    assert.ok(parsed.self_test_regrade, 'CLI JSON output carries a self_test_regrade field');
+    assert.match(parsed.self_test_regrade.note, /self-test round 1 re-graded automatically/);
+
+    const rows = readSelfTestLogRows(root);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].trigger, 'auto-regrade');
+    assert.equal(rows[0].old_vs_new_skipped, true, 'the CLI-wired regrade skips the historical delta');
+    const roundFiles = readdirSync(join(root, '_tests', 'self-test', 'round-1'));
+    assert.ok(!roundFiles.some((f) => /^results-/.test(f)), 'no deliberate results file written by the auto-regrade');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: no registered self-test round is a silent no-op — no self_test_regrade noise', () => {
+  const root = makeProject();
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  try {
+    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json'], { encoding: 'utf8' });
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.self_test_regrade, null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: --dry-run skips the self-test auto-regrade entirely (no log write)', () => {
+  const root = selfTestFixtureStore();
+  try {
+    newRound(root);
+    const snapshotId = loadSnapshot(root, { captureBodies: true }).snapshotId;
+    const gold = {
+      meta: { round: 1, authoring_snapshot_id: snapshotId, author: 't', blind_attestation: 'x' },
+      queries: [{ id: 'q1', query: 'omega speedmaster sale', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] }],
+    };
+    const goldPath = join(root, 'gold.json');
+    writeFileSync(goldPath, JSON.stringify(gold));
+    register(root, 1, goldPath);
+
+    const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--json', '--dry-run'], { encoding: 'utf8' });
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.self_test_regrade, null, 'dry-run never regrades — it is a real append, not a report');
+    assert.equal(readSelfTestLogRows(root).length, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

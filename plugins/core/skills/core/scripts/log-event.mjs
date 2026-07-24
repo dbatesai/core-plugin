@@ -10,19 +10,18 @@
  * Per DC-77 the script ships with the plugin (not per-project).
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  *
- * Phase 2 (2026-05-26, T1 of metrics & observability v1): adds OTel-format
- * dual-write to `<project>/_metrics/traces/<session-id>.jsonl`. STATUS
- * (2026-06-09): the trace write is a COLLECTION STUB — no analyzer reads the
- * OTel rows yet; every consumer (`analyze-retrieval-quality.mjs` etc.) still
- * reads the legacy `_sessions/<date>/<filename>.jsonl` files. Until a trace
- * reader ships, the OTel side is corpus accumulation, not a substrate; the
- * planned one-shot analyzer rewrite lands with that reader.
- *
- * Dual-write overhead: +26 µs per event per Probe 3 (2026-05-26 metrics probes).
- * Negligible at any realistic event rate.
+ * Phase 2 (2026-05-26) added an OTel-format dual-write to
+ * `<project>/_metrics/traces/<session-id>.jsonl`. Retired 2026-07-24 (metrics
+ * holistic redesign, docs/specs/2026-07-23-metrics-holistic-redesign.md §3a):
+ * it never gained a reader in the ~2 months it ran — every consumer
+ * (`analyze-retrieval-quality.mjs` etc.) always read the legacy
+ * `_sessions/<date>/<filename>.jsonl` files instead. Pure write cost, no
+ * benefit. The JSONL logs are the sole event substrate now; a real OTel
+ * consumer, if one ever shows up, should get a dual-write built against its
+ * actual needs rather than resurrecting this speculative one.
  *
  * Library usage:
- *   import { logEvent, eventLogPath, traceLogPath } from './log-event.mjs';
+ *   import { logEvent, eventLogPath } from './log-event.mjs';
  *   logEvent('<project>', 'hygiene-log.jsonl', { kind: 'demote-moves', ... });
  *
  * Failure mode discipline: silent skip when projectDir doesn't exist. Hosts
@@ -33,8 +32,6 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-
-const SCHEMA_VERSION = '1.0.0';
 
 /**
  * Resolve where the metrics storage lives — honors what `metrics-init.mjs`
@@ -126,19 +123,6 @@ export function eventLogPath(projectDir, filename, { today } = {}) {
 }
 
 /**
- * Path for the per-session OTel trace JSONL. Session id comes from the
- * harness's session env var; if absent we use a sentinel so Layer 2 can
- * still attribute the data to a synthetic bucket.
- *
- * Storage base honors the scaffold-time pin per `resolveStoragePath`.
- */
-export function traceLogPath(projectDir, { sessionId, workspaceId } = {}) {
-  const sid = resolveSessionId({ explicit: sessionId });
-  const base = resolveStoragePath(projectDir, { workspaceId });
-  return join(base, 'traces', `${sid}.jsonl`);
-}
-
-/**
  * Resolve the session id for trace bucketing.
  *
  * Chain per RC Turn evt-c97d empirical confirmation:
@@ -191,39 +175,12 @@ export function sanitizeAttributeValue(value, { maxLen = MAX_ATTRIBUTE_STRING, m
   return sanitizeAttributeValue(String(value), { maxLen, maxDepth });
 }
 
-/**
- * Convert a legacy event record into an OTel-format span line.
- *
- * The `kind` field becomes the span name (`core.<kind>`); all other event
- * fields land under the `core.*` attribute namespace per matrix AS-12
- * (CORE-specific extensions only; native LLM/resource attrs come from
- * Claude Code's own emission).
- */
-export function eventToOtelSpan(event, { ts, sessionId } = {}) {
-  const nowNs = BigInt(Date.parse(ts) || Date.now()) * 1000000n;
-  const kind = event.kind || 'event';
-  const attributes = { 'core.event_kind': kind };
-  if (sessionId) attributes['session.id'] = sessionId;
-  for (const [k, v] of Object.entries(event)) {
-    if (k === 'kind') continue;
-    attributes[`core.${k}`] = sanitizeAttributeValue(v);
-  }
-  return {
-    schema_version: SCHEMA_VERSION,
-    span_name: `core.${kind}`,
-    start_time_unix_nano: nowNs.toString(),
-    end_time_unix_nano: nowNs.toString(),
-    attributes,
-    events: [],
-  };
-}
-
-// Returns a write outcome — {legacy, otel, reason?} — so producers can tell a
+// Returns a write outcome — {legacy, reason?} — so producers can tell a
 // delivered event from a silently-swallowed one (Hale live-hook audit,
-// 2026-07-17: "the writer reports a normalized record even if both writes
-// silently fail"). Still best-effort: never throws, never blocks the host.
-export function logEvent(projectDir, filename, event, { today, now, sessionId, workspaceId } = {}) {
-  const outcome = { legacy: false, otel: false };
+// 2026-07-17: "the writer reports a normalized record even if the write
+// silently fails"). Still best-effort: never throws, never blocks the host.
+export function logEvent(projectDir, filename, event, { today, now } = {}) {
+  const outcome = { legacy: false };
   if (!existsSync(projectDir)) { outcome.reason = 'project-dir-missing'; return outcome; }
   const date = today || todayUTC();
   const sessionDir = join(projectDir, '_sessions', date);
@@ -233,30 +190,11 @@ export function logEvent(projectDir, filename, event, { today, now, sessionId, w
   const ts = now || new Date().toISOString();
   const record = { ts, ...event };
 
-  // 1. Legacy write (unchanged shape — existing analyzers depend on it).
   try {
     appendFileSync(join(sessionDir, filename), JSON.stringify(record) + '\n');
     outcome.legacy = true;
   } catch {
     outcome.reason = 'legacy-append-failed'; // best-effort by design — reported, not thrown
-  }
-
-  // 2. OTel-format dual-write per spec §17.7 transition path.
-  //    Storage path resolves via resolveStoragePath() — honors the (g.5)
-  //    AppData redirect that metrics-init.mjs pinned at scaffold time.
-  //    Session id resolves via resolveSessionId() — Claude Code, then Codex,
-  //    then sentinel (RC Turn evt-c97d).
-  //    Best-effort, never blocks or throws.
-  try {
-    const sid = resolveSessionId({ explicit: sessionId });
-    const storageBase = resolveStoragePath(projectDir, { workspaceId });
-    const tracesDir = join(storageBase, 'traces');
-    mkdirSync(tracesDir, { recursive: true });
-    const span = eventToOtelSpan(event, { ts, sessionId: sid });
-    appendFileSync(join(tracesDir, `${sid}.jsonl`), JSON.stringify(span) + '\n');
-    outcome.otel = true;
-  } catch {
-    // Silent — dual-write is transition substrate; legacy path is authoritative.
   }
   return outcome;
 }

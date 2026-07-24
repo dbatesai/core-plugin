@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
-  buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging, workspaceMetrics,
+  buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging, workspaceMetrics, selfTestStats,
 } from '../../plugins/core/skills/core/scripts/metrics-package.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
@@ -486,5 +486,107 @@ test('ACCEPTANCE Hale-2026-07-23 item 6 (package availability): an old-only stor
     assert.deepEqual(w.recognition.instrument_cohort, {
       schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
     });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ── self-test results reaching the export package (holistic-redesign §3b/§5) ──
+
+test('selfTestStats: unavailable with no log; whitelist-folds an unrecognized trigger and per-kind key', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-selftest-'));
+  try {
+    const project = join(root, 'proj');
+    mkdirSync(join(project, '_memories'), { recursive: true });
+    const absent = selfTestStats(project);
+    assert.equal(absent.available, false);
+    assert.match(absent.reason, /no self-test-log\.jsonl/);
+
+    const sessions = join(project, '_sessions', '2026-07-24');
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, 'self-test-log.jsonl'), [
+      JSON.stringify({
+        ts: '2026-07-24T10:00:00Z', kind: 'self-test-run', trigger: 'user-invoked', round: 1,
+        corpus_snapshot_id: 'abc123', goldset_sha256: 'deadbeef',
+        headline_arm: 'ranking', headline_k: 10, headline: 0.8,
+        per_kind_r10: { literal: 1, category: 0.5, 'not-a-real-kind': 0.9 },
+        trap_leak_rate: 0.25, old_vs_new_delta: 0.1, old_vs_new_skipped: false,
+        n_queries: 12, store_units: 200,
+      }),
+      JSON.stringify({
+        ts: '2026-07-24T11:00:00Z', kind: 'self-test-run', trigger: 'some-untrusted-value', round: 2,
+        headline: 0.85, trap_leak_rate: 0, old_vs_new_skipped: true,
+      }),
+    ].join('\n') + '\n');
+
+    const present = selfTestStats(project);
+    assert.equal(present.available, true);
+    assert.equal(present.runs_total, 2);
+    assert.equal(present.rounds_seen, 2);
+    assert.equal(present.latest_round, 2);
+    assert.equal(present.latest_trigger, 'other', 'an unrecognized trigger folds to other, never passed through raw');
+    assert.equal(present.latest_headline, 0.85);
+    assert.equal(present.latest_trap_leak_rate, 0);
+
+    const day = present.days['2026-07-24'];
+    assert.equal(day.length, 2);
+    assert.equal(day[0].trigger, 'user-invoked');
+    assert.deepEqual(day[0].per_kind_r10, { literal: 1, category: 0.5 }, 'an unrecognized per-kind key is dropped, not passed through verbatim');
+    assert.equal(day[0].corpus_snapshot_id, 'abc123');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('end-to-end: self-test results reach the package headline, a trap-leak flag, and both reports', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-selftest-e2e-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root, { plant: false });
+    const sessions = join(project, '_sessions', '2026-07-01');
+    writeFileSync(join(sessions, 'self-test-log.jsonl'), JSON.stringify({
+      ts: '2026-07-01T13:00:00Z', kind: 'self-test-run', trigger: 'auto-regrade', round: 3,
+      corpus_snapshot_id: 'snap-xyz', goldset_sha256: 'gold-xyz',
+      headline_arm: 'ranking', headline_k: 10, headline: 0.75,
+      per_kind_r10: { literal: 1, value: 0.5 },
+      trap_leak_rate: 0.5, old_vs_new_delta: null, old_vs_new_skipped: true,
+      n_queries: 8, store_units: 40,
+    }) + '\n');
+
+    const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
+    assert.ok(!result.error, `no fatal error: ${result.error}`);
+    const extracted = readShippedPackage(result.shipped, join(root, 'x'));
+    const projectDir = join(extracted, 'projects', readdirSync(join(extracted, 'projects'))[0]);
+
+    const selfTest = JSON.parse(readFileSync(join(projectDir, 'self-test.json'), 'utf8'));
+    assert.equal(selfTest.available, true);
+    assert.equal(selfTest.latest_round, 3);
+    assert.equal(selfTest.latest_headline, 0.75);
+    assert.equal(selfTest.latest_trap_leak_rate, 0.5);
+
+    const headline = JSON.parse(readFileSync(join(projectDir, 'headline.json'), 'utf8'));
+    assert.equal(headline.self_test_latest_headline, 0.75);
+    assert.equal(headline.self_test_latest_trap_leak_rate, 0.5);
+    assert.ok(headline.flags.some(f => f.code === 'self-test-trap-leak'), 'a leaked trap raises a flag');
+
+    const reportMd = readFileSync(join(extracted, 'REPORT.md'), 'utf8');
+    assert.match(reportMd, /Self-test.*round 3.*auto-regrade/i);
+    const reportHtml = readFileSync(join(extracted, 'report.html'), 'utf8');
+    assert.match(reportHtml, /self-test headline/i);
+    assert.match(reportHtml, /Round 3/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('project with no self-test round: package still ships, self-test.json is honestly unavailable, no flag raised', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-selftest-absent-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root, { plant: false });
+    const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
+    assert.ok(!result.error, `no fatal error: ${result.error}`);
+    const extracted = readShippedPackage(result.shipped, join(root, 'x'));
+    const projectDir = join(extracted, 'projects', readdirSync(join(extracted, 'projects'))[0]);
+    const selfTest = JSON.parse(readFileSync(join(projectDir, 'self-test.json'), 'utf8'));
+    assert.equal(selfTest.available, false);
+    assert.match(selfTest.reason, /no self-test-log\.jsonl/);
+    const headline = JSON.parse(readFileSync(join(projectDir, 'headline.json'), 'utf8'));
+    assert.equal(headline.self_test_latest_headline, undefined);
+    assert.ok(!headline.flags.some(f => f.code === 'self-test-trap-leak'));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

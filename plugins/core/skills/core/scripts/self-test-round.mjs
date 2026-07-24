@@ -52,6 +52,17 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
 import { runHarness, validateGold } from './retrieval-harness.mjs';
+import { logEvent } from './log-event.mjs';
+import { loadEvents, computeTierDistribution } from './analyze-retrieval-quality.mjs';
+
+// Dedicated log file for self-test grading results — deliberately its OWN
+// file, never the organic retrieval/outcome/hygiene logs (Antigravity's
+// correction, 2026-07-23: a self-test run is a synthetic, on-demand
+// measurement, not real usage; mixing the two means every future reader has
+// to filter synthetic rows out of real ones). Numbers/ids only, same
+// logEvent() writer everything else uses. Per
+// docs/specs/2026-07-23-metrics-holistic-redesign.md §3b.
+export const SELF_TEST_LOG_FILENAME = 'self-test-log.jsonl';
 
 // ---- the question-kind vocabulary + default per-round quota ----
 // The kinds are the shipped harness rungs plus the two the field treats as
@@ -146,10 +157,79 @@ export function contentStems(text) {
   );
 }
 
+// Recent trap-leak history from THIS project's own prior self-test runs —
+// walks _sessions/<date>/self-test-log.jsonl. No day-window filter: self-test
+// rounds are deliberate, infrequent acts, so "recent" just means "the last
+// few that happened," not a calendar cutoff.
+function loadSelfTestLogEvents(project) {
+  const sessionsDir = join(resolve(project), '_sessions');
+  if (!existsSync(sessionsDir)) return [];
+  const rows = [];
+  for (const date of readdirSync(sessionsDir)) {
+    const p = join(sessionsDir, date, SELF_TEST_LOG_FILENAME);
+    if (!existsSync(p)) continue;
+    try {
+      for (const line of readFileSync(p, 'utf8').trim().split('\n').filter(Boolean)) rows.push(JSON.parse(line));
+    } catch { /* a malformed line never blocks quota computation */ }
+  }
+  return rows.sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
+}
+
+const ESCALATION_HIGH_THRESHOLD = 0.3; // >30% of real retrievals needed tier 2/3
+const RECENT_SELF_TEST_LOOKBACK = 5;   // average the last N self-test runs for trap-leak history
+
+// Mechanically reshape the default quota from recent metrics (Antigravity's
+// correction, 2026-07-23: a soft "here's what's weak" note in the brief is
+// something an LLM subagent can just ignore; register() already mechanically
+// enforces per-kind counts against the stated quota, so shifting the quota
+// itself — not just hinting at it — makes this a hard requirement). Two
+// signals, deliberately simple:
+//   - high ESCALATION RATE (real retrieval events needing tier 2/3, not the
+//     cheap tier-1 path) → shift weight from the near-ceiling 'literal' kind
+//     (kept only as a regression canary per DEFAULT_QUOTA's own comment)
+//     toward 'cross-domain', the kind that most directly exercises the same
+//     indirect reasoning tier 2/3 retrieval needed.
+//   - any recent self-test TRAP-LEAK (a trick question a finder fell for) →
+//     shift weight from 'temporal' toward 'abstention' to pressure-test that
+//     exact weakness harder next round.
+// The total question count never changes, only the per-kind allocation, so
+// every existing quota-total assumption (register's enforcement, the brief's
+// total line) still holds.
+export function computeMetricsInformedQuota(project, { baseQuota = DEFAULT_QUOTA } = {}) {
+  const quota = { ...baseQuota };
+  const adjustments = [];
+
+  let escalationRate = null;
+  try {
+    const dist = computeTierDistribution(loadEvents(project, { allTime: true }));
+    if (dist.total > 0) escalationRate = dist.t2.pct + dist.t3.pct;
+  } catch { /* no retrieval log yet — this signal stays neutral */ }
+
+  if (escalationRate != null && escalationRate > ESCALATION_HIGH_THRESHOLD && quota.literal > 1) {
+    quota.literal -= 1;
+    quota['cross-domain'] += 1;
+    adjustments.push(`escalation rate ${Math.round(escalationRate * 100)}% over real retrievals (>${Math.round(ESCALATION_HIGH_THRESHOLD * 100)}% threshold) — shifted 1 question from literal to cross-domain`);
+  }
+
+  const recentRuns = loadSelfTestLogEvents(project).slice(-RECENT_SELF_TEST_LOOKBACK);
+  const leakRates = recentRuns.map(r => r.trap_leak_rate).filter(v => typeof v === 'number');
+  const recentTrapLeak = leakRates.length ? leakRates.reduce((s, x) => s + x, 0) / leakRates.length : null;
+  if (recentTrapLeak != null && recentTrapLeak > 0 && quota.temporal > 0) {
+    quota.temporal -= 1;
+    quota.abstention += 1;
+    adjustments.push(`self-test trap-leak rate averaging ${Math.round(recentTrapLeak * 100)}% over the last ${leakRates.length} run(s) — shifted 1 question from temporal to abstention`);
+  }
+
+  return { quota, adjustments };
+}
+
 // ============================================================
 // new-round — snapshot the corpus, emit the blind-authoring brief.
 // ============================================================
-export function newRound(project, { quota = DEFAULT_QUOTA } = {}) {
+// quota, when explicitly passed, is used verbatim (no metrics adjustment —
+// existing callers that pin an exact quota keep doing exactly that). When
+// omitted, the quota is computed fresh from recent metrics every round.
+export function newRound(project, { quota } = {}) {
   const root = resolve(project);
   if (!existsSync(join(root, '_memories'))) {
     throw new Error(`no _memories/ store at ${root} — nothing to author a self-test against`);
@@ -159,13 +239,17 @@ export function newRound(project, { quota = DEFAULT_QUOTA } = {}) {
   mkdirSync(dir, { recursive: true });
 
   const { identity } = captureCorpusIdentity(project);
+  const { quota: resolvedQuota, adjustments } = quota
+    ? { quota, adjustments: [] }
+    : computeMetricsInformedQuota(project);
   const quotaRecord = {
     round,
     project: root,
     created_at: identity.captured_at,
     authoring_snapshot_id: identity.snapshot_id,
     unit_count: identity.unit_count,
-    quota,
+    quota: resolvedQuota,
+    quota_adjustments: adjustments,
     overlap_required_kinds: [...OVERLAP_REQUIRED],
   };
   writeFileSync(join(dir, 'quota.json'), JSON.stringify(quotaRecord, null, 2));
@@ -173,7 +257,7 @@ export function newRound(project, { quota = DEFAULT_QUOTA } = {}) {
   const brief = renderBrief(quotaRecord);
   writeFileSync(join(dir, 'brief.md'), brief);
 
-  return { round, dir, briefPath: join(dir, 'brief.md'), identity, quota };
+  return { round, dir, briefPath: join(dir, 'brief.md'), identity, quota: resolvedQuota, adjustments };
 }
 
 function renderBrief(q) {
@@ -198,6 +282,12 @@ function renderBrief(q) {
   lines.push('   AND its topics. The only bridge allowed is world knowledge, not shared words.');
   lines.push('4. Name the exact answer unit id(s) for each question. Prefer one primary answer.');
   lines.push('');
+  if (q.quota_adjustments && q.quota_adjustments.length) {
+    lines.push('## This round\'s quota was adjusted from recent metrics');
+    lines.push('');
+    for (const a of q.quota_adjustments) lines.push(`- ${a}`);
+    lines.push('');
+  }
   lines.push(`## Author exactly ${total} questions, in this mix`);
   lines.push('');
   lines.push('| kind | count | what it is |');
@@ -446,7 +536,14 @@ function perKindBreakdown(harnessOut) {
 // delta — WITHOUT persisting anything. This is the read-only core; runRound
 // wraps it to also write a results file. /metrics consumes measureRound so a
 // health check never litters the round directory with run records.
-export async function measureRound(project, round, { snapshot: injected = null } = {}) {
+//
+// skipHistoricalDelta (Antigravity's correction, 2026-07-23): the priors loop
+// below re-runs EVERY prior registered round against the current corpus, so
+// its cost grows without bound as rounds accumulate. Automatic re-grading
+// (regradeNewestRound, wired into the maintenance cadence) sets this true to
+// grade only the newest round's headline — the full multi-round delta stays
+// something a user triggers on purpose via `/self-test run`.
+export async function measureRound(project, round, { snapshot: injected = null, skipHistoricalDelta = false } = {}) {
   const dir = roundDir(project, round);
   const preregPath = join(dir, 'prereg.json');
   const frozenPath = join(dir, 'goldset.json');
@@ -466,20 +563,24 @@ export async function measureRound(project, round, { snapshot: injected = null }
   // Old-vs-new delta (the overfitting detector, TREC-Robust style): run every
   // PRIOR registered round's frozen set against the SAME current corpus, then
   // compare this (newest-run) round's headline to the mean of the older ones.
-  const priors = [];
-  for (const r of listRounds(project)) {
-    if (r === Number(round)) continue;
-    const rPre = join(roundDir(project, r), 'prereg.json');
-    const rGold = join(roundDir(project, r), 'goldset.json');
-    if (!existsSync(rPre) || !existsSync(rGold)) continue;
-    try {
-      const rOut = await runHarness(resolve(project), rGold, { snapshot });
-      priors.push({ round: r, headline: armHeadline(rOut) });
-    } catch { /* a prior round with a stale answer key is skipped, not fatal */ }
+  let priors = [];
+  let priorMean = null;
+  let delta = null;
+  if (!skipHistoricalDelta) {
+    for (const r of listRounds(project)) {
+      if (r === Number(round)) continue;
+      const rPre = join(roundDir(project, r), 'prereg.json');
+      const rGold = join(roundDir(project, r), 'goldset.json');
+      if (!existsSync(rPre) || !existsSync(rGold)) continue;
+      try {
+        const rOut = await runHarness(resolve(project), rGold, { snapshot });
+        priors.push({ round: r, headline: armHeadline(rOut) });
+      } catch { /* a prior round with a stale answer key is skipped, not fatal */ }
+    }
+    const priorHeadlines = priors.map(p => p.headline).filter(h => typeof h === 'number');
+    priorMean = priorHeadlines.length ? priorHeadlines.reduce((s, x) => s + x, 0) / priorHeadlines.length : null;
+    delta = (headline != null && priorMean != null) ? headline - priorMean : null;
   }
-  const priorHeadlines = priors.map(p => p.headline).filter(h => typeof h === 'number');
-  const priorMean = priorHeadlines.length ? priorHeadlines.reduce((s, x) => s + x, 0) / priorHeadlines.length : null;
-  const delta = (headline != null && priorMean != null) ? headline - priorMean : null;
 
   // Gold-id staleness against the current store (runs still proceed — old slices
   // are trainable against the current corpus — but a rotted answer key is surfaced).
@@ -499,7 +600,7 @@ export async function measureRound(project, round, { snapshot: injected = null }
     headline_k: HEADLINE_K,
     headline,
     breakdown,
-    old_vs_new: { priors, prior_mean: priorMean, delta },
+    old_vs_new: { priors, prior_mean: priorMean, delta, skipped: skipHistoricalDelta },
     stale_gold: staleGold,
     n_queries: out.nQueries,
     store_units: out.total,
@@ -509,12 +610,57 @@ export async function measureRound(project, round, { snapshot: injected = null }
   return { record, dir };
 }
 
-// run — measure the round AND persist the run record to the round directory.
+// Build the self-test-log.jsonl event from a measureRound() record — numbers
+// and ids only, never question/answer text or unit bodies, so it's exportable
+// under the same whitelist discipline every other metrics surface already
+// applies. Per docs/specs/2026-07-23-metrics-holistic-redesign.md §3b.
+export function buildSelfTestLogEvent(record, { trigger }) {
+  return {
+    kind: 'self-test-run',
+    trigger, // 'user-invoked' (/self-test run) or 'auto-regrade' (maintenance cadence)
+    round: record.round,
+    corpus_snapshot_id: record.corpus_snapshot_id,
+    goldset_sha256: record.prereg_goldset_sha256,
+    headline_arm: record.headline_arm,
+    headline_k: record.headline_k,
+    headline: record.headline,
+    per_kind_r10: Object.fromEntries(
+      Object.entries(record.breakdown.byKind || {}).map(([kind, v]) => [kind, v.r10]),
+    ),
+    trap_leak_rate: record.breakdown.forbiddenRate,
+    old_vs_new_delta: record.old_vs_new.delta,
+    old_vs_new_skipped: record.old_vs_new.skipped,
+    n_queries: record.n_queries,
+    store_units: record.store_units,
+  };
+}
+
+function writeSelfTestLog(project, record, { trigger }) {
+  return logEvent(resolve(project), SELF_TEST_LOG_FILENAME, buildSelfTestLogEvent(record, { trigger }));
+}
+
+// run — measure the round, persist the run record to the round directory,
+// AND log a self-test-run event (full historical delta, user-invoked).
 export async function runRound(project, round, opts = {}) {
   const { record, dir } = await measureRound(project, round, opts);
   const outPath = join(dir, `results-${record.ran_at.replace(/[:.]/g, '-')}.json`);
   writeFileSync(outPath, JSON.stringify(record, null, 2));
+  writeSelfTestLog(project, record, { trigger: 'user-invoked' });
   return { record, outPath };
+}
+
+// Automatic, cheap re-grading of ONLY the newest frozen round — rides the
+// DC-110 maintenance cadence (maintenance-run.mjs). Grades the newest round's
+// headline with skipHistoricalDelta:true (no unbounded priors loop — see
+// measureRound's doc comment), logs a self-test-run event, and does NOT write
+// a results-<iso>.json — that file marks a deliberate `/self-test run`, not an
+// automatic housekeeping pass. Returns null when no round is registered yet.
+export async function regradeNewestRound(project, { snapshot } = {}) {
+  const newest = newestRegisteredRound(project);
+  if (!newest) return null;
+  const { record } = await measureRound(project, newest.round, { snapshot, skipHistoricalDelta: true });
+  writeSelfTestLog(project, record, { trigger: 'auto-regrade' });
+  return record;
 }
 
 // Newest run record on disk for a round, or null.

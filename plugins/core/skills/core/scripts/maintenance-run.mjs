@@ -29,6 +29,7 @@ import { generateSummaryIndex, computeSourceSignature } from './generate-summary
 import { hashText, stampFiles } from './state-cache.mjs';
 import { resolveWorkspaceId } from './log-event.mjs';
 import { runRichContextRetention, purgeRichContext, RICH_CONTEXT_DEFAULT_RETENTION_DAYS } from './rich-context-capture.mjs';
+import { regradeNewestRound } from './self-test-round.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
 export const PROJECT_SOFT_CAP_BYTES = 70000;
@@ -179,7 +180,30 @@ function composeNarration(ranOps, notes) {
   return parts.join(' ');
 }
 
-function main(argv) {
+// Cheap, best-effort re-grading of the newest registered self-test round —
+// rides this CLI's cadence (invoked unconditionally at startup, /finalize, and
+// /process-memory per hygiene.md/startup.md) since that IS the DC-110
+// maintenance cadence the redesign spec (§3d) wires it into. Deliberately
+// scoped to this CLI entry point, not the synchronous in-process
+// runMaintenance() export close-pass.mjs calls directly from the headless
+// SessionEnd close — folding it in there would mean making that whole
+// synchronous close chain async, a much larger and riskier change than this
+// additive feature warrants. Skipped entirely on --dry-run (it's a real
+// append, not a report). Never null-returns without a reason: no registered
+// round is a normal, silent no-op (nothing to regrade yet).
+async function autoRegradeSelfTest(projectPath, { dryRun }) {
+  if (dryRun) return null;
+  try {
+    const record = await regradeNewestRound(projectPath);
+    if (!record) return null;
+    const pct = record.headline == null ? '—' : `${Math.round(record.headline * 100)}%`;
+    return { note: `self-test round ${record.round} re-graded automatically: headline ${pct}`, record };
+  } catch (e) {
+    return { note: `self-test auto-regrade skipped (${String(e && e.message || e).slice(0, 80)})`, record: null };
+  }
+}
+
+async function main(argv) {
   const json = argv.includes('--json');
   const dryRun = argv.includes('--dry-run');
   const projectPath = argv.find(a => !a.startsWith('--'));
@@ -201,12 +225,13 @@ function main(argv) {
   }
 
   const res = runMaintenance(projectPath, { apply: !dryRun });
-  if (json) process.stdout.write(JSON.stringify(res) + '\n');
-  else process.stdout.write(res.narration + '\n');
+  const regrade = await autoRegradeSelfTest(projectPath, { dryRun });
+  if (json) process.stdout.write(JSON.stringify({ ...res, self_test_regrade: regrade }) + '\n');
+  else process.stdout.write(res.narration + (regrade ? ' ' + regrade.note + '.' : '') + '\n');
   return 0;
 }
 
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
 if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
-  process.exit(main(process.argv.slice(2)));
+  main(process.argv.slice(2)).then((code) => process.exit(code));
 }

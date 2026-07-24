@@ -11,7 +11,9 @@ const FIXT = join(HERE, '..', 'fixtures', 'obligation3-store');
 
 const st = await import(pathToFileURL(join(SCRIPTS, 'self-test-round.mjs')).href);
 const { newRound, register, runRound, measureRound, status, verifyGoldset, contentStems,
-  newestRegisteredRound, listRounds } = st;
+  newestRegisteredRound, listRounds, regradeNewestRound, buildSelfTestLogEvent, SELF_TEST_LOG_FILENAME,
+  computeMetricsInformedQuota, DEFAULT_QUOTA } = st;
+const { recordRetrievalEvent } = await import(pathToFileURL(join(SCRIPTS, 'record-retrieval-event.mjs')).href);
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
 
 // Each test gets its own writable copy of the fixture store (self-test writes
@@ -46,6 +48,22 @@ function writeGold(store, obj) {
   const p = join(store, 'gold.json');
   writeFileSync(p, JSON.stringify(obj));
   return p;
+}
+// The self-test-log.jsonl lands under today's real _sessions/<date>/ dir (no
+// injectable clock in logEvent), so read it back by walking _sessions/ rather
+// than hardcoding a date.
+function readSelfTestLogRows(store) {
+  const sessionsDir = join(store, '_sessions');
+  if (!existsSync(sessionsDir)) return [];
+  const rows = [];
+  for (const date of readdirSync(sessionsDir)) {
+    const p = join(sessionsDir, date, SELF_TEST_LOG_FILENAME);
+    if (!existsSync(p)) continue;
+    for (const line of readFileSync(p, 'utf8').trim().split('\n').filter(Boolean)) {
+      rows.push(JSON.parse(line));
+    }
+  }
+  return rows;
 }
 
 // ── round lifecycle ──
@@ -251,6 +269,200 @@ test('newestRegisteredRound returns the highest frozen round, null when none', (
     const n = newestRegisteredRound(store);
     assert.equal(n.round, 1);
     assert.ok(existsSync(n.goldsetPath));
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+// ── self-test-log event (holistic-redesign §3b/§3d) ──
+
+test('runRound writes a self-test-log event, numbers/ids only, trigger user-invoked', async () => {
+  const store = freshStore();
+  try {
+    newRound(store);
+    register(store, 1, writeGold(store, validGoldset(store)));
+    const { record } = await runRound(store, 1);
+    const rows = readSelfTestLogRows(store);
+    assert.equal(rows.length, 1);
+    const row = rows[0];
+    assert.equal(row.kind, 'self-test-run');
+    assert.equal(row.trigger, 'user-invoked');
+    assert.equal(row.round, 1);
+    assert.equal(row.corpus_snapshot_id, record.corpus_snapshot_id);
+    assert.equal(row.goldset_sha256, record.prereg_goldset_sha256);
+    assert.equal(row.headline, record.headline);
+    assert.equal(typeof row.per_kind_r10, 'object');
+    assert.equal(row.trap_leak_rate, record.breakdown.forbiddenRate);
+    assert.equal(row.old_vs_new_delta, null, 'first round has no delta');
+    assert.equal(row.old_vs_new_skipped, false, 'a full /self-test run never skips the historical delta');
+    assert.ok(row.ts, 'logEvent stamps a ts field');
+    // Whitelist discipline: no question/answer text or unit bodies anywhere in the row.
+    const blob = JSON.stringify(row);
+    assert.ok(!blob.includes('omega'), 'no question text leaked into the log event');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('measureRound skipHistoricalDelta:true skips the priors loop even when priors exist', async () => {
+  const store = freshStore();
+  try {
+    newRound(store);
+    register(store, 1, writeGold(store, validGoldset(store)));
+    await runRound(store, 1);
+    const r2 = newRound(store);
+    const g2 = validGoldset(store);
+    g2.meta.round = r2.round;
+    g2.queries = g2.queries.map(q => ({ ...q, id: `r2-${q.id}` }));
+    register(store, r2.round, writeGold(store, g2));
+
+    const skipped = await measureRound(store, r2.round, { skipHistoricalDelta: true });
+    assert.deepEqual(skipped.record.old_vs_new, { priors: [], prior_mean: null, delta: null, skipped: true });
+
+    const full = await measureRound(store, r2.round, { skipHistoricalDelta: false });
+    assert.equal(full.record.old_vs_new.skipped, false);
+    assert.equal(full.record.old_vs_new.priors.length, 1, 'the full path still finds round 1 as a prior');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('regradeNewestRound: null with no registered round; grades newest only, no results file, logs auto-regrade', async () => {
+  const store = freshStore();
+  try {
+    assert.equal(await regradeNewestRound(store), null, 'nothing registered yet');
+
+    newRound(store);
+    register(store, 1, writeGold(store, validGoldset(store)));
+    const before = readdirSync(st.roundDir(store, 1)).length;
+    const record = await regradeNewestRound(store);
+    assert.equal(typeof record.headline, 'number');
+    assert.equal(record.old_vs_new.skipped, true);
+    const after = readdirSync(st.roundDir(store, 1)).length;
+    assert.equal(after, before, 'auto-regrade writes no results-<iso>.json — that marks a deliberate /self-test run');
+
+    const rows = readSelfTestLogRows(store);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].trigger, 'auto-regrade');
+    assert.equal(rows[0].round, 1);
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('buildSelfTestLogEvent shape is a flat object of numbers/ids/strings from the closed vocabulary only', () => {
+  const fakeRecord = {
+    round: 3, corpus_snapshot_id: 'abc123', prereg_goldset_sha256: 'deadbeef',
+    headline_arm: 'ranking', headline_k: 10, headline: 0.8,
+    breakdown: { byKind: { literal: { r10: 1 }, category: { r10: 0.5 } }, forbiddenRate: 0 },
+    old_vs_new: { delta: 0.1, skipped: false },
+    n_queries: 12, store_units: 200,
+  };
+  const evt = buildSelfTestLogEvent(fakeRecord, { trigger: 'user-invoked' });
+  assert.deepEqual(evt, {
+    kind: 'self-test-run', trigger: 'user-invoked', round: 3, corpus_snapshot_id: 'abc123',
+    goldset_sha256: 'deadbeef', headline_arm: 'ranking', headline_k: 10, headline: 0.8,
+    per_kind_r10: { literal: 1, category: 0.5 }, trap_leak_rate: 0,
+    old_vs_new_delta: 0.1, old_vs_new_skipped: false, n_queries: 12, store_units: 200,
+  });
+});
+
+// ── metrics-informed quota reshaping (holistic-redesign §3e) ──
+
+function plantRetrievalEvents(store, { n, tierReached }) {
+  for (let i = 0; i < n; i++) {
+    recordRetrievalEvent(store, {
+      trigger: 'session-start',
+      intent_topics: ['t'],
+      tier_reached: tierReached,
+      escalation_path: tierReached === 1 ? [1] : [1, tierReached],
+      units_retrieved: [{ id: 'want-omega-speedmaster-on-sale-wait', tier: 1 }],
+      dip_back_count: 0,
+    });
+  }
+}
+
+test('computeMetricsInformedQuota: no signal data → quota unchanged, no adjustments', () => {
+  const store = freshStore();
+  try {
+    const { quota, adjustments } = computeMetricsInformedQuota(store);
+    assert.deepEqual(quota, DEFAULT_QUOTA);
+    assert.deepEqual(adjustments, []);
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('computeMetricsInformedQuota: high escalation rate shifts literal -> cross-domain', () => {
+  const store = freshStore();
+  try {
+    // 8 of 10 retrievals needed tier 3 -> 80% escalation, well over the 30% threshold.
+    plantRetrievalEvents(store, { n: 8, tierReached: 3 });
+    plantRetrievalEvents(store, { n: 2, tierReached: 1 });
+    const { quota, adjustments } = computeMetricsInformedQuota(store);
+    assert.equal(quota.literal, DEFAULT_QUOTA.literal - 1);
+    assert.equal(quota['cross-domain'], DEFAULT_QUOTA['cross-domain'] + 1);
+    assert.equal(quota.value, DEFAULT_QUOTA.value, 'untouched kinds stay at baseline');
+    const total = Object.values(quota).reduce((s, n) => s + n, 0);
+    const baseTotal = Object.values(DEFAULT_QUOTA).reduce((s, n) => s + n, 0);
+    assert.equal(total, baseTotal, 'reallocation never changes the total question count');
+    assert.ok(adjustments.some(a => /escalation rate 80%/.test(a)));
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('computeMetricsInformedQuota: low escalation rate leaves quota untouched', () => {
+  const store = freshStore();
+  try {
+    // 1 of 10 escalated -> 10%, under the 30% threshold.
+    plantRetrievalEvents(store, { n: 1, tierReached: 3 });
+    plantRetrievalEvents(store, { n: 9, tierReached: 1 });
+    const { quota, adjustments } = computeMetricsInformedQuota(store);
+    assert.deepEqual(quota, DEFAULT_QUOTA);
+    assert.deepEqual(adjustments, []);
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('computeMetricsInformedQuota: recent self-test trap-leak shifts temporal -> abstention', async () => {
+  const store = freshStore();
+  try {
+    // A round whose trap DOES leak (the forbidden unit is asked for directly,
+    // making the harness surface it as a top hit for the trap question).
+    newRound(store);
+    const leaky = {
+      meta: { round: 1, authoring_snapshot_id: snapId(store), author: 't', blind_attestation: 'x' },
+      queries: [
+        { id: 'q1', query: 'omega speedmaster sale', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] },
+        { id: 'q2', query: 'Something this store cannot answer at all', rung: 'abstention', expected: [], no_answer: true,
+          forbidden: ['want-omega-speedmaster-on-sale-wait'] },
+      ],
+    };
+    register(store, 1, writeGold(store, leaky));
+    await runRound(store, 1); // logs a self-test-run event with whatever trap_leak_rate the harness measured
+
+    const { quota, adjustments } = computeMetricsInformedQuota(store);
+    const rows = readSelfTestLogRows(store);
+    assert.equal(rows.length, 1);
+    if (rows[0].trap_leak_rate > 0) {
+      assert.equal(quota.temporal, DEFAULT_QUOTA.temporal - 1);
+      assert.equal(quota.abstention, DEFAULT_QUOTA.abstention + 1);
+      assert.ok(adjustments.some(a => /trap-leak rate/.test(a)));
+    } else {
+      // The fixture's literal question may or may not out-rank the trap query
+      // for the same unit depending on the harness's ranking — either way the
+      // rule itself (only shift when leak > 0) is what this test is checking.
+      assert.deepEqual(quota, DEFAULT_QUOTA);
+    }
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('newRound wires computeMetricsInformedQuota by default; an explicit quota override skips it entirely', () => {
+  const store = freshStore();
+  try {
+    plantRetrievalEvents(store, { n: 8, tierReached: 3 });
+    plantRetrievalEvents(store, { n: 2, tierReached: 1 });
+
+    const auto = newRound(store);
+    assert.equal(auto.quota.literal, DEFAULT_QUOTA.literal - 1);
+    assert.ok(auto.adjustments.length > 0);
+    const briefText = readFileSync(auto.briefPath, 'utf8');
+    assert.match(briefText, /quota was adjusted from recent metrics/i);
+    assert.match(briefText, /escalation rate/);
+
+    const pinned = newRound(store, { quota: { ...DEFAULT_QUOTA } });
+    assert.deepEqual(pinned.quota, DEFAULT_QUOTA);
+    assert.deepEqual(pinned.adjustments, [], 'an explicit quota is used verbatim — no metrics adjustment applied');
+    const pinnedBrief = readFileSync(pinned.briefPath, 'utf8');
+    assert.doesNotMatch(pinnedBrief, /quota was adjusted from recent metrics/i);
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
