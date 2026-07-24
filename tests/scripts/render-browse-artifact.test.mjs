@@ -23,7 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const {
-  renderBrowseArtifact, collectUnits, buildArtifactHtml, SENSITIVITY_WARNING,
+  renderBrowseArtifact, SENSITIVITY_WARNING,
   BROWSE_MANIFEST_SCHEMA_VERSION, producerIdentity, publishReceiptPathFor,
 } = await import(pathToFileURL(join(SCRIPTS, 'render-browse-artifact.mjs')).href);
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);

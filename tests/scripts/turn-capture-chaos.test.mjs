@@ -7,10 +7,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SCRIPTS = join(ROOT, 'plugins', 'core', 'skills', 'core', 'scripts');
+// Windows contract: dynamic/ESM imports of absolute paths MUST be file:// URLs
+// (a bare C:\ path parses as an invalid URL scheme on Windows).
+const TURN_CAPTURE_URL = pathToFileURL(join(SCRIPTS, 'turn-capture.mjs')).href;
 
 function makeProject(root) {
   const project = join(root, 'proj');
@@ -21,7 +24,7 @@ function makeProject(root) {
 
 // A worker process that appends N evidence rows through the real writer.
 const WORKER = `
-import { captureTurnEvidence } from ${JSON.stringify(join(SCRIPTS, 'turn-capture.mjs'))};
+import { captureTurnEvidence } from ${JSON.stringify(TURN_CAPTURE_URL)};
 const [project, tag, n] = process.argv.slice(2);
 let failed = 0;
 for (let i = 0; i < Number(n); i++) {
@@ -89,7 +92,7 @@ test('chaos: purge racing a live writer never tears a row or crashes either side
     });
     // Purge mid-write through the same shared lock, three times.
     const purger = (async () => {
-      const { purgeTurnCapture } = await import(join(SCRIPTS, 'turn-capture.mjs'));
+      const { purgeTurnCapture } = await import(TURN_CAPTURE_URL);
       for (let i = 0; i < 3; i++) {
         await new Promise((r) => setTimeout(r, 30));
         const res = purgeTurnCapture(project, { apply: true });

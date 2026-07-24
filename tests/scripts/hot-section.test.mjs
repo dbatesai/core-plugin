@@ -478,7 +478,7 @@ test('clearHotSection also refuses (NEEDS_RECONCILIATION) rather than removing t
 });
 
 test('CLI: apply exits 1 and reports refusal on stderr when PROJECT.md needs reconciliation', () => {
-  const { root, project, home, projectCachePath } = setup();
+  const { root, project, home } = setup();
   try {
     applyHotSection(project, 'First synthesis.', { now: '2026-07-22T00:00:00Z', home });
     const pmPath = join(project, 'PROJECT.md');

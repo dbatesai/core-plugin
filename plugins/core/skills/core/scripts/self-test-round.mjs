@@ -47,7 +47,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
-import { resolve, join, basename } from 'node:path';
+import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';

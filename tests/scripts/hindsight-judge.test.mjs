@@ -7,7 +7,6 @@ import {
   judgeUnjudgedTurns,
   judgmentLogPath,
   JUDGE_VERSION,
-  DEFAULT_GAP_FLOOR,
 } from '../../plugins/core/skills/core/scripts/hindsight-judge.mjs';
 import { captureTurnEvidence, computeStoreSignature } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
 

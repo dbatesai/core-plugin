@@ -125,10 +125,6 @@ function chromeOf(html) {
   return html.replace(/<pre class="mono">[\s\S]*?<\/pre>/, '');
 }
 
-function scratchHome(prefix) {
-  return mkdtempSync(join(tmpdir(), prefix));
-}
-
 function fixtureProject({ workspace = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'metrics-artifact-'));
   if (workspace) writeFileSync(join(root, 'workspace.json'), JSON.stringify({ workspace_id: 'metrics-test-ws' }));
@@ -456,7 +452,7 @@ test('truthfulProducerIdentity: in a CLEAN git checkout, the SHA is the real HEA
   }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 9 (dirty-tree provenance): pluginTreeDirty is true on a modified tracked file and false when committed, and identity fails closed while dirty', async (t) => {
+test('ACCEPTANCE Hale-2026-07-23 item 9 (dirty-tree provenance): pluginTreeDirty is true on a modified tracked file and false when committed, and identity fails closed while dirty', async () => {
   const { execFileSync: exec } = await import('node:child_process');
   const { pluginTreeDirty } = await import(pathToFileURL(join(SCRIPTS, 'artifact-provenance.mjs')).href);
   // Controlled fixture: a throwaway git repo with a plugin-root-shaped subtree.

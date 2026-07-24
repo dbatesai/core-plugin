@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -13,7 +13,6 @@ import {
   purgeTurnCapture,
   readCaptureHealth,
   TURN_CAPTURE_SCHEMA_VERSION,
-  TURN_CAPTURE_DIRNAME,
   TURN_CAPTURE_MAX_PROMPT_BYTES,
   TURN_CAPTURE_MAX_PACK_BYTES,
   TURN_CAPTURE_MAX_REJECTED,

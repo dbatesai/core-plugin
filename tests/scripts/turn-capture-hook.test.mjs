@@ -6,7 +6,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -138,7 +138,8 @@ test('retired: rich-context stream is gone from the shipped tree and the hook so
 });
 
 test('Link 4a: self-test log rows carry producer identity', async () => {
-  const mod = await import(join(SCRIPTS, 'self-test-round.mjs'));
+  // Windows contract: absolute-path dynamic imports must be file:// URLs.
+  const mod = await import(pathToFileURL(join(SCRIPTS, 'self-test-round.mjs')).href);
   assert.equal(typeof mod.buildSelfTestLogEvent, 'function',
     'buildSelfTestLogEvent must be exported for stamp verification');
   const record = {

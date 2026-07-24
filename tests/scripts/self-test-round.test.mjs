@@ -10,8 +10,8 @@ const SCRIPTS = join(HERE, '..', '..', 'plugins', 'core', 'skills', 'core', 'scr
 const FIXT = join(HERE, '..', 'fixtures', 'obligation3-store');
 
 const st = await import(pathToFileURL(join(SCRIPTS, 'self-test-round.mjs')).href);
-const { newRound, register, runRound, measureRound, status, verifyGoldset, contentStems,
-  newestRegisteredRound, listRounds, regradeNewestRound, buildSelfTestLogEvent, SELF_TEST_LOG_FILENAME,
+const { newRound, register, runRound, measureRound, verifyGoldset, contentStems,
+  newestRegisteredRound, regradeNewestRound, buildSelfTestLogEvent, SELF_TEST_LOG_FILENAME,
   computeMetricsInformedQuota, DEFAULT_QUOTA } = st;
 const { recordRetrievalEvent } = await import(pathToFileURL(join(SCRIPTS, 'record-retrieval-event.mjs')).href);
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);

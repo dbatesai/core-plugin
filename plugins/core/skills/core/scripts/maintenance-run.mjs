@@ -28,7 +28,7 @@ import { buildIndex as buildRisksIndex } from './generate-risks-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { hashText, stampFiles } from './state-cache.mjs';
 import { resolveWorkspaceId } from './log-event.mjs';
-import { runTurnCaptureRetention, purgeTurnCapture, turnCaptureDir, TURN_CAPTURE_RETENTION_DAYS } from './turn-capture.mjs';
+import { runTurnCaptureRetention, purgeTurnCapture, TURN_CAPTURE_RETENTION_DAYS } from './turn-capture.mjs';
 import { resolveStoragePath } from './log-event.mjs';
 import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
 import { judgeUnjudgedTurns } from './hindsight-judge.mjs';
