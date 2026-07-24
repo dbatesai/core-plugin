@@ -31,6 +31,7 @@ import { resolveWorkspaceId } from './log-event.mjs';
 import { runTurnCaptureRetention, purgeTurnCapture, turnCaptureDir, TURN_CAPTURE_RETENTION_DAYS } from './turn-capture.mjs';
 import { resolveStoragePath } from './log-event.mjs';
 import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
+import { judgeUnjudgedTurns } from './hindsight-judge.mjs';
 import { regradeNewestRound } from './self-test-round.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
@@ -169,6 +170,24 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
       }
     } catch (e) {
       notes.push(`rich-context legacy sweep skipped (${String(e && e.message).slice(0, 60)})`);
+    }
+  }
+
+  // 3.65 Hindsight judge (v3.14.0 Link 2): grade up to 50 unjudged evidence
+  // rows against the full-prompt ranking — mechanical grade, bounded,
+  // idempotent. Runs BEFORE the scorecard op so fresh verdicts pin same-pass.
+  if (apply) {
+    try {
+      const jr = judgeUnjudgedTurns(root, { limit: 50, now });
+      if (jr.judged > 0) {
+        ranOps.push('hindsight-judge');
+        const counts = Object.entries(jr.verdicts).map(([v, c]) => `${c} ${v}`).join(', ');
+        notes.push(`hindsight judge (mechanical grade): ${jr.judged} turn(s) graded — ${counts}${jr.skipped ? `; ${jr.skipped} skipped` : ''}`);
+      } else if (jr.error) {
+        notes.push(`hindsight judge failed (${jr.error})`);
+      }
+    } catch (e) {
+      notes.push(`hindsight judge skipped (${String(e && e.message).slice(0, 60)})`);
     }
   }
 

@@ -96,5 +96,8 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // 60 -> 61 (2026-07-24, v3.14.0 Link 3): scorecard.mjs, the pinned-
   // conclusions log (--pin for the maintenance cadence, --latest for readers)
   // — a genuinely-new CLI tool with its own entry point, not a copy.
-  assert.ok(n <= 61, `CLI-entry-guard occurrences grew past baseline 61 (target: one shared helper): ${n}`);
+  // 61 -> 62 (2026-07-24, v3.14.0 Link 2): hindsight-judge.mjs, the
+  // mechanical-grade judge (--limit batch CLI for the maintenance cadence) —
+  // a genuinely-new CLI tool with its own entry point, not a copy.
+  assert.ok(n <= 62, `CLI-entry-guard occurrences grew past baseline 62 (target: one shared helper): ${n}`);
 });

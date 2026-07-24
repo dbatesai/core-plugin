@@ -9,6 +9,7 @@ import { runMaintenance } from '../../plugins/core/skills/core/scripts/maintenan
 import { hashText } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
 import { newRound, register, SELF_TEST_LOG_FILENAME } from '../../plugins/core/skills/core/scripts/self-test-round.mjs';
 import { loadSnapshot } from '../../plugins/core/skills/core/scripts/generate-summary-index.mjs';
+import { captureTurnEvidence, computeStoreSignature } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAINT_SCRIPT = join(HERE, '..', '..',
@@ -215,6 +216,30 @@ test('--purge-turn-capture CLI removes the whole stream dir and nothing else', (
   assert.match(out, /Purged the turn-capture evidence stream/);
   assert.ok(!existsSync(streamDir), 'stream dir removed');
   assert.ok(existsSync(join(root, '_memories')), 'memory store untouched');
+});
+
+test('judge op: unjudged evidence rows get judged in the pass, and the scorecard op pins them same-pass', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision about the foo subsystem', mtime: 1000 });
+  // plant one evidence row through the real capture path
+  const cap = captureTurnEvidence(root, {
+    retrieval_id: 'r-maint-1', session_id: 's', harness: 'claude-code',
+    prompt_text: 'a decision about the foo subsystem',
+    pack_text: 'pack', delivered: [{ id: 'dc-1-foo', score: 1, source_stage: 'ranked' }],
+    rejected_top: [], truncation: { byte_cap_applied: false, prompt_tokens_used: 5 },
+    store_signature: computeStoreSignature(root), producer_version: 'v', producer_sha: 'sha',
+  }, { env: { ...process.env, CORE_METRICS_ENABLED: '1', CORE_TURN_CAPTURE: '' } });
+  assert.equal(cap.written, true, cap.reason);
+  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  assert.ok(res.ranOps.includes('hindsight-judge'), 'unjudged evidence → judge op ran');
+  assert.ok(res.ranOps.includes('scorecard-computation'), 'fresh judgments pinned in the same pass');
+  const judgmentRows = readFileSync(join(root, '_metrics', 'judgment-log.jsonl'), 'utf8').trim().split('\n');
+  assert.equal(judgmentRows.length, 1);
+  // second pass: nothing unjudged, nothing new to pin
+  const res2 = runMaintenance(root, { apply: true, now: '2026-06-29T00:00:00Z', home });
+  assert.ok(!res2.ranOps.includes('hindsight-judge'));
+  assert.ok(!res2.ranOps.includes('scorecard-computation'));
 });
 
 test('scorecard op: pins a scorecard when unpinned judgments exist, skips when nothing new', () => {
