@@ -295,6 +295,17 @@ export function captureTurnEvidence(projectDir, input, { workspaceId, now, env =
         try {
           mkdirSync(dir, { recursive: true, mode: TURN_CAPTURE_DIR_MODE });
           hardenPath(dir, TURN_CAPTURE_DIR_MODE);
+          // Self-exclusion from git (found live on the CORE project during
+          // the v3.14.0 demo): the stream holds real conversation content,
+          // and a git-tracked project would otherwise be one `git add -A`
+          // away from committing it — the exact content-in-repo-tree footgun
+          // the retired trace stream had. The stream protects itself; no
+          // project-level .gitignore is relied on.
+          const gitignore = join(dir, '.gitignore');
+          if (!existsSync(gitignore)) {
+            writeFileSync(gitignore, '*\n');
+            hardenPath(gitignore, TURN_CAPTURE_FILE_MODE);
+          }
           appendFileSync(file, JSON.stringify(record) + '\n');
           hardenPath(file, TURN_CAPTURE_FILE_MODE);
         } catch (e) {

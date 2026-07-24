@@ -199,6 +199,22 @@ test('empty prompt_text is an invalid row — reported, not thrown at capture', 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('the stream dir self-excludes from git: first capture plants a .gitignore covering everything', () => {
+  // Found live during the v3.14.0 Gate-C demo: CORE itself is a git-tracked
+  // project and `_metrics/turn-capture/` was committable — the exact
+  // content-in-the-repo-tree footgun the retired trace stream had. The stream
+  // must protect itself regardless of any project-level .gitignore.
+  const root = mkdtempSync(join(tmpdir(), 'tc-gitignore-'));
+  try {
+    const project = makeProject(root);
+    const res = captureTurnEvidence(project, goodRow(), { env: cleanEnv() });
+    assert.equal(res.written, true);
+    const gi = join(turnCaptureDir(project), '.gitignore');
+    assert.equal(existsSync(gi), true, 'stream .gitignore planted at first capture');
+    assert.equal(readFileSync(gi, 'utf8').trim(), '*');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 // ---------- permissions ----------
 
 test('stream dir 0700 and row file 0600 on POSIX', { skip: IS_WIN }, () => {
