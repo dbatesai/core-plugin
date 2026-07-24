@@ -88,5 +88,10 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // 58 -> 59 (2026-07-23): self-test-round.mjs, the /self-test round manager
   // (new-round/register/run/status) — a genuinely-new CLI tool with its own
   // entry point, not a copy.
-  assert.ok(n <= 59, `CLI-entry-guard occurrences grew past baseline 59 (target: one shared helper): ${n}`);
+  // 59 -> 60 (2026-07-24, v3.14.0): turn-capture.mjs REPLACES the deleted
+  // rich-context-capture.mjs one-for-one (net zero); the +1 is
+  // producer-identity.mjs, which uses import.meta.url only for module-relative
+  // manifest resolution (not an entry guard) and is itself a CONSOLIDATION —
+  // one owner for the previously-triplicated producer-identity manifest read.
+  assert.ok(n <= 60, `CLI-entry-guard occurrences grew past baseline 60 (target: one shared helper): ${n}`);
 });

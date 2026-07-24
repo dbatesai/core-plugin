@@ -54,6 +54,7 @@ import { loadSnapshot } from './generate-summary-index.mjs';
 import { runHarness, validateGold } from './retrieval-harness.mjs';
 import { logEvent } from './log-event.mjs';
 import { loadEvents, computeTierDistribution } from './analyze-retrieval-quality.mjs';
+import { producerIdentity } from './producer-identity.mjs';
 
 // Dedicated log file for self-test grading results — deliberately its OWN
 // file, never the organic retrieval/outcome/hygiene logs (Antigravity's
@@ -617,6 +618,10 @@ export async function measureRound(project, round, { snapshot: injected = null, 
 export function buildSelfTestLogEvent(record, { trigger }) {
   return {
     kind: 'self-test-run',
+    // Producer identity (v3.14.0 Link 4a): a score moving between runs must be
+    // attributable to store-drift vs ruler-change from the stored record alone
+    // — parity with retrieval rows.
+    ...producerIdentity(),
     trigger, // 'user-invoked' (/self-test run) or 'auto-regrade' (maintenance cadence)
     round: record.round,
     corpus_snapshot_id: record.corpus_snapshot_id,

@@ -351,7 +351,12 @@ test('buildSelfTestLogEvent shape is a flat object of numbers/ids/strings from t
     n_queries: 12, store_units: 200,
   };
   const evt = buildSelfTestLogEvent(fakeRecord, { trigger: 'user-invoked' });
-  assert.deepEqual(evt, {
+  // producer identity (v3.14.0 Link 4a) is environment-dependent (manifest
+  // read); assert presence + shape, then compare the rest exactly.
+  assert.equal(typeof evt.producer_version, 'string');
+  assert.equal(typeof evt.producer_sha, 'string');
+  const { producer_version: _pv, producer_sha: _ps, ...rest } = evt;
+  assert.deepEqual(rest, {
     kind: 'self-test-run', trigger: 'user-invoked', round: 3, corpus_snapshot_id: 'abc123',
     goldset_sha256: 'deadbeef', headline_arm: 'ranking', headline_k: 10, headline: 0.8,
     per_kind_r10: { literal: 1, category: 0.5 }, trap_leak_rate: 0,

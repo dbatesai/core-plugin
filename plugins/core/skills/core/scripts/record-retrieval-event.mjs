@@ -11,6 +11,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logEvent, sanitizeAttributeValue } from './log-event.mjs';
+import { producerIdentity } from './producer-identity.mjs';
 
 // Stamped on every row this producer writes from 2026-07-22 onward (Hale's
 // metrics-evidence-lifecycle slice-2 review: a reader validating retrieval
@@ -18,7 +19,8 @@ import { logEvent, sanitizeAttributeValue } from './log-event.mjs';
 // contract" apart from "predates this contract entirely" — bump this only
 // when normalizeRetrievalEvent()'s REQUIRED-field contract changes in a way
 // that would reject rows a prior version accepted).
-export const RETRIEVAL_EVENT_SCHEMA_VERSION = '1.0.0';
+// 1.1.0 (v3.14.0 Link 4a): rows carry producer_version/producer_sha — additive.
+export const RETRIEVAL_EVENT_SCHEMA_VERSION = '1.1.0';
 
 export const VALID_TRIGGERS = new Set([
   'session-start',
@@ -134,6 +136,10 @@ export function normalizeRetrievalEvent(event) {
   if (event.retrieval_id !== undefined) requireString(event.retrieval_id, 'retrieval_id');
 
   return {
+    // Producer identity (Link 4a): every row says which build wrote it. The
+    // shared manifest read is the default; an explicit caller value wins (a
+    // row relayed from another producer keeps its original identity).
+    ...producerIdentity(),
     ...event,
     kind: 'retrieval',
     schema_version: RETRIEVAL_EVENT_SCHEMA_VERSION, // always OUR stamp, never a caller-supplied value

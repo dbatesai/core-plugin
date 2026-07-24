@@ -28,7 +28,8 @@ import { buildIndex as buildRisksIndex } from './generate-risks-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { hashText, stampFiles } from './state-cache.mjs';
 import { resolveWorkspaceId } from './log-event.mjs';
-import { runRichContextRetention, purgeRichContext, RICH_CONTEXT_DEFAULT_RETENTION_DAYS } from './rich-context-capture.mjs';
+import { runTurnCaptureRetention, purgeTurnCapture, turnCaptureDir, TURN_CAPTURE_RETENTION_DAYS } from './turn-capture.mjs';
+import { resolveStoragePath } from './log-event.mjs';
 import { regradeNewestRound } from './self-test-round.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
@@ -130,26 +131,44 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
     }
   }
 
-  // 3.5 Rich-context retention (opt-in stream only). Deletes CORE's OWN
+  // 3.5 Turn-capture retention (v3.14.0 evidence stream). Deletes CORE's OWN
   // captured rows older than the 30-day window — scoped strictly to
-  // <metrics-storage-base>/rich-context/ by rich-context-capture.mjs's own path
+  // <metrics-storage-base>/turn-capture/ by turn-capture.mjs's own path
   // assertions; it never touches user memory units or PROJECT.md. Honors
-  // dry-run: apply:false reports what WOULD be deleted and removes nothing, with
-  // the same deletion-proof discipline as the rest of maintenance.
+  // dry-run: apply:false reports what WOULD be deleted and removes nothing.
   try {
-    const rc = runRichContextRetention(root, { apply, now, windowDays: RICH_CONTEXT_DEFAULT_RETENTION_DAYS, workspaceId: resolveWorkspaceId(root) });
-    if (rc.ran) {
-      if (apply && rc.deleted.length) {
-        ranOps.push('rich-context-retention');
-        notes.push(`rich-context retention: deleted ${rc.deleted.length} row file(s) older than ${rc.windowDays}d (cutoff ${rc.cutoff})${rc.verified ? ', verified gone' : ' — WARNING: some deletions unverified'}`);
-      } else if (!apply && rc.candidates.length) {
-        notes.push(`rich-context retention (dry-run): ${rc.candidates.length} row file(s) older than ${rc.windowDays}d would be deleted (cutoff ${rc.cutoff})`);
-      } else if (apply && !rc.verified) {
-        notes.push('rich-context retention: some deletions unverified — recovery-required');
+    const tc = runTurnCaptureRetention(root, { apply, now, windowDays: TURN_CAPTURE_RETENTION_DAYS, workspaceId: resolveWorkspaceId(root) });
+    if (tc.ran) {
+      if (apply && tc.deleted.length) {
+        ranOps.push('turn-capture-retention');
+        notes.push(`turn-capture retention: deleted ${tc.deleted.length} row file(s) older than ${tc.windowDays}d (cutoff ${tc.cutoff})${tc.verified ? ', verified gone' : ' — WARNING: some deletions unverified'}`);
+      } else if (!apply && tc.candidates.length) {
+        notes.push(`turn-capture retention (dry-run): ${tc.candidates.length} row file(s) older than ${tc.windowDays}d would be deleted (cutoff ${tc.cutoff})`);
+      } else if (apply && !tc.verified) {
+        notes.push('turn-capture retention: some deletions unverified — recovery-required');
       }
     }
   } catch (e) {
-    notes.push(`rich-context retention skipped (${String(e && e.message).slice(0, 60)})`);
+    notes.push(`turn-capture retention skipped (${String(e && e.message).slice(0, 60)})`);
+  }
+
+  // 3.6 One-release sweep: remove any leftover rich-context stream from the
+  // retired opt-in mechanism (superseded by turn-capture, v3.14.0 — dc-127
+  // closed by construction). The dirname is asserted before deletion, same
+  // boundary discipline as every deletion op here. Remove this block in v3.15.0.
+  if (apply) {
+    try {
+      const base = resolveStoragePath(root, { workspaceId: resolveWorkspaceId(root) });
+      const legacyDir = join(base, 'rich-context');
+      const legacyLock = join(base, '.rich-context.lock');
+      if (existsSync(legacyDir)) {
+        rmSync(legacyDir, { recursive: true, force: true });
+        rmSync(legacyLock, { force: true });
+        notes.push('removed the retired rich-context stream (superseded by turn-capture)');
+      }
+    } catch (e) {
+      notes.push(`rich-context legacy sweep skipped (${String(e && e.message).slice(0, 60)})`);
+    }
   }
 
   // 4. Update the cadence ledger (per-op run counts = the "observe cadence" data for DC-110 M2).
@@ -207,20 +226,20 @@ async function main(argv) {
   const json = argv.includes('--json');
   const dryRun = argv.includes('--dry-run');
   const projectPath = argv.find(a => !a.startsWith('--'));
-  if (!projectPath) { process.stderr.write('usage: maintenance-run.mjs <projectPath> [--json] [--dry-run] [--purge-rich-context]\n'); return 2; }
+  if (!projectPath) { process.stderr.write('usage: maintenance-run.mjs <projectPath> [--json] [--dry-run] [--purge-turn-capture]\n'); return 2; }
 
-  // --purge-rich-context: destructive, explicit, and standalone (never part of a
-  // routine run). The confirmation contract is prose-level — the SKILL/protocol
-  // require an explicit user ask before this is invoked; the flag does the
-  // mechanical part only, behind rich-context-capture.mjs's directory-name
-  // assertion so it can only ever remove <storage-base>/rich-context/. Respects
-  // --dry-run (reports the target, deletes nothing).
-  if (argv.includes('--purge-rich-context')) {
-    const res = purgeRichContext(projectPath, { apply: !dryRun, workspaceId: resolveWorkspaceId(projectPath) });
+  // --purge-turn-capture: destructive, explicit, and standalone (never part of
+  // a routine run). The confirmation contract is prose-level — the
+  // SKILL/protocol require an explicit user ask before this is invoked; the
+  // flag does the mechanical part only, behind turn-capture.mjs's
+  // directory-name assertion so it can only ever remove
+  // <storage-base>/turn-capture/. Respects --dry-run.
+  if (argv.includes('--purge-turn-capture')) {
+    const res = purgeTurnCapture(projectPath, { apply: !dryRun, workspaceId: resolveWorkspaceId(projectPath) });
     if (json) process.stdout.write(JSON.stringify(res) + '\n');
-    else if (res.purged) process.stdout.write(`Purged the rich-context capture stream: ${res.dir}\n`);
-    else if (res.reason === 'dry-run') process.stdout.write(`Would purge the rich-context capture stream: ${res.dir}\n`);
-    else process.stdout.write(`Rich-context purge did not run: ${res.reason} (${res.dir})\n`);
+    else if (res.purged) process.stdout.write(`Purged the turn-capture evidence stream: ${res.dir}\n`);
+    else if (res.reason === 'dry-run') process.stdout.write(`Would purge the turn-capture evidence stream: ${res.dir}\n`);
+    else process.stdout.write(`Turn-capture purge did not run: ${res.reason} (${res.dir})\n`);
     return res.purged || res.reason === 'dry-run' ? 0 : 2;
   }
 

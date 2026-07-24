@@ -142,12 +142,14 @@ function baseOut(overrides = {}) {
   };
 }
 
-test('computeRows: returns seven rows across mechanics/regression/readiness/benefit sections', () => {
+test('computeRows: returns eight rows across mechanics/regression/readiness/benefit sections', () => {
+  // Eight as of v3.14.0: the turn-capture state line ALWAYS renders (default-ON
+  // stream — ON shows the disclosure, OFF confirms the opt-out took effect).
   const rows = computeRows(baseOut());
-  assert.equal(rows.length, 7);
+  assert.equal(rows.length, 8);
   const bySection = { mechanics: 0, regression: 0, readiness: 0, benefit: 0 };
   for (const r of rows) bySection[r.section]++;
-  assert.equal(bySection.mechanics, 3);
+  assert.equal(bySection.mechanics, 4);
   assert.equal(bySection.regression, 1);
   assert.equal(bySection.readiness, 2);
   assert.equal(bySection.benefit, 1);
@@ -734,7 +736,7 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
 
     // ---- mechanics: round-trip probe, store integrity, telemetry, and the
     // mechanics-scoped machine status (never an umbrella claim).
-    assert.deepEqual(Object.keys(out.mechanics).sort(), ['probe', 'rich_context', 'status', 'store', 'telemetry']);
+    assert.deepEqual(Object.keys(out.mechanics).sort(), ['probe', 'status', 'store', 'telemetry', 'turn_capture']);
     assert.ok(['WORKING', 'WORKING-WITH-CAVEATS', 'DEGRADED', 'MACHINERY-WORKING-NO-STORE'].includes(out.mechanics.status));
     assert.equal(typeof out.mechanics.probe.round_trip, 'boolean');
     assert.equal(out.mechanics.store.present, true);
@@ -765,60 +767,40 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
 });
 
 // ---------------------------------------------------------------------------
-// Rich-context capture — the VISIBLE ACTIVE STATE line (Hale metrics-evidence
-// contract, item 4): renders one plain-language mechanics line when the opt-in
-// stream is ON, and NOTHING when it is off (the default).
+// Turn-capture evidence — the ALWAYS-VISIBLE state line (v3.14.0, default-ON
+// per DC-129). Because the stream is on unless the user acted, BOTH states
+// render: ON carries the disclosure + off-switches; OFF confirms the opt-out.
 // ---------------------------------------------------------------------------
 
-test('rich-context: no mechanics row when the stream is off (or absent)', () => {
-  const rowsAbsent = computeRows(baseOut());
-  assert.ok(!rowsAbsent.some((r) => r.label === 'Rich-context capture'), 'absent rich_context ⇒ no row');
-  const rowsOff = computeRows(baseOut({
-    mechanics: { ...baseOut().mechanics, rich_context: { enabled: false, rows: 0, days: 0 } },
-  }));
-  assert.ok(!rowsOff.some((r) => r.label === 'Rich-context capture'), 'disabled ⇒ no row');
-});
-
-test('rich-context: one plain-language mechanics line when the stream is on', () => {
+test('turn-capture: the ON line carries the disclosure, volumes, health, and every off-switch', () => {
   const out = baseOut({
-    mechanics: { ...baseOut().mechanics, rich_context: { enabled: true, rows: 7, days: 2 } },
+    mechanics: { ...baseOut().mechanics, turn_capture: { enabled: true, rows: 7, days: 2, health: { attempts: 9, failures: 1 } } },
   });
   const rows = computeRows(out);
-  const row = rows.find((r) => r.label === 'Rich-context capture');
+  const row = rows.find((r) => r.label === 'Turn capture (evidence)');
   assert.ok(row, 'enabled ⇒ exactly one visible-active-state row');
   assert.equal(row.section, SECTION.MECHANICS);
   assert.equal(row.noGauge, true, 'no bar/percentage — a state line, not a metric');
-  assert.match(row.value, /ON for this project/);
+  assert.match(row.value, /^ON — /);
   assert.match(row.value, /saved locally/);
+  assert.match(row.value, /never exported/);
+  assert.match(row.value, /auto-deleted after 30 days/);
   assert.match(row.value, /7 row\(s\) \/ 2 day\(s\)/);
-  assert.match(row.value, /rich_context_capture/); // tells the user how to turn it off
-  // Exact disclosure (Hale ea140b0 item 6): a 4 KiB head on no-hit, NOT full text.
-  assert.match(row.value, /4 KiB/);
-  assert.match(row.value, /not the full text/);
-  assert.doesNotMatch(row.value, /full query and delivered-context text/, 'the overstated wording is gone');
-  // and it actually renders into the report text under the MECHANICS heading
-  assert.match(renderReport(out), /Rich-context capture/);
+  assert.match(row.value, /1 of 9 writes failed/);
+  assert.match(row.value, /CORE_TURN_CAPTURE=0/);
+  assert.match(row.value, /"turn_capture": false/);
+  assert.match(row.value, /CORE_METRICS_ENABLED=0/);
+  assert.match(renderReport(out), /Turn capture \(evidence\)/);
 });
 
-// ACCEPTANCE Hale-ea140b0 item 5 — the two REQUIRED effective-state renders.
-test('ACCEPTANCE Hale-ea140b0 item 5: rich-on / metrics-on renders ON (effective)', () => {
+test('turn-capture: the OFF line confirms the opt-out took effect and names the consequence', () => {
   const out = baseOut({
-    mechanics: { ...baseOut().mechanics, rich_context: { enabled: true, effective: true, inactiveReason: null, rows: 3, days: 1 } },
+    mechanics: { ...baseOut().mechanics, turn_capture: { enabled: false, rows: 0, days: 0, health: { attempts: 0, failures: 0 } } },
   });
-  const row = computeRows(out).find((r) => r.label === 'Rich-context capture');
-  assert.ok(row, 'effective-on ⇒ a visible line');
-  assert.match(row.value, /ON for this project/);
-  assert.doesNotMatch(row.value, /configured on, but inactive/);
-  assert.match(renderReport(out), /ON for this project/);
-});
-
-test('ACCEPTANCE Hale-ea140b0 item 5: rich-on / metrics-off renders configured-on-but-inactive, never ON', () => {
-  const out = baseOut({
-    mechanics: { ...baseOut().mechanics, rich_context: { enabled: true, effective: false, inactiveReason: 'aggregate metrics disabled', rows: 0, days: 0 } },
-  });
-  const row = computeRows(out).find((r) => r.label === 'Rich-context capture');
-  assert.ok(row, 'configured-on ⇒ a visible line even when inactive');
-  assert.match(row.value, /configured on, but inactive: aggregate metrics disabled/);
-  assert.doesNotMatch(row.value, /^ON for this project/, 'must NOT claim ON when capture is impossible');
-  assert.match(renderReport(out), /configured on, but inactive: aggregate metrics disabled/);
+  const row = computeRows(out).find((r) => r.label === 'Turn capture (evidence)');
+  assert.ok(row, 'disabled ⇒ still a visible line — the user sees their choice held');
+  assert.match(row.value, /^OFF — /);
+  assert.match(row.value, /hindsight grading/);
+  assert.doesNotMatch(row.value, /^ON/, 'must NOT claim ON when capture is off');
+  assert.match(renderReport(out), /OFF — turn capture is disabled/);
 });

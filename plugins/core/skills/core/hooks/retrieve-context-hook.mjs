@@ -41,8 +41,8 @@ import { randomUUID } from 'node:crypto';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { recordRetrievalOutcome, pendingOutcomePath } from '../scripts/record-retrieval-outcome.mjs';
-import { metricsEnabled, logEvent } from '../scripts/log-event.mjs';
-import { captureRichContext, richContextCaptureEnabled, shouldEnrichRichContext, richCaptureStatusCode } from '../scripts/rich-context-capture.mjs';
+import { metricsEnabled } from '../scripts/log-event.mjs';
+import { captureTurnEvidence, turnCaptureEnabled, computeStoreSignature } from '../scripts/turn-capture.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
 import { logHookEvent } from './hook-log.mjs';
@@ -92,7 +92,7 @@ const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 // Closed vocabularies; an unknown code is coerced to failed/pipeline-error
 // rather than emitted (tests assert every path lands in-vocabulary).
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
-export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'trace-write-failed', 'hook-log-write-failed'];
+export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed'];
 
 // CORE_REASONING_ARM (2026-07-19): a test-only control for the preregistered
 // three-arm efficacy pilot (Hale + Antigravity + Keel convergence). 'automatic'
@@ -196,7 +196,7 @@ export async function main() {
   let telemetryReason = 'ok';
   let retrievalId = null;
   let outcomeNote = null; // bounded note when the post-answer outcome close failed
-  let richCaptureStatus = null; // closed status code for the terminal receipt (item 6)
+  let turnCaptureStatus = null; // closed status code for the terminal receipt (captured/disabled/capture-failed)
   let reasoningDirective = '';
   // Built unconditionally, BEFORE the metrics-gated block below and BEFORE the
   // event record inside it (second Hale catch, 2026-07-19): the first fix
@@ -365,54 +365,59 @@ export async function main() {
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
 
-      // OPT-IN rich-context capture (Hale metrics-evidence contract, item 4;
-      // causal-binding correction, ea140b0 item 1). OFF by default; active only
-      // when this user's MACHINE-LOCAL workspace meta carries
-      // rich_context_capture:true (never the project-root pointer — item 2).
+      // EVERY-TURN evidence capture (v3.14.0 Link 1, DC-129 default-ON with
+      // opt-outs). Written in the same moment as the numbers row above, joined
+      // by the same retrieval_id: the full prompt, the combined delivered pack
+      // text, per-unit ids+scores, the top rejected candidates, a store
+      // signature for drift detection, and producer identity. This is what the
+      // hindsight judge later grades — the numbers row records THAT retrieval
+      // happened; this records enough to judge whether it was RIGHT.
       //
-      // SYNCHRONOUS NO-HIT ONLY. The trigger is limited to a true zero-hit on
-      // THIS retrieval — the retry trigger is deliberately dropped (item 1). A
-      // corrective retry is evidence about the PRIOR retrieval's outcome, but the
-      // only prior-retrieval state this seam holds is `prev.retrieval_id` +
-      // `prev.query_terms` — NOT the prior query text or prior delivered pack. The
-      // row here carries the CURRENT retrievalId, prompt, and context pack, so
-      // labeling it `corrective-retry` would bind the current turn's content to
-      // the prior retrieval as if it were that retrieval's own outcome — the exact
-      // causal mislabel Hale flagged. A zero-hit, by contrast, is a clean
-      // synchronous fact about the current retrieval, correctly its own subject.
+      // Supersedes both retired capture seams (v3.14.0): the zero-hit-only
+      // opt-in stream (a zero-hit has no delivered context by definition,
+      // dc-127 — closed by construction) and the hidden env-gated trace file
+      // that put content in the repo tree with no reader (retired like the
+      // OTel dual-write before it).
       //
-      // When zero-hit, the closed-schema row above records THAT but not WHY; this
-      // captures a bounded head of the query text + delivered context locally so
-      // the developer can debug with full context. Structurally isolated from the
-      // package exporter (it never reads _metrics/rich-context/). Fail-open: a
-      // capture failure never blocks the turn — but its status rides the terminal
-      // receipt (item 6), never silently dropped. Gated INSIDE the metrics-on
-      // branch on purpose: the rich stream is strictly more sensitive than the
-      // aggregate stream, so you cannot be capturing it while having opted out of
-      // all local capture — while its own flag still disables it independently.
+      // LOCAL ONLY: lands under the metrics storage base (0700/0600, 30-day
+      // retention, purge command); metrics-package.mjs has no read path into
+      // it (canary tripwire test). Fail-open: a capture failure never blocks
+      // the turn — it lands in the stream's health counter (Link 5 watches
+      // that) and its closed status rides the terminal receipt. Gated INSIDE
+      // the metrics-on branch: opting out of all local capture also stops
+      // this; its own CORE_TURN_CAPTURE / workspace turn_capture flag disables
+      // it independently.
       try {
-        const zeroHit = final.length === 0;
-        if (richContextCaptureEnabled({ project: store }) && shouldEnrichRichContext({ zeroHit })) {
-          const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
-          const turnId = harness === 'codex'
-            ? (typeof payload.turn_id === 'string' && payload.turn_id.trim() ? payload.turn_id.trim() : null)
-            : (typeof payload.prompt_id === 'string' && payload.prompt_id.trim() ? payload.prompt_id.trim() : null);
-          const rcResult = captureRichContext(store, {
+        if (turnCaptureEnabled({ project: store })) {
+          const deliveredIds = new Set(units.map((u) => u.id));
+          const scoreById = new Map(
+            (Array.isArray(trace.stages.substrate) ? trace.stages.substrate : []).map((h) => [String(h.id), h.score]),
+          );
+          const tcResult = captureTurnEvidence(store, {
             retrieval_id: retrievalId,
             session_id: sessionId,
-            turn_id: turnId,
             harness,
-            verdict: 'no-hit',
-            tier_reached: 1,
-            escalation_path: [1],
+            prompt_text: prompt,
+            pack_text: trace.pack && trace.pack.text ? trace.pack.text : '',
+            delivered: units.map((u) => ({ id: u.id, score: scoreById.get(u.id) ?? null, source_stage: u.source_stage })),
+            rejected_top: (Array.isArray(trace.stages.substrate) ? trace.stages.substrate : [])
+              .filter((h) => !deliveredIds.has(String(h.id)))
+              .map((h) => ({ id: String(h.id), score: h.score, source_stage: 'ranked' })),
+            truncation: {
+              byte_cap_applied: Boolean(trace.pack && Array.isArray(trace.pack.excluded)
+                && trace.pack.excluded.some((e) => e && e.reason === 'byte-cap')),
+              prompt_tokens_used: queryTerms.length,
+            },
+            store_signature: computeStoreSignature(store),
             producer_version: PRODUCER_VERSION,
             producer_sha: PRODUCER_SHA,
-            query_text: prompt,
-            context_pack_head: packText,
           });
-          richCaptureStatus = richCaptureStatusCode(rcResult); // closed code, never raw content
+          turnCaptureStatus = tcResult.written ? 'captured'
+            : String(tcResult.reason || 'error').split(/[:\s]/)[0]; // closed head token, never raw content
+        } else {
+          turnCaptureStatus = 'disabled';
         }
-      } catch { richCaptureStatus = 'error'; /* fail-open, but observable on the receipt */ }
+      } catch { turnCaptureStatus = 'error'; /* fail-open, but observable on the receipt */ }
       // Stage the pending-marker write for AFTER delivery is confirmed below
       // (Hale audit, 2026-07-17, hazard: "creates pending state before
       // delivery") — writing it here, before this turn's context has even
@@ -434,19 +439,6 @@ export async function main() {
             had_hits: final.length > 0,
           }),
         };
-      }
-      // The persisted trace carries the SAME retrieval_id so the event, the
-      // trace, and any future answer-outcome row join on one key.
-      trace.retrieval_id = retrievalId;
-
-      // Full trace persistence is opt-in (CORE_RETRIEVAL_TRACE=1): the trace is
-      // a deep diagnostic with per-stage payloads; the EVENT above is the
-      // always-on canonical record. Local-only either way.
-      if (process.env.CORE_RETRIEVAL_TRACE === '1') {
-        try {
-          const traceOut = logEvent(store, 'retrieval-trace.jsonl', trace);
-          if (telemetryReason === 'ok' && (!traceOut || traceOut.legacy !== true)) telemetryReason = 'trace-write-failed';
-        } catch { if (telemetryReason === 'ok') telemetryReason = 'trace-write-failed'; }
       }
     }
   } catch {
@@ -521,10 +513,10 @@ export async function main() {
     ...(reason !== telemetryReason ? { telemetry_reason: telemetryReason } : {}),
     ...(retrievalId ? { retrieval_id: retrievalId } : {}),
     ...(outcomeNote ? { outcome_close_note: outcomeNote } : {}),
-    // Rich-context capture outcome (item 6): a closed status code — never raw
-    // query/context content — present only when the opt-in stream actually ran,
-    // so a capture (or a previously-silent capture failure) is observable.
-    ...(richCaptureStatus ? { rich_capture: richCaptureStatus } : {}),
+    // Evidence-capture outcome: a closed status code — never raw prompt/pack
+    // content — so a capture (or a silent capture failure) is observable on
+    // the receipt in addition to the stream's own health counter.
+    ...(turnCaptureStatus ? { turn_capture: turnCaptureStatus } : {}),
   });
 }
 

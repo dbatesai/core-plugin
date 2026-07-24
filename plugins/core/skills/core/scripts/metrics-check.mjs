@@ -77,7 +77,7 @@ import { readinessReport } from './calibrate-classifier.mjs';
 import { runHarness } from './retrieval-harness.mjs';
 import { newestRegisteredRound, measureRound } from './self-test-round.mjs';
 import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQualityReport } from './analyze-retrieval-quality.mjs';
-import { richContextStats } from './rich-context-capture.mjs';
+import { turnCaptureStats } from './turn-capture.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -441,26 +441,22 @@ export function computeRows(out) {
   // must see one plain-language line saying so and how to turn it off. When
   // OFF (the default) NOTHING renders here (Hale metrics-evidence contract,
   // item 4; visible-active-state + independent disable).
-  const rc = mech.rich_context || {};
-  if (rc.enabled) {
-    // EFFECTIVE STATE, not the bare flag (Hale ea140b0 item 5). The hook only
-    // writes rich rows inside the aggregate-metrics branch, so a configured-on
-    // flag with metrics off captures NOTHING — say exactly that rather than "ON".
-    // `effective === false` is the explicit inactive signal; absent/true reads as
-    // effective (so a stats object that predates the field still renders "ON").
-    const isEffective = rc.effective !== false;
+  const tc = mech.turn_capture || {};
+  {
+    // Default-ON stream (DC-129): the honest move inverts the old opt-in
+    // display rule — because it IS on unless the user acted, the ON state and
+    // its off-switches must always render, and the OFF state renders too so an
+    // opted-out user sees their choice took effect.
+    const health = tc.health || {};
     rows.push({
       section: SECTION.MECHANICS,
-      label: 'Rich-context capture',
+      label: 'Turn capture (evidence)',
       pct: 0,
       trust: TRUST.DIRECT,
       noGauge: true,
-      // Exact disclosure (item 6): a 4 KiB head of query + delivered context, on
-      // synchronous no-hit only — NOT "full text". Turn-off points at the
-      // machine-local per-user workspace meta (item 2), not the project pointer.
-      value: isEffective
-        ? `ON for this project — on a synchronous no-hit, a 4 KiB head of your query text and of the delivered context (not the full text) is saved locally: ${rc.rows} row(s) / ${rc.days} day(s). Turn off by removing "rich_context_capture": true from your machine-local workspace meta (~/.core/workspaces/<id>/workspace.json).`
-        : `configured on, but inactive: aggregate metrics disabled — CORE writes nothing to the rich-context stream while metrics capture is off (CORE_METRICS_ENABLED=0 or metrics_enabled:false). It is set on in your machine-local workspace meta ("rich_context_capture": true) but will capture nothing until aggregate metrics are re-enabled.`,
+      value: tc.enabled
+        ? `ON — each turn's prompt and the delivered memory context are saved locally so retrieval quality can be graded later (never exported, auto-deleted after 30 days): ${tc.rows || 0} row(s) / ${tc.days || 0} day(s), ${health.failures || 0} of ${health.attempts || 0} writes failed. Turn off with CORE_TURN_CAPTURE=0 or "turn_capture": false in this project's workspace.json (CORE_METRICS_ENABLED=0 turns off all local capture).`
+        : 'OFF — turn capture is disabled for this project, so hindsight grading of retrieval quality has no evidence to work from.',
     });
   }
 
@@ -733,7 +729,7 @@ export async function gatherMetrics(cwd, { home = homedir() } = {}) {
     producer: producerIdentity(),
     generated_at: new Date().toISOString(),
     project: cwd,
-    mechanics: { status: null, probe: {}, store: {}, telemetry: {}, rich_context: {} },
+    mechanics: { status: null, probe: {}, store: {}, telemetry: {}, turn_capture: {} },
     regression: { gold: {} },
     readiness: { recognition_signal: null, calibration: {} },
     benefit: {
@@ -883,10 +879,10 @@ ${body}
   // regression.liveProxy placement contradicted the render's classification).
   out.regression.gold = await checkGoldRegression(cwd);
   mech.telemetry = checkLiveRetrievalProxy(cwd);
-  // Opt-in rich-context capture state — a mechanics/instrumentation fact. Only
-  // rendered when the stream is ON (the visible-active-state line); silent when
-  // off, which is the default (Hale metrics-evidence contract, item 4).
-  mech.rich_context = richContextStats(cwd);
+  // Turn-capture evidence-stream state (v3.14.0, default-ON per DC-129) — a
+  // mechanics/instrumentation fact. Always rendered: ON shows the disclosure +
+  // off-switches; OFF confirms the user's opt-out took effect.
+  mech.turn_capture = turnCaptureStats(cwd);
 
   // ---- mechanics status: hard evidence only; routine upkeep never demotes
   // it. Scoped to mechanics (mech.status), never an umbrella claim. ----

@@ -136,7 +136,11 @@ export function validateRetrievalLogRow(ev) {
   const isCandidate = ev.kind === 'retrieval' || (ev.kind === undefined && isRetrievalShapedEvent(ev));
   if (!isCandidate) return { status: 'not-applicable' };
 
-  if (ev.schema_version === RETRIEVAL_EVENT_SCHEMA_VERSION) {
+  // Known-compatible versions, all validated under the current producer
+  // contract: 1.1.0 (current — adds producer_version/producer_sha, additive)
+  // and 1.0.0 (its strict subset; every pre-v3.14.0 row on disk carries it).
+  // An additive bump must never turn real history into 'unknown-schema-version'.
+  if (ev.schema_version === RETRIEVAL_EVENT_SCHEMA_VERSION || ev.schema_version === '1.0.0') {
     try {
       normalizeRetrievalEvent(ev);
       return { status: 'valid', schema: 'current' };

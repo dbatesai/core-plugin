@@ -352,7 +352,6 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
     { name: 'no-hit', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'zzqx unmatchable quark', expect: { action: 'delivered', reason: 'no-hit' } },
     { name: 'delivery-failed', env: { CORE_RETRIEVAL_BYTE_CAP: '0' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'delivery-failed' } },
     { name: 'event-write-failed', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'event-write-failed' }, setup: (root) => { wf(join(root, '_sessions'), 'not a directory'); } },
-    { name: 'trace-write-failed', env: { CORE_METRICS_ENABLED: '1', CORE_RETRIEVAL_TRACE: '1' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'trace-write-failed' }, setup: (root) => { const d = join(root, '_sessions', new Date().toISOString().slice(0, 10)); mkd(join(d, 'retrieval-trace.jsonl'), { recursive: true }); } },
     { name: 'hook-log-write-failed', env: {}, prompt: 'widget decision', expect: { action: 'failed', reason: 'hook-log-write-failed' }, breakHookLog: true },
   ];
   for (const b of branches) {

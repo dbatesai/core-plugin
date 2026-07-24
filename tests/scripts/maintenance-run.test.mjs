@@ -169,52 +169,64 @@ test('dry-run does not write the state cache either', () => {
   assert.ok(!existsSync(join(root, '_memories', '_lib', 'state-cache.json')), 'dry run must not stamp — nothing was actually written');
 });
 
-// ---- rich-context retention (opt-in stream), wired into the op sequence ----
+// ---- turn-capture retention (v3.14.0 evidence stream), wired into the op sequence ----
 
-function plantRichContext(root, dateName) {
-  const dir = join(root, '_metrics', 'rich-context');
+function plantTurnCapture(root, dateName) {
+  const dir = join(root, '_metrics', 'turn-capture');
   mkdirSync(dir, { recursive: true });
   const file = join(dir, `${dateName}.jsonl`);
-  writeFileSync(file, JSON.stringify({ kind: 'rich-context', schema_version: '1.0.0', query_text: 'q' }) + '\n');
+  writeFileSync(file, JSON.stringify({ kind: 'turn-evidence', schema_version: '1.0.0', prompt_text: 'q' }) + '\n');
   return file;
 }
 
-test('maintenance retention: dry-run reports old rich-context files but deletes nothing', () => {
+test('maintenance retention: dry-run reports old turn-capture files but deletes nothing', () => {
   const root = makeProject();
   const home = testHome(root);
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
-  const oldFile = plantRichContext(root, '2020-01-01');
+  const oldFile = plantTurnCapture(root, '2020-01-01');
   const res = runMaintenance(root, { apply: false, now: '2026-06-28T00:00:00Z', home });
-  assert.ok(res.notes.some((n) => /rich-context retention \(dry-run\).*would be deleted/.test(n)), 'dry-run surfaces the pending deletion');
+  assert.ok(res.notes.some((n) => /turn-capture retention \(dry-run\).*would be deleted/.test(n)), 'dry-run surfaces the pending deletion');
   assert.ok(existsSync(oldFile), 'dry-run deletes nothing');
 });
 
-test('maintenance retention: apply deletes old rich-context rows, keeps recent, narrates it', () => {
+test('maintenance retention: apply deletes old turn-capture rows, keeps recent, narrates it', () => {
   const root = makeProject();
   const home = testHome(root);
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
-  const oldFile = plantRichContext(root, '2020-01-01');
-  const recentFile = plantRichContext(root, '2099-01-01');
+  const oldFile = plantTurnCapture(root, '2020-01-01');
+  const recentFile = plantTurnCapture(root, '2099-01-01');
   const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
-  assert.ok(!existsSync(oldFile), 'old rich-context row deleted');
-  assert.ok(existsSync(recentFile), 'recent rich-context row kept');
-  assert.ok(res.notes.some((n) => /rich-context retention: deleted 1 row file/.test(n)), 'the deletion is narrated with a proof count');
+  assert.ok(!existsSync(oldFile), 'old turn-capture row deleted');
+  assert.ok(existsSync(recentFile), 'recent turn-capture row kept');
+  assert.ok(res.notes.some((n) => /turn-capture retention: deleted 1 row file/.test(n)), 'the deletion is narrated with a proof count');
 });
 
-test('--purge-rich-context CLI removes the whole stream dir and nothing else', () => {
+test('--purge-turn-capture CLI removes the whole stream dir and nothing else', () => {
   const root = makeProject();
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
-  const richDir = join(root, '_metrics', 'rich-context');
-  plantRichContext(root, '2026-06-01');
+  const streamDir = join(root, '_metrics', 'turn-capture');
+  plantTurnCapture(root, '2026-06-01');
   // dry-run first: reports, deletes nothing
-  const dry = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--purge-rich-context', '--dry-run'], { encoding: 'utf8' });
+  const dry = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--purge-turn-capture', '--dry-run'], { encoding: 'utf8' });
   assert.match(dry, /Would purge/);
-  assert.ok(existsSync(richDir), 'dry-run purge deletes nothing');
+  assert.ok(existsSync(streamDir), 'dry-run purge deletes nothing');
   // real purge
-  const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--purge-rich-context'], { encoding: 'utf8' });
-  assert.match(out, /Purged the rich-context capture stream/);
-  assert.ok(!existsSync(richDir), 'stream dir removed');
+  const out = execFileSync(process.execPath, [MAINT_SCRIPT, root, '--purge-turn-capture'], { encoding: 'utf8' });
+  assert.match(out, /Purged the turn-capture evidence stream/);
+  assert.ok(!existsSync(streamDir), 'stream dir removed');
   assert.ok(existsSync(join(root, '_memories')), 'memory store untouched');
+});
+
+test('legacy sweep: a leftover rich-context stream from the retired mechanism is removed on apply', () => {
+  const root = makeProject();
+  const home = testHome(root);
+  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
+  const legacyDir = join(root, '_metrics', 'rich-context');
+  mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(join(legacyDir, '2026-07-01.jsonl'), '{"kind":"rich-context"}\n');
+  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
+  assert.ok(!existsSync(legacyDir), 'retired stream dir removed');
+  assert.ok(res.notes.some((n) => /removed the retired rich-context stream/.test(n)), 'the sweep is narrated');
 });
 
 // ── self-test auto-regrade wired into the CLI cadence (holistic-redesign §3d) ──
