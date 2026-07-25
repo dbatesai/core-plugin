@@ -75,7 +75,7 @@ Then tell the user the deletion path, honestly: they can delete the artifact fro
 
 ## Boundary that never moves
 
-**Unit content never routes into the anonymized `/metrics-package` export** (condition 5). Structurally it can't — the exporter builds from a disjoint numeric/pseudonym allowlist and never exports or routes unit bodies (its census does read whole unit files; no body content survives into package bytes — the planted-body tripwire test proves it) — and behaviorally you must never "borrow" this page's embedded content for any export, summary package, or shared aggregate. This page is the one deliberate, per-publish, user-confirmed disclosure of real unit bodies; nothing else inherits it.
+**Unit content never routes into the anonymized `/metrics export` package** (condition 5). Structurally it can't — the exporter builds from a disjoint numeric/pseudonym allowlist and never exports or routes unit bodies (its census does read whole unit files; no body content survives into package bytes — the planted-body tripwire test proves it) — and behaviorally you must never "borrow" this page's embedded content for any export, summary package, or shared aggregate. This page is the one deliberate, per-publish, user-confirmed disclosure of real unit bodies; nothing else inherits it.
 
 ## Self-healing rails
 
