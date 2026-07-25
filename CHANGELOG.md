@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Dev-process scrub of the entire shipped tree.** All internal development-process references are gone from everything a marketplace install pulls: internal decision-ledger tags, reviewer cross-talk attributions in code comments, internal agent codenames, and a tenant company name — ~710 references across ~190 files, reworded into self-contained plain language (meaning-preserving, not stripped). Public docs, protocols, skills, and code comments now explain every rule in their own words.
+- **Comments describe the present state only.** Every shipped code comment and protocol passage that narrated a prior state, a process story, or calendar-date provenance is rewritten as the plain present constraint (or removed when it carried no present-state content) — ~340 passages across 96 files. Lifecycle vocabulary, format-example dates, and live compatibility/deprecation contracts are unchanged.
 - **Dev-leakage guard enforces the new bar.** The release-gate scan now flags decision-ledger references (upper- or lowercase, on the product surface and CHANGELOG) and agent names in shipped code comments — with a documented carve-out for `dc-<n>-<slug>` unit-id examples, which are the product's own naming convention. The release flow gains a post-bump scrub-verification step; the guard remains the fail-closed enforcement.
 
 ## [3.14.0] — 2026-07-24
