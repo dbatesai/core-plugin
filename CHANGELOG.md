@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The memory-health chain can now detect its own silence.** Every check that reports on the evidence recorder needed the recorder to be running in order to say anything, so an idle recorder read as a healthy one. Volumes are now counted per reporting window as well as cumulatively (a cumulative total never returns to zero, so any past volume permanently masked present silence); the flight-recorder-dead check reads the window; a new coverage check fires when evidence is recorded for under half of hook-triggered lookups; and a new staleness check fires when no conclusion has been pinned in 14 days — the one signal that survives the whole chain going quiet. A rejected row now counts as a failed attempt, so a caller that stops supplying a required field becomes visible instead of recording nothing at all.
+- **`/metrics` states how much evidence is behind its answers.** Under 20 graded turns the default view reports the sample size rather than a verdict — a handful of turns can read 100% and mean nothing.
+- **The default `/metrics` view discloses what is stored whether capture is on or off**, with the off-switch, instead of mentioning capture only when it is already disabled.
+- **The first-run privacy notice reaches every workspace.** It ran only on the brand-new-workspace scaffold, so a project that already existed when local turn capture arrived — the common case on upgrade — was never told. It now runs at every session start, self-gating so it appears once, and the shown-flag is versioned so a materially newer notice reaches a workspace that saw an older one.
+
 ## [3.14.1] — 2026-07-24
 
 ### Changed
