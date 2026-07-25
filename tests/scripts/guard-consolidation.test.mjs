@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)),
@@ -42,7 +42,7 @@ test('ratchet: slug-encoders outside project-slug.mjs do not grow (target: 0)', 
     !p.endsWith('project-slug.mjs') &&
     /replace\(\/\[\^?a-z0-9|replace\(\/\[\/\\\\\]/.test(readFileSync(p, 'utf8')));
   assert.ok(files.length <= 4,
-    `slug-encoder copies grew past baseline 4 (target 0 — import mapProjectPathToSlug): ${files.map(f => f.split('/').pop())}`);
+    `slug-encoder copies grew past baseline 4 (target 0 — import mapProjectPathToSlug): ${files.map(f => basename(f))}`);
 });
 
 test('ratchet: local frontmatter fence-parsers do not grow (target: 1)', () => {

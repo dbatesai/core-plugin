@@ -17,7 +17,7 @@ import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
@@ -328,11 +328,12 @@ test('detector: every no-baseline file is a needs-attention item; pre_existing i
     writeFileSync(newUnit, `---\nid: dc-new\ntype: decision\nstatus: active\n---\n\n# New\n`);
 
     const det = detectStore(project);
-    const byName = Object.fromEntries(det.files.map(f => [f.path.split('/').pop(), f]));
+    // basename, not split('/'): detectStore paths are platform-separated on Windows
+    const byName = Object.fromEntries(det.files.map(f => [basename(f.path), f]));
     // Both no-baseline; both need attention (no timing exemption).
     assert.equal(byName['dc-user.md'].classification, 'no-baseline');
     assert.equal(byName['dc-new.md'].classification, 'no-baseline');
-    const attentionNames = det.needs_attention.map(f => f.path.split('/').pop());
+    const attentionNames = det.needs_attention.map(f => basename(f.path));
     assert.ok(attentionNames.includes('dc-user.md') && attentionNames.includes('dc-new.md'),
       'both no-baseline files are surfaced — neither is silently exempted by timing');
     // pre_existing is a diagnostic hint only: dc-user present at start, dc-new appeared after.
