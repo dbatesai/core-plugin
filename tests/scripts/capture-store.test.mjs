@@ -60,11 +60,26 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
     process.on('message', (m) => {
       if (m === 'probe' && !probeAcked) { probeAcked = true; if (process.send) process.send({ probeAckEpoch: epoch }); }
     });
+    // Windows: a concurrent reader holding the target open can EPERM/EBUSY
+    // the rename; retry briefly instead of crashing (a dead writer would
+    // masquerade as a liveness failure in the parent's window assertions).
+    async function renameWithRetry(from, to) {
+      for (let a = 0; ; a++) {
+        try { renameSync(from, to); return; }
+        catch (e) {
+          if ((e.code === 'EPERM' || e.code === 'EACCES' || e.code === 'EBUSY') && a < 200) {
+            await new Promise((r) => setTimeout(r, 5));
+            continue;
+          }
+          throw e;
+        }
+      }
+    }
     while (!existsSync(${JSON.stringify(stopFile)})) {
       epoch++;
       const tmp = ${JSON.stringify(unitPath)} + '.tmp';
       writeFileSync(tmp, fm + 'omega speedmaster epoch-' + epoch + ' body\\n');
-      renameSync(tmp, ${JSON.stringify(unitPath)});
+      await renameWithRetry(tmp, ${JSON.stringify(unitPath)});
       if (process.send) process.send({ epoch });
       // setImmediate, not Atomics.wait: Atomics.wait blocks this thread at the
       // OS level and starves this process's OWN event loop, so it would never
@@ -81,10 +96,13 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
     // live: the whole test hung past its own timeout without this).
     process.exit(0);
   `;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  // timeout must clear the 20s observation window with margin — a harness
+  // kill mid-window reads as a liveness failure.
+  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 60000, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   let childErr = '';
   child.stderr.on('data', d => { childErr += d; });
-  const childDone = new Promise(res => child.on('close', res));
+  let writerExit = null;
+  const childDone = new Promise(res => child.on('close', (code, signal) => { writerExit = { code, signal }; res(); }));
 
   let probeAckEpoch = null;
   let sawEpochStrictlyAfterAck = false;
@@ -134,6 +152,8 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
       // how long the deadline is (caught live: 121696 captures, 0 signals seen).
       await new Promise((r) => setImmediate(r));
     }
+    assert.equal(writerExit, null,
+      `the writer died mid-window (exit ${JSON.stringify(writerExit)}) — stderr: ${childErr.slice(0, 800)}`);
     assert.ok(sawEpochs.size >= 2 && sawEpochStrictlyAfterAck,
       `the barrier was live for the whole window — ${sawEpochs.size} distinct epochs across ${i} captures, ` +
       `causal in-window advancement past probe-ack epoch ${probeAckEpoch}: ${sawEpochStrictlyAfterAck} (writer stderr: ${childErr})`);
@@ -190,20 +210,39 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
     process.on('message', (m) => {
       if (m === 'probe' && !probeAcked) { probeAcked = true; if (process.send) process.send({ probeAckI: i }); }
     });
+    // Same Windows EPERM/EBUSY rename retry as round-11's writer (a reader
+    // holding the target open fails the rename; a crashed writer here read
+    // as "liveness never advanced past probe-ack" on windows-latest).
+    async function renameWithRetry(from, to) {
+      for (let a = 0; ; a++) {
+        try { renameSync(from, to); return; }
+        catch (e) {
+          if ((e.code === 'EPERM' || e.code === 'EACCES' || e.code === 'EBUSY') && a < 200) {
+            await new Promise((r) => setTimeout(r, 5));
+            continue;
+          }
+          throw e;
+        }
+      }
+    }
     while (!existsSync(${JSON.stringify(stopFile)})) {
       const tmp = ${JSON.stringify(unitPath)} + '.tmp';
       writeFileSync(tmp, bodies[i % 2]);
-      renameSync(tmp, ${JSON.stringify(unitPath)});
+      await renameWithRetry(tmp, ${JSON.stringify(unitPath)});
       if (process.send) process.send({ i });
       i++;
       await new Promise((r) => setImmediate(r));
     }
     process.exit(0); // see round-11: a 'message' listener refs the IPC channel, so exit explicitly
   `;
-  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 30000, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+  // timeout 90s, NOT 30s: the observation window below is 45s — the old 30s
+  // spawn timeout had the harness killing the writer mid-window, which then
+  // read as "liveness never advanced" instead of what it was.
+  const child = spawn(process.execPath, ['--input-type=module', '-e', writer], { timeout: 90000, stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
   let childErr2 = '';
   child.stderr.on('data', d => { childErr2 += d; });
-  const childDone = new Promise(res => child.on('close', res));
+  let writerExit2 = null;
+  const childDone = new Promise(res => child.on('close', (code, signal) => { writerExit2 = { code, signal }; res(); }));
 
   let probeAckI = null;
   let sawIStrictlyAfterAck = false;
@@ -257,6 +296,8 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
       }
       await new Promise((r) => setImmediate(r)); // let the writer's probe-ack/i messages actually get delivered
     }
+    assert.equal(writerExit2, null,
+      `the edge writer died mid-window (exit ${JSON.stringify(writerExit2)}) — stderr: ${childErr2.slice(0, 800)}`);
     assert.ok(seenTargets.size >= 2 && sawIStrictlyAfterAck,
       `the edge barrier was live for the whole window — expansions observed both alternating targets ` +
       `(${[...seenTargets].join(',')}), causal in-window advancement past probe-ack i=${probeAckI}: ${sawIStrictlyAfterAck}`);
