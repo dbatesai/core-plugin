@@ -148,8 +148,14 @@ export const PATTERNS = [
   {
     name: 'dc-reference',
     klass: 'dev-process',
-    // [a-z]? covers letter-suffixed refs (DC-94a) — \d+\b alone misses them.
-    re: /\bDC-\d+[a-z]?\b/g,
+    // [a-z]? covers letter-suffixed refs (DC-94a); case-insensitive because
+    // bare lowercase refs (dc-127) leak identically. The (?!-) carve-out
+    // exempts slug-continued ids (dc-12-routing-rewrite): `dc-<n>-<slug>` is
+    // the PRODUCT's own decision-unit naming convention, and schema docs
+    // legitimately show fictional examples of it. A slugged ref to an
+    // internal workshop unit is mechanically indistinguishable from such an
+    // example — that residual class is a hand-review item, not a guard item.
+    re: /\b[Dd][Cc]-\d+[a-z]?\b(?!-)/g,
     appliesTo: (p) => isProductSurface(p) || p === 'CHANGELOG.md',
   },
   // --- names in shipped JSON config/schema files (Antigravity's 868915d review

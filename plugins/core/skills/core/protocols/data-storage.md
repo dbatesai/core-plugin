@@ -12,7 +12,7 @@ Read this before any Write/Edit on a unit, an observation, a PROJECT.md render, 
 
 Three surfaces, three responsibilities. Don't mix them.
 
-- **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed per DC-74 so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
+- **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed by convention so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
 - **Agent operational meta** — `~/.core/` — your operational layer across projects. `dm-profile.md` is your cross-project home. `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
 
@@ -76,7 +76,7 @@ Architect committed to X done by July 15. Mentioned in passing
 during weekly sync.
 ```
 
-Location: `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Date-organized for browsability — observations are high-volume; flat-with-prefix at the unit-store root would overwhelm. This is the explicit observation exception to the DC-68 flat-layout rule.
+Location: `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Date-organized for browsability — observations are high-volume; flat-with-prefix at the unit-store root would overwhelm. This is the explicit observation exception to the flat-layout rule.
 
 You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `~/.core/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, you can add it under Mode A (autonomous, narrated). When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
 
@@ -132,7 +132,7 @@ The routing rewrite locks 4 phases for the migration to the new
 auth boundary. ...
 ```
 
-Location: `<project>/_memories/<prefix>-<slug>.md` — flat layout per DC-68, with the type encoded in the filename prefix.
+Location: `<project>/_memories/<prefix>-<slug>.md` — flat layout per the standing convention, with the type encoded in the filename prefix.
 
 **Field-name distinction between tiers.** Tier 1 observations carry `references-person:` and `references-topic:` — the raw entities mentioned in the capture. Tier 2 units carry curated `people:` and `topics:` arrays — the result of graduation reasoning, which may add, drop, or rename entries from the raw observation lists. `priority.mjs` and `check-units.mjs` read the Tier 2 `topics:` field; the priority function's A signal (Jaccard alignment with session-intent topics) operates on this curated list.
 
@@ -321,13 +321,13 @@ Metrics capture is physically two separate streams, and they are never mixed:
 | **Closed-schema metrics** | `retrieval-log.jsonl` / `outcome-log.jsonl` and the derived rollups — counts, tiers, verdicts, identities. No prompts, no diffs, no unit bodies, no paths, no raw errors. | **ON**, opt-out via `metrics_enabled: false` or `CORE_METRICS_ENABLED=0`. | `metrics-package.mjs` reads this and anonymizes it into the shareable package. |
 | **Turn-capture evidence** | `<metrics-storage-base>/turn-capture/<date>.jsonl` — one row per turn: the user's prompt (64 KiB byte-cap), the combined delivered context-pack text (16 KiB cap), per-unit ids+scores, the top-20 rejected candidates with scores, a store signature for drift detection, and producer identity. This is what the hindsight judge grades later — it exists so retrieval quality is judgeable after the fact. Files are owner-only (dir `0700`, rows `0600`, best-effort where the FS supports it). For local grading and human/agent debugging only; no model inference runs over it. | **ON** (the product owner's explicit ruling, recorded with the reviewed objection). Opt-outs: `CORE_TURN_CAPTURE=0` (env), `turn_capture: false` in the project-root `workspace.json` (an opt-OUT travelling with a copied project is privacy-safe, the inverse of the old opt-in-stream reasoning), or the master `CORE_METRICS_ENABLED=0`. | **None.** `metrics-package.mjs` has no import path or read path into `turn-capture/`; a permanent canary tripwire test asserts the built package bytes never contain a planted evidence string. |
 
-The evidence stream is the materially more sensitive one, so it carries **always-visible state** (`/metrics` renders the ON line with the exact disclosure and off-switches, or the OFF line confirming an opt-out took effect), **independent disable** (its own flag; toggling it never touches the numbers stream), **30-day retention** (runs inside `maintenance-run.mjs` with dry-run + deletion proof), and **purge on explicit ask** (`maintenance-run.mjs --purge-turn-capture`, or `turn-capture.mjs --purge`). All evidence-stream deletion is scoped by path assertion to `<metrics-storage-base>/turn-capture/` only — it can never target a user memory unit or `PROJECT.md`. **One exclusion lock** at a stable sibling path OUTSIDE the purged directory (`<metrics-storage-base>/.turn-capture.lock`) is shared by append, retention deletion, and purge, so a purge can never unlink the lock out from under a mid-flight writer and the three ops can never race. A health counter (`<metrics-storage-base>/turn-capture-health.json`, a sibling on purpose) records every attempt including ones where the stream itself couldn't be created — a silently dying flight recorder is the exact failure the capture-health tripwire watches. The single writer is `scripts/turn-capture.mjs`; the one wired seam is `retrieve-context-hook.mjs`, writing the evidence row in the same run as the numbers row, joined by `retrieval_id`; a capture outcome (including failures) rides the hook's terminal operational receipt as a closed `turn_capture` status code, never as raw content. *(History: this stream supersedes the 2026-07-22 opt-in rich-context stream — which could only fire on zero-hits, when there is no delivered context to record (dc-127) — and the undocumented env-gated trace file; both retired in v3.14.0.)*
+The evidence stream is the materially more sensitive one, so it carries **always-visible state** (`/metrics` renders the ON line with the exact disclosure and off-switches, or the OFF line confirming an opt-out took effect), **independent disable** (its own flag; toggling it never touches the numbers stream), **30-day retention** (runs inside `maintenance-run.mjs` with dry-run + deletion proof), and **purge on explicit ask** (`maintenance-run.mjs --purge-turn-capture`, or `turn-capture.mjs --purge`). All evidence-stream deletion is scoped by path assertion to `<metrics-storage-base>/turn-capture/` only — it can never target a user memory unit or `PROJECT.md`. **One exclusion lock** at a stable sibling path OUTSIDE the purged directory (`<metrics-storage-base>/.turn-capture.lock`) is shared by append, retention deletion, and purge, so a purge can never unlink the lock out from under a mid-flight writer and the three ops can never race. A health counter (`<metrics-storage-base>/turn-capture-health.json`, a sibling on purpose) records every attempt including ones where the stream itself couldn't be created — a silently dying flight recorder is the exact failure the capture-health tripwire watches. The single writer is `scripts/turn-capture.mjs`; the one wired seam is `retrieve-context-hook.mjs`, writing the evidence row in the same run as the numbers row, joined by `retrieval_id`; a capture outcome (including failures) rides the hook's terminal operational receipt as a closed `turn_capture` status code, never as raw content. *(History: this stream supersedes the 2026-07-22 opt-in rich-context stream — which could only fire on zero-hits, when there is no delivered context to record — and the undocumented env-gated trace file; both retired in v3.14.0.)*
 
 ---
 
 ## Priority function
 
-The committed function from DC-69:
+The committed priority function:
 
 ```
 priority(unit, t) = w_R · R(unit, t)
@@ -493,7 +493,7 @@ Each addition is appended to a changelog at the top of the file:
 
 ```
 - 2026-05-17: added v2-build — emerged from the autonomous build run
-- 2026-05-16: added memory-architecture — coalescing topic across DC-65/67/68/69
+- 2026-05-16: added memory-architecture — coalescing topic across the memory-architecture decisions
 ```
 
 This is Mode A (autonomous, narrated). No per-tag confirmation required.
@@ -573,7 +573,7 @@ When the user goes quiet mid-conversation and you've staged a Mode B proposal: a
 
 ## Harness-local recall integration
 
-Harness-local recall is its own store at a harness-specific path — Claude Code uses `~/.claude/projects/<cwd>/memory/`, Codex uses `~/.codex/memories/`, future harnesses bring their own. The `read-auto-memory` adapter verb resolves the path per harness (see `harnesses/<name>.md`). Per DC-86 it's surface 4 in the authority stack — recall, never authoritative.
+Harness-local recall is its own store at a harness-specific path — Claude Code uses `~/.claude/projects/<cwd>/memory/`, Codex uses `~/.codex/memories/`, future harnesses bring their own. The `read-auto-memory` adapter verb resolves the path per harness (see `harnesses/<name>.md`). By design it's surface 4 in the authority stack — recall, never authoritative.
 
 - Loaded at session start by the harness when it has an auto-load surface (Claude Code does, Codex doesn't auto-load memory).
 - Holds cross-session workflow lessons — user preferences, patterns, references, harness-specific empirical findings.
@@ -586,7 +586,7 @@ Harness-local recall is its own store at a harness-specific path — Claude Code
 
 ## File locations and naming
 
-Unit prefix convention (locked at plan revision 2026-05-17, per DC-68 + Invariant 6):
+Unit prefix convention (locked at plan revision 2026-05-17, per the flat-layout rule + Invariant 6):
 
 | Type | Prefix | Example | Layout |
 |---|---|---|---|
@@ -653,7 +653,7 @@ Three rings, one read at runtime.
 ```
 <project>/
 ├── PROJECT.md                     ← rendered six-section view
-├── _memories/                        ← canonical unit store (flat per DC-68)
+├── _memories/                        ← canonical unit store (flat by convention)
 │   ├── <prefix>-<slug>.md         ← active units
 │   ├── observations/<YYYY-MM>/    ← capture-everything tier
 │   ├── archive/                   ← archived units (flat)
@@ -697,4 +697,4 @@ Removed in v2 (was present in v1, no longer applies):
 - The `file-shape classifier` and `auto-compaction strategy` — replaced by `protocols/hygiene.md` (three verbs: archive / retire / cold-store). Hygiene handles all compaction, retire, and archive operations.
 - Cowork capability-routing — Cowork is not a v2 target harness. The skill works on Claude Code Desktop's Code tab; future-Cowork support is its own design exercise.
 
-If you encounter references to "DC-46 auto-compaction," "BM-DC46-7 effectiveness reports," "the file-shape classifier," or "Cowork capability levels" in older protocol files or memory entries, treat them as historical context. The v2 mechanism is `protocols/hygiene.md`.
+If you encounter references to v1 "auto-compaction," v1 "effectiveness reports," "the file-shape classifier," or "Cowork capability levels" in older protocol files or memory entries, treat them as historical context. The v2 mechanism is `protocols/hygiene.md`.

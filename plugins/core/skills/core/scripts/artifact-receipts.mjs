@@ -131,7 +131,7 @@ export function recordPublishOutcome({
     throw Object.assign(new Error(
       "--status published-private requires --private-verified-evidence — state how privacy was actually confirmed (condition 3); without evidence the publish is 'failed', not 'published-private'"), { code: 'EVIDENCE_REQUIRED' });
   }
-  // Hale's e0a808f revise (2026-07-22): a published-private outcome without a
+  // The e0a808f review revise (2026-07-22): a published-private outcome without a
   // consent record was a gap between the skill prose ("record who consented on
   // which manifest") and this CLI contract — close it here, for every kind.
   if (status === 'published-private' && (!consentBy || !consentMechanism)) {

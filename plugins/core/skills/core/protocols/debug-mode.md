@@ -63,9 +63,9 @@ JSONL at `~/.core/debug/<session-id>.jsonl`. One event per line. Schema per even
   "details": {
     "query": "...",
     "tier_reached": 1,
-    "candidates": ["dc-69", "dc-65", ...],
-    "scores": {"dc-69": 0.87, "dc-65": 0.52},
-    "chosen": ["dc-69"]
+    "candidates": ["dc-12-routing-rewrite", "dc-09-router-design-review", ...],
+    "scores": {"dc-12-routing-rewrite": 0.87, "dc-09-router-design-review": 0.52},
+    "chosen": ["dc-12-routing-rewrite"]
   }
 }
 ```

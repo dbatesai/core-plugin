@@ -1,7 +1,7 @@
 /**
  * demote-moves.mjs — auto-demote closed §Moves bullets to PROJECT-ARCHIVE.md.
  *
- * Phase 1b of the DC-85 memory architecture redesign. Closed bullets ([x])
+ * Phase 1b of the memory architecture redesign. Closed bullets ([x])
  * older than the 30-day floor get moved to PROJECT-ARCHIVE.md §Moves under a
  * date-stamped subsection. A one-line stub pointer replaces the original
  * bullet so the trail back to the archive entry is preserved.
@@ -25,11 +25,11 @@
  *
  * Active items ([ ]) and partial items ([~]) are never touched.
  *
- * Per David's 2026-05-24 reframe: auto-applies by default. --dry-run is the
+ * Per the product owner's 2026-05-24 reframe: auto-applies by default. --dry-run is the
  * agent's own inspection mode (not a permanent user-ratification gate).
  *
- * Per DC-77 the script ships with the plugin (not per-project).
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The script ships with the plugin (not per-project).
+ * The plugin ships Node.js (.mjs) only.
  */
 
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
@@ -365,7 +365,7 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   // shorter floor is a strict superset (age >= floor demotes; 7 <= 30, so
   // everything the 30-day floor catches, the 7-day floor also catches, plus
   // anything 7-29 days old). Gating on "the normal floor found nothing" (the
-  // original design, Hale's catch 2026-07-21) let a single old item mask
+  // original design, a review catch 2026-07-21) let a single old item mask
   // every other item still over cap: one 93-day bullet would demote, the
   // escalation would never fire, and dozens of 10-29-day bullets would sit
   // untouched on a file still massively over cap.

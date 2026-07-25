@@ -12,7 +12,7 @@
  * contract bytes — so the same contract regenerates byte-identically. That is what makes
  * `--check` drift detection meaningful (drift = a hand edit, never a timestamp).
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships with the plugin as a script; .mjs only.
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -169,7 +169,7 @@ export async function generateForHarness({ harness, contractPath, outputPath, ov
   const contract = parseContract(contractPath);
   const overrides = parseOverrides(overridePath);
   const warnings = [...contract.warnings];
-  // FATAL provenance issues — release-gate blockers (Hale item 2: the gate must FAIL
+  // FATAL provenance issues — release-gate blockers (review requirement: the gate must FAIL
   // CLOSED on these, not just warn). They make check mode fail and are surfaced as
   // warnings in write/dry-run so local iteration still sees them.
   const fatal = [];

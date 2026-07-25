@@ -16,7 +16,7 @@
  * (which would change historical validation comparability) is a ceremony-scoped
  * decision, deliberately not smuggled in with the v3.11 remediation.
  *
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The plugin ships Node.js (.mjs) only.
  */
 
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, realpathSync } from 'node:fs';

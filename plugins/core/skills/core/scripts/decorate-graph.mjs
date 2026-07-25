@@ -7,10 +7,10 @@
 // directly to its own body. Point Obsidian at the live store; there is only
 // ever one copy.
 //
-// Design source: David's 2026-07-21 direction change (in-place decoration
+// Design source: the product owner's 2026-07-21 direction change (in-place decoration
 // over export — see mailbox thread
 // core-claude--in-place-graph-decoration-replaces-okf-export) plus
-// Antigravity's same-day architectural review (three constraints, all
+// a same-day independent architectural review (three constraints, all
 // applied below):
 //   1. Dangling edges to archived/retired targets are stripped, not
 //      rendered as Obsidian "ghost" nodes — a retired target is simply
@@ -53,7 +53,7 @@ function countOccurrences(text, needle) {
 }
 
 /**
- * findExistingEdgesBlock — fail-closed marker scan (Hale's 2026-07-21
+ * findExistingEdgesBlock — fail-closed marker scan (a 2026-07-21 review
  * falsifier: a naive first-begin/first-end indexOf pairing corrupts a file
  * that already has a malformed marker state — e.g. one orphaned BEGIN with
  * no END, then a human-authored line, then a later run's own generated END
@@ -203,7 +203,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
   const activeById = new Map(units.map(u => [u.id, u]));
   const memoriesDir = join(resolve(projectDir), '_memories');
 
-  // Authorship-boundary fix (Hale's finding, 2026-07-22 — "mixed-ownership
+  // Authorship-boundary fix (review finding, 2026-07-22 — "mixed-ownership
   // writers launder unreconciled edits"): read the state cache ONCE, before
   // any of this run's writes land, as the pre-write baseline every unit gets
   // classified against below. The bug this closes: decorate-graph used to
@@ -253,7 +253,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     // Shared refuse-or-proceed rule (lifecycle-core.mjs) — identical logic to
     // hot-section and compact-project. A stamped file refuses on
     // 'outside-changed'/'no-baseline'; a file with NO stamp at all ALWAYS
-    // refuses now (Hale's 2026-07-22 root fix — session timing cannot prove
+    // refuses now (a 2026-07-22 root fix from review — session timing cannot prove
     // authorship). A legitimately new unit is decoratable because its creating
     // writer stamped it at creation (lifecycle-detect.mjs stampCreatedBaseline);
     // an un-stamped no-baseline unit is held and surfaced, never rewritten.
@@ -279,7 +279,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
       atomicWriteFileSync(filePath, updated);
       // Stamp the state cache in the same operation, so next session's
       // edit-detection recognizes this as CORE's own write rather than a
-      // between-session user edit (Hale's finding, 2026-07-22 — this used to
+      // between-session user edit (review finding, 2026-07-22 — this used to
       // be a prose instruction telling the AGENT to update the cache by
       // hand; that's now code, matching hot-section.mjs's precedent).
       stampEntries.push({
@@ -344,7 +344,7 @@ function main(argv) {
 
   // Every refusal is a real, user-actionable problem (a malformed marker
   // state, or a stale-byte race) -- printing "none needed a change" while
-  // silently swallowing these was a genuine reporting gap (Hale's 2026-07-21
+  // silently swallowing these was a genuine reporting gap (a 2026-07-21 review
   // finding). Always print them, and let a refusal alone still exit nonzero
   // even outside --check, since it means a file was NOT decorated as asked.
   if (result.refused.length > 0) {

@@ -7,7 +7,7 @@
  * NEVER UPLOADS ANYTHING — it generates a local file, prints a preflight
  * manifest, and writes a local generation receipt; that is the whole job).
  *
- * Design source: the hand-built prototype David approved 2026-07-22 (and
+ * Design source: the hand-built prototype the product owner approved 2026-07-22 (and
  * corrected once for plain language). Its section structure (four
  * plain-question sections), copy voice (every measurement explained in the
  * sentence it appears in — never a bare metric name), visual system (tokens,
@@ -361,7 +361,7 @@ function graderVerificationRow(readiness) {
   });
 }
 
-// (Section 4 — user benefit — REMOVED per DC-129, 2026-07-24: the matched
+// (Section 4 — user benefit — REMOVED by ruling, 2026-07-24: the matched
 // on/off comparison is unobservable, so the question left scope by decision.
 // The honest "never measured" row's job is done; keeping it would imply the
 // question is still open.)

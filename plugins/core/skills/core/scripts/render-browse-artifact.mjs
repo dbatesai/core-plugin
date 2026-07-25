@@ -7,8 +7,8 @@
  * preflight manifest, and writes a local receipt; that is the whole job).
  *
  * Design source: docs/specs/2026-07-22-memory-browse-artifact-design.md (CORE
- * workshop repo) — approved by Hale (seven disclosure conditions) and
- * Antigravity (three refinements). The conditions THIS script enforces in code:
+ * workshop repo) — approved by two independent reviews (seven disclosure
+ * conditions plus three refinements). The conditions THIS script enforces in code:
  *
  *   - Condition 2 (preflight manifest): stdout is exactly one JSON object —
  *     unit count, byte count, scopes, snapshot id, and a fixed sensitivity
@@ -716,7 +716,7 @@ export async function renderBrowseArtifact(projectDir, {
     mkdirSync(receiptDir, { recursive: true });
     writeFileSync(receiptPath, JSON.stringify(manifest, null, 2) + '\n');
   } catch (e) {
-    // Truthful surfacing over silent success: the receipt is Hale condition
+    // Truthful surfacing over silent success: the receipt is disclosure condition
     // 4's audit trail — if it didn't land, the manifest must say so.
     receiptWritten = false;
     manifest.receipt_path = null;

@@ -4,18 +4,18 @@
  * Spec: CORE workshop `docs/specs/2026-07-16-metrics-package-spec.md`.
  *
  * ONE PURPOSE: feedback data for refining CORE itself. The package must be safe
- * to hand across strict data boundaries (the Crest/T-Mobile rule: de-identified
+ * to hand across strict data boundaries (the standing data-boundary rule: de-identified
  * aggregates only, no reconstruction risk), so the design is whitelist-generation:
  * every byte in the package is COMPUTED here from raw sources — no raw file is
  * ever copied, and the only value types that survive are numbers, dates, fixed
  * CORE vocabulary (enum states, op names, check ids, capability ids), and salted
  * pseudonyms. Free text (query words, titles, bodies, paths, validator messages)
- * is dropped, never hashed. Per DC-77 this boundary lives in prescriptive code,
- * not skill prose; per DC-80, zero dependencies.
+ * is dropped, never hashed. By design this boundary lives in prescriptive code,
+ * not skill prose; and the script carries zero dependencies.
  *
  * Pseudonyms: HMAC-SHA256 over a per-install secret salt (~/.core/metrics-package-salt,
- * 0600, NEVER shipped). Stable across packages from the same install (David's
- * ratified call, 2026-07-16) so trend lines are comparable; meaningless elsewhere.
+ * 0600, NEVER shipped). Stable across packages from the same install (ratified
+ * by the product owner, 2026-07-16) so trend lines are comparable; meaningless elsewhere.
  * Deleting the salt rotates every pseudonym.
  *
  * Self-healing: every source is optional — absent/unparseable sources emit
@@ -59,10 +59,10 @@ const UNIT_TYPES = ['decision', 'risk', 'observation', 'person', 'reference', 'p
 const UNIT_STATUSES = ['active', 'retired', 'archived', 'superseded', 'draft'];
 const EDGE_TYPES = ['cites', 'depends-on', 'supersedes', 'supersedes-claim', 'refines', 'amends', 'conflicts-with', 'references-topic'];
 // The classifier's ACTUAL state vocabulary (classify-turns.mjs is the producer —
-// Hale's 2026-07-17 audit caught the previous invented list collapsing 5 of 6
+// a 2026-07-17 review caught the previous invented list collapsing 5 of 6
 // canonical states to 'other').
 const RECOGNITION_STATES = ['rec-fail-tier-0', 'rec-fail-tier-1-3-trigger', 'tier-0-win', 'tier-1-3-win', 'capture-miss', 'mechanics-failure'];
-// Code-owned enums for every remaining string source (Hale audit e1490d4 finding 7:
+// Code-owned enums for every remaining string source (review finding 7 at e1490d4:
 // a shape check like kebab-case is NOT a privacy boundary — user-derived values can
 // be kebab-shaped. Only these exact values pass; everything else folds to 'other').
 const HYGIENE_KINDS = ['compact-project', 'demote-moves', 'demote-moves-large-batch', 'demote-state', 'demote-state-large-batch', 'project-md-over-cap', 'maintenance-run'];
@@ -271,7 +271,7 @@ export function retrievalStats(projectDir, seal) {
     matches.push(entry);
     baseById.set(id, matches);
   }
-  // Outcome resolution (Hale corrections 5–7, 2026-07-17, sharpened in the
+  // Outcome resolution (review corrections 5–7, 2026-07-17, sharpened in the
   // 2026-07-17 HOLD audit: "share one authority resolver across consumers").
   // Only JOINED rows aggregate; orphans are surfaced as counts only. Multiple
   // rows per retrieval resolve through resolveOutcomeAuthority() — the SAME
@@ -362,7 +362,7 @@ export function retrievalStats(projectDir, seal) {
   return {
     available: true, ...trust, days, totals,
     escalation_rate: totals.events ? round3(totals.escalations / totals.events) : null,
-    // Unknown-aware (Hale: missing is not "no dip-back"): the rate divides by
+    // Unknown-aware (review note: missing is not "no dip-back"): the rate divides by
     // rows that OBSERVED the field; rows that omitted it are counted as
     // coverage, never as zeros.
     dip_back: {
@@ -681,7 +681,7 @@ export function workspaceMetrics(home, workspaceId) {
     try {
       const j = JSON.parse(readFileSync(calPath, 'utf8'));
       // Field names match the producer (calibrate-classifier.mjs writes
-      // labeled_count / is_calibrated — Hale's audit caught the earlier
+      // labeled_count / is_calibrated — a review caught the earlier
       // labels_count / cleared misread returning permanent nulls).
       calibration = {
         available: true,
@@ -755,7 +755,7 @@ export function headline(blocks) {
   if (w?.available && w.recognition?.available) {
     const days = Object.keys(w.recognition.days).sort();
     const last = days.length ? w.recognition.days[days[days.length - 1]] : null;
-    // Denominator floor (Hale: never headline a rate from three provisional
+    // Denominator floor (review rule: never headline a rate from three provisional
     // turns) — below 20 turns the rate ships as null with the sample size.
     if (last && last.turns) {
       h.recfail_latest_sample = last.turns;
@@ -912,7 +912,7 @@ export function collectProject(projectDir, { home, seal }) {
 
 // ---------- zip ----------
 
-// Relative archive path (David-approved fix, corrected 2026-07-18 after the
+// Relative archive path (product-owner-approved fix, corrected 2026-07-18 after the
 // first attempt failed local verification): on windows-latest, tar parses a
 // Windows drive-letter path's colon (e.g. C:\Users\...\out.zip) passed to -f
 // as its remote host:path syntax and exits 128 ("Cannot connect to C: resolve
@@ -1020,13 +1020,13 @@ export function runPackage(argv, { homeOverride } = {}) {
   if (!projects.length) return { exit: 2, error: 'no project could be collected', coverage };
 
   // Deltas are computed READ-ONLY here; the history append happens only after
-  // the package actually ships (Hale: history was advancing before leakage
+  // the package actually ships (review finding: history was advancing before leakage
   // validation — an aborted run must not consume a history slot).
   for (const proj of projects) {
     proj.deltas = computeDeltas(home, proj.pseudonym, proj.headline);
   }
 
-  // Generator identity — honest provenance (Hale: a source-tree run must not
+  // Generator identity — honest provenance (review finding: a source-tree run must not
   // identify itself as the released build). The manifest version is reported
   // AS the manifest's claim; `generator` records where this code actually ran
   // from, and the source SHA is captured when the tree is a git checkout.
@@ -1105,7 +1105,7 @@ export function runPackage(argv, { homeOverride } = {}) {
 
   // Partial detection descends one level: a workspace-metrics block whose
   // recognition/calibration/capability sub-blocks are unavailable is partial
-  // coverage too (Hale: nested missing sources must force partial status).
+  // coverage too (review rule: nested missing sources must force partial status).
   const blockPartial = (b) => b && (b.available === false
     || Object.values(b).some((v) => v && typeof v === 'object' && v.available === false));
   const partial = coverage.some(c => !c.available)

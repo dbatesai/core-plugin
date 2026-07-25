@@ -30,11 +30,11 @@ The structural adjustment options, in order of cost:
 2. **Restructure a unit.** Split into two, merge two into one, change the prefix. Cheap but breaks existing cites — handle inverse-edge updates.
 3. **Re-tune priority weights** in the plugin's `scripts/priority.mjs` (weights live in the plugin and propagate via plugin update, not per-project copies). Document the change in the hygiene retrospective.
 4. **Evolve query shape** — change how you phrase retrieval prompts internally.
-5. **Escalate infrastructure** — vector store, graph DB, or other. Earned only after repeated trip-wire firings per DC-67. Two consecutive Explore-miss cycles pointing at the same gap means it's time for a new DC.
+5. **Escalate infrastructure** — vector store, graph DB, or other. Earned only after repeated trip-wire firings per the native-tools-first stance. Two consecutive Explore-miss cycles pointing at the same gap means it's time for a new DC.
 
 ## Trip-wire escalation for infrastructure
 
-DC-67 named four trip-wires for when CORE's native-tools-first stance gets reconsidered:
+The native-tools-first stance names four trip-wires for when it gets reconsidered:
 
 1. Corpus grows past ~50K files AND measured Grep latency > 500ms on common queries repeatedly → revisit lexical infrastructure (likely a ripgrep daemon behind MCP, not a different substrate).
 2. Multi-hop graph walks become frequent AND walk latency > 2s on real measurements → generate `adjacency.json` at hygiene time first; only if that's still slow does a graph engine earn its place.
@@ -45,7 +45,7 @@ One cycle of a trip-wire firing is a signal. Two consecutive cycles = propose a 
 
 ## Harness-local recall (every session)
 
-Harness-local recall — Claude Code's `MEMORY.md`, Codex's `~/.codex/memories/`, equivalents — is scratch cache, not authoritative state. Per DC-86 it's surface 4 in the authority stack (see `protocols/data-storage.md §"Authority ordering"`). The harness writes Claude Code's `MEMORY.md` autonomously at `/finalize`; Codex memory is explicit-save only via the `save-recall-note` adapter verb in `harnesses/codex.md`. You treat the recall surface as a fast-access summary of what was learned, but on every bootstrap, it's re-verified against PROJECT.md (for project facts) and `dm-profile.md` (for cross-project patterns). If it disagrees with synthesis, synthesis wins.
+Harness-local recall — Claude Code's `MEMORY.md`, Codex's `~/.codex/memories/`, equivalents — is scratch cache, not authoritative state. By design it's surface 4 in the authority stack (see `protocols/data-storage.md §"Authority ordering"`). The harness writes Claude Code's `MEMORY.md` autonomously at `/finalize`; Codex memory is explicit-save only via the `save-recall-note` adapter verb in `harnesses/codex.md`. You treat the recall surface as a fast-access summary of what was learned, but on every bootstrap, it's re-verified against PROJECT.md (for project facts) and `dm-profile.md` (for cross-project patterns). If it disagrees with synthesis, synthesis wins.
 
 Why scratch cache: the user's control over project knowledge runs through PROJECT.md. If harness recall were authoritative, the user could delete a fact from synthesis and you'd still "remember" it — breaking the user-control invariant. Recall's role is acceleration, not persistence.
 

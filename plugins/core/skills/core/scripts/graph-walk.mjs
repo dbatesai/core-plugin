@@ -1,11 +1,11 @@
 /**
- * Tier 2 edge-graph walk for CORE memory retrieval, per DC-68/retrieval.md.
+ * Tier 2 edge-graph walk for CORE memory retrieval, per retrieval.md.
  *
  * Given a seed unit, walks typed edges up to a hop cap, applying the R·S proxy
  * from priority.mjs for branch pruning. Deterministic alternative to LLM-by-hand
- * edge traversal — per DC-77, graph traversal logic ships in the plugin.
+ * edge traversal — by design, graph traversal logic ships in the plugin.
  *
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The plugin ships Node.js (.mjs) only.
  *
  * Library usage:
  *   import { walk } from './graph-walk.mjs';

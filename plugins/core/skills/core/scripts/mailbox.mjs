@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * mailbox.mjs — the per-project mailbox: inbound messages TO the agent running a
- * project, from David or other agents. Plain files in `<project>/_mailbox/`,
+ * project, from the product owner or other agents. Plain files in `<project>/_mailbox/`,
  * discoverable via the project registry. Checked at startup + on demand (no hook,
- * no scheduler — David 2026-07-12). Standard surface for every CORE project.
+ * no scheduler — product-owner ruling 2026-07-12). Standard surface for every CORE project.
  *
- * INDEPENDENCE INVARIANT (David 2026-07-12): zero dependency on collab-plugin. This
+ * INDEPENDENCE INVARIANT (product-owner ruling 2026-07-12): zero dependency on collab-plugin. This
  * script imports only node stdlib. Collab MAY adopt the convention as an optional
  * sender; core-plugin never imports/requires/assumes collab, and the mailbox does
  * not ride collab's transport. It is plain files.
@@ -41,7 +41,7 @@
  * caught only because a 172-message backlog turned out to be sitting
  * unseen behind it. All three ops now route through resolveTarget() too.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only, macOS + Windows.
+ * Ships with the plugin by design; .mjs only, macOS + Windows.
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, linkSync, unlinkSync, realpathSync } from 'node:fs';
@@ -223,7 +223,7 @@ function realish() { return (process.hrtime.bigint().toString(36) + (_seq++).toS
 
 /**
  * Ensure `_mailbox/` is git-ignored in the target project (governance control, not a
- * doc sentence — Crest's boundary + the adversarial critic). The mailbox is transient,
+ * doc sentence — a reviewer-drawn boundary + the adversarial critic). The mailbox is transient,
  * potentially cross-project-sensitive inbound comms; unlike the memory store it must
  * never be committed/pushed. Idempotent append to <project>/.gitignore.
  */

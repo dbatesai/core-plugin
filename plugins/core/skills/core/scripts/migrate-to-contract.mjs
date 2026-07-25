@@ -12,7 +12,7 @@
  * auto-adopts. The agent shows the draft; the user accepts; then generate-* takes over.
  * dry-run by default; --write only writes the draft file when asked.
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships with the plugin as a script; .mjs only.
  *
  * CLI:
  *   node migrate-to-contract.mjs --id <contract-id> [--claude CLAUDE.md] [--codex AGENTS.md]
@@ -36,7 +36,7 @@ function meaningfulLines(text) {
 }
 
 // Frontmatter scalars are interpolated into YAML — reject values that could inject extra
-// lines/keys (Hale security review: `contract_id: "demo\nmalicious: true"`).
+// lines/keys (security review repro: `contract_id: "demo\nmalicious: true"`).
 function safeScalar(name, value, pattern) {
   const v = String(value ?? '');
   if (!pattern.test(v)) throw new Error(`migrate: invalid ${name} '${v}' — must match ${pattern} (frontmatter-injection guard)`);
@@ -51,7 +51,7 @@ export function migrateToContract({ files = {}, contractId, lastRevised }) {
   const allKeys = Object.keys(files).filter((h) => files[h] != null);
   const harnesses = allKeys.filter((h) => KNOWN_HARNESSES.includes(h));
   const inputWarnings = allKeys.filter((h) => !KNOWN_HARNESSES.includes(h)).map((h) => `ignoring unknown harness key '${h}' (known: ${KNOWN_HARNESSES.join(', ')})`);
-  // Hale: WARN on weak provenance at migrate-time (don't hard-reject a draft) — but make
+  // Review rule: WARN on weak provenance at migrate-time (don't hard-reject a draft) — but make
   // it explicit that the artifact is non-releaseable until a real last_revised is supplied
   // (the generator gate fails closed on 'unknown').
   if (lastRevised === 'unknown') inputWarnings.push("weak provenance: last_revised 'unknown' — this DRAFT is non-releaseable until a real date is supplied (generate --check fails closed on it)");
@@ -119,7 +119,7 @@ if (isMain()) {
   (r.warnings || []).forEach((w) => process.stderr.write(`(warn) ${w}\n`));
   const writeTo = opt('write');
   if (writeTo) {
-    // Never silently clobber an existing contract (Hale: draft-for-review, not overwrite).
+    // Never silently clobber an existing contract (review rule: draft-for-review, not overwrite).
     if (existsSync(writeTo) && !args.includes('--force')) {
       process.stderr.write(`refusing to overwrite existing ${writeTo} without --force (this is a DRAFT for review; protect the adopted contract)\n`);
       process.exit(1);

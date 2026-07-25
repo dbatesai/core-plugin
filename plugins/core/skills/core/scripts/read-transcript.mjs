@@ -28,7 +28,7 @@
  * still matches current core-codex transcripts — if a Codex version drifts the field
  * names, fix-forward (the parser fails open to no-tool-events, never throws).
  *
- * Per DC-77 the deterministic parse ships as a script; per DC-80 the plugin ships .mjs.
+ * By design the deterministic parse ships as a script; the plugin ships .mjs.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';

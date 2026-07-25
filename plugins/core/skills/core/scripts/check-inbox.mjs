@@ -24,7 +24,7 @@
  *                           quote or source locator (timestamp, page/section, msg-id/date)
  *   INFO untagged-block   — frontmatter block without `mode` (legacy classify path)
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 Node.js (.mjs) only.
+ * The script ships with the plugin. Node.js (.mjs) only.
  *
  * CLI:
  *   node check-inbox.mjs <project-path> [--json]

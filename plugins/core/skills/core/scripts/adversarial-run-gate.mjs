@@ -18,7 +18,7 @@
  * Boundary: this is v2.7 consumer ENFORCEMENT only. It does not provide the
  * v2.8 staged/physical isolation proof or any v3 memory-visibility proof.
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * The script ships with the plugin by convention. The plugin ships .mjs (Node.js) only.
  */
 
 import { realpathSync } from 'node:fs';

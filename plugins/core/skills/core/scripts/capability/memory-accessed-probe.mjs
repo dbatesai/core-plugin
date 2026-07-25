@@ -24,7 +24,7 @@
  * Codex build whose tool schema drifts (extraction fails open to no tool events). It
  * never claims "not accessed" when it cannot see tool calls.
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships with the plugin as a script; .mjs only.
  */
 
 import { existsSync, readFileSync } from 'node:fs';

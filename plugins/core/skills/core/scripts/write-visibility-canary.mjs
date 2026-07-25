@@ -21,7 +21,7 @@
  *
  * CLI: node write-visibility-canary.mjs --workspace-id <id> [--cwd <path>]
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * By design the script ships with the plugin. The plugin ships .mjs only.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';

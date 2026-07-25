@@ -18,8 +18,8 @@
  * WITHIN a project: `decorate-graph.mjs`, `hot-section.mjs`, and
  * `maintenance-run.mjs` can all stamp the same project-local cache file in
  * the same window (concurrent hooks/agents/CLI invocations), and the write
- * itself is a read-modify-write over the whole JSON file. Hale's 40-concurrent-
- * process probe (2026-07-22) measured the real consequence of the old
+ * itself is a read-modify-write over the whole JSON file. A 40-concurrent-
+ * process review probe (2026-07-22) measured the real consequence of the old
  * "no lock needed" assumption: 29/40 stamps survived, 11 lost to the race.
  * Fixed: the read-modify-write below is now serialized under a project-local
  * lock (`<project>/_memories/_lib/.state-cache.lock`, same `withFileLock`
@@ -113,7 +113,7 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
   // serialized: any caller of stampFiles/stampFile races every OTHER caller
   // (decorate-graph, hot-section, maintenance-run, and any future writer),
   // not just other instances of itself. Reuses the same withFileLock
-  // primitive every other lock in this codebase uses (Hale's finding,
+  // primitive every other lock in this codebase uses (a review finding,
   // 2026-07-22 — 29/40 entries survived an unlocked 40-concurrent-process
   // stamp probe). A lock-acquire or cache-write failure never THROWS into the
   // caller (the underlying content write already happened), but it IS now

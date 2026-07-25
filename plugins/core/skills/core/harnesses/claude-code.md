@@ -82,7 +82,7 @@ Claude Code's auto-memory is rebuilt from synthesis on each bootstrap rather tha
 
 If the content is both (a workflow hint AND a project fact), do both writes — they aren't duplicates, they serve different surfaces. See `harnesses/codex.md §save-recall-note` for the same dual-write discipline.
 
-What belongs on the recall surface vs. the project store mirrors DC-86: workflow lessons, harness/install preferences, warm-start hints → recall; decisions, risks, project state → project store.
+What belongs on the recall surface vs. the project store follows the authority-stack split: workflow lessons, harness/install preferences, warm-start hints → recall; decisions, risks, project state → project store.
 
 ## Notes
 

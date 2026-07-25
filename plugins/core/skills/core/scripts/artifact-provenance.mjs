@@ -4,7 +4,7 @@
  * metrics artifact generator became its second consumer — extraction over
  * duplication, matching the state-cache.mjs precedent).
  *
- * The rule this module enforces (Hale condition 6, 2026-07-22 HOLD
+ * The rule this module enforces (review condition 6, 2026-07-22 HOLD
  * correction 1): a page rendered for publish must carry REAL provenance.
  *
  *   - In a source Git checkout: the real `git rev-parse HEAD` of the plugin

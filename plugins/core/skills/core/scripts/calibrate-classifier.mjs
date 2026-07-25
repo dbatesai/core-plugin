@@ -17,7 +17,7 @@
  * HONESTY GATE: precision is computed from imported labels only — never from the
  * heuristic output itself (that would be circular, the R-1 self-confirming failure).
  *
- * Privacy-gated. Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Privacy-gated. Ships with the plugin by design; .mjs only.
  *
  * CLI:
  *   node calibrate-classifier.mjs <project> --check

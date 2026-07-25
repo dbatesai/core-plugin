@@ -2,17 +2,17 @@
 
 ## Why scripts ship in the plugin
 
-The plugin form factor exists specifically so CORE can ship prescriptive code for surfaces the inference model needs to rely on — deterministic computation, indexing, retrieval math, integrity checks, parse/validate operations, graph traversal. The skill-only era forced "100% markdown specs the LLM derives from each session." The plugin era escapes that constraint deliberately. Per DC-77: **executable units stay in the plugin; project folders hold only data.**
+The plugin form factor exists specifically so CORE can ship prescriptive code for surfaces the inference model needs to rely on — deterministic computation, indexing, retrieval math, integrity checks, parse/validate operations, graph traversal. The skill-only era forced "100% markdown specs the LLM derives from each session." The plugin era escapes that constraint deliberately. The standing rule: **executable units stay in the plugin; project folders hold only data.**
 
 When a surface earns its way into "the agent relies on this being right every time," the response is to ship code here, not to write a longer markdown spec.
 
-Per DC-80, all scripts ship as `.mjs` (Node.js ESM). Node is the only runtime Claude Code guarantees on every supported platform (Mac, Windows, Linux). Invoke via `node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs"`.
+By convention, all scripts ship as `.mjs` (Node.js ESM). Node is the only runtime Claude Code guarantees on every supported platform (Mac, Windows, Linux). Invoke via `node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs"`.
 
 ## What ships in this directory
 
 ### `priority.mjs`
 
-The DC-69 priority function. Computes `priority(unit, t) = w_R·R + w_F·F + w_S·S + w_A·A + P` over CORE memory units. Importable library (`score`, `scoreUnitFile`, `scoreProxyRS`) and a CLI diagnostic that ranks a project's units by priority for a given session intent.
+The committed priority function. Computes `priority(unit, t) = w_R·R + w_F·F + w_S·S + w_A·A + P` over CORE memory units. Importable library (`score`, `scoreUnitFile`, `scoreProxyRS`) and a CLI diagnostic that ranks a project's units by priority for a given session intent.
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories/ \
@@ -43,7 +43,7 @@ Used by the validation protocol (weekly auto + on-demand health checks).
 
 ### `graph-walk.mjs`
 
-Tier 2 edge traversal for CORE retrieval, per DC-68/retrieval.md. Given a seed unit, walks typed edges up to a hop cap applying the R·S proxy from `priority.mjs:scoreProxyRS()` for branch pruning. Deterministic alternative to LLM-by-hand edge traversal.
+Tier 2 edge traversal for CORE retrieval, per retrieval.md. Given a seed unit, walks typed edges up to a hop cap applying the R·S proxy from `priority.mjs:scoreProxyRS()` for branch pruning. Deterministic alternative to LLM-by-hand edge traversal.
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.mjs <project>/_memories/dc-67-no-mcp.md \

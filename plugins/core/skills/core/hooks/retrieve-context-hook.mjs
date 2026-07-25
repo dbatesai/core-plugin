@@ -9,8 +9,8 @@
  *
  * SHIPPED DEFAULT-ON, OPT-OUT (Gate G2 resolved, 2026-06-28). Registered in the plugin
  * manifest (hooks/hooks.json) as a UserPromptSubmit hook, so it is live on install. It
- * runs every turn unless the user sets CORE_RETRIEVAL_HOOK=0 (mirrors the DC-107 metrics
- * opt-out). Rationale: a default-off, manually-wired hook is invisible machinery no real
+ * runs every turn unless the user sets CORE_RETRIEVAL_HOOK=0 (mirrors the default-on
+ * metrics opt-out). Rationale: a default-off, manually-wired hook is invisible machinery no real
  * user would enable — the north-star ("never fail to retrieve") is only served if it's
  * actually live, and only then can the metrics layer measure whether injection helps.
  * A zero-hit lexical result injects a bounded Tier 3 directive that tells the active model
@@ -31,7 +31,7 @@
  * Output is byte-capped. Any error is swallowed to a clean exit 0 — a retrieval hook
  * must never block the user's turn.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by design; the plugin ships .mjs only.
  */
 
 import { readFileSync, existsSync, realpathSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
@@ -54,7 +54,7 @@ const TOP_N = 3;
  * Truncate `str` to at most `maxBytes` UTF-8 bytes without splitting a
  * multi-byte character (or a surrogate pair) mid-sequence. String.slice
  * counts UTF-16 code units, not bytes — wrong for a byte-budget contract on
- * any non-ASCII content (K-series UTF-8 byte-cap fix, Hale's re-audit 2026-07-19).
+ * any non-ASCII content (K-series UTF-8 byte-cap fix, review re-audit 2026-07-19).
  */
 export function truncateUtf8(str, maxBytes) {
   const buf = Buffer.from(str, 'utf8');
@@ -80,7 +80,7 @@ const PRODUCER_VERSION = String(PRODUCER_MANIFEST.version || 'unknown');
 // exact commit produced a row -- 'unknown' is honest for every build that
 // isn't release-stamped (a --scope local dev install, or a manifest predating
 // this field). Reads manifest.source_sha -- named 'source', not 'git', per
-// Hale's review: it names the commit this release PACKAGES (the version-bump
+// review guidance: it names the commit this release PACKAGES (the version-bump
 // commit's own parent), not the tagged release commit's own SHA -- those are
 // two different identities and the field name says which one this is. See
 // docs/specs/2026-07-18-self-identifying-build-sha.md.
@@ -138,7 +138,7 @@ export function receipt(action, reason, extra = {}) {
 
 export async function main() {
   // Default-ON, opt-out gate (G2 shipped on, 2026-06-28). Runs unless explicitly
-  // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the DC-107 metrics opt-out).
+  // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the default-on metrics opt-out).
   if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
 
   let payload = {};
@@ -156,8 +156,8 @@ export async function main() {
     if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { cwd: store });
   } catch { return receipt('skip', 'store-unavailable', { cwd: store }); }
 
-  // ONE pipeline run serves both jobs (2026-07-17, closes Hale audit finding 1 +
-  // finding 4 on e1490d4): buildRetrievalTrace runs the same staged pipeline as
+  // ONE pipeline run serves both jobs (2026-07-17, closes review findings 1 +
+  // 4 on e1490d4): buildRetrievalTrace runs the same staged pipeline as
   // retrieveContext and carries the delivered pack — the hook injects pack.text
   // and emits the canonical per-turn retrieval event from the same run, so the
   // telemetry corpus is product-emitted, not agent-behavior-dependent.
@@ -167,7 +167,7 @@ export async function main() {
   const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
     ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
   try {
-    // Test-only fault seam (2026-07-18, Hale-authorized: prove a GENUINE
+    // Test-only fault seam (2026-07-18, review-authorized: prove a GENUINE
     // uncaught exception through the real subprocess path reaches this catch
     // and still exits 0 — the prior coverage only ever called receipt()
     // directly, which proves the logging contract but not that a real crash
@@ -231,14 +231,14 @@ export async function main() {
       }
     } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
   }
-  // Deferred-write inputs for the NEW pending marker (Hale audit, 2026-07-17,
+  // Deferred-write inputs for the NEW pending marker (review audit, 2026-07-17,
   // hazard: "creates pending state before delivery"). The marker must only be
   // persisted once this turn's context is actually confirmed delivered to the
   // user — captured here, written after the stdout.write below.
   let pendingWrite = null;
 
   // Canonical per-turn product event — always on when metrics capture is on
-  // (DC-107 default-ON, opt-out). Fail-open: a telemetry failure must never
+  // (metrics capture is default-ON, opt-out). Fail-open: a telemetry failure must never
   // block the user's turn — but it must be OBSERVABLE, so failures land in the
   // hook log instead of vanishing.
   //
@@ -266,12 +266,12 @@ export async function main() {
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
       retrievalId = randomUUID();
 
-      // FALLBACK inferred-closure path (Hale's 303df39 mechanism + the nine
+      // FALLBACK inferred-closure path (the 303df39 review mechanism + the nine
       // freeze-rejection corrections). Superseded on BOTH harnesses now by a
       // real Stop hook (answer-close-hook.mjs / answer-close-hook-codex.mjs)
       // that fires on a genuine post-answer event with the harness's own turn
       // identity; this path only ever infers closure from the NEXT prompt
-      // arriving, which is sequencing, not post-answer observation (Hale
+      // arriving, which is sequencing, not post-answer observation (review
       // audit, 2026-07-17) — so normally the real Stop hook clears the
       // pending marker first and this block finds nothing to close. Kept as
       // defense-in-depth for a session where the Stop hook didn't fire
@@ -303,7 +303,7 @@ export async function main() {
             const prevTerms = new Set(prev.query_terms || []);
             const overlap = queryTermsEarly.length ? queryTermsEarly.filter((t) => prevTerms.has(t)).length / queryTermsEarly.length : 0;
             const retryShaped = overlap >= 0.6 && queryTermsEarly.length >= 3;
-            // Hale audit, 2026-07-17: reusing retrieval_id AS the answer_turn_id
+            // Review audit, 2026-07-17: reusing retrieval_id AS the answer_turn_id
             // fabricates identity — the two are different concepts (which
             // retrieval ran vs. which answer turn closed it). This inferred
             // path still has no real per-turn id to offer, so it generates a
@@ -320,7 +320,7 @@ export async function main() {
               producer_version: PRODUCER_VERSION,
               producer_sha: PRODUCER_SHA,
             }, { sessionId });
-            // Delete only once the outcome row is CONFIRMED written (Hale
+            // Delete only once the outcome row is CONFIRMED written (review
             // audit, 2026-07-17, hazard: "deletes pending evidence without
             // confirmed outcome persistence") — a failed/fail-open write must
             // never destroy the only record that this retrieval is still
@@ -365,7 +365,7 @@ export async function main() {
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
 
-      // EVERY-TURN evidence capture (v3.14.0 Link 1, DC-129 default-ON with
+      // EVERY-TURN evidence capture (v3.14.0 Link 1, default-ON by ruling, with
       // opt-outs). Written in the same moment as the numbers row above, joined
       // by the same retrieval_id: the full prompt, the combined delivered pack
       // text, per-unit ids+scores, the top rejected candidates, a store
@@ -374,8 +374,8 @@ export async function main() {
       // happened; this records enough to judge whether it was RIGHT.
       //
       // Supersedes both retired capture seams (v3.14.0): the zero-hit-only
-      // opt-in stream (a zero-hit has no delivered context by definition,
-      // dc-127 — closed by construction) and the hidden env-gated trace file
+      // opt-in stream (a zero-hit has no delivered context by definition —
+      // a defect closed by construction here) and the hidden env-gated trace file
       // that put content in the repo tree with no reader (retired like the
       // OTel dual-write before it).
       //
@@ -419,7 +419,7 @@ export async function main() {
         }
       } catch { turnCaptureStatus = 'error'; /* fail-open, but observable on the receipt */ }
       // Stage the pending-marker write for AFTER delivery is confirmed below
-      // (Hale audit, 2026-07-17, hazard: "creates pending state before
+      // (review audit, 2026-07-17, hazard: "creates pending state before
       // delivery") — writing it here, before this turn's context has even
       // reached stdout, would let a crash between here and the stdout.write
       // leave a marker for a retrieval the user never actually saw. Still
@@ -452,7 +452,7 @@ export async function main() {
   // the old if/else-if silently dropping one of them was never reachable.
   // Deliver both, directive appended after the pack, still under the same cap.
   //
-  // Hale's re-audit, 2026-07-19: buildFinalContextPack already budgets
+  // Review re-audit, 2026-07-19: buildFinalContextPack already budgets
   // packText in real UTF-8 bytes (Buffer.byteLength), but this final combine
   // step used to re-truncate with String.slice(0, OUTPUT_BYTE_CAP) — .slice
   // counts UTF-16 code units, not bytes, so appending reasoningDirective and
@@ -472,7 +472,7 @@ export async function main() {
     process.stdout.write(truncateUtf8(reasoningDirective, byteCap));
   }
 
-  // NOW persist the pending marker — after delivery, never before (Hale
+  // NOW persist the pending marker — after delivery, never before (review
   // audit, 2026-07-17). Only when something was actually injected: a marker
   // for a retrieval whose context never reached the user has no honest
   // "delivered" state to close later. Atomic temp+rename.

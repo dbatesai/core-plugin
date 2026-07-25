@@ -1,5 +1,5 @@
 /**
- * demote-state-narrative.mjs — Phase 1c of the DC-85 memory architecture
+ * demote-state-narrative.mjs — Phase 1c of the memory architecture
  * redesign. Demotes stale §State narrative bullets in PROJECT.md to
  * PROJECT-ARCHIVE.md §State, leaving a one-line stub pointer in place.
  *
@@ -16,18 +16,18 @@
  *    keeps the bullet current even if older ones are stale.
  *  - Citation styles other than the strict `*Backed by ...*` footer
  *    (e.g. older `*DC-XX.*` shorthand) fall into the no-citation bucket
- *    by design — DC-93 §3 names this explicitly.
+ *    by design — the demotion design names this explicitly.
  *
- * Default mode is DRY-RUN per DC-93 + the PROJECT.md §Moves Phase 1c entry.
+ * Default mode is DRY-RUN by design (see the PROJECT.md §Moves Phase 1c entry).
  * Only `--apply` writes. This differs from demote-moves.mjs (auto-applies
- * per DC-89) because §State demotion is materially riskier: bullets are
+ * by design) because §State demotion is materially riskier: bullets are
  * current-truth statements rather than already-closed work items, and the
  * criteria are tuned for §State-heavy non-CORE corpora that haven't been
  * exercised yet. Flip the default in a tracked decision once cross-corpus
  * validation produces clean candidate lists for N sessions.
  *
- * Per DC-77 the script ships with the plugin (not per-project).
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * By design the script ships with the plugin (not per-project).
+ * The plugin ships Node.js (.mjs) only.
  */
 
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
@@ -157,7 +157,7 @@ function extractBulletTitle(text) {
 export function classifyStateBullet(bullet, projectDir, { today, recencyDays = STATE_CLOSE_AGE_DAYS } = {}) {
   // Strict footer match is the only path to "has citations" in v1 —
   // extractBackingUnitRefs alone would catch backticked unit ids elsewhere
-  // in the bullet body and treat them as citations. DC-93 §3 chose the
+  // in the bullet body and treat them as citations. The demotion design chose the
   // strict-footer-only interpretation; widen later only on dry-run evidence.
   if (!BACKED_BY_PATTERN.test(bullet.text)) {
     return { decision: 'keep', reason: 'no-backing-units' };

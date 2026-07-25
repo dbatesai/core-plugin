@@ -9,7 +9,7 @@
  * rows as new evidence, mixing incompatible instruments, or inventing a state
  * for a genuine contradiction.
  *
- * The read side is TWO ordered steps (Hale's 2026-07-23 correction packet — the
+ * The read side is TWO ordered steps (a 2026-07-23 review correction packet — the
  * order is load-bearing, not preference):
  *
  *   1. COHORT FIRST. Partition the RAW rows into the exact
@@ -50,7 +50,7 @@
  *
  * Consumers: metrics-rollup.mjs and metrics-package.mjs (workspaceMetrics).
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open: never throws.
+ * Ships with the plugin by convention; .mjs (Node.js) only. Fail-open: never throws.
  */
 
 const UNKEYED_SESSION = 'no-session-context';

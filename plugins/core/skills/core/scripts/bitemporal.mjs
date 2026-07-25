@@ -38,7 +38,7 @@
  * excluded from the "currently valid" set the same way retired units are. Cold
  * history stays reachable by asOf() or an explicit supersedes-edge walk.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open.
+ * Ships with the plugin as prescriptive code; .mjs only. Fail-open.
  *
  * CLI:
  *   node bitemporal.mjs <project> --stamp [--apply]   stamp t_invalid on superseded units (dry-run unless --apply)

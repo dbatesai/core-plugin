@@ -21,7 +21,7 @@
  * lexical hits still rely on the active model to judge insufficiency and follow
  * the Tier 3 protocol; a deterministic layer cannot judge semantic sufficiency.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by convention; .mjs (Node.js) only.
  *
  * CLI: node select-relevant-units.mjs <storePath> "<query>" [--shard N] [--shard-size N]
  */

@@ -23,7 +23,7 @@
  * The conformance test in tests/scripts/frontmatter-flat.test.mjs pins the
  * two parsers to agreement on top-level scalars.
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * The script ships with the plugin by design. The plugin ships .mjs only, zero dependencies.
  */
 
 export function parseFlatFrontmatter(text) {

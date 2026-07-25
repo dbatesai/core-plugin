@@ -6,7 +6,7 @@
  *   - per-topic tier-escalation frequency (recall proxy)
  *   - overall tier distribution
  *
- * Schema validation (2026-07-22, revised per Hale's slice-2 review): loadEvents()
+ * Schema validation (2026-07-22, revised per independent review): loadEvents()
  * validates every row against validateRetrievalLogRow() below and rejects —
  * never silently drops — any row that is JSON-unparseable or claims to be a
  * retrieval event (kind:'retrieval', or legacy rows without a `kind` that
@@ -23,8 +23,8 @@
  * `report.rejected` (current/legacy/other counts broken out by closed code),
  * and formatReport() always prints it, even when it's all zero.
  *
- * Per DC-77 the script lives in the plugin, not per-project.
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * By design the script lives in the plugin, not per-project.
+ * The plugin ships Node.js (.mjs) only.
  *
  * Library usage:
  *   import { buildReport, loadEvents, formatReport } from './analyze-retrieval-quality.mjs';
@@ -58,8 +58,8 @@ export function isRetrievalShapedEvent(ev) {
   );
 }
 
-// ---------- Row-level schema validation (2026-07-22, Hale's metrics-evidence-
-// lifecycle synthesis, slice 2 — revised per Hale's early review "use
+// ---------- Row-level schema validation (2026-07-22, metrics-evidence-
+// lifecycle synthesis, slice 2 — revised per early review guidance "use
 // producer schema and isolate legacy"). ----------
 //
 // Before this, a row that failed JSON.parse was silently dropped inside
@@ -67,7 +67,7 @@ export function isRetrievalShapedEvent(ev) {
 // had a missing/invalid tier_reached silently fell through
 // `Number(ev.tier_reached) || 1` in every aggregation below. Neither failure
 // mode was ever visible to a caller. A first pass at a fix here (a bespoke
-// 3-field validator) was itself flagged by Hale as a weaker SIBLING schema:
+// 3-field validator) was itself flagged in review as a weaker SIBLING schema:
 // a row could claim `kind:'retrieval'` with an invalid trigger, a tier/path
 // mismatch, or an invalid unit tier/source_stage and still pass. This
 // version closes that gap by reusing `normalizeRetrievalEvent()` from
@@ -205,7 +205,7 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
   const events = [];
   // Malformed rows are REJECTED and COUNTED here, not silently dropped — a
   // JSON.parse failure and a schema-invalid retrieval row both land here with
-  // a CLOSED reason code (never the raw offending value — Hale, 2026-07-22:
+  // a CLOSED reason code (never the raw offending value — review, 2026-07-22:
   // "arbitrary malformed values must not flow into reports/packages"), and
   // the local absolute file path stays here for diagnostics only. `.rejected`
   // rides along on the returned array as a plain extra property so every
@@ -328,7 +328,7 @@ function outcomeEvidence(events) {
     byId.set(id, rows);
   }
   // Multiple outcome rows per retrieval_id resolve via the SAME authority
-  // resolver metrics-package.mjs uses (Hale audit, 2026-07-17: "share one
+  // resolver metrics-package.mjs uses (review audit, 2026-07-17: "share one
   // authority resolver across consumers" — the two consumers must never
   // disagree about which outcome is authoritative for the same retrieval).
   // Previously this kept whichever row appeared first, ignoring
@@ -388,7 +388,7 @@ export function buildUserReceipt(events) {
       user_action: 'Record an evidence-qualified answer outcome after each retrieval-backed answer.',
     };
   }
-  // NEVER `safe: true` from answer telemetry alone (Hale strengthened audit,
+  // NEVER `safe: true` from answer telemetry alone (strengthened review audit,
   // 2026-07-17 item 2): outcome rows say nothing about privacy or
   // anti-resurrection state, and field telemetry is not a safety proof. The
   // strongest claim this receipt can honestly make is "no observed harm."
@@ -405,7 +405,7 @@ export function buildUserReceipt(events) {
 
 // Folds raw `.rejected` entries ({file, schema, code}) into CLOSED-vocabulary
 // counts only — no file paths, no raw values. This is the shape that is safe
-// to appear in any rendered report or, eventually, a shareable package (Hale,
+// to appear in any rendered report or, eventually, a shareable package (review,
 // 2026-07-22: "rejected_samples with absolute paths must not reach any
 // shareable package path — closed reason-code counts only").
 function summarizeRejections(rejected) {
@@ -476,7 +476,7 @@ export function formatReport(report) {
   // Always shown, even at zero — an explicit "0 rejected" is itself evidence
   // the row was checked, not just assumed clean (2026-07-22, evidence-lifecycle
   // slice 2: malformed rows must be rejected AND counted, using CLOSED codes
-  // only — never an interpolated raw field value, per Hale's leak concern).
+  // only — never an interpolated raw field value, per the reviewer's leak concern).
   const currentPart = rej.current.count > 0 ? `${rej.current.count} current-schema (${formatByCode(rej.current)})` : '0 current-schema';
   const legacyPart = rej.legacy.count > 0 ? `${rej.legacy.count} legacy (${formatByCode(rej.legacy)})` : '0 legacy';
   const otherPart = rej.other.count > 0 ? `; ${rej.other.count} unreadable (${formatByCode(rej.other)})` : '';

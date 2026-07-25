@@ -114,7 +114,7 @@ What belongs on this surface:
 - Pointers to canonical project artifacts
 - Short summaries of prior session outcomes useful as warm-start hints
 
-What does NOT (also per DC-86):
+What does NOT (per the same recall-vs-project-store split):
 - Project facts of record (those go to `PROJECT.md` and `_memories/`)
 - Decision units, risk units, person units
 - Anything the agent infers should be retired (anti-resurrection applies to recall too)

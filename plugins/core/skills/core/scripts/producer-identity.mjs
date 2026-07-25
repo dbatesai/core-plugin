@@ -11,7 +11,7 @@
  * manifest read — the guard-consolidation ratchet's "fixed once, never swept"
  * lesson applied at birth rather than after the audit.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin as prescriptive code; .mjs only.
  */
 
 import { readFileSync } from 'node:fs';

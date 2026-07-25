@@ -23,7 +23,7 @@
  * shows Claude also transforms another character (e.g. spaces on cloud-sync paths),
  * add it here — one place, one rule.
  *
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The plugin ships Node.js (.mjs) only.
  */
 
 export function mapProjectPathToSlug(p) {

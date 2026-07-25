@@ -19,7 +19,7 @@
  *      against ITSELF; two DIFFERENT writers racing the same PROJECT.md still
  *      interleave destructively without a lock they all share.
  *
- * THE AUTHORSHIP RULE (Hale's 2026-07-22 falsifier — session timing cannot prove
+ * THE AUTHORSHIP RULE (a 2026-07-22 review falsifier — session timing cannot prove
  * authorship). A file with NO cache-stamp baseline is NEVER assumed to be
  * CORE-authored. The previous design inferred "absent from the session-start
  * inventory => CORE created it this session => safe to auto-write" — that
@@ -33,7 +33,7 @@
  * stamp, every downstream writer REFUSES the file and surfaces it as
  * `no-baseline`/`needs-reconciliation` — fail closed, never fail open.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only, node:* imports only.
+ * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
 import { join, resolve } from 'node:path';
@@ -64,8 +64,8 @@ export function withProjectMdWriterLock(projectDir, fn, opts = {}) {
  * There is exactly one answer now: REFUSE. Timing-based authorship inference
  * (the old "absent from session inventory => created-this-session => safe"
  * branch) is GONE — it could not distinguish a CORE-created file from a
- * user-created one that appeared after session start (Hale's 2026-07-22
- * executable falsifier). A creating CORE writer establishes the first baseline
+ * user-created one that appeared after session start (the 2026-07-22
+ * executable review falsifier). A creating CORE writer establishes the first baseline
  * itself at creation time; any writer that later meets a file with no baseline
  * is, by construction, NOT its creator and must not overwrite or attribute it.
  *

@@ -1,6 +1,6 @@
 /**
  * aggregate-receipt.mjs — the privacy-safe aggregate exporter (Train A A2;
- * Crest closure program 2026-07-12 §A2/§A5, keel-to-crest next-steps §7).
+ * closure program 2026-07-12 §A2/§A5, next-steps §7).
  *
  * Two evidence surfaces, never one:
  *   - LOCAL evidence bundle — the runHarness report and tier-sweep output as-is
@@ -20,7 +20,7 @@
  *      and filesystem path the report saw). Any hit → throw, export refused, the
  *      offending fragment named. The scan also refuses generic absolute paths.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by design; .mjs only, zero dependencies.
  *
  * CLI: node aggregate-receipt.mjs <report.json> [--sweep <sweep.json>] [--out <receipt.json>]
  *      (report.json = runHarness --json output; sweep.json = runTierPolicySweep output)
@@ -57,7 +57,7 @@ export function collectForbiddenStrings(report, sweep = null) {
 }
 
 // Any string that IS or CONTAINS a filesystem path, across the supported path
-// forms (blocker 1, Hale verdict §1 battery): absolute POSIX (/tmp, /etc, /var,
+// forms (blocker 1, review verdict §1 battery): absolute POSIX (/tmp, /etc, /var,
 // /private/tmp, /Users, /Volumes, …), home shorthand, Windows drive letters,
 // and UNC (\\server\share). Leading-anchored OR embedded after a delimiter.
 //
@@ -127,7 +127,7 @@ const POLICY_RE = /^P\d(?:_w[0-9.]{1,6})?$/;      // P0..P2, P3_w0.8 …
 // including a project-specific id-naming prefix, which is exactly what leaked
 // before the root-cause fix in retrieval-harness.mjs's unitTypeMix (it now
 // emits the real `type` field, not an id-prefix guess). The first version of
-// this closed-set gate fixed that leak but introduced a NEW defect Hale's
+// this closed-set gate fixed that leak but introduced a NEW defect a
 // re-audit caught: it was a second, hand-written copy of the type vocabulary
 // that silently omitted real canonical types (`open-question`, `premise`) —
 // the positive test passed only because it validated the implementation
@@ -184,7 +184,7 @@ export function validateReceiptShape(receipt) {
     for (const [k, v] of Object.entries(r.recall)) { if (!/^\d{1,3}$/.test(k)) fail('recall K', k); num01(`arms[${arm}].recall[${k}]`, v); }
     num01(`arms[${arm}].mrr`, r.mrr); num01(`arms[${arm}].forbidden_rate`, r.forbidden_rate);
     for (const [rung, byK] of Object.entries(r.per_rung_recall)) {
-      if (!RUNGS.has(rung)) fail('per_rung_recall rung', rung); // Hale's exact repro: a path accepted as a rung key
+      if (!RUNGS.has(rung)) fail('per_rung_recall rung', rung); // the review's exact repro: a path accepted as a rung key
       for (const [k, v] of Object.entries(byK)) { if (!/^\d{1,3}$/.test(k)) fail('per-rung K', k); num01(`per_rung_recall[${rung}][${k}]`, v); }
     }
   }

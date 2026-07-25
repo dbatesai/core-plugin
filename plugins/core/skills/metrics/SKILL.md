@@ -56,7 +56,7 @@ The report covers **three separately-labeled evidence classes** — never one bl
 2. **Retrieval regression** — the newest blind self-test round when one exists (per-kind breakdown, trap-leak rate, old-vs-new overfitting delta), else the small static gold set. Labeled `provisional`, never `proven-live`: the execution is live, the answer key's authority is not independently established. A regression *snapshot*, never a passing *gate*.
 3. **Measurement readiness** — the recognition signal (inverted bar: fuller = healthier) and the calibration pool gating it.
 
-*(A fourth class — user benefit — rendered "not evaluated" through v3.13.x. REMOVED per DC-129: the matched on/off comparison is unobservable, so the question left scope by decision, not by gap. Never resurrect the row; if asked, say exactly that.)*
+*(A fourth class — user benefit — rendered "not evaluated" through v3.13.x. REMOVED by ruling: the matched on/off comparison is unobservable, so the question left scope by decision, not by gap. Never resurrect the row; if asked, say exactly that.)*
 
 The **verdict heading is scoped to mechanics only** (`MECHANICS: HEALTHY` / `HEALTHY — with caveats` / `DEGRADED` / `MACHINERY WORKING, NO STORE`) — never read it as covering the other classes. Trust labels: **proven-live** = demonstrated this run on the real product path; **direct** = real measurement read from disk, not exercised this run; **proxy** = a stand-in signal, never a correctness proof; **provisional** = the instrument or its reference isn't independently validated; **not-evaluated** = no instrument exists for this project yet.
 
@@ -66,7 +66,7 @@ The **verdict heading is scoped to mechanics only** (`MECHANICS: HEALTHY` / `HEA
 node "${CORE_ROOT}/skills/core/scripts/render-metrics-artifact.mjs" <project-dir> --out <scratch-path>/core-metrics.html
 ```
 
-Narrate the printed manifest (content class `aggregates-only`, byte count, producer identity), publish **private** via the Artifact tool, keep a stable URL by republishing the same path, and record the outcome with `--record-publish` (the script refuses `published-private` without evidence + authorization fields). Consent: ask-first by default; narrate-and-proceed only under this user's own durably-recorded standing authorization. On Codex (no artifact surface — DC-75): say so by name, give the `--out` path, never fake a publish.
+Narrate the printed manifest (content class `aggregates-only`, byte count, producer identity), publish **private** via the Artifact tool, keep a stable URL by republishing the same path, and record the outcome with `--record-publish` (the script refuses `published-private` without evidence + authorization fields). Consent: ask-first by default; narrate-and-proceed only under this user's own durably-recorded standing authorization. On Codex (no artifact surface on that harness): say so by name, give the `--out` path, never fake a publish.
 
 ## `export` mode — the anonymized package (was `/metrics-package`)
 

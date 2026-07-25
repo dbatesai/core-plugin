@@ -28,7 +28,7 @@
  * copies appear in an iCloud-synced store, move the store out of iCloud Drive.
  * Documented for operators in scripts/README.md §Cloud-synced stores.
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * The script ships with the plugin by convention. The plugin ships .mjs (Node.js) only.
  */
 
 import { writeFileSync, renameSync, unlinkSync } from 'node:fs';

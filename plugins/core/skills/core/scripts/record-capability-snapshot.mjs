@@ -14,7 +14,7 @@
  * CLI: node record-capability-snapshot.mjs --workspace-id <id>
  *      [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>]
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * The script ships with the plugin by design. The plugin ships .mjs only, zero dependencies.
  */
 
 import { existsSync, realpathSync } from 'node:fs';

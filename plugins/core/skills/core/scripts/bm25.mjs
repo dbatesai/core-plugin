@@ -1,11 +1,11 @@
 /**
  * bm25.mjs — deterministic body-BM25 ranking + tokenizer + the rank-union combiner.
  *
- * Extracted from embed-index.mjs when DC-114 (2026-07-08, reversing DC-113)
- * ruled that CORE runs NO local models: the dense/ollama arm was deleted rather
+ * Extracted from embed-index.mjs when it was ruled (2026-07-08, reversing an
+ * earlier call) that CORE runs NO local models: the dense/ollama arm was deleted rather
  * than shipped dormant; this module keeps the model-free half the live retriever
  * actually uses. Query-time retrieval stays deterministic and dependency-free
- *; the recall gap closes via write-time enrichment (DC-114/DC-115), not
+ *; the recall gap closes via write-time enrichment, not
  * a query-time model.
  *
  * v3.11 remediation: bodies are loaded through the
@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { loadFreshIndex, loadUnitBodies } from './generate-summary-index.mjs';
 
 // Small, conventional English stopword set — enough to stop "the/on/of" from
-// dominating overlap counts. Deliberately not exhaustive (no dependency, DC-80).
+// dominating overlap counts. Deliberately not exhaustive (no dependency, by design).
 export const STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'for', 'with',
   'is', 'are', 'was', 'were', 'be', 'been', 'it', 'its', 'this', 'that', 'these', 'those',

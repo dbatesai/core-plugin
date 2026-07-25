@@ -24,7 +24,7 @@
  *   node index-registry.mjs touch  <workspace_id> [--when <ISO>]             [--core-dir <dir>]
  *   node index-registry.mjs last-active <workspace_id>                       [--core-dir <dir>]
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only, node:* imports only.
+ * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';

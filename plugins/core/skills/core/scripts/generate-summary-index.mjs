@@ -12,8 +12,8 @@
  *. Tier is a label on every result; ranking policy between
  * tiers is a ceremony question, decided on measurement, not hardcoded here.
  *
- * The shared compact index behind DC-94a retrieval (retrieve-context.mjs) and the
- * DC-94b abstract-relevance prototype (select-relevant-units.mjs). One responsibility:
+ * The shared compact index behind per-turn retrieval (retrieve-context.mjs) and the
+ * abstract-relevance prototype (select-relevant-units.mjs). One responsibility:
  * render the index. No scoring, no retrieval — those read this file. loadFreshIndex()
  * below is the ONE validating loader every consumer uses (freshness on every call —
  * a stale index resurrecting a retired unit is an anti-resurrection breach).
@@ -24,7 +24,7 @@
  * scorers, so this uses priority.mjs's canonical parseFrontmatter via loadUnit, which
  * parses lists. The flat parser would have shipped an index with empty topics.
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * The script ships with the plugin. The plugin ships .mjs only.
  *
  * CLI:
  *   node generate-summary-index.mjs <storePath>
@@ -97,7 +97,7 @@ function walkCandidateFiles(memoriesDir) {
  * Content hashes, not mtimes, because anti-resurrection is an invariant: a unit
  * rewritten as retired with its original timestamp restored (editor telemetry,
  * cloud-sync restoration, deliberate tampering) MUST still invalidate the cache —
- * Hale's re-review demonstrated the mtime version serving exactly that retired
+ * A re-review demonstrated the mtime version serving exactly that retired
  * unit. Cost: reads every candidate file (~430 files ≈ a few MB) per validation —
  * the same order of work the BM25 body pass already does per call; measured in
  * the harness latency line, ceiling per the evaluation contract.
@@ -118,7 +118,7 @@ export function computeSourceSignature(storePath) {
  * Structural validation of a cached index — EVERY record, not a sample. A cache
  * is trustworthy only if each unit has a non-empty string id and a safe relative
  * path (no absolute paths, no `..` traversal, forward slashes, `.md`), and ids
- * are unique. Anything else → regenerate. (Hale re-review: validating only
+ * are unique. Anything else → regenerate. (Re-review finding: validating only
  * units[0] let a partially path-less cache serve nested units from wrong paths.)
  */
 export function validateIndexRecords(idx) {
@@ -180,8 +180,8 @@ export function loadFreshIndex(storePath) {
 export function loadSnapshot(storePath, { captureBodies = false, retainRaw = false } = {}) {
   // captureBodies → the ATOMIC capture: id, index, and bodies all derived from
   // one read per file (captureStore). The earlier two-walk version (index walk
-  // first, body walk second) carried a TOCTOU Hale reproduced deterministically
-  // in round 11: a concurrent write between the walks let snapshot_id identify
+  // first, body walk second) carried a TOCTOU reproduced deterministically in
+  // review round 11: a concurrent write between the walks let snapshot_id identify
   // OLD bytes while the evaluator measured NEW ones. Never reintroduce a second
   // walk here.
   if (captureBodies) return captureStore(storePath, { retainRaw });
@@ -202,7 +202,7 @@ export function loadSnapshot(storePath, { captureBodies = false, retainRaw = fal
  *
  * ONE definition, used by both loadUnitBodies (the index-only path) and
  * captureStore's body derivation (the atomic-snapshot path decorate-graph.mjs
- * and the live retriever/harness actually read) — Hale's 2026-07-21 finding:
+ * and the live retriever/harness actually read) — a 2026-07-21 review finding:
  * the two body-derivation sites duplicated the frontmatter-strip transform,
  * and only one of them got the edges-block strip when it was first added.
  */
@@ -289,7 +289,7 @@ function authorityTier(fm, rel) {
  * records, and the BM25 body texts are all derived from those same buffers.
  *
  * Why single-read is the invariant: the previous design computed the signature in
- * one walk and read index/bodies in others — Hale's deterministic reproduction
+ * one walk and read index/bodies in others — a deterministic review reproduction
  * showed a concurrent write between walks makes snapshot_id identify OLD bytes
  * while the evaluator measures NEW bytes. With one read per file, the id and the
  * measured bytes cannot diverge for any file; a mutation mid-capture yields a

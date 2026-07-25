@@ -26,7 +26,7 @@
  * go STALE (not wrong) until the next finalize. Never describe the rec-fail
  * trend as continuous monitoring.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open: never throws.
+ * Ships with the plugin by convention; .mjs (Node.js) only. Fail-open: never throws.
  *
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
  */
@@ -54,7 +54,7 @@ export const CLASSIFIER_VERSION = '0.3.0';
 // The classified-record schema version stamped on every row. Exported so the
 // read side (metrics-rollup.mjs, metrics-package.mjs) can select the exact
 // current-instrument cohort (schema, classifier, proxy) before aggregating —
-// Hale's 2026-07-22 finding: validating calibration against current constants
+// a 2026-07-22 review finding: validating calibration against current constants
 // while aggregating rows from ANY version silently mixes instruments.
 export const CLASSIFIED_SCHEMA_VERSION = '1.0.0';
 
@@ -65,7 +65,7 @@ export const CLASSIFIED_SCHEMA_VERSION = '1.0.0';
 // in-context when this session's transcript shows it was actually read. Stamped on
 // every record so the calibration layer can invalidate any label set cleared
 // under the old proxy — same R-1 honesty guard the classifier_version match enforces.
-// The label-independence half stays Gate G4 (David vouches); this only versions the proxy.
+// The label-independence half stays Gate G4 (the product owner vouches); this only versions the proxy.
 export const PROXY_VERSION = 2;
 
 // A clarifying question — the agent asking the user instead of answering.
@@ -269,7 +269,7 @@ function unitHeadTerms(path) {
 function safeRead(p) { try { return readFileSync(p, 'utf8'); } catch { return ''; } }
 
 export function runClassification({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, workspaceId, env }) {
-  // Capture gate (spec §18, DC-107): default-on, opt-out. Captures nothing
+  // Capture gate (spec §18, metrics policy): default-on, opt-out. Captures nothing
   // — reads no transcript content, writes no records — when the user has opted out.
   if (!metricsEnabled({ project, env })) {
     return { status: 'DISABLED', reason: 'metrics opted out (CORE_METRICS_ENABLED=0 or workspace.json metrics_enabled:false)', provisional: true };
@@ -286,7 +286,7 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   const records = classified.map((c) => ({
     schema_version: CLASSIFIED_SCHEMA_VERSION,
     classifier_version: CLASSIFIER_VERSION,
-    proxy_version: PROXY_VERSION, // DC-94a: versions the in-context proxy so calibration invalidates across proxy changes
+    proxy_version: PROXY_VERSION, // versions the in-context proxy so calibration invalidates across proxy changes
     harness,
     provisional: true, // honesty gate — not evidence-grade until calibration
     session_id: sid,

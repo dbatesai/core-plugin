@@ -13,7 +13,7 @@
  * evidence-grade until calibration clears (spec §17.12, Anvil A4; R-1 self-measuring
  * guard — CORE measuring itself must not launder its own confidence).
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open: never throws.
+ * Ships with the plugin as prescriptive code; .mjs only. Fail-open: never throws.
  *
  * CLI:  node metrics-rollup.mjs <project> [--json] [--today YYYY-MM-DD]
  */
@@ -79,8 +79,8 @@ function readClassified(dir, date) {
  * replay-deduped, COHORT-GATED per-day view plus store-wide dedupe stats and
  * the coverage gap. Store-wide, not per-file, because a session re-processed
  * on a later date appends the same turns under a new date — only a
- * whole-store pass keeps totals stable under that replay (Hale's
- * replay-identity falsifier). The cohort gate
+ * whole-store pass keeps totals stable under that replay (the
+ * replay-identity review falsifier). The cohort gate
  * then keeps only rows produced by the CURRENT instrument — the same
  * (schema, classifier, proxy) triple calibration is validated against;
  * everything else is reported, never counted. The store is small (daily

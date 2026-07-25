@@ -28,7 +28,7 @@
  * surfaces without a literal path, so path-matching alone is too weak.
  * HC_622 #4: never print the raw expected token — redacted hash only.
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * By design the script ships with the plugin. The plugin ships .mjs only.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';

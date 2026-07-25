@@ -8,7 +8,7 @@
  *
  * Rides the committed edge set only. The walk reads depends-on/depended-on-by
  * plus refines/amends (both blessed 2026-06-03) in the affects-direction. A
- * dedicated `affects` edge type still defers to a future DC per DC-68's
+ * dedicated `affects` edge type still defers to a future decision per the
  * committed-set rule — but refines/amends ARE committed, so ignoring them was
  * an under-traversal, not gatekeeping (SYN-006).
  *
@@ -16,7 +16,7 @@
  * t_invalid is now in the past, what still depends on it — the review candidates a
  * supersession creates. CORE produces these edges and consumes this walk.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open.
+ * Ships with the plugin by design; .mjs only, zero dependencies. Fail-open.
  *
  * CLI:
  *   node impact-trace.mjs <project> --of <unit-id>        downstream blast radius of a unit

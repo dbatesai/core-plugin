@@ -1,7 +1,7 @@
 /**
  * file-lock.mjs — generalized advisory file lock: generation files + verified release.
  *
- * Third design iteration (2026-07-14/15, shared-write concurrency spec + Hale's
+ * Third design iteration (2026-07-14/15, shared-write concurrency spec + independent
  * advisory passes), each driven by a proven defect in the previous one:
  *
  *   v1 (close-pass original): steal = blind atomic overwrite → two stealers could
@@ -37,7 +37,7 @@
  * "couldn't acquire, retry", never a crash. Callers with more than one lock
  * follow the total order: per-project lock BEFORE any global ~/.core lock.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only, node:* imports only.
+ * Ships with the plugin as prescriptive code; .mjs only, node:* imports only.
  */
 
 import {
@@ -52,7 +52,7 @@ import { randomBytes } from 'node:crypto';
 export const DEFAULT_STALE_MS = 10 * 60 * 1000;
 // Ceiling for locks whose owner CANNOT be identified (unreadable content, no pid):
 // past this they are supersedable. For locks with a READABLE, LIVE pid there is
-// deliberately no ceiling — Hale's round-3 advisory (2026-07-15): a laptop
+// deliberately no ceiling — the round-3 review advisory (2026-07-15): a laptop
 // suspended mid-critical-section revives past any fixed ceiling and would overlap
 // its superseder, a mutual-exclusion break. Never steal from a live pid; the
 // recycled-pid strand this reopens is accepted as the lesser failure (availability,
@@ -204,7 +204,7 @@ export function acquireFileLock(lockPath, {
   // garbage below its own (higher, correctly-computed) target and GC's it out
   // from under us while we still believe we hold the lock — two processes in
   // the critical section at once, and our eventual release reports
-  // 'not-owner' because our generation file is simply gone (Hale measured
+  // 'not-owner' because our generation file is simply gone (review measured
   // 1/8, 2/10 failure rates under concurrent load).
   //
   // Fixed two ways: (1) maxN and the held-check now derive from the SAME
@@ -305,7 +305,7 @@ export function releaseFileLock(lockPath, nonce, { verify = null, force = false 
         // ENOENT only: our generation was superseded and GC'd — released in effect.
         // Anything else (EPERM/EACCES/EIO — sync tooling, permissions, disk) means
         // the LIVE lock file is still on disk: report failure, never false success
-        // (Hale round 4: the old blanket catch returned released:true over a live lock).
+        // (review round: the old blanket catch returned released:true over a live lock).
         if (e.code !== 'ENOENT') return { released: false, reason: 'release-failed', error: e.code || String(e) };
       }
       return { released: true };

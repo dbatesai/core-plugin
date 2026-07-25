@@ -2,7 +2,7 @@
 /**
  * answer-close-hook.mjs — REAL post-answer outcome closer (Stop hook).
  *
- * Hale's HOLD audit of e4383c1 (2026-07-17) named the core defect in the old design: the
+ * An independent HOLD audit of e4383c1 (2026-07-17) named the core defect in the old design: the
  * per-turn retrieval hook (retrieve-context-hook.mjs) closed the PREVIOUS retrieval's outcome
  * by inferring "the answer must be done" from the NEXT prompt arriving — sequencing, not
  * post-answer observation — and it fabricated identity by reusing retrieval_id AS the
@@ -10,7 +10,7 @@
  * the assistant's response completes (never per-tool-call, never per-turn like
  * UserPromptSubmit would be) — a genuine post-answer event — and the harness's own Stop
  * payload carries the real per-turn identity: Claude Code's `prompt_id`, Codex's `turn_id`
- * (developers.openai.com/codex/hooks#stop — confirmed 2026-07-17, Hale's fresh-audit correction:
+ * (developers.openai.com/codex/hooks#stop — confirmed 2026-07-17, a fresh-audit correction:
  * the earlier "Codex has no Stop-equivalent" framing was stale, not true). Nothing here infers
  * or aliases identity on either harness.
  *
@@ -26,12 +26,12 @@
  * failure swallows to exit 0; the pending marker (and thus the missed close) is picked up by
  * the fallback path on the next UserPromptSubmit if this hook can't close it.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin as prescriptive code; .mjs only.
  *
  * I/O: reads the Stop payload as JSON on stdin (session_id, prompt_id or turn_id, cwd). Always
  * writes `{}` to stdout on exit 0 — Codex's Stop contract requires valid JSON there ("Plain text
  * output is invalid for this event"; empty stdout shipped here originally, a real contract
- * violation Hale's fresh audit caught). An empty object carries no `decision` field, which both
+ * violation a fresh audit caught). An empty object carries no `decision` field, which both
  * harnesses treat as "let the turn proceed, no intervention" — Claude Code's own contract
  * explicitly permits this shape too, not just tolerates it. Stop hook output is not injected
  * into context the way UserPromptSubmit's is; this hook's real product is the outcome-log row +
@@ -62,7 +62,7 @@ export function receipt(action, reason, extra = {}) {
   } catch { /* preserve fail-open even if the fallback surface fails */ }
   // Codex's Stop contract requires valid JSON on stdout for every exit-0 —
   // "Plain text output is invalid for this event" (developers.openai.com/codex/hooks,
-  // confirmed 2026-07-17, Hale's fresh-audit catch: empty stdout shipped here
+  // confirmed 2026-07-17, a fresh-audit catch: empty stdout shipped here
   // originally, silently violating that contract). An empty object carries no
   // `decision` field, which both harnesses treat as "allow the turn to
   // proceed, no intervention" — Claude Code's own Stop contract explicitly

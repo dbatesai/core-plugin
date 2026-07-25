@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "_doc": "Per-harness capability descriptor. capability-probe.mjs reads this to determine which capabilities each harness should probe and which per-harness probe script implements each row. Schema lives at sibling row-schema.md per DC-98 (schema-consumer coupling). Per-harness probe scripts are responsible for emitting full capability rows matching the schema.",
+  "_doc": "Per-harness capability descriptor. capability-probe.mjs reads this to determine which capabilities each harness should probe and which per-harness probe script implements each row. Schema lives at sibling row-schema.md per the schema-consumer coupling rule. Per-harness probe scripts are responsible for emitting full capability rows matching the schema.",
   "surfaces": {
     "collab_files_repo": null,
     "collab_files_expected_remote": null,

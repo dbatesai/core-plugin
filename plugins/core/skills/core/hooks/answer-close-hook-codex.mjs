@@ -8,7 +8,7 @@
  * works identically on POSIX and Windows (.mjs only).
  *
  * Registered on Codex's Stop event via hooks-codex.json — the real per-harness post-answer
- * adapter Hale's HOLD audit required, closing the gap the earlier "Codex has no Stop-equivalent"
+ * adapter an independent HOLD audit required, closing the gap the earlier "Codex has no Stop-equivalent"
  * framing left open. See harnesses/codex.md §hook-register for the registration. Install + trust
  * + a real two-turn proof landed 2026-07-18 at exact SHA 8e941de6 (two independent proof
  * bundles) -- re-proof owed at each subsequent candidate, not a standing gap.

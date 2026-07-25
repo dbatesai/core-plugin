@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { logEvent, sanitizeAttributeValue } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
 
-// Stamped on every row this producer writes from 2026-07-22 onward (Hale's
+// Stamped on every row this producer writes from 2026-07-22 onward (the
 // metrics-evidence-lifecycle slice-2 review: a reader validating retrieval
 // rows needs to tell "written under the current, fully-enforced producer
 // contract" apart from "predates this contract entirely" — bump this only
@@ -111,7 +111,7 @@ export function normalizeRetrievalEvent(event) {
   }
   const unitsRetrieved = event.units_retrieved.map(normalizeUnit);
   if (unitsRetrieved.length === 0) {
-    // Two honest empty-result shapes (Hale live-hook audit 2026-07-17 — a
+    // Two honest empty-result shapes (live-hook audit 2026-07-17 — a
     // no-hit must never fabricate a Tier-3 escalation that didn't run):
     //  - a full-ladder Tier 3 search that found nothing  -> result 'miss'
     //  - the per-turn hook's model-free pipeline (tiers 1-2 only) finding

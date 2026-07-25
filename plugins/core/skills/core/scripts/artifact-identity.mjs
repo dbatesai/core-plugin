@@ -1,6 +1,6 @@
 /**
  * artifact-identity.mjs — deterministic release-artifact identity (Train A
- * blocker 3, Hale verdict §3 + close path §4).
+ * blocker 3, review verdict §3 + close path §4).
  *
  * The defect this replaces: the packet's archive SHA came from
  * `git archive <sha>:plugins/core | shasum`, and tar embeds invocation-time
@@ -16,12 +16,12 @@
  *      `<relpath>:<sha256(file bytes)>` of every file in the subtree. Computable
  *      WITHOUT git from any export of the tree (an extracted archive, a
  *      packaged install), so the identity survives across export mechanisms —
- *      which is exactly Hale's bar: two clean INDEPENDENT exports must agree.
+ *      which is exactly the review bar: two clean INDEPENDENT exports must agree.
  *
  * The freeze step publishes both plus the exact reproduction commands; the
  * packet's `built_artifact_sha256` slot carries the content manifest hash.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Uses `git` via
+ * Ships with the plugin by design; .mjs only. Uses `git` via
  * execFileSync for the repo-side computation only; the directory-side
  * computation (`fromDirectory`) is pure filesystem.
  *
@@ -132,7 +132,7 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
  * CLI's --dir output was a bare manifestHash() result with no field naming
  * which computation path produced it. The first fix added a `mode` field but
  * also embedded the canonical absolute local directory in `dir` and in
- * `reproduce.content_manifest` — Hale's re-audit demonstrated this fails
+ * `reproduce.content_manifest` — a review re-audit demonstrated this fails
  * CORE's OWN refusal-scan boundary (aggregate-receipt.mjs's isPathShaped):
  * a machine-local path is not part of the content identity, varies by
  * machine, and is exactly the kind of non-reconstructive-evidence violation

@@ -1,5 +1,5 @@
 /**
- * Unit store integrity checker for CORE memory architecture, per DC-77.
+ * Unit store integrity checker for CORE memory architecture.
  *
  * Two modes (combined by default):
  *   schema    — frontmatter shape: required fields, valid status/type/edge-type
@@ -13,7 +13,7 @@
  * integrity concern (dangling-edge); schema only checks the edge mapping is
  * well-formed and the type is in VALID_EDGE_TYPES.
  *
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The plugin ships Node.js (.mjs) only.
  *
  * CLI:
  *   node check-units.mjs <project-path>
@@ -259,7 +259,7 @@ export function checkSchema(units, memoriesDir, report) {
 
 export const FRESH_STORE_ORPHAN_RATIO = 0.30;
 
-// DC-94a link-at-graduation: an active, non-observation unit should carry at least
+// Link-at-graduation rule: an active, non-observation unit should carry at least
 // LINK_DENSITY_MIN outgoing typed edges — a graduated decision/risk that connects to
 // nothing is invisible to Tier-2 edge-walk retrieval. WARN tier (benign): an adoption
 // ramp, not a hard gate. Observations are exempt (they're capture, not graduated units),
@@ -333,7 +333,7 @@ export function checkIntegrity(units, memoriesDir, today, report) {
       // Premises are axioms — a settled, rarely-touched premise is correct, not stale.
       // Exempt them from the archive-candidate WARN (EXEMPT_FROM_STALENESS, unit-vocab).
       if (status === 'active' && !EXEMPT_FROM_STALENESS.has(typ))
-        report.push({ level: 'WARN', check: 'stale', unit_id: uid, detail: `R·S=${rs.toFixed(3)} < ${ARCHIVE_RS_THRESHOLD} — archive candidate per DC-69` });
+        report.push({ level: 'WARN', check: 'stale', unit_id: uid, detail: `R·S=${rs.toFixed(3)} < ${ARCHIVE_RS_THRESHOLD} — archive candidate per the priority function` });
     }
 
     const status = String(u.fm.status || '').toLowerCase();
@@ -345,7 +345,7 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     // Canonical archiving (hygiene.md) sets `archived: true` and does not
     // require a status change -- a unit can be `status: active, archived:
     // true` and this must still catch it left top-level. The legacy
-    // `status === 'archived'` form stays recognized too (Hale's 2026-07-22
+    // `status === 'archived'` form stays recognized too (a 2026-07-22 review
     // finding: checking status alone missed the canonical shape entirely,
     // and a substring .includes('archive') could false-positive on a
     // top-level file merely named with "archive" in it).
@@ -370,7 +370,7 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     }
   }
 
-  // DC-94a link-at-graduation density (WARN tier, benign).
+  // Link-at-graduation density (WARN tier, benign).
   checkLinkDensity(units, report);
 
   // INDEX-decisions drift

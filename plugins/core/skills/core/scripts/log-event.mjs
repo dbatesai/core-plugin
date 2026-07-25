@@ -1,14 +1,14 @@
 /**
  * log-event.mjs — shared structured-logging helper.
  *
- * Phase 1b substrate per David's 2026-05-24 reframe: PROJECT.md management
+ * Phase 1b substrate per the product owner's 2026-05-24 reframe: PROJECT.md management
  * is agent-managed; effectiveness is measured via structured event emission,
  * not user review. This helper centralizes the JSONL append discipline used
  * by hot-section.mjs (retrieval-log.jsonl) and demote-moves.mjs +
  * compact-project.mjs (hygiene-log.jsonl).
  *
- * Per DC-77 the script ships with the plugin (not per-project).
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The script ships with the plugin (not per-project) by design.
+ * The plugin ships Node.js (.mjs) only, zero dependencies.
  *
  * Phase 2 (2026-05-26) added an OTel-format dual-write to
  * `<project>/_metrics/traces/<session-id>.jsonl`. Retired 2026-07-24 (metrics
@@ -89,7 +89,7 @@ export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
 /**
  * Capture gate for the Layer 2/3 metrics interpretation passes (spec §18).
  *
- * DEFAULT-ON, opt-out (David 2026-06-04). The instrumented-memory thesis
+ * DEFAULT-ON, opt-out (product-owner ruling, 2026-06-04). The instrumented-memory thesis
  * needs the corpus — under the old default-off the calibration gate starved
  * (CORE-on-CORE is too small to ever reach ~100 labeled turns), so the feedback
  * loop the system exists to close couldn't close. Capture stays LOCAL (no network
@@ -176,7 +176,7 @@ export function sanitizeAttributeValue(value, { maxLen = MAX_ATTRIBUTE_STRING, m
 }
 
 // Returns a write outcome — {legacy, reason?} — so producers can tell a
-// delivered event from a silently-swallowed one (Hale live-hook audit,
+// delivered event from a silently-swallowed one (live-hook review audit,
 // 2026-07-17: "the writer reports a normalized record even if the write
 // silently fails"). Still best-effort: never throws, never blocks the host.
 export function logEvent(projectDir, filename, event, { today, now } = {}) {

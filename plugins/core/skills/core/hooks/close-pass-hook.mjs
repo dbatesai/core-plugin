@@ -24,7 +24,7 @@
  * unref() so `claude -p` survives this session's exit (the nohup equivalent). We don't run the
  * close synchronously — that would make the user wait to exit.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Claude Code only — Codex has no exit
+ * Ships with the plugin as prescriptive code; .mjs only. Claude Code only — Codex has no exit
  * hook (harnesses/codex.md §close-pass drop); there, discharge is startup-catch-up-only.
  *
  * I/O: reads the SessionEnd payload as JSON on stdin (.reason, .cwd, .session_id). Always exits 0.

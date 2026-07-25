@@ -22,7 +22,7 @@ These are the operational primitives. Each has a trigger, an action, and a retri
 
 **When to archive.** Priority score below threshold AND last-referenced age past threshold for the unit's source-type. Concretely, when `R · S < 0.05` and the unit hasn't been cited or read in 90 days, it's a candidate. (Decay rate at τ=60 means R·S < 0.05 at roughly 180 days plus weight 1.0, 90 days plus weight 0.5, 60 days plus weight 0.3.)
 
-**Action.** Move the unit file from `<project>/_memories/<prefix>-<slug>.md` to `<project>/_memories/archive/<prefix>-<slug>.md`. Frontmatter adds `archived: true` and `archived_at: <ISO timestamp>`. The original prefix stays — flat layout per DC-68 holds for archive too.
+**Action.** Move the unit file from `<project>/_memories/<prefix>-<slug>.md` to `<project>/_memories/archive/<prefix>-<slug>.md`. Frontmatter adds `archived: true` and `archived_at: <ISO timestamp>`. The original prefix stays — the flat layout holds for archive too.
 
 **Retrieval impact.** Archived units are not in the default candidate set. Tier 1 grep and Tier 2 graph walks skip the archive directory. Explicit queries like "historical context on X" or "show me archived units" still reach them.
 
@@ -57,7 +57,7 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 - Memory contradiction detection and reconciliation (was dream-cycle Phase 3a).
 - Wikilink promotion — durable `[[unit-id]]` body links become typed `cites` edges (see §"Wikilink promotion").
 - Index regeneration — `_memories/INDEX-decisions.md`, `_memories/INDEX-risks.md`, others (was dream-cycle Phase 3d).
-- File-cap monitoring and proactive compaction when synthesis files grow over the Read tool cap (replaces DC-46 machinery from v1).
+- File-cap monitoring and proactive compaction when synthesis files grow over the Read tool cap (replaces the equivalent machinery from v1).
 - Auto-memory ↔ unit-store reconciliation.
 - Session-log cleanup (was dream-cycle Phase 3e).
 - Continuous self-evaluation: storage and retrieval quality monitoring with structural adjustment.
@@ -115,13 +115,13 @@ The *mechanical* half of upkeep — index regeneration (decisions, risks, summar
 node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" <project>
 ```
 
-It is **signature-gated** (regenerates only when the unit set changed since last run — cheap on an unchanged store), **narrated** (returns a one-line summary of what ran; never silent — honors visible-continuous-curation), and **ledger-recorded** in `<project>/_memories/_maintenance-state.json` (per-op `run_count` + `last_run` — the cadence data DC-110 M2 observes). Surface its narration line in the run. `--dry-run` reports without writing.
+It is **signature-gated** (regenerates only when the unit set changed since last run — cheap on an unchanged store), **narrated** (returns a one-line summary of what ran; never silent — honors visible-continuous-curation), and **ledger-recorded** in `<project>/_memories/_maintenance-state.json` (per-op `run_count` + `last_run` — the cadence data the autonomous-maintenance gate observes). Surface its narration line in the run. `--dry-run` reports without writing.
 
 ### Autonomous maintenance — gated, not built
 
-DC-110 is ledger-first on purpose: maintenance runs **at invocation** (`/finalize`, `/process-memory`, on-demand), not on a per-turn hook. Running any maintenance op unattended/autonomously is gated behind four preconditions, none yet built:
+Maintenance is ledger-first on purpose: it runs **at invocation** (`/finalize`, `/process-memory`, on-demand), not on a per-turn hook. Running any maintenance op unattended/autonomously is gated behind four preconditions, none yet built:
 
-1. a **deterministic "clear-cut" gate** (DC-70-grade, like the six-factor cost gate) — no agent-adjudicated "clear-cut";
+1. a **deterministic "clear-cut" gate** (like the six-factor promotion cost gate) — no agent-adjudicated "clear-cut";
 2. a **kill switch** (env var / workspace flag);
 3. a **per-change audit log** (what changed, not just that an op ran);
 4. **cadence evidence** from the ledger showing the op has enough work to justify unattended runs.
@@ -173,7 +173,7 @@ Part of the reconciliation work at `/finalize` and `/process-memory`. No script 
 
 ## On-demand project setup — governance-hierarchy capture
 
-The new-workspace path (in `protocols/startup-conditional-loads.md`) asks about source-authority hierarchy at intake. Returning workspaces that predate DC-85 won't have the unit yet. When a returning project would benefit from one (multi-document governance, recurring authority contradictions surfaced by synthesis-pass behavior #5, user mentions "what does the spec say vs. what we agreed in chat"), capture it on demand:
+The new-workspace path (in `protocols/startup-conditional-loads.md`) asks about source-authority hierarchy at intake. Returning workspaces that predate this intake won't have the unit yet. When a returning project would benefit from one (multi-document governance, recurring authority contradictions surfaced by synthesis-pass behavior #5, user mentions "what does the spec say vs. what we agreed in chat"), capture it on demand:
 
 - **Ask the user the same question the startup intake asks** — *"When this project's documents disagree, which one wins? PRD > HLSD > RTM > chat, or some other ordering, or single-source?"*
 - **Single-source / trivially-ordered projects: skip.** No unit needed; the question doesn't bind anything.
@@ -186,7 +186,7 @@ Triggering moments worth pulling this in:
 - A new project artifact lands (PRD update, governance doc supersession) that changes the ordering.
 - During `/process-memory` if observations citing different sources are accumulating without authority disambiguation.
 
-This intake is distinct from DC-87's per-source authority capture (`source-of-authority-<source-name>.md` per registered external source). Both shapes can coexist; they answer different questions. The DC-87 units capture *what authority a single source claims*. The DC-85 §8 unit captures *which source wins across the project's hierarchy of artifacts*.
+This intake is distinct from the per-source authority capture (`source-of-authority-<source-name>.md` per registered external source). Both shapes can coexist; they answer different questions. The per-source units capture *what authority a single source claims*. The project-hierarchy unit captures *which source wins across the project's hierarchy of artifacts*.
 
 ---
 
@@ -222,9 +222,9 @@ These observations feed the structural adjustment options below — add an edge,
 
 1. **Add an edge** — a single missing `cites` or `references-topic` often fixes retrieval. Free.
 2. **Restructure a unit** — split into two, merge two into one, change the prefix. Cheap, but breaks any existing cites — handle inverse-edge updates.
-3. **Re-tune priority weights** — adjust `w_R`, `w_F`, `w_S`, or `w_A` in the plugin's `scripts/priority.mjs`. Weights live in the plugin per DC-77 so the tuning propagates to every project via the next plugin update — not per-project drift. Document the change in the hygiene retrospective (`~/.core/hygiene-cycles/<YYYY-MM-DD>.md`).
+3. **Re-tune priority weights** — adjust `w_R`, `w_F`, `w_S`, or `w_A` in the plugin's `scripts/priority.mjs`. Weights live in the plugin by design so the tuning propagates to every project via the next plugin update — not per-project drift. Document the change in the hygiene retrospective (`~/.core/hygiene-cycles/<YYYY-MM-DD>.md`).
 4. **Evolve query shape** — change how you phrase retrieval prompts.
-5. **Escalate infrastructure** — vector store, graph DB, or other. Earned only after repeated trip-wire firings per DC-67 framework. Two consecutive Explore-miss cycles proposing the same gap = candidate for a new DC.
+5. **Escalate infrastructure** — vector store, graph DB, or other. Earned only after repeated trip-wire firings, per the infrastructure-must-be-earned framework. Two consecutive Explore-miss cycles proposing the same gap = candidate for a new DC.
 
 ---
 
@@ -251,7 +251,7 @@ There's no separate dream-cycle ritual anymore. The retrospective doc still gets
 DECISIONS.md grew to ~99K characters / 40K tokens in v1, over the Read tool cap. The v2 fix:
 
 1. Each decision in DECISIONS.md becomes a unit at `<project>/_memories/dc-<NN>-<slug>.md` with v2 unit shape (frontmatter + edges + reasoning body).
-2. `_memories/INDEX-decisions.md` is auto-generated by `node "${CORE_ROOT}/skills/core/scripts/generate-decisions-index.mjs"` (`CORE_ROOT` as resolved at startup; ships with the plugin per DC-77) — walks `_memories/dc-*.md`, parses frontmatter, sorts chronologically. Invoke from the project root or pass an explicit memories dir; the script overwrites `INDEX-decisions.md` in place.
+2. `_memories/INDEX-decisions.md` is auto-generated by `node "${CORE_ROOT}/skills/core/scripts/generate-decisions-index.mjs"` (`CORE_ROOT` as resolved at startup; ships with the plugin by design) — walks `_memories/dc-*.md`, parses frontmatter, sorts chronologically. Invoke from the project root or pass an explicit memories dir; the script overwrites `INDEX-decisions.md` in place.
 3. DECISIONS.md is archived to `<project>/_memories/archive/DECISIONS-pre-graduation.md` (or wherever the cold-start migration plan placed v1 docs).
 4. PROJECT.md's Decisions & Risks section renders from active-status decision units only.
 

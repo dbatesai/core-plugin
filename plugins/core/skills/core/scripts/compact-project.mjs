@@ -2,14 +2,14 @@
  * Compact <project>/PROJECT.md by replacing full-text §Decisions entries with
  * one-line stubs pointing at canonical units in `_memories/`.
  *
- * Matches the DC-48 stub-every-archived-decision pattern: every DC entry
+ * Matches the stub-every-archived-decision pattern: every decision entry
  * becomes a stub. Full text lives in the unit; PROJECT.md is the rendered view.
  *
  * Idempotent — skips entries already in stub form (single-line, no `**...**`
  * paragraph body, ending in a `→ _memories/...md` pointer).
  *
- * Per DC-77 the script ships with the plugin (not per-project).
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The script ships with the plugin (not per-project) by design.
+ * The plugin ships Node.js (.mjs) only, zero dependencies.
  *
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/compact-project.mjs <project>
@@ -38,7 +38,7 @@ export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
 // 80% of the Read-tool 25000-token cap, char-to-token factor 0.30:
 // 0.8 * 25000 / 0.30 ≈ 67000 bytes. Matches protocols/startup.md's cap heuristic.
 export const PROJECT_MD_CAP_BYTES = 67000;
-// Phase 1b — DC-85 R1 soft target. 70KB ≈ 21K tokens at the 0.30 factor.
+// Phase 1b — the ratified soft target. 70KB ≈ 21K tokens at the 0.30 factor.
 // compact-project never refuses to write; this is advisory. When PROJECT.md
 // exceeds the target, a structured project-md-over-cap event emits so the
 // Phase 5 monitoring loop can react. demote-moves handles §Moves growth;
@@ -270,10 +270,10 @@ export function main(argv) {
   const after = Buffer.byteLength(newText, 'utf8');
   const wouldWrite = newText !== text;
 
-  // Edit-gated, shared-locked, CAS-guarded write (Hale's points 2/5/6/7,
+  // Edit-gated, shared-locked, CAS-guarded write (review points 2/5/6/7,
   // 2026-07-22). compact-project used to bare-write PROJECT.md with no
   // pre-write edit check and no post-write stamp at all — so an unreconciled
-  // user correction to a §Decisions entry got compacted away entirely (Hale's
+  // user correction to a §Decisions entry got compacted away entirely (the review's
   // `compact_user_edit` red case), and `/process-memory` auto-invoked this
   // path with no gate. Now: acquire the ONE shared PROJECT.md writer lock,
   // re-read the live bytes under it, refuse if the human-authored region

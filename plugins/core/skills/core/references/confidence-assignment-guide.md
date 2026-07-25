@@ -8,7 +8,7 @@ Used by extractors (per `source-registration-framework.md`) when writing observa
 
 ## The framework
 
-Per `protocols/data-storage.md` and DC-85, every observation carries one of three confidence values:
+Per `protocols/data-storage.md`, every observation carries one of three confidence values:
 
 - **sourced** — fact captured directly from a primary source. The source itself is the evidence.
 - **inferred** — fact derived from secondary evidence within a tight reasoning window. Short reasoning chain, structurally supported.

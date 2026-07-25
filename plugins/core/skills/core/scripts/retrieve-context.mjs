@@ -1,5 +1,5 @@
 /**
- * retrieve-context.mjs — deterministic per-turn retrieval (DC-94a; v3.11 product path).
+ * retrieve-context.mjs — deterministic per-turn retrieval (v3.11 product path).
  *
  * Given a query and a store, return the top-N most relevant active units as
  * {id, summary, tier, score}. Model-free and cheap enough to run on every
@@ -13,13 +13,13 @@
  * (title 3x, topics 2x) and body BM25 (bm25.mjs) — each normalized by its own max,
  * combined per unit as the max of the two. Then one-hop edge expansion from the
  * top hits at a 0.5x discount on the parent's normalized score, competing in the
- * final sort (a neighbor of a strong hit can beat a weak direct hit — DC-94a).
+ * final sort (a neighbor of a strong hit can beat a weak direct hit, by design).
  *
  * Reads the recursive path-bearing index via loadFreshIndex (freshness validated
  * every call). Edge data isn't in the index, so expansion reads the top-hit unit
  * files directly, resolved through the index's per-unit path (nested units included).
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin as prescriptive code; .mjs only.
  *
  * CLI: node retrieve-context.mjs <storePath> "<query>" [--top N]
  */
@@ -34,7 +34,7 @@ import { bm25DocumentScores, bm25Scores, tokenize, STOPWORDS } from './bm25.mjs'
 export const ENRICHMENT_WEIGHT = 0.6;
 
 // The tokenizer moved to bm25.mjs (v3.11 remediation — breaks the retrieve-context ⇄
-// bm25 import cycle Hale flagged). Re-exported here so existing importers keep working.
+// bm25 import cycle flagged in review). Re-exported here so existing importers keep working.
 export { tokenize, STOPWORDS };
 
 function scoreUnit(queryTokens, unit) {
@@ -72,7 +72,7 @@ export function lexicalRankedIds(query, storePath, { snapshot = null } = {}) {
  * productRankedScores — THE product ranking. One function, called by the live
  * retriever (retrieveContext), the per-turn hook (through retrieveContext), and the
  * measurement harness's `live` arm — so a harness number describes what actually
- * ships (Gate-0 product/harness identity, Hale 2026-07-11 §2).
+ * ships (Gate-0 product/harness identity, review finding 2026-07-11 §2).
  *
  * Scoring: two lexical arms produce MAGNITUDE scores — the title/topics overlap
  * scorer and body BM25. Each arm is normalized by its own maximum (scale-free), and
@@ -125,7 +125,7 @@ export function productRankedScores(query, storePath, preloadedIndex = null, sna
     if (!prev || norm > prev.score) combined.set(s.id, { id: s.id, tier: s.tier, score: norm });
   }
 
-  // DC-114/DC-115: write-time enrichment is a distinct, lower-weight arm. It
+  // By design, write-time enrichment is a distinct, lower-weight arm. It
   // never contaminates authored body text, and stale/same-family records were
   // already excluded by the captured sidecar loader.
   const enrichmentScored = bm25DocumentScores(query, snap.enrichments?.documents || []);
@@ -153,7 +153,7 @@ export function productRankedIds(query, storePath, { snapshot = null } = {}) {
  * context (CORE dev: 35/66 top-3 slots observations; the canonical person unit at
  * rank 14). The joint contract v2 §7 pre-registers four policies decided BY the
  * ceremony's final-context numbers, not by prescription. This is the mechanism they
- * select from; nothing here activates until David rules on the ceremony evidence.
+ * select from; nothing here activates until the product owner rules on the ceremony evidence.
  *
  *   P0 — flat ranking, tier is a label only (SHIPPED default; the control).
  *   P1 — canonical-preference tiebreak: within `epsilon` of normalized score, a
@@ -230,13 +230,13 @@ export function storeHealth(storePath, { snapshot = null } = {}) {
  * @returns {{snapshotId, substrate, policied, top, expanded, final}}
  */
 function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, snapshot = null } = {}) {
-  // A3 + Hale round 11: ONE ATOMIC capture per request — id, index, AND body
+  // A3 + review round 11: ONE ATOMIC capture per request — id, index, AND body
   // bytes from a single read per file (captureBodies) — whether the caller is a
   // measurement (passes its run-scoped captured snapshot) or the product path
   // (captures fresh per request). The earlier version passed the NULLABLE
   // caller snapshot downstream, so the product path's body arm re-read live
   // files while the trace carried a snapshotId minted from different bytes —
-  // Hale's round-11 "intra-request tear" finding. `snap`, never `snapshot`,
+  // the round-11 "intra-request tear" review finding. `snap`, never `snapshot`,
   // flows to every reader below.
   const snap = snapshot || loadSnapshot(root, { captureBodies: true });
   const { index, snapshotId } = snap;
@@ -245,7 +245,7 @@ function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsi
   // The product ranking: title/topics ∪ body-BM25, magnitudes preserved via
   // per-arm max-normalization (see productRankedScores). Measured 2026-07-07,
   // dev-set: the body arm lifts recall@10 ~0.68→0.86 on CORE and rescues the
-  // abstract/value rung (DC-113 Tier-A T3, model-free per DC-114).
+  // abstract/value rung (gold-harness Tier-A T3, model-free by design).
   // tierPolicy defaults to 'P0' (identity) so shipped behavior is unchanged; the
   // ceremony (joint contract v2 §7) selects an active policy from measured evidence.
   const substrate = productRankedScores(query, root, index, snap);
@@ -261,9 +261,9 @@ function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsi
 
   // One-hop edge expansion from the top hits, at a 0.5x discount on the parent's
   // normalized score — so a neighbor of a strong hit COMPETES with (and can beat)
-  // weak direct hits in the final ranking, the DC-94a semantic the synthetic rank
-  // scores of the first union rewrite broke (regression caught by Hale 2026-07-11;
-  // edge-bearing fixture now guards it). Edges come FROM THE CAPTURE (Hale round
+  // weak direct hits in the final ranking, the committed neighbor-competes semantic the synthetic rank
+  // scores of the first union rewrite broke (regression caught in review 2026-07-11;
+  // edge-bearing fixture now guards it). Edges come FROM THE CAPTURE (review round
   // 12): this stage used to re-read live unit files via loadUnit, so a concurrent
   // edge change altered expanded/final results under an unchanged snapshot_id —
   // the third live reader found behind the id. No filesystem access here.
@@ -303,7 +303,7 @@ export function retrieveContext(query, storePath, opts = {}) {
 
 /**
  * buildRetrievalTrace — LOCAL-ONLY evidence record of one retrieval request (Train A
- * A3; Crest closure program 2026-07-12 §1). Runs the SAME staged pipeline as
+ * A3; the closure program 2026-07-12 §1). Runs the SAME staged pipeline as
  * retrieveContext (imported, never reimplemented) and records: snapshot identity,
  * component identities, parameters, store health, ranked substrate, policy output,
  * expansion, the final candidates, the delivered pack (accepted/excluded/bytes), and
@@ -363,7 +363,7 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
 }
 
 /**
- * buildFinalContextPack — THE final-context product function (Train A A4; Crest
+ * buildFinalContextPack — THE final-context product function (Train A A4; the
  * closure program 2026-07-12 §2). The SOLE implementation of final ordering,
  * context budget, authority labels, warnings, formatting, and UTF-8 byte
  * accounting for the per-turn injection. The installed hook is a thin adapter
@@ -429,7 +429,7 @@ export function main(argv) {
   const topN = topIdx >= 0 ? Number(argv[topIdx + 1]) || 3 : 3;
   // Strip recognized flags AND --top's own value, leaving positional args.
   const args = argv.filter((a, i) => a !== '--top' && a !== '--pack' && !(topIdx >= 0 && i === topIdx + 1));
-  // Meridian's finding (live Windows box, 2026-07-20): an unrecognized flag like a
+  // Windows hardware test pass finding (live Windows box, 2026-07-20): an unrecognized flag like a
   // fat-fingered `--query` used to fall straight into the positional args and get
   // silently treated as the literal query text, returning a confident top result
   // for garbage input with no error or abstention signal. Since the CLI must

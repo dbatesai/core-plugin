@@ -17,9 +17,9 @@
  *
  * NOT a judgment engine. It tracks completion; it does not decide whether an op's WRITE is
  * safe — PROJECT.md-mutating ops stay edit-gated in startup.md/finalize, and the autonomous
- * judgment tier stays behind the DC-110 M3 preconditions. This is plumbing under that policy.
+ * judgment tier stays behind the self-management M3 preconditions. This is plumbing under that policy.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Cross-platform (no shell, no bash-isms).
+ * Ships with the plugin as prescriptive code; .mjs only. Cross-platform (no shell, no bash-isms).
  *
  * CLI:
  *   node close-pass.mjs detect <store> [--session <id>]      → prints state + owed ops (JSON on --json)
@@ -182,7 +182,7 @@ export function detectCloseState(store, { allOps = [], storeSignature = null, no
   // real production marker confirms this lands correctly. What `closed` alone can't rule out
   // is the child exiting cleanly (or a test stub returning success) WITHOUT ever following that
   // protocol — nothing here previously checked that the record calls actually happened, only
-  // that the process didn't report failure (Hale's close-marker-semantic-gap finding,
+  // that the process didn't report failure (the close-marker-semantic-gap review finding,
   // 2026-07-21). So: still trust `closed`, but only once the required ops are actually present
   // as `done` — that re-owes the pathological case without re-closing a session that worked.
   // `failed` = finished but /finalize failed (P1 fix) — re-owe so the next startup retries.

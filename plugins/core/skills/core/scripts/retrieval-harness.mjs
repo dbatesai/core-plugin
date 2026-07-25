@@ -16,7 +16,7 @@
  *                 only R@3 is meaningful on this arm
  *   - bm25      — the summary+topics+body BM25 arm (NOT body-only: the loader
  *                 prepends title/topics so the vector carries the title signal)
- * Dense/union arms were removed with the ollama embedder per DC-114 (no local
+ * Dense/union arms were removed with the ollama embedder per the no-local-models rule (no local
  * models); dense measurement, if it returns, is a pinned-embedder ceremony arm
  *, not shipped plugin code.
  * One ranking pass per arm: metrics, raw ranks (through the largest reported K),
@@ -37,7 +37,7 @@
  * the existing expected:[] + forbiddenRate path with no scorer change; the enum just
  * had to admit the label so per-rung reporting can name it.)
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by design; .mjs only, zero dependencies.
  *
  * CLI: node retrieval-harness.mjs <store> [--gold <path>] [--json <outpath>]
  */
@@ -175,7 +175,7 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     },
     // The CONTENT-MANIFEST sha256 from artifact-identity.mjs (sorted
     // relpath:sha256(bytes) over the frozen subtree) — ONE meaning everywhere
-    // (Hale round 7: this comment used to say "packaged-archive hash" while
+    // (review round 7: this comment used to say "packaged-archive hash" while
     // validation.md said content-manifest, recreating the tar-byte ambiguity).
     // Supplied by the freeze step at the pin via aggregate-receipt's
     // --artifact-sha; never computed from a dev tree.
@@ -246,7 +246,7 @@ function renderText(out) {
   lines.push(`latency: ${Object.entries(out.latency).map(([a, l]) => `${a} p50 ${l.p50_ms}ms / p95 ${l.p95_ms}ms`).join(' · ')}`);
   lines.push(`store: ${out.total} active units · gold: ${out.nQueries} queries`);
   lines.push(`unit-type mix: ${Object.entries(out.mix).map(([t, n]) => `${t}:${n}`).join(' ')}`);
-  lines.push(`K as fraction of store: ${KS.map(k => `${k}=${(k / out.total * 100).toFixed(0)}%`).join('  ')}  (Crest: compare a corpus to itself, not cross-corpus raw)`);
+  lines.push(`K as fraction of store: ${KS.map(k => `${k}=${(k / out.total * 100).toFixed(0)}%`).join('  ')}  (review rule: compare a corpus to itself, not cross-corpus raw)`);
   lines.push('');
   lines.push(`arm       R@5   R@10  R@30  R@100  MRR   forbid@${FORBIDDEN_K}`);
   for (const [name, r] of Object.entries(out.results)) {
@@ -329,7 +329,7 @@ export function validateGold(gold) {
 export const GOLD_RUNGS = new Set(['literal', 'category', 'value', 'cross-domain', 'temporal', 'abstention']);
 
 /**
- * assertKnownTiers — evaluator-side fail-closed authority enum (A5, Crest correction
+ * assertKnownTiers — evaluator-side fail-closed authority enum (A5, review correction
  * #5). The PRODUCT path tolerates unknown tiers (defaults canonical — a ranking path
  * never throws); the MEASUREMENT path must not: an unknown tier silently classified
  * as canonical would corrupt every tier-policy number. Throws on the first unknown.
@@ -408,7 +408,7 @@ export function runTierPolicySweep(store, gold, { topN = 3, snapshot: injectedSn
       let band;
       if (rescuer) band = `tier-ordering (rescued by ${rescuer[0]})`;
       else {
-        const inSubstrate = productRankedIds(q.query, store, { snapshot }).includes(g); // round 13: Hale's fourth reader — banding must consume the sweep's own capture
+        const inSubstrate = productRankedIds(q.query, store, { snapshot }).includes(g); // round 13: fourth review reading — banding must consume the sweep's own capture
         band = inSubstrate ? 'deep-but-present (topN x tier coupled; no policy reaches at this topN)' : 'recall (absent from ranking; enrichment/reasoning, not tier)';
       }
       bands.push({ query: q.id, gold: g, band }); // ids are the caller's local gold labels

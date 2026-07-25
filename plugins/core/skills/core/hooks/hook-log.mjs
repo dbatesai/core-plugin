@@ -26,7 +26,7 @@
  * check can run without a spurious ENOENT — and refuses to write if the realpath escapes
  * ~/.core (or isn't a /dev/null / tmpdir fallback path).
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by design; .mjs only.
  */
 
 import { appendFileSync, mkdirSync, realpathSync } from 'node:fs';

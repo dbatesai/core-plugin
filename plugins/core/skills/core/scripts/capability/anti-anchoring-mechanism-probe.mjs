@@ -22,7 +22,7 @@
  * This is a deliberate honest demotion, not a dynamic check — the negative-read
  * proof that could earn PASS is a v2.8.0 deliverable.
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * The script ships with the plugin by design. The plugin ships .mjs only, zero dependencies.
  */
 
 export const SCHEMA_VERSION = '1.0.0';

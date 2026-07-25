@@ -57,7 +57,7 @@ import { loadEvents, computeTierDistribution } from './analyze-retrieval-quality
 import { producerIdentity } from './producer-identity.mjs';
 
 // Dedicated log file for self-test grading results — deliberately its OWN
-// file, never the organic retrieval/outcome/hygiene logs (Antigravity's
+// file, never the organic retrieval/outcome/hygiene logs (a review
 // correction, 2026-07-23: a self-test run is a synthetic, on-demand
 // measurement, not real usage; mixing the two means every future reader has
 // to filter synthetic rows out of real ones). Numbers/ids only, same
@@ -179,7 +179,7 @@ function loadSelfTestLogEvents(project) {
 const ESCALATION_HIGH_THRESHOLD = 0.3; // >30% of real retrievals needed tier 2/3
 const RECENT_SELF_TEST_LOOKBACK = 5;   // average the last N self-test runs for trap-leak history
 
-// Mechanically reshape the default quota from recent metrics (Antigravity's
+// Mechanically reshape the default quota from recent metrics (a review
 // correction, 2026-07-23: a soft "here's what's weak" note in the brief is
 // something an LLM subagent can just ignore; register() already mechanically
 // enforces per-kind counts against the stated quota, so shifting the quota
@@ -655,7 +655,7 @@ export async function runRound(project, round, opts = {}) {
 }
 
 // Automatic, cheap re-grading of ONLY the newest frozen round — rides the
-// DC-110 maintenance cadence (maintenance-run.mjs). Grades the newest round's
+// standard maintenance cadence (maintenance-run.mjs). Grades the newest round's
 // headline with skipHistoricalDelta:true (no unbounded priors loop — see
 // measureRound's doc comment), logs a self-test-run event, and does NOT write
 // a results-<iso>.json — that file marks a deliberate `/self-test run`, not an
@@ -670,7 +670,7 @@ export async function regradeNewestRound(project, { snapshot } = {}) {
 
 // ---------------- Link 4b: staleness-triggered fresh-round authoring ----------------
 
-// Growth/age triggers + the DC-129 weekly hard cap. Pure — every input
+// Growth/age triggers + the ruled weekly hard cap. Pure — every input
 // injected so the policy is exhaustively testable; shouldAuthorFreshRound
 // below wires the real surfaces.
 export const ROUND_STALENESS = Object.freeze({

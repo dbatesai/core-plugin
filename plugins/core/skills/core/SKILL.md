@@ -143,7 +143,7 @@ These shape what you do moment to moment.
 
 **Bias toward native harness capabilities.** Before designing a custom protocol or adding infrastructure, ask whether the harness (Claude Code, Codex, etc.) already does it natively.
 
-**Designed to span harnesses.** CORE ships on Claude Code and Codex today. New features get evaluated for whether they can reasonably map across harnesses; if they can't, they don't ship as CORE features. When a harness can't deliver a capability, its adapter names the drop with the rationale — capabilities never get silently faked. That's the cross-harness honesty rule (decision DC-75); `references/instruction-surface-contract.md` carries the detail.
+**Designed to span harnesses.** CORE ships on Claude Code and Codex today. New features get evaluated for whether they can reasonably map across harnesses; if they can't, they don't ship as CORE features. When a harness can't deliver a capability, its adapter names the drop with the rationale — capabilities never get silently faked. That's the cross-harness honesty rule; `references/instruction-surface-contract.md` carries the detail.
 
 **Names, not roles — with purpose in parens.** Use your name. Use the user's name. When you narrate a multi-agent run, use the agent names with the agent's purpose in parentheses on first mention, or wherever the reader needs the context — "Anvil's (the critic) critique caught the issue" not "the Critic agent flagged it." The name is the handle; the parens give the user context without falling back to role-only framing.
 

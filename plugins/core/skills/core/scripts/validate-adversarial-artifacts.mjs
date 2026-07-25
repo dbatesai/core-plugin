@@ -12,13 +12,13 @@
  * stays DEGRADED; nothing here claims R-17 closed.
  *
  * Schema: skills/core/schemas/adversarial-artifacts.md (the durable in-repo contract;
- * Hale-reviewed @ 5be7e6d, fix-forward applied — ts/schema_version checks, cross-artifact
+ * independently reviewed @ 5be7e6d, fix-forward applied — ts/schema_version checks, cross-artifact
  * agent integrity, advisory/authority mode). Honest policy: an EMPTY persuasion log is a
  * WARNING (process-suspect) in advisory mode and a hard FAIL in authority mode — a
  * genuinely uncontested run is rare but possible, and a hard fail would punish real
  * consensus.
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships as a script with the plugin by design; .mjs only, zero dependencies.
  *
  * CLI: node validate-adversarial-artifacts.mjs --frames a.json,b.json --persuasion p.jsonl --mind m.jsonl [--json]
  */
@@ -125,7 +125,7 @@ export function validateAdversarialArtifacts({ initialFrames = [], persuasionLog
     if (mode === 'authority') { emptyPersuasionFails = true; crossErrors.push('authority mode: empty persuasion log after adversarial phases — blocked (claims Phase-3 pressure but recorded none)'); }
     else warnings.push('process-suspect: empty persuasion log — adversarial phases produced no recorded persuasion (legitimate only if the run was genuinely uncontested)');
   }
-  // Hale: authority mode must HARD-FAIL zero initial frames — a run fed to a release/
+  // Review rule: authority mode must HARD-FAIL zero initial frames — a run fed to a release/
   // authority gate with no Phase-1 frames cannot prove framing happened OR cross-check
   // participants. Advisory mode keeps it a warning.
   if (frameResults.length === 0) {

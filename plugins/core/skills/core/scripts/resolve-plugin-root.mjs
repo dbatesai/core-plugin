@@ -17,8 +17,8 @@
  * Mutation permission is a separate dimension — consumers read mutation_permitted
  * + mutation_block_reason, not identity_status. (HC refinement, same event.)
  *
- * Per DC-77 the script ships with the plugin.
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * By design the script ships with the plugin.
+ * The plugin ships Node.js (.mjs) only.
  */
 
 import { realpathSync, existsSync, readFileSync, statSync } from 'node:fs';

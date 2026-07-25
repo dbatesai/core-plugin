@@ -1,5 +1,5 @@
 /**
- * Priority function for CORE memory units, per DC-69.
+ * Priority function for CORE memory units.
  *
  * priority(unit, t) = w_R · R + w_F · F + w_S · S + w_A · A + P
  *
@@ -9,8 +9,8 @@
  * A = Jaccard overlap of unit topics with session-intent topics.
  * P = pin contribution (floor 0.7 / floor 0.9 / override 1.5; pinned:false is neutral).
  *
- * Per DC-77 the script lives in the plugin, not per-project.
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The script lives in the plugin, not per-project, by design.
+ * The plugin ships Node.js (.mjs) only, zero dependencies.
  *
  * Library usage:
  *   import { scoreUnitFile, scoreProxyRS } from './priority.mjs';
@@ -32,7 +32,7 @@ import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isActiveStatus } from './unit-vocab.mjs';
 
-// ---------- DC-69 constants ----------
+// ---------- priority-function constants ----------
 
 export const W_R = 0.30;
 export const W_F = 0.15;
@@ -56,10 +56,10 @@ const PIN_CONTRIBUTION = {
   true: ['floor', 0.9],
   always: ['override', 1.5],
   // `pinned: false` is NEUTRAL by decision (MEM-005, 2026-06-09): the
-  // multiply-0.3 demotion DC-69 sketched was never reachable — pinContribution
+  // multiply-0.3 demotion the original design sketched was never reachable — pinContribution
   // short-circuits false to ['none', 0.0] — no live unit uses pinned:false,
   // and silently activating a 70% penalty would be an unasked-for behavior
-  // change. DC-69's unit (CORE workshop store) is to be amended to record
+  // change. The design record is to be amended to record
   // "false → neutral"; this table row was dead code and is gone.
 };
 

@@ -4,7 +4,7 @@ What it is: one canonical `<project>/CONTRACT.md` is the authoritative source of
 
 Read this when a project asks to adopt the contract system, when you're editing a contract, or when a release surfaces a contract-drift gate.
 
-## The pieces (all ship as DC-77 scripts under `skills/core/scripts/`)
+## The pieces (all ship as plugin scripts under `skills/core/scripts/`)
 
 - `contract-format.mjs` — the shared core. `parseContract` (frontmatter + `##` sections + `### <harness>-only` subsections, with schema validation), `renderForHarness`, `parseOverrides`, deterministic provenance, and `generateForHarness` (the body every generator calls).
 - `generate-claude-md.mjs` / `generate-agents-md.mjs` — thin per-harness wrappers. Modes: `--mode write|check|dry-run`.

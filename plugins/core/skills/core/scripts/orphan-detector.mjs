@@ -21,7 +21,7 @@
  * to the decision that gates their activation. The detector still PRINTS them every
  * run so they stay visible and don't rot silently — "tracked, not forgotten."
  *
- * Logged gap, fixed 2026-07-19 (Antigravity's catch during the D1 security fix,
+ * Logged gap, fixed 2026-07-19 (an independent-review catch during the D1 security fix,
  * 2026-07-18): hook files were entirely absent from the scan, so a scripts/
  * utility imported ONLY from a hook was structurally invisible to the import
  * closure, and genuine hook-level dead code could accumulate unflagged. Hook
@@ -30,7 +30,7 @@
  * same way. No currently-shipped file changed reachability status — this
  * closes a structural blind spot, not a live incident.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by convention; .mjs (Node.js) only.
  *
  * CLI:  node orphan-detector.mjs [--core-root <dir>] [--json]
  *   exit 0 — no un-allowlisted orphans (allowlisted items still printed)
@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
   'retrieval-harness.mjs': {
-    reason: 'Offline Recall@K gold harness (DC-113 Tier-A T1; arms trimmed to model-free per DC-114) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the DC-115 measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
+    reason: 'Offline Recall@K gold harness (Tier-A; arms trimmed to model-free per the no-local-models rule) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the pre-registered measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
     allowlistDate: '2026-07-07',
     reviewBy: '2026-10-07',
   },
@@ -87,7 +87,7 @@ export function findOrphans({ coreRoot, allowlist = ALLOWLIST, today = new Date(
   const hooksRoot = join(coreRoot, 'skills', 'core', 'hooks');
 
   const scripts = walk(scriptsRoot, '.mjs');
-  // Logged gap (2026-07-18, Antigravity's catch during the D1 security fix):
+  // Logged gap (2026-07-18, an independent-review catch during the D1 security fix):
   // the transitive-closure walk used to only follow scripts/*.mjs import
   // chains, so a scripts/ utility imported ONLY from a hook file was
   // structurally invisible — allowlisted rather than fixed, to avoid

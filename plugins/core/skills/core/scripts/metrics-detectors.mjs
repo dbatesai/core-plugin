@@ -17,8 +17,8 @@
  *                          the agent hadn't surfaced them first. Heuristic proxy for
  *                          "the agent should have raised this unprompted."
  *
- * Privacy-gated (spec §18) and fail-open. Per DC-77 ships with the plugin;
- * per DC-80 .mjs only.
+ * Privacy-gated (spec §18) and fail-open. Ships with the plugin;
+ * .mjs only.
  *
  * CLI:  node metrics-detectors.mjs <project> [--harness claude-code|codex] [--json]
  */
@@ -56,7 +56,7 @@ export function extractCitations(text) {
 /**
  * Index the unit store: the set of unit ids (filenames sans .md, lowercased) and
  * the set of claim-keys (`dc-<n>`, `risk-<n>`) derived from those filenames so a
- * `DC-104` citation resolves to `dc-104-harness-agnostic-...md`.
+ * `DC-<n>` citation resolves to its `dc-<n>-...md` unit file.
  */
 export function buildUnitIndex(memoriesDir) {
   const ids = new Set();
@@ -336,7 +336,7 @@ export function runAnticipationGap(events, memoriesDir) {
  * Walk active open-question units with a `by-when` in the past. The startup
  * protocol already surfaces these at startup; promoting it to a Layer-2 detector
  * makes the lapse a captured, escalatable event rather than a read-time-only
- * glance. The register-trigger half of the layer stays gated on DC-103.
+ * glance. The register-trigger half of the layer stays gated on the measure-first retrieval bar.
  *
  * Returns [{filename, by_when, days_overdue}].
  */

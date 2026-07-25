@@ -1,7 +1,7 @@
 /**
  * Workspace-fork check — detect copied workspaces and auto-fork.
  *
- * Per DC-77, workspace identity stability is a critical surface inference
+ * Workspace identity stability is a critical surface inference
  * can't be trusted on alone. The Round-3 Codex re-probe (2026-05-21) showed
  * the agent reading the prose, narrating the mismatch, and still operating
  * under the source identity. This script ships the fork as deterministic code;

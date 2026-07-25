@@ -23,7 +23,7 @@
  * whitelist discipline as every metrics surface). Append-only under its own
  * sibling lock.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by design; .mjs only, zero dependencies.
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';

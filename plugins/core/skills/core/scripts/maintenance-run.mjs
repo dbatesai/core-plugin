@@ -7,13 +7,13 @@
  * cap check — gated on a durable signature so it only does work when the units actually
  * changed since last run. Records what ran in <store>/_memories/_maintenance-state.json
  * (the cadence ledger), and returns a narration string so the run is VISIBLE, never
- * silent (honors visible-continuous-curation). This is NOT a per-turn Stop hook: DC-110
+ * silent (honors visible-continuous-curation). This is NOT a per-turn Stop hook: maintenance
  * is ledger-first — observe real cadence, then decide whether unattended runs are
  * warranted. Autonomous/unattended operation is gated behind the preconditions in
  * hygiene.md §"Autonomous maintenance" (deterministic clear-cut gate, kill switch,
  * per-change audit log) and is deliberately not built here.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by convention; .mjs (Node.js) only.
  *
  * CLI: node maintenance-run.mjs <projectPath> [--json] [--dry-run]
  */
@@ -89,7 +89,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   if (unitsChanged) {
     if (apply) {
       // Stamp the state cache for every generated file this pass actually
-      // rewrites, in the same operation as the write (Hale's finding,
+      // rewrites, in the same operation as the write (a review finding,
       // 2026-07-22 — same pattern decorate-graph.mjs and hot-section.mjs
       // use: a script that rewrites a file on the user's behalf must record
       // that in code, not rely on the agent remembering to update the cache
@@ -157,8 +157,8 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   }
 
   // 3.6 One-release sweep: remove any leftover rich-context stream from the
-  // retired opt-in mechanism (superseded by turn-capture, v3.14.0 — dc-127
-  // closed by construction). The dirname is asserted before deletion, same
+  // retired opt-in mechanism (superseded by turn-capture, v3.14.0 — its
+  // zero-hit-only defect closed by construction). The dirname is asserted before deletion, same
   // boundary discipline as every deletion op here. Remove this block in v3.15.0.
   if (apply) {
     try {
@@ -234,7 +234,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
     }
   }
 
-  // 4. Update the cadence ledger (per-op run counts = the "observe cadence" data for DC-110 M2).
+  // 4. Update the cadence ledger (per-op run counts = the "observe cadence" data for the unattended-runs decision).
   const ops = (ledger.ops && typeof ledger.ops === 'object') ? ledger.ops : {};
   for (const op of ranOps) {
     const prev = ops[op] || { run_count: 0 };
@@ -264,7 +264,7 @@ function composeNarration(ranOps, notes) {
 
 // Cheap, best-effort re-grading of the newest registered self-test round —
 // rides this CLI's cadence (invoked unconditionally at startup, /finalize, and
-// /process-memory per hygiene.md/startup.md) since that IS the DC-110
+// /process-memory per hygiene.md/startup.md) since that IS the ledger-first
 // maintenance cadence the redesign spec (§3d) wires it into. Deliberately
 // scoped to this CLI entry point, not the synchronous in-process
 // runMaintenance() export close-pass.mjs calls directly from the headless

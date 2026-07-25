@@ -22,7 +22,7 @@ The framework defines six pieces:
 The framework relies on three existing CORE mechanisms it does not redesign:
 
 - **Observation unit schema** (per `protocols/data-storage.md`) — the in-flight draft state and the fully-graduated state are the same schema, distinguished by `status`.
-- **DC-70 promotion modes** (A autonomous / B confirmed / C explicit) — the landing-destination rule.
+- **The three promotion modes** (A autonomous / B confirmed / C explicit) — the landing-destination rule.
 - **`inbox.md`** — the existing staging surface for non-autonomous observations.
 
 ---
@@ -39,7 +39,7 @@ Project-side, in `<project>/_sources/`. One YAML file per registered source:
 
 Project-side because the registration is project context — what sources feed this project's intelligence is part of what the user sees, edits, and reasons about. This aligns with the user-control invariant: the registration is a fact about the project, owned by the project surface.
 
-The leading `_` on `_sources/` follows the DC-74 convention for CORE-managed project subdirectories.
+The leading `_` on `_sources/` follows the standing naming convention for CORE-managed project subdirectories.
 
 ### Required fields
 
@@ -184,7 +184,7 @@ A source becomes registered to a project through this protocol. Re-runnable when
 
 When a new source is added later: protocol runs only for the new source.
 
-When a project's relationship to an existing source changes (authority shift, relevance criteria change): protocol re-runs for that source, the registration updates, and a new `source-of-authority` unit supersedes the prior one (per DC-83 supersedes-not-deletes pattern).
+When a project's relationship to an existing source changes (authority shift, relevance criteria change): protocol re-runs for that source, the registration updates, and a new `source-of-authority` unit supersedes the prior one (per the supersedes-not-deletes pattern).
 
 ### Who runs the intake
 
@@ -194,7 +194,7 @@ The intake protocol is part of CORE's startup flow — the new-workspace branch 
 
 ## 4. Promotion-mode landing destinations
 
-When the extractor produces an observation, the observation lands in one of three destinations based on DC-70 promotion modes. The mode is determined by the extractor at write time using confidence-level and content signals.
+When the extractor produces an observation, the observation lands in one of three destinations based on the promotion modes. The mode is determined by the extractor at write time using confidence-level and content signals.
 
 ### The three destinations
 
@@ -235,7 +235,7 @@ mode: B | C
 judgment-needed: <prose, required when mode is C — names what judgment is required>
 ```
 
-`mode` lets graduation distinguish Mode B (routine confirmation) from Mode C (explicit user judgment) without re-deriving the mode from criteria. `judgment-needed` is required for Mode C and carries the specific question the user must answer (e.g., *"contradicts dc-42 on the BGL date — confirm which is authoritative"*; *"reconstruction from three chat threads; verify the inferred decision is correct"*).
+`mode` lets graduation distinguish Mode B (routine confirmation) from Mode C (explicit user judgment) without re-deriving the mode from criteria. `judgment-needed` is required for Mode C and carries the specific question the user must answer (e.g., *"contradicts dc-42-bgl-date on the BGL date — confirm which is authoritative"*; *"reconstruction from three chat threads; verify the inferred decision is correct"*).
 
 Blocks land in chronological order, no source/confidence/mode sectioning required. Mode-labeled blocks in chronological order are scannable at typical volumes (under a hundred items per inbox). Installations may add structure if their volume warrants; the framework doesn't mandate it.
 
@@ -247,7 +247,7 @@ Mode A observations don't pass through `/process-memory` for graduation — they
 
 ---
 
-## 5. Annotation frameworks (source-agnostic restatement of DC-85)
+## 5. Annotation frameworks (source-agnostic restatement of the observation-filter design)
 
 ### Confidence-level
 
@@ -305,7 +305,7 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 5. **Trigger graduation** when source pulls complete and graduation is warranted. The installation decides when (after every refresh; on a schedule; when inbox count crosses a threshold). The entry point is `/process-memory` or equivalent.
 
-6. **Surface errors** via the standard notification surface (DC-78 channel-agnostic — installation uses whatever channel its harness supports).
+6. **Surface errors** via the standard notification surface (channel-agnostic by design — installation uses whatever channel its harness supports).
 
 ### Prohibited behaviors
 
@@ -316,7 +316,7 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 ### Three-filter pipeline as contract, not implementation
 
-DC-85 defines three filter steps (relevance → extraction → confidence judgment). The framework requires these three judgments happen in order; it does not require they happen in separate processes.
+The observation-filter design defines three filter steps (relevance → extraction → confidence judgment). The framework requires these three judgments happen in order; it does not require they happen in separate processes.
 
 An installation may dispatch each step as a subagent (per the model-tier matrix in `references/model-assignments.md` — Haiku filter, Sonnet extraction, Sonnet confidence judgment). Or it may run all three inline in a single agent context. The choice is installation-level and is governed by performance/cost considerations the installation owns.
 
@@ -371,7 +371,7 @@ Two artifacts CORE ships in support of the framework:
 
 (A third artifact, `scripts/analyze-source-pull-log.mjs`, shipped a monitoring-log analyzer for the §7 read protocol — deleted 2026-07-21, see §7 above for why. Not replaced yet.)
 
-These two plus the existing observation schema, DC-70 promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
+These two plus the existing observation schema, the promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
 
 ---
 

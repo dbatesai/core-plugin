@@ -1,7 +1,7 @@
 /**
  * generate-agents-md.mjs — v3.0 generator for Codex's AGENTS.md from CONTRACT.md.
  * Thin wrapper over contract-format.mjs; see generate-claude-md.mjs for the shape.
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships with the plugin as a script; .mjs only.
  *
  * CLI: node generate-agents-md.mjs --contract <CONTRACT.md> [--out <AGENTS.md>] [--override <f>] [--mode write|check|dry-run]
  */
