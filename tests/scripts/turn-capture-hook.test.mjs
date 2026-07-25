@@ -158,3 +158,35 @@ test('Link 4a: self-test log rows carry producer identity', async () => {
   assert.ok(ev.producer_version, 'self-test row missing producer_version');
   assert.ok(ev.producer_sha, 'self-test row missing producer_sha');
 });
+
+// The receipt is the only signal that survives into production. A retrieve-context
+// row carrying a retrieval_id but no turn_capture field means the capture block
+// never executed — which is exactly what a stale install looks like from the
+// outside, and the shape no test previously asserted.
+test('every metrics-on invocation stamps a turn_capture status on its receipt', () => {
+  const store = tempStore();
+  const logFile = isolatedHooksLog();
+  runHook('omega speedmaster on sale', { CORE_HOOKS_LOG_FILE: logFile }, store);
+  const rows = readFileSync(logFile, 'utf8').trim().split('\n')
+    .filter(Boolean).map((l) => JSON.parse(l))
+    .filter((r) => r.hook === 'retrieve-context');
+  assert.ok(rows.length > 0, 'the hook wrote no receipt at all');
+  for (const r of rows) {
+    if (!r.retrieval_id) continue; // pre-metrics-branch skips carry no capture status
+    assert.ok('turn_capture' in r,
+      `a receipt with retrieval_id ${r.retrieval_id} carries no turn_capture field — the capture block did not run: ${JSON.stringify(r)}`);
+  }
+});
+
+test('DEFAULT-ON through the real hook: a clean environment still captures', () => {
+  const store = tempStore();
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) if (k.startsWith('CORE_')) delete env[k];
+  env.CORE_HOOKS_LOG_FILE = isolatedHooksLog();
+  execFileSync('node', [HOOK], {
+    input: JSON.stringify({ prompt: 'omega speedmaster on sale', cwd: store, session_id: 'tc-clean-env' }),
+    env, encoding: 'utf8',
+  });
+  assert.equal(evidenceRows(store).length, 1,
+    'default-ON must not depend on CORE_METRICS_ENABLED being set by hand');
+});

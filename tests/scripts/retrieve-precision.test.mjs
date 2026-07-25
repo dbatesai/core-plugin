@@ -46,7 +46,9 @@ test('precision@3 clears the recorded threshold', () => {
   // is small with little token collision.
   // eslint-disable-next-line no-console
   console.log(`precision@3=${precision.toFixed(3)} recall@3=${recall.toFixed(3)}`);
-  assert.ok(precision >= 0.5, `precision@3 (${precision.toFixed(3)}) must clear the 0.5 starting bar`);
+  // Ratcheted to just under the measured value (0.850). A starting bar of 0.5
+  // let precision fall 41% without failing; this fails on a real regression.
+  assert.ok(precision >= 0.80, `precision@3 (${precision.toFixed(3)}) fell below the ratcheted 0.80 floor`);
 });
 
 test('N sweep recorded (2 vs 3 vs 5) — default top-N stays David\'s call (G2)', () => {
@@ -55,6 +57,10 @@ test('N sweep recorded (2 vs 3 vs 5) — default top-N stays David\'s call (G2)'
     // eslint-disable-next-line no-console
     console.log(`N=${n}: precision=${precision.toFixed(3)} recall=${recall.toFixed(3)}`);
   }
-  // No assertion that changes the default — recording only. G2 is David's.
-  assert.ok(true);
+  // The default top-N is a product decision, not this test's to make — but the
+  // sweep must still fail if the retriever stops returning anything at any N.
+  for (const n of [2, 3, 5]) {
+    const { recall } = precisionRecallAt(n);
+    assert.ok(recall > 0, `N=${n} returned zero relevant results — the retriever is dead at this N`);
+  }
 });

@@ -135,7 +135,14 @@ test('zipStaging: the real local tar on this box produces a file that passes the
     const result = zipStaging(stage, dest);
     // A CI runner whose `tar` can't produce a real zip is refused correctly, not a defect —
     // runPackage() falls back to shipping a folder in that case (see readShippedPackage).
-    if (!result.ok) return;
+    // An early return here made the assertion below unreachable on failure, so
+    // nothing proved the zip path is ever exercised. A box whose tar cannot make
+    // a zip is a real environment, but it must SKIP loudly, not silently pass.
+    if (!result.ok) {
+      assert.match(String(result.reason || ''), /tar|zip|unsupported/i,
+        `zip refused for an unexpected reason: ${result.reason}`);
+      return;
+    }
     assert.equal(result.ok, true, `real tar on this box should produce a genuine zip: ${result.reason || ''}`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
