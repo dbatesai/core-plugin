@@ -59,7 +59,7 @@ Implicit — agents poll their inbox via `SendMessage` listings each turn. The V
 
 - **Dynamic-cadence self-re-entry (the default for collab loops and any backing-off poll):** `ScheduleWakeup` with `delaySeconds`. Prefer this over `/loop` for anything with a *variable* cadence — `/loop` is fixed-interval and flattens a dynamic ladder (e.g. collab's fast→slow back-off), so it wastes turns when idle and reacts late when busy. **Wire the wake to an idempotent command, never a one-shot side-effecting one:** a wake re-fires the *full* command, so it must be safe to run repeatedly (e.g. the collab tick script, which is idempotent by design — re-running recomputes state). Pass the same continuation prompt back each fire; stop scheduling when the loop's exit condition is met.
 - **Fixed-interval recurring:** `/loop <interval> <command>` when the cadence genuinely is fixed and the command is idempotent. Use `CronCreate` (5-field UTC cron, ≥1-hour interval per the platform constraint) only for cross-session recurring schedules that must survive the session ending.
-- **Parity note (DC-75):** `schedule` is a *drop* on Codex (no native scheduler) — Codex uses supervised re-entry at the computed cadence, and collab's portable cadence-compute + supervised re-entry is the cross-harness baseline. ScheduleWakeup is a Claude-Code optimization layered on that portable policy, not a replacement for it.
+- **Parity note:** `schedule` is a *drop* on Codex (no native scheduler) — Codex uses supervised re-entry at the computed cadence, and collab's portable cadence-compute + supervised re-entry is the cross-harness baseline. ScheduleWakeup is a Claude-Code optimization layered on that portable policy, not a replacement for it.
 
 ## hook-register
 

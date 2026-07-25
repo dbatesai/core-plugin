@@ -322,7 +322,7 @@ export async function checkGoldRegression(project, { goldPath = join(resolve(pro
 // Renders a {count, by_code} bucket as a short CLOSED-vocabulary summary —
 // e.g. "invalid-tier: 1, missing-tier: 2". Codes are safe to interpolate
 // anywhere (rendered report, --json, a future package surface); the raw
-// values that failed validation never are (Hale, 2026-07-22).
+// values that failed validation never are.
 function formatRejectionCodes(bucket) {
   return Object.entries(bucket?.by_code || {}).sort((a, b) => b[1] - a[1]).map(([code, n]) => `${code}: ${n}`).join(', ');
 }
@@ -371,7 +371,7 @@ export function computeRows(out) {
   const rows = [];
   // Every read below comes off the SAME canonical four-class object --json
   // emits — mechanics/regression/readiness/benefit — so the render and the
-  // machine output can never carry different taxonomies (Hale, 2026-07-22).
+  // machine output can never carry different taxonomies.
   const mech = out.mechanics || {};
   const store = mech.store || {};
   const readiness = out.readiness || {};
@@ -449,7 +449,7 @@ export function computeRows(out) {
   // item 4; visible-active-state + independent disable).
   const tc = mech.turn_capture || {};
   {
-    // Default-ON stream (DC-129): the honest move inverts the old opt-in
+    // Default-ON stream: the honest move inverts the old opt-in
     // display rule — because it IS on unless the user acted, the ON state and
     // its off-switches must always render, and the OFF state renders too so an
     // opted-out user sees their choice took effect.
@@ -711,7 +711,7 @@ export async function gatherMetrics(cwd, { home = homedir() } = {}) {
   // taxonomy (mechanics/regression/readiness/benefit) plus identity and run
   // metadata — the renderer consumes this exact object and --json emits it
   // verbatim, so machine and human views share one taxonomy by construction
-  // (Hale, 2026-07-22 acceptance revise). No umbrella top-level verdict: the
+  //. No umbrella top-level verdict: the
   // machine verdict is mechanics.status, scoped like the rendered heading.
   const out = {
     schema_version: METRICS_REPORT_SCHEMA_VERSION, // always OUR stamp (record-retrieval-event.mjs convention)

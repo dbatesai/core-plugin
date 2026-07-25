@@ -73,7 +73,7 @@ export function resolveTranscript(cwd, home, override) {
   if (override) return existsSync(override) ? override : null;
   // Was a hand-rolled `.replace(/\//g, '-')` -- missed the Windows drive colon and
   // any dot in the path, same bug family as auto-memory-injection-probe.mjs. Use
-  // the one canonical encoder (Meridian's live-box repro, 2026-07-20).
+  // the one canonical encoder.
   const mapped = mapProjectPathToSlug(cwd);
   const dir = join(home, '.claude', 'projects', mapped);
   if (!existsSync(dir)) return null;

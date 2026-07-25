@@ -15,7 +15,7 @@
  * zero-hit has no delivered context by definition, dc-127) and the hidden
  * CORE_RETRIEVAL_TRACE env stream (content in the repo tree, no reader).
  *
- * DEFAULT-ON with opt-outs (DC-129, David's explicit ruling over the opt-in
+ * DEFAULT-ON with opt-outs (David's explicit ruling over the opt-in
  * recommendation, recorded in the spec):
  *   1. `CORE_METRICS_ENABLED` off → OFF (master kill switch; capture nests
  *      inside the metrics gate).
@@ -90,7 +90,7 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
  *   1. aggregate metrics OFF (env/workspace, DC-107 gate) → OFF.
  *   2. env `CORE_TURN_CAPTURE` false (0/false/no/off) → OFF; true → ON.
  *   3. project-root `workspace.json` `"turn_capture": false` → OFF.
- *   4. default → ON (DC-129).
+ *   4. default → ON.
  */
 export function turnCaptureEnabled({ project, env = process.env } = {}) {
   if (!metricsEnabled({ project, env })) return false;

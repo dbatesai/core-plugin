@@ -57,7 +57,7 @@ extractor-pointer: <installation-specific path or identifier for the extractor i
 
 - `name` — used as the `source` field on every observation extracted from this source. Match the file basename (without `.yaml`).
 - `kind` — describes data shape, not source type. Structured = field-typed records (rows, tickets, calendar events). Semi-structured = mixed-shape content with consistent metadata (emails, documents with frontmatter). Free-text = prose without enforced structure (chat logs, transcripts, prose pages).
-- `authority` — prose, not enum. The intake protocol uses this to scaffold the `source-of-authority` unit (per DC-85). One or two sentences describing what claims this source is authoritative for in this project. Examples: *"the official project tracker for engineering work — authoritative for ticket status, ownership, and dates; not authoritative for cross-team agreements that haven't been ticketed"*; *"the team's primary async communication channel — authoritative for in-thread agreements when both participants confirm; not authoritative for unilateral statements without confirmation."*
+- `authority` — prose, not enum. The intake protocol uses this to scaffold the `source-of-authority` unit. One or two sentences describing what claims this source is authoritative for in this project. Examples: *"the official project tracker for engineering work — authoritative for ticket status, ownership, and dates; not authoritative for cross-team agreements that haven't been ticketed"*; *"the team's primary async communication channel — authoritative for in-thread agreements when both participants confirm; not authoritative for unilateral statements without confirmation."*
 - `cadence` — when/how often this source should be pulled. `always-on` = swept at every refresh. `session-pull` = pulled on demand during a session. `user-flagged` = pulled only when the user explicitly says to. `event-driven` = pulled when an external trigger fires (webhook, notification, scheduled job).
 - `confidence-default` — the default confidence-level for facts extracted from this source absent specific signal. Per-fact overrides happen via `confidence-overrides` (optional, below) or extractor judgment on content signals.
 - `relevance-contract` — prose declaration of how the extractor decides whether a given datum from this source is project-relevant. Examples: *"items mentioning project keywords or assigned to project participants"*; *"messages in chats whose members include any of the project participants"*; *"events whose subject includes a project keyword or whose attendees include any project stakeholder."*
@@ -169,7 +169,7 @@ A source becomes registered to a project through this protocol. Re-runnable when
 1. **Discover.** The installation lists sources it has available for the project. The user (or the agent in interview mode) sees what's on offer.
 
 2. **Per-source authority decision.** For each source the user wants to register, an interview question: *"What's this source's authority for this project's intelligence?"* The answer becomes:
-   - A `source-of-authority` unit in `<project>/_memories/` (per DC-85)
+   - A `source-of-authority` unit in `<project>/_memories/`
    - The `authority` field on the registration YAML
 
 3. **Confidence calibration.** Surface the source's proposed `confidence-default` (installation's suggestion) and any `confidence-overrides`. User confirms or adjusts. Final values land in the registration.

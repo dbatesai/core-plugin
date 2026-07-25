@@ -538,7 +538,7 @@ function perKindBreakdown(harnessOut) {
 // wraps it to also write a results file. /metrics consumes measureRound so a
 // health check never litters the round directory with run records.
 //
-// skipHistoricalDelta (Antigravity's correction, 2026-07-23): the priors loop
+// skipHistoricalDelta: the priors loop
 // below re-runs EVERY prior registered round against the current corpus, so
 // its cost grows without bound as rounds accumulate. Automatic re-grading
 // (regradeNewestRound, wired into the maintenance cadence) sets this true to
@@ -676,7 +676,7 @@ export async function regradeNewestRound(project, { snapshot } = {}) {
 export const ROUND_STALENESS = Object.freeze({
   growth_fraction: 0.20,   // corpus grew >20% past the round's frozen unit count
   max_sessions: 10,        // more than this many session-days since registration
-  trigger_cap_days: 7,     // hard cap: at most one auto-author trigger per week (DC-129)
+  trigger_cap_days: 7,     // hard cap: at most one auto-author trigger per week
 });
 
 export function assessRoundStaleness({ registeredAt, hasResult, sessionDatesAfter, currentUnits, frozenUnits, lastTriggerTs, now }) {

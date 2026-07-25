@@ -5,10 +5,10 @@
  * ruled that CORE runs NO local models: the dense/ollama arm was deleted rather
  * than shipped dormant; this module keeps the model-free half the live retriever
  * actually uses. Query-time retrieval stays deterministic and dependency-free
- * (DC-80); the recall gap closes via write-time enrichment (DC-114/DC-115), not
+ *; the recall gap closes via write-time enrichment (DC-114/DC-115), not
  * a query-time model.
  *
- * v3.11 remediation (Hale 2026-07-11 §1/§4): bodies are loaded through the
+ * v3.11 remediation: bodies are loaded through the
  * recursive path-bearing index via loadFreshIndex() — nested units (observations/
  * <YYYY-MM>/…) are in the population, paths come from the index (never
  * reconstructed as `_memories/<id>.md`), and freshness is validated on EVERY
@@ -18,7 +18,7 @@
  *
  * Cost honesty: bm25Rank re-reads unit bodies and rebuilds term statistics on
  * every call — the INDEX is cached; bodies and statistics are not. Measured
- * (Hale, 2026-07-11, M-series Mac, synthetic 180-token bodies): warm p50 ~6ms at
+ *: warm p50 ~6ms at
  * 200 units, ~13ms at 400, ~63ms at 2,000. Acceptable at CORE/BBLens scale;
  * precompute document statistics into the index if a store outgrows that.
  *
@@ -119,7 +119,7 @@ export function bm25Rank(query, store, opts = {}) {
 // interleaveRanked (the round-robin union combiner) was DELETED 2026-07-11: the
 // product ranking moved to normalized magnitudes (retrieve-context productRankedScores)
 // and no production caller remained — dead code documented as live is a doc lie
-// (Hale re-review §6).
+//.
 
 function selfTest() {
   // BM25: returns a ranked array when a store is supplied.

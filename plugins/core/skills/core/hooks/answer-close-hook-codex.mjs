@@ -5,7 +5,7 @@
  * Thin wrapper, not a copy: sets CORE_HOOK_HARNESS='codex' EXPLICITLY then delegates to the
  * shared implementation in answer-close-hook.mjs, which reads Codex's `turn_id` (instead of
  * Claude Code's `prompt_id`) once that env var is set. Pure JS, no shell env-var prefix syntax —
- * works identically on POSIX and Windows (per DC-80, .mjs only).
+ * works identically on POSIX and Windows (.mjs only).
  *
  * Registered on Codex's Stop event via hooks-codex.json — the real per-harness post-answer
  * adapter Hale's HOLD audit required, closing the gap the earlier "Codex has no Stop-equivalent"

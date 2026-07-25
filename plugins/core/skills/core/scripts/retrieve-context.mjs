@@ -2,7 +2,7 @@
  * retrieve-context.mjs — deterministic per-turn retrieval (DC-94a; v3.11 product path).
  *
  * Given a query and a store, return the top-N most relevant active units as
- * {id, summary, tier, score}. Model-free (DC-114) and cheap enough to run on every
+ * {id, summary, tier, score}. Model-free and cheap enough to run on every
  * turn from a shell hook. This is the "retrieve the right thing" half of the
  * north-star: the literal/lexical tier. Abstract matches (value→instance) that
  * lexical can't bridge are the reasoning tier's job; the obligation-3 ladder
@@ -80,7 +80,7 @@ export function lexicalRankedIds(query, storePath, { snapshot = null } = {}) {
  * preserved (not flattened to rank positions) because the one-hop edge discount
  * needs ratios: "a neighbor of a STRONG hit beats a WEAK direct hit" is only
  * expressible when 0.5 × parent-strength can exceed another unit's strength — the
- * v3.10 semantic the synthetic rank scores broke (Hale 2026-07-11 §3).
+ * v3.10 semantic the synthetic rank scores broke.
  *
  * @returns {Array<{id, tier, score}>} every unit scoring > 0 on either arm, sorted
  *   desc by combined normalized score (ties by id), score ∈ (0, 1].
@@ -114,7 +114,7 @@ export function productRankedScores(query, storePath, preloadedIndex = null, sna
   } catch (err) {
     // Fail-open (title-only) but never silent: the degradation is visible on stderr
     // (hook logs) and via storeHealth() — a product that quietly halves its recall
-    // is a health incident, not a fallback (Hale re-review §6).
+    // is a health incident, not a fallback.
     _lastBm25Error = String(err && err.message || err);
     process.stderr.write(`retrieve-context: body-BM25 arm failed (${_lastBm25Error}) — degraded to title-only for this query\n`);
   }
@@ -313,7 +313,7 @@ export function retrieveContext(query, storePath, opts = {}) {
 export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, byteCap = 2048, snapshot = null } = {}) {
   const root = resolve(storePath);
   const t0 = process.hrtime.bigint();
-  // Storeless probe only when there is NO injected snapshot (Hale round 14): a
+  // Storeless probe only when there is NO injected snapshot: a
   // caller holding a capture already proved the store existed at capture time,
   // and the trace must describe the CAPTURED state even if the live store
   // vanished afterward — an unconditional existsSync here returned `storeless`
@@ -356,7 +356,7 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
     },
     // `text` rides the trace so a single pipeline run can serve BOTH the injection
     // (the hook prints it) and the evidence record — the per-turn hook is this
-    // function's production caller (Hale audit e1490d4 finding 1, closed 2026-07-17).
+    // function's production caller.
     pack: { accepted: pack.accepted, excluded: pack.excluded, bytes: pack.bytes, warnings: pack.warnings, text: pack.text },
     timing_ms: +elapsedMs.toFixed(2),
   };
@@ -390,7 +390,7 @@ export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = 
   if (!hits || !hits.length) return { text: '', bytes: 0, accepted, excluded, warnings };
 
   const HEADER = 'Relevant stored context (CORE per-turn retrieval):\n';
-  // Contract fix (Hale close path §6): the cap binds ABSOLUTELY. A cap smaller
+  // Contract fix: the cap binds ABSOLUTELY. A cap smaller
   // than the header used to return bytes > byteCap in violation of the pack's
   // own contract; now it delivers an empty pack, every hit excluded, and the
   // constraint named in warnings.

@@ -46,7 +46,7 @@ Generated output is a pure function of the contract: `generated_at` is the contr
 
 When a harness needs something the contract doesn't cover, put it in `<harness>.md.override` (e.g. `CLAUDE.md.override`). It's appended to the generated file inside a `BEGIN/END OVERRIDE` separator and tracked by `override_block_hash` (over raw bytes). Overrides **add**; they cannot delete contract content (to remove content for one harness, edit that harness's `-only` section).
 
-## Cross-harness honesty (DC-75)
+## Cross-harness honesty
 
 The only per-harness facts in the generators are the harness name and the output filename (`HARNESS_OUTPUT`). Everything else is shared. A harness absent from `canonical_for` triggers a warning if you generate for it. This keeps the system harness-agnostic — the contract describes the project, the generators map it to each surface.
 

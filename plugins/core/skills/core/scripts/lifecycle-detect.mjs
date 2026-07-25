@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * lifecycle-detect.mjs — the lifecycle REPORTING preflight and the CORE
- * creation-baseline seam (Hale's 2026-07-22 findings).
+ * creation-baseline seam.
  *
  * TWO honest jobs, and no more:
  *

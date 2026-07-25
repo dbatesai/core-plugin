@@ -107,7 +107,7 @@ The dual log is intentional. The run log is what the user reads during the sessi
 
 ---
 
-## Mechanical maintenance — the cadence ledger (DC-110)
+## Mechanical maintenance — the cadence ledger
 
 The *mechanical* half of upkeep — index regeneration (decisions, risks, summary), ghost-duplicate cleanup, PROJECT.md cap check — is consolidated in `scripts/maintenance-run.mjs` and separated from the *judgment* half (graduation, retire calls) that stays in `/process-memory`. `/finalize` and `/process-memory` both invoke it:
 
@@ -117,7 +117,7 @@ node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" <project>
 
 It is **signature-gated** (regenerates only when the unit set changed since last run — cheap on an unchanged store), **narrated** (returns a one-line summary of what ran; never silent — honors visible-continuous-curation), and **ledger-recorded** in `<project>/_memories/_maintenance-state.json` (per-op `run_count` + `last_run` — the cadence data DC-110 M2 observes). Surface its narration line in the run. `--dry-run` reports without writing.
 
-### Autonomous maintenance — gated, not built (DC-110 M3)
+### Autonomous maintenance — gated, not built
 
 DC-110 is ledger-first on purpose: maintenance runs **at invocation** (`/finalize`, `/process-memory`, on-demand), not on a per-turn hook. Running any maintenance op unattended/autonomously is gated behind four preconditions, none yet built:
 
@@ -171,7 +171,7 @@ Part of the reconciliation work at `/finalize` and `/process-memory`. No script 
 4. Promotion means adding `{type: cites, target: <id>}` to the citing unit's `edges:` frontmatter when not already present. `cites` is a lazy, one-directional edge — no inverse edge required (per `protocols/data-storage.md` §"The committed edge types").
 5. Log each promotion in the hygiene JSONL (`verb: promote-wikilink`, with citing unit and target).
 
-## On-demand project setup — governance-hierarchy capture (DC-85 §8)
+## On-demand project setup — governance-hierarchy capture
 
 The new-workspace path (in `protocols/startup-conditional-loads.md`) asks about source-authority hierarchy at intake. Returning workspaces that predate DC-85 won't have the unit yet. When a returning project would benefit from one (multi-document governance, recurring authority contradictions surfaced by synthesis-pass behavior #5, user mentions "what does the spec say vs. what we agreed in chat"), capture it on demand:
 

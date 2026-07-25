@@ -124,7 +124,7 @@ After auto-fixing, re-run the validator and report the new counts.
 
 ---
 
-## Step 4 — Run mechanical maintenance (DC-110)
+## Step 4 — Run mechanical maintenance
 
 Run the consolidated mechanical pass. It regenerates both indexes + the summary index, cleans ghost duplicates, and checks the PROJECT.md cap — signature-gated (no-op when units are unchanged) and recorded in the cadence ledger (`_memories/_maintenance-state.json`):
 
@@ -169,7 +169,7 @@ node "${CORE_ROOT}/skills/core/scripts/demote-state-narrative.mjs" "<project>"
 ```
 
 - `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` on **checkbox + age** — a done item is done regardless of its cited units' status. Age = most-recent non-future date in the bullet text (citation/backtick/wikilink/obs-id dates stripped), falling back to cited-unit dates when the bullet has no date; kept when no age is provable or age < 30 days, and archived stubs are never re-demoted. `--strict` restores the old "all cited units terminal" gate. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. A large first batch (≥20) is **held** unless re-run with `--apply-large-batch` — narrate the held count and that nothing was written.
-- `compact-project.mjs` collapses `§Decisions` paragraphs to one-line stubs pointing at units (DC-48 pattern). Auto-MIGRATE per DC-46; idempotent. Now also emits `kind: compact-project` with section-size breakdown and `kind: project-md-over-cap` when the file remains >70KB after compaction. Use `--section-sizes` to inspect the breakdown without writing.
+- `compact-project.mjs` collapses `§Decisions` paragraphs to one-line stubs pointing at units. Auto-MIGRATE per DC-46; idempotent. Now also emits `kind: compact-project` with section-size breakdown and `kind: project-md-over-cap` when the file remains >70KB after compaction. Use `--section-sizes` to inspect the breakdown without writing.
 - `demote-state-narrative.mjs` walks §State and surfaces demotion candidates when the bullet carries a strict `*Backed by ...*` footer, ALL cited units are in terminal status (mirrors `demote-moves` set for cross-script symmetry), AND the most-recent backing-unit `updated:` date is >60 days old. **Default is dry-run in v1** per DC-93 — emits a candidate list and a `kind: demote-state` event to hygiene-log without writing. Pass `--apply` only when a §State-heavy non-CORE corpus has been exercised and produces clean candidate lists for multiple sessions; flip the default in a tracked decision then. Narrate "would demote N items" only if N > 0.
 
 Report the demoted count and the before/after sizes the scripts print. Over-cap warnings after all three scripts have run name what's left — §Notes overflow or the §Moves citation-discipline gap captured at [[obs-demote-moves-first-fire-2026-05-24]].
@@ -182,7 +182,7 @@ Report the demoted count and the before/after sizes the scripts print. Over-cap 
 wc -c "<project>/IMPROVEMENT_LOG.md"
 ```
 
-If over ~66KB, surface a recommendation but do not auto-compact — IMPROVEMENT_LOG has a count-based rotation pattern (DC-42) that needs `/finalize` discretion, not in-flight compaction.
+If over ~66KB, surface a recommendation but do not auto-compact — IMPROVEMENT_LOG has a count-based rotation pattern that needs `/finalize` discretion, not in-flight compaction.
 
 ---
 
@@ -222,7 +222,7 @@ Surface where native harness memory (MEMORY.md / `~/.codex/memories`) holds proj
 node "${CORE_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<project>"
 ```
 
-**Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection (DC-83) says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is deferred (design Q3).
+**Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is deferred (design Q3).
 
 ---
 

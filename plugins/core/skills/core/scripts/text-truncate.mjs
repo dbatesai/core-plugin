@@ -10,7 +10,7 @@
  * and generate-risks-index.mjs. Fix-in-one-copy is exactly the failure this
  * collapses — one shared function, so there is no second copy left to drift.
  *
- * Upgraded same day (Antigravity's review, "ponytail" pass): a surrogate-pair
+ * Upgraded same day: a surrogate-pair
  * boundary check stops literal encoding corruption (the reported bug — a
  * U+FFFD replacement character) but is not the full correctness bar. A cut
  * between a base character and a combining diacritical mark, or inside a ZWJ

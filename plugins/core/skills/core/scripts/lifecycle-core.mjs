@@ -1,6 +1,6 @@
 /**
  * lifecycle-core.mjs — the user-authorship-boundary primitives shared by every
- * writer that mutates a mixed-ownership file (Hale's 2026-07-22 findings).
+ * writer that mutates a mixed-ownership file.
  * Deliberately imports NO writer module (only node:* + file-lock), so the
  * writers can depend on it without an import cycle, and `lifecycle-detect.mjs`
  * (the executable preflight) can depend on BOTH the writers and this.
@@ -17,7 +17,7 @@
  *      PROJECT.md (hot-section, compaction, moves/state demotion, full render).
  *      Writer-local locks (.hot-section.lock etc.) only serialize a writer
  *      against ITSELF; two DIFFERENT writers racing the same PROJECT.md still
- *      interleave destructively without a lock they all share (Hale's point 7).
+ *      interleave destructively without a lock they all share.
  *
  * THE AUTHORSHIP RULE (Hale's 2026-07-22 falsifier — session timing cannot prove
  * authorship). A file with NO cache-stamp baseline is NEVER assumed to be
@@ -39,7 +39,7 @@
 import { join, resolve } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
 
-// ---------- Shared PROJECT.md writer lock (Hale point 7) ----------
+// ---------- Shared PROJECT.md writer lock ----------
 
 /** The ONE lock every PROJECT.md writer acquires. Distinct from each writer's
  *  old private lock, which only serialized a writer against itself. */

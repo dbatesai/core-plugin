@@ -88,7 +88,7 @@ function fold(value, whitelist) {
 }
 
 // Small-cell suppression: cells with 0 < count < k fold into one aggregate so a
-// rare category can't fingerprint the store across packages (Hale finding 6).
+// rare category can't fingerprint the store across packages.
 function suppressSmallCells(hist, k = SMALL_CELL_K) {
   const out = {};
   let suppressedCells = 0; let suppressedTotal = 0;
@@ -252,7 +252,7 @@ export function retrievalStats(projectDir, seal) {
     badLines += bad;
     for (const row of rows) entries.push({ date, row });
   }
-  // Outcomes live in the SEPARATE later outcome-log (Hale stop-note): read
+  // Outcomes live in the SEPARATE later outcome-log: read
   // them alongside retrieval rows so the join sees both sides.
   for (const { date, file } of listSessionLogs(projectDir, 'outcome-log.jsonl')) {
     const { rows, bad } = readJsonlSafe(file);
@@ -524,7 +524,7 @@ export function storeCensus(projectDir) {
     edges_by_type: suppressSmallCells(edgesByType),
     edges_total: Object.values(edgesByType).reduce((a, b) => a + b, 0),
     orphans, orphan_rate: active ? round3(orphans / active) : null,
-    // NOT 1-orphan_rate (Hale caught the earlier redundant stat): edges per
+    // NOT 1-orphan_rate: edges per
     // active unit measures graph richness; the active-to-active fraction
     // measures how much of the edge mass is traversable among live units.
     edges_per_active_unit: active ? round3(Object.values(edgesByType).reduce((a, b) => a + b, 0) / active) : null,
@@ -657,7 +657,7 @@ export function workspaceMetrics(home, workspaceId) {
       unkeyed_kept: stats.unkeyed_kept,
     };
     // Availability reflects AGGREGATEABLE in-cohort rows, not day-key count
-    // (Hale item 6, 2026-07-23): the deduper preserves empty day-keys, so an
+    //: the deduper preserves empty day-keys, so an
     // old-only store — every row excluded by the cohort gate — has day-keys but
     // zero countable turns. That store is UNAVAILABLE-with-a-coverage-gap, never
     // available-with-zero-turns.
@@ -896,7 +896,7 @@ export function collectProject(projectDir, { home, seal }) {
     'workspace-metrics': workspaceMetrics(home, workspaceId),
     'self-test': selfTestStats(projectDir),
   };
-  // Population gate on per-unit rankings (Hale finding 6): below the floor a
+  // Population gate on per-unit rankings: below the floor a
   // ranking row can fingerprint a specific unit across packages.
   const census = localBlocks['store-census'];
   const retrieval = localBlocks['retrieval-stats'];
@@ -927,7 +927,7 @@ export function collectProject(projectDir, { home, seal }) {
 // absolute and is unaffected by the process cwd change.
 // ZIP local-file-header magic number (PK\x03\x04). `-a` auto-selects the archive
 // format from destZip's extension, but ZIP support behind `-a` is NOT consistent
-// across tar builds (Meridian, live Windows box, 2026-07-20): GNU tar (what Git
+// across tar builds: GNU tar (what Git
 // Bash/MSYS2 put first on PATH on her machine) has no ZIP support at all and
 // silently emits an uncompressed TAR wearing a .zip extension, exit 0. The `tar -t`
 // listing check below does NOT catch this -- GNU tar happily lists its own tar

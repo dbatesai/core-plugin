@@ -11,7 +11,7 @@
  *      release verified ownership — but release-verify-then-remove kept a TOCTOU,
  *      and the rename-claim + restore repair had an irreducible three-process
  *      corner: a revived releaser could displace a fresh owner's lock while a
- *      third writer claimed the exposed path (Hale, 2026-07-15).
+ *      third writer claimed the exposed path.
  *   v3 (this file): GENERATION LOCKS eliminate that corner structurally. The lock
  *      is a family of files `<lockPath>.g<N>` plus `.g<N>.done` tombstones:
  *
@@ -126,7 +126,7 @@ function inspectFromGenerations(gens, { now, staleMs, hardStaleMs }) {
     return { held: !stale, lock: null, stale };
   }
   // A lock with a recorded pid: stale only when aged AND the owner is dead.
-  // NO liveness override at any age (Hale round 3): a suspended-then-revived
+  // NO liveness override at any age: a suspended-then-revived
   // owner past any ceiling would overlap its superseder. A readable lock with
   // no usable pid falls back to the hard ceiling.
   const stale = typeof lock.pid === 'number'
@@ -189,7 +189,7 @@ export function acquireFileLock(lockPath, {
   mkdirSync(dirname(lockPath), { recursive: true });
   const nonce = newNonce();
 
-  // K12 (Hale's audit, 2026-07-16; re-audited 2026-07-19): the original code
+  // K12: the original code
   // read maxN from ONE listGenerations() call, then computed `held` from a
   // SECOND, independent listGenerations() read buried inside inspectFileLock
   // (via currentLockFile). Real I/O (statSync + readJson + a pidAlive syscall)
@@ -281,7 +281,7 @@ export function acquireFileLock(lockPath, {
 export function releaseFileLock(lockPath, nonce, { verify = null, force = false } = {}) {
   const gens = listGenerations(lockPath);
   if (force) {
-    // The operator recovery path must not lie either (Hale round 5): a removal
+    // The operator recovery path must not lie either: a removal
     // that fails for any reason other than already-gone reports failure, naming
     // the artifact and cause — "lock released" while the lock survives is worse
     // than the stuck lock itself.
@@ -342,7 +342,7 @@ export function withFileLock(lockPath, fn, {
     }
     sleepSync(retryDelayMs);
   }
-  // K12 (Hale's audit, 2026-07-16): this used to be `try { return fn(); }
+  // K12: this used to be `try { return fn(); }
   // finally { releaseFileLock(...); }` — releaseFileLock's return value was
   // discarded entirely. releaseFileLock already does the work of honestly
   // reporting a real failure ({released:false, reason, error} — EPERM/EACCES/

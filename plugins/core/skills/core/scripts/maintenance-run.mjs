@@ -1,5 +1,5 @@
 /**
- * maintenance-run.mjs — narrated, cadence-ledgered mechanical memory maintenance (DC-110).
+ * maintenance-run.mjs — narrated, cadence-ledgered mechanical memory maintenance.
  *
  * The mechanical half of memory upkeep, separated from the judgment half (graduation,
  * retire calls) that stays in /process-memory. Runs the cheap deterministic ops —
@@ -115,7 +115,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
       } catch { /* best-effort: a stamp we can't compute never blocks the regen itself */ }
 
       const stampOutcome = stampFiles(root, stampEntries, { now, home });
-      // Truthful stamp-failure surfacing (Hale's point 6): the indexes wrote
+      // Truthful stamp-failure surfacing: the indexes wrote
       // but their attribution stamp didn't. These are machine-generated files
       // with no human region, so it's lower-stakes than a mixed-ownership
       // write — but still report it rather than claim a clean maintenance run.
@@ -220,7 +220,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // is stale (corpus growth / session age / no round yet), emit ONE narrated
   // note that fresh-round authoring is due — the authoring itself stays a real
   // blind subagent step the protocol schedules, never run from here. The
-  // weekly hard cap (DC-129) lives inside the assessment and is stamped when
+  // weekly hard cap lives inside the assessment and is stamped when
   // the trigger fires, so a repeat pass inside the cap stays silent.
   if (apply) {
     try {

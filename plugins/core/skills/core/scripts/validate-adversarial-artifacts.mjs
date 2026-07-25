@@ -106,7 +106,7 @@ export function validateAdversarialArtifacts({ initialFrames = [], persuasionLog
   const persuasion = validateJsonl(persuasionLog, validatePersuasionLogLine);
   const mind = validateJsonl(mindChanges, validateMindChangeLine);
 
-  // Cross-artifact integrity (Hale): logs cannot name participants who never framed.
+  // Cross-artifact integrity: logs cannot name participants who never framed.
   // Only checkable when frames are present. 'self' is exempt in persuaded_by.
   const agents = framedAgents(initialFrames);
   if (agents.size > 0) {

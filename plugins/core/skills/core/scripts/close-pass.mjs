@@ -47,7 +47,7 @@ import { logHookEvent } from '../hooks/hook-log.mjs';
 // pass (claude -p re-reading a transcript) can take a couple of minutes.
 export const LOCK_STALE_MS = 10 * 60 * 1000;
 // Ceiling for locks whose owner can't be identified (unreadable payload, no pid). A lock with
-// a READABLE LIVE pid is never auto-superseded at ANY age (Hale round 3, 2026-07-15): a laptop
+// a READABLE LIVE pid is never auto-superseded at ANY age: a laptop
 // suspended mid-close revives past any ceiling and would overlap its superseder. The recycled-
 // pid strand this reopens (pidAlive→true forever → closes skip) is the accepted lesser failure:
 // detect reports in-progress, startup narrates it, and `close-pass.mjs release` is the remedy.
@@ -139,7 +139,7 @@ export function finishClose(store, { sessionId = null, status = 'closed', now = 
   if (sessionId) marker.session_id = sessionId;
   atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
   const release = releaseLock(store, { sessionId });
-  // Fail closed on a real release failure (Hale round 4): a permission/I/O error
+  // Fail closed on a real release failure: a permission/I/O error
   // used to be swallowed while the close reported success — the live lock then
   // blocked every future close silently. Record it ON the marker so detection
   // and forensics see it; callers get it in the return.
@@ -289,7 +289,7 @@ export function buildChildEnv(env = process.env) {
 }
 
 /**
- * The deterministic close envelope (DC-77): the marker lifecycle and mechanical maintenance are
+ * The deterministic close envelope: the marker lifecycle and mechanical maintenance are
  * plumbing, NOT left to the LLM's discretion (validation 2026-06-30 showed a headless agent
  * narrating "indexes regenerated" and "session closed" while writing neither the maintenance
  * ledger nor the marker). Sequence: begin (lock + in-progress marker) → runMaintenance (mechanical,
@@ -327,7 +327,7 @@ export function runClose(store, { now = new Date().toISOString(), spawnFinalize 
     finalizeOk = fin == null ? true : fin.ok !== false;
     let incompleteOps = [];
     if (finalizeOk) {
-      // Root fix (Hale, 2026-07-21): a clean process exit is not proof the child actually
+      // Root fix: a clean process exit is not proof the child actually
       // followed the finalize protocol. detectCloseState() catching this on a LATER read is
       // defense-in-depth, not disposition -- the function that DOES the certifying (this one)
       // must not stamp 'closed' / log 'close-complete' on a close that skipped its required

@@ -49,18 +49,39 @@ test('planted personal path in a skill file is caught', () => {
   });
 });
 
-test('planted agent name in shipped prose is caught, but not in a code comment', () => {
+test('planted agent name is caught in shipped prose AND in shipped code comments (2026-07-24 ruling)', () => {
   withTree(({ root, w }) => {
     w('plugins/core/skills/core/protocols/planted.md', "Per Hale's finding, this is fixed.\n");
-    w('plugins/core/skills/core/scripts/planted.mjs', "// Per Hale's finding — code comment, not scanned.\n");
+    w('plugins/core/skills/core/scripts/planted.mjs', "// Per Hale's finding — shipped code comment, scanned since the 2026-07-24 ruling.\n");
     const findings = scanTree({ root });
     assert.ok(
       findings.some((f) => f.pattern === 'agent-name-in-prose' && f.file.endsWith('planted.md')),
       'agent name in .md prose not caught',
     );
     assert.ok(
-      !findings.some((f) => f.file.endsWith('planted.mjs')),
-      'code-comment agent name should NOT be flagged (reported class, not auto-blocked)',
+      findings.some((f) => f.pattern === 'agent-name-in-prose' && f.file.endsWith('planted.mjs')),
+      'agent name in shipped plugins/ code comment not caught (no-dev-process-references ruling)',
+    );
+  });
+});
+
+test('planted DC-reference is caught on the product surface and CHANGELOG, not in tests/', () => {
+  withTree(({ root, w }) => {
+    w('plugins/core/skills/core/protocols/planted.md', 'Graduation links per DC-94a.\n');
+    w('CHANGELOG.md', '- Fixed per DC-114.\n');
+    w('tests/scripts/planted.test.mjs', '// ACCEPTANCE DC-116 item 3 — provenance traceability stays.\n');
+    const findings = scanTree({ root });
+    assert.ok(
+      findings.some((f) => f.pattern === 'dc-reference' && f.file.endsWith('planted.md')),
+      'DC-ref in shipped protocol prose not caught',
+    );
+    assert.ok(
+      findings.some((f) => f.pattern === 'dc-reference' && f.file === 'CHANGELOG.md'),
+      'DC-ref in CHANGELOG not caught',
+    );
+    assert.ok(
+      !findings.some((f) => f.pattern === 'dc-reference' && f.file.startsWith('tests/')),
+      'tests/ DC-refs are a flagged residual, not auto-blocked',
     );
   });
 });

@@ -63,7 +63,7 @@ export const CLASSIFIED_SCHEMA_VERSION = '1.0.0';
 // whose letters appeared anywhere read as "in context"). Proxy v2 is the current
 // word-boundary `containsTerm` + the MET-004 rule that PROJECT.md only counts as
 // in-context when this session's transcript shows it was actually read. Stamped on
-// every record (DC-94a) so the calibration layer can invalidate any label set cleared
+// every record so the calibration layer can invalidate any label set cleared
 // under the old proxy — same R-1 honesty guard the classifier_version match enforces.
 // The label-independence half stays Gate G4 (David vouches); this only versions the proxy.
 export const PROXY_VERSION = 2;
@@ -199,7 +199,7 @@ const _escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
  * Word-boundary containment over an already-lowercased blob. A bare `.includes` made any
  * substring (e.g. "opt-in" inside "adopt-inline") read as present; a token boundary that
- * tolerates the hyphen/colon characters in project ids (DC-99, references-topic) fixes that.
+ * tolerates the hyphen/colon characters in project ids (references-topic) fixes that.
  */
 export function containsTerm(blob, term) {
   const t = String(term || '').toLowerCase().trim();

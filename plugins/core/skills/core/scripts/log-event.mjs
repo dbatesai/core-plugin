@@ -89,7 +89,7 @@ export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
 /**
  * Capture gate for the Layer 2/3 metrics interpretation passes (spec §18).
  *
- * DEFAULT-ON, opt-out (DC-107, David 2026-06-04). The instrumented-memory thesis
+ * DEFAULT-ON, opt-out (David 2026-06-04). The instrumented-memory thesis
  * needs the corpus — under the old default-off the calibration gate starved
  * (CORE-on-CORE is too small to ever reach ~100 labeled turns), so the feedback
  * loop the system exists to close couldn't close. Capture stays LOCAL (no network
@@ -114,7 +114,7 @@ export function metricsEnabled({ project, env = process.env } = {}) {
       if (p && p.metrics_enabled === true) return true;   // per-workspace opt-in (explicit)
     } catch { /* fall through */ }
   }
-  return true; // default-ON (DC-107): instrument by default; opt out via env or workspace flag
+  return true; // default-ON: instrument by default; opt out via env or workspace flag
 }
 
 export function eventLogPath(projectDir, filename, { today } = {}) {

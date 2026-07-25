@@ -47,7 +47,7 @@ import { fileURLToPath } from 'node:url';
 // can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
   'retrieval-harness.mjs': {
-    reason: 'Offline Recall@K gold harness (DC-113 Tier-A T1; arms trimmed to model-free per DC-114) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the DC-115 measurement ceremony (Crest\'s shared harness is the BBLens twin). Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
+    reason: 'Offline Recall@K gold harness (DC-113 Tier-A T1; arms trimmed to model-free per DC-114) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the DC-115 measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
     allowlistDate: '2026-07-07',
     reviewBy: '2026-10-07',
   },
@@ -201,7 +201,7 @@ export function formatReport(r) {
     for (const s of r.orphanScripts) L.push(`  ✖ script  ${s}`);
     for (const p of r.orphanProtocols) L.push(`  ✖ protocol ${p} — not in the SKILL.md protocol index, so it never loads`);
   } else {
-    // Scope-honest closing line (Hale audit e1490d4 finding 2): this detector
+    // Scope-honest closing line: this detector
     // proves FILE-level reachability minus the allowlist — it does not check
     // function-level wiring inside reachable files, and allowlisted entries are
     // deliberate exceptions, not reachable mechanisms.

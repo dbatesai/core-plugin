@@ -49,7 +49,7 @@ Required checks, stated because they are conditions, not habits (condition 3):
 - **Verify the artifact is private at publish time.** If the harness cannot confirm visibility, treat the publish as failed: say so, and do not hand the user a URL as if it were private.
 - **No silent sharing carryover on republish.** If this artifact URL existed before, its sharing setting may have been broadened since — re-verify privacy on every republish; never assume the previous state held.
 
-**Harness honesty (DC-75 — the cross-harness capability contract):** on a harness with no artifact surface (Codex today), say so by name and fall back to the local file: give the user the exact `--out` path and how to open it. Never fake a publish, never claim a hosted URL that does not exist.
+**Harness honesty (the cross-harness capability contract):** on a harness with no artifact surface (Codex today), say so by name and fall back to the local file: give the user the exact `--out` path and how to open it. Never fake a publish, never claim a hosted URL that does not exist.
 
 ## Step 4 — record the outcome (every consent decision leaves a record)
 

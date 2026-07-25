@@ -151,7 +151,7 @@ export function normalizeRetrievalEvent(event) {
 
 // Returns { record, written, write_outcome } — `written` is the authoritative
 // legacy-row delivery; callers that need delivery evidence must check it
-// rather than trusting the normalized record's existence (Hale, 2026-07-17).
+// rather than trusting the normalized record's existence.
 export function recordRetrievalEvent(projectDir, event, opts = {}) {
   const record = normalizeRetrievalEvent(event);
   const outcome = logEvent(projectDir, 'retrieval-log.jsonl', record, opts) || { legacy: false, otel: false, reason: 'no-outcome' };
@@ -205,7 +205,7 @@ export function main(argv) {
     workspaceId: args.flags.get('workspace-id'),
   });
   // Machine-readable delivery receipt: normalization succeeding is NOT delivery
-  // (Hale, 2026-07-17). Automation gets exit 1 + the outcome on a write failure.
+  //. Automation gets exit 1 + the outcome on a write failure.
   process.stdout.write(JSON.stringify({ written: out.written, write_outcome: out.write_outcome }) + '\n');
   return out.written ? 0 : 1;
 }

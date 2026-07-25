@@ -655,7 +655,7 @@ export async function renderMetricsArtifact(projectDir, {
     content_note: METRICS_ARTIFACT_CONTENT_NOTE,
     total_bytes: Buffer.byteLength(html),
     // Exact-byte identity of the generated page — the publish receipt copies
-    // this and binds the publish to these specific bytes (Hale item 7).
+    // this and binds the publish to these specific bytes.
     artifact_sha256: artifactContentDigest(html),
     out_path: outAbs,
     receipt_path: receiptPath,

@@ -152,7 +152,7 @@ export function readMessage(projectPath, file) {
   return readFileSync(full, 'utf8');
 }
 
-// K16 (Hale's audit, 2026-07-16): archiveMessage renamed straight onto
+// K16: archiveMessage renamed straight onto
 // `join(archiveDir, basename(file))` with no collision check — a bare
 // filesystem rename onto an existing path silently REPLACES it. The inbox's
 // own collision guard (atomicCreate, below) only scopes to the inbox
@@ -227,7 +227,7 @@ function realish() { return (process.hrtime.bigint().toString(36) + (_seq++).toS
  * potentially cross-project-sensitive inbound comms; unlike the memory store it must
  * never be committed/pushed. Idempotent append to <project>/.gitignore.
  */
-// Fail-closed (Hale's finding, 2026-07-21): the old version swallowed every
+// Fail-closed: the old version swallowed every
 // failure here — a `.gitignore` that couldn't be read OR written (e.g. it's a
 // directory, or the tree is read-only in a way that isn't a plain ENOENT on a
 // missing file) silently fell through, and postMessage() still wrote the

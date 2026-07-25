@@ -36,7 +36,7 @@ Multiple researchers investigate from different angles independently. A fact-che
 
 GAN tends to fit when the task is to harden a claim against challenge — code review, architectural validation, audit work. CAI tends to fit when the output must satisfy a known standard — compliance, accessibility, style consistency. MAD tends to fit when the task involves legitimate competing perspectives with no single right answer — strategic planning, risk assessment, architecture choice. The Karpathy loop tends to fit when the task is iterative refinement against a defined target — writing, code generation, polishing. Research Synthesis tends to fit when the task requires gathering and integrating information from multiple sources — literature review, competitive analysis, bug investigation needing root-cause discovery.
 
-These are tendencies, not assignments. The same task can warrant different dispositions at different phases, and a single phase can blend dispositions. Composition is the primary practice (per DC-76); the catalog is starting material, not a menu the lead agent reads off.
+These are tendencies, not assignments. The same task can warrant different dispositions at different phases, and a single phase can blend dispositions. Composition is the primary practice; the catalog is starting material, not a menu the lead agent reads off.
 
 ## Composition
 
@@ -46,7 +46,7 @@ Strategies combine. Two recognizable patterns:
 
 **Blending** runs two dispositions together within a single phase. A requirements analysis might run GAN (Generator proposes, Critic challenges) with CAI principles checked alongside every iteration ("every requirement must be testable", "no requirement contradicts an existing one"). One disposition is primary — it drives the interaction pattern — and the other adds constraints or checks. Two strategies is the practical ceiling on blending; more than that overwhelms.
 
-**Full compositional freedom.** Chaining and blending are recognizable patterns, not constraints. The lead agent composes whatever the task demands. Novel compositions are encouraged when justified, and surprise-persona composition (per DC-76) is a recommended default for high-stakes work — pulling in a lens the catalog doesn't anticipate often surfaces the issue the standard roster would miss. Record the composition reasoning so future sessions can see what worked.
+**Full compositional freedom.** Chaining and blending are recognizable patterns, not constraints. The lead agent composes whatever the task demands. Novel compositions are encouraged when justified, and surprise-persona composition is a recommended default for high-stakes work — pulling in a lens the catalog doesn't anticipate often surfaces the issue the standard roster would miss. Record the composition reasoning so future sessions can see what worked.
 
 When the catalog doesn't fit a task at all, design a new disposition. Name it with the same disposition / wants / costs / blind spot framing so it can compose with the rest, record the first execution's outcome, and add it to the catalog. The dispositions in this file are seed material, not a closed set.
 

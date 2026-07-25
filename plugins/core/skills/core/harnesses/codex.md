@@ -107,7 +107,7 @@ The verb writes only to the Codex recall surface. If the content is also project
 
 After writing, acknowledge the save to the user in plain voice — name the path.
 
-What belongs on this surface (per DC-86):
+What belongs on this surface:
 - Cross-session workflow lessons
 - User preferences for assistant behavior
 - Harness-specific empirical findings
@@ -121,7 +121,7 @@ What does NOT (also per DC-86):
 
 ## configure-project
 
-Codex has no startup-mandate hook the way Claude Code does, so a returning Codex session on a CORE folder confirms the install by running the `/configure-project` skill (or its script directly). It is the Codex-side counterpart to Claude Code's startup mandate: it resolves `CORE_ROOT`, confirms the manifests + skill dir + this adapter are present, runs the workspace fork-check in detect-only mode (per DC-104, a path already registered is a *returning* workspace regardless of which harness registered it — Codex opening a Claude-managed folder is not a fork), validates the `_memories/` store, reports configured-vs-session-live connector capability, runs the capability probe, and generates `AGENTS.md` from `CONTRACT.md` when one exists.
+Codex has no startup-mandate hook the way Claude Code does, so a returning Codex session on a CORE folder confirms the install by running the `/configure-project` skill (or its script directly). It is the Codex-side counterpart to Claude Code's startup mandate: it resolves `CORE_ROOT`, confirms the manifests + skill dir + this adapter are present, runs the workspace fork-check in detect-only mode (a path already registered is a *returning* workspace regardless of which harness registered it — Codex opening a Claude-managed folder is not a fork), validates the `_memories/` store, reports configured-vs-session-live connector capability, runs the capability probe, and generates `AGENTS.md` from `CONTRACT.md` when one exists.
 
 Run it as the setup step on a folder, or any time you want a "is this project wired correctly under Codex?" check:
 

@@ -233,7 +233,7 @@ export function checkSchema(units, memoriesDir, report) {
     if (tValidStr && tInvalidStr && isoRe.test(tValidStr) && isoRe.test(tInvalidStr) && tValidStr > tInvalidStr)
       report.push({ level: 'WARN', check: 't_valid-after-t_invalid', unit_id: uid, detail: `t_valid (${tValidStr}) is after t_invalid (${tInvalidStr}) — a fact can't stop being true before it started` });
 
-    // by-when validation — optional field for open-question units (DC-85 §2).
+    // by-when validation — optional field for open-question units.
     // Schema only validates well-formedness; staleness signaling lives in the startup protocol.
     const byWhen = u.fm['by-when'];
     if (byWhen !== undefined && byWhen !== null && byWhen !== '') {
@@ -337,7 +337,7 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     }
 
     const status = String(u.fm.status || '').toLowerCase();
-    // The immediate parent only (Hale's 2026-07-22 finding): a full-path
+    // The immediate parent only: a full-path
     // segment scan false-positives when the project itself sits under some
     // unrelated ancestor directory named "archive" -- that has nothing to do
     // with this unit store's own archive/ subdirectory.

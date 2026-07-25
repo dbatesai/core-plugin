@@ -35,7 +35,7 @@ node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs finish <project> --session 
 
 `begin` refusing the lock is not an error — it means another close (a startup catch-up, or a second exit hook) holds it; stop silently. An op you legitimately skip as not-owed gets `--status skipped`; a failure gets `--status failed --note "..."` so startup re-owes it.
 
-**Marker ownership is the one plumbing difference (`CORE_CLOSE_ENVELOPE=1`).** When the exit hook spawned you, the deterministic runner (`close-pass.mjs run`) owns the envelope: it already did `begin` (lock + in-progress marker) and the mechanical `maintenance-run` before you started, and it stamps `finish` when you return — so the `closed` marker and indexes are guaranteed even if you do nothing. This is deliberate (DC-77): validation 2026-06-30 caught a headless agent narrating "session closed" while writing no marker. So in envelope mode: skip `begin`, `finish`, and `maintenance-run` (the runner owns those — the marker already shows `maintenance-run` recorded), but **record each judgment op you complete exactly as in a manual run** (`close-pass.mjs record <project> --op <op> --status done`). That's safe and wanted: the runner waits for you synchronously, so your records land in the marker before its `finish` — and the per-op trail is what makes a crashed headless close resumable instead of opaque. In interactive mode (no envelope var), you own the full `begin` → record → `finish` sequence and run `maintenance-run` yourself at Step 2.3. Either way the marker ends up telling the same story: same ops, same records, different hands on the bookends.
+**Marker ownership is the one plumbing difference (`CORE_CLOSE_ENVELOPE=1`).** When the exit hook spawned you, the deterministic runner (`close-pass.mjs run`) owns the envelope: it already did `begin` (lock + in-progress marker) and the mechanical `maintenance-run` before you started, and it stamps `finish` when you return — so the `closed` marker and indexes are guaranteed even if you do nothing. This is deliberate: validation 2026-06-30 caught a headless agent narrating "session closed" while writing no marker. So in envelope mode: skip `begin`, `finish`, and `maintenance-run` (the runner owns those — the marker already shows `maintenance-run` recorded), but **record each judgment op you complete exactly as in a manual run** (`close-pass.mjs record <project> --op <op> --status done`). That's safe and wanted: the runner waits for you synchronously, so your records land in the marker before its `finish` — and the per-op trail is what makes a crashed headless close resumable instead of opaque. In interactive mode (no envelope var), you own the full `begin` → record → `finish` sequence and run `maintenance-run` yourself at Step 2.3. Either way the marker ends up telling the same story: same ops, same records, different hands on the bookends.
 
 **The control-surface rule — every PROJECT.md write is edit-gated (spec §7).** Before any render (Step 2.4), hot-section (Step 2.6), or §Moves/§State mutation (Steps 3.1–3.3), run the executable lifecycle detector (the 2026-07-22 boundary fix), which classifies PROJECT.md and every unit against the last CORE baseline:
 
@@ -80,7 +80,7 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 2. **Update touched units.** For every unit you wrote to during the session, verify frontmatter — `updated:` timestamp, `last_accessed:`, `access_count:`, edges. Make sure inverse edges are set on `supersedes` / `depends-on` / `conflicts-with`.
 
-3. **Run mechanical maintenance (DC-110).** Run the consolidated mechanical pass — it regenerates both indexes + the summary index, cleans cloud-sync ghost duplicates, and checks the PROJECT.md cap, all signature-gated (cheap on an unchanged store) and recorded in the cadence ledger:
+3. **Run mechanical maintenance.** Run the consolidated mechanical pass — it regenerates both indexes + the summary index, cleans cloud-sync ghost duplicates, and checks the PROJECT.md cap, all signature-gated (cheap on an unchanged store) and recorded in the cadence ledger:
 
    ```bash
    node ${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs <project>
@@ -92,7 +92,7 @@ Project state has been updating continuously. Finalize is when you verify the re
 
 5. **Render-and-accept — incremental gate (spec §7, kept not deleted).** The gate fires only when a render *materially changed* §State or §Moves (what the user actually reads); a silent pass otherwise — don't make the user re-accept an unchanged surface. When it fires: present the draft (or the preserved-existing PROJECT.md per the skip rule above). User accepts (Mode A continues) or edits (Mode B-ish — edits become ground truth, propagate back to units, anti-resurrection fires for removals). Write the accepted PROJECT.md to disk. **Headless mode:** no human to accept — write the render only where edit-detection cleared, and if §State/§Moves materially changed, leave a `render-pending-accept` flag (in `~/.core/workspaces/<id>/`) so the next startup surfaces the material change for the user's accept rather than declaring it canonical. Record op `render-project-md`.
 
-6. **Refresh the hot section (DC-85 Phase 1a).** After the accepted PROJECT.md lands, refresh the hot tier atop it. This captures the new state the user just left — the session's actual outcome, not the state at session start. Steps:
+6. **Refresh the hot section.** After the accepted PROJECT.md lands, refresh the hot tier atop it. This captures the new state the user just left — the session's actual outcome, not the state at session start. Steps:
    - Call `node ${CORE_ROOT}/skills/core/scripts/hot-section.mjs candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>...` with the session-intent topics from this session.
    - Compose 5-7 lines of plain prose blending priority candidates (stable structural heft) and session-level awareness (what closed, what's still open, what's next). Usually 1-3 items per spec §1.1; no bold-lead-in paragraphs unless they earn their weight.
    - Write the composed prose to `~/.core/workspaces/<id>/hot-section-draft.md` with the file-write tool (never as a bare `--text` shell argument — unit-derived prose carries quotes and backticks), then call `node ${CORE_ROOT}/skills/core/scripts/hot-section.mjs apply <project> --file ~/.core/workspaces/<id>/hot-section-draft.md` to land it.
@@ -114,19 +114,19 @@ Walk the unit store and run the hygiene operations from `protocols/hygiene.md`, 
 
 Sub-steps 3.1–3.7 change the store; 3.8 onward are read-and-report passes — except the validity stamp in 3.14 and the graph decoration in 3.17, both of which write and both of which get their own failure-handling note above/below rather than the generic read-and-report one. A failure in a read-and-report pass costs visibility, not data. Every skipped or failed sub-step gets named in the Step 6 closing declaration.
 
-### 3.1 Demote closed §Moves bullets (DC-85 Phase 1b)
+### 3.1 Demote closed §Moves bullets
 
 Run `node ${CORE_ROOT}/skills/core/scripts/demote-moves.mjs <project>` before `compact-project.mjs`. Auto-applies. A completed `[x]` bullet is **done** — it moves to `PROJECT-ARCHIVE.md §Moves` (date-stamped subsection, one-line stub left behind) on **checkbox + age**, not on its cited units' status. Age comes from the most-recent non-future date in the bullet text (the completion proxy — citation `(…)`, backtick, wikilink, and obs-id dates are stripped first), falling back to cited-unit dates only when the bullet carries no date. Kept when no age is provable (`no-age-signal`) or age < 30 days (`too-recent`); already-archived stubs are never re-demoted (`already-stubbed`). `--strict` restores the old conservative gate (require all cited units terminal). A large first batch (≥20) is **held** — nothing written, candidates surfaced — until you re-run with `--apply-large-batch`, so a bulk migration of PROJECT.md gets a look. Event emission to `_sessions/<date>/hygiene-log.jsonl` (`kind: demote-moves`). Narrate "demoted N items" only if N > 0; if a batch is held, say so and surface the count.
 
 *On failure:* atomic write — nothing landed. Narrate and continue to 3.2; PROJECT.md keeps its pre-run content.
 
-### 3.2 Tighten PROJECT.md to soft target (DC-85 Phase 1b)
+### 3.2 Tighten PROJECT.md to soft target
 
 After demote-moves, run `node ${CORE_ROOT}/skills/core/scripts/compact-project.mjs <project>` to compact §Decisions stubs. Emits `compact-project` event with section-size breakdown; if still over the 70KB soft target, emits `project-md-over-cap` and a stderr warning. The agent narrates the warning in plain voice; §State narrative demotion (3.3, below) handles the §State half of what compact-project + demote-moves leave behind.
 
 *On failure:* atomic write — nothing landed. Narrate and continue to 3.3.
 
-### 3.3 Demote stale §State narrative (DC-85 Phase 1c)
+### 3.3 Demote stale §State narrative
 
 Run `node ${CORE_ROOT}/skills/core/scripts/demote-state-narrative.mjs <project>` after `compact-project.mjs`. **Default is dry-run in v1** — surfaces a candidate list to stdout and a `demote-state` event to hygiene-log.jsonl without writing. A §State bullet is a demote candidate only when it carries a strict `*Backed by ...*` footer, ALL cited units are in terminal status (`resolved`/`archived`/`superseded`/`closed` — mirrors `demote-moves` for cross-script symmetry), AND the most-recent backing-unit `updated:` date is >60 days old. Conservative defaults match `demote-moves` — no citation, missing unit, or any-active-unit → keep. Older citation styles (`*DC-XX.*` shorthand) fall into no-citation by design per DC-93 §3. Pass `--apply` only when a §State-heavy non-CORE corpus has been exercised and produces clean candidate lists for multiple sessions; flip the default in a tracked decision then. Narrate "would demote N items" only if N > 0; surface large-batch warnings (>20 candidates) in plain voice.
 
@@ -162,7 +162,7 @@ Check `IMPROVEMENT_LOG.md` by name first — a generic "any synthesis file" swee
 wc -c "<project>/IMPROVEMENT_LOG.md"
 ```
 
-If it's over ~66KB, act now: IMPROVEMENT_LOG has a count-based rotation pattern (DC-42) that waits for `/finalize` discretion — `/process-memory` only surfaces the recommendation, and this is the step where the discretion actually runs. Propose the rotation to the user; don't carry the recommendation forward another session. Skip silently when the project has no `IMPROVEMENT_LOG.md`.
+If it's over ~66KB, act now: IMPROVEMENT_LOG has a count-based rotation pattern that waits for `/finalize` discretion — `/process-memory` only surfaces the recommendation, and this is the step where the discretion actually runs. Propose the rotation to the user; don't carry the recommendation forward another session. Skip silently when the project has no `IMPROVEMENT_LOG.md`.
 
 Then the general sweep: if any other synthesis file is over the Read-tool threshold, follow the graduation pattern in `protocols/hygiene.md`.
 

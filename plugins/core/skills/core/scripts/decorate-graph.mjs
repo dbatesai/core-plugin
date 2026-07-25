@@ -264,7 +264,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     }
 
     if (!dryRun) {
-      // Stale-byte refusal (Hale's concurrency finding): the file lock this
+      // Stale-byte refusal: the file lock this
       // script runs under is private to decorate-graph, so it doesn't
       // serialize against a hygiene pass or a hand edit landing between the
       // snapshot read and this write. Re-read right before writing and
@@ -292,7 +292,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     changed.push(u.path);
   }
 
-  // Truthful stamp-failure surfacing (Hale's point 6): the unit files landed
+  // Truthful stamp-failure surfacing: the unit files landed
   // on disk; if their authorship stamp didn't, report attribution-unknown so
   // the caller surfaces it, rather than reporting a clean decoration.
   let stampOutcome = { stamped: true };
@@ -353,7 +353,7 @@ function main(argv) {
   }
 
   // A unit whose human-authored region already diverged from the last known
-  // baseline (Hale's authorship-laundering finding, 2026-07-22) is a real,
+  // baseline is a real,
   // user-visible signal — not a silent skip. Printing it alongside refusals
   // and treating it as exit-nonzero keeps the same "never claim quiet
   // success while something needs a look" discipline as the refused-file path.
@@ -362,7 +362,7 @@ function main(argv) {
     for (const r of result.needs_reconciliation) process.stderr.write(`  ${r.path}: ${r.classification}\n`);
   }
 
-  // Attribution failure (Hale's point 6): files wrote but a baseline stamp
+  // Attribution failure: files wrote but a baseline stamp
   // didn't land. Never report clean success over an unknown-authorship state.
   const attributionFailed = result.attribution && result.attribution.stamped === false;
   if (attributionFailed) {

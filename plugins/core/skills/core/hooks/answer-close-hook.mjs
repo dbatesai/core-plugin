@@ -91,7 +91,7 @@ export function main() {
   const store = payload.cwd || process.cwd();
   if (!existsSync(store)) return receipt('skip', 'no-pending', { cwd: store });
 
-  // Explicit, never inferred (Hale audit, 2026-07-17 fresh round): the entry
+  // Explicit, never inferred: the entry
   // wrapper sets CORE_HOOK_HARNESS before calling main(). Default to
   // 'claude-code' when unset — this file's OWN direct hooks.json registration
   // never sets it, so existing Claude Code installs keep working unchanged.

@@ -2,7 +2,7 @@
  * state-cache.mjs — shared file-write-attribution primitives for the
  * edit-detection state cache.
  *
- * Extracted 2026-07-22 (Hale's finding): `hot-section.mjs` was the only
+ * Extracted 2026-07-22: `hot-section.mjs` was the only
  * script that stamped `last_written_by` into the state cache in code — the
  * lock-and-write logic lived inline in its `recordProjectMdWrite`.
  * `decorate-graph.mjs` needed the identical primitive (a script rewrites a
@@ -79,7 +79,7 @@ export function readProjectCache(projectDir) {
  * residual global cache under its lock. The cache write must never THROW —
  * the caller's real content write has already landed by the time this runs,
  * so a failure here must not blow up the caller — but it must NOT be swallowed
- * silently either (Hale's point 6, 2026-07-22): a content write that succeeds
+ * silently either: a content write that succeeds
  * while the baseline stamp fails means the file's on-disk bytes and its
  * recorded authorship have diverged. Reported, not hidden.
  *
@@ -117,7 +117,7 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
   // 2026-07-22 — 29/40 entries survived an unlocked 40-concurrent-process
   // stamp probe). A lock-acquire or cache-write failure never THROWS into the
   // caller (the underlying content write already happened), but it IS now
-  // reported truthfully instead of silently swallowed (Hale's point 6).
+  // reported truthfully instead of silently swallowed.
   let stampOutcome = { stamped: true };
   try {
     mkdirSync(dirname(cachePath), { recursive: true });
@@ -166,7 +166,7 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
 }
 
 /** Convenience single-file wrapper around stampFiles. Returns the same
- *  truthful outcome (Hale's point 6). */
+ *  truthful outcome. */
 export function stampFile(projectDir, path, hash, lastWrittenBy, { now, home, extra } = {}) {
   return stampFiles(projectDir, [{ path, hash, lastWrittenBy, extra }], { now, home });
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * retrieve-context-hook.mjs — per-turn retrieval injection (DC-94a, Gate G2).
+ * retrieve-context-hook.mjs — per-turn retrieval injection (Gate G2).
  *
  * A UserPromptSubmit hook entry. When enabled, it runs the deterministic retriever
  * (retrieve-context.mjs) over the incoming user prompt and prints the top-3 matching
@@ -14,7 +14,7 @@
  * user would enable — the north-star ("never fail to retrieve") is only served if it's
  * actually live, and only then can the metrics layer measure whether injection helps.
  * A zero-hit lexical result injects a bounded Tier 3 directive that tells the active model
- * to inspect every exhaustive reasoning shard. Known limit (DC-111): when lexical matching
+ * to inspect every exhaustive reasoning shard. Known limit: when lexical matching
  * returns topical-but-irrelevant context, only the active model can judge insufficiency and
  * follow the same Tier 3 protocol; the model-free hook cannot decide semantic relevance.
  * To opt out:
@@ -86,7 +86,7 @@ const PRODUCER_VERSION = String(PRODUCER_MANIFEST.version || 'unknown');
 // docs/specs/2026-07-18-self-identifying-build-sha.md.
 const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 
-// Typed operational receipt (Hale minimal path, 2026-07-17): ONE terminal
+// Typed operational receipt: ONE terminal
 // hook-log row per eligible invocation — early exits included — on the SHARED
 // {hook, action, reason} contract (never a second dialect like `kind:`).
 // Closed vocabularies; an unknown code is coerced to failed/pipeline-error
@@ -95,7 +95,7 @@ export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
 export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed'];
 
 // CORE_REASONING_ARM (2026-07-19): a test-only control for the preregistered
-// three-arm efficacy pilot (Hale + Antigravity + Keel convergence). 'automatic'
+// three-arm efficacy pilot. 'automatic'
 // is the unchanged shipped default -- the directive fires only on a true Tier 1
 // zero-hit, exactly as before this existed. 'deterministic-only' and 'always-on'
 // exist ONLY so the pilot can force a real, distinguishable behavioral
@@ -174,7 +174,7 @@ export async function main() {
     // gets caught at all). Same pattern as CORE_FILELOCK_NO_LINK: an explicit,
     // self-documenting test seam, never read in normal operation.
     if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
-    // Resolved INSIDE this try (Hale catch, 2026-07-19): a throw here used to
+    // Resolved INSIDE this try: a throw here used to
     // land outside every try/catch in this function, so it escaped all the
     // way to the outer main().catch(() => process.exit(0)) with no receipt()
     // call at all -- exit 0 was correct (never block the turn) but the
@@ -199,7 +199,7 @@ export async function main() {
   let turnCaptureStatus = null; // closed status code for the terminal receipt (captured/disabled/capture-failed)
   let reasoningDirective = '';
   // Built unconditionally, BEFORE the metrics-gated block below and BEFORE the
-  // event record inside it (second Hale catch, 2026-07-19): the first fix
+  // event record inside it: the first fix
   // moved this construction inside the `metricsEnabled()` branch so the
   // recorded directive_fired field could reflect the real outcome -- but that
   // put actual DELIVERED CONTENT behind a telemetry-only gate. With
@@ -240,7 +240,7 @@ export async function main() {
   // Canonical per-turn product event — always on when metrics capture is on
   // (DC-107 default-ON, opt-out). Fail-open: a telemetry failure must never
   // block the user's turn — but it must be OBSERVABLE, so failures land in the
-  // hook log instead of vanishing (Hale live-hook audit, 2026-07-17).
+  // hook log instead of vanishing.
   //
   // Every field is an OBSERVED value from this run's stages — never a constant,
   // never a reinterpreted field. In particular: the ladder tier of a hit is
@@ -255,7 +255,7 @@ export async function main() {
     if (!metricsEnabled({ project: store })) {
       telemetryReason = 'metrics-opt-out'; // hook-log is the authoritative receipt; no retrieval row is faked
     } else {
-      // Ladder semantics (Hale, round 2 of this correction): the shipped product
+      // Ladder semantics: the shipped product
       // retriever — INCLUDING its built-in one-hop edge expansion — is Tier 1 by
       // the protocol's own definition; Tier 2 is the separate 2–3-hop graph-walk
       // path, which this pipeline never runs. So every event from this mechanism
@@ -282,11 +282,11 @@ export async function main() {
       // outcome stays 'unknown' until calibrated — and the pending record is
       // persisted only after the retrieval row write is proven below.
       const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
-      // Harness resolution (Hale audit, 2026-07-17 fresh round): CORE_HOOK_HARNESS
+      // Harness resolution: CORE_HOOK_HARNESS
       // is the EXPLICIT, authoritative signal — set by the harness-specific
       // wrapper entry file (retrieve-context-hook-codex.mjs sets it to 'codex'
       // before calling main()), never inferred. The ambient env-var fallback
-      // below is undocumented Codex behavior (Hale's own words) — kept ONLY
+      // below is undocumented Codex behavior — kept ONLY
       // for direct/manual invocation that bypasses the wrapper, never trusted
       // as the primary signal.
       const harness = process.env.CORE_HOOK_HARNESS === 'codex' ? 'codex'
@@ -351,7 +351,7 @@ export async function main() {
         candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
         selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
-        // Gated on the env var being EXPLICITLY set (Hale catch, 2026-07-19),
+        // Gated on the env var being EXPLICITLY set,
         // not on the resolved arm differing from 'automatic'. An ordinary
         // user who never touches CORE_REASONING_ARM still gets zero new
         // fields -- byte-identical to before this existed. But the pilot's

@@ -24,7 +24,7 @@
  *   t_invalid  when the fact stopped being true. Empty while the fact holds;
  *              stamped by supersession (B supersedes A ⇒ A.t_invalid = B.t_valid).
  *
- * This is additive and source-agnostic (DC-102): CORE populates from its simple
+ * This is additive and source-agnostic: CORE populates from its simple
  * sources (conversation + local files, via the created-default + supersession),
  * an overlay populates t_valid from its richer registered sources via the
  * `world-time-policy` registration field. Same dimension, same readers.
@@ -303,7 +303,7 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
     // A point-in-time reconstruction is inherently a historical query -- it
     // must see units the archive action has physically relocated to
     // archive/, or asOf() silently loses everything valid in the past that's
-    // since been archived (Hale's 2026-07-21 finding). --stamp/--metrics
+    // since been archived. --stamp/--metrics
     // above stay on the active-only pool; only --as-of needs the merge.
     const ids = asOf(units.concat(iterArchivedUnits(memoriesDir)), date);
     process.stdout.write(`bitemporal: ${ids.length} unit(s) valid as of ${date}\n`);

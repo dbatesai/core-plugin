@@ -42,7 +42,7 @@ function resolveTarget(target, memoriesDir, includeObservations = false, include
   if (existsSync(c1)) return c1;
   const c2 = join(memoriesDir, t);
   if (existsSync(c2)) return c2;
-  // Archive is out of scope for a default walk (Hale's 2026-07-22 finding):
+  // Archive is out of scope for a default walk:
   // an archived unit can carry status:active with no t_invalid, so neither
   // downstream suppression check (isInvalidated / isActiveStatus) would ever
   // catch it -- resolving the path at all is what has to be gated, not just

@@ -3,7 +3,7 @@
  *
  * os.homedir() follows $HOME/$USERPROFILE, which a project-controlled hook
  * environment can point at an attacker directory carrying its own
- * .claude/settings.json (Hale's demonstrated bypass, 2026-07-11 re-review §5).
+ *.claude/settings.json.
  * os.userInfo() reads the OS account database (passwd on POSIX, the profile
  * registry on Windows) and ignores the environment entirely.
  *

@@ -437,7 +437,7 @@ export function iterUnits(memoriesDir) {
 
 /**
  * iterArchivedUnits — the ONE archive-aware companion to iterUnits, for the
- * explicit-history modes only (Hale's 2026-07-21 finding). Archiving a unit
+ * explicit-history modes only. Archiving a unit
  * (a separate, independent action from retiring it — see hygiene.md) is what
  * physically relocates it to `archive/`, but iterUnits is top-level-only by
  * design (default retrieval must stay non-recursive, per

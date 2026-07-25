@@ -178,7 +178,7 @@ function ageInDays(updatedIso, todayIso) {
  * proxy for a closed item ("shipped 2026-05-27"). Returns null when the bullet
  * carries no usable date. Dates that aren't completion dates are stripped first:
  *   - `[[wikilink]]` targets and bare obs-ids (matched by extractBackingUnitRefs)
- *   - `(parenthetical citations)` like `(DC-106, 2026-06-01)` — this project's
+ *   - `(parenthetical citations)` like `(2026-06-01)` — this project's
  *     normal citation style; the date is a unit's date, not the work's
  *   - `\`backtick code spans\`` — version strings, the stub's own pointer date
  * Future dates (> today) are ignored: a planning/target date is not a completion
@@ -192,7 +192,7 @@ export function extractMostRecentDate(text, today = null) {
     .replace(/\[\[[^\]]*\]\]/g, ' ')
     .replace(/\bobs-[a-z0-9-]*\d{4}-\d{2}-\d{2}\b/gi, ' ')
     .replace(/`[^`]*`/g, ' ')        // backtick code spans (version strings, stub pointer date)
-    .replace(/\([^)]*\)/g, ' ');     // parenthetical citations: (DC-106, 2026-06-01)
+.replace(/\([^)]*\)/g, ' ');     // parenthetical citations: (2026-06-01)
   const dates = [];
   for (const m of cleaned.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
     const [iso, y, mo, d] = m;
@@ -441,7 +441,7 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   const newText = text.slice(0, beforeMoves) + newMoves + text.slice(afterMoves);
 
   // Shared PROJECT.md writer lock + edit gate + live-preimage CAS + re-stamp
-  // (Hale's points 2/6/7, 2026-07-22). Two reasons this writer now stamps and
+  //. Two reasons this writer now stamps and
   // guards like compact-project/hot-section, where before it did neither:
   //   1. Re-stamp is REQUIRED, not optional. The baseline outside_hash covers
   //      everything outside the hot block, so a §Moves rewrite here invalidates

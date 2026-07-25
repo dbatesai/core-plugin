@@ -96,7 +96,7 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
   // backslash path (C:\Users\david) while the bucket literals below use
   // forward slashes, so the interpolated comparison string is mixed-separator
   // and matches nothing — every Windows path fell through to 'unknown', closing
-  // all mutation gates for Windows users (Meridian, 2026-05-31, issue #45).
+  // all mutation gates for Windows users.
   // Backslashes can't appear in a legitimate POSIX path, so normalizing to
   // forward slashes is safe on Mac/Linux and needs no platform fork.
   const r = pluginRoot.replace(/\\/g, '/');
@@ -237,7 +237,7 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
   // We deliberately do NOT re-point when the consuming harness's manifest is
   // ABSENT from the resolved root — that's a genuine wrong-plugin split-brain
   // (we walked to a plugin that doesn't serve the running harness) and it must
-  // still DEGRADE. (Meridian Finding 2, 2026-05-31, issue #45.)
+  // still DEGRADE.
   if (consuming.harness !== 'unknown' && consuming.harness !== found.harness) {
     const consumingAnchor = PLUGIN_ROOT_ANCHORS.find(a => a.harness === consuming.harness);
     const consumingManifest = consumingAnchor && join(found.plugin_root, consumingAnchor.file);

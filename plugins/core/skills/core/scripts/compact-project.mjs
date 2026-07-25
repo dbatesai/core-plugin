@@ -364,7 +364,7 @@ export function main(argv) {
   console.log(`PROJECT.md: ${before} → ${after} bytes (${delta > 0 ? '-' : '+'}${Math.abs(delta)} = ${pct}%)`);
   console.log(`§Decisions: ${stats.compacted} compacted, ${stats.skipped} already-stub, ${stats.missing} no-unit`);
 
-  // Truthful stamp-failure surfacing (Hale's point 6): PROJECT.md compacted on
+  // Truthful stamp-failure surfacing: PROJECT.md compacted on
   // disk but its baseline stamp didn't land. Say so — next lifecycle pass will
   // read the compacted file as an unreconciled edit until it's re-stamped.
   if (attributionFailed) {

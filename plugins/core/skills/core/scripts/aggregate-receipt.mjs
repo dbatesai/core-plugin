@@ -114,7 +114,7 @@ export function refusalScan(receipt, forbidden) {
   return true;
 }
 
-// ---------- blocker 1: closed enums + scalar shapes (Hale verdict §1) ----------
+// ---------- blocker 1: closed enums + scalar shapes ----------
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const COMMIT_RE = /^[0-9a-f]{7,40}$/;
@@ -122,7 +122,7 @@ const VERSION_RE = /^[0-9A-Za-z.+-]{1,40}$/;
 const SCHEMA_RE = /^[a-z0-9-]+\/\d+$/;           // e.g. train-a-aggregate-receipt/1
 const ARM_RE = /^[a-z][a-z0-9_]{0,24}$/;          // lexical | ranking | context3 | bm25 | future arms
 const POLICY_RE = /^P\d(?:_w[0-9.]{1,6})?$/;      // P0..P2, P3_w0.8 …
-// K09 (Hale's audit, 2026-07-16, re-audited 2026-07-19): this used to be a pure
+// K09: this used to be a pure
 // SHAPE check (lowercase, <=24 chars), so any arbitrary lowercase word passed —
 // including a project-specific id-naming prefix, which is exactly what leaked
 // before the root-cause fix in retrieval-harness.mjs's unitTypeMix (it now
@@ -289,7 +289,7 @@ function main(argv) {
     catch (e) { process.stderr.write(`cannot read sweep: ${e.message}\n`); return 2; }
   }
   // The freeze step injects the artifact identity here — the CONTENT-MANIFEST
-  // sha256 from artifact-identity.mjs, one meaning end to end (Hale round 7).
+  // sha256 from artifact-identity.mjs, one meaning end to end.
   // Shape validation still applies: a non-sha256 value refuses the export.
   if (artIdx >= 0) {
     report.manifest = report.manifest || {};

@@ -52,7 +52,7 @@ function manifestHash(entries) {
   const sorted = entries.sort((a, b) => (a.relpath < b.relpath ? -1 : a.relpath > b.relpath ? 1 : 0));
   const manifest = sorted.map(e => `${e.relpath}:${e.hash}`).join('\n');
   // entries ship in the result so a divergence between two exports can name the
-  // first differing file instead of just two unequal hashes (Hale round 8).
+  // first differing file instead of just two unequal hashes.
   return { content_manifest_sha256: sha256(manifest), file_count: sorted.length, entries: sorted };
 }
 
@@ -110,7 +110,7 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
   const oid = treeOid(repo, ref, subdir);
   const { content_manifest_sha256, file_count } = manifestFromGit(repo, ref, subdir);
   return {
-    mode: 'git', // K17 (Hale's audit, 2026-07-16): mode-blind — see directoryIdentity below
+    mode: 'git', // K17: mode-blind — see directoryIdentity below
     ref,
     subdir,
     tree_oid: oid,
@@ -128,7 +128,7 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
 }
 
 /**
- * K17 (Hale's audit, 2026-07-16; re-audited 2026-07-19): "mode-blind" — the
+ * K17: "mode-blind" — the
  * CLI's --dir output was a bare manifestHash() result with no field naming
  * which computation path produced it. The first fix added a `mode` field but
  * also embedded the canonical absolute local directory in `dir` and in

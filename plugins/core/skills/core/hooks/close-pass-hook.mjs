@@ -84,7 +84,7 @@ function main() {
     return 0;
   }
 
-  // Spawn the DETERMINISTIC close envelope (DC-77), not raw `claude -p`. `close-pass.mjs run`
+  // Spawn the DETERMINISTIC close envelope, not raw `claude -p`. `close-pass.mjs run`
   // guarantees the marker lifecycle (begin/finish lock + marker) and mechanical maintenance
   // around the LLM close — the reliability spine can't be skipped by agent discretion
   // (validation 2026-06-30 showed a headless agent narrating a close it never marked). Detached

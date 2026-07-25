@@ -5,7 +5,7 @@
  * instructions; per-harness CLAUDE.md / AGENTS.md are GENERATED from it.
  * This module holds what all three generators share — the parser, the schema check, the
  * harness render, and the deterministic provenance header — so generate-claude-md /
- * agents-md stay thin (DC-75: harness specifics are just the name + filename).
+ * agents-md stay thin (harness specifics are just the name + filename).
  *
  * The load-bearing property is DETERMINISM: the provenance `generated_at` is the
  * contract's `last_revised` (NOT wall-clock), and `contract_hash` is the sha256 of the
@@ -108,7 +108,7 @@ export function parseContract(contractPath) {
 export function parseOverrides(overridePath) {
   if (!overridePath || !existsSync(overridePath)) return { present: false, content: '', hash: 'none' };
   const raw = readFileSync(overridePath, 'utf8');
-  // Hash the RAW bytes (Hale review) — a whitespace-only edit still changes the file and
+  // Hash the RAW bytes — a whitespace-only edit still changes the file and
   // must change override_block_hash. content is trimmed only for clean appending.
   return { present: true, content: raw.trim(), hash: sha256(raw) };
 }
@@ -176,7 +176,7 @@ export async function generateForHarness({ harness, contractPath, outputPath, ov
   if (!contract.canonicalFor.includes(harness)) {
     fatal.push(`harness '${harness}' is not in canonical_for [${contract.canonicalFor.join(', ')}] — generating an unintended surface`);
   }
-  // Missing AND the literal 'unknown' are separate cases (Hale) — both make generated_at
+  // Missing AND the literal 'unknown' are separate cases — both make generated_at
   // non-deterministic and must fail the gate closed.
   if (!contract.frontmatter.last_revised || contract.frontmatter.last_revised === 'unknown') {
     fatal.push(`contract last_revised is ${contract.frontmatter.last_revised ? "'unknown'" : 'missing'} — generated_at is non-deterministic, so --check drift is unreliable; supply a real date before release`);

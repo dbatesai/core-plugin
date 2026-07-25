@@ -86,7 +86,7 @@ export const BROWSE_MANIFEST_SCHEMA_VERSION = '1.0.0';
 // metrics artifact generator became their second consumer (2026-07-22).
 export { PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor, recordPublishOutcome, recordRevocation };
 
-// Fixed sensitivity warning (Hale condition 2) — one string, stable across
+// Fixed sensitivity warning — one string, stable across
 // runs, so the skill can relay it verbatim and tests can assert it exactly.
 export const SENSITIVITY_WARNING =
   'SENSITIVITY: this file embeds the FULL BODIES of the memory units counted above — real project ' +
@@ -96,7 +96,7 @@ export const SENSITIVITY_WARNING =
   'has flagged sensitive, still needs an explicit go-ahead before it goes up.';
 
 /**
- * Truthful producer identity (Hale condition 6, 2026-07-22 HOLD correction 1):
+ * Truthful producer identity:
  * real git HEAD in a source checkout (tracked-file guarded), stamped manifest
  * identity in an installed tree, fail closed with neither. The implementation
  * lives in the shared artifact-provenance.mjs (extracted 2026-07-22 when the
@@ -644,7 +644,7 @@ export async function renderBrowseArtifact(projectDir, {
 
   // Fail closed on producer identity BEFORE reading the store or writing
   // anything: a page whose provenance cannot be established must never be
-  // rendered for publish (Hale condition 6 — no "unknown-sha" render).
+  // rendered for publish.
   const producer = producerIdentity();
   if (!producer.source_sha) {
     throw Object.assign(new Error(
@@ -702,7 +702,7 @@ export async function renderBrowseArtifact(projectDir, {
     excluded_by_topic_count: collected.excludedByTopic,
     total_bytes: Buffer.byteLength(html),
     // Exact-byte identity of the generated page — the publish receipt copies
-    // this and binds the publish to these specific bytes (Hale item 7).
+    // this and binds the publish to these specific bytes.
     artifact_sha256: artifactContentDigest(html),
     metrics_included: metrics.available,
     out_path: outAbs,
@@ -727,7 +727,7 @@ export async function renderBrowseArtifact(projectDir, {
 }
 
 // ============================================================
-// Post-publish receipt (Hale correction 2, 2026-07-22 HOLD) — separate from
+// Post-publish receipt — separate from
 // the preflight-generation receipt above. The generation receipt records what
 // was generated and offered; the publish receipt is the audit trail of what
 // actually happened at the consent/publish boundary — including declined and

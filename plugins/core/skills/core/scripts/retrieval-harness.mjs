@@ -1,5 +1,5 @@
 /**
- * retrieval-harness.mjs — offline Recall@K gold harness (DC-113, Tier A T1 / Gate 1+2).
+ * retrieval-harness.mjs — offline Recall@K gold harness (Tier A T1 / Gate 1+2).
  *
  * THE measurement instrument. Given a pre-registered gold set (queries → correct unit
  * ids + forbidden ids + difficulty rung), score each retrieval arm on the SAME store:
@@ -18,13 +18,13 @@
  *                 prepends title/topics so the vector carries the title signal)
  * Dense/union arms were removed with the ollama embedder per DC-114 (no local
  * models); dense measurement, if it returns, is a pinned-embedder ceremony arm
- * (DC-115), not shipped plugin code.
+ *, not shipped plugin code.
  * One ranking pass per arm: metrics, raw ranks (through the largest reported K),
  * and p50/p95 latency all come from the same observations. Every run emits a
  * provenance manifest: plugin version, source commit (when in a git checkout),
  * harness self-hash, gold sha256, content-derived corpus hash, arm params.
  *
- * Corpus-normalization (Crest's 2026-07-07 "retrieval is not corpus-portable" finding):
+ * Corpus-normalization:
  * every run prints store size, K-as-fraction-of-store, and the unit-type mix, and the
  * rung breakdown — so a cross-corpus reader can see the base-rate effects instead of
  * comparing raw Recall@K across differently-shaped stores. Compare a corpus to ITSELF
@@ -73,7 +73,7 @@ export function firstRelevantRank(ranked, expected) {
 // re-read of every unit AFTER the run's snapshot was minted. It now derives the
 // mix from an index object; runHarness passes its captured snapshot's index.
 //
-// K09 (Hale's audit, 2026-07-16): this used to derive the type key from the
+// K09: this used to derive the type key from the
 // unit ID's leading alpha run (id.match(/^([a-z]+)-/)) rather than the unit's
 // actual `type:` frontmatter field. A project's own id-naming convention is
 // project-specific vocabulary — a bespoke prefix leaks straight through this
@@ -99,7 +99,7 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
   // A5 strictness: the Recall@K instrument refuses an under-declared gold set and
   // an unclassifiable store the same way the tier sweep does — zero silent skips.
   validateGold(gold);
-  // Blocker 2 (Hale verdict §2): ONE immutable captured corpus — index AND body
+  // Blocker 2: ONE immutable captured corpus — index AND body
   // bytes — minted before any measurement; every arm and every policy consumes it.
   // No reader below touches live unit files after snapshot_id is computed, so a
   // store mutation mid-run cannot change what any number describes. An injected
@@ -113,7 +113,7 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     // FINAL product context — DELIVERED identities, not selection: routed through
     // buildFinalContextPack so the byte cap participates (Train A A4 — a hit
     // retrieveContext selects but the cap drops is NOT counted as delivered).
-    // Reported at K=3 ONLY (Hale close path §6): the delivered list is at most
+    // Reported at K=3 ONLY: the delivered list is at most
     // three items, so R@5/R@10/… on it would relabel R@3 as deeper recall.
     context3: { run: (q) => buildFinalContextPack(retrieveContext(q, store, { topN: 3, snapshot })).accepted.map(a => a.id), ks: [3] },
     bm25: { run: (q) => bm25Rank(q, store, { snapshot }) },              // summary+topics+body BM25 arm (not body-only — the loader prepends title/topics)
@@ -154,7 +154,7 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     const { execFileSync } = await import('node:child_process');
     sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dirname(fileURLToPath(import.meta.url)), encoding: 'utf8' }).trim();
   } catch { /* not a git checkout (packaged install) — stays null, never guessed */ }
-  // A5 (Crest correction #6): a receipt without hashes is not reproducible.
+  // A5: a receipt without hashes is not reproducible.
   // Product-function hashes cover the three modules the pipeline runs; the
   // built-artifact hash is null in a dev tree BY DESIGN (it names the packaged
   // archive; the packet's freeze step supplies it — never guessed here).
@@ -270,7 +270,7 @@ function renderText(out) {
 }
 
 /**
- * validateGold — completeness/shape gate before any measurement (Crest 2026-07-12 #5):
+ * validateGold — completeness/shape gate before any measurement:
  * declared query set present, no duplicate ids, expected/forbidden are arrays. Throws
  * loudly rather than silently skipping a malformed query.
  */
@@ -284,7 +284,7 @@ export function validateGold(gold) {
     if (!q.query || typeof q.query !== 'string' || !q.query.trim()) throw new Error(`${q.id}: missing query text`);
     if (q.expected !== undefined && !Array.isArray(q.expected)) throw new Error(`${q.id}: expected must be an array`);
     if (q.forbidden !== undefined && !Array.isArray(q.forbidden)) throw new Error(`${q.id}: forbidden must be an array`);
-    // A5 strictness (Crest correction #2): every query DECLARES its support — at
+    // A5 strictness: every query DECLARES its support — at
     // least one expected id, or an explicit no_answer:true. An empty expected with
     // no declaration is how a gold set silently shrinks its own denominator.
     const expected = q.expected || [];
@@ -299,7 +299,7 @@ export function validateGold(gold) {
       for (const v of vals) {
         if (typeof v !== 'string' || !v.trim()) throw new Error(`${q.id}: ${field} entries must be non-empty strings`);
       }
-      // Blocker-4 fail-closed (Hale verdict §4): duplicate supports double-count a
+      // Blocker-4 fail-closed: duplicate supports double-count a
       // hit and silently inflate recall's numerator — refuse, don't dedupe.
       if (new Set(vals).size !== vals.length) {
         throw new Error(`${q.id}: duplicate ids in ${field} — evaluator refuses (dedupe the gold set deliberately)`);
@@ -337,7 +337,7 @@ export const GOLD_RUNGS = new Set(['literal', 'category', 'value', 'cross-domain
 export function assertKnownTiers(index) {
   const VALID_TIERS = new Set(['canonical', 'observation']);
   for (const u of index.units) {
-    // Blocker-4 fail-closed (Hale verdict §4): a MISSING/empty tier must refuse
+    // Blocker-4 fail-closed: a MISSING/empty tier must refuse
     // like an unknown one — product code defaults missing tiers to canonical, so
     // an unmeasured unit would silently join the highest-authority class in every
     // tier-policy number. Absence is not a tier.
@@ -352,7 +352,7 @@ export function assertKnownTiers(index) {
 }
 
 /**
- * runTierPolicySweep — the CORRECTED tier-policy evaluator (Crest 2026-07-12).
+ * runTierPolicySweep — the CORRECTED tier-policy evaluator.
  *
  * Measures P0-P3 on the REAL final injected context by calling the imported product
  * function `retrieveContext(..., {tierPolicy})` — edge expansion, re-sort, topN cap
@@ -396,7 +396,7 @@ export function runTierPolicySweep(store, gold, { topN = 3, snapshot: injectedSn
     return { policy: label, r3: mean === null ? null : +mean.toFixed(3), n: recalls.length, forbidden3: forbidQ ? +(forbid / forbidQ).toFixed(3) : 0 };
   });
   // Counterfactual bands on P0 misses: RUN the policies, don't infer from rank.
-  // A5 (Crest correction #3): banding is per (query, gold) pair over ALL declared
+  // A5: banding is per (query, gold) pair over ALL declared
   // supports — first-support-only banding collapsed the multi-valued estimand
   // (recallAtK is fractional over all expected; the bands must match it).
   const bands = [];
@@ -450,7 +450,7 @@ async function main(argv) {
   if (jsonIdx >= 0) {
     const p = argv[jsonIdx + 1];
     // Full payload on purpose: gold + rawRanks + manifest are the evidence trail —
-    // a JSON report that strips them can't be independently re-scored (Hale 2026-07-11).
+    // a JSON report that strips them can't be independently re-scored.
     writeFileSync(p, JSON.stringify(out, null, 2));
     process.stdout.write(`\njson: ${p}\n`);
   }

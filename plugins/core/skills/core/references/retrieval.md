@@ -50,12 +50,12 @@ This returns a scored, hop-ordered candidate list. Read the top results. Fall ba
 
 **Edge types to follow:** All committed edge types (the DC-68 base set plus later additions — see `VALID_EDGE_TYPES` in `check-units.mjs`) are walkable in Tier 2. Body `[[wikilinks]]` are followed only at the seed step (one hop into the body), not transitively.
 
-#### Score-gated termination (DC-69)
+#### Score-gated termination
 
 When following an edge to a candidate unit:
 
 1. Read the candidate's frontmatter
-2. Compute the **R·S proxy** — recency times source-type weight — using `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs:scoreProxyRS(unit)` (DC-77 — priority logic ships with the plugin, not per-project)
+2. Compute the **R·S proxy** — recency times source-type weight — using `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs:scoreProxyRS(unit)` (priority logic ships with the plugin, not per-project)
 3. If R·S < **0.3**, prune this branch — do NOT continue walking from this candidate
 4. If R·S ≥ 0.3, the candidate enters the result set; recursion continues from this candidate
 
@@ -78,7 +78,7 @@ A branch terminates when ANY of these are true:
 
 ### Tier 3 — Reasoning escalation (shortlist first, subagent second)
 
-**Step 1 — reason over exhaustive bounded shards (DC-117, ratified 2026-07-15; scale repair 2026-07-17).** The per-turn hook automatically injects this escalation when Tier 1 returns no lexical context. When Tier 1 returns context that still does not answer the question, the active model must escalate here itself; a model-free hook cannot judge semantic sufficiency. Start at shard zero:
+**Step 1 — reason over exhaustive bounded shards (ratified 2026-07-15; scale repair 2026-07-17).** The per-turn hook automatically injects this escalation when Tier 1 returns no lexical context. When Tier 1 returns context that still does not answer the question, the active model must escalate here itself; a model-free hook cannot judge semantic sufficiency. Start at shard zero:
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/select-relevant-units.mjs" <project> "<the question>" --shard 0 --shard-size 80

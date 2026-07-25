@@ -7,7 +7,7 @@ Base directory for this skill: this `SKILL.md`'s directory.
 
 # `/configure-project`
 
-A project store is harness-agnostic (DC-104): Claude Code and Codex co-exist on one folder. This skill is the one-shot setup-and-health check that confirms a given harness is wired correctly against that shared store. It's the Codex-side counterpart to Claude Code's startup mandate — but it runs on either harness.
+A project store is harness-agnostic: Claude Code and Codex co-exist on one folder. This skill is the one-shot setup-and-health check that confirms a given harness is wired correctly against that shared store. It's the Codex-side counterpart to Claude Code's startup mandate — but it runs on either harness.
 
 It is **idempotent** and **report-only by default**. The only write it ever performs is generating `AGENTS.md`, and only when you pass `--apply` *and* a `CONTRACT.md` exists. Workspace identity is detected and reported, never mutated here (forking is `/core`'s job — startup performs it).
 

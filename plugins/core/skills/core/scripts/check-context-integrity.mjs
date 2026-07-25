@@ -1,5 +1,5 @@
 /**
- * check-context-integrity.mjs — does the agent know when it's blind? (DC-94a)
+ * check-context-integrity.mjs — does the agent know when it's blind?
  *
  * At bootstrap the agent loads MEMORY.md (capped by the harness injection budget) and
  * reads PROJECT.md (which can exceed one Read). When either gets truncated, the agent

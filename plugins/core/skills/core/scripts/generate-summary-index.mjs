@@ -9,7 +9,7 @@
  * it and never reconstruct `_memories/<id>.md`, which is wrong for nested units.
  * `tier` labels authority ('observation' for raw capture, 'canonical' otherwise) so
  * retrieval results never flatten raw observations into graduated truth unlabeled
- * (Hale 2026-07-11 §2). Tier is a label on every result; ranking policy between
+ *. Tier is a label on every result; ranking policy between
  * tiers is a ceremony question, decided on measurement, not hardcoded here.
  *
  * The shared compact index behind DC-94a retrieval (retrieve-context.mjs) and the
@@ -18,7 +18,7 @@
  * below is the ONE validating loader every consumer uses (freshness on every call —
  * a stale index resurrecting a retired unit is an anti-resurrection breach).
  *
- * Parser choice (DC-94a, deviates from the build plan on purpose): the plan named
+ * Parser choice (deviates from the build plan on purpose): the plan named
  * frontmatter-flat.mjs, but that flat parser silently DROPS multi-line `topics:` lists
  * (it skips every indented line). topics is load-bearing for the downstream retrieval
  * scorers, so this uses priority.mjs's canonical parseFrontmatter via loadUnit, which
@@ -52,7 +52,7 @@ function isCandidateName(name) {
 
 // Directories the recursive walk descends into: anything not starting with `_`
 // (skips _lib, _validation) — same convention as the file filter. `archive/`
-// is excluded by name (Hale's 2026-07-21 finding): a top-level retired unit
+// is excluded by name: a top-level retired unit
 // is suppressed from active results by status, but an archived unit is a
 // separate, physical relocation out of the active tree — before this
 // exclusion the walk still descended into archive/, so the source signature
@@ -141,7 +141,7 @@ export function validateIndexRecords(idx) {
  * source_sig matches the store's current recursive signature; regenerates otherwise.
  * Every consumer (retrieve-context, bm25, select-relevant-units, the harness) loads
  * through this, so no public entry point can serve a stale index — the standalone
- *-bm25Rank-resurrects-a-retired-unit defect (Hale 2026-07-11 §4) is closed here,
+ *-bm25Rank-resurrects-a-retired-unit defect is closed here,
  * at the loader, not per-caller.
  */
 export function loadFreshIndex(storePath) {
@@ -150,7 +150,7 @@ export function loadFreshIndex(storePath) {
   if (existsSync(indexPath)) {
     try {
       const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
-      // K04 (Hale's audit): source_sig is a pure content hash — it only changes
+      // K04: source_sig is a pure content hash — it only changes
       // when file BYTES change, so a unit valid at generation time but past its
       // own t_invalid date now would keep serving from cache forever if nothing
       // else in the store happens to be edited. next_invalidation_at is the
@@ -284,7 +284,7 @@ function authorityTier(fm, rel) {
 }
 
 /**
- * captureStore — THE atomic store capture (Hale round 11). Each candidate file is
+ * captureStore — THE atomic store capture. Each candidate file is
  * read from disk EXACTLY ONCE; the source signature (→ snapshotId), the index
  * records, and the BM25 body texts are all derived from those same buffers.
  *
@@ -340,7 +340,7 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     // check alone missed a `status: active` unit with a past t_invalid, which
     // then leaked into per-turn retrieval (the read path this index feeds).
     if (isInvalidated({ id, fm, body }, now)) continue;
-    // K04 (Hale's audit, 2026-07-16): the cache staleness check in loadFreshIndex
+    // K04: the cache staleness check in loadFreshIndex
     // is byte-only (source_sig, a content hash) — it never re-fires just because
     // calendar time passed, so a unit included here as valid (t_invalid in the
     // future) silently keeps serving as valid past its own t_invalid date if no
@@ -393,7 +393,7 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
 
   // BM25 body texts AND typed edges for the WINNERS, from the SAME buffers
   // (body transform identical to loadUnitBodies: frontmatter stripped, summary +
-  // topics prepended). Edges ride the capture (Hale round 12): edge expansion
+  // topics prepended). Edges ride the capture: edge expansion
   // used to re-read live unit files after the id was minted — a concurrent edge
   // change altered expanded/final results under an unchanged snapshot_id.
   const bodies = [];

@@ -71,7 +71,7 @@ function countOccurrences(text, needle) {
 }
 
 /**
- * findExistingBlock — fail-closed marker scan (Hale's point 4, 2026-07-22).
+ * findExistingBlock — fail-closed marker scan.
  * The old version paired the FIRST BEGIN with the FIRST END via bare indexOf,
  * which silently deleted any user text sitting between a duplicate BEGIN and
  * the END — a real repro Hale's probe caught (`hot_duplicate_markers`). Now it
@@ -214,7 +214,7 @@ export function hashOutsideHotBlock(text) {
 
 /**
  * Deterministic classifier for a PROJECT.md hash mismatch against the cached
- * stamp (DC-77: this is a critical trust-boundary decision, not something to
+ * stamp (this is a critical trust-boundary decision, not something to
  * leave to prose interpretation). Returns:
  *   'no-baseline'       — no cached outside_hash to compare against (older
  *                          cache entry predating this fix, or never stamped).
@@ -240,7 +240,7 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir
   // lock/prune logic). The domain-specific piece — hashing OUTSIDE the hot
   // block so a later mismatch can be classified correctly — stays here,
   // passed through as `extra.outside_hash`. Returns the truthful stamp outcome
-  // (Hale's point 6) so a caller can surface an attribution-unknown state.
+  // so a caller can surface an attribution-unknown state.
   return stampFile(
     projectDir,
     resolve(projectMdPath),
@@ -255,7 +255,7 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir
 // applyHotSection() below keeps its long-standing return shape (just the
 // updated text string) for every existing caller/test. applyHotSectionWithOutcome()
 // is the SAME implementation, additionally surfacing `applied` and
-// `stampOutcome` — added 2026-07-22 (Hale's CLI-contract-truth finding) so
+// `stampOutcome` — added 2026-07-22 so
 // `cmdApply` can tell "content wrote AND stamp landed" apart from "content
 // wrote but the attribution stamp failed" instead of always reporting full
 // success. Do not duplicate the write logic between the two — one shared
@@ -287,7 +287,7 @@ function applyHotSectionCore(projectDir, text, { now, allowOverBudget = false, h
   }
 
   // Shared PROJECT.md writer lock + pre-write reconciliation check + strict
-  // marker refusal + live-preimage CAS (Hale's points 2, 4, 7). Acquire the
+  // marker refusal + live-preimage CAS. Acquire the
   // ONE lock every PROJECT.md writer shares, classify the human-authored
   // region against the pre-write baseline, refuse a malformed marker state
   // byte-identically, and re-verify the on-disk bytes immediately before the
@@ -295,7 +295,7 @@ function applyHotSectionCore(projectDir, text, { now, allowOverBudget = false, h
   const { updated, applied, stampOutcome } = withProjectMdWriterLock(projectDir, () => {
     const { path, text: original } = readProjectMd(projectDir);
     // Strict marker refusal FIRST — a malformed marker state must never be
-    // parsed-past, guessed at, or written over (Hale's point 4).
+    // parsed-past, guessed at, or written over.
     const scan = findExistingBlock(original);
     if (!scan.ok) throw malformedHotMarkersError(resolve(path));
     assertReconciled(projectDir, resolve(path), original);
@@ -316,7 +316,7 @@ function applyHotSectionCore(projectDir, text, { now, allowOverBudget = false, h
     }
     let outcome = { stamped: true };
     if (next !== original) {
-      // Live-preimage compare-and-swap (Hale's point 2): re-read right before
+      // Live-preimage compare-and-swap: re-read right before
       // the atomic write and refuse if the bytes moved since `original` — a
       // stale write here would silently discard whatever moved them.
       const live = readFileSync(path, 'utf8');
@@ -335,7 +335,7 @@ function applyHotSectionCore(projectDir, text, { now, allowOverBudget = false, h
     applied,
     attribution: stampOutcome && stampOutcome.stamped === false ? stampOutcome.outcome : 'ok',
   });
-  // Truthful stamp-failure surfacing (Hale's point 6): the hot section landed
+  // Truthful stamp-failure surfacing: the hot section landed
   // on disk but its authorship stamp did not, so next lifecycle pass will read
   // it as an unreconciled edit. Say so loudly rather than report clean success.
   if (applied && stampOutcome && stampOutcome.stamped === false) {
@@ -366,7 +366,7 @@ export function currentHotSection(projectDir) {
 // Same shared-core pattern as applyHotSection/applyHotSectionWithOutcome
 // above: clearHotSection() keeps its long-standing string return for
 // existing callers; clearHotSectionWithOutcome() additionally surfaces
-// `cleared` and `stampOutcome` for cmdClear (Hale, 2026-07-22).
+// `cleared` and `stampOutcome` for cmdClear.
 export function clearHotSectionWithOutcome(projectDir, opts = {}) {
   return clearHotSectionCore(projectDir, opts);
 }
@@ -379,7 +379,7 @@ function clearHotSectionCore(projectDir, { now, home } = {}) {
   return withProjectMdWriterLock(projectDir, () => {
     const { path, text: original } = readProjectMd(projectDir);
     const scan = findExistingBlock(original);
-    // Strict marker refusal, same as applyHotSection (Hale's point 4): never
+    // Strict marker refusal, same as applyHotSection: never
     // clear over a malformed/ambiguous marker state.
     if (!scan.ok) throw malformedHotMarkersError(resolve(path));
     if (!scan.block) return { updated: original, cleared: false, stampOutcome: null };
@@ -391,7 +391,7 @@ function clearHotSectionCore(projectDir, { now, home } = {}) {
     let stampOutcome = null;
     const cleared = updated !== original;
     if (cleared) {
-      // Live-preimage CAS (Hale's point 2).
+      // Live-preimage CAS.
       const live = readFileSync(path, 'utf8');
       if (live !== original) throw needsReconciliationError(resolve(path), 'stale-preimage');
       atomicWriteFileSync(path, updated);
@@ -535,7 +535,7 @@ function cmdApply(args) {
   }
   const lines = text.trim().split('\n').length;
   // Content-write success and attribution-stamp success are TWO different
-  // facts (Hale, 2026-07-22): the stderr warning above already told a human
+  // facts: the stderr warning above already told a human
   // the stamp failed, but a hook/caller reading exit code + stdout alone used
   // to see plain success either way. Do NOT roll back the content write —
   // it already happened and stays — but the machine-readable contract must

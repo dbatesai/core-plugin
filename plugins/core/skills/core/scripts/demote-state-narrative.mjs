@@ -55,7 +55,7 @@ export const LARGE_BATCH_WARNING_THRESHOLD = 20;
 export const ARCHIVE_FILE = 'PROJECT-ARCHIVE.md';
 export const ARCHIVE_STATE_HEADING = '## §State';
 // Only the strict `*Backed by ...*` footer counts as a citation for v1
-// (DC-93 §3). Older styles intentionally don't match — they keep the
+//. Older styles intentionally don't match — they keep the
 // bullet on the conservative no-citation path until a HTML-marker
 // upgrade lands.
 export const BACKED_BY_PATTERN = /\*Backed by [^*]+\*/;
@@ -342,7 +342,7 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
   const newText = text.slice(0, beforeState) + newState + text.slice(afterState);
 
   // Shared PROJECT.md writer lock + edit gate + live-preimage CAS + re-stamp
-  // (Hale's points 2/6/7, 2026-07-22) — identical pattern to demote-moves.mjs:
+  // — identical pattern to demote-moves.mjs:
   // re-stamp so the next PROJECT.md writer sees a coherent baseline, but only
   // on a clean baseline (guard first, refuse on a pending edit or stale
   // preimage) so a blind re-stamp can't launder an unreconciled edit. Guard
