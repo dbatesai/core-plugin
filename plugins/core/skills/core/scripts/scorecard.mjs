@@ -103,14 +103,28 @@ export function computeScorecard(projectDir, { now, thresholds = null, workspace
   const newestSelfTest = selfTests.reduce((best, r) =>
     (!best || String(r.ts || '') > String(best.ts || '')) ? r : best, null);
 
-  let turnsCaptured = 0;
-  for (const { file } of listTurnCaptureFiles(projectDir, { workspaceId: wsId })) {
-    turnsCaptured += readJsonl(file).length;
-  }
-  const retrievalRows = readSessionLog(projectDir, 'retrieval-log.jsonl')
-    .filter((r) => r.kind === 'retrieval' || r.kind === undefined).length;
-
   const prior = latestScorecards(projectDir, 1, { workspaceId: wsId });
+  // Window start: the previous card's timestamp. Cumulative totals alone can't
+  // show a stream that stopped — any historical volume masks present silence —
+  // so every volume is also counted over the window this card actually covers.
+  const windowFrom = prior.length ? String(prior[0].ts || '') : '';
+  const inWindow = (row) => !windowFrom || String(row.ts || '') > windowFrom;
+
+  let turnsCaptured = 0;
+  let turnsCapturedWindow = 0;
+  for (const { file } of listTurnCaptureFiles(projectDir, { workspaceId: wsId })) {
+    const rows = readJsonl(file);
+    turnsCaptured += rows.length;
+    turnsCapturedWindow += rows.filter(inWindow).length;
+  }
+  const retrievals = readSessionLog(projectDir, 'retrieval-log.jsonl')
+    .filter((r) => r.kind === 'retrieval' || r.kind === undefined);
+  const retrievalRows = retrievals.length;
+  const retrievalRowsWindow = retrievals.filter(inWindow).length;
+  // Coverage compares like with like: only hook-triggered retrievals have a
+  // capture counterpart. Agent-logged Tier-1/2/3 events have no hook to fire.
+  const hookRetrievalRowsWindow = retrievals
+    .filter((r) => inWindow(r) && r.trigger === 'per-turn-hook').length;
 
   return {
     kind: 'scorecard',
@@ -125,7 +139,13 @@ export function computeScorecard(projectDir, { now, thresholds = null, workspace
       headline: newestSelfTest && typeof newestSelfTest.headline === 'number' ? newestSelfTest.headline : null,
       round_id: newestSelfTest && newestSelfTest.round !== undefined ? newestSelfTest.round : null,
     },
-    volumes: { turns_captured: turnsCaptured, retrieval_rows: retrievalRows },
+    volumes: {
+      turns_captured: turnsCaptured,
+      retrieval_rows: retrievalRows,
+      turns_captured_window: turnsCapturedWindow,
+      retrieval_rows_window: retrievalRowsWindow,
+      hook_retrieval_rows_window: hookRetrievalRowsWindow,
+    },
     capture_health: readCaptureHealth(projectDir, { workspaceId: wsId }),
   };
 }

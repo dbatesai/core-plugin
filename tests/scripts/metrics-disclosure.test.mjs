@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir, platform } from 'node:os';
-import { checkMetricsDisclosure, NOTICE_TEXT } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
+import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 
 const SCRIPT = join(process.cwd(), 'plugins/core/skills/core/scripts/metrics-disclosure.mjs');
 
@@ -134,4 +134,36 @@ test('CLI: missing workspace-id argument exits nonzero with a usage message', ()
   assert.throws(() => {
     execFileSync('node', [SCRIPT, 'check'], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   }, /Command failed/);
+});
+
+test('a workspace stamped under an older notice version is shown the current notice again', () => {
+  withFakeHome((fakeHome) => {
+    const workspaceId = 'ws-old-notice';
+    const dir = join(fakeHome, '.core', 'workspaces', workspaceId);
+    mkdirSync(dir, { recursive: true });
+    // Stamped by a build whose notice described less than today's does.
+    writeFileSync(join(dir, 'workspace.json'),
+      JSON.stringify({ workspace_id: workspaceId, metrics_disclosure_shown: true }, null, 2));
+
+    const res = checkMetricsDisclosure({ workspaceId });
+    assert.equal(res.shown, true, 'a materially newer notice must reach an already-stamped workspace');
+    assert.equal(res.noticeText, NOTICE_TEXT);
+    const after = JSON.parse(readFileSync(join(dir, 'workspace.json'), 'utf8'));
+    assert.equal(after.metrics_disclosure_version, NOTICE_VERSION);
+  });
+});
+
+test('a workspace stamped at the current notice version stays silent', () => {
+  withFakeHome((fakeHome) => {
+    const workspaceId = 'ws-current-notice';
+    const dir = join(fakeHome, '.core', 'workspaces', workspaceId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'workspace.json'), JSON.stringify({
+      workspace_id: workspaceId, metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION,
+    }, null, 2));
+
+    const res = checkMetricsDisclosure({ workspaceId });
+    assert.equal(res.shown, false);
+    assert.equal(res.alreadyShown, true);
+  });
 });

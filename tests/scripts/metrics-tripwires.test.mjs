@@ -137,6 +137,90 @@ test('flight recorder dead: retrieval rows without evidence rows trips', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('flight recorder dead AFTER prior volume: a cumulative-zero check would miss this, a window check catches it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tw-dead-after-'));
+  try {
+    const project = makeProject(root);
+    // The real shape: a handful of rows exist from an earlier run, then capture
+    // stops while retrieval keeps going. All-time turns_captured is nonzero
+    // forever, so only a per-window count can see the silence.
+    plant(project, [
+      card('2026-07-20T00:00:00Z', { volumes: { turns_captured: 5, retrieval_rows: 5 } }),
+      card('2026-07-21T00:00:00Z', {
+        volumes: {
+          turns_captured: 5, retrieval_rows: 200,
+          turns_captured_window: 0, retrieval_rows_window: 195,
+        },
+      }),
+    ]);
+    const res = evaluateTripwires(project);
+    assert.ok(res.tripped.some((t) => t.kind === 'capture-dead'), JSON.stringify(res.tripped));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('capture covering only a fraction of hook retrievals trips the coverage wire', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tw-cov-'));
+  try {
+    const project = makeProject(root);
+    plant(project, [card('2026-07-21T00:00:00Z', {
+      volumes: {
+        turns_captured: 30, retrieval_rows: 300,
+        turns_captured_window: 12, hook_retrieval_rows_window: 100,
+      },
+    })]);
+    const res = evaluateTripwires(project);
+    assert.ok(res.tripped.some((t) => t.kind === 'capture-coverage'), JSON.stringify(res.tripped));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('healthy coverage does NOT trip the coverage wire', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tw-cov-ok-'));
+  try {
+    const project = makeProject(root);
+    plant(project, [card('2026-07-21T00:00:00Z', {
+      volumes: {
+        turns_captured: 95, retrieval_rows: 300,
+        turns_captured_window: 95, hook_retrieval_rows_window: 100,
+      },
+    })]);
+    assert.equal(evaluateTripwires(project).tripped.some((t) => t.kind === 'capture-coverage'), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a low-volume window never trips the coverage wire (no false alarm on a short session)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tw-cov-low-'));
+  try {
+    const project = makeProject(root);
+    plant(project, [card('2026-07-21T00:00:00Z', {
+      volumes: {
+        turns_captured: 1, retrieval_rows: 8,
+        turns_captured_window: 1, hook_retrieval_rows_window: 8,
+      },
+    })]);
+    assert.equal(evaluateTripwires(project).tripped.some((t) => t.kind === 'capture-coverage'), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a frozen chain trips the staleness wire — the one signal that survives total chain death', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tw-stale-'));
+  try {
+    const project = makeProject(root);
+    plant(project, [card('2026-06-01T00:00:00Z', { volumes: { turns_captured: 5, retrieval_rows: 5 } })]);
+    const res = evaluateTripwires(project, { now: new Date('2026-07-21T00:00:00Z') });
+    assert.ok(res.tripped.some((t) => t.kind === 'scorecard-stale'), JSON.stringify(res.tripped));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a recent scorecard does NOT trip the staleness wire', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tw-stale-ok-'));
+  try {
+    const project = makeProject(root);
+    plant(project, [card('2026-07-20T00:00:00Z', { volumes: { turns_captured: 5, retrieval_rows: 5 } })]);
+    const res = evaluateTripwires(project, { now: new Date('2026-07-21T00:00:00Z') });
+    assert.equal(res.tripped.some((t) => t.kind === 'scorecard-stale'), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('no scorecards at all → healthy silence (nothing to alarm about yet)', () => {
   const root = mkdtempSync(join(tmpdir(), 'tw-none-'));
   try {

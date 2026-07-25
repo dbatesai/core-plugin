@@ -332,3 +332,36 @@ test('lock path is a stable sibling OUTSIDE the purged dir', () => {
     assert.equal(lock.endsWith('.turn-capture.lock'), true);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a malformed row counts as a failed attempt in the health counter (a systematic rejection must be visible)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-invalid-health-'));
+  try {
+    const project = makeProject(root);
+    const env = cleanEnv();
+    // A caller that stops supplying prompt_text is a live failure: every turn
+    // is rejected. If the attempt is not counted, failures/attempts stays 0/0
+    // and the capture-failure tripwire can never see it.
+    for (let i = 0; i < 3; i++) {
+      const res = captureTurnEvidence(project, { retrieval_id: `r-${i}`, session_id: 's' }, { env });
+      assert.equal(res.written, false);
+    }
+    const health = readCaptureHealth(project);
+    assert.equal(health.attempts, 3, 'rejected rows must count as attempts');
+    assert.equal(health.failures, 3, 'rejected rows must count as failures');
+    assert.equal(health.consecutive_failures, 3, 'a rejection streak must be visible to the tripwire');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('an opt-out is not a failure (disabled capture leaves the health counter untouched)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-optout-health-'));
+  try {
+    const project = makeProject(root);
+    const env = cleanEnv({ CORE_TURN_CAPTURE: '0' });
+    const res = captureTurnEvidence(project, goodRow(), { env });
+    assert.equal(res.written, false);
+    assert.equal(res.reason, 'disabled');
+    const health = readCaptureHealth(project);
+    assert.equal(health.attempts, 0, 'opting out must never read as a failing recorder');
+    assert.equal(health.failures, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -37,6 +37,13 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 
+/**
+ * Bump whenever the notice describes something materially new being stored.
+ * Workspaces stamped below this see the notice again; a wording polish that
+ * changes nothing about what is captured does not earn a bump.
+ */
+export const NOTICE_VERSION = 2;
+
 export const NOTICE_TEXT = [
   "One thing worth knowing since this is a brand-new project: CORE keeps a local, on-this-machine log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically, it stays on this machine, and none of it goes anywhere else.",
   "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `workspace.json`.",
@@ -70,11 +77,16 @@ export function checkMetricsDisclosure({ workspaceId }) {
     }
   }
 
-  if (manifest.metrics_disclosure_shown === true) {
+  // Versioned: a workspace that saw an older notice is shown the current one
+  // when the wording changes materially. A bare boolean would strand everyone
+  // who was told about a narrower version of what gets stored.
+  if (manifest.metrics_disclosure_shown === true
+      && Number(manifest.metrics_disclosure_version || 1) >= NOTICE_VERSION) {
     return { ok: true, shown: false, alreadyShown: true, noticeText: null };
   }
 
   manifest.metrics_disclosure_shown = true;
+  manifest.metrics_disclosure_version = NOTICE_VERSION;
 
   try {
     mkdirSync(manifestDir, { recursive: true });

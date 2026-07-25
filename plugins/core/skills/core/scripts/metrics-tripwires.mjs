@@ -38,7 +38,12 @@ export const TRIPWIRE_THRESHOLDS = Object.freeze({
   capture_failure_rate: 0.10,      // failures/attempts …
   capture_failure_min_attempts: 20, // … only meaningful at or above this volume (Agy)
   capture_consecutive_failures: 3, // … or this streak, regardless of volume (Agy)
+  capture_coverage_min: 0.5,       // captured/hook-retrieved, per window …
+  capture_coverage_min_volume: 20, // … only meaningful at or above this volume
+  scorecard_stale_days: 14,        // no pinned conclusion in this long = chain silent
 });
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function missRate(cardRow) {
   const h = cardRow && cardRow.hindsight;
@@ -51,7 +56,7 @@ function missRate(cardRow) {
  * { healthy, tripped: [{kind, message}] }. Never throws; an unreadable
  * history is healthy silence (nothing trustworthy to alarm about).
  */
-export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWIRE_THRESHOLDS } = {}) {
+export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWIRE_THRESHOLDS, now = new Date() } = {}) {
   const tripped = [];
   let cards = [];
   try { cards = latestScorecards(projectDir, 5, { workspaceId }); } catch { cards = []; }
@@ -110,12 +115,48 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
   }
 
   // 5. Flight recorder dead: retrieval happening, nothing being captured.
+  // Counted over the window this card covers. A cumulative total can never
+  // return to zero, so any past volume — a demo run, an old session — would
+  // permanently mask a recorder that has since gone silent.
   const vol = newest.volumes || {};
-  if ((vol.retrieval_rows || 0) > 0 && (vol.turns_captured || 0) === 0) {
+  const capturedWindow = vol.turns_captured_window;
+  const retrievedWindow = vol.retrieval_rows_window;
+  const windowed = typeof capturedWindow === 'number' && typeof retrievedWindow === 'number';
+  const deadNow = windowed
+    ? retrievedWindow > 0 && capturedWindow === 0
+    : (vol.retrieval_rows || 0) > 0 && (vol.turns_captured || 0) === 0;
+  if (deadNow) {
     tripped.push({
       kind: 'capture-dead',
       message: 'Memory retrieval is running but no turn evidence is being recorded at all — if you did not turn capture off yourself, the recorder is silently broken.',
     });
+  }
+
+  // 6. Partial silence: the recorder runs but misses most turns. Compared only
+  // against hook-triggered retrievals, the ones that have a capture counterpart.
+  const hookWindow = vol.hook_retrieval_rows_window;
+  if (!deadNow && typeof capturedWindow === 'number' && typeof hookWindow === 'number'
+      && hookWindow >= thresholds.capture_coverage_min_volume) {
+    const coverage = capturedWindow / hookWindow;
+    if (coverage < thresholds.capture_coverage_min) {
+      tripped.push({
+        kind: 'capture-coverage',
+        message: `Turn evidence is only being recorded for ${Math.round(coverage * 100)}% of memory lookups — the quality numbers below are based on a fraction of what actually happened.`,
+      });
+    }
+  }
+
+  // 7. The chain itself stopped. Every wire above needs a fresh conclusion to
+  // read; this is the one that fires when no fresh conclusion is arriving.
+  const newestTs = Date.parse(String(newest.ts || ''));
+  if (Number.isFinite(newestTs)) {
+    const ageDays = (now.getTime() - newestTs) / DAY_MS;
+    if (ageDays >= thresholds.scorecard_stale_days) {
+      tripped.push({
+        kind: 'scorecard-stale',
+        message: `The memory health numbers have not updated in ${Math.floor(ageDays)} days — the checks that produce them may have stopped running.`,
+      });
+    }
   }
 
   return { healthy: tripped.length === 0, tripped };

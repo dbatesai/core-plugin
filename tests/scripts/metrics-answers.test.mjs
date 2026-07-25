@@ -119,3 +119,31 @@ test('CLI --answers prints the answer view and exits 0', () => {
     assert.match(out, /Is it storing the right memories\?/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a tiny graded pool never renders a bare YES — it says how thin the evidence is', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ans-thin-'));
+  try {
+    const project = makeProject(root);
+    appendScorecard(project, card('2026-07-24T00:00:00Z', {
+      hindsight: { judged_turns: 5, hit_right: 5, noise: 0, hindsight_miss: 0, storage_gap: 0 },
+    }));
+    const out = renderAnswerView(gatherAnswers(project));
+    assert.ok(!/Is it storing the right memories\?\s+YES/.test(out),
+      `a 5-turn pool must not print an unqualified YES:\n${out}`);
+    assert.match(out, /too little evidence|not enough/i);
+    assert.match(out, /5/, 'the sample size must be visible to the reader');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('capture state is stated when capture is ON, not only when it is off', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ans-on-'));
+  try {
+    const project = makeProject(root);
+    appendScorecard(project, card('2026-07-24T00:00:00Z'));
+    const answers = gatherAnswers(project);
+    const out = renderAnswerView({ ...answers, capture: { enabled: true, rows: 40, days: 3 } });
+    assert.match(out, /saved locally|recorded locally/i,
+      `the default door must disclose that prompts and delivered context are stored:\n${out}`);
+    assert.match(out, /CORE_TURN_CAPTURE=0/, 'the off-switch must be stated where the disclosure is');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

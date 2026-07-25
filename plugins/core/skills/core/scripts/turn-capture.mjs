@@ -282,7 +282,14 @@ export function captureTurnEvidence(projectDir, input, { workspaceId, now, env =
     const wsId = workspaceId || resolveWorkspaceId(projectDir);
     let row;
     try { row = normalizeTurnEvidenceRow(input); }
-    catch (e) { return { written: false, reason: `invalid-row: ${e.message}` }; }
+    catch (e) {
+      // A rejected row is a live failure, not a non-event: a caller that stops
+      // supplying a required field fails every turn. Counting it keeps the
+      // failure-streak wire able to see it. An opt-out returns above this and
+      // is never counted — declining to record is not a broken recorder.
+      bumpHealth(projectDir, wsId, { failed: true, reason: `invalid-row: ${e.message}`, ts: new Date().toISOString() });
+      return { written: false, reason: `invalid-row: ${e.message}` };
+    }
     const record = { ts: now || new Date().toISOString(), ...row };
     const dir = turnCaptureDir(projectDir, { workspaceId: wsId });
     const file = join(dir, `${todayUTC(now)}.jsonl`);

@@ -173,7 +173,12 @@ node "${CORE_ROOT}/skills/core/scripts/decorate-graph.mjs" <project> \
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
 node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" <project> --json \
   || echo "CORE-MAINTENANCE-SKIPPED: index refresh didn't complete cleanly (or CORE_ROOT unresolved — call skipped)"
+
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/metrics-disclosure.mjs" check <workspace-id>
 ```
+
+**The metrics disclosure runs here too, on every workspace.** CORE stores each turn's prompt and the memory context it delivered, on this machine, by default. A workspace that already existed when that capability arrived is exactly the one whose owner was never told — so the notice cannot live only on the new-workspace scaffold. The script self-gates: it prints the notice and stamps the manifest the first time, and is a silent no-op on every session after. If it prints anything, put that text in the readiness summary verbatim, once. It is also invoked from `protocols/startup-conditional-loads.md` for brand-new workspaces; the flag makes the double call harmless.
 
 **This runs AFTER edit-detection above, never before — mixed-ownership writers launder unreconciled edits.** Run before edit-detection reads the files it classifies, this backstop would silently absorb a between-session user edit to a unit body or PROJECT.md: decoration/hot-section would preserve the user's bytes but then unconditionally stamp a FRESH baseline over them, and the classifier would then read the file as CORE's own regenerated block (`edges-block-only`/`hot-block-only`) instead of the genuine user edit it actually was — bytes survive, but the fact that they changed is never observed, attributed, or propagated. Running this step only after edit-detection has already read and classified the pre-decoration bytes closes that window at the protocol level, matching the ordering the startup catch-up below requires for the exact same reason.
 

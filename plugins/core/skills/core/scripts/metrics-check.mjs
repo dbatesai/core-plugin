@@ -891,6 +891,12 @@ export function renderAnswerView({ project, cards, tripwires, capture }) {
   const h = newest && newest.hindsight;
   const judged = h ? h.judged_turns : 0;
   const captureOff = capture && capture.enabled === false;
+  // Below this many graded turns the rates are noise, not a verdict. A handful
+  // of turns can read 100% and mean nothing, so the answer states the thinness
+  // instead of a bare YES.
+  const MIN_JUDGED = 20;
+  const thin = judged > 0 && judged < MIN_JUDGED;
+  const thinNote = `too little evidence yet — only ${judged} graded turn${judged === 1 ? '' : 's'} so far`;
 
   // Q1 — storing the right memories (storage-gap rate, mechanical grade).
   let storing;
@@ -898,6 +904,9 @@ export function renderAnswerView({ project, cards, tripwires, capture }) {
     storing = 'not measured — turn capture is off for this project, so nothing records what each conversation needed.';
   } else if (!judged) {
     storing = 'not yet measured — evidence is being captured; grading runs with regular maintenance.';
+  } else if (thin) {
+    const gaps = h.storage_gap;
+    storing = `${thinNote}${gaps ? ` (${gaps} of them needed something no stored memory contains)` : ''}`;
   } else {
     const gaps = h.storage_gap;
     const verdict = gaps === 0 ? 'YES' : gaps / judged <= 0.10 ? 'MOSTLY' : 'NO';
@@ -911,6 +920,8 @@ export function renderAnswerView({ project, cards, tripwires, capture }) {
     loading = 'not measured — turn capture is off (see above).';
   } else if (!judged) {
     loading = 'not yet measured — grading needs captured evidence first.';
+  } else if (thin) {
+    loading = `${thinNote} — ${h.hindsight_miss} missed, ${h.noise} noisy across those turns`;
   } else {
     const rate = h.hit_right / judged;
     const verdict = rate >= 0.95 ? 'YES' : rate >= 0.75 ? 'MOSTLY' : 'NO';
@@ -935,6 +946,16 @@ export function renderAnswerView({ project, cards, tripwires, capture }) {
     blind = `${pct(head)}${trend}`;
   }
   L.push(`Does it pass its own blind test?     ${blind}`);
+  L.push('');
+
+  // What's being recorded, stated on the door itself. The numbers above are
+  // produced by storing each turn's prompt and delivered memory context, so a
+  // reader who never opens `full` still learns that, and how to stop it.
+  if (captureOff) {
+    L.push('Turn recording is OFF for this project — nothing about your conversations is being saved.');
+  } else {
+    L.push('To produce these numbers, each turn\'s prompt and the memory context CORE gave you are saved locally on this machine — never sent anywhere, deleted after 30 days. Turn it off with CORE_TURN_CAPTURE=0, or "turn_capture": false in this project\'s workspace.json.');
+  }
   L.push('');
 
   // The attention surface: tripwires, or earned quiet.
