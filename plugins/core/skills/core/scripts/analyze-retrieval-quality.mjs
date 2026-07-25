@@ -6,12 +6,29 @@
  *   - per-topic tier-escalation frequency (recall proxy)
  *   - overall tier distribution
  *
+ * Schema validation (2026-07-22, revised per Hale's slice-2 review): loadEvents()
+ * validates every row against validateRetrievalLogRow() below and rejects —
+ * never silently drops — any row that is JSON-unparseable or claims to be a
+ * retrieval event (kind:'retrieval', or legacy rows without a `kind` that
+ * duck-type as retrieval-shaped) but fails the schema. Rows stamped with the
+ * CURRENT schema_version (record-retrieval-event.mjs's
+ * RETRIEVAL_EVENT_SCHEMA_VERSION) are validated by reusing that file's own
+ * normalizeRetrievalEvent() — the single canonical producer contract, not a
+ * weaker sibling schema. Rows with no schema_version at all (every row any
+ * project wrote before this existed) get a narrow backward-compatibility
+ * check and are tagged 'legacy' — counted separately, never implied to meet
+ * current-producer conformance. Rejections ride along on the returned array
+ * as `.rejected` (an array of {file, schema, code} — CLOSED reason codes
+ * only, never a raw echoed value); buildReport() folds that into
+ * `report.rejected` (current/legacy/other counts broken out by closed code),
+ * and formatReport() always prints it, even when it's all zero.
+ *
  * Per DC-77 the script lives in the plugin, not per-project.
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  *
  * Library usage:
  *   import { buildReport, loadEvents, formatReport } from './analyze-retrieval-quality.mjs';
- *   const events = loadEvents('<project>', { sinceDays: 30 });
+ *   const events = loadEvents('<project>', { sinceDays: 30 }); // events.rejected also available
  *   const report = buildReport(events);
  *   console.log(formatReport(report));
  *
@@ -24,6 +41,7 @@ import { readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
+import { normalizeRetrievalEvent, RETRIEVAL_EVENT_SCHEMA_VERSION } from './record-retrieval-event.mjs';
 
 export const DEFAULT_SINCE_DAYS = 30;
 export const TOP_DIP_BACK = 10;
@@ -38,6 +56,124 @@ export function isRetrievalShapedEvent(ev) {
     || Object.hasOwn(ev, 'escalation_path')
     || Object.hasOwn(ev, 'dip_back_count')
   );
+}
+
+// ---------- Row-level schema validation (2026-07-22, Hale's metrics-evidence-
+// lifecycle synthesis, slice 2 — revised per Hale's early review "use
+// producer schema and isolate legacy"). ----------
+//
+// Before this, a row that failed JSON.parse was silently dropped inside
+// loadEvents() with zero count kept anywhere, and a row that DID parse but
+// had a missing/invalid tier_reached silently fell through
+// `Number(ev.tier_reached) || 1` in every aggregation below. Neither failure
+// mode was ever visible to a caller. A first pass at a fix here (a bespoke
+// 3-field validator) was itself flagged by Hale as a weaker SIBLING schema:
+// a row could claim `kind:'retrieval'` with an invalid trigger, a tier/path
+// mismatch, or an invalid unit tier/source_stage and still pass. This
+// version closes that gap by reusing `normalizeRetrievalEvent()` from
+// record-retrieval-event.mjs — the ONE canonical producer contract — as the
+// validator for any row stamped with the CURRENT schema version, instead of
+// maintaining a second, drifting definition of "valid" here.
+//
+// Rows written before `schema_version` existed (every row in every real
+// project's corpus today) cannot be held to that full contract — trigger and
+// a tier-consistent escalation_path were not always required historically.
+// Those get a NARROW backward-compatibility check instead, and the result is
+// always tagged 'legacy' — counted separately, never folded into or implied
+// to meet current-producer conformance. A row carrying some OTHER, unrecognized
+// schema_version is rejected outright as 'unknown-schema-version' rather than
+// guessed at.
+//
+// Every rejection carries a CLOSED reason CODE only (REJECTION_CODES below) —
+// never an interpolated raw field value. A malformed row can contain
+// anything (including secret-shaped strings); that content must never
+// reappear in a report or package surface, so codes are the only thing any
+// caller threads into rendered/exported output. Raw detail (file path, the
+// underlying exception message) is available on the `.rejected` array
+// loadEvents() returns for LOCAL diagnostic use only — buildReport() below
+// never copies raw values into the report object it returns.
+export const REJECTION_CODES = new Set([
+  'invalid-row-shape', 'invalid-json', 'unknown-schema-version',
+  // current-schema (full producer-contract) rejections:
+  'invalid-trigger', 'invalid-intent-topics', 'missing-tier', 'invalid-tier',
+  'invalid-escalation-path', 'invalid-units', 'invalid-result', 'invalid-mechanism',
+  'invalid-retrieval-id', 'schema-invalid',
+  // legacy (pre-versioning, narrow-compatibility) rejections:
+  'legacy-missing-tier', 'legacy-invalid-tier', 'legacy-invalid-units', 'legacy-invalid-topics',
+]);
+
+// Classifies a normalizeRetrievalEvent() throw into a closed code by the
+// field name embedded in its message ("invalid retrieval event: <field> ...").
+// Never touches the row's actual value — only the field NAME the canonical
+// validator already put in its own error, which is itself a closed set.
+function codeForProducerRejection(ev, message) {
+  const m = String(message).match(/^invalid retrieval event: (\S+)/);
+  const field = m ? m[1].split(/[[.]/)[0] : null;
+  switch (field) {
+    case 'trigger': return 'invalid-trigger';
+    case 'intent_topics': return 'invalid-intent-topics';
+    case 'tier_reached': return ev.tier_reached === undefined ? 'missing-tier' : 'invalid-tier';
+    case 'escalation_path': return 'invalid-escalation-path';
+    case 'units_retrieved': return 'invalid-units';
+    case 'result': return 'invalid-result';
+    case 'mechanism': return 'invalid-mechanism';
+    case 'retrieval_id': return 'invalid-retrieval-id';
+    default: return 'schema-invalid';
+  }
+}
+
+// This validator only judges rows that are ATTEMPTING to be a retrieval
+// event: kind === 'retrieval' explicitly, or (for pre-`kind`-field legacy
+// rows) anything that duck-types as retrieval-shaped. Any other explicit
+// kind (retrieval-outcome, hot-section-synthesis, hot-section-over-budget,
+// a future kind this file doesn't know about yet) is a different event type
+// entirely and is never validated or counted as a rejected retrieval row —
+// 'not-applicable', not 'rejected'.
+export function validateRetrievalLogRow(ev) {
+  if (!ev || typeof ev !== 'object' || Array.isArray(ev)) {
+    return { status: 'rejected', schema: 'unknown', code: 'invalid-row-shape' };
+  }
+  const isCandidate = ev.kind === 'retrieval' || (ev.kind === undefined && isRetrievalShapedEvent(ev));
+  if (!isCandidate) return { status: 'not-applicable' };
+
+  // Known-compatible versions, all validated under the current producer
+  // contract: 1.1.0 (current — adds producer_version/producer_sha, additive)
+  // and 1.0.0 (its strict subset; every pre-v3.14.0 row on disk carries it).
+  // An additive bump must never turn real history into 'unknown-schema-version'.
+  if (ev.schema_version === RETRIEVAL_EVENT_SCHEMA_VERSION || ev.schema_version === '1.0.0') {
+    try {
+      normalizeRetrievalEvent(ev);
+      return { status: 'valid', schema: 'current' };
+    } catch (e) {
+      return { status: 'rejected', schema: 'current', code: codeForProducerRejection(ev, e.message) };
+    }
+  }
+
+  if (ev.schema_version !== undefined) {
+    // A defined but unrecognized version — never assume forward/backward
+    // compatibility with a schema this code doesn't know about.
+    return { status: 'rejected', schema: 'unknown-version', code: 'unknown-schema-version' };
+  }
+
+  // No schema_version at all: pre-versioning history. Narrow check only —
+  // covers exactly the fields the aggregations below consume numerically
+  // (tier_reached, units_retrieved[].id, intent_topics). Passing this check
+  // is 'legacy-valid', never 'valid' under the current producer contract.
+  if (ev.tier_reached === undefined) return { status: 'rejected', schema: 'legacy', code: 'legacy-missing-tier' };
+  if (!Number.isInteger(ev.tier_reached) || ev.tier_reached < 1 || ev.tier_reached > 3) {
+    return { status: 'rejected', schema: 'legacy', code: 'legacy-invalid-tier' };
+  }
+  if (ev.units_retrieved !== undefined) {
+    if (!Array.isArray(ev.units_retrieved) || ev.units_retrieved.some((u) => !u || typeof u !== 'object' || typeof u.id !== 'string' || !u.id.trim())) {
+      return { status: 'rejected', schema: 'legacy', code: 'legacy-invalid-units' };
+    }
+  }
+  if (ev.intent_topics !== undefined) {
+    if (!Array.isArray(ev.intent_topics) || ev.intent_topics.some((t) => typeof t !== 'string')) {
+      return { status: 'rejected', schema: 'legacy', code: 'legacy-invalid-topics' };
+    }
+  }
+  return { status: 'valid', schema: 'legacy' };
 }
 
 // ---------- Date helpers ----------
@@ -58,7 +194,7 @@ function _parseSessionDate(name) {
 export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTime = false, today = null } = {}) {
   const sessionsDir = join(projectRoot, '_sessions');
   let entries;
-  try { entries = readdirSync(sessionsDir); } catch { return []; }
+  try { entries = readdirSync(sessionsDir); } catch { return Object.assign([], { rejected: [] }); }
 
   const t = today || _todayUTC();
   // A non-finite sinceDays (e.g. `--since-days abc` → NaN) would make the cutoff
@@ -67,6 +203,17 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
   const cutoff = allTime ? null : new Date(t.getTime() - days * 86_400_000);
 
   const events = [];
+  // Malformed rows are REJECTED and COUNTED here, not silently dropped — a
+  // JSON.parse failure and a schema-invalid retrieval row both land here with
+  // a CLOSED reason code (never the raw offending value — Hale, 2026-07-22:
+  // "arbitrary malformed values must not flow into reports/packages"), and
+  // the local absolute file path stays here for diagnostics only. `.rejected`
+  // rides along on the returned array as a plain extra property so every
+  // existing `loadEvents(...)` caller that treats the result as a plain
+  // array keeps working unchanged; buildReport() below is the one place that
+  // reads it, and it never copies the raw `file` value into the report it
+  // returns — only closed-code counts.
+  const rejected = [];
   for (const name of entries.sort()) {
     const date = _parseSessionDate(name);
     if (!date) continue;
@@ -78,11 +225,16 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
       for (const line of raw.split('\n')) {
         const trimmed = line.trim();
         if (!trimmed) continue;
-        try { events.push(JSON.parse(trimmed)); } catch { /* malformed line — skip */ }
+        let parsed;
+        try { parsed = JSON.parse(trimmed); }
+        catch { rejected.push({ file: logPath, schema: 'unknown', code: 'invalid-json' }); continue; }
+        const check = validateRetrievalLogRow(parsed);
+        if (check.status === 'rejected') { rejected.push({ file: logPath, schema: check.schema, code: check.code }); continue; }
+        events.push(parsed);
       }
     }
   }
-  return events;
+  return Object.assign(events, { rejected });
 }
 
 // ---------- Aggregations ----------
@@ -251,6 +403,28 @@ export function buildUserReceipt(events) {
 
 // ---------- Report assembly ----------
 
+// Folds raw `.rejected` entries ({file, schema, code}) into CLOSED-vocabulary
+// counts only — no file paths, no raw values. This is the shape that is safe
+// to appear in any rendered report or, eventually, a shareable package (Hale,
+// 2026-07-22: "rejected_samples with absolute paths must not reach any
+// shareable package path — closed reason-code counts only").
+function summarizeRejections(rejected) {
+  const current = { count: 0, by_code: {} };
+  const legacy = { count: 0, by_code: {} };
+  const other = { count: 0, by_code: {} }; // invalid-json / invalid-row-shape / unknown-schema-version
+  for (const r of rejected) {
+    const bucket = r.schema === 'current' ? current : r.schema === 'legacy' ? legacy : other;
+    bucket.count += 1;
+    bucket.by_code[r.code] = (bucket.by_code[r.code] || 0) + 1;
+  }
+  return { current, legacy, other, total: current.count + legacy.count + other.count };
+}
+
+function formatByCode(bucket) {
+  const codes = Object.entries(bucket.by_code).sort((a, b) => b[1] - a[1]);
+  return codes.map(([code, n]) => `${code}: ${n}`).join(', ');
+}
+
 export function buildReport(events) {
   const retrievalEvents = events.filter(isRetrievalShapedEvent);
   // Count distinct calendar DAYS from event timestamps (reported as such — these are
@@ -263,6 +437,11 @@ export function buildReport(events) {
       .map(ev => (ev && ev.ts ? String(ev.ts).slice(0, 10) : ''))
       .filter(d => DATE_RE.test(d))
   );
+  // Rejection counts ride in on `events.rejected` when the caller got `events`
+  // from loadEvents() above; a plain array passed directly (every unit test in
+  // this file does this) has no `.rejected` and honestly reports zero — there
+  // is nothing to have rejected when the caller already hand-built the array.
+  const rejected = Array.isArray(events.rejected) ? events.rejected : [];
   return {
     sessions: sessions.size,
     total_events: events.length,
@@ -272,12 +451,20 @@ export function buildReport(events) {
     dip_back_rates: computeDipBackRates(retrievalEvents).slice(0, TOP_DIP_BACK),
     tier_escalation: computeTierEscalation(retrievalEvents).slice(0, TOP_ESCALATION),
     receipt: buildUserReceipt(events),
+    rejected: summarizeRejections(rejected),
   };
 }
 
 export function formatReport(report) {
+  const rej = report.rejected || summarizeRejections([]);
   if (!report.total_events) {
-    return `No retrieval events found in the analyzed window.\nChecked: ${report.receipt.checked}\nSafe: unknown\nImpact: ${report.receipt.impact}\nAction: ${report.receipt.action}\nUser action: ${report.receipt.user_action}`;
+    // Zero valid events is NOT the same claim as zero rows seen — a corpus that
+    // is all malformed rows must never read identically to a truly empty one
+    // (2026-07-22, evidence-lifecycle slice 2).
+    const rejectedLine = rej.total > 0
+      ? `\nRejected malformed rows: ${rej.total} (${formatByCode({ by_code: { ...rej.current.by_code, ...rej.legacy.by_code, ...rej.other.by_code } })}) — these are NOT zero valid events, they are rows that failed schema validation`
+      : '';
+    return `No retrieval events found in the analyzed window.${rejectedLine}\nChecked: ${report.receipt.checked}\nSafe: unknown\nImpact: ${report.receipt.impact}\nAction: ${report.receipt.action}\nUser action: ${report.receipt.user_action}`;
   }
   const td = report.tier_distribution;
   const pct = v => `${Math.round(v * 100)}%`;
@@ -286,6 +473,14 @@ export function formatReport(report) {
   const telemetryOnlyEvents = report.telemetry_only_events ?? 0;
   lines.push(`Calendar days with events: ${report.sessions} | Total events: ${report.total_events}`);
   lines.push(`Retrieval-shaped events: ${retrievalEvents} | telemetry-only rows: ${telemetryOnlyEvents}`);
+  // Always shown, even at zero — an explicit "0 rejected" is itself evidence
+  // the row was checked, not just assumed clean (2026-07-22, evidence-lifecycle
+  // slice 2: malformed rows must be rejected AND counted, using CLOSED codes
+  // only — never an interpolated raw field value, per Hale's leak concern).
+  const currentPart = rej.current.count > 0 ? `${rej.current.count} current-schema (${formatByCode(rej.current)})` : '0 current-schema';
+  const legacyPart = rej.legacy.count > 0 ? `${rej.legacy.count} legacy (${formatByCode(rej.legacy)})` : '0 legacy';
+  const otherPart = rej.other.count > 0 ? `; ${rej.other.count} unreadable (${formatByCode(rej.other)})` : '';
+  lines.push(`Rejected malformed rows: ${rej.total} — ${currentPart}, ${legacyPart}${otherPart}`);
   lines.push(`Checked: ${report.receipt.checked}`);
   lines.push(`Safe: ${report.receipt.safe === null ? 'unknown' : report.receipt.safe}`);
   lines.push(`Impact: ${report.receipt.impact}`);

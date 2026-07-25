@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { recordRetrievalEvent, normalizeRetrievalEvent } from '../../plugins/core/skills/core/scripts/record-retrieval-event.mjs';
+import { recordRetrievalEvent, normalizeRetrievalEvent, RETRIEVAL_EVENT_SCHEMA_VERSION } from '../../plugins/core/skills/core/scripts/record-retrieval-event.mjs';
 import { buildReport, loadEvents } from '../../plugins/core/skills/core/scripts/analyze-retrieval-quality.mjs';
-import { eventToOtelSpan, sanitizeAttributeValue, MAX_ATTRIBUTE_STRING } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { sanitizeAttributeValue, MAX_ATTRIBUTE_STRING } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 
 const PLUGIN_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const RECORD_RETRIEVAL_EVENT_SCRIPT = join(PLUGIN_ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', 'record-retrieval-event.mjs');
@@ -31,7 +31,7 @@ function withTempProject(fn) {
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 
-test('recordRetrievalEvent writes retrieval proof visible to analyzer and OTel', () => {
+test('recordRetrievalEvent writes retrieval proof visible to the analyzer', () => {
   const root = mkdtempSync(join(tmpdir(), 'retrieval-event-'));
   try {
     recordRetrievalEvent(root, {
@@ -65,14 +65,10 @@ test('recordRetrievalEvent writes retrieval proof visible to analyzer and OTel',
       { unit_id: 'dc-retrieval-path', retrievals: 1, dipback_observed: 1, rate: 1 },
     ]);
 
-    const trace = readFileSync(join(root, '_metrics', 'traces', 'session-1.jsonl'), 'utf8')
-      .trim()
-      .split('\n')
-      .map(line => JSON.parse(line))[0];
-    assert.equal(trace.span_name, 'core.retrieval');
-    assert.equal(trace.attributes['core.trigger'], 'session-start');
-    assert.equal(trace.attributes['core.tier_reached'], 2);
-    assert.deepEqual(trace.attributes['core.units_retrieved'], [{ id: 'dc-retrieval-path', tier: 1, score: 0.91 }]);
+    // OTel dual-write retired 2026-07-24 (docs/specs/2026-07-23-metrics-holistic-redesign.md
+    // §3a) — the JSONL log above is the sole substrate now, so no _metrics/traces/ file
+    // gets written at all.
+    assert.equal(existsSync(join(root, '_metrics', 'traces')), false, 'no trace dir is written');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -145,16 +141,15 @@ test('MET-010: sanitizeAttributeValue strips control chars but keeps newlines/ta
   assert.equal(sanitizeAttributeValue('a\u0000b\u001bc\nd\te'), 'abc\nd\te');
 });
 
-test('MET-010: eventToOtelSpan sanitizes every promoted attribute, including nested objects', () => {
-  const span = eventToOtelSpan({
-    kind: 'retrieval',
+test('MET-010: sanitizeAttributeValue sanitizes nested objects recursively, depth-capped', () => {
+  const out = sanitizeAttributeValue({
     note: 'y'.repeat(5000),
     evil: 'a\u0000b\u001bc',
     deep: { a: { b: { c: { d: { e: 'too deep' } } } } },
   });
-  assert.ok(span.attributes['core.note'].length <= 1100);
-  assert.equal(span.attributes['core.evil'], 'abc');
-  assert.match(JSON.stringify(span.attributes['core.deep']), /depth-capped/);
+  assert.ok(out.note.length <= 1100);
+  assert.equal(out.evil, 'abc');
+  assert.match(JSON.stringify(out.deep), /depth-capped/);
 });
 
 test('MET-010: normalizeRetrievalEvent sanitizes unit ids and topics', () => {
@@ -168,3 +163,28 @@ test('MET-010: normalizeRetrievalEvent sanitizes unit ids and topics', () => {
   assert.equal(r.intent_topics[0], 'memory-arch');
   assert.equal(r.units_retrieved[0].id, 'dc-1-evil');
 });
+
+// ---------------------------------------------------------------------------
+// schema_version stamping (2026-07-22, Hale's metrics-evidence-lifecycle
+// slice-2 review): every row this producer writes must carry the CURRENT
+// schema version so a reader can tell "written under the fully-enforced
+// current contract" apart from pre-versioning history — and the producer's
+// own stamp must always win over anything a caller tries to supply.
+// ---------------------------------------------------------------------------
+
+test('normalizeRetrievalEvent always stamps the current schema_version', () => {
+  const r = normalizeRetrievalEvent(validEvent());
+  assert.equal(r.schema_version, RETRIEVAL_EVENT_SCHEMA_VERSION);
+});
+
+test('normalizeRetrievalEvent overrides any caller-supplied schema_version — it is never a passthrough field', () => {
+  const r = normalizeRetrievalEvent(validEvent({ schema_version: '99.9.9' }));
+  assert.equal(r.schema_version, RETRIEVAL_EVENT_SCHEMA_VERSION);
+});
+
+test('recordRetrievalEvent writes a row on disk carrying schema_version, visible to the analyzer as current-schema', () => withTempProject((root) => {
+  recordRetrievalEvent(root, validEvent(), { today: '2026-07-22', sessionId: 'schema-version-check' });
+  const events = loadEvents(root, { allTime: true });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].schema_version, RETRIEVAL_EVENT_SCHEMA_VERSION);
+}));

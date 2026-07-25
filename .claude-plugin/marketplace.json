@@ -5,14 +5,14 @@
     "email": "david_bates@mac.com"
   },
   "metadata": {
-    "description": "CORE — project intelligence in chat with a critic baked in. The `/core` agent plus seven companion utilities.",
-    "version": "3.13.1"
+    "description": "CORE — project intelligence in chat with a critic baked in. The `/core` agent plus nine companion utilities.",
+    "version": "3.14.0"
   },
   "plugins": [
     {
       "name": "core",
-      "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Ships with seven companion utilities — `/finalize`, `/process-memory`, `/register-sources`, `/vibecheck`, `/configure-project`, `/metrics-package`, `/export-obsidian` — that CORE invokes internally and that you can also call directly.",
-      "version": "3.13.1",
+      "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Ships with nine companion utilities — `/finalize`, `/process-memory`, `/register-sources`, `/vibecheck`, `/configure-project`, `/metrics` (with full/export/self-test modes), `/memory-view`, and the deprecation shims `/metrics-package` and `/self-test` — that CORE invokes internally and that you can also call directly.",
+      "version": "3.14.0",
       "source": "./plugins/core",
       "category": "productivity",
       "author": {

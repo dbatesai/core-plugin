@@ -8,13 +8,13 @@ CORE is a single agent backed by a unit-based memory store (one fact per file, w
 
 - [README.md](README.md): what CORE is, why it exists, how it works, and install commands.
 - [INSTALL.md](INSTALL.md): install on Claude Code or Codex, run a local copy, troubleshoot.
-- [USAGE.md](USAGE.md): the full reference — every command (`/core` plus seven companions), every protocol, and the scripts — and what each one does.
+- [USAGE.md](USAGE.md): the full reference — every command (`/core` plus nine companions), every protocol, and the scripts — and what each one does.
 
 ## How to use it
 
 - **Install (Claude Code):** `/plugin marketplace add dbatesai/core-plugin` then `/plugin install core@core`. From the terminal: `claude plugins marketplace add dbatesai/core-plugin` then `claude plugins install core@core`.
 - **Run:** type `/core` to start or resume a project. It loads your project context and prints a readiness summary before doing anything else.
-- **Companions:** `/finalize` (close a session), `/process-memory` (memory housekeeping on demand), `/register-sources` (point CORE at an outside data source), `/configure-project` (bootstrap and health-check a project), `/vibecheck` (capture the session's vibe), `/export-obsidian` (open the memory store as a browsable graph in Obsidian), `/metrics-package` (pull an anonymized stats package).
+- **Companions:** `/finalize` (close a session), `/process-memory` (memory housekeeping on demand), `/register-sources` (point CORE at an outside data source), `/configure-project` (bootstrap and health-check a project), `/vibecheck` (capture the session's vibe), `/metrics` (a live, in-terminal proof the memory system is working), `/metrics-package` (pull an anonymized stats package), `/memory-view` (browse the memory store as a read-only page, published as a private artifact only after an explicit, per-publish confirmation), `/self-test` (a blind, round-based memory self-test authored from the project's own store — including questions the store deliberately can't answer — scored on the real retrieval path, feeding `/metrics`).
 
 ## Design
 

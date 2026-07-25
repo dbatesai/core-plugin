@@ -27,6 +27,11 @@ import { fileURLToPath } from 'node:url';
 import { logEvent } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
+import { readProjectCache } from './state-cache.mjs';
+import { classifyProjectMdChange, recordProjectMdWrite } from './hot-section.mjs';
+import {
+  writeGuardDecision, withProjectMdWriterLock,
+} from './lifecycle-core.mjs';
 
 export const DECISIONS_HEADER = '**Decisions (dated, append-only):**';
 export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
@@ -263,8 +268,63 @@ export function main(argv) {
   const before = Buffer.byteLength(text, 'utf8');
   const { text: newText, stats } = compactDecisions(text, units);
   const after = Buffer.byteLength(newText, 'utf8');
-  const wrote = newText !== text;
-  if (wrote) atomicWriteFileSync(projectMd, newText);
+  const wouldWrite = newText !== text;
+
+  // Edit-gated, shared-locked, CAS-guarded write (Hale's points 2/5/6/7,
+  // 2026-07-22). compact-project used to bare-write PROJECT.md with no
+  // pre-write edit check and no post-write stamp at all — so an unreconciled
+  // user correction to a §Decisions entry got compacted away entirely (Hale's
+  // `compact_user_edit` red case), and `/process-memory` auto-invoked this
+  // path with no gate. Now: acquire the ONE shared PROJECT.md writer lock,
+  // re-read the live bytes under it, refuse if the human-authored region
+  // diverged from the last baseline (pending user edit) or if the live bytes
+  // moved since we computed the compaction (stale preimage), write atomically,
+  // then stamp the new baseline in code and surface any stamp failure.
+  let wrote = false;
+  let attributionFailed = null;
+  let refused = null;
+  if (wouldWrite) {
+    const absProjectMd = resolve(projectMd);
+    withProjectMdWriterLock(projectDir, () => {
+      let live;
+      try { live = readFileSync(projectMd, 'utf8'); }
+      catch { refused = { reason: 'unreadable-under-lock' }; return; }
+
+      const cache = readProjectCache(projectDir);
+      const cachedStamp = cache.files[absProjectMd];
+      const classification = classifyProjectMdChange(cachedStamp, live);
+      const decision = writeGuardDecision({ cachedStamp, classification });
+      if (!decision.proceed) { refused = { reason: 'pending-edit', classification: decision.classification, detail: decision.reason }; return; }
+
+      // Live-preimage CAS: the bytes we computed `newText` from must still be
+      // exactly what's on disk. If they moved (a concurrent/out-of-lock
+      // writer), refuse rather than write a compaction of stale bytes.
+      if (live !== text) { refused = { reason: 'stale-preimage' }; return; }
+
+      atomicWriteFileSync(projectMd, newText);
+      wrote = true;
+      const outcome = recordProjectMdWrite(projectMd);
+      if (outcome && outcome.stamped === false) attributionFailed = outcome;
+    });
+  }
+
+  if (refused) {
+    const label = refused.reason === 'pending-edit'
+      ? `an unreconciled user edit to PROJECT.md (${refused.classification})`
+      : refused.reason === 'stale-preimage'
+        ? 'PROJECT.md changed on disk since compaction was computed'
+        : 'PROJECT.md was unreadable under the writer lock';
+    process.stderr.write(
+      `compact-project: refusing to write — ${label}. ` +
+      `Nothing changed; reconcile the edit (propagate it back to the unit) before compacting.\n`
+    );
+    logEvent(projectDir, 'hygiene-log.jsonl', {
+      kind: 'compact-project-refused',
+      reason: refused.reason,
+      classification: refused.classification || null,
+    });
+    return 1;
+  }
 
   const sizes = sectionSizes(newText);
   logEvent(projectDir, 'hygiene-log.jsonl', {
@@ -303,6 +363,18 @@ export function main(argv) {
   const pct = (delta / before * 100).toFixed(1);
   console.log(`PROJECT.md: ${before} → ${after} bytes (${delta > 0 ? '-' : '+'}${Math.abs(delta)} = ${pct}%)`);
   console.log(`§Decisions: ${stats.compacted} compacted, ${stats.skipped} already-stub, ${stats.missing} no-unit`);
+
+  // Truthful stamp-failure surfacing (Hale's point 6): PROJECT.md compacted on
+  // disk but its baseline stamp didn't land. Say so — next lifecycle pass will
+  // read the compacted file as an unreconciled edit until it's re-stamped.
+  if (attributionFailed) {
+    process.stderr.write(
+      `compact-project: WROTE PROJECT.md but the authorship stamp failed ` +
+      `(${attributionFailed.outcome}: ${attributionFailed.reason}) — attribution unknown, ` +
+      `recovery-required before the next render trusts this file.\n`
+    );
+    return 1;
+  }
   return 0;
 }
 

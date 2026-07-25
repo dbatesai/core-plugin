@@ -2,14 +2,14 @@
   "schema_version": "1.0.0",
   "_doc": "Per-harness capability descriptor. capability-probe.mjs reads this to determine which capabilities each harness should probe and which per-harness probe script implements each row. Schema lives at sibling row-schema.md per DC-98 (schema-consumer coupling). Per-harness probe scripts are responsible for emitting full capability rows matching the schema.",
   "surfaces": {
-    "collab_files_repo": "~/files",
-    "collab_files_expected_remote": "git@github.com:dbatesai/files.git",
-    "_doc": "Target-surface config consumed by target-surface-collab-files-probe.mjs. Option A per completion plan §1.2: config lives in the descriptor (per-harness contract surface) rather than env vars or collab-plugin config. Each harness may legitimately differ in its files-repo path."
+    "collab_files_repo": null,
+    "collab_files_expected_remote": null,
+    "_doc": "Target-surface config consumed by target-surface-collab-files-probe.mjs. Unset (null) by default: this capability only applies to an install that actually uses a git-backed collab-files transport (see collab-plugin's `github:<repo>` transport), which is not every install. Per-installation config is set via the CORE_COLLAB_FILES_REPO / CORE_COLLAB_FILES_EXPECTED_REMOTE env vars, checked before these fields. These fields remain as an opt-in override for an install that wants to bake in its own default (Option A per completion plan §1.2) — they must never ship set to any one person's personal repo path or remote, since the descriptor is shared by every install of the plugin."
   },
   "harnesses": {
     "claude-code": {
       "probe_script": "claude-code-capability-probe.mjs",
-      "_doc": "Partly empirical — anti-anchoring claim still trust-based (R-17 DEGRADED-by-mechanism per session 48). R-17 closure is not-before-v2.9.0 and requires physical anti-anchoring validation/consumer enforcement (Hale-ratified 2026-05-29); native Workflow/Agent isolation:worktree is a candidate primitive.",
+      "_doc": "Partly empirical — anti-anchoring claim still trust-based (R-17 DEGRADED-by-mechanism per session 48). R-17 closure is not-before-v2.9.0 and requires physical anti-anchoring validation/consumer enforcement (peer-ratified 2026-05-29); native Workflow/Agent isolation:worktree is a candidate primitive.",
       "capabilities": [
         {
           "capability_id": "plugin-root-resolution",
@@ -83,14 +83,14 @@
     }
   },
   "consumer_actions": {
-    "_doc": "Named pre-action gates. Each lists the capability_ids it requires in PASS state, plus operation-scoped gates the runner enforces per HC critique evt-202605271310 (identity PASS alone is NOT a mutation permit). Stable enum codes for mutation_block_reason: 'authority_not_allowed' when allowed_authorities check fails; 'harness_mismatch' when consuming_harness is not in allowed_harnesses; 'consuming_harness_unknown' when consuming_harness is unknown but the action requires a known harness; 'consuming_harness_signal_weak' when the row's signal_weight is weak but the action requires strong; 'identity-{degraded|not-yet|unknown}' when identity itself doesn't reach PASS.",
+    "_doc": "Named pre-action gates. Each lists the capability_ids it requires in PASS state, plus operation-scoped gates the runner enforces per the identity-vs-mutation critique (identity PASS alone is NOT a mutation permit). Stable enum codes for mutation_block_reason: 'authority_not_allowed' when allowed_authorities check fails; 'harness_mismatch' when consuming_harness is not in allowed_harnesses; 'consuming_harness_unknown' when consuming_harness is unknown but the action requires a known harness; 'consuming_harness_signal_weak' when the row's signal_weight is weak but the action requires strong; 'identity-{degraded|not-yet|unknown}' when identity itself doesn't reach PASS.",
     "collab-files-mutating": {
       "requires_pass": ["plugin-root-resolution", "target-surface-collab-files"],
       "allowed_authorities": ["canonical-source", "installed-cache"],
       "allowed_harnesses": ["claude-code", "codex"],
       "allowed_signal_weight": "strong",
-      "target_surface": "~/files/collabs/",
-      "description": "Event-write to ~/files/collabs/ via collab-plugin's gitCommitPush(). Requires strong signal (not just CODEX_THREAD_ID alone) because it writes to the shared files transport."
+      "target_surface": "<collab-files-repo>/collabs/",
+      "description": "Event-write to the configured collab-files transport's collabs/ path (see surfaces.collab_files_repo / CORE_COLLAB_FILES_REPO) via collab-plugin's gitCommitPush(). Requires strong signal (not just CODEX_THREAD_ID alone) because it writes to a shared transport. Never bake in any one person's personal repo path here."
     },
     "project-memory-write": {
       "requires_pass": ["plugin-root-resolution"],

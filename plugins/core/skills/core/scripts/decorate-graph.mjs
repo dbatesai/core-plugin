@@ -38,6 +38,8 @@ import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
+import { hashText, stampFiles, readProjectCache } from './state-cache.mjs';
+import { writeGuardDecision } from './lifecycle-core.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
 
 export { EDGES_BEGIN, EDGES_END };
@@ -143,6 +145,50 @@ export function decorateUnitText(text, unitId, edges, activeById) {
 }
 
 /**
+ * hashOutsideEdgesBlock — content hash of a unit's text with the
+ * marker-delimited edges block excluded, so a later mismatch against the
+ * cached stamp can tell "decorate-graph regenerated its own block" from "a
+ * human edited this unit" — same construction as hot-section.mjs's
+ * hashOutsideHotBlock for PROJECT.md's hot section. decorate-graph never
+ * touches anything outside EDGES_BEGIN/EDGES_END by construction (see
+ * decorateUnitText), so if this hash still matches the cached one, nothing
+ * outside the edges block changed regardless of what last_written_by claims.
+ *
+ * A malformed marker state (findExistingEdgesBlock returns {ok:false}) hashes
+ * the WHOLE text as "outside" — decorateStore refuses to touch (and never
+ * stamps) a malformed file anyway, so this path only matters for a stamp
+ * that predates a marker corruption introduced by something other than this
+ * script, which correctly falls through to "outside changed" on comparison.
+ */
+export function hashOutsideEdgesBlock(text) {
+  const t = String(text || '');
+  const scan = findExistingEdgesBlock(t);
+  const block = scan.ok ? scan.block : null;
+  const outside = block ? t.slice(0, block.start) + t.slice(block.end) : t;
+  return hashText(outside);
+}
+
+/**
+ * classifyUnitChange — deterministic classifier for a unit-file hash
+ * mismatch against the cached stamp, mirroring hot-section.mjs's
+ * classifyProjectMdChange for PROJECT.md's hot block. Returns:
+ *   'no-baseline'        — no cached outside_hash to compare against (older
+ *                          cache entry predating this fix, or never stamped).
+ *   'edges-block-only'   — everything outside the edges block is
+ *                          byte-identical to the last recorded write; safe to
+ *                          treat as CORE's own decoration regardless of the
+ *                          whole-file hash mismatch.
+ *   'outside-changed'    — content outside the edges block changed since the
+ *                          last stamp. decorate-graph.mjs cannot have
+ *                          produced this; MUST be treated as a genuine user
+ *                          edit.
+ */
+export function classifyUnitChange(cachedStamp, currentText) {
+  if (!cachedStamp || typeof cachedStamp.outside_hash !== 'string') return 'no-baseline';
+  return hashOutsideEdgesBlock(currentText) === cachedStamp.outside_hash ? 'edges-block-only' : 'outside-changed';
+}
+
+/**
  * decorateStore — the store-wide pass. One atomic snapshot (same
  * loadSnapshot(..., {captureBodies:true, retainRaw:true}) render-okf-export
  * uses), so ids/edges/raw bytes all derive from the same read — no
@@ -151,15 +197,30 @@ export function decorateUnitText(text, unitId, edges, activeById) {
  * Only ever touches top-level active units (loadSnapshot's own population);
  * archive/ is out of scope by construction, matching iterActiveUnits.
  */
-export function decorateStore(projectDir, { dryRun = false } = {}) {
+export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
   const cap = loadSnapshot(projectDir, { captureBodies: true, retainRaw: true });
   const units = cap.index.units;
   const activeById = new Map(units.map(u => [u.id, u]));
   const memoriesDir = join(resolve(projectDir), '_memories');
 
+  // Authorship-boundary fix (Hale's finding, 2026-07-22 — "mixed-ownership
+  // writers launder unreconciled edits"): read the state cache ONCE, before
+  // any of this run's writes land, as the pre-write baseline every unit gets
+  // classified against below. The bug this closes: decorate-graph used to
+  // rewrite its own generated block and then unconditionally stamp a FRESH
+  // outside_hash — even when the human-authored region had ALREADY diverged
+  // from the last known-good baseline (a between-session user edit nobody
+  // had reconciled yet). The fresh stamp made that divergence permanently
+  // undetectable: the user's bytes survived, but the fact that they changed
+  // was never observed, attributed, or propagated. See
+  // classifyUnitChange below for what "already diverged" means.
+  const preWriteCache = readProjectCache(projectDir);
+
   const changed = [];
   const unchanged = [];
   const refused = [];
+  const needsReconciliation = [];
+  const stampEntries = [];
   for (const u of units) {
     const raw = cap.raw?.[u.path];
     if (raw === undefined) continue; // scaffolding/unreadable — nothing to decorate
@@ -176,6 +237,32 @@ export function decorateStore(projectDir, { dryRun = false } = {}) {
     if (updated === text) { unchanged.push(u.path); continue; }
 
     const filePath = join(memoriesDir, ...u.path.split('/'));
+
+    // Refuse to decorate (and never re-stamp) a file whose human-authored
+    // region already disagrees with the last established baseline. Gated on
+    // `cachedStamp` being present: a file with NO prior cache entry has no
+    // established baseline to violate — its first-ever decoration is safe
+    // and is exactly how that baseline gets established in the first place.
+    // A file that DOES have a prior entry but classifies as 'outside-changed'
+    // (a real edit since the last stamp) or 'no-baseline' (a pre-fix entry
+    // recorded before outside_hash existed, so we can't prove what "outside"
+    // looked like) is an unreconciled user edit already in flight — decorate
+    // must not touch it or launder it into a fresh stamp.
+    const cachedStamp = preWriteCache.files[filePath];
+    const classification = classifyUnitChange(cachedStamp, text);
+    // Shared refuse-or-proceed rule (lifecycle-core.mjs) — identical logic to
+    // hot-section and compact-project. A stamped file refuses on
+    // 'outside-changed'/'no-baseline'; a file with NO stamp at all ALWAYS
+    // refuses now (Hale's 2026-07-22 root fix — session timing cannot prove
+    // authorship). A legitimately new unit is decoratable because its creating
+    // writer stamped it at creation (lifecycle-detect.mjs stampCreatedBaseline);
+    // an un-stamped no-baseline unit is held and surfaced, never rewritten.
+    const decision = writeGuardDecision({ cachedStamp, classification });
+    if (!decision.proceed) {
+      needsReconciliation.push({ path: u.path, classification: decision.classification });
+      continue;
+    }
+
     if (!dryRun) {
       // Stale-byte refusal (Hale's concurrency finding): the file lock this
       // script runs under is private to decorate-graph, so it doesn't
@@ -190,9 +277,26 @@ export function decorateStore(projectDir, { dryRun = false } = {}) {
         continue;
       }
       atomicWriteFileSync(filePath, updated);
+      // Stamp the state cache in the same operation, so next session's
+      // edit-detection recognizes this as CORE's own write rather than a
+      // between-session user edit (Hale's finding, 2026-07-22 — this used to
+      // be a prose instruction telling the AGENT to update the cache by
+      // hand; that's now code, matching hot-section.mjs's precedent).
+      stampEntries.push({
+        path: filePath,
+        hash: hashText(updated),
+        lastWrittenBy: 'decorate-graph',
+        extra: { outside_hash: hashOutsideEdgesBlock(updated) },
+      });
     }
     changed.push(u.path);
   }
+
+  // Truthful stamp-failure surfacing (Hale's point 6): the unit files landed
+  // on disk; if their authorship stamp didn't, report attribution-unknown so
+  // the caller surfaces it, rather than reporting a clean decoration.
+  let stampOutcome = { stamped: true };
+  if (!dryRun && stampEntries.length > 0) stampOutcome = stampFiles(projectDir, stampEntries, { now, home });
 
   return {
     snapshot_id: cap.snapshotId,
@@ -200,6 +304,8 @@ export function decorateStore(projectDir, { dryRun = false } = {}) {
     changed,
     unchanged_count: unchanged.length,
     refused,
+    needs_reconciliation: needsReconciliation,
+    attribution: stampOutcome && stampOutcome.stamped === false ? stampOutcome : { stamped: true },
     dry_run: dryRun,
   };
 }
@@ -225,7 +331,7 @@ function main(argv) {
 
   const result = decorateStoreLocked(projectDir, { dryRun });
 
-  if (result.changed.length === 0 && result.refused.length === 0) {
+  if (result.changed.length === 0 && result.refused.length === 0 && result.needs_reconciliation.length === 0) {
     process.stdout.write(`decorate-graph: ${result.total_units} units, none needed a change (snapshot ${result.snapshot_id.slice(0, 12)}).\n`);
     return 0;
   }
@@ -246,8 +352,29 @@ function main(argv) {
     for (const r of result.refused) process.stderr.write(`  ${r.path}: ${r.reason}\n`);
   }
 
-  if (check) return (result.changed.length > 0 || result.refused.length > 0) ? 1 : 0;
-  return result.refused.length > 0 ? 1 : 0;
+  // A unit whose human-authored region already diverged from the last known
+  // baseline (Hale's authorship-laundering finding, 2026-07-22) is a real,
+  // user-visible signal — not a silent skip. Printing it alongside refusals
+  // and treating it as exit-nonzero keeps the same "never claim quiet
+  // success while something needs a look" discipline as the refused-file path.
+  if (result.needs_reconciliation.length > 0) {
+    process.stderr.write(`decorate-graph: ${result.needs_reconciliation.length} file(s) need reconciliation before decoration (unreconciled user edit outside the generated block):\n`);
+    for (const r of result.needs_reconciliation) process.stderr.write(`  ${r.path}: ${r.classification}\n`);
+  }
+
+  // Attribution failure (Hale's point 6): files wrote but a baseline stamp
+  // didn't land. Never report clean success over an unknown-authorship state.
+  const attributionFailed = result.attribution && result.attribution.stamped === false;
+  if (attributionFailed) {
+    process.stderr.write(
+      `decorate-graph: WROTE unit files but the authorship stamp failed ` +
+      `(${result.attribution.outcome}: ${result.attribution.reason}) — attribution unknown, ` +
+      `recovery-required before the next lifecycle pass trusts these files.\n`
+    );
+  }
+
+  if (check) return (result.changed.length > 0 || result.refused.length > 0 || result.needs_reconciliation.length > 0 || attributionFailed) ? 1 : 0;
+  return (result.refused.length > 0 || result.needs_reconciliation.length > 0 || attributionFailed) ? 1 : 0;
 }
 
 const _cliEntry = (() => { try { return fileURLToPath(import.meta.url) === resolve(process.argv[1]); } catch { return false; } })();

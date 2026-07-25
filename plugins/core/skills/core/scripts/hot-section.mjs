@@ -25,15 +25,17 @@
  * Per DC-80 the plugin ships Node.js (.mjs) only.
  */
 
-import { readFileSync, realpathSync, mkdirSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { createHash } from 'node:crypto';
 import { resolve, join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
 import { logEvent } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { withFileLock } from './file-lock.mjs';
+import { hashText, stampFile, readProjectCache } from './state-cache.mjs';
+import {
+  writeGuardDecision, withProjectMdWriterLock,
+} from './lifecycle-core.mjs';
 
 export const HOT_BEGIN = '<!-- HOT-SECTION:BEGIN -->';
 export const HOT_END = '<!-- HOT-SECTION:END -->';
@@ -62,14 +64,54 @@ function readProjectMd(projectDir) {
   }
 }
 
-function findExistingBlock(text) {
+function countOccurrences(text, needle) {
+  let count = 0, idx = 0;
+  while ((idx = text.indexOf(needle, idx)) !== -1) { count++; idx += needle.length; }
+  return count;
+}
+
+/**
+ * findExistingBlock — fail-closed marker scan (Hale's point 4, 2026-07-22).
+ * The old version paired the FIRST BEGIN with the FIRST END via bare indexOf,
+ * which silently deleted any user text sitting between a duplicate BEGIN and
+ * the END — a real repro Hale's probe caught (`hot_duplicate_markers`). Now it
+ * matches decorate-graph.mjs's exact-one-pair rule byte-for-byte:
+ *
+ *   { ok: true,  block: null }          — no markers at all, clean slate.
+ *   { ok: true,  block: {start,end} }   — exactly one correctly-ordered pair.
+ *   { ok: false, block: null }          — ANY other shape (duplicate BEGIN,
+ *                                         mismatched count, END before BEGIN):
+ *                                         refuse to touch the file, don't guess.
+ */
+export function findExistingBlock(text) {
+  const beginCount = countOccurrences(text, HOT_BEGIN);
+  const endCount = countOccurrences(text, HOT_END);
+  if (beginCount === 0 && endCount === 0) return { ok: true, block: null };
+  if (beginCount !== 1 || endCount !== 1) return { ok: false, block: null };
   const beginIdx = text.indexOf(HOT_BEGIN);
   const endIdx = text.indexOf(HOT_END);
-  if (beginIdx === -1 || endIdx === -1 || endIdx < beginIdx) return null;
+  if (endIdx < beginIdx) return { ok: false, block: null };
   // Inclusive of trailing newline after the end marker, so replacement is clean.
   let blockEnd = endIdx + HOT_END.length;
   while (blockEnd < text.length && text[blockEnd] === '\n') blockEnd++;
-  return { start: beginIdx, end: blockEnd };
+  return { ok: true, block: { start: beginIdx, end: blockEnd } };
+}
+
+/**
+ * MALFORMED_HOT_MARKERS — thrown (byte-identical refusal, nothing written) when
+ * PROJECT.md's hot-section markers aren't either "no markers" or "exactly one
+ * ordered pair". Mirrors decorate-graph.mjs's MALFORMED_EDGES_MARKERS: a
+ * corrupt/ambiguous marker state is a manual-look problem, never a guess.
+ */
+function malformedHotMarkersError(path) {
+  const err = new Error(
+    `malformed HOT-SECTION:BEGIN/END marker state in ${path} — refusing to touch this file ` +
+    `(expected either zero markers or exactly one ordered BEGIN/END pair). ` +
+    `Duplicate or out-of-order markers can hide user text; a manual look is needed.`
+  );
+  err.code = 'MALFORMED_HOT_MARKERS';
+  err.path = path;
+  return err;
 }
 
 function renderBlock(text, timestamp) {
@@ -79,6 +121,56 @@ function renderBlock(text, timestamp) {
 
 function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+}
+
+// Writer-boundary lock: applyHotSection/clearHotSection had NO lock at all
+// around their PROJECT.md read-modify-write. Fixed 2026-07-22 with a private
+// `.hot-section.lock`; superseded the SAME day by Hale's point 7 — a
+// writer-local lock only serialises hot-section against ITSELF, so a
+// concurrent compaction or demotion could still interleave with a hot-section
+// apply on the same PROJECT.md. Now every PROJECT.md writer shares ONE lock
+// (`withProjectMdWriterLock`, in lifecycle-core.mjs), which is what actually
+// closes the cross-writer race.
+
+/**
+ * NeedsReconciliationError — thrown instead of writing when PROJECT.md's
+ * human-authored region (everything outside the marker-delimited hot block)
+ * already disagrees with the last established baseline. Mirrors the existing
+ * HOT_SECTION_OVER_BUDGET pattern in this same file: a typed, catchable error
+ * rather than a silent skip or a value the caller might not check.
+ */
+function needsReconciliationError(path, classification) {
+  const err = new Error(
+    `PROJECT.md needs reconciliation before a hot-section write: content outside the hot block ` +
+    `already diverged from the last known baseline (classification: ${classification}). ` +
+    `Refusing to rewrite/re-stamp over an unreconciled user edit.`
+  );
+  err.code = 'NEEDS_RECONCILIATION';
+  err.path = path;
+  err.classification = classification;
+  return err;
+}
+
+/**
+ * Refuse a write when PROJECT.md has a PRIOR established baseline that the
+ * CURRENT (pre-write) bytes already disagree with outside the hot block.
+ * Gated on `cachedStamp` being present, same reasoning as
+ * decorate-graph.mjs's identical check: a file with no prior cache entry has
+ * no established baseline to violate, so its first-ever hot-section write is
+ * safe and is exactly how that baseline gets established.
+ */
+function assertReconciled(projectDir, path, currentText) {
+  const cache = readProjectCache(projectDir);
+  const cachedStamp = cache.files[path];
+  const classification = classifyProjectMdChange(cachedStamp, currentText);
+  // Shared refuse-or-proceed rule (lifecycle-core.mjs) — identical logic to
+  // decorate-graph and compact-project. A PROJECT.md with NO cache stamp always
+  // refuses now (Hale's 2026-07-22 root fix — session timing cannot prove
+  // authorship). A freshly-rendered PROJECT.md is writable because its render
+  // step stamped it at creation (lifecycle-detect.mjs stampCreatedBaseline
+  // --kind project); an un-stamped no-baseline PROJECT.md is held, not written.
+  const decision = writeGuardDecision({ cachedStamp, classification });
+  if (!decision.proceed) throw needsReconciliationError(path, decision.classification);
 }
 
 // The edit-detection cache records, per file, who last wrote it and a content
@@ -110,9 +202,14 @@ function nowIso() {
 // regardless of what `last_written_by` claims.
 export function hashOutsideHotBlock(text) {
   const t = String(text || '');
-  const block = findExistingBlock(t);
+  const scan = findExistingBlock(t);
+  // A malformed marker state hashes the WHOLE text as "outside" — same as
+  // decorate-graph.mjs's hashOutsideEdgesBlock. The writers refuse to touch a
+  // malformed file anyway, so this only matters when comparing a pre-malform
+  // stamp, which correctly falls through to "outside changed".
+  const block = scan.ok ? scan.block : null;
   const outside = block ? t.slice(0, block.start) + t.slice(block.end) : t;
-  return createHash('sha256').update(outside, 'utf8').digest('hex').slice(0, 16);
+  return hashText(outside);
 }
 
 /**
@@ -137,43 +234,41 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir
   const currentText = (() => {
     try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
   })();
-  const stamp = {
-    last_hash: createHash('sha256').update(currentText, 'utf8').digest('hex').slice(0, 16),
-    outside_hash: hashOutsideHotBlock(currentText),
-    last_written: now || nowIso(),
-    last_written_by: 'hot-section',
-  };
-
-  // Per-project cache — the write of record. Single-owner, so no lock needed.
-  const projectCachePath = join(dirname(resolve(projectMdPath)), '_memories', '_lib', 'state-cache.json');
-  try {
-    mkdirSync(dirname(projectCachePath), { recursive: true });
-    let cache;
-    try { cache = JSON.parse(readFileSync(projectCachePath, 'utf8')); } catch { cache = { files: {} }; }
-    if (!cache || typeof cache !== 'object') cache = { files: {} };
-    if (!cache.files || typeof cache.files !== 'object') cache.files = {};
-    cache.files[projectMdPath] = stamp;
-    atomicWriteFileSync(projectCachePath, JSON.stringify(cache, null, 2) + '\n');
-  } catch { /* best-effort: a cache-write failure never blocks the synthesis */ }
-
-  // One-release migration: prune this file's entry from the global cache under
-  // the lock, so a stale global stamp can't shadow the per-project one.
-  const globalCachePath = join(home, '.core', 'state-cache.json');
-  try {
-    withFileLock(join(home, '.core', 'state-cache.lock'), () => {
-      let cache;
-      try { cache = JSON.parse(readFileSync(globalCachePath, 'utf8')); } catch { cache = null; }
-      if (cache?.files && projectMdPath in cache.files) {
-        delete cache.files[projectMdPath];
-        atomicWriteFileSync(globalCachePath, JSON.stringify(cache, null, 2) + '\n');
-      }
-    }, { retries: 3, retryDelayMs: 50 });
-  } catch { /* best-effort — a held lock just defers the prune to the next stamp */ }
+  const projectDir = dirname(resolve(projectMdPath));
+  // Shared stamp-and-prune plumbing lives in state-cache.mjs (extracted
+  // 2026-07-22 so decorate-graph.mjs didn't need a second copy of the same
+  // lock/prune logic). The domain-specific piece — hashing OUTSIDE the hot
+  // block so a later mismatch can be classified correctly — stays here,
+  // passed through as `extra.outside_hash`. Returns the truthful stamp outcome
+  // (Hale's point 6) so a caller can surface an attribution-unknown state.
+  return stampFile(
+    projectDir,
+    resolve(projectMdPath),
+    hashText(currentText),
+    'hot-section',
+    { now, home, extra: { outside_hash: hashOutsideHotBlock(currentText) } },
+  );
 }
 
 // ---------- Public API ----------
 
-export function applyHotSection(projectDir, text, { now, allowOverBudget = false, home } = {}) {
+// applyHotSection() below keeps its long-standing return shape (just the
+// updated text string) for every existing caller/test. applyHotSectionWithOutcome()
+// is the SAME implementation, additionally surfacing `applied` and
+// `stampOutcome` — added 2026-07-22 (Hale's CLI-contract-truth finding) so
+// `cmdApply` can tell "content wrote AND stamp landed" apart from "content
+// wrote but the attribution stamp failed" instead of always reporting full
+// success. Do not duplicate the write logic between the two — one shared
+// core, two return shapes.
+export function applyHotSectionWithOutcome(projectDir, text, opts = {}) {
+  return applyHotSectionCore(projectDir, text, opts);
+}
+
+export function applyHotSection(projectDir, text, opts = {}) {
+  return applyHotSectionCore(projectDir, text, opts).updated;
+}
+
+function applyHotSectionCore(projectDir, text, { now, allowOverBudget = false, home } = {}) {
   const tokens = estimateTokens(text);
   if (tokens > HOT_SECTION_TOKEN_BUDGET && !allowOverBudget) {
     logEvent(projectDir, 'retrieval-log.jsonl', {
@@ -191,40 +286,74 @@ export function applyHotSection(projectDir, text, { now, allowOverBudget = false
     throw err;
   }
 
-  const { path, text: original } = readProjectMd(projectDir);
-  const block = renderBlock(text, now || nowIso());
-  const existing = findExistingBlock(original);
-  let updated;
-  if (existing) {
-    updated = original.slice(0, existing.start) + block + original.slice(existing.end);
-  } else {
-    // Insert before the first `## What & Why` heading. If that's missing,
-    // append the block to the end (defensive — unusual but well-defined).
-    const insertAt = original.indexOf('## What & Why');
-    if (insertAt === -1) {
-      updated = original.endsWith('\n') ? original + '\n' + block : original + '\n\n' + block;
+  // Shared PROJECT.md writer lock + pre-write reconciliation check + strict
+  // marker refusal + live-preimage CAS (Hale's points 2, 4, 7). Acquire the
+  // ONE lock every PROJECT.md writer shares, classify the human-authored
+  // region against the pre-write baseline, refuse a malformed marker state
+  // byte-identically, and re-verify the on-disk bytes immediately before the
+  // atomic write so an out-of-lock writer can't be laundered either.
+  const { updated, applied, stampOutcome } = withProjectMdWriterLock(projectDir, () => {
+    const { path, text: original } = readProjectMd(projectDir);
+    // Strict marker refusal FIRST — a malformed marker state must never be
+    // parsed-past, guessed at, or written over (Hale's point 4).
+    const scan = findExistingBlock(original);
+    if (!scan.ok) throw malformedHotMarkersError(resolve(path));
+    assertReconciled(projectDir, resolve(path), original);
+    const block = renderBlock(text, now || nowIso());
+    const existing = scan.block;
+    let next;
+    if (existing) {
+      next = original.slice(0, existing.start) + block + original.slice(existing.end);
     } else {
-      updated = original.slice(0, insertAt) + block + original.slice(insertAt);
+      // Insert before the first `## What & Why` heading. If that's missing,
+      // append the block to the end (defensive — unusual but well-defined).
+      const insertAt = original.indexOf('## What & Why');
+      if (insertAt === -1) {
+        next = original.endsWith('\n') ? original + '\n' + block : original + '\n\n' + block;
+      } else {
+        next = original.slice(0, insertAt) + block + original.slice(insertAt);
+      }
     }
-  }
-  if (updated !== original) {
-    atomicWriteFileSync(path, updated);
-    recordProjectMdWrite(path, { now, home });
-  }
+    let outcome = { stamped: true };
+    if (next !== original) {
+      // Live-preimage compare-and-swap (Hale's point 2): re-read right before
+      // the atomic write and refuse if the bytes moved since `original` — a
+      // stale write here would silently discard whatever moved them.
+      const live = readFileSync(path, 'utf8');
+      if (live !== original) throw needsReconciliationError(resolve(path), 'stale-preimage');
+      atomicWriteFileSync(path, next);
+      outcome = recordProjectMdWrite(path, { now, home });
+    }
+    return { updated: next, applied: next !== original, stampOutcome: outcome };
+  });
+
   logEvent(projectDir, 'retrieval-log.jsonl', {
     kind: 'hot-section-synthesis',
     tokens,
     budget: HOT_SECTION_TOKEN_BUDGET,
     over_budget: tokens > HOT_SECTION_TOKEN_BUDGET,
-    applied: updated !== original,
+    applied,
+    attribution: stampOutcome && stampOutcome.stamped === false ? stampOutcome.outcome : 'ok',
   });
-  return updated;
+  // Truthful stamp-failure surfacing (Hale's point 6): the hot section landed
+  // on disk but its authorship stamp did not, so next lifecycle pass will read
+  // it as an unreconciled edit. Say so loudly rather than report clean success.
+  if (applied && stampOutcome && stampOutcome.stamped === false) {
+    process.stderr.write(
+      `hot-section: WROTE PROJECT.md but the authorship stamp failed ` +
+      `(${stampOutcome.outcome}: ${stampOutcome.reason}) — attribution unknown, ` +
+      `recovery-required: a reconcile/re-stamp is owed before the next render.\n`
+    );
+  }
+  return { updated, applied, stampOutcome };
 }
 
 export function currentHotSection(projectDir) {
   const { text } = readProjectMd(projectDir);
-  const block = findExistingBlock(text);
-  if (!block) return '';
+  const scan = findExistingBlock(text);
+  // A malformed marker state can't be safely parsed — return empty rather than
+  // guess at which BEGIN/END pair is "the" hot block.
+  if (!scan.ok || !scan.block) return '';
   const inner = text.slice(text.indexOf(HOT_BEGIN) + HOT_BEGIN.length, text.indexOf(HOT_END));
   // Strip the `## Right now` heading and the `*Synthesized ...*` footer to
   // return just the composed body.
@@ -234,20 +363,46 @@ export function currentHotSection(projectDir) {
     .trim();
 }
 
-export function clearHotSection(projectDir, { now, home } = {}) {
-  const { path, text: original } = readProjectMd(projectDir);
-  const existing = findExistingBlock(original);
-  if (!existing) return original;
-  const updated = original.slice(0, existing.start) + original.slice(existing.end);
-  if (updated !== original) {
-    atomicWriteFileSync(path, updated);
-    // Hale's second finding, same audit: clearHotSection wrote PROJECT.md but
-    // never stamped the cache, leaving `last_hash`/`outside_hash` permanently
-    // stale after a clear — edit-detection would then misread the clear
-    // itself as an unattributed change on the very next check.
-    recordProjectMdWrite(path, { now, home });
-  }
-  return updated;
+// Same shared-core pattern as applyHotSection/applyHotSectionWithOutcome
+// above: clearHotSection() keeps its long-standing string return for
+// existing callers; clearHotSectionWithOutcome() additionally surfaces
+// `cleared` and `stampOutcome` for cmdClear (Hale, 2026-07-22).
+export function clearHotSectionWithOutcome(projectDir, opts = {}) {
+  return clearHotSectionCore(projectDir, opts);
+}
+
+export function clearHotSection(projectDir, opts = {}) {
+  return clearHotSectionCore(projectDir, opts).updated;
+}
+
+function clearHotSectionCore(projectDir, { now, home } = {}) {
+  return withProjectMdWriterLock(projectDir, () => {
+    const { path, text: original } = readProjectMd(projectDir);
+    const scan = findExistingBlock(original);
+    // Strict marker refusal, same as applyHotSection (Hale's point 4): never
+    // clear over a malformed/ambiguous marker state.
+    if (!scan.ok) throw malformedHotMarkersError(resolve(path));
+    if (!scan.block) return { updated: original, cleared: false, stampOutcome: null };
+    // Same authorship-boundary check as applyHotSection: a clear also
+    // rewrites (removes) the generated region and re-stamps — it must not
+    // do so over a human-authored region that already diverged unreconciled.
+    assertReconciled(projectDir, resolve(path), original);
+    const updated = original.slice(0, scan.block.start) + original.slice(scan.block.end);
+    let stampOutcome = null;
+    const cleared = updated !== original;
+    if (cleared) {
+      // Live-preimage CAS (Hale's point 2).
+      const live = readFileSync(path, 'utf8');
+      if (live !== original) throw needsReconciliationError(resolve(path), 'stale-preimage');
+      atomicWriteFileSync(path, updated);
+      // Hale's second finding, same audit: clearHotSection wrote PROJECT.md but
+      // never stamped the cache, leaving `last_hash`/`outside_hash` permanently
+      // stale after a clear — edit-detection would then misread the clear
+      // itself as an unattributed change on the very next check.
+      stampOutcome = recordProjectMdWrite(path, { now, home });
+    }
+    return { updated, cleared, stampOutcome };
+  });
 }
 
 export function candidatesForSynthesis(projectDir, { top = DEFAULT_CANDIDATE_COUNT, sessionTopics = [], today = null } = {}) {
@@ -368,8 +523,38 @@ function cmdApply(args) {
     process.stderr.write('error: no synthesis text provided (use --text "..." or --file PATH, or pipe to stdin)\n');
     return 2;
   }
-  applyHotSection(projectDir, text);
-  process.stdout.write(`PROJECT.md: hot section applied (${text.trim().split('\n').length} lines).\n`);
+  let result;
+  try {
+    result = applyHotSectionWithOutcome(projectDir, text);
+  } catch (e) {
+    if (e.code === 'NEEDS_RECONCILIATION' || e.code === 'MALFORMED_HOT_MARKERS') {
+      process.stderr.write(`hot-section: refusing to apply — ${e.message}\n`);
+      return 1;
+    }
+    throw e;
+  }
+  const lines = text.trim().split('\n').length;
+  // Content-write success and attribution-stamp success are TWO different
+  // facts (Hale, 2026-07-22): the stderr warning above already told a human
+  // the stamp failed, but a hook/caller reading exit code + stdout alone used
+  // to see plain success either way. Do NOT roll back the content write —
+  // it already happened and stays — but the machine-readable contract must
+  // stop calling this a clean success.
+  if (result.applied && result.stampOutcome && result.stampOutcome.stamped === false) {
+    process.stdout.write(
+      `PROJECT.md: hot section applied (${lines} lines), but the attribution stamp FAILED — ` +
+      `partial success, recovery required.\n`
+    );
+    process.stdout.write(JSON.stringify({
+      content_write: 'ok',
+      attribution_stamp: 'failed',
+      outcome: result.stampOutcome.outcome,
+      reason: result.stampOutcome.reason,
+      recovery: result.stampOutcome.recovery || 'recovery-required',
+    }) + '\n');
+    return 1;
+  }
+  process.stdout.write(`PROJECT.md: hot section applied (${lines} lines).\n`);
   return 0;
 }
 
@@ -383,10 +568,43 @@ function cmdCurrent(args) {
 function cmdClear(args) {
   const projectDir = resolveProjectDir(args.positionals[0]);
   const before = readProjectMd(projectDir).text;
-  clearHotSection(projectDir);
+  let result;
+  try {
+    result = clearHotSectionWithOutcome(projectDir);
+  } catch (e) {
+    if (e.code === 'NEEDS_RECONCILIATION' || e.code === 'MALFORMED_HOT_MARKERS') {
+      process.stderr.write(`hot-section: refusing to clear — ${e.message}\n`);
+      return 1;
+    }
+    throw e;
+  }
   const after = readProjectMd(projectDir).text;
-  if (before === after) process.stdout.write('No hot section present; nothing to clear.\n');
-  else process.stdout.write('PROJECT.md: hot section cleared.\n');
+  if (before === after) {
+    process.stdout.write('No hot section present; nothing to clear.\n');
+    return 0;
+  }
+  // Same content-write-vs-attribution-stamp distinction as cmdApply (Hale,
+  // 2026-07-22): the clear already happened and stays — never rolled back —
+  // but a failed stamp must not read as clean success on exit code + stdout.
+  if (result.cleared && result.stampOutcome && result.stampOutcome.stamped === false) {
+    process.stderr.write(
+      `hot-section: WROTE PROJECT.md (cleared) but the authorship stamp failed ` +
+      `(${result.stampOutcome.outcome}: ${result.stampOutcome.reason}) — attribution unknown, ` +
+      `recovery-required: a reconcile/re-stamp is owed before the next render.\n`
+    );
+    process.stdout.write(
+      'PROJECT.md: hot section cleared, but the attribution stamp FAILED — partial success, recovery required.\n'
+    );
+    process.stdout.write(JSON.stringify({
+      content_write: 'ok',
+      attribution_stamp: 'failed',
+      outcome: result.stampOutcome.outcome,
+      reason: result.stampOutcome.reason,
+      recovery: result.stampOutcome.recovery || 'recovery-required',
+    }) + '\n');
+    return 1;
+  }
+  process.stdout.write('PROJECT.md: hot section cleared.\n');
   return 0;
 }
 

@@ -14,9 +14,23 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
-const { decorateStore, decorateUnitText, findExistingEdgesBlock, renderEdgesBlock, EDGES_BEGIN, EDGES_END } =
-  await import(pathToFileURL(join(SCRIPTS, 'decorate-graph.mjs')).href);
+const {
+  decorateStore, decorateUnitText, findExistingEdgesBlock, renderEdgesBlock, EDGES_BEGIN, EDGES_END,
+  hashOutsideEdgesBlock, classifyUnitChange,
+} = await import(pathToFileURL(join(SCRIPTS, 'decorate-graph.mjs')).href);
+const { hashText } = await import(pathToFileURL(join(SCRIPTS, 'state-cache.mjs')).href);
+const { stampCreatedBaseline } = await import(pathToFileURL(join(SCRIPTS, 'lifecycle-detect.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'decorate-graph.mjs');
+
+// Isolated HOME for every test that actually writes (and therefore stamps the
+// state cache) — decorateStore's cache-prune step touches ~/.core under a
+// lock by default, same as hot-section.mjs's default; tests must never let
+// that default resolve against the real developer home.
+function testHome(root) {
+  const home = join(root, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  return home;
+}
 
 function fixtureStore() {
   const root = mkdtempSync(join(tmpdir(), 'decorate-graph-'));
@@ -31,6 +45,16 @@ function fixtureStore() {
   writeFileSync(join(mem, 'dc-4-orphan.md'),
     '---\nid: dc-4-orphan\ntype: observation\nstatus: active\n---\n\n# DC-4 — No edges\n\nBody.\n');
   writeFileSync(join(mem, 'INDEX.md'), '# scaffolding — must be excluded');
+  // dc-1-alpha is the only unit here that will gain an edges block, so it is
+  // the only one that reaches the write guard. Stamp its creation baseline the
+  // way graduation does (lifecycle-detect stampCreatedBaseline --kind unit) —
+  // a no-baseline unit now fails closed (Hale's 2026-07-22 root fix), and a
+  // freshly-graduated unit is decoratable precisely because its creating writer
+  // stamped it at creation. The other units gain no block, short-circuit before
+  // the guard, and need no baseline (so the orphan-never-stamped invariant holds).
+  const home = join(root, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  stampCreatedBaseline(root, join(mem, 'dc-1-alpha.md'), { kind: 'unit', home });
   return root;
 }
 
@@ -155,7 +179,8 @@ test('stale-byte comparison: bytes mutated after capture correctly fail Buffer.e
 test('decorateStore: writes changed units, skips unchanged, never touches a retired unit', () => {
   const root = fixtureStore();
   try {
-    const result = decorateStore(root);
+    const home = testHome(root);
+    const result = decorateStore(root, { home });
     assert.equal(result.changed.includes('dc-1-alpha.md'), true, 'dc-1 gained a real edge to dc-2');
     assert.equal(result.changed.includes('dc-4-orphan.md'), false, 'dc-4 has no edges — nothing to write');
 
@@ -171,9 +196,10 @@ test('decorateStore: writes changed units, skips unchanged, never touches a reti
 test('decorateStore: a second run over unchanged output writes nothing further', () => {
   const root = fixtureStore();
   try {
-    decorateStore(root);
+    const home = testHome(root);
+    decorateStore(root, { home });
     const before = readFileSync(join(root, '_memories', 'dc-1-alpha.md'), 'utf8');
-    const result2 = decorateStore(root);
+    const result2 = decorateStore(root, { home });
     const after = readFileSync(join(root, '_memories', 'dc-1-alpha.md'), 'utf8');
     assert.equal(before, after);
     assert.equal(result2.changed.length, 0, 'fully idempotent on a second pass');
@@ -183,13 +209,113 @@ test('decorateStore: a second run over unchanged output writes nothing further',
 test('decorateStore --dry-run (dryRun option) reports changes without writing them', () => {
   const root = fixtureStore();
   try {
+    const home = testHome(root);
     const before = readFileSync(join(root, '_memories', 'dc-1-alpha.md'), 'utf8');
-    const result = decorateStore(root, { dryRun: true });
-    const after = readFileSync(join(root, '_memories', 'dc-1-alpha.md'), 'utf8');
+    const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+    const alphaPath = join(root, '_memories', 'dc-1-alpha.md');
+    const creationStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[alphaPath];
+    const result = decorateStore(root, { dryRun: true, home });
+    const after = readFileSync(alphaPath, 'utf8');
     assert.equal(before, after, 'dry run must not write');
     assert.ok(result.changed.includes('dc-1-alpha.md'));
     assert.equal(result.dry_run, true);
+    // Dry run must not RE-stamp: the only stamp present is the creation baseline
+    // (last_written_by: unit-create), never a decorate-graph stamp — nothing was
+    // actually written, so nothing re-attributed.
+    const afterStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[alphaPath];
+    assert.deepEqual(afterStamp, creationStamp, 'dry run leaves the creation baseline untouched — no re-stamp');
+    assert.equal(afterStamp.last_written_by, 'unit-create', 'still the creation stamp, not decorate-graph');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---- state-cache stamping (Hale's finding, 2026-07-22): decorate-graph must
+// stamp the per-project state cache in the SAME operation it rewrites a unit
+// file, in code — not rely on a prose instruction telling the agent to do it
+// by hand afterward. Mirrors hot-section.mjs's precedent for PROJECT.md. ----
+
+test('decorateStore stamps the per-project state cache with last_written_by: decorate-graph for every file it actually rewrites', () => {
+  const root = fixtureStore();
+  try {
+    const home = testHome(root);
+    const result = decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+    const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+
+    const alphaPath = join(root, '_memories', 'dc-1-alpha.md');
+    const entry = cache.files[alphaPath];
+    assert.ok(entry, 'dc-1-alpha.md (a changed file) has a state-cache entry after decorateStore');
+    assert.equal(entry.last_written_by, 'decorate-graph', 'stamped as CORE-authored, not a user edit');
+    assert.equal(entry.last_written, '2026-07-22T00:00:00Z');
+    const onDisk = readFileSync(alphaPath, 'utf8');
+    assert.equal(entry.last_hash, hashText(onDisk), 'the cached hash matches the actual new on-disk bytes');
+    assert.match(entry.outside_hash, /^[0-9a-f]{16}$/, 'outside-block hash recorded for later classification');
+
+    // dc-4-orphan.md was never rewritten (no edges) — it must NOT appear in
+    // the cache at all; stamping only the files actually touched is the
+    // whole point (a stray stamp for an untouched file would be as wrong as
+    // a missing one for a touched file).
+    const orphanPath = join(root, '_memories', 'dc-4-orphan.md');
+    assert.ok(!(orphanPath in cache.files), 'an unchanged file is never stamped');
+
+    assert.deepEqual(result.changed.sort(), ['dc-1-alpha.md'], 'sanity: exactly the file we asserted on was reported changed');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('classifyUnitChange: a subsequent decorate-only rewrite reads as edges-block-only (CORE\'s own write, not a user edit)', () => {
+  const root = fixtureStore();
+  try {
+    const home = testHome(root);
+    decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+    const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+    const alphaPath = join(root, '_memories', 'dc-1-alpha.md');
+    const cachedStamp = cache.files[alphaPath];
+
+    // Simulate what edit-detection sees next session: re-decorate after a
+    // schema/target-set change re-renders JUST the edges block (same shape
+    // as a real re-run — the human-authored region is untouched).
+    writeFileSync(join(root, '_memories', 'dc-2-beta.md'),
+      '---\nid: dc-2-beta\ntype: decision\nstatus: retired\n---\n\n# DC-2 — Beta\n\nBody.\n');
+    decorateStore(root, { now: '2026-07-22T01:00:00Z', home });
+    const currentText = readFileSync(alphaPath, 'utf8');
+
+    assert.equal(classifyUnitChange(cachedStamp, currentText), 'edges-block-only',
+      'the whole-file hash moved (the edge to dc-2-beta was dropped) but the change is entirely inside the edges block — must read as CORE\'s own rewrite');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('classifyUnitChange: a GENUINE user edit outside the edges block still reads as outside-changed, even though last_written_by says decorate-graph (the failure mode to guard hardest)', () => {
+  const root = fixtureStore();
+  try {
+    const home = testHome(root);
+    decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+    const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+    const alphaPath = join(root, '_memories', 'dc-1-alpha.md');
+    const cachedStamp = cache.files[alphaPath];
+    assert.equal(cachedStamp.last_written_by, 'decorate-graph', 'sanity: the stale label a naive check would trust');
+
+    // A hand edit to the human-authored body, landing AFTER decorate-graph's
+    // last stamp — the edges block itself is untouched.
+    const stale = readFileSync(alphaPath, 'utf8');
+    const handEdited = stale.replace('Body.', 'Body. The user actually typed this sentence by hand.');
+    writeFileSync(alphaPath, handEdited);
+
+    assert.equal(classifyUnitChange(cachedStamp, handEdited), 'outside-changed',
+      'a real user edit outside the edges block must never be suppressed just because last_written_by says decorate-graph');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('classifyUnitChange: no baseline (pre-fix or never-stamped entry) reports no-baseline rather than guessing', () => {
+  assert.equal(classifyUnitChange(null, 'anything'), 'no-baseline');
+  assert.equal(classifyUnitChange({ last_written_by: 'decorate-graph' }, 'anything'), 'no-baseline',
+    'a stamp with no outside_hash (pre-fix shape) must not be trusted as safe');
+});
+
+test('hashOutsideEdgesBlock is identical regardless of what changes INSIDE the edges block', () => {
+  const withOne = `# dc-1\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-2]]\n${EDGES_END}\n`;
+  const withOther = `# dc-1\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-9]]\n- supersedes: [[dc-3]]\n${EDGES_END}\n`;
+  assert.equal(hashOutsideEdgesBlock(withOne), hashOutsideEdgesBlock(withOther));
 });
 
 test('decorateUnitText is CRLF-safe (Meridian\'s Windows review, 2026-07-21)', () => {
@@ -223,5 +349,119 @@ test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stde
     assert.equal(result.status, 1, 'a refusal must exit nonzero');
     assert.doesNotMatch(result.stdout, /none needed a change/, 'must not claim nothing happened when a file was refused');
     assert.match(result.stderr, /dc-1-bad\.md/, 'the refused file must be named on stderr');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---- Authorship-laundering regression (Hale's finding, 2026-07-22: mailbox
+// "premaintenance-authorship-falsifier", "723c24a-authorship-ordering-repro",
+// "mixed-ownership-writers-launder-unreconciled-edits"). Exact reproduction:
+// decorate a unit (establishes a baseline), the user edits the body OUTSIDE
+// the edges block, the unit's edge TARGET retires (so the edges block goes
+// stale too), decoration runs again. Before the fix: decorateStore rewrote
+// the now-stale edges block, preserved the user's bytes, but then stamped a
+// FRESH outside_hash computed from the post-user-edit text — so the next
+// classifyUnitChange call read 'edges-block-only' instead of
+// 'outside-changed', and the user's edit was never observed, attributed, or
+// propagated (silent loss of user INTENT, even though the bytes survived).
+// After the fix: decorateStore must refuse to touch or re-stamp dc-alpha.md,
+// report it under needs_reconciliation, and a later classification check
+// must still correctly read 'outside-changed'. ----
+
+function authorshipFixture(root) {
+  const mem = join(root, '_memories');
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'dc-alpha.md'),
+    '---\nid: dc-alpha\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-beta\n---\n\n# Alpha\n\nOriginal body.\n');
+  writeFileSync(join(mem, 'dc-beta.md'),
+    '---\nid: dc-beta\ntype: decision\nstatus: active\n---\n\n# Beta\n\nTarget.\n');
+  // dc-alpha gains an edges block, so it reaches the write guard — stamp its
+  // creation baseline (graduation would have done this) so the FIRST decoration
+  // legitimately proceeds. The user edit that lands AFTER that first decoration
+  // is what these tests then prove is refused, never laundered.
+  const home = join(root, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  stampCreatedBaseline(root, join(mem, 'dc-alpha.md'), { kind: 'unit', home });
+}
+
+test("decorateStore refuses to rewrite/re-stamp a unit whose human-authored body already diverged from its baseline, and reports needs_reconciliation (Hale's authorship-laundering finding)", () => {
+  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-authorship-'));
+  try {
+    const home = testHome(root);
+    authorshipFixture(root);
+    const unitPath = join(root, '_memories', 'dc-alpha.md');
+
+    // 1. Decorate once — establishes the baseline.
+    const first = decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    assert.ok(first.changed.includes('dc-alpha.md'), 'sanity: first pass actually decorated dc-alpha');
+    const cachePath = join(root, '_memories', '_lib', 'state-cache.json');
+    const baselineStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[unitPath];
+
+    // 2. The user hand-edits the body OUTSIDE the edges block — an
+    // unreconciled edit nobody has processed yet.
+    const userEdited = readFileSync(unitPath, 'utf8')
+      .replace('Original body.', 'Original body.\n\nUSER EDIT MUST BE OBSERVED.');
+    writeFileSync(unitPath, userEdited);
+    assert.equal(classifyUnitChange(baselineStamp, userEdited), 'outside-changed',
+      'sanity: the classifier itself correctly sees the user edit before any maintenance runs');
+
+    // 3. The edge target retires — the edges block is now ALSO stale, so a
+    // real decoration pass has a genuine reason to touch this file.
+    writeFileSync(join(root, '_memories', 'dc-beta.md'),
+      '---\nid: dc-beta\ntype: decision\nstatus: retired\n---\n\n# Beta\n\nTarget.\n');
+
+    // 4. Run decoration again — this must NOT silently absorb the user edit.
+    const second = decorateStore(root, { now: '2026-07-22T01:00:00Z', home });
+    assert.equal(second.changed.includes('dc-alpha.md'), false,
+      'the file must NOT be rewritten while an unreconciled user edit is outstanding');
+    assert.deepEqual(second.needs_reconciliation, [{ path: 'dc-alpha.md', classification: 'outside-changed' }],
+      'the refusal must be a real, visible signal, not a silent skip');
+
+    // 5. The user's bytes are untouched, the cache was NOT re-stamped, and a
+    // fresh classification check still correctly reads outside-changed —
+    // nothing lost, nothing silently laundered into edges-block-only.
+    const current = readFileSync(unitPath, 'utf8');
+    assert.match(current, /USER EDIT MUST BE OBSERVED/, "the user's edit must still be in the file");
+    const afterStamp = JSON.parse(readFileSync(cachePath, 'utf8')).files[unitPath];
+    assert.deepEqual(afterStamp, baselineStamp, 'the cache entry must be untouched — no re-stamp over an unreconciled edit');
+    assert.equal(classifyUnitChange(afterStamp, current), 'outside-changed',
+      'the SAME classifier call that was laundered to edges-block-only before the fix must still report outside-changed after it');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('decorateStore --dry-run also reports needs_reconciliation (preview never claims a launder-risk file would be safely decorated)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-authorship-dry-'));
+  try {
+    const home = testHome(root);
+    authorshipFixture(root);
+    const unitPath = join(root, '_memories', 'dc-alpha.md');
+    decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    writeFileSync(unitPath, readFileSync(unitPath, 'utf8').replace('Original body.', 'Original body.\n\nUSER EDIT.'));
+    writeFileSync(join(root, '_memories', 'dc-beta.md'),
+      '---\nid: dc-beta\ntype: decision\nstatus: retired\n---\n\n# Beta\n\nTarget.\n');
+
+    const result = decorateStore(root, { dryRun: true, home });
+    assert.equal(result.changed.includes('dc-alpha.md'), false);
+    assert.equal(result.needs_reconciliation.some(r => r.path === 'dc-alpha.md'), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI entrypoint exits 1 and names a needs-reconciliation file on stderr when an unreconciled user edit blocks decoration', () => {
+  const root = mkdtempSync(join(tmpdir(), 'decorate-graph-cli-reconcile-'));
+  try {
+    const home = testHome(root);
+    authorshipFixture(root);
+    const unitPath = join(root, '_memories', 'dc-alpha.md');
+    decorateStore(root, { now: '2026-07-22T00:00:00Z', home });
+    writeFileSync(unitPath, readFileSync(unitPath, 'utf8').replace('Original body.', 'Original body.\n\nUSER EDIT.'));
+    writeFileSync(join(root, '_memories', 'dc-beta.md'),
+      '---\nid: dc-beta\ntype: decision\nstatus: retired\n---\n\n# Beta\n\nTarget.\n');
+
+    const result = spawnSync(process.execPath, [CLI_PATH, root], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(result.status, 1, 'blocking on an unreconciled edit must exit nonzero');
+    assert.doesNotMatch(result.stdout, /none needed a change/);
+    assert.match(result.stderr, /dc-alpha\.md/, 'the blocked file must be named on stderr');
+    assert.match(result.stderr, /reconciliation/, 'the reason must be legible, not just a bare path');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

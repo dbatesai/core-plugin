@@ -7,6 +7,7 @@ import {
   demoteStateNarrative, classifyStateBullet, parseStateBullets, extractStateSection,
   LARGE_BATCH_WARNING_THRESHOLD, ARCHIVE_FILE,
 } from '../../plugins/core/skills/core/scripts/demote-state-narrative.mjs';
+import { stampCreatedBaseline } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
 
 const TODAY = '2026-06-09';
 
@@ -24,6 +25,11 @@ function project(bullets) {
     '## Decisions', '',
     'nothing here', '',
   ].join('\n'));
+  // Establish the PROJECT.md creation baseline the render step now does — a
+  // no-baseline PROJECT.md fails closed (Hale's 2026-07-22 root fix).
+  const home = join(dir, 'home');
+  mkdirSync(join(home, '.core'), { recursive: true });
+  stampCreatedBaseline(dir, join(dir, 'PROJECT.md'), { kind: 'project', home });
   return dir;
 }
 

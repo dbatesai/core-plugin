@@ -156,6 +156,8 @@ Capture runs by default and writes only to local disk under `<project>/_metrics/
 
 The classifier is **PROVISIONAL**. It isn't calibrated, so the readiness summary only flags an *upward* recognition-failure trend — never an absolute level — and every surface that shows the signal says PROVISIONAL. Calibration clears once a human-labeled set reaches a 0.7-precision gate, and that precision is computed only from the labels, never from the classifier's own output.
 
+`/metrics` is the user-facing surface for all of this: a live health check that builds a throwaway scratch store, proves the write→validate→index→retrieve→suppress round trip fresh on every run, then reads this project's real validator counts, unit census, retrieval-log coverage, recognition signal, and calibration-pool progress — each rendered as a bar gauge with an honest trust label (proven-live / direct / provisional), never a bare number pretending to be more certain than it is.
+
 ## Debug mode
 
 Toggle-able logger at `~/.core/debug/<session-id>.jsonl`. Logs every retrieval, unit write, render, hygiene operation, graduation decision, multi-agent invocation in structured form. Flags anomalies inline (unit written but retrieval misses; missing inverse edge; retired fact re-appearing in render; priority function out-of-range; Tier 3 fired when Tier 1 should have caught it; hygiene operation reversed in same session).

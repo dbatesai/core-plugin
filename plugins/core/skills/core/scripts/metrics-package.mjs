@@ -45,6 +45,9 @@ import { loadUnit } from './priority.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
 import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
+import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
+import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'metrics-package-salt';
@@ -398,6 +401,69 @@ export function hygieneStats(projectDir) {
   return { available: true, _trust: TRUST.DIRECT, _trust_basis: 'script-written op log', days, demote_batches: demoteBatches, over_cap_events: overCap };
 }
 
+// Closed whitelist for per-kind R@10 keys — derived from self-test-round.mjs's
+// own DEFAULT_QUOTA rather than a duplicated literal list, so it stays in sync
+// automatically if the question-kind vocabulary ever changes.
+const QUESTION_KINDS = Object.keys(DEFAULT_QUOTA);
+const SELF_TEST_TRIGGERS = ['user-invoked', 'auto-regrade'];
+
+// Closes the gap named in docs/specs/2026-07-23-metrics-holistic-redesign.md
+// §3b/§5: self-test grading results (the project's own blind self-exam,
+// scripts/self-test-round.mjs) reach the exported package through the exact
+// same dedicated log + whitelist discipline every other block here uses.
+// Numbers, ids, and hashes only — never the question/answer text or unit
+// bodies self-test-round.mjs keeps in its round directory.
+export function selfTestStats(projectDir) {
+  const trust = { _trust: TRUST.DIRECT, _trust_basis: 'script-written self-test grading log' };
+  const logs = listSessionLogs(projectDir, SELF_TEST_LOG_FILENAME);
+  if (!logs.length) return { available: false, reason: 'no self-test-log.jsonl under _sessions/', ...trust };
+
+  const days = {};
+  let badLines = 0;
+  const allRuns = [];
+  for (const { date, file } of logs) {
+    const { rows, bad } = readJsonlSafe(file);
+    badLines += bad;
+    const dayRuns = [];
+    for (const r of rows) {
+      if (r.kind !== 'self-test-run') continue;
+      const run = {
+        round: num(r.round),
+        trigger: fold(String(r.trigger || 'other'), SELF_TEST_TRIGGERS),
+        corpus_snapshot_id: typeof r.corpus_snapshot_id === 'string' ? r.corpus_snapshot_id : null,
+        goldset_sha256: typeof r.goldset_sha256 === 'string' ? r.goldset_sha256 : null,
+        headline: num(r.headline),
+        per_kind_r10: r.per_kind_r10 && typeof r.per_kind_r10 === 'object'
+          ? Object.fromEntries(Object.entries(r.per_kind_r10).filter(([k]) => QUESTION_KINDS.includes(k)).map(([k, v]) => [k, num(v)]))
+          : {},
+        trap_leak_rate: num(r.trap_leak_rate),
+        old_vs_new_delta: num(r.old_vs_new_delta),
+        old_vs_new_skipped: r.old_vs_new_skipped === true,
+        n_queries: num(r.n_queries),
+        store_units: num(r.store_units),
+      };
+      dayRuns.push(run);
+      allRuns.push(run);
+    }
+    if (dayRuns.length) days[date] = dayRuns;
+  }
+  if (!allRuns.length) return { available: false, reason: 'self-test-log.jsonl present but no self-test-run rows', ...trust };
+
+  const latest = allRuns[allRuns.length - 1]; // files read in date order; logEvent appends within a day in ts order
+  return {
+    available: true, ...trust,
+    days, malformed_lines: badLines,
+    runs_total: allRuns.length,
+    rounds_seen: [...new Set(allRuns.map(r => r.round))].length,
+    latest_round: latest.round,
+    latest_trigger: latest.trigger,
+    latest_headline: latest.headline,
+    latest_per_kind_r10: latest.per_kind_r10,
+    latest_trap_leak_rate: latest.trap_leak_rate,
+    latest_old_vs_new_delta: latest.old_vs_new_delta,
+  };
+}
+
 export function storeCensus(projectDir) {
   const store = join(projectDir, '_memories');
   if (!existsSync(store)) return { available: false, reason: 'no _memories/ unit store', _trust: TRUST.DIRECT, _trust_basis: 'store walk' };
@@ -534,10 +600,31 @@ export function workspaceMetrics(home, workspaceId) {
   const recognition = { available: false, reason: 'no classified turn files', _trust: TRUST.PROVISIONAL, _trust_basis: 'classifier has not cleared its calibration gate — trends only, never levels', days: {} };
   const clsDir = join(wsDir, 'metrics', 'classified');
   if (existsSync(clsDir)) {
+    // Read-side replay dedupe + instrument-cohort gate (metrics-dedupe.mjs):
+    // the classified store is append-only, so re-processed sessions appear
+    // more than once, and rows from retired classifier/proxy versions survive
+    // when never re-classified. Dedupe store-wide (a replay can land in a
+    // later date file), then count ONLY the current-instrument cohort;
+    // out-of-cohort survivors ship as an explicit coverage gap. Winners keep
+    // the day of the surviving row (replay-day attribution). Everything ships
+    // as numbers plus version-shaped labels (non-version-shaped values fold
+    // to 'other' inside the dedupe module) — the whitelist boundary is
+    // untouched.
+    const daysInput = [];
     for (const f of readdirSync(clsDir).sort()) {
       const day = isoDay(f);
       if (!day || !f.endsWith('.jsonl')) continue;
-      const { rows } = readJsonlSafe(join(clsDir, f));
+      daysInput.push({ day, rows: readJsonlSafe(join(clsDir, f)).rows });
+    }
+    const { days: dedupedDays, stats, cohort, coverage_gap: coverageGap } = cohortClassifiedByDay(daysInput, {
+      schema_version: CLASSIFIED_SCHEMA_VERSION,
+      classifier_version: CLASSIFIER_VERSION,
+      proxy_version: PROXY_VERSION,
+    });
+    let aggregateableRows = 0;
+    for (const [day, rows] of Object.entries(dedupedDays)) {
+      if (!rows.length) continue; // empty day-keys survive dedupe; they are not aggregateable rows
+      aggregateableRows += rows.length;
       const states = {};
       let provisional = 0;
       for (const r of rows) {
@@ -552,7 +639,40 @@ export function workspaceMetrics(home, workspaceId) {
         provisional_share: rows.length ? round3(provisional / rows.length) : null,
       };
     }
-    if (Object.keys(recognition.days).length) { recognition.available = true; delete recognition.reason; }
+    // The exact instrument cohort and coverage gap are always visible when a
+    // classified store exists — an old-only store must report the gap, not hide
+    // it behind unavailability. Values are fixed constants, counts, and
+    // version-shaped labels only — whitelist-safe.
+    recognition.instrument_cohort = cohort;
+    recognition.coverage_gap = {
+      rows_excluded: coverageGap.rows_excluded,
+      versions: coverageGap.versions,
+    };
+    recognition.replay_dedupe = {
+      rows_read: stats.rows_read,
+      rows_kept: stats.rows_kept,
+      replays_dropped: stats.replays_dropped,
+      superseded_dropped: stats.superseded_dropped,
+      conflicts: stats.conflicts,
+      unkeyed_kept: stats.unkeyed_kept,
+    };
+    // Availability reflects AGGREGATEABLE in-cohort rows, not day-key count
+    // (Hale item 6, 2026-07-23): the deduper preserves empty day-keys, so an
+    // old-only store — every row excluded by the cohort gate — has day-keys but
+    // zero countable turns. That store is UNAVAILABLE-with-a-coverage-gap, never
+    // available-with-zero-turns.
+    if (aggregateableRows > 0) {
+      recognition.available = true;
+      delete recognition.reason;
+      // Fixed-vocabulary policy stamp: replayed sessions keep their earliest
+      // observation day (immutable observation day).
+      recognition.day_attribution = 'observation-day';
+    } else {
+      recognition.available = false;
+      recognition.reason = coverageGap.rows_excluded
+        ? `no in-cohort classified rows (${coverageGap.rows_excluded} row${coverageGap.rows_excluded === 1 ? '' : 's'} excluded — see coverage_gap)`
+        : 'no classified turns in the current instrument cohort';
+    }
   }
 
   let calibration = { available: false, reason: 'no calibration-state.json' };
@@ -642,6 +762,12 @@ export function headline(blocks) {
       h.recfail_latest_rate = last.turns >= 20 ? round3((last.states['rec-fail-tier-0'] || 0) / last.turns) : null;
     }
   }
+  const st = blocks['self-test'];
+  if (st?.available) {
+    h.self_test_latest_headline = st.latest_headline;
+    h.self_test_latest_trap_leak_rate = st.latest_trap_leak_rate;
+    h.self_test_runs_total = st.runs_total;
+  }
   return h;
 }
 
@@ -691,6 +817,7 @@ export function computeFlags(blocks, hl) {
     if (degraded.length) add('warning', 'capability-degraded', `${degraded.length} capability(ies) currently degraded: ${degraded.join(', ')}.`);
   }
   if (w?.available && w.recognition?.available) add('warning', 'recognition-provisional', 'Recognition-state numbers are PROVISIONAL — the classifier has not cleared its calibration gate; read trends, not absolute levels.');
+  if (hl.self_test_latest_trap_leak_rate != null && hl.self_test_latest_trap_leak_rate > 0) add('warning', 'self-test-trap-leak', `Latest self-test round: a deliberately-unanswerable question's trap surfaced ${(hl.self_test_latest_trap_leak_rate * 100).toFixed(0)}% of the time — the store answered something it should have abstained on.`);
   return flags;
 }
 
@@ -767,6 +894,7 @@ export function collectProject(projectDir, { home, seal }) {
     'project-md': projectMdStats(projectDir),
     'maintenance': maintenanceStats(projectDir),
     'workspace-metrics': workspaceMetrics(home, workspaceId),
+    'self-test': selfTestStats(projectDir),
   };
   // Population gate on per-unit rankings (Hale finding 6): below the floor a
   // ranking row can fingerprint a specific unit across packages.

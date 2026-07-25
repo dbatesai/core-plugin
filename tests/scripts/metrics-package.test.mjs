@@ -7,8 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
-  buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging,
+  buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging, workspaceMetrics, selfTestStats,
 } from '../../plugins/core/skills/core/scripts/metrics-package.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
 // Planted tripwires — distinctive strings that MUST NOT survive into any package byte.
 const PLANT_NAME = 'ZephyrCorpMeltdown';
@@ -170,8 +171,11 @@ test('share artifact projects local daily telemetry to weekly-only blocks and re
     writeFileSync(join(secondWeek, 'hygiene-log.jsonl'), `${JSON.stringify({ kind: 'maintenance-run' })}\n`);
     const classified = join(home, '.core', 'workspaces', 'fixture-ws-alpha', 'metrics', 'classified');
     mkdirSync(classified, { recursive: true });
-    writeFileSync(join(classified, '2026-07-01.jsonl'), `${JSON.stringify({ state: 'tier-0-win', provisional: true })}\n`);
-    writeFileSync(join(classified, '2026-07-08.jsonl'), `${JSON.stringify({ state: 'rec-fail-tier-0', provisional: false })}\n`);
+    // Current-instrument stamps: the cohort gate (Hale 2026-07-22) only
+    // aggregates rows produced by the running (schema, classifier, proxy).
+    const stamp = { schema_version: CLASSIFIED_SCHEMA_VERSION, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION };
+    writeFileSync(join(classified, '2026-07-01.jsonl'), `${JSON.stringify({ ...stamp, state: 'tier-0-win', provisional: true })}\n`);
+    writeFileSync(join(classified, '2026-07-08.jsonl'), `${JSON.stringify({ ...stamp, state: 'rec-fail-tier-0', provisional: false })}\n`);
     const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
     const extracted = readShippedPackage(result.shipped, join(root, 'x'));
     const projectDir = join(extracted, 'projects', readdirSync(join(extracted, 'projects'))[0]);
@@ -383,5 +387,206 @@ test('separate-log outcomes join by authority: conflict at equal authority resol
     const stats = retrievalStats(root, makeSeal('cafe'.repeat(8)));
     const day = stats.days['2026-07-17'];
     assert.deepEqual(day.outcomes, { useful: 1 }, 'stronger evidence wins r-1; r-2 conflict resolves unknown and stays out of denominators');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('workspace recognition dedupes replayed classified rows before counting, and ships numeric dedupe stats', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-dedupe-'));
+  try {
+    const home = join(root, 'home');
+    const clsDir = join(home, '.core', 'workspaces', 'ws-dedupe', 'metrics', 'classified');
+    mkdirSync(clsDir, { recursive: true });
+    const ident = (over = {}) => ({
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+      harness: 'claude-code', provisional: true, session_id: 'sess-pkg', ...over,
+    });
+    const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+    // 07-01: a 2-turn session (current instrument), plus one out-of-cohort
+    // 0.2.0 row. 07-08: the same two turns replayed identically at a catch-up,
+    // a genuinely-new turn2, and a same-instrument contradiction on turn3.
+    writeFileSync(join(clsDir, '2026-07-01.jsonl'), lines([
+      ident({ turn_idx: 0, state: 'tier-0-win' }),
+      ident({ turn_idx: 1, state: 'rec-fail-tier-0' }),
+      ident({ turn_idx: 9, classifier_version: '0.2.0', state: 'tier-1-3-win' }), // out of cohort → gap
+    ]));
+    writeFileSync(join(clsDir, '2026-07-08.jsonl'), lines([
+      ident({ turn_idx: 0, state: 'tier-0-win' }), // pure replay of 07-01 turn0
+      ident({ turn_idx: 1, state: 'rec-fail-tier-0' }), // pure replay of 07-01 turn1
+      ident({ turn_idx: 2, state: 'tier-0-win' }), // genuinely new turn, first seen 07-08
+      ident({ turn_idx: 3, state: 'tier-0-win' }), // turn3: contradiction ...
+      ident({ turn_idx: 3, state: 'rec-fail-tier-0' }), // ... excluded, counted as a conflict
+    ]));
+    const w = workspaceMetrics(home, 'ws-dedupe');
+    assert.equal(w.recognition.available, true);
+    const totalTurns = Object.values(w.recognition.days).reduce((n, d) => n + d.turns, 0);
+    assert.equal(totalTurns, 3, 'replays collapse; turn3 is a conflict (excluded); 3 aggregateable turns remain');
+    // IMMUTABLE OBSERVATION DAY: the replayed turns stay on their earliest day.
+    assert.equal(w.recognition.days['2026-07-01'].turns, 2, 'replayed turns stay on their earliest observation day');
+    assert.deepEqual(w.recognition.days['2026-07-01'].states, { 'tier-0-win': 1, 'rec-fail-tier-0': 1 });
+    assert.equal(w.recognition.days['2026-07-08'].turns, 1, 'only the genuinely-new turn is first-observed 07-08');
+    assert.deepEqual(w.recognition.days['2026-07-08'].states, { 'tier-0-win': 1 });
+    assert.deepEqual(w.recognition.replay_dedupe, {
+      rows_read: 7, rows_kept: 3, replays_dropped: 2, superseded_dropped: 0, conflicts: 1, unkeyed_kept: 0,
+    }, 'dedupe stats ship as plain numbers; the conflict is counted, never a winner');
+    assert.deepEqual(w.recognition.instrument_cohort, {
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+    }, 'the cohort the counts aggregate is stated');
+    assert.deepEqual(w.recognition.coverage_gap, {
+      rows_excluded: 1, versions: { 'schema=1.0.0 classifier=0.2.0 proxy=2': 1 },
+    }, 'the out-of-cohort 0.2.0 row is an explicit gap');
+    assert.equal(w.recognition.day_attribution, 'observation-day', 'attribution policy is stamped, not implicit');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("workspace recognition: Hale's mixed-instrument falsifier — an old-instrument survivor lands in the coverage gap, never the counts", () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-cohort-'));
+  try {
+    const home = join(root, 'home');
+    const clsDir = join(home, '.core', 'workspaces', 'ws-cohort', 'metrics', 'classified');
+    mkdirSync(clsDir, { recursive: true });
+    const ident = (over = {}) => ({
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+      harness: 'claude-code', provisional: true, session_id: 'sess-cohort', ...over,
+    });
+    writeFileSync(join(clsDir, '2026-07-08.jsonl'), [
+      // 0.2.0-only observation: no newer counterpart, survives dedupe — must NOT be counted.
+      JSON.stringify(ident({ turn_idx: 0, classifier_version: '0.2.0', state: 'tier-0-win' })),
+      JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
+    ].join('\n') + '\n');
+    const w = workspaceMetrics(home, 'ws-cohort');
+    assert.equal(w.recognition.available, true);
+    assert.equal(w.recognition.days['2026-07-08'].turns, 1, 'only the current-cohort row counts');
+    assert.deepEqual(w.recognition.days['2026-07-08'].states, { 'rec-fail-tier-0': 1 });
+    assert.equal(w.recognition.replay_dedupe.rows_kept, 1, 'cohort-first: only the in-cohort row reaches dedupe');
+    assert.deepEqual(w.recognition.coverage_gap, {
+      rows_excluded: 1,
+      versions: { 'schema=1.0.0 classifier=0.2.0 proxy=2': 1 },
+    }, 'the excluded instrument is named and counted');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('ACCEPTANCE Hale-2026-07-23 item 6 (package availability): an old-only store reports UNAVAILABLE-with-a-coverage-gap, never available-with-zero-turns', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-oldonly-'));
+  try {
+    const home = join(root, 'home');
+    const clsDir = join(home, '.core', 'workspaces', 'ws-oldonly', 'metrics', 'classified');
+    mkdirSync(clsDir, { recursive: true });
+    // Every row is a retired 0.2.0 instrument — nothing in the current cohort.
+    writeFileSync(join(clsDir, '2026-07-08.jsonl'), [
+      JSON.stringify({ schema_version: '1.0.0', classifier_version: '0.2.0', proxy_version: 2, harness: 'claude-code', session_id: 'sess-old', turn_idx: 0, state: 'tier-0-win' }),
+      JSON.stringify({ schema_version: '1.0.0', classifier_version: '0.2.0', proxy_version: 2, harness: 'claude-code', session_id: 'sess-old', turn_idx: 1, state: 'rec-fail-tier-0' }),
+    ].join('\n') + '\n');
+    const w = workspaceMetrics(home, 'ws-oldonly');
+    assert.equal(w.recognition.available, false, 'no aggregateable cohort rows ⇒ unavailable, not available-with-zero-turns');
+    assert.match(w.recognition.reason, /no in-cohort classified rows/);
+    assert.deepEqual(w.recognition.days, {}, 'no day carries a phantom turns:0 entry');
+    assert.deepEqual(w.recognition.coverage_gap, {
+      rows_excluded: 2, versions: { 'schema=1.0.0 classifier=0.2.0 proxy=2': 2 },
+    }, 'the coverage gap stays visible even when unavailable');
+    assert.deepEqual(w.recognition.instrument_cohort, {
+      schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ── self-test results reaching the export package (holistic-redesign §3b/§5) ──
+
+test('selfTestStats: unavailable with no log; whitelist-folds an unrecognized trigger and per-kind key', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-selftest-'));
+  try {
+    const project = join(root, 'proj');
+    mkdirSync(join(project, '_memories'), { recursive: true });
+    const absent = selfTestStats(project);
+    assert.equal(absent.available, false);
+    assert.match(absent.reason, /no self-test-log\.jsonl/);
+
+    const sessions = join(project, '_sessions', '2026-07-24');
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, 'self-test-log.jsonl'), [
+      JSON.stringify({
+        ts: '2026-07-24T10:00:00Z', kind: 'self-test-run', trigger: 'user-invoked', round: 1,
+        corpus_snapshot_id: 'abc123', goldset_sha256: 'deadbeef',
+        headline_arm: 'ranking', headline_k: 10, headline: 0.8,
+        per_kind_r10: { literal: 1, category: 0.5, 'not-a-real-kind': 0.9 },
+        trap_leak_rate: 0.25, old_vs_new_delta: 0.1, old_vs_new_skipped: false,
+        n_queries: 12, store_units: 200,
+      }),
+      JSON.stringify({
+        ts: '2026-07-24T11:00:00Z', kind: 'self-test-run', trigger: 'some-untrusted-value', round: 2,
+        headline: 0.85, trap_leak_rate: 0, old_vs_new_skipped: true,
+      }),
+    ].join('\n') + '\n');
+
+    const present = selfTestStats(project);
+    assert.equal(present.available, true);
+    assert.equal(present.runs_total, 2);
+    assert.equal(present.rounds_seen, 2);
+    assert.equal(present.latest_round, 2);
+    assert.equal(present.latest_trigger, 'other', 'an unrecognized trigger folds to other, never passed through raw');
+    assert.equal(present.latest_headline, 0.85);
+    assert.equal(present.latest_trap_leak_rate, 0);
+
+    const day = present.days['2026-07-24'];
+    assert.equal(day.length, 2);
+    assert.equal(day[0].trigger, 'user-invoked');
+    assert.deepEqual(day[0].per_kind_r10, { literal: 1, category: 0.5 }, 'an unrecognized per-kind key is dropped, not passed through verbatim');
+    assert.equal(day[0].corpus_snapshot_id, 'abc123');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('end-to-end: self-test results reach the package headline, a trap-leak flag, and both reports', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-selftest-e2e-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root, { plant: false });
+    const sessions = join(project, '_sessions', '2026-07-01');
+    writeFileSync(join(sessions, 'self-test-log.jsonl'), JSON.stringify({
+      ts: '2026-07-01T13:00:00Z', kind: 'self-test-run', trigger: 'auto-regrade', round: 3,
+      corpus_snapshot_id: 'snap-xyz', goldset_sha256: 'gold-xyz',
+      headline_arm: 'ranking', headline_k: 10, headline: 0.75,
+      per_kind_r10: { literal: 1, value: 0.5 },
+      trap_leak_rate: 0.5, old_vs_new_delta: null, old_vs_new_skipped: true,
+      n_queries: 8, store_units: 40,
+    }) + '\n');
+
+    const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
+    assert.ok(!result.error, `no fatal error: ${result.error}`);
+    const extracted = readShippedPackage(result.shipped, join(root, 'x'));
+    const projectDir = join(extracted, 'projects', readdirSync(join(extracted, 'projects'))[0]);
+
+    const selfTest = JSON.parse(readFileSync(join(projectDir, 'self-test.json'), 'utf8'));
+    assert.equal(selfTest.available, true);
+    assert.equal(selfTest.latest_round, 3);
+    assert.equal(selfTest.latest_headline, 0.75);
+    assert.equal(selfTest.latest_trap_leak_rate, 0.5);
+
+    const headline = JSON.parse(readFileSync(join(projectDir, 'headline.json'), 'utf8'));
+    assert.equal(headline.self_test_latest_headline, 0.75);
+    assert.equal(headline.self_test_latest_trap_leak_rate, 0.5);
+    assert.ok(headline.flags.some(f => f.code === 'self-test-trap-leak'), 'a leaked trap raises a flag');
+
+    const reportMd = readFileSync(join(extracted, 'REPORT.md'), 'utf8');
+    assert.match(reportMd, /Self-test.*round 3.*auto-regrade/i);
+    const reportHtml = readFileSync(join(extracted, 'report.html'), 'utf8');
+    assert.match(reportHtml, /self-test headline/i);
+    assert.match(reportHtml, /Round 3/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('project with no self-test round: package still ships, self-test.json is honestly unavailable, no flag raised', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mp-selftest-absent-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root, { plant: false });
+    const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
+    assert.ok(!result.error, `no fatal error: ${result.error}`);
+    const extracted = readShippedPackage(result.shipped, join(root, 'x'));
+    const projectDir = join(extracted, 'projects', readdirSync(join(extracted, 'projects'))[0]);
+    const selfTest = JSON.parse(readFileSync(join(projectDir, 'self-test.json'), 'utf8'));
+    assert.equal(selfTest.available, false);
+    assert.match(selfTest.reason, /no self-test-log\.jsonl/);
+    const headline = JSON.parse(readFileSync(join(projectDir, 'headline.json'), 'utf8'));
+    assert.equal(headline.self_test_latest_headline, undefined);
+    assert.ok(!headline.flags.some(f => f.code === 'self-test-trap-leak'));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

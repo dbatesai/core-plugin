@@ -18,21 +18,39 @@
  * CLI:  node metrics-rollup.mjs <project> [--json] [--today YYYY-MM-DD]
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
-import { CLASSIFIER_VERSION, PROXY_VERSION } from './classify-turns.mjs';
+import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
+import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from './metrics-dedupe.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
 
+// Cross-date attribution — EXPLICIT POLICY (Hale item 3, 2026-07-23 correction):
+// IMMUTABLE OBSERVATION DAY. A replayed session keeps its EARLIEST/original
+// observation day; replay never moves history forward. A turn first observed on
+// day X and re-classified on day Y counts once, under day X — the day the user
+// need actually occurred, not the day a classification was re-produced. So
+// "turns today" means user turns first observed today, never processing
+// activity. Stated in the rollup JSON and the daily markdown.
+const DAY_ATTRIBUTION = 'observation-day';
+const DAY_ATTRIBUTION_NOTE = 'replayed sessions keep their earliest/original observation day; "turns today" means user turns first observed that day, never re-processing activity';
+
 /**
  * Read calibration state and decide whether the rollup may drop the PROVISIONAL
- * tag. A calibration only counts if it was run against the CURRENT classifier
- * version — calibrate at v0.1.0, then improve the classifier, and the old
- * precision number no longer describes what's running. Version mismatch ⇒ treat
- * as uncalibrated (the R-1 honesty spine: never launder stale confidence).
+ * tag. A calibration only counts if it was run against the CURRENT instrument
+ * TRIPLE — classifier version, proxy version, AND the classified-row schema
+ * version. Calibrate at one instrument, then change any leg of the triple, and
+ * the old precision number no longer describes what's running. Any mismatch ⇒
+ * treat as uncalibrated (the R-1 honesty spine: never launder stale confidence).
+ *
+ * The distinct `classified_schema_version` field is the schema of the CLASSIFIED
+ * ROWS the calibration was measured against (written by calibrate-classifier.mjs).
+ * The state's own `schema_version` is the calibration-FILE schema and is NOT a
+ * substitute — binding to it would let a calibration taken against a different
+ * row schema still claim exact-triple calibration (Hale item 5).
  */
 function readCalibrationState(metaDir) {
   const f = join(metaDir, 'calibration-state.json');
@@ -40,7 +58,9 @@ function readCalibrationState(metaDir) {
   let s;
   try { s = JSON.parse(readFileSync(f, 'utf8')); } catch { return { is_calibrated: false, provisional: true }; }
   if (s.is_calibrated
-      && (s.classifier_version !== CLASSIFIER_VERSION || s.proxy_version !== PROXY_VERSION)) {
+      && (s.classifier_version !== CLASSIFIER_VERSION
+        || s.proxy_version !== PROXY_VERSION
+        || s.classified_schema_version !== CLASSIFIED_SCHEMA_VERSION)) {
     return { ...s, is_calibrated: false, provisional: true, version_mismatch: true };
   }
   return s;
@@ -54,14 +74,41 @@ function readClassified(dir, date) {
   }).filter(Boolean);
 }
 
+/**
+ * Read EVERY daily classified file (ascending date order) and return the
+ * replay-deduped, COHORT-GATED per-day view plus store-wide dedupe stats and
+ * the coverage gap. Store-wide, not per-file, because a session re-processed
+ * on a later date appends the same turns under a new date — only a
+ * whole-store pass keeps totals stable under that replay (Hale's
+ * replay-identity falsifier). The cohort gate (Hale's 2026-07-22 addendum)
+ * then keeps only rows produced by the CURRENT instrument — the same
+ * (schema, classifier, proxy) triple calibration is validated against;
+ * everything else is reported, never counted. The store is small (daily
+ * JSONL, one row per classified turn), so the full read is cheap.
+ */
+function readClassifiedCohort(dir) {
+  let files = [];
+  try {
+    files = readdirSync(dir)
+      .filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
+      .sort();
+  } catch { files = []; }
+  const daysInput = files.map((f) => ({ day: f.slice(0, 10), rows: readClassified(dir, f.slice(0, 10)) }));
+  return cohortClassifiedByDay(daysInput, {
+    schema_version: CLASSIFIED_SCHEMA_VERSION,
+    classifier_version: CLASSIFIER_VERSION,
+    proxy_version: PROXY_VERSION,
+  });
+}
+
 function rate(records, state) {
   if (!records.length) return null;
   const n = records.filter((r) => r.state === state).length;
   return { n, total: records.length, pct: n / records.length };
 }
 
-/** Trailing 7-day average rate of `state`, excluding `today`. */
-function trailingAvg(classifiedDir, today, state, days = 7) {
+/** Trailing 7-day average rate of `state`, excluding `today`, over the deduped per-day view. */
+function trailingAvg(dedupedDays, today, state, days = 7) {
   const dates = [];
   const base = new Date(today + 'T00:00:00Z');
   for (let i = 1; i <= days; i++) {
@@ -71,8 +118,7 @@ function trailingAvg(classifiedDir, today, state, days = 7) {
   }
   const rates = [];
   for (const date of dates) {
-    const recs = readClassified(classifiedDir, date);
-    const r = rate(recs, state);
+    const r = rate(dedupedDays[date] || [], state);
     if (r) rates.push(r.pct);
   }
   if (!rates.length) return null;
@@ -88,30 +134,53 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
   const metaDir = operationalMetricsDir(wid, { home });
   const classifiedDir = join(metaDir, 'classified');
 
-  const todayRecs = readClassified(classifiedDir, date);
+  // Read-side replay dedupe + instrument-cohort gate (metrics-dedupe.mjs):
+  // the classified store is append-only, so re-processed sessions appear more
+  // than once, and old-instrument rows survive when never re-classified.
+  // Aggregate ONLY the deduped current-cohort view; surface the dedupe stats
+  // and the coverage gap, never bury either.
+  const { days: dedupedDays, stats: dedupe, cohort, coverage_gap: coverageGap } = readClassifiedCohort(classifiedDir);
+  const todayRecs = dedupedDays[date] || [];
   const dist = {};
   for (const r of todayRecs) dist[r.state] = (dist[r.state] || 0) + 1;
   const headline = rate(todayRecs, HEADLINE);
-  const avg = trailingAvg(classifiedDir, date, HEADLINE);
+  const avg = trailingAvg(dedupedDays, date, HEADLINE);
 
   // Phase 3: read calibration state to determine whether to drop PROVISIONAL tag.
   const calState = readCalibrationState(metaDir);
   const provisional = !calState.is_calibrated;
   const provisionalTag = provisional ? ' [PROVISIONAL — classifier uncalibrated]' : '';
 
+  // Visible in the one-line signal whenever the dedupe actually changed the
+  // numbers (dropped rows or conflicts); always present in JSON + daily md.
+  const lossy = dedupe.rows_read !== dedupe.rows_kept || dedupe.conflicts > 0;
+  const dedupeTag = lossy
+    ? ` [replay-dedupe: ${dedupe.rows_read}→${dedupe.rows_kept} store-wide${dedupe.conflicts ? `, ${dedupe.conflicts} conflict${dedupe.conflicts === 1 ? '' : 's'}` : ''}]`
+    : '';
+  // Coverage gap is a correctness signal, not a footnote: whenever any row
+  // was excluded for being outside the current instrument cohort, say so in
+  // the one-liner too (always present in JSON + daily md).
+  const gapTag = coverageGap.rows_excluded ? ` [${formatCoverageGapNote({ cohort, coverage_gap: coverageGap })}]` : '';
+
   let signal;
   if (!todayRecs.length) {
     // provisionalTag is '' when calibrated; the old `|| ' [PROVISIONAL]'` fallback
     // re-added the tag on a calibrated workspace, mislabeling honest metrics (M5).
-    signal = `metrics: no classified turns for ${date} yet${provisionalTag}`;
+    signal = `metrics: no classified turns for ${date} yet${dedupeTag}${gapTag}${provisionalTag}`;
   } else {
     const todayPct = Math.round(headline.pct * 100);
     const avgStr = avg == null ? 'n/a (no prior 7d)' : `${Math.round(avg * 100)}%`;
     const arrow = avg == null ? '' : headline.pct > avg + 0.02 ? ' ↑' : headline.pct < avg - 0.02 ? ' ↓' : ' ≈';
-    signal = `${HEADLINE}: ${headline.n}/${headline.total} turns today (${todayPct}%) vs 7-day avg ${avgStr}${arrow}${provisionalTag}`;
+    signal = `${HEADLINE}: ${headline.n}/${headline.total} turns today (${todayPct}%) vs 7-day avg ${avgStr}${arrow}${dedupeTag}${gapTag}${provisionalTag}`;
   }
 
-  return { date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg, provisional, calibrated: calState.is_calibrated, signal, metaDir };
+  return {
+    date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg,
+    provisional, calibrated: calState.is_calibrated, dedupe,
+    cohort, coverage_gap: coverageGap,
+    day_attribution: DAY_ATTRIBUTION, day_attribution_note: DAY_ATTRIBUTION_NOTE,
+    signal, metaDir,
+  };
 }
 
 export function writeRollup(r) {
@@ -127,6 +196,9 @@ export function writeRollup(r) {
       '',
       `Headline ${HEADLINE} rate: ${r.headline ? `${r.headline.n}/${r.headline.total} (${Math.round(r.headline.pct * 100)}%)` : 'n/a'}`,
       `Trailing 7-day avg: ${r.trailing_avg == null ? 'n/a' : `${Math.round(r.trailing_avg * 100)}%`}`,
+      ...(r.dedupe ? [`Replay-dedupe (store-wide): ${formatDedupeNote(r.dedupe)}`] : []),
+      ...(r.cohort ? [(() => { const n = formatCoverageGapNote(r); return n.charAt(0).toUpperCase() + n.slice(1); })()] : []),
+      ...(r.day_attribution_note ? [`Day attribution: ${r.day_attribution_note}.`] : []),
       '',
       '## State distribution (today)',
       ...Object.entries(r.distribution).sort((a, b) => b[1] - a[1]).map(([s, n]) => `- ${s}: ${n}`),

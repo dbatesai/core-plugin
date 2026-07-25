@@ -35,9 +35,9 @@ test('entryPath prefers canonical `path`, tolerates legacy `project_path`', () =
 });
 
 // ---------- The regression: project_path-keyed entry must NOT re-fork ----------
-// Meridian, R11, 2026-05-31: the index entry was schema-style (project_path),
+// Observed on a Windows box, 2026-05-31: the index entry was schema-style (project_path),
 // the fork-check read only `path`, so it never recognized its own registered
-// workspace and re-forked local-llm-build-r11 -> -2 -> -3 every startup.
+// workspace and re-forked a workspace -> -2 -> -3 every startup.
 
 test('project_path-keyed index entry at cwd -> no fork (the false-fork bug)', () => {
   withFixture(

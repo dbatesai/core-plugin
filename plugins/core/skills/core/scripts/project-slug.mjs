@@ -4,11 +4,11 @@
  *
  * Claude Code maps a project cwd to ~/.claude/projects/<slug>/memory/MEMORY.md
  * where <slug> is the absolute path with path separators AND dots replaced by '-'.
- * Confirmed on a dotted corporate username: `/Users/David.Bates28/...` encodes to
- * `-Users-David-Bates28-...` (the dot becomes a hyphen).
+ * Confirmed on a dotted corporate username: a home dir like `/Users/<first.last>`
+ * encodes to `-Users-<first-last>-...` (the dot becomes a hyphen).
  *
  * The previous inline encoders only replaced '/' (`path.replace(/\//g, '-')`), so a
- * username containing a dot produced `-Users-David.Bates28-...` — a slug that never
+ * username containing a dot produced `-Users-<first.last>-...` — a slug that never
  * matched the real folder. Two confirmed failures from that single gap:
  *   - generate-memory-index's cross-project guard false-refused (MEMORY.md priority
  *     block could not auto-refresh; manual fix every finalize).

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -31,6 +31,31 @@ test('generate-memory-index CLI guard does NOT use new URL().pathname (H1 regres
     !/new URL\(\s*import\.meta\.url\s*\)\.pathname/.test(SRC),
     'new URL(import.meta.url).pathname breaks the entry guard on Windows — use fileURLToPath',
   );
+});
+
+// H1 sweep: the same defect class anywhere in shipped scripts/hooks OR the test
+// suite itself. `.pathname` on a file: URL yields `/D:/...` on Windows; join +
+// pathToFileURL then mangle it into `D:\D:\...` (the exact failure that kept
+// the stamp-race and no-baseline-detector tests red on windows-latest for two
+// releases). Use fileURLToPath(new URL(...)) or pass the URL .href directly.
+test('no file anywhere uses new URL(...).pathname (H1 sweep — Windows-safe)', () => {
+  const roots = [
+    '../../plugins/core/skills/core/scripts',
+    '../../plugins/core/skills/core/hooks',
+    '.',
+  ].map((r) => fileURLToPath(new URL(r, import.meta.url)));
+  const self = fileURLToPath(import.meta.url);
+  const offenders = [];
+  for (const root of roots) {
+    for (const f of readdirSync(root)) {
+      if (!f.endsWith('.mjs')) continue;
+      const path = join(root, f);
+      if (path === self) continue; // this file names the pattern in prose
+      const src = readFileSync(path, 'utf8');
+      if (/new URL\([^)]*\)\s*\.pathname/.test(src)) offenders.push(join(root, f));
+    }
+  }
+  assert.deepEqual(offenders, [], `these files use URL .pathname (breaks on Windows): ${offenders.join(', ')}`);
 });
 
 // --- M13: --top must be a positive integer; a NaN top must never thin MEMORY.md ---

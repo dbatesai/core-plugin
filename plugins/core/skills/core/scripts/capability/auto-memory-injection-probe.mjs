@@ -41,7 +41,7 @@ export const CANARY = '## Recent activity';
 /**
  * Map an absolute cwd to the Claude Code project-memory directory name.
  * Claude Code replaces every '/', '\', '.', and ':' in the absolute path with '-'.
- * /Users/dbates/Documents/Projects/CORE → -Users-dbates-Documents-Projects-CORE
+ * /Users/<user>/Documents/Projects/CORE → -Users-<user>-Documents-Projects-CORE
  */
 export function mappedMemoryPath(cwd, home = homedir()) {
   // Build the path with explicit forward slashes (path.join emits backslashes on

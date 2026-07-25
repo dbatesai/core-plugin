@@ -21,6 +21,12 @@ function setup() {
   mkdirSync(project, { recursive: true });
   mkdirSync(join(home, '.core'), { recursive: true });
   writeFileSync(join(project, 'PROJECT.md'), '# Project\n\n## What & Why\n\nThe thing.\n');
+  // A PROJECT.md CORE renders is stamped at creation (the render step calls the
+  // creation-baseline seam — lifecycle-detect stampCreatedBaseline --kind project).
+  // Absent that stamp every writer now fails closed on no-baseline (Hale's
+  // 2026-07-22 root fix), so establish the creation baseline here the way the
+  // real product does, exactly once, before any writer touches the file.
+  recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-01T00:00:00Z', home });
   return {
     root, project, home,
     globalCachePath: join(home, '.core', 'state-cache.json'),
@@ -64,6 +70,7 @@ test('recordProjectMdWrite merges into an existing per-project cache without clo
 test('recordProjectMdWrite tolerates a missing per-project cache file (creates it)', () => {
   const { root, project, home, projectCachePath } = setup();
   try {
+    rmSync(projectCachePath, { force: true }); // start from a genuinely-absent cache (setup pre-stamped one)
     recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-06T00:00:00Z', home });
     const cache = JSON.parse(readFileSync(projectCachePath, 'utf8'));
     assert.equal(cache.files[join(project, 'PROJECT.md')].last_written_by, 'hot-section');
@@ -276,6 +283,7 @@ test('applyHotSection appends the block at EOF when `## What & Why` is missing',
   const { root, project, home } = setup();
   try {
     writeFileSync(join(project, 'PROJECT.md'), '# Project\n\nNo six-section shape here.\n');
+    recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-01T00:00:00Z', home }); // re-stamp the rewritten (CORE-authored) content
     applyHotSection(project, 'Fallback insertion point.', { now: '2026-06-06T00:00:00Z', home });
     const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
     assert.ok(pm.trim().endsWith(HOT_END), 'block landed at the end, not silently dropped');
@@ -405,5 +413,163 @@ test('CLI: clear subcommand reports success and actually removes the block', () 
     assert.match(res.stdout, /hot section cleared/);
     const pm = readFileSync(join(project, 'PROJECT.md'), 'utf8');
     assert.ok(!pm.includes(HOT_BEGIN), 'block actually gone');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---- Authorship-laundering regression (Hale's finding, 2026-07-22: mailbox
+// "mixed-ownership-writers-launder-unreconciled-edits"). Exact reproduction:
+// apply a hot section (establishes a baseline), the user hand-edits
+// PROJECT.md OUTSIDE the hot block, then a second `applyHotSection` runs.
+// Before the fix: the write landed (the user's bytes preserved) and then
+// unconditionally re-stamped a FRESH outside_hash computed from the
+// post-user-edit file — so the next classifyProjectMdChange call read
+// 'hot-block-only' instead of 'outside-changed', and the edit was never
+// observed, attributed, or propagated. After the fix: applyHotSection/
+// clearHotSection must refuse (NEEDS_RECONCILIATION), never write or
+// re-stamp, and a later classification check must still read
+// 'outside-changed'. ----
+
+test("applyHotSection refuses (NEEDS_RECONCILIATION) and never re-stamps when PROJECT.md's body already diverged from its baseline (Hale's authorship-laundering finding)", () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'First synthesis.', { now: '2026-07-22T00:00:00Z', home });
+    const pmPath = join(project, 'PROJECT.md');
+    const baselineStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[pmPath];
+
+    // The user hand-edits PROJECT.md OUTSIDE the hot block.
+    const userEdited = readFileSync(pmPath, 'utf8').replace('The thing.', 'The thing.\n\nUSER EDIT MUST BE OBSERVED.');
+    writeFileSync(pmPath, userEdited);
+    assert.equal(classifyProjectMdChange(baselineStamp, userEdited), 'outside-changed',
+      'sanity: the classifier itself correctly sees the user edit before any maintenance runs');
+
+    // A second synthesis pass must refuse rather than launder the edit.
+    assert.throws(
+      () => applyHotSection(project, 'Second synthesis.', { now: '2026-07-22T01:00:00Z', home }),
+      (e) => e.code === 'NEEDS_RECONCILIATION' && e.classification === 'outside-changed',
+    );
+
+    const current = readFileSync(pmPath, 'utf8');
+    assert.match(current, /USER EDIT MUST BE OBSERVED/, "the user's edit must still be in the file");
+    assert.doesNotMatch(current, /Second synthesis/, 'the blocked write must never land');
+    const afterStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[pmPath];
+    assert.deepEqual(afterStamp, baselineStamp, 'the cache entry must be untouched — no re-stamp over an unreconciled edit');
+    assert.equal(classifyProjectMdChange(afterStamp, current), 'outside-changed',
+      'the SAME classifier call that was laundered to hot-block-only before the fix must still report outside-changed after it');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('clearHotSection also refuses (NEEDS_RECONCILIATION) rather than removing the block over an unreconciled user edit', () => {
+  const { root, project, home, projectCachePath } = setup();
+  try {
+    applyHotSection(project, 'Ephemeral.', { now: '2026-07-22T00:00:00Z', home });
+    const pmPath = join(project, 'PROJECT.md');
+    const baselineStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[pmPath];
+    writeFileSync(pmPath, readFileSync(pmPath, 'utf8').replace('The thing.', 'The thing.\n\nUSER EDIT.'));
+
+    assert.throws(
+      () => clearHotSection(project, { now: '2026-07-22T01:00:00Z', home }),
+      (e) => e.code === 'NEEDS_RECONCILIATION',
+    );
+    const current = readFileSync(pmPath, 'utf8');
+    assert.match(current, /HOT-SECTION:BEGIN/, 'the hot block must still be present — the blocked clear never landed');
+    const afterStamp = JSON.parse(readFileSync(projectCachePath, 'utf8')).files[pmPath];
+    assert.deepEqual(afterStamp, baselineStamp, 'no re-stamp over an unreconciled edit');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI: apply exits 1 and reports refusal on stderr when PROJECT.md needs reconciliation', () => {
+  const { root, project, home } = setup();
+  try {
+    applyHotSection(project, 'First synthesis.', { now: '2026-07-22T00:00:00Z', home });
+    const pmPath = join(project, 'PROJECT.md');
+    writeFileSync(pmPath, readFileSync(pmPath, 'utf8').replace('The thing.', 'The thing.\n\nUSER EDIT.'));
+
+    const res = spawnSync(process.execPath, [SCRIPT, 'apply', project, '--text', 'Second synthesis.'], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    });
+    assert.equal(res.status, 1, 'a blocked apply must exit nonzero');
+    assert.match(res.stderr, /reconciliation/);
+    const current = readFileSync(pmPath, 'utf8');
+    assert.doesNotMatch(current, /Second synthesis/, 'the blocked write must never land via the CLI either');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------------------------------------------------------------------------
+// Stamp-failure CLI contract (2026-07-22, Hale's finding: "cli_exit: 0" when
+// the content write landed but the authorship stamp failed — a hook/caller
+// reading exit code + stdout alone saw full success either way). The content
+// write must NEVER be rolled back; the machine contract (exit code + a
+// structured receipt) must stop calling this a clean success.
+// ---------------------------------------------------------------------------
+
+test('applyHotSectionWithOutcome surfaces stampOutcome.stamped:false without throwing or losing the content write', async () => {
+  const { applyHotSectionWithOutcome } = await import('../../plugins/core/skills/core/scripts/hot-section.mjs');
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const { root, project, home } = setup();
+  try {
+    const lockPath = join(project, '_memories', '_lib', '.state-cache.lock');
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    const held = acquireFileLock(lockPath);
+    assert.ok(held.ok, 'test setup: must be able to hold the lock');
+    let result;
+    try {
+      result = applyHotSectionWithOutcome(project, 'Generated hot text.', { home });
+    } finally {
+      releaseFileLock(lockPath, held.nonce);
+    }
+    assert.equal(result.applied, true, 'the content write itself happened');
+    assert.equal(result.stampOutcome.stamped, false, 'the stamp could not land while the lock was held');
+    assert.equal(result.updated.includes('Generated hot text.'), true, 'the returned text reflects the real write, not a rollback');
+    const onDisk = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.match(onDisk, /Generated hot text\./, 'the content write is NOT rolled back');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI apply: a stamp failure (lock held) exits NONZERO and never reports a contradictory clean success', async () => {
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const { root, project, home } = setup();
+  try {
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    const lockPath = join(project, '_memories', '_lib', '.state-cache.lock');
+    const held = acquireFileLock(lockPath);
+    assert.ok(held.ok, 'test setup: must be able to hold the lock');
+
+    const res = spawnSync(process.execPath, [SCRIPT, 'apply', project, '--text', 'Generated hot text.'], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home }, timeout: 5000,
+    });
+    releaseFileLock(lockPath, held.nonce);
+
+    const onDisk = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.match(onDisk, /Generated hot text\./, 'content write happened — this is Hale\'s "do not roll back" requirement');
+    assert.notEqual(res.status, 0, 'the CLI must exit NONZERO when the attribution stamp failed (the exact bug: it used to exit 0)');
+    assert.match(res.stderr, /attribution unknown|recovery-required/i, 'the human-readable warning still fires');
+    // The exact regression this test guards: exit 0 AND a stdout line reading as
+    // plain, unqualified success is a "contradictory success" a caller cannot see through.
+    const contradictorySuccess = res.status === 0 && /hot section applied/i.test(String(res.stdout || ''));
+    assert.equal(contradictorySuccess, false, 'never both exit 0 AND an unqualified "hot section applied" success line');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('CLI clear: a stamp failure (lock held) exits NONZERO, still removes the block, and never reports a contradictory clean success', async () => {
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const { root, project, home } = setup();
+  try {
+    applyHotSection(project, 'To be cleared.', { now: '2026-07-22T00:00:00Z', home });
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    const lockPath = join(project, '_memories', '_lib', '.state-cache.lock');
+    const held = acquireFileLock(lockPath);
+    assert.ok(held.ok, 'test setup: must be able to hold the lock');
+
+    const res = spawnSync(process.execPath, [SCRIPT, 'clear', project], {
+      encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home }, timeout: 5000,
+    });
+    releaseFileLock(lockPath, held.nonce);
+
+    const onDisk = readFileSync(join(project, 'PROJECT.md'), 'utf8');
+    assert.doesNotMatch(onDisk, /To be cleared\./, 'the block removal happened — not rolled back');
+    assert.notEqual(res.status, 0, 'the CLI must exit NONZERO when the attribution stamp failed on a clear too');
+    assert.match(res.stderr, /attribution unknown|recovery-required/i);
+    const contradictorySuccess = res.status === 0 && /hot section cleared/i.test(String(res.stdout || ''));
+    assert.equal(contradictorySuccess, false, 'never both exit 0 AND an unqualified "hot section cleared" success line');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

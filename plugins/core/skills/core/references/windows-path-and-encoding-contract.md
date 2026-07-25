@@ -2,7 +2,7 @@
 
 Seven rules for any new script, hook, index generator, enrichment writer, or packaging path. Every Windows-specific bug found in this plugin so far traces to one disease: a Mac or source-repo shape assumption leaking into install-time or runtime logic. Treat these as requirements when scaffolding new code, not as review catches after the fact.
 
-Authored by Meridian (the Windows harness advocate) from live findings on a real Windows box, 2026-07-20/21.
+Authored from live findings on a real Windows box, 2026-07-20/21.
 
 1. **Path-to-slug: use the canonical `mapProjectPathToSlug()` (`scripts/project-slug.mjs`). Never hand-roll a cwd-to-slug encoder.** Claude Code maps the drive colon, backslashes, and forward slashes all to `-` (`C:\Users\...` becomes `C--Users-...`, double dash from the colon). A local `replace(/\//g,'-')` or `replace(/[/\\]/g,'-')` is wrong on Windows because it misses the colon or the backslash. Two capability probes shipped exactly this bug — both hand-rolled instead of calling the canonical function, and both falsely reported memory not visible on a real Windows box while the mechanism actually worked.
 

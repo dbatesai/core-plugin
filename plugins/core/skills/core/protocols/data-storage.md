@@ -48,7 +48,7 @@ Capture-everything. Every utterance, tool output, casual mention, conversational
 
 **What's worth capturing — the forward-decision test (DC-94a).** Bias-to-capture doesn't mean capture noise. The test for whether a fact earns a write: *would this fact, sitting in context six weeks from now, change what the agent says or builds?* If yes, capture it. The keep-list, concretely:
 
-- **Preferences and constraints — with the context that makes them actionable.** Not "David likes X" but "David wants X *because* Y, *except when* Z." The condition is the load-bearing part.
+- **Preferences and constraints — with the context that makes them actionable.** Not "the user likes X" but "the user wants X *because* Y, *except when* Z." The condition is the load-bearing part.
 - **Decisions — and the fork not taken.** What was decided, and what was rejected and why. The road not traveled is what stops the agent re-proposing it next session.
 - **Risks — with their status.** Open, mitigated, accepted, closed. A risk with no status is a rumor.
 - **Multi-session patterns.** Anything that's recurred — a repeated correction, a habit, a recurring blocker — is a signal worth a durable record, not just an in-the-moment note.
@@ -237,7 +237,14 @@ The graduation step is where the LLM's value lives — noticing connections acro
 5. Compose the graduated unit with rich frontmatter and edges.
 6. Edge back to source observations via `cites` with `note: "graduated from"`.
 7. **Link at graduation — at least 3 edges, or argue zero (DC-94a).** Before the write completes, name and write typed edges to at least three related units (what it depends on, supersedes, refines, conflicts with, or cites). A graduated decision or risk that connects to nothing is invisible to Tier-2 edge-walk retrieval — and the whole point of the store is that traversal finds an answer before the agent says "I don't know." If there genuinely are fewer than three real relationships, write one sentence in the body saying why it stands alone. `check-units --integrity` emits a benign `link-density` WARN for an active, non-observation unit under three edges, so under-linked units stay visible without blocking. Never invent an edge to clear the count — a false edge is worse than a missing one.
-8. Source observations stay in place — the raw record is preserved.
+8. **Stamp the creation baseline in the SAME step you write the unit (the 2026-07-22 authorship rule).** A newly-written unit has no cache-stamp baseline, and CORE never assumes authorship from timing — so until its creating writer stamps it, decoration/hot-section/compaction will HOLD it as `no-baseline` (fail closed) rather than touch it. Establish the baseline the instant the file lands, so the same session's decoration backstop can decorate it normally:
+
+   ```bash
+   node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" <project> --stamp-created "_memories/<new-unit>.md" --kind unit
+   ```
+
+   This is the ONLY safe first-write: creating a new file establishes its first baseline, which is a different, safe operation from overwriting an existing file that might carry unreconciled user content. If you skip it, the unit is not lost — it is held and surfaced at the next lifecycle pass, and you re-stamp then. (Same seam for a fresh PROJECT.md render: `--stamp-created PROJECT.md --kind project`.)
+9. Source observations stay in place — the raw record is preserved.
 
 ### Dispatch gate — Sonnet vs Opus
 
@@ -305,6 +312,17 @@ Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYY
 
 The startup protocol surfaces the signals that matter from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
 
+### Two capture streams, one exporter boundary
+
+Metrics capture is physically two separate streams, and they are never mixed:
+
+| Stream | What it holds | Default | Exporter |
+|---|---|---|---|
+| **Closed-schema metrics** | `retrieval-log.jsonl` / `outcome-log.jsonl` and the derived rollups — counts, tiers, verdicts, identities. No prompts, no diffs, no unit bodies, no paths, no raw errors. | **ON** (DC-107), opt-out via `metrics_enabled: false` or `CORE_METRICS_ENABLED=0`. | `metrics-package.mjs` reads this and anonymizes it into the shareable package. |
+| **Turn-capture evidence** | `<metrics-storage-base>/turn-capture/<date>.jsonl` — one row per turn: the user's prompt (64 KiB byte-cap), the combined delivered context-pack text (16 KiB cap), per-unit ids+scores, the top-20 rejected candidates with scores, a store signature for drift detection, and producer identity. This is what the hindsight judge grades later — it exists so retrieval quality is judgeable after the fact. Files are owner-only (dir `0700`, rows `0600`, best-effort where the FS supports it). For local grading and human/agent debugging only; no model inference runs over it (DC-114). | **ON** (DC-129 — the product owner's explicit ruling, recorded with the reviewed objection). Opt-outs: `CORE_TURN_CAPTURE=0` (env), `turn_capture: false` in the project-root `workspace.json` (an opt-OUT travelling with a copied project is privacy-safe, the inverse of the old opt-in-stream reasoning), or the master `CORE_METRICS_ENABLED=0`. | **None.** `metrics-package.mjs` has no import path or read path into `turn-capture/`; a permanent canary tripwire test asserts the built package bytes never contain a planted evidence string. |
+
+The evidence stream is the materially more sensitive one, so it carries **always-visible state** (`/metrics` renders the ON line with the exact disclosure and off-switches, or the OFF line confirming an opt-out took effect), **independent disable** (its own flag; toggling it never touches the numbers stream), **30-day retention** (runs inside `maintenance-run.mjs` with dry-run + deletion proof), and **purge on explicit ask** (`maintenance-run.mjs --purge-turn-capture`, or `turn-capture.mjs --purge`). All evidence-stream deletion is scoped by path assertion to `<metrics-storage-base>/turn-capture/` only — it can never target a user memory unit or `PROJECT.md`. **One exclusion lock** at a stable sibling path OUTSIDE the purged directory (`<metrics-storage-base>/.turn-capture.lock`) is shared by append, retention deletion, and purge, so a purge can never unlink the lock out from under a mid-flight writer and the three ops can never race. A health counter (`<metrics-storage-base>/turn-capture-health.json`, a sibling on purpose) records every attempt including ones where the stream itself couldn't be created — a silently dying flight recorder is the exact failure the capture-health tripwire watches. The single writer is `scripts/turn-capture.mjs`; the one wired seam is `retrieve-context-hook.mjs`, writing the evidence row in the same run as the numbers row, joined by `retrieval_id`; a capture outcome (including failures) rides the hook's terminal operational receipt as a closed `turn_capture` status code, never as raw content. *(History: this stream supersedes the 2026-07-22 opt-in rich-context stream — which could only fire on zero-hits, when there is no delivered context to record (dc-127) — and the undocumented env-gated trace file; both retired in v3.14.0.)*
+
 ---
 
 ## Priority function
@@ -361,7 +379,7 @@ Commits are autonomous — commit as needed without asking. Pushes follow the us
 - *"Follow the release process on `<repo>`"* — work on feature branches, open PRs, never push directly to main; the release flow (e.g., `/cut-release`) carries main updates.
 - No standing rule named for a repo — confirm before push.
 
-If origin owner doesn't match what the user authorized (e.g., the user authorized `dbatesai/*` and you find `someoneelse/foo`), skip the push and surface the mismatch.
+If origin owner doesn't match what the user authorized (e.g., the user authorized `<owner>/*` and you find `someoneelse/foo`), skip the push and surface the mismatch.
 
 ---
 
@@ -393,7 +411,7 @@ The user owns PROJECT.md. Manage it in whatever way best serves accuracy and tho
 
 ## Edit detection
 
-Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json` (single-owner — two projects closing at once can't clobber each other). A small global `~/.core/state-cache.json` remains for genuinely cross-project files (`dm-profile.md`, `topics.md`). **One-release union-read:** read both, and where the same file appears in each, the newer `last_written` wins — old-version sessions still write the global file until every install picks the release up; each per-project stamp prunes its file's global entry (under the lock), so the union converges. Cache shape, either surface:
+Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json` — single-owner ACROSS PROJECTS (two projects closing at once write separate files, so they can't clobber each other), but NOT single-owner WITHIN a project: `decorate-graph.mjs`, `hot-section.mjs`, and `maintenance-run.mjs` can all stamp the same project-local cache in the same window, so the read-modify-write itself is locked (`stampFiles`/`stampFile` in `state-cache.mjs`, under `<project>/_memories/_lib/.state-cache.lock` via `withFileLock` — a concurrency finding, 2026-07-22, after a 40-concurrent-process probe measured real lost writes against the old unlocked version). A small global `~/.core/state-cache.json` remains for genuinely cross-project files (`dm-profile.md`, `topics.md`). **One-release union-read:** read both, and where the same file appears in each, the newer `last_written` wins — old-version sessions still write the global file until every install picks the release up; each per-project stamp prunes its file's global entry (under the lock), so the union converges. Cache shape, either surface:
 
 ```json
 {
@@ -410,7 +428,14 @@ Hash-based comparison against the state cache. The cache of record is **per-proj
 
 You update the cache on every read/write. You compare at every read.
 
-CORE's own writes are not user edits. Scripts that render PROJECT.md (e.g. `hot-section.mjs apply`) stamp `last_written_by` with their own name — but that label alone is not trustworthy evidence for a later mismatch: it says who wrote the previously cached bytes, not the current ones, so a user edit made after a hot-section apply would carry the same stale label (Hale's finding, 2026-07-21). Use `hot-section.mjs`'s `classifyProjectMdChange(cachedStamp, currentText)` instead — it hashes only the content outside the marker-delimited hot block, which `hot-section.mjs` never touches by construction. `'hot-block-only'` is CORE's synthesis: refresh the entry, don't propagate or fire anti-resurrection. `'outside-changed'` or `'no-baseline'` (a pre-fix stamp with no `outside_hash`) must be treated as a genuine user edit.
+CORE's own writes are not user edits. Scripts that render PROJECT.md or a unit file on the user's behalf stamp `last_written_by` with their own name **in code**, via the shared `state-cache.mjs` helper (`stampFiles`/`stampFile` — the lock-and-prune plumbing every one of these callers shares, so there's exactly one copy of it) — but that label alone is not trustworthy evidence for a later mismatch: it says who wrote the previously cached bytes, not the current ones, so a user edit made after the fact would carry the same stale label. Two callers, same pattern, each with its own domain-specific classifier (the marker-delimited block differs per file shape, so the hashing logic stays next to each script rather than living in the shared helper):
+
+- **PROJECT.md** — `hot-section.mjs apply` stamps `last_written_by: hot-section` (a finding, 2026-07-21). Use `classifyProjectMdChange(cachedStamp, currentText)` from `hot-section.mjs`: it hashes only the content outside the marker-delimited hot block, which `hot-section.mjs` never touches by construction. `'hot-block-only'` is CORE's synthesis: refresh the entry, don't propagate or fire anti-resurrection. `'outside-changed'` or `'no-baseline'` (a pre-fix stamp with no `outside_hash`) must be treated as a genuine user edit.
+- **Unit files** (`_memories/*.md`) — `decorate-graph.mjs` stamps `last_written_by: decorate-graph` for every file it actually rewrites (a finding, 2026-07-22 — this used to be a prose instruction telling the agent to update the cache by hand after a decoration pass; it is now code, matching the PROJECT.md precedent). Use `classifyUnitChange(cachedStamp, currentText)` from `decorate-graph.mjs`: it hashes only the content outside the marker-delimited `CORE:BEGIN_EDGES`/`CORE:END_EDGES` block. `'edges-block-only'` is CORE's own regenerated wikilink block: refresh the entry, don't propagate or fire anti-resurrection. `'outside-changed'` or `'no-baseline'` must be treated as a genuine user edit.
+
+`maintenance-run.mjs` stamps `last_written_by: maintenance-run` the same way for the fully machine-generated files it writes (`INDEX-decisions.md`, `INDEX-risks.md`, the summary index) — no block-splitting classifier needed there, since those files have no human-authored region to distinguish from CORE's own.
+
+**Both classifiers now also gate the WRITE itself, in code, not just later reads (a finding, 2026-07-22 — "mixed-ownership writers launder unreconciled edits").** Preserving the human-authored bytes on a rewrite is not the same as preserving authorship: `decorate-graph.mjs`/`hot-section.mjs` used to rewrite their own generated region and then unconditionally stamp a FRESH `outside_hash` — even when the human-authored region had ALREADY diverged from the last known baseline before the rewrite ran. That fresh stamp made the divergence permanently undetectable: the user's bytes survived, but the fact that they'd changed was never observed, attributed, or propagated (a hash mismatch that WOULD have read `outside-changed` against the true prior baseline instead read `edges-block-only`/`hot-block-only` against the writer's own just-laundered one). Fixed at the writer boundary, inside `decorateStore`/`decorateStoreLocked` and `applyHotSection`/`clearHotSection`: each now reads the PRE-write cache and classifies the file BEFORE writing. A file with a prior cache entry that classifies `outside-changed` or `no-baseline` is refused — not decorated, not re-stamped — and reported as `needs_reconciliation` (decorate-graph: in `decorateStore`'s return value; hot-section: a thrown `NEEDS_RECONCILIATION` error). A file with NO prior cache entry has no established baseline to violate, so its first-ever write still proceeds and establishes that baseline. Because the check lives inside the writer functions themselves, any caller — this protocol, a hook, `/finalize`, a manual script invocation — gets the protection automatically, without needing to call the classifier first at each call site.
 
 Runs at:
 - startup (full sweep).
@@ -424,8 +449,7 @@ Belt-and-suspenders for tracked files: cache is primary, `git diff` is the fallb
 
 ### Shared-write concurrency (the `~/.core/` write rules)
 
-Multiple agents run startup and `/finalize` at the same time (David's requirement, 2026-07-12;
-built 2026-07-14). The old "single-writer assumption" is retired. The rules, per file:
+Multiple agents can run startup and `/finalize` at the same time. The old "single-writer assumption" is retired. The rules, per file:
 
 - **`index.json` — NEVER hand-edit. All mutation goes through `scripts/index-registry.mjs`**
   (`add` / `update` / `remove` via CLI or module import). The script does the full
@@ -438,9 +462,13 @@ built 2026-07-14). The old "single-writer assumption" is retired. The rules, per
   `~/.core/workspaces/<id>/last-active`. Read it per-workspace first; the `last_active` field
   still present in old `index.json` entries is a tolerant read fallback for one release, and
   nothing writes it.
-- **Edit-detection state-cache is per-project** (see §Edit detection above): the hot path has
-  no shared write at all. The residual global cache (cross-project files only) is written
-  under `~/.core/state-cache.lock` via `withFileLock`.
+- **Edit-detection state-cache is per-project** (see §Edit detection above): the project-local
+  cache DOES have a shared write within a project — `decorate-graph.mjs`, `hot-section.mjs`,
+  and `maintenance-run.mjs` can all stamp it in the same window — so `stampFiles`/`stampFile`
+  serialize the read-modify-write under `<project>/_memories/_lib/.state-cache.lock` (a concurrency
+  finding, 2026-07-22: the old "no shared write at all" assumption here was false and cost real
+  writes under a 40-concurrent-process probe). The residual global cache (cross-project files
+  only) is written under `~/.core/state-cache.lock` via `withFileLock`.
 - **`dm-profile.md`, `topics.md`** — rare, usually interactive writes. Atomic
   write-temp-then-rename stays mandatory; if the file changed under you mid-session, re-read,
   merge your entry into the fresh copy, and narrate the collision in one line.

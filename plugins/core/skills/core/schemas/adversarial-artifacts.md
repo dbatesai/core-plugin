@@ -1,6 +1,6 @@
 # Adversarial artifact schema (v2.9/v3.0)
 
-The durable, in-repo contract for the three artifacts CORE's anti-anchoring discipline produces. `validate-adversarial-artifacts.mjs` enforces this. (The proposal + Hale's review that shaped it lived in the dev workshop; this file is the shipped source of truth.)
+The durable, in-repo contract for the three artifacts CORE's anti-anchoring discipline produces. `validate-adversarial-artifacts.mjs` enforces this. (The proposal + peer review that shaped it lived in the dev workshop; this file is the shipped source of truth.)
 
 These artifacts are how we know the adversarial process actually ran. They prove the discipline *executed and recorded itself* — they do NOT prove physical isolation. R-17 closure (physical anti-anchoring) needs a staging manifest + the empirical Workflow spike; these schemas are necessary, not sufficient, for that.
 

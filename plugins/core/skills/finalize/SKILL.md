@@ -16,14 +16,14 @@ Execute every step in order. Don't skip.
 
 ## One method, three entries (spec 2026-06-29; unified 2026-07-02)
 
-Finalize is ONE method with three entry points: **interactive** — the user typed `/finalize`; **headless** — `CORE_CLOSE_HEADLESS=1` is set (the SessionEnd close hook spawned you with `claude -p "/finalize"`; `close-pass-hook.mjs`); and the **startup catch-up**, which discharges whatever a missed close left owed. Every entry runs the same steps below, the same incremental way. The only thing mode changes is what needs a human in the room: headless can't show a draft or wait for an accept, so §Step 2.5's material-change accept defers to the next startup (`render-pending-accept` flag) and the Step 6 closing declaration is written into the session summary instead of said aloud. If you find yourself doing different *work* because of the mode, that's a defect (David, 2026-07-02) — mode moves the audience, never the method.
+Finalize is ONE method with three entry points: **interactive** — the user typed `/finalize`; **headless** — `CORE_CLOSE_HEADLESS=1` is set (the SessionEnd close hook spawned you with `claude -p "/finalize"`; `close-pass-hook.mjs`); and the **startup catch-up**, which discharges whatever a missed close left owed. Every entry runs the same steps below, the same incremental way. The only thing mode changes is what needs a human in the room: headless can't show a draft or wait for an accept, so §Step 2.5's material-change accept defers to the next startup (`render-pending-accept` flag) and the Step 6 closing declaration is written into the session summary instead of said aloud. If you find yourself doing different *work* because of the mode, that's a defect — mode moves the audience, never the method.
 
 **Discharge is incremental in both modes.** Don't re-run every step unconditionally. Consult the per-op close marker and the DC-110 cadence ledger, run only what's *owed*, skip what's already current. The reliability spine is `close-pass.mjs` (spec §8), which gives a single-flight lock (no two close agents racing the same store), a per-op completion marker (a partial close is detected, not trusted), and three-state startup detection. Use it as the frame around the whole pass:
 
 ```bash
 # Begin: acquire the lock + write the in-progress marker enumerating owed ops.
 node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs begin <project> --session <session-id> \
-  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,reflection-a,reflection-b,metrics,session-summary,memory-refresh
+  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,decorate-graph,reflection-a,reflection-b,metrics,session-summary,memory-refresh
 # (if it prints "lock held; another close is running" — STOP; a close is already in flight)
 
 # After each op completes, record it (this is what makes a crashed close recoverable):
@@ -37,7 +37,13 @@ node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs finish <project> --session 
 
 **Marker ownership is the one plumbing difference (`CORE_CLOSE_ENVELOPE=1`).** When the exit hook spawned you, the deterministic runner (`close-pass.mjs run`) owns the envelope: it already did `begin` (lock + in-progress marker) and the mechanical `maintenance-run` before you started, and it stamps `finish` when you return — so the `closed` marker and indexes are guaranteed even if you do nothing. This is deliberate (DC-77): validation 2026-06-30 caught a headless agent narrating "session closed" while writing no marker. So in envelope mode: skip `begin`, `finish`, and `maintenance-run` (the runner owns those — the marker already shows `maintenance-run` recorded), but **record each judgment op you complete exactly as in a manual run** (`close-pass.mjs record <project> --op <op> --status done`). That's safe and wanted: the runner waits for you synchronously, so your records land in the marker before its `finish` — and the per-op trail is what makes a crashed headless close resumable instead of opaque. In interactive mode (no envelope var), you own the full `begin` → record → `finish` sequence and run `maintenance-run` yourself at Step 2.3. Either way the marker ends up telling the same story: same ops, same records, different hands on the bookends.
 
-**The control-surface rule — every PROJECT.md write is edit-gated (spec §7).** Before any render (Step 2.4), hot-section (Step 2.6), or §Moves/§State mutation (Steps 3.1–3.3), run edit-detection against `~/.core/state-cache.json` exactly as `startup.md §"Load — returning workspace"` defines it. If the user edited PROJECT.md (outside the hot block) since CORE last wrote it, the user's edit wins: propagate it back to source units, fire anti-resurrection for removals, and do NOT clobber it with a fresh render this pass. A render only proceeds when edit-detection clears. This is non-negotiable in headless mode — there's no human to catch a bad overwrite.
+**The control-surface rule — every PROJECT.md write is edit-gated (spec §7).** Before any render (Step 2.4), hot-section (Step 2.6), or §Moves/§State mutation (Steps 3.1–3.3), run the executable lifecycle detector (the 2026-07-22 boundary fix), which classifies PROJECT.md and every unit against the last CORE baseline:
+
+```bash
+node ${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs <project> --json
+```
+
+Handle each classification before writing: `pending-edit` (the user edited PROJECT.md outside the hot block since CORE last wrote it) → the user's edit wins: propagate it back to source units, fire anti-resurrection for removals, do NOT clobber it with a render this pass; `malformed` → surface by name for a manual marker fix; `no-baseline` with `safeFirstWrite:false` → a pre-existing, never-reconciled file (surface, don't auto-write); `missing`/`read-only` → surface plainly. A render/writer only proceeds on `clean`/`generated-only` (or `no-baseline` with `safeFirstWrite:true`). This is non-negotiable in headless mode — there's no human to catch a bad overwrite. The detector is preflight/reporting; the writers below ALSO self-refuse at their own boundary — each shares one PROJECT.md writer lock, re-reads its live preimage, and refuses byte-identically on a pending edit, a stale preimage, or a malformed marker state — so even a writer invoked out of order (a hook, a manual run) gets this protection, and a writer that prints a `refused` line wrote nothing (reconcile, then re-run).
 
 **Kill switch.** `CORE_AUTO_CLOSE=0` halts auto-discharge (it gates the hook before you're ever spawned). It also covers any in-session autonomous maintenance — if it's set, don't run the EDIT-GATED writers unattended; surface what's owed and let the next interactive close handle it.
 
@@ -104,8 +110,9 @@ Walk the unit store and run the hygiene operations from `protocols/hygiene.md`, 
 
 - `demote-moves.mjs` and `compact-project.mjs` write atomically — a non-zero exit means nothing landed, so it's safe to keep going past them.
 - `bitemporal.mjs --stamp` writes to historical units. If the dry-run itself errors, do NOT run `--apply` this session — skip the whole validity-stamp sub-step (3.14) and name the skip in Step 6.
+- `decorate-graph.mjs` writes each unit file atomically, but the run as a whole isn't all-or-nothing: a non-zero exit means at least one file was refused (a malformed marker state, or a stale-byte race), not that nothing landed — other units may have decorated cleanly in the same run. Report refusals by name; don't read a non-zero exit here as "nothing happened."
 
-Sub-steps 3.1–3.7 change the store; 3.8 onward are read-and-report passes — except the validity stamp in 3.14, which is why it gets the dry-run rule above. A failure in a read-and-report pass costs visibility, not data. Every skipped or failed sub-step gets named in the Step 6 closing declaration.
+Sub-steps 3.1–3.7 change the store; 3.8 onward are read-and-report passes — except the validity stamp in 3.14 and the graph decoration in 3.17, both of which write and both of which get their own failure-handling note above/below rather than the generic read-and-report one. A failure in a read-and-report pass costs visibility, not data. Every skipped or failed sub-step gets named in the Step 6 closing declaration.
 
 ### 3.1 Demote closed §Moves bullets (DC-85 Phase 1b)
 
@@ -183,7 +190,7 @@ Run `node ${CORE_ROOT}/skills/core/scripts/audit-memory-boundary.mjs <project>`.
 ### 3.12 Capability drift + source-pull monitoring
 
 - **Capability drift surfacing (v2.7)** — run `node ${CORE_ROOT}/skills/core/scripts/analyze-capability-drift.mjs <project>`. It reads the per-session `~/.core/workspaces/<id>/capability-history.jsonl` (appended each session at startup by `record-capability-snapshot.mjs`), renders `<project>/_memories/_capability-drift-log.md`, and reports degrading drift + regressions. Narrate only what's actionable in plain voice — a capability that slipped PASS→DEGRADED, or one that stopped reporting between sessions. If there's no history yet (fresh workspace), say so in one sentence; don't invent drift. Healing-direction changes are informational — don't lead with them.
-- **Source-pull monitoring — removed 2026-07-21.** `analyze-source-pull-log.mjs` shipped an analyzer for a log no installation actually writes yet, and 2 of its 3 promised signals (a registered source missing from the window, an error count climbing *this session*) were structurally undeliverable with the inputs it had (it never read `<project>/_sources/`, and the CLI received no session boundary) — Hale's finding, three-way consensus to delete rather than patch. See `references/external-sources/source-registration-framework.md §7` for the still-open write-side contract; re-add the analyzer together with a real writer and the missing inputs, not before.
+- **Source-pull monitoring — removed 2026-07-21.** `analyze-source-pull-log.mjs` shipped an analyzer for a log no installation actually writes yet, and 2 of its 3 promised signals (a registered source missing from the window, an error count climbing *this session*) were structurally undeliverable with the inputs it had (it never read `<project>/_sources/`, and the CLI received no session boundary) — a finding, three-way consensus to delete rather than patch. See `references/external-sources/source-registration-framework.md §7` for the still-open write-side contract; re-add the analyzer together with a real writer and the missing inputs, not before.
 
 *On failure:* read-and-report — narrate and continue.
 
@@ -217,13 +224,19 @@ When this session edited the plugin tree itself (a new `scripts/*.mjs` or a `pro
 
 *On failure:* dev-meta only — narrate and continue; it never blocks a user project's close.
 
+### 3.17 Decorate the memory graph (Obsidian wikilinks)
+
+Run `node ${CORE_ROOT}/skills/core/scripts/decorate-graph.mjs <project>`. This regenerates the marker-delimited `[[wikilink]]` block in every active unit, computed from that unit's own `edges:` frontmatter over one atomic snapshot of the store, so `_memories/` itself opens directly as an Obsidian vault — graph view, backlinks, note browsing — with no separate export copy to go stale. The script is the only writer of the generated block (between `<!-- CORE:BEGIN_EDGES -->` / `<!-- CORE:END_EDGES -->` markers); a unit is only rewritten when its computed block actually changed, and retired/archived units are excluded from the snapshot entirely so they're never decorated. A unit whose markers are duplicated, orphaned, or out of order is refused and left byte-identical — name any refused file plainly in Step 6 rather than silently skipping it. Narrate "decorated N units" only if N > 0; "none needed" is a clean result. Record op `decorate-graph`.
+
+*On failure:* each file writes atomically, but a non-zero exit means at least one unit was refused, not that nothing landed — other units may have decorated cleanly in the same run. Name the refused file(s) plainly; don't claim the whole store decorated in Step 6.
+
 The deeper sub-protocols (edge-integrity sweep, session-log auto-prune) live in `references/hygiene-strategies.md`.
 
 ---
 
 ## Step 4 — Session summary (full narrative, every close)
 
-Write the full narrative summary to `<project>/_summaries/summary-<YYYY-MM-DD>.md` (letter suffix if today already has one) — **every close, both modes**. The 2026-06-29 spec dropped this to a 2–3-line stub; David reversed that 2026-07-02: the close runs invisibly in the background, so the write costs the user nothing, and a durable narrative is worth more than a stub. Lead with the resume pointer (the part the next agent reads first), then the narrative:
+Write the full narrative summary to `<project>/_summaries/summary-<YYYY-MM-DD>.md` (letter suffix if today already has one) — **every close, both modes**. The 2026-06-29 spec dropped this to a 2–3-line stub; that was reversed 2026-07-02: the close runs invisibly in the background, so the write costs the user nothing, and a durable narrative is worth more than a stub. Lead with the resume pointer (the part the next agent reads first), then the narrative:
 
 ```markdown
 # Session Summary — <YYYY-MM-DD>

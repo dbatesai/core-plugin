@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)),
@@ -42,7 +42,7 @@ test('ratchet: slug-encoders outside project-slug.mjs do not grow (target: 0)', 
     !p.endsWith('project-slug.mjs') &&
     /replace\(\/\[\^?a-z0-9|replace\(\/\[\/\\\\\]/.test(readFileSync(p, 'utf8')));
   assert.ok(files.length <= 4,
-    `slug-encoder copies grew past baseline 4 (target 0 — import mapProjectPathToSlug): ${files.map(f => f.split('/').pop())}`);
+    `slug-encoder copies grew past baseline 4 (target 0 — import mapProjectPathToSlug): ${files.map(f => basename(f))}`);
 });
 
 test('ratchet: local frontmatter fence-parsers do not grow (target: 1)', () => {
@@ -69,6 +69,38 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // deterministic release-artifact identity CLI — genuinely new, not a copy.
   // 52 → 53 (2026-07-16): metrics-package.mjs, the anonymized memory-efficacy
   // feedback-package CLI — genuinely new (metrics-package-report.mjs is
-  // import-only, no entry guard). Still target one shared isCliEntry() helper.
-  assert.ok(n <= 53, `CLI-entry-guard occurrences grew past baseline 53 (target: one shared helper): ${n}`);
+  // import-only, no entry guard). 53 → 54 (2026-07-22): lifecycle-detect.mjs,
+  // the executable user-authorship-boundary preflight (Hale's fix) — a
+  // genuinely-new CLI tool with its own entry point (lifecycle-core.mjs is
+  // import-only, no entry guard). 54 → 55 (2026-07-22): render-browse-artifact.mjs,
+  // the /memory-view snapshot-page generator — a genuinely-new CLI tool with its
+  // own entry point, not a copy. 55 → 57 (2026-07-22, metrics artifact):
+  // render-metrics-artifact.mjs, the /metrics artifact-page generator — a
+  // genuinely-new CLI tool with its own entry point; and
+  // artifact-provenance.mjs, which uses import.meta.url for realpath-from-
+  // module resolution (not an entry guard) — it is itself a CONSOLIDATION,
+  // extracting the duplicated truthful-producer-identity logic into one owner
+  // (artifact-receipts.mjs, the receipts consolidation, needs no
+  // import.meta.url at all). Still target one shared isCliEntry() helper.
+  // 57 -> 58 (2026-07-23): rich-context-capture.mjs, the opt-in rich-context
+  // capture stream's single writer + retention/purge CLI — a genuinely-new CLI
+  // tool with its own entry point, not a copy.
+  // 58 -> 59 (2026-07-23): self-test-round.mjs, the /self-test round manager
+  // (new-round/register/run/status) — a genuinely-new CLI tool with its own
+  // entry point, not a copy.
+  // 59 -> 60 (2026-07-24, v3.14.0): turn-capture.mjs REPLACES the deleted
+  // rich-context-capture.mjs one-for-one (net zero); the +1 is
+  // producer-identity.mjs, which uses import.meta.url only for module-relative
+  // manifest resolution (not an entry guard) and is itself a CONSOLIDATION —
+  // one owner for the previously-triplicated producer-identity manifest read.
+  // 60 -> 61 (2026-07-24, v3.14.0 Link 3): scorecard.mjs, the pinned-
+  // conclusions log (--pin for the maintenance cadence, --latest for readers)
+  // — a genuinely-new CLI tool with its own entry point, not a copy.
+  // 61 -> 62 (2026-07-24, v3.14.0 Link 2): hindsight-judge.mjs, the
+  // mechanical-grade judge (--limit batch CLI for the maintenance cadence) —
+  // a genuinely-new CLI tool with its own entry point, not a copy.
+  // 62 -> 63 (2026-07-24, v3.14.0 Link 5): metrics-tripwires.mjs, the
+  // session-start degradation check (startup protocol consumes its stdout) —
+  // a genuinely-new CLI tool with its own entry point, not a copy.
+  assert.ok(n <= 63, `CLI-entry-guard occurrences grew past baseline 63 (target: one shared helper): ${n}`);
 });

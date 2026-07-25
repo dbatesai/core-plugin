@@ -32,8 +32,16 @@ export function buildReportMd({ manifest, projects }) {
     lines.push(`- **Store:** ${numOr(h.units_total)} units, ${numOr(h.edges_total)} edges · ${numOr(h.edges_per_active_unit)} edges/active unit · orphan rate ${pct(h.orphan_rate)} *(direct)*`);
     lines.push(`- **Retrieval:** ${numOr(h.retrieval_events_total)} logged events · escalation past lexical ${pct(h.escalation_rate)} · dip-back rate ${h.dip_back_rate != null ? pct(h.dip_back_rate) : `unobserved (0/${numOr(h.retrieval_events_total,'0')} rows carry the field)`} · ${numOr(h.miss_total, '0')} misses *(proxy — corpus not yet fully product-emitted)*`);
     lines.push(`- **Validator:** ${numOr(h.warn_total)} warnings, ${numOr(h.fail_total, '0')} failures *(direct)*`);
-    lines.push(`- **Recognition:** latest rec-fail rate ${h.recfail_latest_rate != null ? pct(h.recfail_latest_rate) : `withheld (sample ${numOr(h.recfail_latest_sample, '0')} turns < 20 floor)`} *(provisional — uncalibrated classifier)*`);
+    const rd = proj.blocks['workspace-metrics']?.recognition?.replay_dedupe;
+    const rdNote = rd ? ` · replay-dedupe ${rd.rows_read}→${rd.rows_kept} rows (${rd.superseded_dropped} superseded, ${rd.conflicts} conflicts)` : '';
+    lines.push(`- **Recognition:** latest rec-fail rate ${h.recfail_latest_rate != null ? pct(h.recfail_latest_rate) : `withheld (sample ${numOr(h.recfail_latest_sample, '0')} turns < 20 floor)`}${rdNote} *(provisional — uncalibrated classifier)*`);
     lines.push(`- **PROJECT.md:** ${h.project_md_bytes != null ? `${Math.round(h.project_md_bytes / 1024)}KB` : '—'}`);
+    const st = proj.blocks['self-test'];
+    if (st?.available) {
+      lines.push(`- **Self-test:** round ${numOr(st.latest_round)} (${st.latest_trigger}) — headline ${pct(st.latest_headline)}, trap-leak ${pct(st.latest_trap_leak_rate)}, ${numOr(st.runs_total)} run(s) over ${numOr(st.rounds_seen)} round(s) *(direct — the project's own blind self-exam, graded against its live corpus)*`);
+    } else {
+      lines.push(`- **Self-test:** not covered — ${st?.reason || 'no self-test round has been run yet'}`);
+    }
     lines.push('');
     if (proj.deltas?.available) {
       const changes = Object.entries(proj.deltas.changes || {}).filter(([, v]) => v !== 0);
@@ -166,6 +174,7 @@ export function buildReportHtml({ manifest, projects }) {
       tile(pct(h.escalation_rate), 'retrieval escalation', 'proxy'),
       tile(h.recfail_latest_rate != null ? pct(h.recfail_latest_rate) : 'n<20', 'latest rec-fail', 'provisional'),
       tile(numOr(h.warn_total), 'validator warnings', 'direct'),
+      tile(h.self_test_latest_headline != null ? pct(h.self_test_latest_headline) : 'no rounds', 'self-test headline', 'direct'),
     ].join('');
 
     const flags = proj.flags.map(f =>
@@ -193,19 +202,33 @@ export function buildReportHtml({ manifest, projects }) {
           Object.entries(v.warns_by_check).sort((a, b) => b[1] - a[1]).map(([k, n]) => ({ label: k, value: n })))
       : '';
 
+    const st = proj.blocks['self-test'];
+    let selfTestChart = '';
+    if (st?.available) {
+      const kindRows = Object.entries(st.latest_per_kind_r10 || {})
+        .filter(([, v2]) => typeof v2 === 'number')
+        .map(([k, v2]) => ({ label: k, value: Math.round(v2 * 100) }));
+      selfTestChart = barChart(`Self-test round ${st.latest_round} — Recall@10 by question kind (%)`, kindRows);
+      selfTestChart += `<div class="note">Round ${esc(st.latest_round)} (${esc(st.latest_trigger)}): headline ${pct(st.latest_headline)}, trap-leak ${pct(st.latest_trap_leak_rate)}${st.latest_old_vs_new_delta != null ? `, old-vs-new delta ${st.latest_old_vs_new_delta >= 0 ? '+' : ''}${Math.round(st.latest_old_vs_new_delta * 100)}pts` : ''} — ${esc(st.runs_total)} run(s) over ${esc(st.rounds_seen)} round(s). The project's own blind self-exam, graded against its live corpus each time it runs (direct evidence, not a proxy).</div>`;
+    } else if (st) {
+      selfTestChart = `<div class="note">Self-test: not covered — ${esc(st.reason)}.</div>`;
+    }
+
     const w = proj.blocks['workspace-metrics'];
     let recLine = '';
     if (w?.available && w.recognition?.available) {
       const weekKeys = Object.keys(w.recognition.weeks).sort();
       recLine = lineChart('rec-fail-tier-0 turns per week (PROVISIONAL — uncalibrated)',
         weekKeys.map(week => ({ label: week, value: (w.recognition.weeks[week].states['rec-fail-tier-0'] || 0) })));
+      const rd = w.recognition.replay_dedupe;
+      if (rd) recLine += `<div class="note">Replay-dedupe: ${esc(rd.rows_read)} classified rows read, ${esc(rd.rows_kept)} kept (${esc(rd.replays_dropped)} replays, ${esc(rd.superseded_dropped)} superseded, ${esc(rd.conflicts)} conflicts, ${esc(rd.unkeyed_kept)} unkeyed kept).</div>`;
     }
 
     const deltas = proj.deltas?.available
       ? `<div class="note">Since ${esc(proj.deltas.since)}: ${Object.entries(proj.deltas.changes || {}).filter(([, x]) => x !== 0).map(([k, x]) => `${esc(k)} ${x > 0 ? '+' : ''}${esc(x)}`).join(' · ') || 'no headline movement'}</div>`
       : '<div class="note">First package from this install for this project — trend lines start here.</div>';
 
-    return `<h2>${esc(proj.pseudonym)}</h2><div class="tiles">${tiles}</div>${flags}${deltas}${tierChart}${eventsLine}${warnChart}${recLine}`;
+    return `<h2>${esc(proj.pseudonym)}</h2><div class="tiles">${tiles}</div>${flags}${deltas}${tierChart}${eventsLine}${warnChart}${recLine}${selfTestChart}`;
   }).join('');
 
   return `<!doctype html>
