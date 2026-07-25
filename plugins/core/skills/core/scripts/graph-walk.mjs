@@ -53,7 +53,7 @@ function resolveTarget(target, memoriesDir, includeObservations = false, include
     if (existsSync(c3)) return c3;
   }
   if (includeObservations) {
-    // SYN-007: edges pointing into observations/<YYYY-MM>/ resolved to null.
+    // Without this branch, edges pointing into observations/<YYYY-MM>/ resolve to null.
     const obsRoot = join(memoriesDir, 'observations');
     const flat = join(obsRoot, `${stem}.md`);
     if (existsSync(flat)) return flat;
@@ -70,7 +70,7 @@ function resolveTarget(target, memoriesDir, includeObservations = false, include
 
 // Build an inverse edge index: target-stem -> [{sourcePath, sourceId, edgeType}].
 // Top-level scan by default; includeObservations also scans observations/ and
-// its month subdirs (SYN-007) so observation units can appear as inbound neighbors.
+// its month subdirs so observation units can appear as inbound neighbors.
 export function buildInverseEdgeIndex(memoriesDir, { includeObservations = false, includeInvalidated = false } = {}) {
   const inverse = new Map();
   const scanDir = (dir) => {

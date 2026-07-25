@@ -1,9 +1,8 @@
 /**
  * artifact-receipts.mjs — the shared audit-trail mechanism for every
- * artifact-page generator (extracted and generalized from
- * render-browse-artifact.mjs, 2026-07-22, when the metrics artifact generator
- * became its second consumer — extraction over duplication, matching the
- * state-cache.mjs precedent).
+ * artifact-page generator (consumed by render-browse-artifact.mjs and the
+ * metrics artifact generator — one shared implementation, not per-generator
+ * copies).
  *
  * Two receipts, two different claims:
  *
@@ -131,9 +130,9 @@ export function recordPublishOutcome({
     throw Object.assign(new Error(
       "--status published-private requires --private-verified-evidence — state how privacy was actually confirmed (condition 3); without evidence the publish is 'failed', not 'published-private'"), { code: 'EVIDENCE_REQUIRED' });
   }
-  // The e0a808f review revise (2026-07-22): a published-private outcome without a
-  // consent record was a gap between the skill prose ("record who consented on
-  // which manifest") and this CLI contract — close it here, for every kind.
+  // A published-private outcome without a
+  // consent record would leave a gap between the skill prose ("record who consented on
+  // which manifest") and this CLI contract — closed here, for every kind.
   if (status === 'published-private' && (!consentBy || !consentMechanism)) {
     throw Object.assign(new Error(
       "--status published-private requires --consent-by and --consent-mechanism — record who consented and what they were shown (condition 4); without a consent record the publish is 'failed', not 'published-private'"), { code: 'CONSENT_REQUIRED' });

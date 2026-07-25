@@ -1,15 +1,14 @@
 /**
  * index-registry.mjs — the ONLY sanctioned writer of ~/.core/index.json.
  *
- * Why this exists (shared-write concurrency spec, 2026-07-12 + adversarial pass):
- * the registry's contended writers were LLM freehand read-modify-writes told by
- * protocol prose to "update index.json" — writes no lock can reach. A lock only
- * helps if every writer takes it, so the fix is to REMOVE freehand writes: every
+ * Why this exists: a lock only helps if every writer takes it — a freehand
+ * LLM read-modify-write of index.json is a write no lock can reach. So there
+ * are no freehand writes: every
  * mutation routes through this script, which does the full read-decide-write
- * under the nonce-CAS lock from file-lock.mjs. The prose sites now call the CLI;
+ * under the nonce-CAS lock from file-lock.mjs. Protocol prose calls this CLI;
  * protocols/data-storage.md forbids hand-editing index.json.
  *
- * last_active is NOT a registry field anymore (the hot-path hazard): it lives in
+ * last_active is NOT a registry field (the hot-path hazard): it lives in
  * the per-workspace single-owner file ~/.core/workspaces/<id>/last-active, a
  * full-overwrite write that needs no coordination. The index.json last_active
  * field stays a tolerant READ fallback for one release; nothing writes it.

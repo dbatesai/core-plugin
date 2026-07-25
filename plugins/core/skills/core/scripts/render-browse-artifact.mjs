@@ -6,9 +6,7 @@
  * THIS SCRIPT NEVER UPLOADS ANYTHING — it generates a local file, prints a
  * preflight manifest, and writes a local receipt; that is the whole job).
  *
- * Design source: docs/specs/2026-07-22-memory-browse-artifact-design.md (CORE
- * workshop repo) — approved by two independent reviews (seven disclosure
- * conditions plus three refinements). The conditions THIS script enforces in code:
+ * The disclosure conditions THIS script enforces in code:
  *
  *   - Condition 2 (preflight manifest): stdout is exactly one JSON object —
  *     unit count, byte count, scopes, snapshot id, and a fixed sensitivity
@@ -82,8 +80,8 @@ import {
 
 export const BROWSE_MANIFEST_SCHEMA_VERSION = '1.0.0';
 // Re-exported so existing consumers (skill docs, tests) keep one import site;
-// the implementations moved to the shared artifact-receipts.mjs when the
-// metrics artifact generator became their second consumer (2026-07-22).
+// the implementations live in the shared artifact-receipts.mjs (also consumed
+// by the metrics artifact generator).
 export { PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor, recordPublishOutcome, recordRevocation };
 
 // Fixed sensitivity warning — one string, stable across
@@ -99,8 +97,8 @@ export const SENSITIVITY_WARNING =
  * Truthful producer identity:
  * real git HEAD in a source checkout (tracked-file guarded), stamped manifest
  * identity in an installed tree, fail closed with neither. The implementation
- * lives in the shared artifact-provenance.mjs (extracted 2026-07-22 when the
- * metrics artifact generator became its second consumer); this wrapper stamps
+ * lives in the shared artifact-provenance.mjs (shared with the
+ * metrics artifact generator); this wrapper stamps
  * this generator's own script name into the identity.
  */
 export function producerIdentity() {

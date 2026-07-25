@@ -112,11 +112,11 @@ Read the output. The validator emits three counts: PASS, WARN, FAIL.
 - `status-value: closed` on a risk unit → rewrite to `archived`.
 - `status-value: superseded` on a decision unit → rewrite to `retired`.
 - `archived-in-active`: unit has `status: archived` but sits in active dir → move to `_memories/archive/`.
-- `edge-unknown-type`: edge type not in the committed set (`cites`, `supersedes`, `superseded-by`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`, `depended-on-by`, `supersedes-claim`, `refines`, `amends`) → three cases: (a) `superseded-by`/`depended-on-by` → remove (the inverse already lives on the other unit); (b) a type in the normalize map (`relates`/`relates-to`/`related` → `cites`) → **relabel to the named target** — the validator prints the target in the warning detail, so this is a mechanical safe-fix, not a guess; (c) anything else → surface for a bless-or-relabel decision (don't invent a type). `refines` and `amends` are committed now (distinct from `supersedes`) and no longer flag.
+- `edge-unknown-type`: edge type not in the committed set (`cites`, `supersedes`, `superseded-by`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`, `depended-on-by`, `supersedes-claim`, `refines`, `amends`) → three cases: (a) `superseded-by`/`depended-on-by` → remove (the inverse already lives on the other unit); (b) a type in the normalize map (`relates`/`relates-to`/`related` → `cites`) → **relabel to the named target** — the validator prints the target in the warning detail, so this is a mechanical safe-fix, not a guess; (c) anything else → surface for a bless-or-relabel decision (don't invent a type). `refines` and `amends` are committed types (distinct from `supersedes`) and do not flag.
 - `external-ref`: a cross-store/citation/path edge target recognized as legitimately outside the unit store (benign; not a break) — no fix, leave it.
 
 **Surface for human judgment** without auto-fixing:
-- `dangling-edge` / `edge-target-missing` — a missing in-store unit (real break) or a typo; the user decides. (Recognized cross-store refs are `external-ref`, handled above — they no longer show here.)
+- `dangling-edge` / `edge-target-missing` — a missing in-store unit (real break) or a typo; the user decides. (Recognized cross-store refs are `external-ref`, handled above — they do not show here.)
 - `orphan` (no edges) — sometimes deliberate (risks often stand alone), sometimes a graduation gap.
 - Anything else the validator flags that isn't on the safe-fix list.
 
@@ -152,7 +152,7 @@ The script is the only writer of the generated block — it sits between `<!-- C
 
 ## Step 5 — PROJECT.md tier discipline (Phase 1b + 1c)
 
-**Lifecycle preflight FIRST — the user-authorship boundary (the 2026-07-22 fix).** Before any PROJECT.md writer runs, classify the store's files against the last CORE baseline. This closes the exact gap a later audit caught: `/process-memory` used to auto-invoke `compact-project.mjs` with NO edit-detection gate, so an unreconciled user correction to a §Decisions entry got compacted away silently.
+**Lifecycle preflight FIRST — the user-authorship boundary.** Before any PROJECT.md writer runs, classify the store's files against the last CORE baseline. Without this edit-detection gate, an unreconciled user correction to a §Decisions entry would be compacted away silently.
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" "<project>" --json
@@ -168,8 +168,8 @@ node "${CORE_ROOT}/skills/core/scripts/compact-project.mjs" "<project>"
 node "${CORE_ROOT}/skills/core/scripts/demote-state-narrative.mjs" "<project>"
 ```
 
-- `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` on **checkbox + age** — a done item is done regardless of its cited units' status. Age = most-recent non-future date in the bullet text (citation/backtick/wikilink/obs-id dates stripped), falling back to cited-unit dates when the bullet has no date; kept when no age is provable or age < 30 days, and archived stubs are never re-demoted. `--strict` restores the old "all cited units terminal" gate. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. A large first batch (≥20) is **held** unless re-run with `--apply-large-batch` — narrate the held count and that nothing was written.
-- `compact-project.mjs` collapses `§Decisions` paragraphs to one-line stubs pointing at units. Auto-applies as a MIGRATE; idempotent. Now also emits `kind: compact-project` with section-size breakdown and `kind: project-md-over-cap` when the file remains >70KB after compaction. Use `--section-sizes` to inspect the breakdown without writing.
+- `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` on **checkbox + age** — a done item is done regardless of its cited units' status. Age = most-recent non-future date in the bullet text (citation/backtick/wikilink/obs-id dates stripped), falling back to cited-unit dates when the bullet has no date; kept when no age is provable or age < 30 days, and archived stubs are never re-demoted. `--strict` gates on "all cited units terminal" instead of checkbox + age. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. A large first batch (≥20) is **held** unless re-run with `--apply-large-batch` — narrate the held count and that nothing was written.
+- `compact-project.mjs` collapses `§Decisions` paragraphs to one-line stubs pointing at units. Auto-applies as a MIGRATE; idempotent. Also emits `kind: compact-project` with section-size breakdown and `kind: project-md-over-cap` when the file remains >70KB after compaction. Use `--section-sizes` to inspect the breakdown without writing.
 - `demote-state-narrative.mjs` walks §State and surfaces demotion candidates when the bullet carries a strict `*Backed by ...*` footer, ALL cited units are in terminal status (mirrors `demote-moves` set for cross-script symmetry), AND the most-recent backing-unit `updated:` date is >60 days old. **Default is dry-run in v1** by decision — emits a candidate list and a `kind: demote-state` event to hygiene-log without writing. Pass `--apply` only when a §State-heavy non-CORE corpus has been exercised and produces clean candidate lists for multiple sessions; flip the default in a tracked decision then. Narrate "would demote N items" only if N > 0.
 
 Report the demoted count and the before/after sizes the scripts print. Over-cap warnings after all three scripts have run name what's left — §Notes overflow or the §Moves citation-discipline gap captured at [[obs-demote-moves-first-fire-2026-05-24]].

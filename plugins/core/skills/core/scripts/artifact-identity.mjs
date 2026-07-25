@@ -1,9 +1,8 @@
 /**
- * artifact-identity.mjs — deterministic release-artifact identity (Train A
- * blocker 3, review verdict §3 + close path §4).
+ * artifact-identity.mjs — deterministic release-artifact identity.
  *
- * The defect this replaces: the packet's archive SHA came from
- * `git archive <sha>:plugins/core | shasum`, and tar embeds invocation-time
+ * Why not hash an archive: with
+ * `git archive <sha>:plugins/core | shasum`, tar embeds invocation-time
  * metadata — same content, different bytes every run. An identity nobody can
  * reproduce is not an identity.
  *
@@ -16,7 +15,7 @@
  *      `<relpath>:<sha256(file bytes)>` of every file in the subtree. Computable
  *      WITHOUT git from any export of the tree (an extracted archive, a
  *      packaged install), so the identity survives across export mechanisms —
- *      which is exactly the review bar: two clean INDEPENDENT exports must agree.
+ *      the bar: two clean INDEPENDENT exports must agree.
  *
  * The freeze step publishes both plus the exact reproduction commands; the
  * packet's `built_artifact_sha256` slot carries the content manifest hash.
@@ -162,10 +161,10 @@ function main(argv) {
     return 0;
   }
   const subIdx = argv.indexOf('--subdir');
-  // Positionals = non-flag args that are not --subdir's value. The old filter
-  // compared each arg against argv[indexOf('--subdir') + 1]; with NO --subdir
-  // that is argv[0] — silently dropping the repo argument, so the documented
-  // two-arg form always printed usage (proof-bundle case c5 caught it, 2026-07-17).
+  // Positionals = non-flag args that are not --subdir's value. The `subIdx >= 0`
+  // guard matters: without it, with NO --subdir the filter would compare
+  // against argv[0] — silently dropping the repo argument, so the documented
+  // two-arg form would always print usage.
   const [repo, ref] = argv.filter((a, i) => !a.startsWith('--') && !(subIdx >= 0 && i === subIdx + 1));
   if (!repo || !ref) {
     process.stderr.write('usage: artifact-identity.mjs <repo> <ref> [--subdir plugins/core] [--json] | --dir <tree>\n');

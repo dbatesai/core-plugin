@@ -1,6 +1,5 @@
 /**
- * aggregate-receipt.mjs — the privacy-safe aggregate exporter (Train A A2;
- * closure program 2026-07-12 §A2/§A5, next-steps §7).
+ * aggregate-receipt.mjs — the privacy-safe aggregate exporter.
  *
  * Two evidence surfaces, never one:
  *   - LOCAL evidence bundle — the runHarness report and tier-sweep output as-is
@@ -57,19 +56,15 @@ export function collectForbiddenStrings(report, sweep = null) {
 }
 
 // Any string that IS or CONTAINS a filesystem path, across the supported path
-// forms (blocker 1, review verdict §1 battery): absolute POSIX (/tmp, /etc, /var,
+// forms: absolute POSIX (/tmp, /etc, /var,
 // /private/tmp, /Users, /Volumes, …), home shorthand, Windows drive letters,
 // and UNC (\\server\share). Leading-anchored OR embedded after a delimiter.
 //
-// K09 (audit, 2026-07-16): two real bypasses in the embedded-path branch.
-// (1) The boundary-character class before an embedded path didn't include ':',
-// so "path:/Users/<user>/x" (a very common separator — "note:", "file:",
-// "location:") slipped through undetected. (2) The embedded alternatives only
-// covered POSIX well-known roots and UNC (\\server) — an embedded (non-leading)
-// Windows drive-letter path like "see C:\Users\<user>\x" was never checked at
-// all; the drive-letter form was only tested at the string's very start. Both
-// fixed: ':' added to the boundary class, and the embedded drive-letter form
-// added as its own alternative alongside the POSIX-root and UNC ones.
+// The boundary-character class before an embedded path includes ':' so
+// "path:/Users/<user>/x" (a very common separator — "note:", "file:",
+// "location:") is caught, and the embedded alternatives cover the
+// drive-letter form ("see C:\Users\<user>\x") as its own alternative
+// alongside the POSIX-root and UNC ones — not only at the string's start.
 const PATH_SHAPED = new RegExp(
   '^(?:/|~[/\\\\]|[A-Za-z]:[/\\\\]|\\\\\\\\)' +                 // starts like a path
   '|(?:^|[\\s"\'(=,:])(?:/(?:private|tmp|etc|var|Users|home|Volumes|opt|usr|srv|mnt|media)\\b|\\\\\\\\[A-Za-z0-9]|[A-Za-z]:[/\\\\])' // or embeds one (POSIX root, UNC, or a drive letter)
@@ -105,16 +100,16 @@ export function refusalScan(receipt, forbidden) {
     }
   }
   // Path refusal across supported path forms, on every key and string value —
-  // not a JSON-blob regex (blocker 1: dynamic keys were where paths leaked).
+  // not a JSON-blob regex, because dynamic KEYS can carry paths too.
   refusePathShapes(receipt);
-  // Belt: the original blob regex stays as a second, independent net.
+  // Belt: a blob regex runs as a second, independent net.
   if (/"[^"]*(?:\/Users\/|\/home\/|[A-Za-z]:\\|~\/)/.test(json)) {
     throw new Error('aggregate-receipt REFUSED: receipt contains a filesystem path');
   }
   return true;
 }
 
-// ---------- blocker 1: closed enums + scalar shapes ----------
+// ---------- closed enums + scalar shapes ----------
 
 const SHA256_RE = /^[0-9a-f]{64}$/;
 const COMMIT_RE = /^[0-9a-f]{7,40}$/;
@@ -122,18 +117,13 @@ const VERSION_RE = /^[0-9A-Za-z.+-]{1,40}$/;
 const SCHEMA_RE = /^[a-z0-9-]+\/\d+$/;           // e.g. train-a-aggregate-receipt/1
 const ARM_RE = /^[a-z][a-z0-9_]{0,24}$/;          // lexical | ranking | context3 | bm25 | future arms
 const POLICY_RE = /^P\d(?:_w[0-9.]{1,6})?$/;      // P0..P2, P3_w0.8 …
-// K09: this used to be a pure
-// SHAPE check (lowercase, <=24 chars), so any arbitrary lowercase word passed —
-// including a project-specific id-naming prefix, which is exactly what leaked
-// before the root-cause fix in retrieval-harness.mjs's unitTypeMix (it now
-// emits the real `type` field, not an id-prefix guess). The first version of
-// this closed-set gate fixed that leak but introduced a NEW defect a
-// re-audit caught: it was a second, hand-written copy of the type vocabulary
-// that silently omitted real canonical types (`open-question`, `premise`) —
-// the positive test passed only because it validated the implementation
-// against itself, not against CORE's actual vocabulary. Fixed by importing
-// the one real source of truth (`unit-vocab.mjs`'s `VALID_TYPES`) and adding
-// only the receipt-specific `other` fallback — no second canonical list.
+// Unit-type mix keys are gated by a CLOSED set, not a mere shape check — a
+// shape check would let any arbitrary lowercase word through (including a
+// project-specific id-naming prefix, which is reconstruction vocabulary).
+// The set imports the one real source of truth (`unit-vocab.mjs`'s
+// `VALID_TYPES`) plus only the receipt-specific `other` fallback — never a
+// second, hand-written copy of the type vocabulary, which could silently
+// omit real canonical types.
 const KNOWN_UNIT_TYPES = new Set([...VALID_TYPES, 'other']);
 const MIX_KEY_RE = /^[a-z][a-z-]{0,23}$/;         // shape check; KNOWN_UNIT_TYPES is the real closed-set gate below
 const RUNGS = new Set(['literal', 'category', 'value', 'cross-domain']);
@@ -184,7 +174,7 @@ export function validateReceiptShape(receipt) {
     for (const [k, v] of Object.entries(r.recall)) { if (!/^\d{1,3}$/.test(k)) fail('recall K', k); num01(`arms[${arm}].recall[${k}]`, v); }
     num01(`arms[${arm}].mrr`, r.mrr); num01(`arms[${arm}].forbidden_rate`, r.forbidden_rate);
     for (const [rung, byK] of Object.entries(r.per_rung_recall)) {
-      if (!RUNGS.has(rung)) fail('per_rung_recall rung', rung); // the review's exact repro: a path accepted as a rung key
+      if (!RUNGS.has(rung)) fail('per_rung_recall rung', rung); // a path must never be accepted as a rung key
       for (const [k, v] of Object.entries(byK)) { if (!/^\d{1,3}$/.test(k)) fail('per-rung K', k); num01(`per_rung_recall[${rung}][${k}]`, v); }
     }
   }
@@ -267,7 +257,7 @@ export function buildAggregateReceipt(report, sweep = null) {
       },
     } : null,
   };
-  validateReceiptShape(receipt);                              // blocker 1: closed enums + scalar shapes first
+  validateReceiptShape(receipt);                              // closed enums + scalar shapes first
   refusalScan(receipt, collectForbiddenStrings(report, sweep)); // then the reconstruction-vocabulary + path scan
   return receipt;
 }

@@ -2,15 +2,12 @@
  * state-cache.mjs — shared file-write-attribution primitives for the
  * edit-detection state cache.
  *
- * Extracted 2026-07-22: `hot-section.mjs` was the only
- * script that stamped `last_written_by` into the state cache in code — the
- * lock-and-write logic lived inline in its `recordProjectMdWrite`.
- * `decorate-graph.mjs` needed the identical primitive (a script rewrites a
- * file on the user's behalf; edit-detection must not misread that write as a
- * user edit on the next session) and duplicating the lock/prune logic a
- * second time would just be one more place for the two copies to drift.
- * This module is that shared primitive; `hot-section.mjs`'s
- * `recordProjectMdWrite` now calls into it instead of owning its own copy.
+ * When a script rewrites a file on the user's behalf, edit-detection must not
+ * misread that write as a user edit on the next session — so the write gets
+ * stamped `last_written_by` in the state cache. This module is the one
+ * shared lock-and-write primitive for that stamp: `hot-section.mjs`'s
+ * `recordProjectMdWrite` and `decorate-graph.mjs` both call into it rather
+ * than owning copies of the lock/prune logic that could drift.
  *
  * Cache of record: per-project at `<project>/_memories/_lib/state-cache.json`
  * — single-owner ACROSS PROJECTS (two projects closing at once can't clobber
@@ -18,18 +15,16 @@
  * WITHIN a project: `decorate-graph.mjs`, `hot-section.mjs`, and
  * `maintenance-run.mjs` can all stamp the same project-local cache file in
  * the same window (concurrent hooks/agents/CLI invocations), and the write
- * itself is a read-modify-write over the whole JSON file. A 40-concurrent-
- * process review probe (2026-07-22) measured the real consequence of the old
- * "no lock needed" assumption: 29/40 stamps survived, 11 lost to the race.
- * Fixed: the read-modify-write below is now serialized under a project-local
- * lock (`<project>/_memories/_lib/.state-cache.lock`, same `withFileLock`
+ * itself is a read-modify-write over the whole JSON file — an unlocked
+ * read-modify-write loses stamps to the race. So the write below is
+ * serialized under a project-local lock
+ * (`<project>/_memories/_lib/.state-cache.lock`, same `withFileLock`
  * primitive every other lock in this codebase uses — no new mechanism). A
  * residual global `~/.core/state-cache.json` exists for genuinely
  * cross-project files; every per-project stamp also prunes its own file
  * paths out of the global cache under `~/.core/state-cache.lock`, so a stale
  * global entry can never shadow a fresher per-project one (see
- * `data-storage.md` §"Shared-write concurrency" for the one-release
- * union-read this migration established).
+ * `data-storage.md` §"Shared-write concurrency" for the union-read rule).
  *
  * What this module deliberately does NOT own: any domain-specific "what
  * counts as CORE's own write vs a real user edit" classification (e.g.
@@ -113,10 +108,9 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
   // serialized: any caller of stampFiles/stampFile races every OTHER caller
   // (decorate-graph, hot-section, maintenance-run, and any future writer),
   // not just other instances of itself. Reuses the same withFileLock
-  // primitive every other lock in this codebase uses (a review finding,
-  // 2026-07-22 — 29/40 entries survived an unlocked 40-concurrent-process
-  // stamp probe). A lock-acquire or cache-write failure never THROWS into the
-  // caller (the underlying content write already happened), but it IS now
+  // primitive every other lock in this codebase uses. A lock-acquire or
+  // cache-write failure never THROWS into the
+  // caller (the underlying content write already happened), but it IS
   // reported truthfully instead of silently swallowed.
   let stampOutcome = { stamped: true };
   try {

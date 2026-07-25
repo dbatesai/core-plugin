@@ -15,9 +15,7 @@
  * reason over. No fixed shortlist can silently drop the gold unit as the corpus grows.
  * Retired and invalidated units never appear because the shared fresh index excludes them.
  *
- * GATE G3: promotion RATIFIED (2026-07-15). The 2026-07-17 scale repair
- * removes the unsafe 100-row ceiling, reuses the shipped full-body product scorer,
- * and wires an automatic no-hit directive from the per-turn hook. Queries with
+ * The per-turn hook wires an automatic no-hit directive to this path. Queries with
  * lexical hits still rely on the active model to judge insufficiency and follow
  * the Tier 3 protocol; a deterministic layer cannot judge semantic sufficiency.
  *

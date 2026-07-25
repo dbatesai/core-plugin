@@ -164,8 +164,8 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
 
   let signal;
   if (!todayRecs.length) {
-    // provisionalTag is '' when calibrated; the old `|| ' [PROVISIONAL]'` fallback
-    // re-added the tag on a calibrated workspace, mislabeling honest metrics (M5).
+    // provisionalTag is '' when calibrated; a `|| ' [PROVISIONAL]'` fallback here
+    // would re-add the tag on a calibrated workspace, mislabeling honest metrics.
     signal = `metrics: no classified turns for ${date} yet${dedupeTag}${gapTag}${provisionalTag}`;
   } else {
     const todayPct = Math.round(headline.pct * 100);

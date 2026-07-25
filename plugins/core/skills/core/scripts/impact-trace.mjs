@@ -1,5 +1,5 @@
 /**
- * impact-trace.mjs — Phase 4 layer 6: impact propagation over the dependency graph.
+ * impact-trace.mjs — impact propagation over the dependency graph.
  *
  * "If this fact changes, what's affected?" CORE already carries `depends-on` edges
  * (and their inverse `depended-on-by`). This walks them in the affects-direction —
@@ -7,10 +7,9 @@
  * supersession of X surfaces its blast radius instead of leaving it implicit.
  *
  * Rides the committed edge set only. The walk reads depends-on/depended-on-by
- * plus refines/amends (both blessed 2026-06-03) in the affects-direction. A
- * dedicated `affects` edge type still defers to a future decision per the
- * committed-set rule — but refines/amends ARE committed, so ignoring them was
- * an under-traversal, not gatekeeping (SYN-006).
+ * plus refines/amends — all committed edge types — in the affects-direction. A
+ * dedicated `affects` edge type defers to a future decision per the
+ * committed-set rule.
  *
  * Pairs with bitemporal.mjs: traceSupersededImpact() reports, for every unit whose
  * t_invalid is now in the past, what still depends on it — the review candidates a
@@ -32,9 +31,9 @@ import { iterActiveUnits } from './check-units.mjs';
 export const IMPACT_VERSION = '1.0.0';
 
 // Edge types that put a unit downstream of its target: U --(t)--> T means a
-// change to T affects U. depends-on is the original; refines and amends joined
-// 2026-06-09 (SYN-006) — both are committed edge types (blessed 2026-06-03)
-// whose semantics make the refining/amending unit stale when its target moves.
+// change to T affects U. depends-on, refines, and amends are committed edge
+// types whose semantics make the dependent/refining/amending unit stale when
+// its target moves.
 export const AFFECTS_EDGE_TYPES = new Set(['depends-on', 'refines', 'amends']);
 // Inverse direction: U --(depended-on-by)--> T means U affects T.
 export const AFFECTS_INVERSE_EDGE_TYPES = new Set(['depended-on-by']);

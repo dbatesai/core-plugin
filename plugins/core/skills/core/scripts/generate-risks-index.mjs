@@ -57,10 +57,9 @@ export function bestDate(fm) {
   return 'unknown';
 }
 
-// Independent review, 2026-07-19: a hand-duplicated copy of the surrogate-
-// splitting truncate() bug fixed in generate-summary-index.mjs — see
-// text-truncate.mjs for why this collapsed to a shared helper instead of a
-// second local fix.
+// Delegates to the shared surrogate-safe helper — see
+// text-truncate.mjs for why truncation lives in one shared helper instead of
+// per-script copies.
 export function truncate(text, maxLen = SUMMARY_MAX) {
   return sharedTruncate(text, maxLen);
 }

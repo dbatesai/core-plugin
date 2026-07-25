@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * close-pass-hook.mjs — SessionEnd hook entry for self-managed session close (spec 2026-06-29).
+ * close-pass-hook.mjs — SessionEnd hook entry for self-managed session close.
  *
  * Fires once at session end (NOT per-turn — that's why it's SessionEnd, not Stop: Stop fires
  * after every agent response). When the session did real work or owes maintenance, it spawns a
@@ -9,13 +9,13 @@
  * terminal kill), the startup catch-up (startup.md, close-pass.mjs detectCloseState) is the
  * backstop — the marker shows incomplete and next startup discharges the remainder.
  *
- * Four guards, all from the 2026-06-29 adversarial pass (spec §8, §10):
+ * Four guards:
  *   1. Recursion guard — the spawned `claude -p` fires its OWN SessionEnd when it finishes.
  *      We export CORE_CLOSE_PASS_ACTIVE=1 into its env; this hook sees that and no-ops, so the
  *      close agent never spawns a close agent.
- *   2. Kill switch (spec §7) — CORE_AUTO_CLOSE=0 halts the auto-discharge entirely. Covers the
- *      one writer that touches PROJECT.md every close, not just the M3 judgment tier.
- *   3. Spawn pre-check (spec §8) — shouldSpawn() gates the agent: a trivial read-only session
+ *   2. Kill switch — CORE_AUTO_CLOSE=0 halts the auto-discharge entirely. Covers the
+ *      one writer that touches PROJECT.md every close.
+ *   3. Spawn pre-check — shouldSpawn() gates the agent: a trivial read-only session
  *      that owes nothing never pays for a close agent.
  *   4. Fail-open — a session-close hook must never block or error the user's exit. Any failure
  *      swallows to exit 0; the startup catch-up covers a missed close.
@@ -67,7 +67,7 @@ function main() {
   }
 
   // Canonicalize (realpath) then require a REGISTERED CORE workspace before spawning anything.
-  // Security (review 2026-06-30, HIGH): a generic `_memories/` dir is not proof; the ~/.core
+  // Security: a generic `_memories/` dir is not proof; the ~/.core
   // registry is the trust anchor an attacker can't plant from inside a project dir.
   let store = resolve(payload.cwd || process.cwd());
   try { store = realpathSync(store); } catch { /* keep resolved */ }
@@ -87,7 +87,7 @@ function main() {
   // Spawn the DETERMINISTIC close envelope, not raw `claude -p`. `close-pass.mjs run`
   // guarantees the marker lifecycle (begin/finish lock + marker) and mechanical maintenance
   // around the LLM close — the reliability spine can't be skipped by agent discretion
-  // (validation 2026-06-30 showed a headless agent narrating a close it never marked). Detached
+  // (a headless agent can otherwise narrate a close it never marked). Detached
   // + unref() so it survives our exit; auth-strip + output log live inside `run`.
   const runner = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'close-pass.mjs');
   try {

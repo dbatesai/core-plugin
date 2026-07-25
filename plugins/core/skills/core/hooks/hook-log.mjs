@@ -10,14 +10,14 @@
  * trusted temp file under ~/.core; set it to /dev/null to silence). Logging must NEVER break
  * a hook, so every failure is swallowed.
  *
- * D1: CORE_HOOKS_LOG_FILE was previously
- * read unconditionally, an arbitrary-file-append primitive — Claude Code forwards a trusted
+ * CORE_HOOKS_LOG_FILE is never
+ * honored unconditionally — that would be an arbitrary-file-append primitive: Claude Code forwards a trusted
  * project's .claude/settings.json env into hook subprocesses, so a hostile-but-trusted repo
- * could redirect it. Same fix shape as CORE_CLOSE_INDEX's resolveIndexPath(): only honor the
+ * could redirect it. Same shape as CORE_CLOSE_INDEX's resolveIndexPath(): only honor the
  * override when it resolves inside the trusted ~/.core (via trustedHome(), not the spoofable
  * os.homedir()), otherwise ignore it and use the real default.
  *
- * D1 second pass: the lexical resolveHookLogPath() check
+ * Additionally, the lexical resolveHookLogPath() check
  * alone is a CWE-22-shaped gap — path.resolve() never dereferences symlinks, so a symlink
  * placed under ~/.core pointing outside it would pass the string check while appendFileSync
  * writes through it to the real outside target. resolveHookLogPath() stays lexical-only and

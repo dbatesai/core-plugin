@@ -110,7 +110,7 @@ If `workspace.json` is absent, exit 0 with a graceful message.
 
 ### `pwd-guard.mjs` and `voice-reminder.mjs` — personal developer hooks
 
-These were shipped in `hooks/` prior to 2026-05-19 but removed. They are CORE-author-specific, not useful to plugin users in general:
+These are CORE-author-specific and deliberately not shipped in the plugin — not useful to plugin users in general:
 
 - `pwd-guard.mjs` — reminds the CORE author to declare `intent: skill-edit` when writing to skill-product paths. Lives at `<CORE-dev-repo>/.claude/scripts/pwd-guard.mjs`, wired from the CORE project's `.claude/settings.json`.
 - `voice-reminder.mjs` — injects a plain-voice imperative each turn. Lives at `~/.claude/hooks/voice-reminder.mjs`, wired from `~/.claude/settings.json`.

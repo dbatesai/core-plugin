@@ -218,7 +218,7 @@ function todayUTC(now) {
 /**
  * Cheap store snapshot marker for drift detection: the retriever's own summary
  * index (`_memories/_lib/unit-summaries.json`) is regenerated on any store
- * change (the R1 source-signature fix), so its size+mtime identifies the store
+ * change (the R1 source-signature contract), so its size+mtime identifies the store
  * state a turn actually retrieved against. The hindsight judge records this
  * signature at capture AND at judge time; a mismatch flags the judgment as
  * store-drifted rather than pretending hindsight over a store that no longer

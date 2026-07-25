@@ -48,12 +48,10 @@ export function mappedMemoryPath(cwd, home = homedir()) {
   // Windows, which breaks the slug shape Claude Code's projects folder uses and the
   // cross-platform tests; Node's fs accepts forward slashes on Windows, so a
   // '/'-joined path still reads fine). The slug itself MUST come from the one
-  // canonical encoder (project-slug.mjs) -- this file used to hand-roll its own
-  // `.replace(/[/\\]/g, '-')`, which missed the Windows drive colon and any dot in
-  // the path. The Windows hardware test pass reproduced the resulting false-DEGRADED on
-  // a real box, 2026-07-20: the probe reported memory not visible while the real
-  // startup canary echoed clean. The mechanism worked; only this hand-rolled
-  // duplicate encoder was wrong.
+  // canonical encoder (project-slug.mjs) -- a hand-rolled
+  // `.replace(/[/\\]/g, '-')` misses the Windows drive colon and any dot in
+  // the path, making the probe report a false-DEGRADED ("memory not visible")
+  // on a store the harness actually injects fine.
   const mapped = mapProjectPathToSlug(cwd);
   return [home, '.claude', 'projects', mapped, 'memory', 'MEMORY.md'].join('/');
 }

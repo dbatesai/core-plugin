@@ -103,7 +103,7 @@ function sleepSync(ms) {
  */
 export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT_MS, staleMs = STALE_LOCK_MS, sleep = sleepSync } = {}) {
   const deadline = now() + timeoutMs;
-  // Delegates entirely to file-lock.mjs (2026-07-15 review: one lock implementation,
+  // Delegates entirely to file-lock.mjs (one lock implementation,
   // not three). Generation model: acquisition is winning the exclusive create of
   // the next generation file; release tombstones our OWN generation only; a stale
   // lock's owner is respected while its pid is alive (fail closed), with the 10×

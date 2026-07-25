@@ -38,7 +38,7 @@ import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.m
 
 export const REQUIRED_FIELDS = new Set(['id', 'type', 'status', 'created', 'updated', 'topics']);
 
-// Vocabulary constants live in unit-vocab.mjs (SYN-005 unification) and are
+// Vocabulary constants live in unit-vocab.mjs (the one shared vocabulary) and are
 // re-exported here so every existing importer and test keeps working.
 export {
   VALID_STATUSES, TERMINAL_STATUSES, VALID_TYPES, VALID_EDGE_TYPES,
@@ -73,8 +73,8 @@ export const ARCHIVE_RS_THRESHOLD = 0.05;
 export const STALE_DAYS = 90;
 export const SOURCES_WARN_AGE_DAYS = 14;
 
-// MEM-014: PROJECT.md and the hot section are capped, but a single unit had no
-// size signal anywhere — retrieval reads matched units whole, so one bloated
+// PROJECT.md and the hot section are capped; this is the size signal for a
+// single unit — retrieval reads matched units whole, so one bloated
 // unit eats disproportionate context. ~10KB ≈ 3K tokens at the 0.30 factor.
 export const UNIT_SIZE_WARN_BYTES = 10_000;
 
@@ -105,9 +105,9 @@ export function iterActiveUnits(memoriesDir, { includeObservations = false } = {
   }
 
   if (includeObservations) {
-    // SYN-007: observation units live in observations/<YYYY-MM>/ and were never
-    // schema-audited, even though iterAllUnitFiles (the dangling-edge target
-    // set) is recursive — edges could point at observations that pass the
+    // Observation units live in observations/<YYYY-MM>/ and need schema
+    // auditing too: iterAllUnitFiles (the dangling-edge target
+    // set) is recursive, so without this, edges could point at observations that pass the
     // dangling check but escape every other check. Opt-in keeps the default
     // active set top-level-only.
     const obsPaths = iterAllUnitFiles(join(memoriesDir, 'observations')).sort();
@@ -151,8 +151,8 @@ export function checkSchema(units, memoriesDir, report) {
       if (!(fld in u.fm)) report.push({ level: 'FAIL', check: 'required-field', unit_id: uid, detail: `Missing required frontmatter field: '${fld}'` });
     }
 
-    // MEM-008: a key that is PRESENT but blank passed both the presence check
-    // (key in fm) and the value checks (guarded by truthiness). `type: `
+    // A key that is PRESENT but blank passes both the presence check
+    // (key in fm) and the value checks (guarded by truthiness) — catch it here. `type: `
     // parses to an empty list; '' and null are the scalar variants.
     for (const fld of ['id', 'type', 'status', 'created', 'updated']) {
       if (!(fld in u.fm)) continue; // absence already FAILed above
@@ -170,8 +170,8 @@ export function checkSchema(units, memoriesDir, report) {
       report.push({ level: 'WARN', check: 'type-value', unit_id: uid, detail: `Unknown type '${typ}'` });
 
     // confidence-level / stability-class — typed by the source-registration
-    // framework but previously unvalidated: a unit could carry
-    // confidence-level: banana and pass everything (SYN-005 / SCH-003).
+    // framework and validated here: without this check a unit could carry
+    // confidence-level: banana and pass everything.
     const conf = String(u.fm['confidence-level'] || '').toLowerCase();
     if (conf && !VALID_CONFIDENCE_LEVELS.has(conf))
       report.push({ level: 'WARN', check: 'confidence-level-value', unit_id: uid, detail: `Unknown confidence-level '${conf}' (expected: ${[...VALID_CONFIDENCE_LEVELS].sort().join(', ')})` });
@@ -244,7 +244,7 @@ export function checkSchema(units, memoriesDir, report) {
         report.push({ level: 'WARN', check: 'by-when-format', unit_id: uid, detail: `Field 'by-when' must be ISO date (YYYY-MM-DD), found '${byWhenStr}'` });
     }
 
-    // MEM-014 advisory size check.
+    // Advisory unit-size check.
     let unitBytes = 0;
     try { unitBytes = statSync(u.path).size; }
     catch { unitBytes = Buffer.byteLength(String(u.body || ''), 'utf8'); }
@@ -345,14 +345,14 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     // Canonical archiving (hygiene.md) sets `archived: true` and does not
     // require a status change -- a unit can be `status: active, archived:
     // true` and this must still catch it left top-level. The legacy
-    // `status === 'archived'` form stays recognized too (a 2026-07-22 review
-    // finding: checking status alone missed the canonical shape entirely,
+    // `status === 'archived'` form stays recognized too — checking status
+    // alone would miss the canonical shape entirely,
     // and a substring .includes('archive') could false-positive on a
-    // top-level file merely named with "archive" in it).
+    // top-level file merely named with "archive" in it.
     if ((u.fm.archived === true || status === 'archived') && !inArchiveDir)
       report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit is archived (archived: true or status=archived) but is not in archive/ subdir' });
 
-    // MEM-018: unknown provenance is now visible. An active, aged,
+    // Unknown provenance is made visible here. An active, aged,
     // non-observation unit with no sources scores the degraded S default —
     // surface it so a sources entry gets added. Advisory (benign).
     const srcVal = u.fm.sources;
@@ -469,7 +469,7 @@ export function jsonReport(report, memoriesDir, mode, today) {
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
   'external-ref', 'sources-missing', 'sources-not-list', 'unit-oversize', 'link-density',
-  // Legacy annotations predate the source-registration-framework vocab; visibility without degradation (SYN-005 follow-up).
+  // Legacy annotations outside the source-registration-framework vocab get visibility without degradation.
   'confidence-level-value', 'stability-class-value',
 ]);
 

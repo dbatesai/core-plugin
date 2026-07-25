@@ -1,31 +1,31 @@
 /**
  * demote-moves.mjs — auto-demote closed §Moves bullets to PROJECT-ARCHIVE.md.
  *
- * Phase 1b of the memory architecture redesign. Closed bullets ([x])
+ * Closed bullets ([x])
  * older than the 30-day floor get moved to PROJECT-ARCHIVE.md §Moves under a
  * date-stamped subsection. A one-line stub pointer replaces the original
  * bullet so the trail back to the archive entry is preserved.
  *
- * Demotion rule (default, loosened 2026-06-02): a completed item is done —
+ * Demotion rule (default): a completed item is done —
  * it leaves the agenda on checkbox-state + age, regardless of whether its
  * backing-unit `status:` was kept tidy. Age comes from the most-recent date
  * IN THE BULLET TEXT (the completion-time proxy — "shipped 2026-05-27"),
  * falling back to max(updated:/created:) across any cited units when the
  * bullet carries no date. Keep only when no age can be proven at all.
  *
- * Why the change: the original gate required ALL cited units to be in
- * terminal status AND ≥30 days stale. On a real corpus that left 75 shipped
- * items stranded on the agenda (PROJECT.md grew to 196KB) — an [x] item whose
- * referenced decision is still `active`, or that carried no `*Backed by*`
- * footer, never demoted. A done item is done; the active unit it cites is a
- * reference, not a reason to keep the finished work on the agenda.
+ * Why checkbox-state + age rather than unit status: gating on ALL cited units
+ * being terminal AND ≥30 days stale strands shipped items on the agenda — an
+ * [x] item whose referenced decision is still `active`, or that carries no
+ * `*Backed by*` footer, would never demote. A done item is done; the active
+ * unit it cites is a reference, not a reason to keep the finished work on
+ * the agenda.
  *
- * --strict restores the original conservative gate (require refs present, all
+ * --strict applies that conservative gate anyway (require refs present, all
  * cited units terminal, age from unit dates) for callers that want it.
  *
  * Active items ([ ]) and partial items ([~]) are never touched.
  *
- * Per the product owner's 2026-05-24 reframe: auto-applies by default. --dry-run is the
+ * Auto-applies by default. --dry-run is the
  * agent's own inspection mode (not a permanent user-ratification gate).
  *
  * The script ships with the plugin (not per-project).
@@ -45,15 +45,15 @@ import {
   writeGuardDecision, withProjectMdWriterLock,
 } from './lifecycle-core.mjs';
 
-// Terminal statuses come from the shared vocabulary (SYN-005): retired/archived/
-// superseded. 'resolved'/'closed' were never schema statuses and no longer gate;
-// 'retired' — the schema's actual done-status — now demotes (it never did before).
+// Terminal statuses come from the shared vocabulary (unit-vocab.mjs): retired/
+// archived/superseded. 'resolved'/'closed' are not schema statuses and do not
+// gate; 'retired' — the schema's done-status — demotes.
 export { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 export const CLOSE_AGE_DAYS = 30;
 export const LARGE_BATCH_WARNING_THRESHOLD = 20;
 
-// Size-pressure fallback (2026-07-21): the age floor above is tuned for a
+// Size-pressure fallback: the age floor above is tuned for a
 // project whose Moves growth is slower than 30 days. A fast-moving project
 // can stay over PROJECT.md's hard cap indefinitely even with this gate
 // working exactly as designed, because nothing ages out fast enough. When
@@ -183,7 +183,6 @@ function ageInDays(updatedIso, todayIso) {
  *   - `\`backtick code spans\`` — version strings, the stub's own pointer date
  * Future dates (> today) are ignored: a planning/target date is not a completion
  * date, and counting it would either mask a real past date or disable aging.
- * (Review 2026-06-02d: P1/P2 citation-leak + future-date.)
  */
 export function extractMostRecentDate(text, today = null) {
   if (!text) return null;
@@ -208,8 +207,8 @@ export function extractMostRecentDate(text, today = null) {
 }
 
 /**
- * Strict (original) gate: require backing-unit citations, all present, all in
- * terminal status, then age from max(updated:/created:) across them. Preserved
+ * Strict gate: require backing-unit citations, all present, all in
+ * terminal status, then age from max(updated:/created:) across them. Lives
  * behind --strict for callers that want the conservative behavior.
  */
 function classifyBulletStrict(bullet, memoriesDir, todayIso, ageFloorDays) {
@@ -232,8 +231,7 @@ function classifyBulletStrict(bullet, memoriesDir, todayIso, ageFloorDays) {
 
 /** A demotion stub left by a prior run: `… → see `PROJECT-ARCHIVE.md §Moves …``.
  *  It's an [x] bullet carrying re-ageable dates, so it must NOT re-enter the gate
- *  (else a later finalize demotes the stub → stub-of-stub, breaking the trail.
- *  Review 2026-06-02d HIGH, reproduced by two reviewers). */
+ *  (else a later finalize demotes the stub → stub-of-stub, breaking the trail). */
 const STUB_RE = /→\s*see\s+`?PROJECT-ARCHIVE\.md\s+§Moves/;
 
 export function classifyBullet(bullet, projectDir, { today, strict = false, ageFloorDays = CLOSE_AGE_DAYS } = {}) {
@@ -248,9 +246,9 @@ export function classifyBullet(bullet, projectDir, { today, strict = false, ageF
 
   if (strict) return classifyBulletStrict(bullet, memoriesDir, todayIso, ageFloorDays);
 
-  // Loosened default: a completed item is done. Age it by the date in the
+  // Default: a completed item is done. Age it by the date in the
   // bullet text (completion proxy) first; fall back to cited-unit dates only
-  // when the bullet itself carries no date. Backing-unit status no longer gates.
+  // when the bullet itself carries no date. Backing-unit status does not gate.
   const refs = extractBackingUnitRefs(bullet.text);
   const textDate = extractMostRecentDate(bullet.text, todayIso);
   let maxUpdated = textDate;
@@ -364,8 +362,8 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   // shorter floor regardless of what the normal floor already found — a
   // shorter floor is a strict superset (age >= floor demotes; 7 <= 30, so
   // everything the 30-day floor catches, the 7-day floor also catches, plus
-  // anything 7-29 days old). Gating on "the normal floor found nothing" (the
-  // original design, a review catch 2026-07-21) let a single old item mask
+  // anything 7-29 days old). Gating on "the normal floor found nothing"
+  // instead would let a single old item mask
   // every other item still over cap: one 93-day bullet would demote, the
   // escalation would never fire, and dozens of 10-29-day bullets would sit
   // untouched on a file still massively over cap.
@@ -424,7 +422,6 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
   // A large first batch is a bulk migration of a user-owned file (PROJECT.md).
   // Hold it: write nothing, surface the candidates, and require an explicit
   // --apply-large-batch so a human looks before N items leave the agenda at once.
-  // (Review 2026-06-02d MED: the warning otherwise fired AFTER the writes.)
   if (largeBatch && !applyLargeBatch) {
     stats.held = true;
     stats.held_reason = 'large-batch-needs-confirmation';

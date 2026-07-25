@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * retrieve-context-hook.mjs — per-turn retrieval injection (Gate G2).
+ * retrieve-context-hook.mjs — per-turn retrieval injection.
  *
  * A UserPromptSubmit hook entry. When enabled, it runs the deterministic retriever
  * (retrieve-context.mjs) over the incoming user prompt and prints the top-3 matching
  * unit summaries to stdout, which Claude Code injects into the turn's context — so the
  * most relevant stored facts are in front of the agent every turn, not just at bootstrap.
  *
- * SHIPPED DEFAULT-ON, OPT-OUT (Gate G2 resolved, 2026-06-28). Registered in the plugin
+ * DEFAULT-ON, OPT-OUT. Registered in the plugin
  * manifest (hooks/hooks.json) as a UserPromptSubmit hook, so it is live on install. It
  * runs every turn unless the user sets CORE_RETRIEVAL_HOOK=0 (mirrors the default-on
  * metrics opt-out). Rationale: a default-off, manually-wired hook is invisible machinery no real
@@ -23,11 +23,9 @@
  *   CORE_RETRIEVAL_HOOK=0
  *
  * I/O contract: reads the UserPromptSubmit payload as JSON on stdin (uses `.prompt`;
- * store path from payload `.cwd`, else process.cwd() — CORE_RETRIEVAL_STORE was
- * removed entirely, D1 fix 2026-07-18, second pass: no legitimate production use
- * ever set it, and its trust check was lexical-only, bypassable via a symlink
- * placed under ~/.core, so deleting the override closes the class rather than
- * further hardening a boundary that's proven leaky).
+ * store path from payload `.cwd`, else process.cwd() — deliberately no env-var
+ * store override: a path override is a trust boundary this hook cannot safely
+ * enforce, so none exists).
  * Output is byte-capped. Any error is swallowed to a clean exit 0 — a retrieval hook
  * must never block the user's turn.
  *
@@ -54,7 +52,7 @@ const TOP_N = 3;
  * Truncate `str` to at most `maxBytes` UTF-8 bytes without splitting a
  * multi-byte character (or a surrogate pair) mid-sequence. String.slice
  * counts UTF-16 code units, not bytes — wrong for a byte-budget contract on
- * any non-ASCII content (K-series UTF-8 byte-cap fix, review re-audit 2026-07-19).
+ * any non-ASCII content.
  */
 export function truncateUtf8(str, maxBytes) {
   const buf = Buffer.from(str, 'utf8');
@@ -76,14 +74,13 @@ const PRODUCER_MANIFEST = (() => {
   } catch { return {}; }
 })();
 const PRODUCER_VERSION = String(PRODUCER_MANIFEST.version || 'unknown');
-// producer_sha (2026-07-18): producer_version alone can't distinguish which
+// producer_sha: producer_version alone can't distinguish which
 // exact commit produced a row -- 'unknown' is honest for every build that
 // isn't release-stamped (a --scope local dev install, or a manifest predating
-// this field). Reads manifest.source_sha -- named 'source', not 'git', per
-// review guidance: it names the commit this release PACKAGES (the version-bump
+// this field). Reads manifest.source_sha -- named 'source', not 'git':
+// it names the commit this release PACKAGES (the version-bump
 // commit's own parent), not the tagged release commit's own SHA -- those are
-// two different identities and the field name says which one this is. See
-// docs/specs/2026-07-18-self-identifying-build-sha.md.
+// two different identities and the field name says which one this is.
 const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 
 // Typed operational receipt: ONE terminal
@@ -94,10 +91,10 @@ const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
 export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed'];
 
-// CORE_REASONING_ARM (2026-07-19): a test-only control for the preregistered
+// CORE_REASONING_ARM: a test-only control for the preregistered
 // three-arm efficacy pilot. 'automatic'
-// is the unchanged shipped default -- the directive fires only on a true Tier 1
-// zero-hit, exactly as before this existed. 'deterministic-only' and 'always-on'
+// is the shipped default -- the directive fires only on a true Tier 1
+// zero-hit. 'deterministic-only' and 'always-on'
 // exist ONLY so the pilot can force a real, distinguishable behavioral
 // difference per arm; no real user should ever set this. An explicit but
 // unrecognized value throws rather than silently falling back to 'automatic' --
@@ -137,7 +134,7 @@ export function receipt(action, reason, extra = {}) {
 }
 
 export async function main() {
-  // Default-ON, opt-out gate (G2 shipped on, 2026-06-28). Runs unless explicitly
+  // Default-ON, opt-out gate. Runs unless explicitly
   // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the default-on metrics opt-out).
   if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
 
@@ -156,8 +153,7 @@ export async function main() {
     if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { cwd: store });
   } catch { return receipt('skip', 'store-unavailable', { cwd: store }); }
 
-  // ONE pipeline run serves both jobs (2026-07-17, closes review findings 1 +
-  // 4 on e1490d4): buildRetrievalTrace runs the same staged pipeline as
+  // ONE pipeline run serves both jobs: buildRetrievalTrace runs the same staged pipeline as
   // retrieveContext and carries the delivered pack — the hook injects pack.text
   // and emits the canonical per-turn retrieval event from the same run, so the
   // telemetry corpus is product-emitted, not agent-behavior-dependent.
@@ -167,20 +163,16 @@ export async function main() {
   const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
     ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
   try {
-    // Test-only fault seam (2026-07-18, review-authorized: prove a GENUINE
-    // uncaught exception through the real subprocess path reaches this catch
-    // and still exits 0 — the prior coverage only ever called receipt()
-    // directly, which proves the logging contract but not that a real crash
-    // gets caught at all). Same pattern as CORE_FILELOCK_NO_LINK: an explicit,
+    // Test-only fault seam: lets tests prove a GENUINE uncaught exception
+    // through the real subprocess path reaches this catch and still exits 0.
+    // Same pattern as CORE_FILELOCK_NO_LINK: an explicit,
     // self-documenting test seam, never read in normal operation.
     if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
-    // Resolved INSIDE this try: a throw here used to
-    // land outside every try/catch in this function, so it escaped all the
-    // way to the outer main().catch(() => process.exit(0)) with no receipt()
-    // call at all -- exit 0 was correct (never block the turn) but the
-    // promised typed pipeline-error row silently never got written. Resolving
-    // it here reuses the exact same fault seam as buildRetrievalTrace instead
-    // of inventing a second one.
+    // Resolved INSIDE this try so a throw lands in this catch and writes the
+    // typed pipeline-error receipt; outside it, the throw would escape to the
+    // outer main().catch(() => process.exit(0)) with no receipt() call at all
+    // -- exit 0 is correct (never block the turn) but the promised typed
+    // pipeline-error row would silently never get written.
     requestedArm = resolveReasoningArm(process.env.CORE_REASONING_ARM);
     trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
   } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
@@ -199,28 +191,22 @@ export async function main() {
   let turnCaptureStatus = null; // closed status code for the terminal receipt (captured/disabled/capture-failed)
   let reasoningDirective = '';
   // Built unconditionally, BEFORE the metrics-gated block below and BEFORE the
-  // event record inside it: the first fix
-  // moved this construction inside the `metricsEnabled()` branch so the
-  // recorded directive_fired field could reflect the real outcome -- but that
-  // put actual DELIVERED CONTENT behind a telemetry-only gate. With
-  // CORE_METRICS_ENABLED=0, automatic zero-hit escalation and always-on
-  // delivery silently stopped firing at all -- opting out of telemetry must
-  // never change what the user's turn actually receives. Building it here,
-  // unconditionally, fixes that while still keeping it ahead of the event
-  // record (which lives inside the metrics branch and reads this value) so
-  // directive_fired still reflects the real constructed outcome, not intent.
+  // event record inside it: this is delivered content, not telemetry --
+  // opting out of telemetry (CORE_METRICS_ENABLED=0) must never change what
+  // the user's turn actually receives. Building it here, unconditionally,
+  // keeps it ahead of the event record (which lives inside the metrics branch
+  // and reads this value) so directive_fired reflects the real constructed
+  // outcome, not intent.
   if (shouldEmitDirective) {
     try {
       const shards = selectCandidates(prompt, store, { shardSize: 80 });
       if (shards.length) {
         const unitsTotal = shards[0].units_total;
-        // Pilot self-invocation finding (2026-07-21, real-invocation probe):
-        // the internal test-control env var name leaking into model-facing
-        // text ("CORE_REASONING_ARM=always-on forces...") reads as a
-        // fabricated/self-referential instruction to a fresh model with no
-        // established trust in this session -- three real Claude Code
-        // invocations independently flagged content built this way as a
-        // likely prompt injection. Describe the forced case in the same
+        // Keep internal mechanism out of model-facing text: an env-var name
+        // in the directive ("CORE_REASONING_ARM=always-on forces...") reads
+        // as a fabricated/self-referential instruction to a fresh model with
+        // no established trust in this session -- a likely prompt injection.
+        // Describe the forced case in the same
         // plain, non-mechanism-revealing register as the honest zero-hit
         // case; the requestedArm value itself has no legitimate reason to
         // appear in what the model reads.
@@ -231,8 +217,7 @@ export async function main() {
       }
     } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
   }
-  // Deferred-write inputs for the NEW pending marker (review audit, 2026-07-17,
-  // hazard: "creates pending state before delivery"). The marker must only be
+  // Deferred-write inputs for the pending marker. The marker must only be
   // persisted once this turn's context is actually confirmed delivered to the
   // user — captured here, written after the stdout.write below.
   let pendingWrite = null;
@@ -247,7 +232,7 @@ export async function main() {
   // derived from WHICH STAGE produced it (in stages.top => Tier 1 lexical; added
   // by edge expansion => Tier 2). `h.tier` on trace hits is the unit AUTHORITY
   // tier (canonical/observation) and must never be coerced into a ladder tier —
-  // that exact coercion shipped in a2cab1b and fabricated tier telemetry.
+  // that coercion fabricates tier telemetry.
   // This pipeline is the model-free substrate: it never runs Tier 3, so an empty
   // result is `no-hit` at the tier actually reached — never a fabricated
   // 1→2→3 `miss`.
@@ -260,23 +245,22 @@ export async function main() {
       // the protocol's own definition; Tier 2 is the separate 2–3-hop graph-walk
       // path, which this pipeline never runs. So every event from this mechanism
       // is tier_reached 1, and hit provenance rides a separate closed
-      // `source_stage` field instead of overloading the ladder tier (the first
-      // corrected mapping made routine expansion hits read as Tier-2 escalation —
-      // the same causal-evidence defect under a different mapping).
+      // `source_stage` field instead of overloading the ladder tier
+      // (overloading it would make routine expansion hits read as Tier-2
+      // escalation — a causal-evidence defect).
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
       retrievalId = randomUUID();
 
-      // FALLBACK inferred-closure path (the 303df39 review mechanism + the nine
-      // freeze-rejection corrections). Superseded on BOTH harnesses now by a
+      // FALLBACK inferred-closure path. On both harnesses a
       // real Stop hook (answer-close-hook.mjs / answer-close-hook-codex.mjs)
-      // that fires on a genuine post-answer event with the harness's own turn
-      // identity; this path only ever infers closure from the NEXT prompt
-      // arriving, which is sequencing, not post-answer observation (review
-      // audit, 2026-07-17) — so normally the real Stop hook clears the
-      // pending marker first and this block finds nothing to close. Kept as
+      // fires on a genuine post-answer event with the harness's own turn
+      // identity and normally clears the pending marker first, so this block
+      // finds nothing to close; this path only ever infers closure from the
+      // NEXT prompt arriving, which is sequencing, not post-answer
+      // observation. Kept as
       // defense-in-depth for a session where the Stop hook didn't fire
       // (missed trust review, older harness build, hook crash upstream).
-      // Corrections applied: harness detected from runtime, pending state
+      // Invariants: harness detected from runtime, pending state
       // keyed by harness + resolved NON-NULL session (no aliasing; no session
       // -> no pending, no outcome), overlap is a provisional SIGNAL only — the
       // outcome stays 'unknown' until calibrated — and the pending record is
@@ -303,8 +287,8 @@ export async function main() {
             const prevTerms = new Set(prev.query_terms || []);
             const overlap = queryTermsEarly.length ? queryTermsEarly.filter((t) => prevTerms.has(t)).length / queryTermsEarly.length : 0;
             const retryShaped = overlap >= 0.6 && queryTermsEarly.length >= 3;
-            // Review audit, 2026-07-17: reusing retrieval_id AS the answer_turn_id
-            // fabricates identity — the two are different concepts (which
+            // Reusing retrieval_id AS the answer_turn_id would
+            // fabricate identity — the two are different concepts (which
             // retrieval ran vs. which answer turn closed it). This inferred
             // path still has no real per-turn id to offer, so it generates a
             // fresh one rather than aliasing — honest about being synthetic,
@@ -320,9 +304,8 @@ export async function main() {
               producer_version: PRODUCER_VERSION,
               producer_sha: PRODUCER_SHA,
             }, { sessionId });
-            // Delete only once the outcome row is CONFIRMED written (review
-            // audit, 2026-07-17, hazard: "deletes pending evidence without
-            // confirmed outcome persistence") — a failed/fail-open write must
+            // Delete only once the outcome row is CONFIRMED written
+            // — a failed/fail-open write must
             // never destroy the only record that this retrieval is still
             // open, or the evidence is lost for good.
             if (closeResult.written) {
@@ -353,31 +336,22 @@ export async function main() {
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
         // Gated on the env var being EXPLICITLY set,
         // not on the resolved arm differing from 'automatic'. An ordinary
-        // user who never touches CORE_REASONING_ARM still gets zero new
-        // fields -- byte-identical to before this existed. But the pilot's
-        // "escalation-only" arm (the preregistration's name for today's
-        // shipped default behavior) legitimately requests 'automatic'
-        // explicitly, and the prior condition gave that arm no observable
-        // receipt at all -- every escalation-only trial would have spoiled
-        // under the runner's own fail-closed contract, since there was
-        // nothing to check requested_arm against.
+        // user who never touches CORE_REASONING_ARM gets zero new
+        // fields. But the pilot's "escalation-only" arm legitimately
+        // requests 'automatic' explicitly and still needs an observable
+        // receipt -- the runner's fail-closed contract checks requested_arm
+        // on every trial.
         ...(process.env.CORE_REASONING_ARM !== undefined ? { requested_arm: requestedArm, directive_fired: Boolean(reasoningDirective) } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
 
-      // EVERY-TURN evidence capture (v3.14.0 Link 1, default-ON by ruling, with
-      // opt-outs). Written in the same moment as the numbers row above, joined
+      // EVERY-TURN evidence capture (Link 1 of the evidence chain), default-ON
+      // with opt-outs. Written in the same moment as the numbers row above, joined
       // by the same retrieval_id: the full prompt, the combined delivered pack
       // text, per-unit ids+scores, the top rejected candidates, a store
       // signature for drift detection, and producer identity. This is what the
       // hindsight judge later grades — the numbers row records THAT retrieval
       // happened; this records enough to judge whether it was RIGHT.
-      //
-      // Supersedes both retired capture seams (v3.14.0): the zero-hit-only
-      // opt-in stream (a zero-hit has no delivered context by definition —
-      // a defect closed by construction here) and the hidden env-gated trace file
-      // that put content in the repo tree with no reader (retired like the
-      // OTel dual-write before it).
       //
       // LOCAL ONLY: lands under the metrics storage base (0700/0600, 30-day
       // retention, purge command); metrics-package.mjs has no read path into
@@ -419,14 +393,12 @@ export async function main() {
         }
       } catch { turnCaptureStatus = 'error'; /* fail-open, but observable on the receipt */ }
       // Stage the pending-marker write for AFTER delivery is confirmed below
-      // (review audit, 2026-07-17, hazard: "creates pending state before
-      // delivery") — writing it here, before this turn's context has even
+      // — writing it here, before this turn's context has even
       // reached stdout, would let a crash between here and the stdout.write
       // leave a marker for a retrieval the user never actually saw. Still
-      // gated on the retrieval row write being PROVEN (correction 2: an
+      // gated on the retrieval row write being PROVEN (an
       // unproven retrieval must never become the base of a future outcome
-      // row) and keyed per harness+session so concurrent sessions never alias
-      // (correction 1).
+      // row) and keyed per harness+session so concurrent sessions never alias.
       if (out.written && pendingFile) {
         pendingWrite = {
           path: pendingFile,
@@ -446,23 +418,21 @@ export async function main() {
   }
 
   const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
-  // Both can be true at once now (always-on can force the directive even when
-  // Tier 1 also found hits) — before CORE_REASONING_ARM existed this was
-  // structurally impossible (the directive only ever fired on zero-hit), so
-  // the old if/else-if silently dropping one of them was never reachable.
+  // Both can be true at once (always-on can force the directive even when
+  // Tier 1 also found hits).
   // Deliver both, directive appended after the pack, still under the same cap.
   //
-  // Review re-audit, 2026-07-19: buildFinalContextPack already budgets
-  // packText in real UTF-8 bytes (Buffer.byteLength), but this final combine
-  // step used to re-truncate with String.slice(0, OUTPUT_BYTE_CAP) — .slice
-  // counts UTF-16 code units, not bytes, so appending reasoningDirective and
-  // re-slicing could both exceed the preregistered byte budget on non-ASCII
+  // buildFinalContextPack already budgets
+  // packText in real UTF-8 bytes (Buffer.byteLength), and this final combine
+  // step must hold the same contract — String.slice
+  // counts UTF-16 code units, not bytes, so slicing here could both exceed
+  // the byte budget on non-ASCII
   // content AND split a multi-byte character (or a surrogate pair) mid-
-  // sequence, corrupting the delivered payload. It also always used the
-  // hardcoded 2048 constant rather than the effective `byteCap` (which can be
-  // smaller via CORE_RETRIEVAL_BYTE_CAP), silently ignoring a tighter
-  // configured budget. truncateUtf8 trims on a real byte offset and backs off
-  // to the nearest complete UTF-8 sequence boundary instead of cutting blind.
+  // sequence, corrupting the delivered payload. truncateUtf8 trims on a real
+  // byte offset, backs off
+  // to the nearest complete UTF-8 sequence boundary instead of cutting blind,
+  // and honors the effective `byteCap` (which can be smaller than the 2048
+  // constant via CORE_RETRIEVAL_BYTE_CAP).
   const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
   if (packText && reasoningDirective) {
     process.stdout.write(truncateUtf8(packText + reasoningDirective, byteCap));
@@ -472,8 +442,8 @@ export async function main() {
     process.stdout.write(truncateUtf8(reasoningDirective, byteCap));
   }
 
-  // NOW persist the pending marker — after delivery, never before (review
-  // audit, 2026-07-17). Only when something was actually injected: a marker
+  // NOW persist the pending marker — after delivery, never before.
+  // Only when something was actually injected: a marker
   // for a retrieval whose context never reached the user has no honest
   // "delivered" state to close later. Atomic temp+rename.
   if (injected && pendingWrite) {
@@ -491,8 +461,8 @@ export async function main() {
   let reason;
   if (reasoningDirective) {
     action = 'delivered';
-    // 'no-hit' is only honest for the true zero-hit case (unchanged from
-    // before this control existed). always-on can now force the directive
+    // 'no-hit' is only honest for the true zero-hit case. always-on can
+    // force the directive
     // even when Tier 1 found real hits -- reporting 'no-hit' there would be
     // a fabrication, so fall back to the actual telemetry outcome instead.
     reason = zeroHit ? 'no-hit' : telemetryReason;

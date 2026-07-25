@@ -42,7 +42,7 @@ Example: a decision unit archived three months back keeps showing up in protocol
 
 ### 3c — File-Cap Reconciliation
 
-The legacy auto-MIGRATE classifier (path-(a)-vs-(b) re-decision) is **retired v1 machinery** — superseded by the file-cap monitoring in `protocols/hygiene.md`. There is no MIGRATE count and no path choice anymore. Instead: monitor the synthesis files (`PROJECT.md`, `IMPROVEMENT_LOG.md`, any project-flagged synthesis file) against the Read-tool soft target, and when one is over, proactively compact it per `hygiene.md §"file-cap monitoring and proactive compaction"` — archive/retire the units behind the over-cap section, rotate the log, leave grep stubs where a compaction migrates content. Surface the volume to the user (how much was compacted, from where to where) so the work stays visible; the user doesn't re-decide a strategy, they just see what happened.
+File-cap reconciliation is the file-cap monitoring in `protocols/hygiene.md`. There is no MIGRATE count and no path choice. Monitor the synthesis files (`PROJECT.md`, `IMPROVEMENT_LOG.md`, any project-flagged synthesis file) against the Read-tool soft target, and when one is over, proactively compact it per `hygiene.md §"file-cap monitoring and proactive compaction"` — archive/retire the units behind the over-cap section, rotate the log, leave grep stubs where a compaction migrates content. Surface the volume to the user (how much was compacted, from where to where) so the work stays visible; the user doesn't re-decide a strategy, they just see what happened.
 
 **Calibration default** — trigger at ~80% of the Read-tool cap (the `compact-project.mjs --check` soft target). Tune per project if a synthesis file runs hot.
 

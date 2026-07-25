@@ -59,8 +59,8 @@ import { iterActiveUnits } from './check-units.mjs';
 export const BITEMPORAL_VERSION = '1.0.0';
 
 // The read-time validity predicates (effectiveValidity / validAt / isInvalidated)
-// now live in priority.mjs — the canonical unit module — so every reader shares
-// one definition (validity-dimension consolidation, 2026-06-02). Re-exported here
+// live in priority.mjs — the canonical unit module — so every reader shares
+// one definition. Re-exported here
 // for back-compat: this module's CLI, its writer/metrics functions, and any
 // existing importer keep working against the same single source.
 export { effectiveValidity, validAt, isInvalidated };

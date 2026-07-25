@@ -78,7 +78,7 @@ A branch terminates when ANY of these are true:
 
 ### Tier 3 — Reasoning escalation (shortlist first, subagent second)
 
-**Step 1 — reason over exhaustive bounded shards (ratified 2026-07-15; scale repair 2026-07-17).** The per-turn hook automatically injects this escalation when Tier 1 returns no lexical context. When Tier 1 returns context that still does not answer the question, the active model must escalate here itself; a model-free hook cannot judge semantic sufficiency. Start at shard zero:
+**Step 1 — reason over exhaustive bounded shards.** The per-turn hook automatically injects this escalation when Tier 1 returns no lexical context. When Tier 1 returns context that still does not answer the question, the active model must escalate here itself; a model-free hook cannot judge semantic sufficiency. Start at shard zero:
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/select-relevant-units.mjs" <project> "<the question>" --shard 0 --shard-size 80

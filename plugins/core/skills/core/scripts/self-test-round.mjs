@@ -57,12 +57,11 @@ import { loadEvents, computeTierDistribution } from './analyze-retrieval-quality
 import { producerIdentity } from './producer-identity.mjs';
 
 // Dedicated log file for self-test grading results — deliberately its OWN
-// file, never the organic retrieval/outcome/hygiene logs (a review
-// correction, 2026-07-23: a self-test run is a synthetic, on-demand
+// file, never the organic retrieval/outcome/hygiene logs (a self-test run is
+// a synthetic, on-demand
 // measurement, not real usage; mixing the two means every future reader has
 // to filter synthetic rows out of real ones). Numbers/ids only, same
-// logEvent() writer everything else uses. Per
-// docs/specs/2026-07-23-metrics-holistic-redesign.md §3b.
+// logEvent() writer everything else uses.
 export const SELF_TEST_LOG_FILENAME = 'self-test-log.jsonl';
 
 // ---- the question-kind vocabulary + default per-round quota ----
@@ -179,9 +178,9 @@ function loadSelfTestLogEvents(project) {
 const ESCALATION_HIGH_THRESHOLD = 0.3; // >30% of real retrievals needed tier 2/3
 const RECENT_SELF_TEST_LOOKBACK = 5;   // average the last N self-test runs for trap-leak history
 
-// Mechanically reshape the default quota from recent metrics (a review
-// correction, 2026-07-23: a soft "here's what's weak" note in the brief is
-// something an LLM subagent can just ignore; register() already mechanically
+// Mechanically reshape the default quota from recent metrics (a soft
+// "here's what's weak" note in the brief is
+// something an LLM subagent can just ignore; register() mechanically
 // enforces per-kind counts against the stated quota, so shifting the quota
 // itself — not just hinting at it — makes this a hard requirement). Two
 // signals, deliberately simple:
@@ -614,11 +613,11 @@ export async function measureRound(project, round, { snapshot: injected = null, 
 // Build the self-test-log.jsonl event from a measureRound() record — numbers
 // and ids only, never question/answer text or unit bodies, so it's exportable
 // under the same whitelist discipline every other metrics surface already
-// applies. Per docs/specs/2026-07-23-metrics-holistic-redesign.md §3b.
+// applies.
 export function buildSelfTestLogEvent(record, { trigger }) {
   return {
     kind: 'self-test-run',
-    // Producer identity (v3.14.0 Link 4a): a score moving between runs must be
+    // Producer identity: a score moving between runs must be
     // attributable to store-drift vs ruler-change from the stored record alone
     // — parity with retrieval rows.
     ...producerIdentity(),

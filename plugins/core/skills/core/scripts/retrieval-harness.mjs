@@ -69,19 +69,19 @@ export function firstRelevantRank(ranked, expected) {
 // (scoreArm — the ranker-callback scorer — was folded into scoreRankedLists below,
 // so metrics and raw evidence always come from one observation set.)
 
-// Round-13 audit: this used to call generateSummaryIndex(store) — a FULL live
-// re-read of every unit AFTER the run's snapshot was minted. It now derives the
-// mix from an index object; runHarness passes its captured snapshot's index.
+// Derives the mix from an index object — runHarness passes its captured
+// snapshot's index — never from a fresh live re-read of the store, which
+// could diverge from the snapshot the run was minted against.
 //
-// K09: this used to derive the type key from the
-// unit ID's leading alpha run (id.match(/^([a-z]+)-/)) rather than the unit's
-// actual `type:` frontmatter field. A project's own id-naming convention is
-// project-specific vocabulary — a bespoke prefix leaks straight through this
+// The type key comes from the unit's actual `type:` frontmatter field, never
+// from the unit ID's leading alpha run (id.match(/^([a-z]+)-/)):
+// a project's own id-naming convention is
+// project-specific vocabulary — a bespoke prefix would leak straight through this
 // "generic CORE vocabulary" mix into the shareable aggregate receipt (the
 // whitelist/refusal-scan boundary aggregate-receipt.mjs exists to enforce),
 // since MIX_KEY_RE there only checks shape (lowercase, <=24 chars), not
-// membership in the actual closed CORE type set. Fixed at the source: use the
-// real `type` field the index already carries, closed CORE vocabulary only.
+// membership in the actual closed CORE type set. The index already carries the
+// real `type` field, closed CORE vocabulary only.
 export function unitTypeMix(index) {
   const mix = {};
   for (const u of index.units) {
@@ -174,9 +174,8 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
       'generate-summary-index.mjs': fileHash('generate-summary-index.mjs'),
     },
     // The CONTENT-MANIFEST sha256 from artifact-identity.mjs (sorted
-    // relpath:sha256(bytes) over the frozen subtree) — ONE meaning everywhere
-    // (review round 7: this comment used to say "packaged-archive hash" while
-    // validation.md said content-manifest, recreating the tar-byte ambiguity).
+    // relpath:sha256(bytes) over the frozen subtree) — ONE meaning everywhere,
+    // matching validation.md's content-manifest definition.
     // Supplied by the freeze step at the pin via aggregate-receipt's
     // --artifact-sha; never computed from a dev tree.
     built_artifact_sha256: null,
@@ -188,8 +187,8 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     gold_path: resolve(goldPath),
     gold_sha256: createHash('sha256').update(goldRaw).digest('hex'),
     // Definitionally equal to snapshot_id (both are sha256 of the content-derived
-    // per-file signature) — and taken FROM the capture: the old computation
-    // re-walked the live store after the snapshot was minted (round-13 audit).
+    // per-file signature) — and taken FROM the capture, never re-walked from
+    // the live store after the snapshot was minted.
     corpus_content_sha256: snapshot.snapshotId,
     arm_params: { bm25: { k1: 1.5, b: 0.75 }, context3: { topN: 3 } },
     counts: {

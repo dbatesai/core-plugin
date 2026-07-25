@@ -5,8 +5,8 @@
  * memory-visible (it was injected into context). This asks a different question the
  * other two miss: did the agent actually REACH FOR the CORE store this session, or
  * did it only touch harness-native scratch memory? That gap is the store-selection
- * failure surfaced empirically on core-codex (2026-05-29): 46 CORE units present, yet
- * the agent reached native ~/.codex/memories 11x vs CORE units 4x. Corpus present !=
+ * failure: a store can hold dozens of CORE units while the agent reaches for
+ * native harness memory several times as often. Corpus present !=
  * corpus reached — a recognition-failure cousin that neither file-present nor
  * an injection canary can detect.
  *

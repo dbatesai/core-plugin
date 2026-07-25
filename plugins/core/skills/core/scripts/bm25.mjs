@@ -1,18 +1,16 @@
 /**
  * bm25.mjs — deterministic body-BM25 ranking + tokenizer + the rank-union combiner.
  *
- * Extracted from embed-index.mjs when it was ruled (2026-07-08, reversing an
- * earlier call) that CORE runs NO local models: the dense/ollama arm was deleted rather
- * than shipped dormant; this module keeps the model-free half the live retriever
- * actually uses. Query-time retrieval stays deterministic and dependency-free
+ * CORE runs NO local models: this module is the model-free ranking the live
+ * retriever actually uses. Query-time retrieval stays deterministic and dependency-free
  *; the recall gap closes via write-time enrichment, not
  * a query-time model.
  *
- * v3.11 remediation: bodies are loaded through the
+ * Bodies are loaded through the
  * recursive path-bearing index via loadFreshIndex() — nested units (observations/
  * <YYYY-MM>/…) are in the population, paths come from the index (never
  * reconstructed as `_memories/<id>.md`), and freshness is validated on EVERY
- * public call, so the standalone CLI/harness path can no longer serve a retired
+ * public call, so the standalone CLI/harness path cannot serve a retired
  * unit from a stale cache. tokenize/STOPWORDS live here (not retrieve-context)
  * so the import graph is acyclic: retrieve-context → bm25 → generate-summary-index.
  *
@@ -115,11 +113,6 @@ export function bm25DocumentScores(query, documents, { k1 = 1.5, b = 0.75 } = {}
 export function bm25Rank(query, store, opts = {}) {
   return bm25Scores(query, store, opts).map(x => x.id);
 }
-
-// interleaveRanked (the round-robin union combiner) was DELETED 2026-07-11: the
-// product ranking moved to normalized magnitudes (retrieve-context productRankedScores)
-// and no production caller remained — dead code documented as live is a doc lie
-//.
 
 function selfTest() {
   // BM25: returns a ranked array when a store is supplied.

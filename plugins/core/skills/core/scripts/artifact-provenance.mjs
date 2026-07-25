@@ -1,11 +1,10 @@
 /**
  * artifact-provenance.mjs — truthful producer identity for every artifact-page
- * generator (extracted from render-browse-artifact.mjs, 2026-07-22, when the
- * metrics artifact generator became its second consumer — extraction over
- * duplication, matching the state-cache.mjs precedent).
+ * generator. One shared implementation (extraction over duplication), so all
+ * generators stamp provenance identically.
  *
- * The rule this module enforces (review condition 6, 2026-07-22 HOLD
- * correction 1): a page rendered for publish must carry REAL provenance.
+ * The rule this module enforces: a page rendered for publish must carry REAL
+ * provenance.
  *
  *   - In a source Git checkout: the real `git rev-parse HEAD` of the plugin
  *     source tree this module actually runs from — never a stale release

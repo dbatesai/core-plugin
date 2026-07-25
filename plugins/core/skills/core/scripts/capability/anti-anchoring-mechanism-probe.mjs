@@ -1,5 +1,5 @@
 /**
- * anti-anchoring-mechanism-probe.mjs — v2.7.0 R-17 honest demotion (Claude Code).
+ * anti-anchoring-mechanism-probe.mjs — R-17 honest demotion (Claude Code).
  *
  * Reports the mechanism behind CORE's adversarial anti-anchoring discipline. On
  * Claude Code today it is TRUST-BASED: when the protocol runs the Critic before
@@ -9,18 +9,18 @@
  * mechanically enforce it. This row exists to stop that gap from reading as an
  * implicit PASS.
  *
- * Per v2.7.0 plan §6: emit identity_status DEGRADED with mechanism 'trust-based',
- * evidence pointing at the R-17 risk unit, and a stated closure target. The
+ * Emits identity_status DEGRADED with mechanism 'trust-based',
+ * evidence pointing at the R-17 risk unit, and a stated closure target. A
  * stronger two-row split (staged-initial-frame-isolation PASS +
- * physical-filesystem-isolation NOT-YET) plus the negative-read proof ship in
- * v2.8.0 — see docs/plans/2026-05-28-v2.8.0-multi-agent-validation-layer.md §7.
+ * physical-filesystem-isolation NOT-YET) plus a negative-read proof would be
+ * required to earn PASS; neither is shipped.
  *
  * Called by capability-probe.mjs when the descriptor declares
  * delegate: 'capability/anti-anchoring-mechanism-probe.mjs'.
  *
  * Identity_status: always DEGRADED on Claude Code until the isolation mechanism ships (unscheduled).
  * This is a deliberate honest demotion, not a dynamic check — the negative-read
- * proof that could earn PASS is a v2.8.0 deliverable.
+ * proof that could earn PASS is not shipped.
  *
  * The script ships with the plugin by design. The plugin ships .mjs only, zero dependencies.
  */

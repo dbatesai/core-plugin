@@ -123,14 +123,11 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
 }
 
-// Writer-boundary lock: applyHotSection/clearHotSection had NO lock at all
-// around their PROJECT.md read-modify-write. Fixed 2026-07-22 with a private
-// `.hot-section.lock`; superseded the SAME day by a review point — a
-// writer-local lock only serialises hot-section against ITSELF, so a
-// concurrent compaction or demotion could still interleave with a hot-section
-// apply on the same PROJECT.md. Now every PROJECT.md writer shares ONE lock
-// (`withProjectMdWriterLock`, in lifecycle-core.mjs), which is what actually
-// closes the cross-writer race.
+// Writer-boundary lock: every PROJECT.md writer shares ONE lock
+// (`withProjectMdWriterLock`, in lifecycle-core.mjs). A writer-local lock
+// would only serialise hot-section against ITSELF — a concurrent compaction
+// or demotion could still interleave with a hot-section apply on the same
+// PROJECT.md — so the shared lock is what closes the cross-writer race.
 
 /**
  * NeedsReconciliationError — thrown instead of writing when PROJECT.md's
@@ -165,7 +162,7 @@ function assertReconciled(projectDir, path, currentText) {
   const classification = classifyProjectMdChange(cachedStamp, currentText);
   // Shared refuse-or-proceed rule (lifecycle-core.mjs) — identical logic to
   // decorate-graph and compact-project. A PROJECT.md with NO cache stamp always
-  // refuses now (the 2026-07-22 review root fix — session timing cannot prove
+  // refuses (session timing cannot prove
   // authorship). A freshly-rendered PROJECT.md is writable because its render
   // step stamped it at creation (lifecycle-detect.mjs stampCreatedBaseline
   // --kind project); an un-stamped no-baseline PROJECT.md is held, not written.
@@ -182,15 +179,15 @@ function assertReconciled(projectDir, path, currentText) {
 // startup.md §"Load — returning workspace"; this stamp is the corroborating record
 // and keeps `last_written_by` honest about who actually touched PROJECT.md.)
 //
-// Shared-write concurrency (2026-07-14): the stamp lands in the PER-PROJECT cache
+// Shared-write concurrency: the stamp lands in the PER-PROJECT cache
 // at <project>/_memories/_lib/state-cache.json — a single-owner file, so two
-// projects closing at once can't clobber each other's hashes (the old global
-// ~/.core/state-cache.json write was an unlocked read-modify-write). For one
-// release, readers take the UNION of per-project + global (newer last_written
+// projects closing at once can't clobber each other's hashes (a shared global
+// cache write would be an unlocked read-modify-write). For one
+// release, readers take the UNION of per-project + the global
+// ~/.core/state-cache.json (newer last_written
 // wins); each stamp also prunes its file's entry from the global cache under the
 // lock, so the union converges to per-project.
-// Content outside the marker-delimited hot block, hashed on its own (the
-// hot-section-edit-attribution review finding, 2026-07-21). `last_written_by:
+// Content outside the marker-delimited hot block is hashed on its own. `last_written_by:
 // hot-section` alone is NOT trustworthy evidence for a later hash mismatch —
 // it only says who wrote the PREVIOUS cached bytes, not the current ones. A
 // legitimate user edit made after a hot-section apply would carry that same
@@ -216,8 +213,8 @@ export function hashOutsideHotBlock(text) {
  * Deterministic classifier for a PROJECT.md hash mismatch against the cached
  * stamp (this is a critical trust-boundary decision, not something to
  * leave to prose interpretation). Returns:
- *   'no-baseline'       — no cached outside_hash to compare against (older
- *                          cache entry predating this fix, or never stamped).
+ *   'no-baseline'       — no cached outside_hash to compare against (a cache
+ *                          entry without one, or never stamped).
  *   'hot-block-only'     — everything outside the hot block is byte-identical
  *                          to the last recorded write; safe to treat as
  *                          CORE's own synthesis regardless of the mismatch.
@@ -235,8 +232,8 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir
     try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
   })();
   const projectDir = dirname(resolve(projectMdPath));
-  // Shared stamp-and-prune plumbing lives in state-cache.mjs (extracted
-  // 2026-07-22 so decorate-graph.mjs didn't need a second copy of the same
+  // Shared stamp-and-prune plumbing lives in state-cache.mjs (shared with
+  // decorate-graph.mjs so there is one copy of the
   // lock/prune logic). The domain-specific piece — hashing OUTSIDE the hot
   // block so a later mismatch can be classified correctly — stays here,
   // passed through as `extra.outside_hash`. Returns the truthful stamp outcome
@@ -252,10 +249,10 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir
 
 // ---------- Public API ----------
 
-// applyHotSection() below keeps its long-standing return shape (just the
-// updated text string) for every existing caller/test. applyHotSectionWithOutcome()
+// applyHotSection() below returns just the
+// updated text string, the shape every existing caller/test expects. applyHotSectionWithOutcome()
 // is the SAME implementation, additionally surfacing `applied` and
-// `stampOutcome` — added 2026-07-22 so
+// `stampOutcome` — so
 // `cmdApply` can tell "content wrote AND stamp landed" apart from "content
 // wrote but the attribution stamp failed" instead of always reporting full
 // success. Do not duplicate the write logic between the two — one shared
@@ -583,8 +580,8 @@ function cmdClear(args) {
     process.stdout.write('No hot section present; nothing to clear.\n');
     return 0;
   }
-  // Same content-write-vs-attribution-stamp distinction as cmdApply (review,
-  // 2026-07-22): the clear already happened and stays — never rolled back —
+  // Same content-write-vs-attribution-stamp distinction as
+  // cmdApply: the clear already happened and stays — never rolled back —
   // but a failed stamp must not read as clean success on exit code + stdout.
   if (result.cleared && result.stampOutcome && result.stampOutcome.stamped === false) {
     process.stderr.write(

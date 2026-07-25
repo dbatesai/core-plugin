@@ -102,14 +102,14 @@ export const STALE_THRESHOLD_DAYS = 30;
 
 // A unit is "stable" for stale-context purposes when its status is terminal
 // (the schema's retired/archived/superseded — shared vocab, SYN-005) or its
-// stability-class is the schema's durably-correct. The old STABLE_STATUSES set
-// ('final','stable','foundational','closed',…) matched no schema value, so
-// out-of-schema statuses silently exempted units from the tripwire.
+// stability-class is the schema's durably-correct. Only schema values gate
+// here — an out-of-schema status must not silently exempt a unit from the
+// tripwire.
 const STABLE_STABILITY_CLASSES = new Set(['durably-correct']);
 
 /** Parse the minimal frontmatter we need from a unit file. */
 export function parseFrontmatter(content) {
-  content = content.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
+  content = content.replace(/\r\n?/g, '\n'); // CRLF tolerance
   const m = content.match(/^---\n([\s\S]*?)\n---/);
   if (!m) return {};
   const fm = {};
@@ -155,7 +155,7 @@ export function extractReadUnitFilenames(events) {
  * For each unit the agent read this session, check if it's stale. Two signals:
  *   - superseded (HIGH): the unit's bi-temporal t_invalid is in the past — the
  *     fact stopped being true, yet the agent read it this session. This is the
- *     sharp signal (Phase 4 layer 1 feeding Phase 2): reading a fact known to be
+ *     sharp signal: reading a fact known to be
  *     superseded is a stronger miss than mere age.
  *   - aged (MEDIUM): updated > thresholdDays ago AND status not final/stable.
  * Returns [{filename, reason, days_stale, status, t_invalid?}].

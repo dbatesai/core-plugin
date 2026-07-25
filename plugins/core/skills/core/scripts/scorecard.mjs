@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
- * scorecard.mjs — pinned, immutable conclusions (v3.14.0 Link 3).
+ * scorecard.mjs — pinned, immutable conclusions.
  *
- * Why this exists (the determinism link of the evidence-chain spec): every
- * number `/metrics` shows used to be recomputed on the fly with whatever code
- * is currently installed — a trend today and a trend next month were not
- * comparable if any scoring code changed in between. A scorecard pins one
+ * Why this exists: a number recomputed on the fly with whatever code
+ * is currently installed is not trend-comparable — a trend today and a trend
+ * next month diverge if any scoring code changed in between. A scorecard pins one
  * period's conclusions — hindsight grade counts, the self-test headline,
  * volumes, capture health — stamped with {data window, producer identity,
  * judge version, thresholds}, appended to an immutable log. Trends are

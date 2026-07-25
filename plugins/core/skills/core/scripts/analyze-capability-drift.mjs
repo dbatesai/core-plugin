@@ -217,9 +217,9 @@ export function loadCapabilityHistory(workspaceId, project = null, opts = {}) {
     String(a.observed_at ?? '').localeCompare(String(b.observed_at ?? '')));
 }
 
-// Migration cleanup: the drift log was renamed to the `_`-prefixed form in v3.1.0
+// Legacy sweep: the drift log lives at the `_`-prefixed filename
 // so check-units skips it. A non-prefixed `capability-drift-log.md` left over from
-// an older version is treated as a real unit and fails schema (missing required
+// an older layout is treated as a real unit and fails schema (missing required
 // fields). Remove it when we write the current file so upgraders self-heal. Only
 // ever touches that exact legacy filename.
 export function removeLegacyDriftLog(project) {

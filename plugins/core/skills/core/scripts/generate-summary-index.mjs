@@ -1,7 +1,7 @@
 /**
  * generate-summary-index.mjs — build <store>/_memories/_lib/unit-summaries.json,
  * one compact { id, path, type, tier, summary, topics, status, updated } record per
- * ACTIVE unit, walked RECURSIVELY (v3.11 premise: index every eligible note; nested
+ * ACTIVE unit, walked RECURSIVELY (index every eligible note; nested
  * trees like observations/<YYYY-MM>/ are part of the retrieval population).
  *
  * Each record carries `path` (relative to _memories/, forward slashes) — consumers
@@ -18,11 +18,10 @@
  * below is the ONE validating loader every consumer uses (freshness on every call —
  * a stale index resurrecting a retired unit is an anti-resurrection breach).
  *
- * Parser choice (deviates from the build plan on purpose): the plan named
- * frontmatter-flat.mjs, but that flat parser silently DROPS multi-line `topics:` lists
- * (it skips every indented line). topics is load-bearing for the downstream retrieval
- * scorers, so this uses priority.mjs's canonical parseFrontmatter via loadUnit, which
- * parses lists. The flat parser would have shipped an index with empty topics.
+ * Parser choice: frontmatter-flat.mjs silently DROPS multi-line `topics:` lists
+ * (it skips every indented line), and topics is load-bearing for the downstream
+ * retrieval scorers — so this uses priority.mjs's canonical parseFrontmatter via
+ * loadUnit, which parses lists.
  *
  * The script ships with the plugin. The plugin ships .mjs only.
  *
@@ -54,10 +53,10 @@ function isCandidateName(name) {
 // (skips _lib, _validation) — same convention as the file filter. `archive/`
 // is excluded by name: a top-level retired unit
 // is suppressed from active results by status, but an archived unit is a
-// separate, physical relocation out of the active tree — before this
-// exclusion the walk still descended into archive/, so the source signature
-// and any consumer reading the raw walk (not just the status-filtered index)
-// could still see archived content. Path exclusion is the actual boundary
+// separate, physical relocation out of the active tree — without the name
+// exclusion the walk would descend into archive/, and the source signature
+// plus any consumer reading the raw walk (not just the status-filtered index)
+// could see archived content. Path exclusion is the actual boundary
 // for archived units; status filtering is what does the job for retired ones.
 function isCandidateDir(name) {
   return !name.startsWith('_') && name !== 'archive';
@@ -97,7 +96,7 @@ function walkCandidateFiles(memoriesDir) {
  * Content hashes, not mtimes, because anti-resurrection is an invariant: a unit
  * rewritten as retired with its original timestamp restored (editor telemetry,
  * cloud-sync restoration, deliberate tampering) MUST still invalidate the cache —
- * A re-review demonstrated the mtime version serving exactly that retired
+ * an mtime fingerprint serves exactly that retired
  * unit. Cost: reads every candidate file (~430 files ≈ a few MB) per validation —
  * the same order of work the BM25 body pass already does per call; measured in
  * the harness latency line, ceiling per the evaluation contract.
@@ -118,8 +117,8 @@ export function computeSourceSignature(storePath) {
  * Structural validation of a cached index — EVERY record, not a sample. A cache
  * is trustworthy only if each unit has a non-empty string id and a safe relative
  * path (no absolute paths, no `..` traversal, forward slashes, `.md`), and ids
- * are unique. Anything else → regenerate. (Re-review finding: validating only
- * units[0] let a partially path-less cache serve nested units from wrong paths.)
+ * are unique. Anything else → regenerate. (Validating only units[0] would let
+ * a partially path-less cache serve nested units from wrong paths.)
  */
 export function validateIndexRecords(idx) {
   if (!idx || !Array.isArray(idx.units)) return false;
@@ -140,9 +139,8 @@ export function validateIndexRecords(idx) {
  * loadFreshIndex — THE validating index loader. Reads the cached index when its
  * source_sig matches the store's current recursive signature; regenerates otherwise.
  * Every consumer (retrieve-context, bm25, select-relevant-units, the harness) loads
- * through this, so no public entry point can serve a stale index — the standalone
- *-bm25Rank-resurrects-a-retired-unit defect is closed here,
- * at the loader, not per-caller.
+ * through this, so no public entry point can serve a stale index — freshness is
+ * enforced here, at the loader, not per-caller.
  */
 export function loadFreshIndex(storePath) {
   const root = resolve(storePath);
@@ -171,7 +169,7 @@ export function loadFreshIndex(storePath) {
 }
 
 /**
- * loadSnapshot — the request-scoped, content-addressed store snapshot (Train A A3).
+ * loadSnapshot — the request-scoped, content-addressed store snapshot.
  * ONE load per retrieval request feeds every reader and scorer; the snapshot_id is
  * sha256 of the index's content-derived source signature, so two requests that saw
  * the same bytes report the same id and any store mutation changes it. Traces and
@@ -179,11 +177,10 @@ export function loadFreshIndex(storePath) {
  */
 export function loadSnapshot(storePath, { captureBodies = false, retainRaw = false } = {}) {
   // captureBodies → the ATOMIC capture: id, index, and bodies all derived from
-  // one read per file (captureStore). The earlier two-walk version (index walk
-  // first, body walk second) carried a TOCTOU reproduced deterministically in
-  // review round 11: a concurrent write between the walks let snapshot_id identify
-  // OLD bytes while the evaluator measured NEW ones. Never reintroduce a second
-  // walk here.
+  // one read per file (captureStore). A two-walk version (index walk first,
+  // body walk second) is a TOCTOU: a concurrent write between the walks lets
+  // snapshot_id identify OLD bytes while the evaluator measures NEW ones.
+  // Never introduce a second walk here.
   if (captureBodies) return captureStore(storePath, { retainRaw });
   // Index-only consumers (no body reads downstream) keep the cache-validated path.
   const index = loadFreshIndex(storePath);
@@ -202,9 +199,8 @@ export function loadSnapshot(storePath, { captureBodies = false, retainRaw = fal
  *
  * ONE definition, used by both loadUnitBodies (the index-only path) and
  * captureStore's body derivation (the atomic-snapshot path decorate-graph.mjs
- * and the live retriever/harness actually read) — a 2026-07-21 review finding:
- * the two body-derivation sites duplicated the frontmatter-strip transform,
- * and only one of them got the edges-block strip when it was first added.
+ * and the live retriever/harness actually read) — a second copy of this
+ * transform at either body-derivation site would drift.
  */
 export function stripGeneratedEdgesBlock(body) {
   const beginIdx = body.indexOf(EDGES_BEGIN);
@@ -248,14 +244,10 @@ export function deriveSummary(body) {
   return '';
 }
 
-// Found while regression-testing the K-series UTF-8 byte-cap fix (retrieve-
-// context-hook.mjs), 2026-07-19: this is the actual source of the corruption
-// that fix's test caught (`.slice(0, maxLen - 1)` counted UTF-16 code units
-// and could orphan a surrogate pair). An independent review the same day
-// found two more hand-duplicated copies of this exact bug
-// (generate-decisions-index.mjs, generate-risks-index.mjs) that a same-file
-// fix here didn't reach — collapsed all three into text-truncate.mjs so
-// there's no second copy left to drift.
+// Delegates to text-truncate.mjs, the single surrogate-safe truncation
+// implementation (a naive `.slice(0, maxLen - 1)` counts UTF-16 code units
+// and can orphan a surrogate pair, corrupting the summary). All index
+// generators share that one copy so none can drift.
 export function truncate(text, maxLen = SUMMARY_MAX) {
   return sharedTruncate(text, maxLen);
 }
@@ -288,9 +280,9 @@ function authorityTier(fm, rel) {
  * read from disk EXACTLY ONCE; the source signature (→ snapshotId), the index
  * records, and the BM25 body texts are all derived from those same buffers.
  *
- * Why single-read is the invariant: the previous design computed the signature in
- * one walk and read index/bodies in others — a deterministic review reproduction
- * showed a concurrent write between walks makes snapshot_id identify OLD bytes
+ * Why single-read is the invariant: computing the signature in one walk and
+ * reading index/bodies in others means a concurrent write between walks makes
+ * snapshot_id identify OLD bytes
  * while the evaluator measures NEW bytes. With one read per file, the id and the
  * measured bytes cannot diverge for any file; a mutation mid-capture yields a
  * mixed state whose id correctly identifies exactly those captured bytes.
@@ -323,8 +315,8 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
   }
   const source_sig = sigParts.sort().join('|');
 
-  // Index candidates from the same buffers — identical semantics to the old
-  // loadUnit path (parseFrontmatter is the same canonical parser).
+  // Index candidates from the same buffers — parseFrontmatter is the same
+  // canonical parser loadUnit uses.
   const candidates = [];
   const textByPath = new Map(); // winner-body derivation reads from here, never disk
   const fmByPath = new Map();   // winner-edge derivation reads from here, never disk
@@ -337,8 +329,8 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     const id = fm.id !== undefined ? String(fm.id) : basenameNoMd(rel);
     if (!isActive(fm)) continue;
     // Exclude units whose validity dimension is invalid as of now — the status
-    // check alone missed a `status: active` unit with a past t_invalid, which
-    // then leaked into per-turn retrieval (the read path this index feeds).
+    // check alone would admit a `status: active` unit with a past t_invalid,
+    // leaking it into per-turn retrieval (the read path this index feeds).
     if (isInvalidated({ id, fm, body }, now)) continue;
     // K04: the cache staleness check in loadFreshIndex
     // is byte-only (source_sig, a content hash) — it never re-fires just because
@@ -393,9 +385,9 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
 
   // BM25 body texts AND typed edges for the WINNERS, from the SAME buffers
   // (body transform identical to loadUnitBodies: frontmatter stripped, summary +
-  // topics prepended). Edges ride the capture: edge expansion
-  // used to re-read live unit files after the id was minted — a concurrent edge
-  // change altered expanded/final results under an unchanged snapshot_id.
+  // topics prepended). Edges ride the capture: re-reading live unit files for
+  // edge expansion after the id is minted would let a concurrent edge change
+  // alter expanded/final results under an unchanged snapshot_id.
   const bodies = [];
   const edges = {};
   for (const u of units) {
@@ -451,8 +443,8 @@ function basenameNoMd(rel) {
 
 export function generateSummaryIndex(storePath) {
   // One capture — the written index's source_sig describes the exact bytes its
-  // records were derived from (the old version signature-walked the store a
-  // second time, the same multi-walk gap captureStore exists to close).
+  // records were derived from (never signature-walk the store a second time;
+  // that reopens the multi-walk gap captureStore exists to close).
   const out = captureStore(storePath).index;
   const libDir = join(resolve(storePath), '_memories', '_lib');
   try { mkdirSync(libDir, { recursive: true }); } catch { /* ignore */ }

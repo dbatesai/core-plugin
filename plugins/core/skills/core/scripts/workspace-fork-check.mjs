@@ -2,8 +2,8 @@
  * Workspace-fork check — detect copied workspaces and auto-fork.
  *
  * Workspace identity stability is a critical surface inference
- * can't be trusted on alone. The Round-3 Codex re-probe (2026-05-21) showed
- * the agent reading the prose, narrating the mismatch, and still operating
+ * can't be trusted on alone — an agent can read the prose, narrate the
+ * mismatch, and still operate
  * under the source identity. This script ships the fork as deterministic code;
  * the agent's job drops to "run this script, echo its output."
  *
@@ -36,15 +36,12 @@ export function slugify(name) {
     .replace(/^-+|-+$/g, '');
 }
 
-// An index entry's registered project path. STANDARDIZED on `path` 2026-06-01:
+// An index entry's registered project path. The standard field is `path`:
 // the live index, startup.md's prose path-match, this script's index writer, and
-// now the schema + manifest writer all use `path`. `project_path` was a minority
-// patch (it was what the schema documented while reality used `path`), and a
-// `project_path`-keyed entry invisible to a `path`-only read is what re-forked a
-// workspace on every startup (observed on a Windows box, 2026-05-31: a workspace re-forked ->
-// -2 -> -3 ...). This read stays tolerant of legacy `project_path` for back-compat
-// (the planned v3.8.0 removal did not happen; the fallback stays until a dedicated
-// migration drops it). `path` is preferred.
+// the schema + manifest writer all use it. This read stays tolerant of legacy
+// `project_path` entries for back-compat — a `project_path`-keyed entry invisible
+// to a `path`-only read re-forks the workspace on every startup (-2 -> -3 ...).
+// The fallback stays until a dedicated migration drops it. `path` is preferred.
 export function entryPath(entry) {
   return entry.path || entry.project_path || null;
 }
@@ -119,7 +116,7 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
 
   const nowIso = now.toISOString();
 
-  // H3 + concurrency (2026-07-14): the fork mutates three surfaces. checkFork resolves
+  // The fork mutates three surfaces. checkFork resolves
   // PATH-MATCH (an index entry whose path == cwd) BEFORE id-match, so the index entry is
   // what makes a fork "stick" on the next run. Write order is meta-dir+manifest → index
   // entry → local pointer (last), every write atomic. The ordering enforces the invariant
@@ -132,7 +129,7 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
   //
   // The whole read-DECIDE-write runs inside the registry lock via mutateIndex: the
   // collision-resolved id is recomputed from the LOCKED re-read (two concurrent forks
-  // can no longer both mint "foo-2"), and a concurrent registration of this same cwd
+  // cannot both mint "foo-2"), and a concurrent registration of this same cwd
   // is re-checked so the second fork downgrades to no-fork instead of duplicating.
   const forkResult = mutateIndex(coreDir, (entries) => {
     const raced = entries.find(e => entryPath(e) && canonicalPath(entryPath(e)) === cwdResolved);
@@ -166,7 +163,7 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
 
   touchWorkspace(coreDir, newId, nowIso);
 
-  // Expanded absolute path (HARNESS-007): Node never expands ~, so the pointer
+  // Expanded absolute path: Node never expands ~, so the pointer
   // must carry a consumer-usable path. coreDir honors --core-dir overrides.
   const newPointer = {
     ...pointer,

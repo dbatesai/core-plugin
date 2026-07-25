@@ -358,7 +358,7 @@ None initially. If the file grows past a threshold (say 50MB), a hygiene pass at
 
 ### Read protocol
 
-**Not currently wired — the analyzer was deleted 2026-07-21.** `scripts/analyze-source-pull-log.mjs` shipped a read-side analyzer, but no installation had ever actually implemented the write side this section describes — no `source-pull-log.jsonl` existed anywhere it was checked. Worse, 2 of the 3 signals the analyzer promised (a registered source missing from the window, an error count climbing *this session*) were structurally undeliverable with its actual inputs: it never read `<project>/_sources/` to know what "missing" means, and its CLI received no session boundary to know what "this session" means. Three-way consensus to delete rather than patch a read side with no real writer. Wrapper authors: do not rely on monitoring being operational. If this comes back, it needs the missing inputs (the registered source set, an explicit session boundary) designed in from the start, alongside a real writer — not a read side built first and guessed at.
+**Not currently wired — CORE ships no monitoring analyzer.** Nothing reads `source-pull-log.jsonl`, and no installation is known to implement the write side this section describes. Wrapper authors: do not rely on monitoring being operational. An analyzer for this protocol needs its inputs (the registered source set, an explicit session boundary) designed in from the start, alongside a real writer — a read side with no real writer cannot deliver the signals this section describes (which sources are missing from the window, whether an error count is climbing *this session*).
 
 ---
 
@@ -368,8 +368,6 @@ Two artifacts CORE ships in support of the framework:
 
 1. **This framework document.** The contract.
 2. **`references/confidence-assignment-guide.md`.** Pattern catalog for confidence-level assignment, source-category-agnostic, pattern-anchored. Installations reference this when implementing extractors.
-
-(A third artifact, `scripts/analyze-source-pull-log.mjs`, shipped a monitoring-log analyzer for the §7 read protocol — deleted 2026-07-21, see §7 above for why. Not replaced yet.)
 
 These two plus the existing observation schema, the promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
 

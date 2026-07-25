@@ -1,10 +1,6 @@
 /**
  * metrics-init.mjs — T1 storage scaffold for the metrics & observability layer
  *
- * Implements matrix items SL-1/SL-2/SL-3/SL-4 + AS-12 + RL-2 from the
- * `design-and-pressuretest-t3-stop-hook-with` collab (closed 2026-05-26).
- * See `docs/specs/2026-05-25-metrics-and-observability-spec.md` for full design.
- *
  * What it does:
  *   - Default storage: `<project>/_metrics/` on Mac, Linux, Windows-no-OneDrive.
  *   - Windows-with-OneDrive: redirect to `~/AppData/Local/core-metrics/<workspace-id>/`.

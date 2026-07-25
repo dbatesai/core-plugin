@@ -38,13 +38,11 @@ export const RISKS_HEADER_PATTERN = /^\*\*Risks \(/;
 // 80% of the Read-tool 25000-token cap, char-to-token factor 0.30:
 // 0.8 * 25000 / 0.30 ≈ 67000 bytes. Matches protocols/startup.md's cap heuristic.
 export const PROJECT_MD_CAP_BYTES = 67000;
-// Phase 1b — the ratified soft target. 70KB ≈ 21K tokens at the 0.30 factor.
+// Phase 1b — the soft target. 70KB ≈ 21K tokens at the 0.30 factor.
 // compact-project never refuses to write; this is advisory. When PROJECT.md
 // exceeds the target, a structured project-md-over-cap event emits so the
 // Phase 5 monitoring loop can react. demote-moves handles §Moves growth;
-// §State narrative compaction is Phase 1c. Renamed from HARD_CAP_BYTES on
-// 2026-05-24 (session 34) — the old name implied enforcement the script
-// never had.
+// §State narrative compaction is Phase 1c.
 export const SOFT_TARGET_BYTES = 70000;
 
 export function parseArgv(argv) {
@@ -57,7 +55,7 @@ export function parseArgv(argv) {
   return { positional, flags };
 }
 
-// M1: delegates to the shared flat parser (was a local copy). Export kept for the callsite.
+// Delegates to the shared flat parser. Export kept for the callsite.
 export function parseFrontmatter(text) {
   return parseFlatFrontmatter(text);
 }
@@ -244,7 +242,7 @@ export function main(argv) {
     const size = Buffer.byteLength(text, 'utf8');
     const status = size > PROJECT_MD_CAP_BYTES ? 'OVER cap' : 'under cap';
     console.log(`PROJECT.md: ${size} bytes (${status}; cap ${PROJECT_MD_CAP_BYTES} bytes).`);
-    // MEM-012: the size is whole-file but this script's write path is partial —
+    // The size is whole-file but this script's write path is partial —
     // say so here so a caller never reads "under/over cap" as "this tool
     // handles the whole file".
     console.log('Scope: compact-project.mjs compacts §Decisions ONLY. §Moves demotion = demote-moves.mjs (auto-applies); §State narrative demotion = demote-state-narrative.mjs (dry-run; pass --apply). Run all three for full compaction.');
@@ -270,12 +268,11 @@ export function main(argv) {
   const after = Buffer.byteLength(newText, 'utf8');
   const wouldWrite = newText !== text;
 
-  // Edit-gated, shared-locked, CAS-guarded write (review points 2/5/6/7,
-  // 2026-07-22). compact-project used to bare-write PROJECT.md with no
-  // pre-write edit check and no post-write stamp at all — so an unreconciled
-  // user correction to a §Decisions entry got compacted away entirely (the review's
-  // `compact_user_edit` red case), and `/process-memory` auto-invoked this
-  // path with no gate. Now: acquire the ONE shared PROJECT.md writer lock,
+  // Edit-gated, shared-locked, CAS-guarded write. A bare write here (no
+  // pre-write edit check, no post-write stamp) would compact away an
+  // unreconciled user correction to a §Decisions entry — and
+  // `/process-memory` auto-invokes this path, so the gate must live in
+  // code, not in caller discipline. So: acquire the ONE shared PROJECT.md writer lock,
   // re-read the live bytes under it, refuse if the human-authored region
   // diverged from the last baseline (pending user edit) or if the live bytes
   // moved since we computed the compaction (stale preimage), write atomically,

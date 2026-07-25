@@ -2,25 +2,20 @@
 /**
  * answer-close-hook.mjs — REAL post-answer outcome closer (Stop hook).
  *
- * An independent HOLD audit of e4383c1 (2026-07-17) named the core defect in the old design: the
- * per-turn retrieval hook (retrieve-context-hook.mjs) closed the PREVIOUS retrieval's outcome
- * by inferring "the answer must be done" from the NEXT prompt arriving — sequencing, not
- * post-answer observation — and it fabricated identity by reusing retrieval_id AS the
- * answer_turn_id. Both are now fixed by wiring a REAL adapter: Stop fires once, right after
+ * Stop fires once, right after
  * the assistant's response completes (never per-tool-call, never per-turn like
  * UserPromptSubmit would be) — a genuine post-answer event — and the harness's own Stop
  * payload carries the real per-turn identity: Claude Code's `prompt_id`, Codex's `turn_id`
- * (developers.openai.com/codex/hooks#stop — confirmed 2026-07-17, a fresh-audit correction:
- * the earlier "Codex has no Stop-equivalent" framing was stale, not true). Nothing here infers
- * or aliases identity on either harness.
+ * (developers.openai.com/codex/hooks#stop). Nothing here infers
+ * or aliases identity on either harness: inferring "the answer must be done" from the NEXT
+ * prompt arriving would be sequencing, not post-answer observation, and reusing retrieval_id
+ * AS the answer_turn_id would fabricate identity.
  *
  * Codex support: this same file handles both harnesses. Which one is active for a given
  * invocation is set EXPLICITLY by the entry wrapper — answer-close-hook.mjs itself for Claude
  * Code (hooks.json Stop), answer-close-hook-codex.mjs for Codex (hooks-codex.json Stop) — via
  * CORE_HOOK_HARNESS, never inferred from ambient env vars. See harnesses/codex.md §hook-register
- * for the Codex-side registration. Install + trust + a real two-turn proof landed 2026-07-18
- * at exact SHA 8e941de6 (two independent proof bundles) -- re-proof owed at each subsequent
- * candidate, not a standing gap.
+ * for the Codex-side registration.
  *
  * Fail-open by contract: a Stop hook must never block or alter the assistant's turn. Every
  * failure swallows to exit 0; the pending marker (and thus the missed close) is picked up by
@@ -30,8 +25,7 @@
  *
  * I/O: reads the Stop payload as JSON on stdin (session_id, prompt_id or turn_id, cwd). Always
  * writes `{}` to stdout on exit 0 — Codex's Stop contract requires valid JSON there ("Plain text
- * output is invalid for this event"; empty stdout shipped here originally, a real contract
- * violation a fresh audit caught). An empty object carries no `decision` field, which both
+ * output is invalid for this event"). An empty object carries no `decision` field, which both
  * harnesses treat as "let the turn proceed, no intervention" — Claude Code's own contract
  * explicitly permits this shape too, not just tolerates it. Stop hook output is not injected
  * into context the way UserPromptSubmit's is; this hook's real product is the outcome-log row +
@@ -61,9 +55,8 @@ export function receipt(action, reason, extra = {}) {
     }
   } catch { /* preserve fail-open even if the fallback surface fails */ }
   // Codex's Stop contract requires valid JSON on stdout for every exit-0 —
-  // "Plain text output is invalid for this event" (developers.openai.com/codex/hooks,
-  // confirmed 2026-07-17, a fresh-audit catch: empty stdout shipped here
-  // originally, silently violating that contract). An empty object carries no
+  // "Plain text output is invalid for this event"
+  // (developers.openai.com/codex/hooks). An empty object carries no
   // `decision` field, which both harnesses treat as "allow the turn to
   // proceed, no intervention" — Claude Code's own Stop contract explicitly
   // permits "exit 0 without any JSON at all" OR omitting `decision`, so this
@@ -107,7 +100,7 @@ export function main() {
 
   // The real per-harness answer-turn identity: Claude Code's prompt_id, or
   // Codex's turn_id (developers.openai.com/codex/hooks#stop — "Codex-specific
-  // extension. Active Codex turn id", confirmed 2026-07-17) — whichever field
+  // extension. Active Codex turn id") — whichever field
   // THIS harness's Stop payload actually carries. Stop fires once the answer
   // is complete, so this is a genuine post-answer observation, not an
   // inference from the next prompt arriving. Fall back to a freshly-generated

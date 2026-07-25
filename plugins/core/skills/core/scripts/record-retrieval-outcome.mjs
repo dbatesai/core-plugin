@@ -6,8 +6,7 @@ import { basename, join, resolve } from 'node:path';
 import { logEvent, sanitizeAttributeValue } from './log-event.mjs';
 import { acquireFileLock, releaseFileLock } from './file-lock.mjs';
 
-// Strengthened contract (review audit of 303df39 + freeze-rejection corrections,
-// 2026-07-17): 'unknown' is a first-class honest state; evidence AUTHORITY is
+// Contract: 'unknown' is a first-class honest state; evidence AUTHORITY is
 // carried separately from the outcome so weak attribution can never look
 // confirmed; identity (harness, session/turn, producer version) is REQUIRED.
 export const USEFULNESS_OUTCOMES = new Set(['useful', 'partial', 'noisy', 'miss', 'unknown']);
@@ -17,8 +16,7 @@ export function outcomeLockPath(projectDir) {
   return join(projectDir, '_sessions', '.retrieval-outcome.lock');
 }
 
-// Filename-safe (review audit, 2026-07-17, hazard: unsanitized session id in a
-// filename): a session id is harness-controlled input, not guaranteed
+// Filename-safe: a session id is harness-controlled input, not guaranteed
 // path-safe. Anything outside this allowlist collapses to '_' before it ever
 // reaches the filesystem — no path separators, no traversal, no platform-
 // illegal characters can escape the intended directory.
@@ -31,8 +29,8 @@ export function pendingOutcomePath(projectDir, harness, sessionId) {
   return join(projectDir, '_memories', '_lib', `pending-retrieval-${sanitizeForFilename(harness, 20)}-${sanitizeForFilename(sessionId)}.json`);
 }
 
-// Shared authority resolver (review audit, 2026-07-17: "share one authority
-// resolver across consumers"). Every consumer that folds multiple outcome
+// Shared authority resolver — ONE resolver across consumers.
+// Every consumer that folds multiple outcome
 // rows for one retrieval_id down to a single resolved outcome must go
 // through this — analyze-retrieval-quality.mjs and metrics-package.mjs both
 // do. Highest evidence_authority wins; a tie among top-ranked rows that
@@ -92,8 +90,8 @@ export function normalizeRetrievalOutcome(input) {
   const sessionId = requireStr(input.session_id, 'session_id');
   const answerTurnId = requireStr(input.answer_turn_id, 'answer_turn_id');
   const producerVersion = requireStr(input.producer_version, 'producer_version');
-  // producer_sha (2026-07-18): producer_version alone can't distinguish which
-  // exact commit produced a row -- five recent SHAs all shipped the same
+  // producer_sha: producer_version alone can't distinguish which
+  // exact commit produced a row -- many SHAs can ship the same
   // semver string. 'unknown' is the honest default when the manifest carries
   // no source_sha (unstamped builds, --scope local dev installs) rather than a
   // guessed or omitted value -- same 'unknown is first-class' philosophy as
@@ -129,14 +127,14 @@ export function recordRetrievalOutcome(projectDir, input, opts = {}) {
     const bases = rows.filter(row => row.kind === 'retrieval' && row.retrieval_id === record.retrieval_id);
     if (bases.length !== 1) throw new Error(`retrieval_id must identify exactly one retrieval; found ${bases.length}`);
     // A second (or Nth) outcome row for the same retrieval_id is EXPECTED, not
-    // an error (review audit, 2026-07-17, hazard: "an automatic unknown blocks
-    // stronger later evidence"). The auto-close path writes 'unknown' the
+    // an error — an automatic unknown must never block
+    // stronger later evidence. The auto-close path writes 'unknown' the
     // moment closure is inferred; real evidence — a user confirmation, a
     // corrective retry — can arrive after that and must still be recordable.
     // Consumers resolve multiple rows via resolveOutcomeAuthority() above, so
     // rejecting the append here would make that resolver permanently dead
-    // code on the live write path. SEPARATE later outcome log (review
-    // stop-note, 2026-07-17): outcome rows never enter the append-only
+    // code on the live write path. SEPARATE later outcome log:
+    // outcome rows never enter the append-only
     // retrieval log they judge.
     const writeOutcome = logEvent(projectDir, 'outcome-log.jsonl', record, opts) || { legacy: false, otel: false, reason: 'no-outcome' };
     return { record, written: writeOutcome.legacy === true, write_outcome: writeOutcome };

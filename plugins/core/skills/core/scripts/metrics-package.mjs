@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
  * metrics-package.mjs — the anonymized memory-efficacy feedback package.
- * Spec: CORE workshop `docs/specs/2026-07-16-metrics-package-spec.md`.
  *
  * ONE PURPOSE: feedback data for refining CORE itself. The package must be safe
  * to hand across strict data boundaries (the standing data-boundary rule: de-identified
@@ -14,8 +13,8 @@
  * not skill prose; and the script carries zero dependencies.
  *
  * Pseudonyms: HMAC-SHA256 over a per-install secret salt (~/.core/metrics-package-salt,
- * 0600, NEVER shipped). Stable across packages from the same install (ratified
- * by the product owner, 2026-07-16) so trend lines are comparable; meaningless elsewhere.
+ * 0600, NEVER shipped). Stable across packages from the same install so trend
+ * lines are comparable; meaningless elsewhere.
  * Deleting the salt rotates every pseudonym.
  *
  * Self-healing: every source is optional — absent/unparseable sources emit
@@ -58,13 +57,13 @@ const HISTORY_DIR = 'metrics-package-history';
 const UNIT_TYPES = ['decision', 'risk', 'observation', 'person', 'reference', 'principle', 'value', 'explainer', 'review-finding', 'open-question', 'premise', 'episode'];
 const UNIT_STATUSES = ['active', 'retired', 'archived', 'superseded', 'draft'];
 const EDGE_TYPES = ['cites', 'depends-on', 'supersedes', 'supersedes-claim', 'refines', 'amends', 'conflicts-with', 'references-topic'];
-// The classifier's ACTUAL state vocabulary (classify-turns.mjs is the producer —
-// a 2026-07-17 review caught the previous invented list collapsing 5 of 6
+// The classifier's ACTUAL state vocabulary (classify-turns.mjs is the producer;
+// this list must match its output exactly — an invented list here would fold
 // canonical states to 'other').
 const RECOGNITION_STATES = ['rec-fail-tier-0', 'rec-fail-tier-1-3-trigger', 'tier-0-win', 'tier-1-3-win', 'capture-miss', 'mechanics-failure'];
-// Code-owned enums for every remaining string source (review finding 7 at e1490d4:
-// a shape check like kebab-case is NOT a privacy boundary — user-derived values can
-// be kebab-shaped. Only these exact values pass; everything else folds to 'other').
+// Code-owned enums for every remaining string source. A shape check like
+// kebab-case is NOT a privacy boundary — user-derived values can
+// be kebab-shaped. Only these exact values pass; everything else folds to 'other'.
 const HYGIENE_KINDS = ['compact-project', 'demote-moves', 'demote-moves-large-batch', 'demote-state', 'demote-state-large-batch', 'project-md-over-cap', 'maintenance-run'];
 const MAINTENANCE_OPS = ['decisions-index', 'risks-index', 'summary-index'];
 const CAPABILITY_IDS = ['plugin-root-resolution', 'target-surface-collab-files', 'auto-memory-injection', 'anti-anchoring-mechanism', 'instruction-surface-resolution', 'memory-visible-in-agent-context', 'memory-accessed'];
@@ -271,8 +270,7 @@ export function retrievalStats(projectDir, seal) {
     matches.push(entry);
     baseById.set(id, matches);
   }
-  // Outcome resolution (review corrections 5–7, 2026-07-17, sharpened in the
-  // 2026-07-17 HOLD audit: "share one authority resolver across consumers").
+  // Outcome resolution: one authority resolver, shared across consumers.
   // Only JOINED rows aggregate; orphans are surfaced as counts only. Multiple
   // rows per retrieval resolve through resolveOutcomeAuthority() — the SAME
   // function analyze-retrieval-quality.mjs uses — never first-row-wins, so an
@@ -407,8 +405,7 @@ export function hygieneStats(projectDir) {
 const QUESTION_KINDS = Object.keys(DEFAULT_QUOTA);
 const SELF_TEST_TRIGGERS = ['user-invoked', 'auto-regrade'];
 
-// Closes the gap named in docs/specs/2026-07-23-metrics-holistic-redesign.md
-// §3b/§5: self-test grading results (the project's own blind self-exam,
+// Self-test grading results (the project's own blind self-exam,
 // scripts/self-test-round.mjs) reach the exported package through the exact
 // same dedicated log + whitelist discipline every other block here uses.
 // Numbers, ids, and hashes only — never the question/answer text or unit
@@ -912,26 +909,23 @@ export function collectProject(projectDir, { home, seal }) {
 
 // ---------- zip ----------
 
-// Relative archive path (product-owner-approved fix, corrected 2026-07-18 after the
-// first attempt failed local verification): on windows-latest, tar parses a
-// Windows drive-letter path's colon (e.g. C:\Users\...\out.zip) passed to -f
+// Relative archive path: on Windows, tar parses a
+// drive-letter path's colon (e.g. C:\Users\...\out.zip) passed to -f
 // as its remote host:path syntax and exits 128 ("Cannot connect to C: resolve
-// failed") — confirmed from live CI stderr, not inferred. The first fix
-// attempt added --force-local to disable that, but macOS/Linux bsdtar (the
+// failed"). --force-local would disable that, but macOS/Linux bsdtar (the
 // same libarchive-based tar that ships on Windows too) does not recognize
-// that flag at all ("Option --force-local is not supported" — confirmed by
-// direct local invocation before this fix shipped, unlike the first attempt).
-// The portable fix instead avoids the ambiguous colon entirely: run tar with
+// that flag at all ("Option --force-local is not supported").
+// The portable approach avoids the ambiguous colon entirely: run tar with
 // destZip's directory as the process cwd and pass only its basename to -f, so
 // -f never contains a drive letter. -C's argument for the source tree stays
 // absolute and is unaffected by the process cwd change.
 // ZIP local-file-header magic number (PK\x03\x04). `-a` auto-selects the archive
 // format from destZip's extension, but ZIP support behind `-a` is NOT consistent
-// across tar builds: GNU tar (what Git
-// Bash/MSYS2 put first on PATH on her machine) has no ZIP support at all and
-// silently emits an uncompressed TAR wearing a .zip extension, exit 0. The `tar -t`
-// listing check below does NOT catch this -- GNU tar happily lists its own tar
-// output, and manifest.json is right there, so the old code returned ok:true for a
+// across tar builds: GNU tar (commonly first on PATH under Git
+// Bash/MSYS2 on Windows) has no ZIP support at all and
+// silently emits an uncompressed TAR wearing a .zip extension, exit 0. A `tar -t`
+// listing check does NOT catch this -- GNU tar happily lists its own tar
+// output, and manifest.json is right there, so a listing check reports ok for a
 // file that is not actually a zip. Checking the real magic bytes is the only
 // verification that can't be fooled by a tar binary lying about its own output.
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
@@ -1012,7 +1006,7 @@ export function runPackage(argv, { homeOverride } = {}) {
       coverage.push({ project: collected.pseudonym, available: true });
     } catch (err) {
       // The reason is an error CODE, never err.message — raw messages embed real
-      // filesystem paths (the leak scan caught exactly this during development).
+      // filesystem paths, which the leak scan rejects.
       const code = (err && typeof err.code === 'string') ? err.code : 'collection-error';
       coverage.push({ project: seal('project', basename(dir)), available: false, reason: code });
     }
@@ -1020,14 +1014,13 @@ export function runPackage(argv, { homeOverride } = {}) {
   if (!projects.length) return { exit: 2, error: 'no project could be collected', coverage };
 
   // Deltas are computed READ-ONLY here; the history append happens only after
-  // the package actually ships (review finding: history was advancing before leakage
-  // validation — an aborted run must not consume a history slot).
+  // the package actually ships — an aborted run must not consume a history slot.
   for (const proj of projects) {
     proj.deltas = computeDeltas(home, proj.pseudonym, proj.headline);
   }
 
-  // Generator identity — honest provenance (review finding: a source-tree run must not
-  // identify itself as the released build). The manifest version is reported
+  // Generator identity — honest provenance: a source-tree run must not
+  // identify itself as the released build. The manifest version is reported
   // AS the manifest's claim; `generator` records where this code actually ran
   // from, and the source SHA is captured when the tree is a git checkout.
   let plugin = null;

@@ -9,7 +9,7 @@
  * rows as new evidence, mixing incompatible instruments, or inventing a state
  * for a genuine contradiction.
  *
- * The read side is TWO ordered steps (a 2026-07-23 review correction packet — the
+ * The read side is TWO ordered steps (the
  * order is load-bearing, not preference):
  *
  *   1. COHORT FIRST. Partition the RAW rows into the exact

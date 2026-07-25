@@ -18,8 +18,8 @@
  *
  * Wrapper seam: CORE_AUTOSTART_SKILL names the skill the directive invokes (default /core).
  * A wrapper (e.g. BBLens) sets it to its own entry point (/bblens) and inherits this hook —
- * one guarded mechanism instead of a duplicate wrapper-local one (a 2026-07-02 integration request;
- * overlay-not-fork). TWO gates, because project .claude/settings.json env is forwarded into
+ * one guarded mechanism instead of a duplicate wrapper-local one
+ * (overlay-not-fork). TWO gates, because project .claude/settings.json env is forwarded into
  * hook subprocesses: (1) shape — the value must look like /name or /plugin:name, so free
  * text never reaches the injected directive; (2) authority — a non-default skill is honored
  * only when the USER's ~/.claude/settings.json registers it (CORE_AUTOSTART_SKILL or the

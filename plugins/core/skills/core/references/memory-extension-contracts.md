@@ -44,8 +44,8 @@ something a wrapper can register locally:
 
 - **Unit types and edge types.** `VALID_TYPES` / `VALID_EDGE_TYPES` in `scripts/check-units.mjs`
   are hardcoded sets; a wrapper's novel type WARNs at validation and there is no project-local
-  override. New types get blessed into core on cross-corpus evidence — the `refines`/`amends`
-  precedent (2026-06-03, two corpora). Propose them upstream; don't carry unblessed types.
+  override. New types get blessed into core on cross-corpus evidence.
+  Propose them upstream; don't carry unblessed types.
 - **Harness adapters.** `KNOWN_HARNESSES` in `scripts/contract-format.mjs` is
   `['claude-code', 'codex']`. A new harness needs a `harnesses/<name>.md` adapter plus
   generator support in core.

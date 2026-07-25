@@ -46,12 +46,12 @@
  *   read-only      — couldn't read it (permission/IO); can't determine state.
  *
  * SESSION INVENTORY — DIAGNOSTIC ONLY, NON-AUTHORITATIVE. `--record-session-start`
- * snapshots which user-sensitive files existed at session start. It once drove a
- * safety decision ("absent from inventory => CORE-created => safe"); that was the
- * bug review falsified and it is GONE. The inventory now only annotates a
+ * snapshots which user-sensitive files existed at session start. It drives no
+ * safety decision ("absent from inventory => CORE-created => safe" would be
+ * unsound). The inventory only annotates a
  * no-baseline file with a `pre_existing` hint for the agent's narrative. Because
- * it drives no decision, the concurrency/staleness concerns review raised about the
- * single global inventory file no longer matter — a wrong hint is harmless.
+ * it drives no decision, concurrency/staleness of the
+ * single global inventory file doesn't matter — a wrong hint is harmless.
  *
  * CLI:
  *   node lifecycle-detect.mjs <project> [--record-session-start <id>] [--json]

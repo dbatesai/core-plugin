@@ -40,10 +40,10 @@ import { mapProjectPathToSlug } from '../project-slug.mjs';
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-visible-in-agent-context';
 export const DEFAULT_INJECTION_LINE_WINDOW = 200;
-// Byte cap on the injected MEMORY.md window. Field-observed (session 56, 2026-05-30):
-// Claude Code's startup warning displays "limit: 24.4KB" and renders a 25,684-byte file
+// Byte cap on the injected MEMORY.md window. Claude Code's startup warning
+// displays "limit: 24.4KB" and renders a 25,684-byte file
 // as "25.7KB" — decimal KB (÷1000), so the cap is 24,400 bytes, NOT 24.4×1024. A file can
-// sit UNDER the 200-line window yet OVER this byte cap (196 lines / 25.7KB that session),
+// sit UNDER the 200-line window yet OVER this byte cap,
 // truncating silently while a line-only probe falsely PASSes. Byte + line = defense-in-depth.
 export const DEFAULT_INJECTION_BYTE_WINDOW = 24400;
 

@@ -48,9 +48,9 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 
 **How to apply.** Code that observes (read capability state, render readiness, surface hygiene metrics) sets a graceful fallback when probes return DEGRADED / NOT-YET / UNKNOWN — narrate the limitation, don't refuse to start. Code that mutates (collab event-write, PROJECT.md autonomous render, plugin-cache install) reads `mutation_permitted` from the relevant capability row and aborts with `mutation_block_reason` when false. The two paths use the same capability primitive but read different fields.
 
-**First consumer.** `capability-probe.mjs --startup` (v2.6.0, fail-open) vs `capability-probe.mjs --pre-action collab-files-mutating` (v2.6.0, fail-closed). Same script, different invocation modes; the modes embody the doctrine.
+**First consumer.** `capability-probe.mjs --startup` (fail-open) vs `capability-probe.mjs --pre-action collab-files-mutating` (fail-closed). Same script, different invocation modes; the modes embody the doctrine.
 
-**Codified in.** The standing fail-open-startup / fail-closed-mutation ruling. This doctrine is its cross-protocol form — the ruling names the rule; this file names the consumers.
+**Codified in.** The standing fail-open-startup / fail-closed-mutation rule. This doctrine is its cross-protocol form — the rule itself, plus this file naming the consumers.
 
 ## Doctrine 5 — Doctrine-consumer coupling
 

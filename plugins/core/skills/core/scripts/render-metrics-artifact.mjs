@@ -7,14 +7,13 @@
  * NEVER UPLOADS ANYTHING — it generates a local file, prints a preflight
  * manifest, and writes a local generation receipt; that is the whole job).
  *
- * Design source: the hand-built prototype the product owner approved 2026-07-22 (and
- * corrected once for plain language). Its section structure (four
+ * The page's section structure (four
  * plain-question sections), copy voice (every measurement explained in the
  * sentence it appears in — never a bare metric name), visual system (tokens,
  * chips, gauges, hatched empty states, snapshot banner, both themes), and
- * trust-tag legend are the spec this generator reproduces mechanically.
+ * trust-tag legend are fixed; this generator reproduces them mechanically.
  *
- * Hard requirements carried over from render-browse-artifact.mjs:
+ * Hard requirements shared with render-browse-artifact.mjs:
  *   - Zero external references anywhere in the page (strict-CSP survivable;
  *     grep-assertable and asserted in the test suite). This page needs no
  *     JavaScript at all — it is static HTML + inline CSS.
@@ -361,10 +360,9 @@ function graderVerificationRow(readiness) {
   });
 }
 
-// (Section 4 — user benefit — REMOVED by ruling, 2026-07-24: the matched
-// on/off comparison is unobservable, so the question left scope by decision.
-// The honest "never measured" row's job is done; keeping it would imply the
-// question is still open.)
+// There is deliberately NO user-benefit section: the matched on/off comparison
+// is unobservable, so that question is out of scope by decision — a row for it
+// would imply the question is still open.
 
 // ---- The verdict block, scoped to mechanics exactly like the terminal heading ----
 function verdictBlock(mech) {

@@ -89,8 +89,8 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   if (unitsChanged) {
     if (apply) {
       // Stamp the state cache for every generated file this pass actually
-      // rewrites, in the same operation as the write (a review finding,
-      // 2026-07-22 — same pattern decorate-graph.mjs and hot-section.mjs
+      // rewrites, in the same operation as the write (same pattern
+      // decorate-graph.mjs and hot-section.mjs
       // use: a script that rewrites a file on the user's behalf must record
       // that in code, not rely on the agent remembering to update the cache
       // by hand). These files are fully machine-generated with no
@@ -156,9 +156,9 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
     notes.push(`turn-capture retention skipped (${String(e && e.message).slice(0, 60)})`);
   }
 
-  // 3.6 One-release sweep: remove any leftover rich-context stream from the
-  // retired opt-in mechanism (superseded by turn-capture, v3.14.0 — its
-  // zero-hit-only defect closed by construction). The dirname is asserted before deletion, same
+  // 3.6 One-release sweep: remove any leftover rich-context stream directory
+  // left by the retired opt-in capture mechanism (turn-capture is the live
+  // capture layer). The dirname is asserted before deletion, same
   // boundary discipline as every deletion op here. Remove this block in v3.15.0.
   if (apply) {
     try {
