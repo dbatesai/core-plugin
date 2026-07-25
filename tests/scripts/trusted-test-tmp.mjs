@@ -9,10 +9,34 @@
  * that create paths here MUST register an after() cleanup (see
  * isolatedHooksLog() call sites for the pattern).
  */
-import { mkdirSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+
+/**
+ * Windows without Developer Mode or admin lacks SeCreateSymbolicLinkPrivilege,
+ * so fs.symlinkSync throws EPERM for a normal process — symlink-fixture tests
+ * then hard-fail in SETUP without exercising the product logic at all
+ * (Meridian's R11 full-suite finding, 2026-07-23). Probe once per process;
+ * symlink-dependent tests call this and skip cleanly when it's false.
+ * GitHub's windows-latest runners have the privilege, so CI still exercises
+ * the real assertions everywhere they can run.
+ */
+let _symlinkCapable = null;
+export function symlinkCapable() {
+  if (_symlinkCapable !== null) return _symlinkCapable;
+  const dir = mkdtempSync(join(tmpdir(), 'symlink-probe-'));
+  try {
+    symlinkSync(dir, join(dir, 'probe-link'), 'dir');
+    _symlinkCapable = true;
+  } catch {
+    _symlinkCapable = false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  return _symlinkCapable;
+}
 
 export function trustedTestTmpRoot() {
   const dir = join(homedir(), '.core', '.test-tmp');

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, symlinkCapable } from './trusted-test-tmp.mjs';
 import { resolveHookLogPath, logHookEvent } from '../../plugins/core/skills/core/hooks/hook-log.mjs';
 
 const HOOKS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
@@ -178,7 +178,8 @@ test('resolveHookLogPath: no env var falls back to the default', () => {
 // re-check (realpathSync after mkdir) is the actual defense; this proves it
 // refuses the write rather than following the link, using a real symlink,
 // not a hypothetical.
-test('logHookEvent: a symlink under ~/.core pointing outside it is refused, not followed', () => {
+test('logHookEvent: a symlink under ~/.core pointing outside it is refused, not followed', (t) => {
+  if (!symlinkCapable()) return t.skip('symlink privilege unavailable (Windows non-elevated box)');
   const outsideDir = mkdtempSync(join(tmpdir(), 'hook-log-outside-'));
   const linkDir = join(trustedTestTmpRoot(), `escape-link-${Date.now()}`);
   symlinkSync(outsideDir, linkDir, 'dir');
