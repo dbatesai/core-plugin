@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * mailbox.mjs — the per-project mailbox: inbound messages TO the agent running a
- * project, from David or other agents. Plain files in `<project>/_mailbox/`,
+ * project, from the product owner or other agents. Plain files in `<project>/_mailbox/`,
  * discoverable via the project registry. Checked at startup + on demand (no hook,
- * no scheduler — David 2026-07-12). Standard surface for every CORE project.
+ * no scheduler). Standard surface for every CORE project.
  *
- * INDEPENDENCE INVARIANT (David 2026-07-12): zero dependency on collab-plugin. This
+ * INDEPENDENCE INVARIANT: zero dependency on collab-plugin. This
  * script imports only node stdlib. Collab MAY adopt the convention as an optional
  * sender; core-plugin never imports/requires/assumes collab, and the mailbox does
  * not ride collab's transport. It is plain files.
@@ -30,18 +30,16 @@
  * registered id or a path to a real project. An unresolved target FAILS LOUD
  * (exit 2) — a comms channel must never silently drop a message.
  *
- * Self-caught 2026-07-20: `list`/`read`/`archive` used to resolve <project>
- * with a bare `resolve()` instead of the registry-aware resolveTarget() that
- * `post --to` already used -- a workspace id (e.g. an id NOT containing '/'
- * or '.') silently resolved relative to the CALLER'S cwd instead of through
- * the registry, and a wrong/unregistered id landed on a nonexistent
- * directory and printed "no unread messages" instead of failing loud. That
- * is indistinguishable from a genuinely empty mailbox and is exactly the
- * silent-drop the FAILS LOUD invariant above was supposed to rule out --
- * caught only because a 172-message backlog turned out to be sitting
- * unseen behind it. All three ops now route through resolveTarget() too.
+ * ALL ops — `list`/`read`/`archive` as well as `post --to` — resolve <project>
+ * through the registry-aware resolveTarget(), never a bare `resolve()`. With a
+ * bare `resolve()`, a workspace id (an id NOT containing '/'
+ * or '.') would silently resolve relative to the CALLER'S cwd instead of through
+ * the registry, and a wrong/unregistered id would land on a nonexistent
+ * directory and print "no unread messages" instead of failing loud —
+ * indistinguishable from a genuinely empty mailbox, exactly the
+ * silent-drop the FAILS LOUD invariant above rules out.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only, macOS + Windows.
+ * Ships with the plugin by design; .mjs only, macOS + Windows.
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync, linkSync, unlinkSync, realpathSync } from 'node:fs';
@@ -152,7 +150,7 @@ export function readMessage(projectPath, file) {
   return readFileSync(full, 'utf8');
 }
 
-// K16 (Hale's audit, 2026-07-16): archiveMessage renamed straight onto
+// K16: archiveMessage renamed straight onto
 // `join(archiveDir, basename(file))` with no collision check — a bare
 // filesystem rename onto an existing path silently REPLACES it. The inbox's
 // own collision guard (atomicCreate, below) only scopes to the inbox
@@ -222,15 +220,15 @@ let _seq = 0;
 function realish() { return (process.hrtime.bigint().toString(36) + (_seq++).toString(36)); }
 
 /**
- * Ensure `_mailbox/` is git-ignored in the target project (governance control, not a
- * doc sentence — Crest's boundary + the adversarial critic). The mailbox is transient,
+ * Ensure `_mailbox/` is git-ignored in the target project (a governance control
+ * enforced in code, not a doc sentence). The mailbox is transient,
  * potentially cross-project-sensitive inbound comms; unlike the memory store it must
  * never be committed/pushed. Idempotent append to <project>/.gitignore.
  */
-// Fail-closed (Hale's finding, 2026-07-21): the old version swallowed every
-// failure here — a `.gitignore` that couldn't be read OR written (e.g. it's a
+// Fail-closed: swallowing failures here — a `.gitignore` that can't be read
+// OR written (e.g. it's a
 // directory, or the tree is read-only in a way that isn't a plain ENOENT on a
-// missing file) silently fell through, and postMessage() still wrote the
+// missing file) — would let postMessage() write the
 // mailbox content with no leak protection actually established. Returns
 // normally on success; THROWS when protection can't be verified, so the
 // caller (postMessage) can refuse rather than write unprotected content.

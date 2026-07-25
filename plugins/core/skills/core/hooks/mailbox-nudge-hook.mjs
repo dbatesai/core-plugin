@@ -21,7 +21,7 @@
  * documented per-project inbox. It intentionally does NOT know about
  * sibling advisor-project mailboxes some multi-agent workflows use --
  * naming specific sibling project paths in shipped code would be exactly
- * the core-vs-extension leak DC-102 forbids (core ships the capability,
+ * the core-vs-extension leak the separation rule forbids (core ships the capability,
  * a workflow's own project layout is its own business).
  *
  * Fail-open and silent by default: no _mailbox/ directory, or zero unread

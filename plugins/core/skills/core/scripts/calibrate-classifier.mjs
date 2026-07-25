@@ -17,7 +17,7 @@
  * HONESTY GATE: precision is computed from imported labels only — never from the
  * heuristic output itself (that would be circular, the R-1 self-confirming failure).
  *
- * Privacy-gated. Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Privacy-gated. Ships with the plugin by design; .mjs only.
  *
  * CLI:
  *   node calibrate-classifier.mjs <project> --check
@@ -80,7 +80,7 @@ export function emptyCalibrationState() {
     // distinct leg of the instrument triple, NOT the calibration-file schema
     // above. Consumers (metrics-rollup) bind exact-triple calibration to this
     // field so a calibration taken against a different row schema can't claim
-    // to describe the current instrument (Hale item 5, 2026-07-23).
+    // to describe the current instrument.
     classified_schema_version: CLASSIFIED_SCHEMA_VERSION,
     is_calibrated: false,
     provisional: true,
@@ -483,7 +483,7 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
     classifier_version: CLASSIFIER_VERSION,
     proxy_version: PROXY_VERSION,
     // Distinct instrument-triple leg: the classified-row schema calibration was
-    // measured against (Hale item 5, 2026-07-23). metrics-rollup binds
+    // measured against. metrics-rollup binds
     // exact-triple calibration to this, never to schema_version above.
     classified_schema_version: CLASSIFIED_SCHEMA_VERSION,
     is_calibrated: allHarnessesCalibrated,

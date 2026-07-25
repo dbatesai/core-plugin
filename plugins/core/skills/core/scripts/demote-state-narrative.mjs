@@ -1,7 +1,7 @@
 /**
- * demote-state-narrative.mjs — Phase 1c of the DC-85 memory architecture
- * redesign. Demotes stale §State narrative bullets in PROJECT.md to
- * PROJECT-ARCHIVE.md §State, leaving a one-line stub pointer in place.
+ * demote-state-narrative.mjs — demotes stale §State narrative bullets in
+ * PROJECT.md to PROJECT-ARCHIVE.md §State, leaving a one-line stub pointer
+ * in place.
  *
  * A §State bullet is demotable when:
  *  - It has at least one `*Backed by ...*` italicized footer citation.
@@ -15,19 +15,19 @@
  *  - max(updated:) is used across cited units, not min — newer cited unit
  *    keeps the bullet current even if older ones are stale.
  *  - Citation styles other than the strict `*Backed by ...*` footer
- *    (e.g. older `*DC-XX.*` shorthand) fall into the no-citation bucket
- *    by design — DC-93 §3 names this explicitly.
+ *    (e.g. the `*DC-XX.*` shorthand) fall into the no-citation bucket
+ *    by design.
  *
- * Default mode is DRY-RUN per DC-93 + the PROJECT.md §Moves Phase 1c entry.
+ * Default mode is DRY-RUN by design.
  * Only `--apply` writes. This differs from demote-moves.mjs (auto-applies
- * per DC-89) because §State demotion is materially riskier: bullets are
+ * by design) because §State demotion is materially riskier: bullets are
  * current-truth statements rather than already-closed work items, and the
  * criteria are tuned for §State-heavy non-CORE corpora that haven't been
  * exercised yet. Flip the default in a tracked decision once cross-corpus
  * validation produces clean candidate lists for N sessions.
  *
- * Per DC-77 the script ships with the plugin (not per-project).
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * By design the script ships with the plugin (not per-project).
+ * The plugin ships Node.js (.mjs) only.
  */
 
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
@@ -43,21 +43,19 @@ import {
   writeGuardDecision, withProjectMdWriterLock,
 } from './lifecycle-core.mjs';
 
-// Terminal statuses come from the shared vocabulary (SYN-005). This resolves
-// the 2026-05-27 criteria-vs-corpus mismatch noted here previously: 'retired'
-// (229-active/3-retired corpus) is now terminal in BOTH demoters at once, and
-// the out-of-schema 'resolved'/'closed' no longer gate. Symmetry with
-// demote-moves is structural now — both import the same Set.
+// Terminal statuses come from the shared vocabulary (SYN-005): 'retired' is
+// terminal in BOTH demoters at once, and the out-of-schema
+// 'resolved'/'closed' do not gate. Symmetry with demote-moves is
+// structural — both import the same Set.
 export { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 export const STATE_CLOSE_AGE_DAYS = 60;
 export const LARGE_BATCH_WARNING_THRESHOLD = 20;
 export const ARCHIVE_FILE = 'PROJECT-ARCHIVE.md';
 export const ARCHIVE_STATE_HEADING = '## §State';
-// Only the strict `*Backed by ...*` footer counts as a citation for v1
-// (DC-93 §3). Older styles intentionally don't match — they keep the
-// bullet on the conservative no-citation path until a HTML-marker
-// upgrade lands.
+// Only the strict `*Backed by ...*` footer counts as a citation.
+// Other citation styles intentionally don't match — they keep the
+// bullet on the conservative no-citation path.
 export const BACKED_BY_PATTERN = /\*Backed by [^*]+\*/;
 
 // ---------- Section + bullet extraction ----------
@@ -120,12 +118,10 @@ export function parseStateBullets(stateBody) {
   return bullets;
 }
 
-// ---------- Local helpers (mirrors demote-moves file-locals; see Path B
-// in 2026-05-27-phase-1c-implementation-plan.md for the duplicate-vs-extract
-// reasoning). Refactor into a shared `_demote-helpers.mjs` when a third
-// demote-* script needs them.
+// ---------- Local helpers (mirrors demote-moves file-locals). Refactor into
+// a shared `_demote-helpers.mjs` when a third demote-* script needs them.
 
-// Flat frontmatter map for a unit (M1: shared parser, was a local copy).
+// Flat frontmatter map for a unit (shared parser).
 function parseFrontmatter(text) {
   return parseFlatFrontmatter(text)[0];
 }
@@ -157,7 +153,7 @@ function extractBulletTitle(text) {
 export function classifyStateBullet(bullet, projectDir, { today, recencyDays = STATE_CLOSE_AGE_DAYS } = {}) {
   // Strict footer match is the only path to "has citations" in v1 —
   // extractBackingUnitRefs alone would catch backticked unit ids elsewhere
-  // in the bullet body and treat them as citations. DC-93 §3 chose the
+  // in the bullet body and treat them as citations. The demotion design chose the
   // strict-footer-only interpretation; widen later only on dry-run evidence.
   if (!BACKED_BY_PATTERN.test(bullet.text)) {
     return { decision: 'keep', reason: 'no-backing-units' };
@@ -342,7 +338,7 @@ export function demoteStateNarrative(projectDir, { today, apply = false } = {}) 
   const newText = text.slice(0, beforeState) + newState + text.slice(afterState);
 
   // Shared PROJECT.md writer lock + edit gate + live-preimage CAS + re-stamp
-  // (Hale's points 2/6/7, 2026-07-22) — identical pattern to demote-moves.mjs:
+  // — identical pattern to demote-moves.mjs:
   // re-stamp so the next PROJECT.md writer sees a coherent baseline, but only
   // on a clean baseline (guard first, refuse on a pending edit or stale
   // preimage) so a blind re-stamp can't launder an unreconciled edit. Guard

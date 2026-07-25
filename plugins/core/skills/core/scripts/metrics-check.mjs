@@ -2,16 +2,14 @@
 /**
  * metrics-check.mjs — evidence-first memory health check for a CORE project.
  *
- * Ported from the personal `~/.claude/skills/metrics/` skill into the plugin
- * proper. Script resolution follows the metrics-package.mjs pattern exactly:
- * this file lives beside check-units.mjs / retrieve-context.mjs / calibrate-
+ * Script resolution follows the metrics-package.mjs pattern exactly: this
+ * file lives beside check-units.mjs / retrieve-context.mjs / calibrate-
  * classifier.mjs in the shared `skills/core/scripts/` directory, so it calls
- * them by co-location (`scriptDir`-relative) instead of hunting for an
- * installed plugin cache the way the old standalone version had to.
+ * them by co-location (`scriptDir`-relative).
  *
- * Reports FOUR SEPARATE, HONESTLY-LABELED EVIDENCE CLASSES (2026-07-22 —
- * never blend them into one umbrella verdict again; see the "Evidence-class
- * contract" comment below for the full rationale):
+ * Reports THREE SEPARATE, HONESTLY-LABELED EVIDENCE CLASSES (never blended
+ * into one umbrella verdict; see the "Evidence-class contract" comment below
+ * for the full rationale):
  *
  *  1. MECHANICS (proven-live + direct): the live round-trip PROOF — builds a
  *     throwaway scratch store, writes synthetic units through the plugin's
@@ -30,10 +28,6 @@
  *  3. MEASUREMENT READINESS (provisional / direct): is the instrumentation
  *     itself ready to be trusted? The recognition signal and the calibration
  *     pool that gates it.
- *  4. USER BENEFIT (not-evaluated): does any of this measurably help the
- *     user get better answers? Nothing in this codebase measures that yet —
- *     no matched memory-on/off comparison exists — so the row says so
- *     plainly instead of being silently folded into the other classes.
  *
  * Output (default): the rendered report — a MECHANICS-scoped verdict heading,
  * sectioned blocks of 10-char bar gauges (one gauge per row, one section per
@@ -41,9 +35,9 @@
  * classes, never just the first. Pass --json to emit EXACTLY the canonical data
  * object as a single JSON document instead of the report (nothing else on the
  * stream, so the output is valid JSON that render-metrics-artifact --json-in can
- * consume directly). Its top-level structure IS the four-evidence-class taxonomy
- * (2026-07-22, Hale's slice acceptance revise — the machine consumer must
- * receive the SAME taxonomy the human report renders, never a different one):
+ * consume directly). Its top-level structure IS the three-evidence-class
+ * taxonomy — the machine consumer receives the SAME taxonomy the human report
+ * renders, never a different one:
  *
  *   schema_version  — METRICS_REPORT_SCHEMA_VERSION, stamped by this script
  *   producer        — { script, plugin, plugin_version, source_sha } from the
@@ -53,7 +47,6 @@
  *                     scoped machine verdict plus everything mechanics-class
  *   regression      — { gold }: the gold-set snapshot ONLY
  *   readiness       — { recognition_signal, calibration }
- *   benefit         — { status: 'not-evaluated', reason }
  *   generated_at / project / caveats / report — run metadata + the rendered
  *                     report string
  *
@@ -134,7 +127,7 @@ export const FAILED_CHAR = '✗';
  * from the 0/1 boundary), 15% -> 2 filled blocks (rounds up from the 1/2
  * boundary), 73% -> 7 filled blocks (7.3 rounds down), 0% -> 0, 100% -> 10.
  *
- * Non-zero floor (2026-07-22): plain rounding sends anything below the first
+ * Non-zero floor: plain rounding sends anything below the first
  * bin's midpoint (0% < pct < 5%) to 0 filled blocks — a real-but-low signal
  * like 3% then renders identically to a hard 0%/absent state, with no visual
  * difference between "present but weak" and "nothing at all". No half-block
@@ -151,7 +144,7 @@ export function renderBar(pct, { failed = false } = {}) {
 }
 
 // ============================================================
-// Trust vocabulary (same meaning as the original skill's table)
+// Trust vocabulary
 // ============================================================
 
 export const TRUST = {
@@ -160,33 +153,25 @@ export const TRUST = {
 };
 
 // ============================================================
-// Evidence-class contract (2026-07-22, Hale's metrics-evidence-lifecycle
-// synthesis, accepted by Keel — see the mailbox thread
-// "accept-metrics-evidence-contract-first-slice"; REVISED the same day per
-// Hale's slice-1 follow-up review "evidence classes still mixed" — capture
-// volume/tier-mix is a mechanics/instrumentation fact, not regression
-// evidence, and recognition/calibration are a measurement-READINESS gate,
-// not regression either). Four honest classes, never blended into one
+// Evidence-class contract — three honest classes, never blended into one
 // verdict:
 //   mechanics   — proven store mechanics + instrumentation health: round-trip
 //                 proof, unit integrity, and telemetry capture counts (never
 //                 a percentage — there is no valid eligible-hook denominator
 //                 to divide by).
 //   regression  — does retrieval itself work well against a reference
-//                 answer key? Currently exactly one signal: a live gold-set
+//                 answer key? Exactly one signal: a live gold-set
 //                 snapshot run, honestly labeled provisional (the execution
-//                 is live/proven, but the answer key is a small, Keel-
+//                 is live/proven, but the answer key is a small, agent-
 //                 authored, directional set with no preregistered pass
 //                 threshold — a regression SNAPSHOT, not a passing GATE).
 //   readiness   — is the measurement instrumentation itself ready to be
 //                 trusted? Recognition signal + the calibration pool that
 //                 gates it. Neither is retrieval regression or user benefit.
 //
-// (A fourth class — user benefit — rendered "not evaluated" through v3.13.x.
-// REMOVED per DC-129, 2026-07-24: measuring what the user did with delivered
-// answers is unobservable, so the question left scope by decision rather than
-// by gap. The honest row's job was done; keeping it would imply the question
-// is still open.)
+// User benefit — whether delivered answers measurably help the user — is out
+// of scope: what the user did with a delivered answer is unobservable from
+// here, so no class claims it.
 // ============================================================
 export const SECTION = { MECHANICS: 'mechanics', REGRESSION: 'regression', READINESS: 'readiness' };
 
@@ -221,7 +206,7 @@ const run = (script, args) => {
 };
 
 // ============================================================
-// Calibration-pool check — the new row. Reuses calibrate-classifier.mjs's own
+// Calibration-pool check. Reuses calibrate-classifier.mjs's own
 // readinessReport() (imported, not shelled out to) so this never re-derives
 // the gate logic; it just reads the same answer /calibrate-classifier --check
 // would report. Fails open: any error here means "no calibration data", never
@@ -322,7 +307,7 @@ export async function checkGoldRegression(project, { goldPath = join(resolve(pro
 // Renders a {count, by_code} bucket as a short CLOSED-vocabulary summary —
 // e.g. "invalid-tier: 1, missing-tier: 2". Codes are safe to interpolate
 // anywhere (rendered report, --json, a future package surface); the raw
-// values that failed validation never are (Hale, 2026-07-22).
+// values that failed validation never are.
 function formatRejectionCodes(bucket) {
   return Object.entries(bucket?.by_code || {}).sort((a, b) => b[1] - a[1]).map(([code, n]) => `${code}: ${n}`).join(', ');
 }
@@ -337,7 +322,7 @@ export function checkLiveRetrievalProxy(project) {
   if (!report.total_events || !report.retrieval_events) {
     // Even with zero valid events, a nonzero rejected count is real evidence —
     // say so instead of reporting an absence indistinguishable from "nothing
-    // ever ran" (2026-07-22, evidence-lifecycle slice 2).
+    // ever ran".
     const reason = rejected.total > 0
       ? `no VALID retrieval events recorded — ${rejected.total} row(s) rejected (${[
           rejected.current.count > 0 ? `current-schema: ${formatRejectionCodes(rejected.current)}` : null,
@@ -369,9 +354,9 @@ export function checkLiveRetrievalProxy(project) {
 
 export function computeRows(out) {
   const rows = [];
-  // Every read below comes off the SAME canonical four-class object --json
-  // emits — mechanics/regression/readiness/benefit — so the render and the
-  // machine output can never carry different taxonomies (Hale, 2026-07-22).
+  // Every read below comes off the SAME canonical three-class object --json
+  // emits — mechanics/regression/readiness — so the render and the
+  // machine output can never carry different taxonomies.
   const mech = out.mechanics || {};
   const store = mech.store || {};
   const readiness = out.readiness || {};
@@ -402,19 +387,14 @@ export function computeRows(out) {
     value: !store.present ? 'no store' : `${attention} warning${attention === 1 ? '' : 's'}`,
   });
 
-  // 3. Telemetry capture — REPLACES the old "Retrieval-log coverage" percentage
-  // (Hale, 2026-07-22 slice-1 revise: "rows÷days is an invalid denominator...
-  // remove the gauge/percentage... show counts"). There is no eligible-hook
-  // receipt to divide by, so this row is COUNTS ONLY — noGauge:true skips the
-  // bar entirely rather than render a bracket that would silently imply a
-  // valid percentage. Tier mix (previously its own "Live retrieval proxy"
-  // regression row) folds in here too: it is a mechanism/instrumentation
-  // diagnostic, not a regression claim, per Hale's item 3. Malformed-row
+  // 3. Telemetry capture — COUNTS ONLY: rows÷days is an invalid denominator
+  // (there is no eligible-hook receipt to divide by), so noGauge:true skips
+  // the bar entirely rather than render a bracket that would silently imply a
+  // valid percentage. Tier mix folds in here too: it is a mechanism/
+  // instrumentation diagnostic, not a regression claim. Malformed-row
   // rejection counts (closed codes only) live here as well — capture health
-  // is a mechanics concern, and the data now LIVES at mechanics.telemetry in
-  // the canonical object (not regression.liveProxy — the old placement that
-  // contradicted this very classification; Hale, 2026-07-22 acceptance
-  // revise, item 1).
+  // is a mechanics concern, and the data lives at mechanics.telemetry in
+  // the canonical object.
   const proxy = mech.telemetry || {};
   const rejected = proxy.rejected || { current: { count: 0, by_code: {} }, legacy: { count: 0, by_code: {} }, other: { count: 0, by_code: {} }, total: 0 };
   const rejectedNote = rejected.total > 0
@@ -442,15 +422,13 @@ export function computeRows(out) {
     value: telemetryValue,
   });
 
-  // 3b. Rich-context capture — VISIBLE ACTIVE STATE. The opt-in stream saves
-  // literal query + delivered-context text locally, so when it is ON the user
-  // must see one plain-language line saying so and how to turn it off. When
-  // OFF (the default) NOTHING renders here (Hale metrics-evidence contract,
-  // item 4; visible-active-state + independent disable).
+  // 3b. Rich-context capture — VISIBLE ACTIVE STATE. The default-ON stream
+  // saves literal query + delivered-context text locally, so its state must
+  // always render in one plain-language line (visible-active-state +
+  // independent disable).
   const tc = mech.turn_capture || {};
   {
-    // Default-ON stream (DC-129): the honest move inverts the old opt-in
-    // display rule — because it IS on unless the user acted, the ON state and
+    // Because the stream IS on unless the user acted, the ON state and
     // its off-switches must always render, and the OFF state renders too so an
     // opted-out user sees their choice took effect.
     const health = tc.health || {};
@@ -467,14 +445,13 @@ export function computeRows(out) {
   }
 
   // ---- RETRIEVAL REGRESSION: does retrieval work well against a reference
-  // answer key? Currently exactly one signal exists — a live gold-set
+  // answer key? Exactly one signal exists — a live gold-set
   // snapshot — and it is labeled `provisional`, never `proven-live`: the
   // EXECUTION is genuinely live (retrieveContext + buildFinalContextPack run
-  // for real, this run), but the reference set is a small, Keel-authored,
+  // for real, this run), but the reference set is a small, agent-authored,
   // directional answer key with no preregistered pass/fail threshold. A live
-  // run does not independently validate its own expected answers (Hale,
-  // 2026-07-22 slice-1 revise, item 5) — this is a regression SNAPSHOT, not a
-  // passing GATE. ----
+  // run does not independently validate its own expected answers — this is a
+  // regression SNAPSHOT, not a passing GATE. ----
 
   // 4. Gold-set snapshot — real regression evidence when a project has a
   // pre-registered gold set; an honest absence otherwise.
@@ -491,7 +468,7 @@ export function computeRows(out) {
     // A frozen self-test round earns the richer, more honest line: the per-kind
     // breakdown (including the "nothing stored about that" trap-leak rate) and
     // the old-vs-new delta that watches for overfitting. Still provisional —
-    // the answer key is self-authored — but no longer a single static number.
+    // the answer key is self-authored.
     let selfTestBits = '';
     if (fromRound) {
       const kinds = Object.entries(gold.by_kind || {})
@@ -525,8 +502,7 @@ export function computeRows(out) {
   // ---- MEASUREMENT READINESS: is the instrumentation itself ready to be
   // trusted? Neither of these two rows is retrieval regression or user
   // benefit — recognition is a provisional need/failure classifier, and
-  // calibration is the readiness gate that governs it (Hale, 2026-07-22
-  // slice-1 revise, item 4). ----
+  // calibration is the readiness gate that governs it. ----
 
   // 5. Recognition signal — INVERTED on purpose: the underlying number is a
   // FAILURE rate (rec-fail-tier-0), so a bigger number is worse. The bar shows
@@ -569,7 +545,7 @@ export function computeRows(out) {
 // ============================================================
 
 export function buildNarrative(out) {
-  // Same canonical four-class object the renderer and --json use — never a
+  // Same canonical three-class object the renderer and --json use — never a
   // parallel view of the data.
   const mech = out.mechanics || {};
   const store = mech.store || {};
@@ -597,8 +573,8 @@ export function buildNarrative(out) {
   }
 
   // s1 — mechanics + telemetry capture (an instrumentation fact, not
-  // regression evidence — Hale, 2026-07-22 slice-1 revise; the data lives at
-  // mechanics.telemetry in the canonical object).
+  // regression evidence; the data lives at mechanics.telemetry in the
+  // canonical object).
   const proxy = mech.telemetry || {};
   let s1 = 'Mechanics are proven and working';
   if (proxy.available) {
@@ -639,13 +615,10 @@ export function buildNarrative(out) {
 // Full report render — verdict heading, visual block, narrative.
 // ============================================================
 
-// Display text for the MECHANICS heading only — 'HEALTHY' replaces the old
-// 'WORKING' wording per Hale's slice-1 revise (matching his exact target
-// shape: "MECHANICS: HEALTHY"). The internal status KEYS are unchanged
-// ('WORKING'/'WORKING-WITH-CAVEATS'/...), but the field now lives at
-// mechanics.status in the canonical object — scoped to mechanics exactly like
-// this heading, never an umbrella top-level `verdict` (Hale, 2026-07-22
-// acceptance revise, item 4).
+// Display text for the MECHANICS heading only — maps the internal status
+// KEYS ('WORKING'/'WORKING-WITH-CAVEATS'/...) to their display wording. The
+// field lives at mechanics.status in the canonical object — scoped to
+// mechanics exactly like this heading, never an umbrella top-level `verdict`.
 const VERDICT_DISPLAY = {
   'WORKING': 'HEALTHY',
   'WORKING-WITH-CAVEATS': 'HEALTHY — with caveats',
@@ -660,8 +633,7 @@ const GAUGE_WIDTH = BAR_WIDTH + 3;
 
 // Section headers below the mechanics heading — each names its OWN evidence
 // class and its OWN honest status word, so no single word at the top can be
-// misread as covering evidence three sections down (Hale, 2026-07-22
-// slice-1 revise: match this shape exactly).
+// misread as covering evidence three sections down.
 const SECTION_HEADER = {
   [SECTION.REGRESSION]: 'RETRIEVAL REGRESSION: PROVISIONAL',
   [SECTION.READINESS]: 'MEASUREMENT READINESS',
@@ -679,8 +651,7 @@ export function renderReport(out, { workspaceName } = {}) {
   const renderRow = (row) => {
     // noGauge rows (e.g. Telemetry capture) render NO bracket/bar at all —
     // there is no valid denominator to turn into a percentage, so the space
-    // stays blank rather than imply one (Hale, 2026-07-22: "remove the
-    // gauge/percentage... show counts").
+    // stays blank rather than imply one.
     const gauge = row.noGauge ? ' '.repeat(GAUGE_WIDTH) : `[${renderBar(row.pct, { failed: row.failed })}] `;
     return `${row.label.padEnd(LABEL_WIDTH)}${gauge}${row.trust.padEnd(TRUST_WIDTH)} ${row.value}`;
   };
@@ -707,11 +678,11 @@ export function renderReport(out, { workspaceName } = {}) {
 // ============================================================
 
 export async function gatherMetrics(cwd, { home = homedir() } = {}) {
-  // THE canonical object. Its top-level structure IS the four-evidence-class
-  // taxonomy (mechanics/regression/readiness/benefit) plus identity and run
+  // THE canonical object. Its top-level structure IS the three-evidence-class
+  // taxonomy (mechanics/regression/readiness) plus identity and run
   // metadata — the renderer consumes this exact object and --json emits it
-  // verbatim, so machine and human views share one taxonomy by construction
-  // (Hale, 2026-07-22 acceptance revise). No umbrella top-level verdict: the
+  // verbatim, so machine and human views share one taxonomy by construction.
+  // No umbrella top-level verdict: the
   // machine verdict is mechanics.status, scoped like the rendered heading.
   const out = {
     schema_version: METRICS_REPORT_SCHEMA_VERSION, // always OUR stamp (record-retrieval-event.mjs convention)
@@ -816,10 +787,8 @@ ${body}
     // rendered Telemetry-capture row all source from checkLiveRetrievalProxy()
     // below instead, which reuses analyze-retrieval-quality.mjs's loadEvents()
     // /buildReport() — the ONE canonical validator and rejection-counter.
-    // Keeping a second, independent per-row validity check here (as an
-    // earlier version of this code did) is exactly the "weaker parallel
-    // schema" anti-pattern Hale's slice-2 review flagged; this scan no longer
-    // attempts one (2026-07-22).
+    // A second, independent per-row validity check here would be a weaker
+    // parallel schema; this scan deliberately attempts none.
     let rows = 0, files = 0;
     const sessions = join(cwd, '_sessions');
     if (existsSync(sessions)) {
@@ -836,9 +805,7 @@ ${body}
       note: 'raw line/file count only — capture presence, not schema validity or retrieval correctness (see the Telemetry capture row for the validated, rejection-counted breakdown)' };
 
     // recognition / trend signal state — a MEASUREMENT-READINESS fact, so it
-    // lives in the readiness class (not under the mechanics store — the old
-    // placement that contradicted the render's classification; Hale,
-    // 2026-07-22 acceptance revise, item 2).
+    // lives in the readiness class, matching the render's classification.
     try {
       const wsId = JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8')).workspace_id;
       const sig = join(home, '.core/workspaces', wsId, 'metrics/orient-signal.txt');
@@ -860,11 +827,10 @@ ${body}
   // ---- 4. RETRIEVAL REGRESSION (read-only + one live product-path run) ----
   // The regression class carries the gold-set snapshot ONLY. The live
   // telemetry/tier-mix data is a mechanics/instrumentation fact and lives at
-  // mechanics.telemetry (Hale, 2026-07-22 acceptance revise, item 1 — the old
-  // regression.liveProxy placement contradicted the render's classification).
+  // mechanics.telemetry, matching the render's classification.
   out.regression.gold = await checkGoldRegression(cwd);
   mech.telemetry = checkLiveRetrievalProxy(cwd);
-  // Turn-capture evidence-stream state (v3.14.0, default-ON per DC-129) — a
+  // Turn-capture evidence-stream state (default-ON) — a
   // mechanics/instrumentation fact. Always rendered: ON shows the disclosure +
   // off-switches; OFF confirms the user's opt-out took effect.
   mech.turn_capture = turnCaptureStats(cwd);
@@ -889,10 +855,10 @@ ${body}
 }
 
 // ============================================================
-// Answer-shaped default view (v3.14.0 Component 6)
+// Answer-shaped default view
 // ============================================================
 //
-// The `/metrics` DEFAULT: David's three outcome questions, one sentence each,
+// The `/metrics` DEFAULT: three outcome questions, one sentence each,
 // the single number that matters per line, a trend word — sourced from the
 // latest PINNED scorecard and the tripwire state. Presentation only: no fresh
 // computation, no live re-scoring (that's exactly the determinism split — the
@@ -1002,10 +968,10 @@ if (isCliEntry) {
     process.exit(0);
   }
   const out = await gatherMetrics(cwd);
-  // --json emits EXACTLY ONE JSON document and nothing else (Hale item 8,
-  // 2026-07-23): the human report and the JSON on one stream made saved stdout
-  // invalid JSON, so `render-metrics-artifact --json-in` could not consume the
-  // real product output. Default (no flag) prints the human report.
+  // --json emits EXACTLY ONE JSON document and nothing else: mixing the human
+  // report and the JSON on one stream would make saved stdout invalid JSON,
+  // and `render-metrics-artifact --json-in` could not consume the real
+  // product output. Default (no flag) prints the human report.
   if (wantsJson) process.stdout.write(JSON.stringify(out, null, 2) + '\n');
   else process.stdout.write(out.report + '\n');
   process.exit(0);

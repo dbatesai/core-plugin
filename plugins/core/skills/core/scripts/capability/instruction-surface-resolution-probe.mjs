@@ -24,7 +24,7 @@
  * Called by capability-probe.mjs when the descriptor declares
  * delegate: 'capability/instruction-surface-resolution-probe.mjs'.
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * The script ships with the plugin by convention. The plugin ships .mjs (Node.js) only.
  */
 
 import { existsSync, readFileSync } from 'node:fs';

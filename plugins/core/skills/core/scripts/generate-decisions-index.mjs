@@ -6,8 +6,8 @@
  * id / status / date, pulls the H1 line from the body as the summary, sorts
  * by the numeric DC id, and writes the markdown table.
  *
- * Per DC-77 the script ships with the plugin (not per-project).
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * By design the script ships with the plugin (not per-project).
+ * The plugin ships Node.js (.mjs) only.
  *
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs \
@@ -32,7 +32,7 @@ export function parseFrontmatter(text) {
   return parseFlatFrontmatter(text);
 }
 
-// M12: a `|` in any cell value (a decision H1 like "DC-99: A | B") splits the markdown
+// M12: a `|` in any cell value (a decision H1 like "DC-NN: A | B") splits the markdown
 // table row and corrupts the substring check-units index-drift detection relies on.
 // Escape pipes and flatten any stray newline so each value stays one well-formed cell.
 export function escapeCell(v) {
@@ -58,10 +58,8 @@ export function bestDate(fm) {
   return 'unknown';
 }
 
-// Independent review, 2026-07-19: a hand-duplicated copy of the surrogate-
-// splitting truncate() bug fixed in generate-summary-index.mjs — see
-// text-truncate.mjs for why this collapsed to a shared helper instead of a
-// second local fix.
+// truncate() delegates to the shared helper in text-truncate.mjs — see that
+// file for the surrogate-splitting hazard a local copy would reintroduce.
 export function truncate(text, maxLen = SUMMARY_MAX) {
   return sharedTruncate(text, maxLen);
 }
@@ -92,9 +90,9 @@ export function buildIndex(memoriesDir) {
   const lines = [
     '# Decisions Index',
     '',
-    '> Auto-generated from `_memories/dc-*.md` frontmatter (flat layout per DC-68).',
+    '> Auto-generated from `_memories/dc-*.md` frontmatter (flat layout by convention).',
     '> Do not edit manually — re-run `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs`',
-    '> to regenerate. Script ships with the plugin per DC-77.',
+    '> to regenerate. Script ships with the plugin.',
     '',
     `**${rows.length} decisions indexed.**`,
     '',

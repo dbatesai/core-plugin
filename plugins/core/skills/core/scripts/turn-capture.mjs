@@ -2,7 +2,7 @@
 /**
  * turn-capture.mjs — the every-turn evidence layer (v3.14.0 Link 1).
  *
- * Why this exists (evidence-chain spec, DC-129): the closed-schema telemetry
+ * Why this exists (evidence-chain spec): the closed-schema telemetry
  * (`retrieval-log.jsonl`) records THAT retrieval happened — ≤8 keyword tokens,
  * delivered unit ids, counts — but nothing recorded today lets a later reader
  * judge whether the loaded memories were RIGHT for the moment. This stream
@@ -12,10 +12,10 @@
  * (hindsight-judge.mjs) reads it later; the exporter NEVER does.
  *
  * It supersedes the rich-context stream (fired only on zero-hits — and a
- * zero-hit has no delivered context by definition, dc-127) and the hidden
+ * zero-hit has no delivered context by definition) and the hidden
  * CORE_RETRIEVAL_TRACE env stream (content in the repo tree, no reader).
  *
- * DEFAULT-ON with opt-outs (DC-129, David's explicit ruling over the opt-in
+ * DEFAULT-ON with opt-outs (the product owner's explicit ruling over the opt-in
  * recommendation, recorded in the spec):
  *   1. `CORE_METRICS_ENABLED` off → OFF (master kill switch; capture nests
  *      inside the metrics gate).
@@ -41,7 +41,7 @@
  * (`<stream>/capture-health.json`) so a silently dying flight recorder is
  * itself observable (Link 5 tripwire input).
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by convention; .mjs (Node.js) only.
  */
 
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -87,10 +87,10 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 /**
  * Is the every-turn evidence layer active for this project?
  * Precedence (first match wins):
- *   1. aggregate metrics OFF (env/workspace, DC-107 gate) → OFF.
+ *   1. aggregate metrics OFF (env/workspace metrics gate) → OFF.
  *   2. env `CORE_TURN_CAPTURE` false (0/false/no/off) → OFF; true → ON.
  *   3. project-root `workspace.json` `"turn_capture": false` → OFF.
- *   4. default → ON (DC-129).
+ *   4. default → ON.
  */
 export function turnCaptureEnabled({ project, env = process.env } = {}) {
   if (!metricsEnabled({ project, env })) return false;
@@ -218,7 +218,7 @@ function todayUTC(now) {
 /**
  * Cheap store snapshot marker for drift detection: the retriever's own summary
  * index (`_memories/_lib/unit-summaries.json`) is regenerated on any store
- * change (the R1 source-signature fix), so its size+mtime identifies the store
+ * change (the R1 source-signature contract), so its size+mtime identifies the store
  * state a turn actually retrieved against. The hindsight judge records this
  * signature at capture AND at judge time; a mismatch flags the judgment as
  * store-drifted rather than pretending hindsight over a store that no longer

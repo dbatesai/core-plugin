@@ -1,24 +1,16 @@
 /**
  * log-event.mjs — shared structured-logging helper.
  *
- * Phase 1b substrate per David's 2026-05-24 reframe: PROJECT.md management
- * is agent-managed; effectiveness is measured via structured event emission,
- * not user review. This helper centralizes the JSONL append discipline used
- * by hot-section.mjs (retrieval-log.jsonl) and demote-moves.mjs +
- * compact-project.mjs (hygiene-log.jsonl).
+ * PROJECT.md management is agent-managed; effectiveness is measured via
+ * structured event emission, not user review. This helper centralizes the
+ * JSONL append discipline used by hot-section.mjs (retrieval-log.jsonl) and
+ * demote-moves.mjs + compact-project.mjs (hygiene-log.jsonl).
  *
- * Per DC-77 the script ships with the plugin (not per-project).
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The script ships with the plugin (not per-project) by design.
+ * The plugin ships Node.js (.mjs) only, zero dependencies.
  *
- * Phase 2 (2026-05-26) added an OTel-format dual-write to
- * `<project>/_metrics/traces/<session-id>.jsonl`. Retired 2026-07-24 (metrics
- * holistic redesign, docs/specs/2026-07-23-metrics-holistic-redesign.md §3a):
- * it never gained a reader in the ~2 months it ran — every consumer
- * (`analyze-retrieval-quality.mjs` etc.) always read the legacy
- * `_sessions/<date>/<filename>.jsonl` files instead. Pure write cost, no
- * benefit. The JSONL logs are the sole event substrate now; a real OTel
- * consumer, if one ever shows up, should get a dual-write built against its
- * actual needs rather than resurrecting this speculative one.
+ * The `_sessions/<date>/<filename>.jsonl` JSONL logs are the sole event
+ * substrate — there is no OTel or other dual-write.
  *
  * Library usage:
  *   import { logEvent, eventLogPath } from './log-event.mjs';
@@ -41,8 +33,8 @@ import { homedir } from 'node:os';
  * workspace has been scaffolded. Falls back to `<projectDir>/_metrics/` if
  * the pin file is absent (scaffold not run yet, or workspace id unknown).
  *
- * Per RM Turn 16 (evt-cc56): without this, dual-write hardcodes project-local
- * and bypasses (g.5)'s AppData redirect on Windows+OneDrive.
+ * Without this, writers would hardcode a project-local path and bypass
+ * (g.5)'s AppData redirect on Windows+OneDrive.
  */
 export function resolveStoragePath(projectDir, { workspaceId } = {}) {
   if (workspaceId) {
@@ -89,10 +81,10 @@ export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
 /**
  * Capture gate for the Layer 2/3 metrics interpretation passes (spec §18).
  *
- * DEFAULT-ON, opt-out (DC-107, David 2026-06-04). The instrumented-memory thesis
- * needs the corpus — under the old default-off the calibration gate starved
- * (CORE-on-CORE is too small to ever reach ~100 labeled turns), so the feedback
- * loop the system exists to close couldn't close. Capture stays LOCAL (no network
+ * DEFAULT-ON, opt-out. The instrumented-memory thesis needs the corpus — a
+ * default-off gate starves calibration (a single project rarely reaches ~100
+ * labeled turns), so the feedback loop the system exists to close could
+ * never close. Capture stays LOCAL (no network
  * exfil); the accepted tradeoff is that a fresh marketplace install classifies its
  * own conversation content into local artifacts unless the user opts out.
  *
@@ -100,7 +92,7 @@ export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
  *   1. `CORE_METRICS_ENABLED` env false (0/false/no/off) → OFF — hard opt-out, beats everything.
  *   2. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
  *   3. `<project>/workspace.json` `"metrics_enabled": false` → OFF — per-workspace opt-out.
- *   4. `<project>/workspace.json` `"metrics_enabled": true`  → ON — explicit opt-in (redundant now).
+ *   4. `<project>/workspace.json` `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
  *   5. default → ON.
  */
 export function metricsEnabled({ project, env = process.env } = {}) {
@@ -114,7 +106,7 @@ export function metricsEnabled({ project, env = process.env } = {}) {
       if (p && p.metrics_enabled === true) return true;   // per-workspace opt-in (explicit)
     } catch { /* fall through */ }
   }
-  return true; // default-ON (DC-107): instrument by default; opt out via env or workspace flag
+  return true; // default-ON: instrument by default; opt out via env or workspace flag
 }
 
 export function eventLogPath(projectDir, filename, { today } = {}) {
@@ -176,9 +168,8 @@ export function sanitizeAttributeValue(value, { maxLen = MAX_ATTRIBUTE_STRING, m
 }
 
 // Returns a write outcome — {legacy, reason?} — so producers can tell a
-// delivered event from a silently-swallowed one (Hale live-hook audit,
-// 2026-07-17: "the writer reports a normalized record even if the write
-// silently fails"). Still best-effort: never throws, never blocks the host.
+// delivered event from a silently-swallowed one. Still best-effort: never
+// throws, never blocks the host.
 export function logEvent(projectDir, filename, event, { today, now } = {}) {
   const outcome = { legacy: false };
   if (!existsSync(projectDir)) { outcome.reason = 'project-dir-missing'; return outcome; }

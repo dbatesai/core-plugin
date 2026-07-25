@@ -8,7 +8,7 @@ user-invocable: true
 
 `/orient` no longer does anything on its own. Everything it used to do — picking a project back up, edit detection, hygiene-log signals, the hot-section refresh, source-registration readiness, and the readiness summary — is now part of CORE's startup protocol and runs whenever you type `/core`.
 
-**Sunset date: 2026-08-15.** Deprecated 2026-06-05 with no stated removal date at the time (a real gap a ponytail audit caught, 2026-07-21 — a compatibility shim with no sunset can't safely be deleted without risking a silent break for a wrapper or a habit still calling it). This gives a ~6-week window from the audit date before the shim is actually removed. If you maintain a wrapper or script that still invokes `/orient`, switch it to `/core` before that date.
+**Sunset date: 2026-08-15.** A compatibility shim needs a stated sunset — without one it can't safely be deleted without risking a silent break for a wrapper or a habit still calling it. If you maintain a wrapper or script that still invokes `/orient`, switch it to `/core` before that date.
 
 When this skill is invoked, do exactly one thing: print the notice below verbatim, then stop. Do not read files, run scripts, or bootstrap — `/core` owns that now. This is a no-op shim kept so existing muscle memory, scripts, and wrappers don't break.
 

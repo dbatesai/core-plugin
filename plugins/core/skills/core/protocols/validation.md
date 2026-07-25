@@ -32,7 +32,7 @@ expected_memories:
   - dc-69-priority-function
 forbidden_memories: []
 tier_expected: 1
-notes: "Should match dc-69 via 'priority' + 'function' + 'formula' terms."
+notes: "Should match dc-69-priority-function via 'priority' + 'function' + 'formula' terms."
 ---
 ```
 

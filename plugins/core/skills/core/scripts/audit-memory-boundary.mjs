@@ -6,7 +6,7 @@
  * HEALTH of that boundary — read-only — so the user can act, without ever silently
  * merging the two.
  *
- * The hard invariant (DC-83 user-control / anti-resurrection): a native entry absent
+ * The hard invariant (user-control / anti-resurrection): a native entry absent
  * from CORE is NOT automatically a missing unit — it may be a fact the user DELETED from
  * CORE, and deleted facts stay deleted. So this is:
  *   - SAMPLED, never swept (a bounded sample; never iterate-and-promote)
@@ -15,10 +15,9 @@
  *   - read-only — no mutation, no release gate.
  *
  * v1 reports native-only candidates (sampled, anti-resurrection-labeled) + boundary
- * stats. Per the design Q3 (docs/specs/2026-05-30-audit-memory-boundary-design.md),
- * content-CONFLICT detection is DEFERRED — it's the noisiest signal and needs Hale's
- * matcher decision; shipping a noisy conflict flag would create resurrection pressure.
- * Match function is deterministic high-signal-term overlap (Q1 lean), so paraphrases can
+ * stats. Content-CONFLICT detection is DEFERRED — it's the noisiest signal and needs a
+ * reviewed matcher decision; shipping a noisy conflict flag would create resurrection pressure.
+ * Match function is deterministic high-signal-term overlap, so paraphrases can
  * read as "absent" — which is exactly why output is candidates, not a verdict.
  *
  * SCOPE (MET-009): current-project-only by design. The audit reads only this
@@ -29,9 +28,9 @@
  * terms — not a widening of this one.
  *
  * The native surface is provided by the caller (resolved per harness via the
- * read-auto-memory adapter, DC-75) so this stays harness-agnostic.
+ * read-auto-memory adapter) so this stays harness-agnostic.
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships as a plugin script by convention; .mjs (Node.js) only.
  *
  * CLI: node audit-memory-boundary.mjs <project-root> [--native <MEMORY.md>] [--sample N] [--json]
  */

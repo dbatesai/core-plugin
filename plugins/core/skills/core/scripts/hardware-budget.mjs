@@ -10,7 +10,7 @@
  * Thresholds mirror the table in protocols/execution.md §"Hardware budget" —
  * if one moves, move both.
  *
- * Per DC-77 the script ships with the plugin. Per DC-80, Node.js (.mjs) only.
+ * The script ships with the plugin by design. Node.js (.mjs) only, zero dependencies.
  */
 
 import { totalmem } from 'node:os';

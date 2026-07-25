@@ -1,5 +1,5 @@
 /**
- * Unit store integrity checker for CORE memory architecture, per DC-77.
+ * Unit store integrity checker for CORE memory architecture.
  *
  * Two modes (combined by default):
  *   schema    — frontmatter shape: required fields, valid status/type/edge-type
@@ -13,7 +13,7 @@
  * integrity concern (dangling-edge); schema only checks the edge mapping is
  * well-formed and the type is in VALID_EDGE_TYPES.
  *
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The plugin ships Node.js (.mjs) only.
  *
  * CLI:
  *   node check-units.mjs <project-path>
@@ -38,7 +38,7 @@ import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.m
 
 export const REQUIRED_FIELDS = new Set(['id', 'type', 'status', 'created', 'updated', 'topics']);
 
-// Vocabulary constants live in unit-vocab.mjs (SYN-005 unification) and are
+// Vocabulary constants live in unit-vocab.mjs (the one shared vocabulary) and are
 // re-exported here so every existing importer and test keeps working.
 export {
   VALID_STATUSES, TERMINAL_STATUSES, VALID_TYPES, VALID_EDGE_TYPES,
@@ -73,8 +73,8 @@ export const ARCHIVE_RS_THRESHOLD = 0.05;
 export const STALE_DAYS = 90;
 export const SOURCES_WARN_AGE_DAYS = 14;
 
-// MEM-014: PROJECT.md and the hot section are capped, but a single unit had no
-// size signal anywhere — retrieval reads matched units whole, so one bloated
+// PROJECT.md and the hot section are capped; this is the size signal for a
+// single unit — retrieval reads matched units whole, so one bloated
 // unit eats disproportionate context. ~10KB ≈ 3K tokens at the 0.30 factor.
 export const UNIT_SIZE_WARN_BYTES = 10_000;
 
@@ -105,9 +105,9 @@ export function iterActiveUnits(memoriesDir, { includeObservations = false } = {
   }
 
   if (includeObservations) {
-    // SYN-007: observation units live in observations/<YYYY-MM>/ and were never
-    // schema-audited, even though iterAllUnitFiles (the dangling-edge target
-    // set) is recursive — edges could point at observations that pass the
+    // Observation units live in observations/<YYYY-MM>/ and need schema
+    // auditing too: iterAllUnitFiles (the dangling-edge target
+    // set) is recursive, so without this, edges could point at observations that pass the
     // dangling check but escape every other check. Opt-in keeps the default
     // active set top-level-only.
     const obsPaths = iterAllUnitFiles(join(memoriesDir, 'observations')).sort();
@@ -151,8 +151,8 @@ export function checkSchema(units, memoriesDir, report) {
       if (!(fld in u.fm)) report.push({ level: 'FAIL', check: 'required-field', unit_id: uid, detail: `Missing required frontmatter field: '${fld}'` });
     }
 
-    // MEM-008: a key that is PRESENT but blank passed both the presence check
-    // (key in fm) and the value checks (guarded by truthiness). `type: `
+    // A key that is PRESENT but blank passes both the presence check
+    // (key in fm) and the value checks (guarded by truthiness) — catch it here. `type: `
     // parses to an empty list; '' and null are the scalar variants.
     for (const fld of ['id', 'type', 'status', 'created', 'updated']) {
       if (!(fld in u.fm)) continue; // absence already FAILed above
@@ -170,8 +170,8 @@ export function checkSchema(units, memoriesDir, report) {
       report.push({ level: 'WARN', check: 'type-value', unit_id: uid, detail: `Unknown type '${typ}'` });
 
     // confidence-level / stability-class — typed by the source-registration
-    // framework but previously unvalidated: a unit could carry
-    // confidence-level: banana and pass everything (SYN-005 / SCH-003).
+    // framework and validated here: without this check a unit could carry
+    // confidence-level: banana and pass everything.
     const conf = String(u.fm['confidence-level'] || '').toLowerCase();
     if (conf && !VALID_CONFIDENCE_LEVELS.has(conf))
       report.push({ level: 'WARN', check: 'confidence-level-value', unit_id: uid, detail: `Unknown confidence-level '${conf}' (expected: ${[...VALID_CONFIDENCE_LEVELS].sort().join(', ')})` });
@@ -233,7 +233,7 @@ export function checkSchema(units, memoriesDir, report) {
     if (tValidStr && tInvalidStr && isoRe.test(tValidStr) && isoRe.test(tInvalidStr) && tValidStr > tInvalidStr)
       report.push({ level: 'WARN', check: 't_valid-after-t_invalid', unit_id: uid, detail: `t_valid (${tValidStr}) is after t_invalid (${tInvalidStr}) — a fact can't stop being true before it started` });
 
-    // by-when validation — optional field for open-question units (DC-85 §2).
+    // by-when validation — optional field for open-question units.
     // Schema only validates well-formedness; staleness signaling lives in the startup protocol.
     const byWhen = u.fm['by-when'];
     if (byWhen !== undefined && byWhen !== null && byWhen !== '') {
@@ -244,7 +244,7 @@ export function checkSchema(units, memoriesDir, report) {
         report.push({ level: 'WARN', check: 'by-when-format', unit_id: uid, detail: `Field 'by-when' must be ISO date (YYYY-MM-DD), found '${byWhenStr}'` });
     }
 
-    // MEM-014 advisory size check.
+    // Advisory unit-size check.
     let unitBytes = 0;
     try { unitBytes = statSync(u.path).size; }
     catch { unitBytes = Buffer.byteLength(String(u.body || ''), 'utf8'); }
@@ -259,7 +259,7 @@ export function checkSchema(units, memoriesDir, report) {
 
 export const FRESH_STORE_ORPHAN_RATIO = 0.30;
 
-// DC-94a link-at-graduation: an active, non-observation unit should carry at least
+// Link-at-graduation rule: an active, non-observation unit should carry at least
 // LINK_DENSITY_MIN outgoing typed edges — a graduated decision/risk that connects to
 // nothing is invisible to Tier-2 edge-walk retrieval. WARN tier (benign): an adoption
 // ramp, not a hard gate. Observations are exempt (they're capture, not graduated units),
@@ -333,11 +333,11 @@ export function checkIntegrity(units, memoriesDir, today, report) {
       // Premises are axioms — a settled, rarely-touched premise is correct, not stale.
       // Exempt them from the archive-candidate WARN (EXEMPT_FROM_STALENESS, unit-vocab).
       if (status === 'active' && !EXEMPT_FROM_STALENESS.has(typ))
-        report.push({ level: 'WARN', check: 'stale', unit_id: uid, detail: `R·S=${rs.toFixed(3)} < ${ARCHIVE_RS_THRESHOLD} — archive candidate per DC-69` });
+        report.push({ level: 'WARN', check: 'stale', unit_id: uid, detail: `R·S=${rs.toFixed(3)} < ${ARCHIVE_RS_THRESHOLD} — archive candidate per the priority function` });
     }
 
     const status = String(u.fm.status || '').toLowerCase();
-    // The immediate parent only (Hale's 2026-07-22 finding): a full-path
+    // The immediate parent only: a full-path
     // segment scan false-positives when the project itself sits under some
     // unrelated ancestor directory named "archive" -- that has nothing to do
     // with this unit store's own archive/ subdirectory.
@@ -345,14 +345,14 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     // Canonical archiving (hygiene.md) sets `archived: true` and does not
     // require a status change -- a unit can be `status: active, archived:
     // true` and this must still catch it left top-level. The legacy
-    // `status === 'archived'` form stays recognized too (Hale's 2026-07-22
-    // finding: checking status alone missed the canonical shape entirely,
+    // `status === 'archived'` form stays recognized too — checking status
+    // alone would miss the canonical shape entirely,
     // and a substring .includes('archive') could false-positive on a
-    // top-level file merely named with "archive" in it).
+    // top-level file merely named with "archive" in it.
     if ((u.fm.archived === true || status === 'archived') && !inArchiveDir)
       report.push({ level: 'WARN', check: 'archived-in-active', unit_id: uid, detail: 'Unit is archived (archived: true or status=archived) but is not in archive/ subdir' });
 
-    // MEM-018: unknown provenance is now visible. An active, aged,
+    // Unknown provenance is made visible here. An active, aged,
     // non-observation unit with no sources scores the degraded S default —
     // surface it so a sources entry gets added. Advisory (benign).
     const srcVal = u.fm.sources;
@@ -370,7 +370,7 @@ export function checkIntegrity(units, memoriesDir, today, report) {
     }
   }
 
-  // DC-94a link-at-graduation density (WARN tier, benign).
+  // Link-at-graduation density (WARN tier, benign).
   checkLinkDensity(units, report);
 
   // INDEX-decisions drift
@@ -469,7 +469,7 @@ export function jsonReport(report, memoriesDir, mode, today) {
 export const BENIGN_WARN_CHECKS = new Set([
   'orphan', 'stale', 'fresh-store', 'cold-store-eligible', 'topics-format',
   'external-ref', 'sources-missing', 'sources-not-list', 'unit-oversize', 'link-density',
-  // Legacy annotations predate the source-registration-framework vocab; visibility without degradation (SYN-005 follow-up).
+  // Legacy annotations outside the source-registration-framework vocab get visibility without degradation.
   'confidence-level-value', 'stability-class-value',
 ]);
 

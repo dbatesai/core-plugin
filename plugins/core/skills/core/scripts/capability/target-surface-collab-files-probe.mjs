@@ -34,8 +34,8 @@
  *               wrong remote, push-dry-run failed)
  *   UNKNOWN  — probe couldn't run (repo not accessible, git not found, etc.)
  *
- * Per DC-77: ships with the plugin.
- * Per DC-80: Node.js (.mjs) only.
+ * Ships with the plugin by design.
+ * Node.js (.mjs) only, zero dependencies.
  */
 
 import { existsSync, realpathSync } from 'node:fs';

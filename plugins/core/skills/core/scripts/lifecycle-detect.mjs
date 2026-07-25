@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * lifecycle-detect.mjs — the lifecycle REPORTING preflight and the CORE
- * creation-baseline seam (Hale's 2026-07-22 findings).
+ * creation-baseline seam.
  *
  * TWO honest jobs, and no more:
  *
@@ -16,7 +16,7 @@
  *      safely (the writers still fail closed on their own). The writers do NOT
  *      consult this module's output — it exists for the human-facing narrative,
  *      not as a programmatic gate. (Correcting the earlier header, which claimed
- *      a production gate role the product never actually wired — Hale's point 1.)
+ *      a production gate role the product never actually wired — a review point.)
  *
  *   2. CREATION-BASELINE seam (`stampCreatedBaseline`/`createFile`). The ONLY
  *      safe way a no-baseline file becomes writable by decorate/hot-section/
@@ -46,12 +46,12 @@
  *   read-only      — couldn't read it (permission/IO); can't determine state.
  *
  * SESSION INVENTORY — DIAGNOSTIC ONLY, NON-AUTHORITATIVE. `--record-session-start`
- * snapshots which user-sensitive files existed at session start. It once drove a
- * safety decision ("absent from inventory => CORE-created => safe"); that was the
- * bug Hale falsified and it is GONE. The inventory now only annotates a
+ * snapshots which user-sensitive files existed at session start. It drives no
+ * safety decision ("absent from inventory => CORE-created => safe" would be
+ * unsound). The inventory only annotates a
  * no-baseline file with a `pre_existing` hint for the agent's narrative. Because
- * it drives no decision, the concurrency/staleness concerns Hale raised about the
- * single global inventory file no longer matter — a wrong hint is harmless.
+ * it drives no decision, concurrency/staleness of the
+ * single global inventory file doesn't matter — a wrong hint is harmless.
  *
  * CLI:
  *   node lifecycle-detect.mjs <project> [--record-session-start <id>] [--json]
@@ -63,7 +63,7 @@
  *                                  render). --kind selects the domain block hasher
  *                                  (default 'unit'); --by sets last_written_by.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin as prescriptive code; .mjs only.
  */
 
 import { readFileSync, readdirSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
@@ -125,15 +125,15 @@ export function recordSessionStart(projectDir, { sessionId = null, now = new Dat
 
 /**
  * stampCreatedBaseline — establish the FIRST CORE-authored baseline for a file
- * CORE is creating right now. This is the creation-time stamp Hale's root fix
+ * CORE is creating right now. This is the creation-time stamp the review root fix
  * requires: the creating writer records the exact bytes it just wrote, so every
  * downstream writer (decorate/hot-section/compact) recognizes the file as
  * CORE-authored instead of refusing it as no-baseline. `kind` selects the
  * domain block hasher so the stamped `outside_hash` matches what the downstream
  * classifier will compute: 'unit' → hashOutsideEdgesBlock, 'project' →
  * hashOutsideHotBlock. Returns state-cache.mjs's truthful stamp outcome (a
- * stamp failure surfaces as attribution-unknown/recovery-required, Hale's
- * point 6) — it never throws into the creator.
+ * stamp failure surfaces as attribution-unknown/recovery-required, per the
+ * review requirement) — it never throws into the creator.
  */
 export function stampCreatedBaseline(projectDir, absPath, { kind = 'unit', lastWrittenBy, now, home } = {}) {
   const abs = resolve(absPath);

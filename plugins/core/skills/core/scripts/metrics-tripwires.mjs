@@ -11,7 +11,7 @@
  * stamped into every scorecard row by the maintenance pass, so a threshold
  * change is visible in history rather than silently moving the goalposts.
  *
- * The four wires (spec Component 4 + Antigravity's Gate-A floors):
+ * The four wires (spec Component 4 + the review-set Gate-A floors):
  *   self-test-drop         — headline fell > threshold vs the previous card.
  *   miss-trend             — hindsight-miss rate strictly rising across the
  *                            trend window of consecutive cards.
@@ -22,7 +22,7 @@
  *   capture-dead           — retrieval rows exist but zero evidence rows were
  *                            captured: the flight recorder itself is down.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by design; .mjs only.
  */
 
 import { realpathSync } from 'node:fs';

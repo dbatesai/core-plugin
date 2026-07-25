@@ -6,9 +6,7 @@
  * THIS SCRIPT NEVER UPLOADS ANYTHING — it generates a local file, prints a
  * preflight manifest, and writes a local receipt; that is the whole job).
  *
- * Design source: docs/specs/2026-07-22-memory-browse-artifact-design.md (CORE
- * workshop repo) — approved by Hale (seven disclosure conditions) and
- * Antigravity (three refinements). The conditions THIS script enforces in code:
+ * The disclosure conditions THIS script enforces in code:
  *
  *   - Condition 2 (preflight manifest): stdout is exactly one JSON object —
  *     unit count, byte count, scopes, snapshot id, and a fixed sensitivity
@@ -82,11 +80,11 @@ import {
 
 export const BROWSE_MANIFEST_SCHEMA_VERSION = '1.0.0';
 // Re-exported so existing consumers (skill docs, tests) keep one import site;
-// the implementations moved to the shared artifact-receipts.mjs when the
-// metrics artifact generator became their second consumer (2026-07-22).
+// the implementations live in the shared artifact-receipts.mjs (also consumed
+// by the metrics artifact generator).
 export { PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor, recordPublishOutcome, recordRevocation };
 
-// Fixed sensitivity warning (Hale condition 2) — one string, stable across
+// Fixed sensitivity warning — one string, stable across
 // runs, so the skill can relay it verbatim and tests can assert it exactly.
 export const SENSITIVITY_WARNING =
   'SENSITIVITY: this file embeds the FULL BODIES of the memory units counted above — real project ' +
@@ -96,11 +94,11 @@ export const SENSITIVITY_WARNING =
   'has flagged sensitive, still needs an explicit go-ahead before it goes up.';
 
 /**
- * Truthful producer identity (Hale condition 6, 2026-07-22 HOLD correction 1):
+ * Truthful producer identity:
  * real git HEAD in a source checkout (tracked-file guarded), stamped manifest
  * identity in an installed tree, fail closed with neither. The implementation
- * lives in the shared artifact-provenance.mjs (extracted 2026-07-22 when the
- * metrics artifact generator became its second consumer); this wrapper stamps
+ * lives in the shared artifact-provenance.mjs (shared with the
+ * metrics artifact generator); this wrapper stamps
  * this generator's own script name into the identity.
  */
 export function producerIdentity() {
@@ -644,7 +642,7 @@ export async function renderBrowseArtifact(projectDir, {
 
   // Fail closed on producer identity BEFORE reading the store or writing
   // anything: a page whose provenance cannot be established must never be
-  // rendered for publish (Hale condition 6 — no "unknown-sha" render).
+  // rendered for publish.
   const producer = producerIdentity();
   if (!producer.source_sha) {
     throw Object.assign(new Error(
@@ -702,7 +700,7 @@ export async function renderBrowseArtifact(projectDir, {
     excluded_by_topic_count: collected.excludedByTopic,
     total_bytes: Buffer.byteLength(html),
     // Exact-byte identity of the generated page — the publish receipt copies
-    // this and binds the publish to these specific bytes (Hale item 7).
+    // this and binds the publish to these specific bytes.
     artifact_sha256: artifactContentDigest(html),
     metrics_included: metrics.available,
     out_path: outAbs,
@@ -716,7 +714,7 @@ export async function renderBrowseArtifact(projectDir, {
     mkdirSync(receiptDir, { recursive: true });
     writeFileSync(receiptPath, JSON.stringify(manifest, null, 2) + '\n');
   } catch (e) {
-    // Truthful surfacing over silent success: the receipt is Hale condition
+    // Truthful surfacing over silent success: the receipt is disclosure condition
     // 4's audit trail — if it didn't land, the manifest must say so.
     receiptWritten = false;
     manifest.receipt_path = null;
@@ -727,7 +725,7 @@ export async function renderBrowseArtifact(projectDir, {
 }
 
 // ============================================================
-// Post-publish receipt (Hale correction 2, 2026-07-22 HOLD) — separate from
+// Post-publish receipt — separate from
 // the preflight-generation receipt above. The generation receipt records what
 // was generated and offered; the publish receipt is the audit trail of what
 // actually happened at the consent/publish boundary — including declined and

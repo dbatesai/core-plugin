@@ -1,5 +1,5 @@
 /**
- * write-visibility-canary.mjs — v3.0 memory-visible canary WRITE half.
+ * write-visibility-canary.mjs — memory-visible canary WRITE half.
  *
  * Run at /finalize (session N close): generate a fresh random token, write it as a
  * single CORE-owned tagged line at the top of MEMORY.md (inside the first-200-line
@@ -8,20 +8,20 @@
  * the token it sees in injected context and memory-visible-probe.mjs verifies the
  * echo preceded any read of the canary surfaces.
  *
- * The canary is a VISIBLE markdown line, not an HTML comment. A field bootstrap on
- * 2026-05-29 proved the harness strips HTML comments when it injects MEMORY.md into
- * context: the line-1 `<!-- ... -->` canary did not reach injected memory (injection
- * began at the first `## ` heading), which blocked the field-cycle PASS. A visible
+ * The canary is a VISIBLE markdown line, not an HTML comment. The harness
+ * strips HTML comments when it injects MEMORY.md into
+ * context (injection begins at the first `## ` heading), so an HTML-comment
+ * canary never reaches injected memory; a visible
  * line survives injection. The legacy HTML-comment form is still recognized for
- * idempotent replacement so the upgrade is clean on first write.
+ * idempotent replacement.
  *
- * HC_622 #1 — idempotent: replaces the existing tagged canary line in place; it does
- * NOT append unbounded canary lines. HC_622 #4 — the CLI output is redacted; it never
+ * Idempotent: replaces the existing tagged canary line in place; it does
+ * NOT append unbounded canary lines. The CLI output is redacted; it never
  * prints the raw token to stdout (which would land in the transcript).
  *
  * CLI: node write-visibility-canary.mjs --workspace-id <id> [--cwd <path>]
  *
- * Per DC-77 the script ships with the plugin. Per DC-80 the plugin ships .mjs only.
+ * By design the script ships with the plugin. The plugin ships .mjs only.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
@@ -56,7 +56,7 @@ export function generateToken() {
 }
 
 /**
- * Idempotent upsert (HC_622 #1): strip any prior canary line (visible or legacy
+ * Idempotent upsert: strip any prior canary line (visible or legacy
  * HTML-comment form), then prepend a fresh VISIBLE canary line so it stays at the very
  * top of the first-200-line injection window and survives the harness's comment
  * stripping. Never accumulates more than one canary line.
@@ -85,7 +85,7 @@ export function writeCanary(opts = {}) {
   mkdirSync(dirname(side), { recursive: true });
   writeFileSync(side, JSON.stringify({ token, written_at, cwd, memory_path: memPath, memory_written }, null, 2));
 
-  // Redacted return only (HC_622 #4) — never the raw token.
+  // Redacted return only — never the raw token.
   return { token_len: token.length, side_file: side, memory_written, memory_path: memPath };
 }
 

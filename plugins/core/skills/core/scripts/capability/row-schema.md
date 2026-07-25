@@ -1,6 +1,6 @@
 # Capability Row Schema
 
-The contract every capability row carries. Producers (`*-capability-probe.mjs` scripts) write to this shape; consumers (pre-action gates, startup readiness, drift detection in v2.7) read it. Per DC-98, this markdown IS the contract — consumers cite anchors here rather than re-deriving the field semantics.
+The contract every capability row carries. Producers (`*-capability-probe.mjs` scripts) write to this shape; consumers (pre-action gates, startup readiness, drift detection in v2.7) read it. Per the schema-consumer coupling doctrine, this markdown IS the contract — consumers cite anchors here rather than re-deriving the field semantics.
 
 **Schema version:** 1.0.0 (additive minor bumps preserve backward compatibility; major bumps require coordinated consumer update)
 
@@ -124,7 +124,7 @@ Major version bumps require coordinated update of every consumer cited in this f
 
 ## Known consumers
 
-Per DC-98 (schema-consumer coupling), this schema lives only as long as it has named consumers. When a consumer is retired, remove its entry. When the consumers list is empty, the schema graduates to a deprecated doc.
+Per the schema-consumer coupling doctrine, this schema lives only as long as it has named consumers. When a consumer is retired, remove its entry. When the consumers list is empty, the schema graduates to a deprecated doc.
 
 | Consumer | Where | What it reads |
 |---|---|---|
@@ -153,6 +153,6 @@ Every script that reads capability rows MUST:
 3. When surfacing a row to the user, narrate `identity_status` and `mutation_block_reason` separately — they answer different questions.
 4. Honor `freshness` + `refresh_policy` when caching; never cache a `content-volatile` row across operations.
 
-## Relationship to DC-98
+## Relationship to the schema-consumer coupling doctrine
 
 This schema is itself an instance of the doctrine it serves. The doctrine says: "schema lives only as long as its consumer." The "Known consumers" section above is the load-bearing list. When the consumers list goes empty, this file gets archived; the schema doesn't outlive its purpose.

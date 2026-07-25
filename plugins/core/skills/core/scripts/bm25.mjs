@@ -1,24 +1,22 @@
 /**
  * bm25.mjs — deterministic body-BM25 ranking + tokenizer + the rank-union combiner.
  *
- * Extracted from embed-index.mjs when DC-114 (2026-07-08, reversing DC-113)
- * ruled that CORE runs NO local models: the dense/ollama arm was deleted rather
- * than shipped dormant; this module keeps the model-free half the live retriever
- * actually uses. Query-time retrieval stays deterministic and dependency-free
- * (DC-80); the recall gap closes via write-time enrichment (DC-114/DC-115), not
+ * CORE runs NO local models: this module is the model-free ranking the live
+ * retriever actually uses. Query-time retrieval stays deterministic and dependency-free
+ *; the recall gap closes via write-time enrichment, not
  * a query-time model.
  *
- * v3.11 remediation (Hale 2026-07-11 §1/§4): bodies are loaded through the
+ * Bodies are loaded through the
  * recursive path-bearing index via loadFreshIndex() — nested units (observations/
  * <YYYY-MM>/…) are in the population, paths come from the index (never
  * reconstructed as `_memories/<id>.md`), and freshness is validated on EVERY
- * public call, so the standalone CLI/harness path can no longer serve a retired
+ * public call, so the standalone CLI/harness path cannot serve a retired
  * unit from a stale cache. tokenize/STOPWORDS live here (not retrieve-context)
  * so the import graph is acyclic: retrieve-context → bm25 → generate-summary-index.
  *
  * Cost honesty: bm25Rank re-reads unit bodies and rebuilds term statistics on
  * every call — the INDEX is cached; bodies and statistics are not. Measured
- * (Hale, 2026-07-11, M-series Mac, synthetic 180-token bodies): warm p50 ~6ms at
+ *: warm p50 ~6ms at
  * 200 units, ~13ms at 400, ~63ms at 2,000. Acceptable at CORE/BBLens scale;
  * precompute document statistics into the index if a store outgrows that.
  *
@@ -39,7 +37,7 @@ import { fileURLToPath } from 'node:url';
 import { loadFreshIndex, loadUnitBodies } from './generate-summary-index.mjs';
 
 // Small, conventional English stopword set — enough to stop "the/on/of" from
-// dominating overlap counts. Deliberately not exhaustive (no dependency, DC-80).
+// dominating overlap counts. Deliberately not exhaustive (no dependency, by design).
 export const STOPWORDS = new Set([
   'the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'for', 'with',
   'is', 'are', 'was', 'were', 'be', 'been', 'it', 'its', 'this', 'that', 'these', 'those',
@@ -115,11 +113,6 @@ export function bm25DocumentScores(query, documents, { k1 = 1.5, b = 0.75 } = {}
 export function bm25Rank(query, store, opts = {}) {
   return bm25Scores(query, store, opts).map(x => x.id);
 }
-
-// interleaveRanked (the round-robin union combiner) was DELETED 2026-07-11: the
-// product ranking moved to normalized magnitudes (retrieve-context productRankedScores)
-// and no production caller remained — dead code documented as live is a doc lie
-// (Hale re-review §6).
 
 function selfTest() {
   // BM25: returns a ranked array when a store is supplied.

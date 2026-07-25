@@ -59,13 +59,13 @@ Implicit — agents poll their inbox via `SendMessage` listings each turn. The V
 
 - **Dynamic-cadence self-re-entry (the default for collab loops and any backing-off poll):** `ScheduleWakeup` with `delaySeconds`. Prefer this over `/loop` for anything with a *variable* cadence — `/loop` is fixed-interval and flattens a dynamic ladder (e.g. collab's fast→slow back-off), so it wastes turns when idle and reacts late when busy. **Wire the wake to an idempotent command, never a one-shot side-effecting one:** a wake re-fires the *full* command, so it must be safe to run repeatedly (e.g. the collab tick script, which is idempotent by design — re-running recomputes state). Pass the same continuation prompt back each fire; stop scheduling when the loop's exit condition is met.
 - **Fixed-interval recurring:** `/loop <interval> <command>` when the cadence genuinely is fixed and the command is idempotent. Use `CronCreate` (5-field UTC cron, ≥1-hour interval per the platform constraint) only for cross-session recurring schedules that must survive the session ending.
-- **Parity note (DC-75):** `schedule` is a *drop* on Codex (no native scheduler) — Codex uses supervised re-entry at the computed cadence, and collab's portable cadence-compute + supervised re-entry is the cross-harness baseline. ScheduleWakeup is a Claude-Code optimization layered on that portable policy, not a replacement for it.
+- **Parity note:** `schedule` is a *drop* on Codex (no native scheduler) — Codex uses supervised re-entry at the computed cadence, and collab's portable cadence-compute + supervised re-entry is the cross-harness baseline. ScheduleWakeup is a Claude-Code optimization layered on that portable policy, not a replacement for it.
 
 ## hook-register
 
 Edit `~/.claude/settings.json` (global) or `<project>/.claude/settings.json` (project). Add an entry to the `hooks.<event>` array referencing a script path. PreToolUse hooks can block; PostToolUse hooks observe; SessionStart/SessionEnd run at lifecycle boundaries. The plugin ships hooks at `hooks/hooks.json` under `${CLAUDE_PLUGIN_ROOT}`.
 
-**Post-answer outcome close (audit, 2026-07-17).** `Stop` fires once, right after Claude's response completes — a genuine post-answer event, distinct from `SessionEnd` (once per session) and from inferring closure off the next `UserPromptSubmit` (sequencing, not observation). `hooks/answer-close-hook.mjs` is registered on `Stop` and closes the per-turn retrieval hook's pending outcome using the harness's own `prompt_id` (Claude Code v2.1.196+ — the common-fields `prompt_id` uniquely identifies the turn) as the real `answer_turn_id`, never an alias of `retrieval_id`. Falls back to a freshly-generated id, still never aliased, on older builds without `prompt_id`. See `harnesses/codex.md §hook-register` for why this stays Claude-Code-only for now.
+**Post-answer outcome close.** `Stop` fires once, right after Claude's response completes — a genuine post-answer event, distinct from `SessionEnd` (once per session) and from inferring closure off the next `UserPromptSubmit` (sequencing, not observation). `hooks/answer-close-hook.mjs` is registered on `Stop` and closes the per-turn retrieval hook's pending outcome using the harness's own `prompt_id` (Claude Code v2.1.196+ — the common-fields `prompt_id` uniquely identifies the turn) as the real `answer_turn_id`, never an alias of `retrieval_id`. Falls back to a freshly-generated id, still never aliased, on older builds without `prompt_id`. See `harnesses/codex.md §hook-register` for why this stays Claude-Code-only for now.
 
 ## read-auto-memory
 
@@ -82,7 +82,7 @@ Claude Code's auto-memory is rebuilt from synthesis on each bootstrap rather tha
 
 If the content is both (a workflow hint AND a project fact), do both writes — they aren't duplicates, they serve different surfaces. See `harnesses/codex.md §save-recall-note` for the same dual-write discipline.
 
-What belongs on the recall surface vs. the project store mirrors DC-86: workflow lessons, harness/install preferences, warm-start hints → recall; decisions, risks, project state → project store.
+What belongs on the recall surface vs. the project store follows the authority-stack split: workflow lessons, harness/install preferences, warm-start hints → recall; decisions, risks, project state → project store.
 
 ## Notes
 

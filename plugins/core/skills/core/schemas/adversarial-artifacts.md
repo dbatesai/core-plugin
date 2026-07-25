@@ -22,7 +22,7 @@ lives only as long as its consumer).
 | `ts` | yes | ISO 8601, parseable |
 | `peer_exposure` | yes | must be `false` — a **declared invariant** (self-asserted), not isolation proof. The mechanical proof is the staging manifest, cross-checked separately. |
 | `frame.key_claims` | yes | non-empty array |
-| `frame.confidence` | optional | one of `low \| medium \| high \| foundational` (DC-94 categorical) |
+| `frame.confidence` | optional | one of `low \| medium \| high \| foundational` |
 
 ## `persuasion-log.jsonl` — one event per line (inter-agent persuasion)
 | Field | Required | Check |

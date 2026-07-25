@@ -1,11 +1,11 @@
 /**
  * close-pass.mjs — session-close orchestration: lock, per-op marker, three-state detection.
  *
- * The reliability spine of self-managed maintenance (spec 2026-06-29). The exit hook
+ * The reliability spine of self-managed maintenance. The exit hook
  * (Stop-hook claude -p) and the startup catch-up both drive close work through this
  * script so neither can lie about a half-finished close or race a second close agent.
  *
- * Three problems it solves (all caught by the 2026-06-29 adversarial pass):
+ * Three problems it solves:
  *   1. Partial close — a boolean "closed" marker can sit over a half-maintained store if
  *      the close agent dies mid-run. So the marker is PER-OP: it records which ops finished,
  *      and startup discharges whatever's still owed instead of trusting marker-presence.
@@ -17,9 +17,9 @@
  *
  * NOT a judgment engine. It tracks completion; it does not decide whether an op's WRITE is
  * safe — PROJECT.md-mutating ops stay edit-gated in startup.md/finalize, and the autonomous
- * judgment tier stays behind the DC-110 M3 preconditions. This is plumbing under that policy.
+ * judgment tier stays behind the self-management M3 preconditions. This is plumbing under that policy.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Cross-platform (no shell, no bash-isms).
+ * Ships with the plugin as prescriptive code; .mjs only. Cross-platform (no shell, no bash-isms).
  *
  * CLI:
  *   node close-pass.mjs detect <store> [--session <id>]      → prints state + owed ops (JSON on --json)
@@ -47,7 +47,7 @@ import { logHookEvent } from '../hooks/hook-log.mjs';
 // pass (claude -p re-reading a transcript) can take a couple of minutes.
 export const LOCK_STALE_MS = 10 * 60 * 1000;
 // Ceiling for locks whose owner can't be identified (unreadable payload, no pid). A lock with
-// a READABLE LIVE pid is never auto-superseded at ANY age (Hale round 3, 2026-07-15): a laptop
+// a READABLE LIVE pid is never auto-superseded at ANY age: a laptop
 // suspended mid-close revives past any ceiling and would overlap its superseder. The recycled-
 // pid strand this reopens (pidAlive→true forever → closes skip) is the accepted lesser failure:
 // detect reports in-progress, startup narrates it, and `close-pass.mjs release` is the remedy.
@@ -62,7 +62,7 @@ function readJson(p) {
 
 /**
  * Is the lock currently held by a live, non-stale owner?
- * Delegates to file-lock.mjs (extracted 2026-07-14, shared-write concurrency spec).
+ * Delegates to file-lock.mjs.
  * @returns {{ held: boolean, lock: object|null, stale: boolean }}
  */
 export function inspectLock(store, now = Date.now()) {
@@ -71,8 +71,7 @@ export function inspectLock(store, now = Date.now()) {
 
 /**
  * Acquire the single-flight lock. Atomic 'wx' create; a stale lock is stolen via
- * file-lock.mjs's rename-claim CAS, so two concurrent stealers can no longer both
- * "win" (the old blind-overwrite steal allowed exactly that).
+ * file-lock.mjs's rename-claim CAS, so two concurrent stealers cannot both "win".
  * @returns {{ ok: boolean, reason?: string, lock?: object, stolen?: boolean }}
  */
 export function acquireLock(store, { sessionId = null, now = Date.now() } = {}) {
@@ -87,7 +86,7 @@ export function acquireLock(store, { sessionId = null, now = Date.now() } = {}) 
  * Release the lock. With a sessionId the release is VERIFIED: a revived slow owner
  * whose stale lock was stolen cannot delete the fresh owner's lock (session_id
  * mismatch is a no-op). Without a sessionId (legacy callers, the operator `release`
- * command) behavior stays the historical unconditional remove.
+ * command) the release is an unconditional remove.
  */
 export function releaseLock(store, { sessionId = null } = {}) {
   const p = lockPath(store);
@@ -113,7 +112,7 @@ export function beginClose(store, { sessionId, ops = [], storeSignature = null, 
     store_signature: storeSignature,
     ops: {},
   };
-  // P3: the lock is already held here — if the marker write fails, drop the lock we just took
+  // The lock is already held here — if the marker write fails, drop the lock we just took
   // so a disk-full/permission error can't strand it (rethrow so the caller records the failure).
   try {
     atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
@@ -139,9 +138,9 @@ export function finishClose(store, { sessionId = null, status = 'closed', now = 
   if (sessionId) marker.session_id = sessionId;
   atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
   const release = releaseLock(store, { sessionId });
-  // Fail closed on a real release failure (Hale round 4): a permission/I/O error
-  // used to be swallowed while the close reported success — the live lock then
-  // blocked every future close silently. Record it ON the marker so detection
+  // Fail closed on a real release failure: a swallowed permission/I/O error
+  // would leave a live lock silently blocking every future close while this
+  // close reports success. Record it ON the marker so detection
   // and forensics see it; callers get it in the return.
   if (release && release.released === false && release.reason === 'release-failed') {
     marker.release_error = release.error || 'release-failed';
@@ -178,14 +177,12 @@ export function detectCloseState(store, { allOps = [], storeSignature = null, no
 
   // Terminal states. `closed` = the runner's finish stamped success. A genuinely complete
   // close DOES carry every judgment op in marker.ops — the headless /finalize child shells
-  // out to `close-pass.mjs record --op <op>` at each protocol step (finalize/SKILL.md), and a
-  // real production marker confirms this lands correctly. What `closed` alone can't rule out
-  // is the child exiting cleanly (or a test stub returning success) WITHOUT ever following that
-  // protocol — nothing here previously checked that the record calls actually happened, only
-  // that the process didn't report failure (Hale's close-marker-semantic-gap finding,
-  // 2026-07-21). So: still trust `closed`, but only once the required ops are actually present
-  // as `done` — that re-owes the pathological case without re-closing a session that worked.
-  // `failed` = finished but /finalize failed (P1 fix) — re-owe so the next startup retries.
+  // out to `close-pass.mjs record --op <op>` at each protocol step (finalize/SKILL.md).
+  // What `closed` alone can't rule out is the child exiting cleanly (or a test stub
+  // returning success) WITHOUT ever following that protocol. So: trust `closed`, but only
+  // once the required ops are actually present as `done` — that re-owes the pathological
+  // case without re-closing a session that worked.
+  // `failed` = finished but /finalize failed — re-owe so the next startup retries.
   if (marker.status === 'closed') {
     if (sigMismatch) return { state: 'owed', owed: allOps.filter(isStoreDerived), reason: 'store-changed' };
     if (notDone.length) return { state: 'owed', owed: notDone, reason: 'closed-but-incomplete' };
@@ -219,7 +216,7 @@ export function shouldSpawn(store, { didWork = false, madeDecision = false, allO
 }
 
 /**
- * Security gate (review 2026-06-30, HIGH): is `store` a CORE workspace we should auto-close?
+ * Security gate: is `store` a CORE workspace we should auto-close?
  * A generic `_memories/` dirname is NOT proof — an attacker-supplied repo can have one, and the
  * close spawns a detached, tool-enabled `claude -p`. The trust anchor is the ~/.core/index.json
  * registry, which an attacker can't plant from inside a project dir. Requires the canonicalized
@@ -246,10 +243,10 @@ export function resolveIndexPath(env = process.env) {
 
 // resolveIndexPath() (above) is the hardened resolver: it bases ~/.core on the trusted
 // OS home (not the spoofable $HOME) and ignores any CORE_CLOSE_INDEX pointing outside it.
-// It is the active default here (wired 2026-07-13, close-authority spec). The explicit
+// It is the active default here. The explicit
 // `indexPath` option is the TRUSTED in-process channel — a caller passing it does so from
 // code, not from a project's forwarded env — which is how the tests exercise the positive
-// path. Untrusted env can no longer redirect the gate; a subprocess can't fake trustedHome().
+// path. Untrusted env cannot redirect the gate; a subprocess can't fake trustedHome().
 export function isRegisteredWorkspace(store, { indexPath = resolveIndexPath() } = {}) {
   if (!indexPath) return false;               // no trusted registry → fail closed
   const home = trustedHome();
@@ -289,9 +286,9 @@ export function buildChildEnv(env = process.env) {
 }
 
 /**
- * The deterministic close envelope (DC-77): the marker lifecycle and mechanical maintenance are
- * plumbing, NOT left to the LLM's discretion (validation 2026-06-30 showed a headless agent
- * narrating "indexes regenerated" and "session closed" while writing neither the maintenance
+ * The deterministic close envelope: the marker lifecycle and mechanical maintenance are
+ * plumbing, NOT left to the LLM's discretion (a headless agent can narrate "indexes
+ * regenerated" and "session closed" while writing neither the maintenance
  * ledger nor the marker). Sequence: begin (lock + in-progress marker) → runMaintenance (mechanical,
  * signature-gated) → `claude -p /finalize` (the intelligent reflection/render/summary) → finish
  * (closed marker, lock released). Even if the LLM inside does nothing structural, the store ends
@@ -302,7 +299,7 @@ export function buildChildEnv(env = process.env) {
 export function runClose(store, { now = new Date().toISOString(), spawnFinalize = defaultSpawnFinalize } = {}) {
   const sessionId = 'auto-' + now.slice(0, 19).replace(/[:T]/g, '-');
 
-  // P3: beginClose acquires the lock AND writes the marker. If either throws (disk full,
+  // beginClose acquires the lock AND writes the marker. If either throws (disk full,
   // read-only store), make sure we never strand a lock we took, and never crash silently.
   let begun;
   try {
@@ -322,12 +319,12 @@ export function runClose(store, { now = new Date().toISOString(), spawnFinalize 
     } catch (e) {
       recordOp(store, { op: 'maintenance-run', status: 'failed', note: String(e && e.message || e).slice(0, 200) });
     }
-    // P1/P5: capture the finalize outcome. A no-op test stub returns undefined → treat as ok.
+    // Capture the finalize outcome. A no-op test stub returns undefined → treat as ok.
     const fin = spawnFinalize(store);
     finalizeOk = fin == null ? true : fin.ok !== false;
     let incompleteOps = [];
     if (finalizeOk) {
-      // Root fix (Hale, 2026-07-21): a clean process exit is not proof the child actually
+      // A clean process exit is not proof the child actually
       // followed the finalize protocol. detectCloseState() catching this on a LATER read is
       // defense-in-depth, not disposition -- the function that DOES the certifying (this one)
       // must not stamp 'closed' / log 'close-complete' on a close that skipped its required
@@ -348,10 +345,10 @@ export function runClose(store, { now = new Date().toISOString(), spawnFinalize 
     finalizeOk = false;
     recordOp(store, { op: 'finalize', status: 'failed', note: String(e && e.message || e).slice(0, 200) });
   } finally {
-    // P1: only stamp `closed` when finalize actually succeeded; otherwise `failed` → the next
+    // Only stamp `closed` when finalize actually succeeded; otherwise `failed` → the next
     // startup re-owes and retries, instead of the marker lying that the close completed.
     finishClose(store, { sessionId, status: finalizeOk ? 'closed' : 'failed' });
-    // P7: log the OUTCOME (not just the launch) so `cat hooks-log.jsonl` reflects reality.
+    // Log the OUTCOME (not just the launch) so `cat hooks-log.jsonl` reflects reality.
     logHookEvent({ hook: 'close-run', action: finalizeOk ? 'close-complete' : 'close-failed', cwd: store });
   }
   return { ok: finalizeOk };
@@ -367,7 +364,7 @@ export function claudeSpawnShell(platform = process.platform) {
 }
 
 function defaultSpawnFinalize(store) {
-  // P1b: append (never truncate) so a fast-failing spawn can't erase the last good log, and
+  // Append (never truncate) so a fast-failing spawn can't erase the last good log, and
   // 0600 so project content the close echoes isn't world-readable on a shared host.
   const logPath = join(homedir(), '.core', 'close-pass-last.log');
   let stdio = 'ignore';
@@ -379,7 +376,7 @@ function defaultSpawnFinalize(store) {
     stdio = ['ignore', logFd, logFd];
   } catch { /* fall back to ignored stdio */ }
   const r = spawnSync('claude', ['-p', '/finalize'], { cwd: resolve(store), env: buildChildEnv(process.env), stdio, shell: claudeSpawnShell() });
-  // P1: surface the spawn result — spawnSync does NOT throw on ENOENT / non-zero / signal.
+  // Surface the spawn result — spawnSync does NOT throw on ENOENT / non-zero / signal.
   const result = { ok: !r.error && r.status === 0, status: r.status, signal: r.signal, error: r.error && String(r.error.message || r.error) };
   if (logFd != null) {
     try { writeSync(logFd, `=== result ok=${result.ok} exit=${result.status} signal=${result.signal || ''} ${result.error || ''} ===\n`); } catch { /* ignore */ }
@@ -501,7 +498,7 @@ function selfTest() {
   assert(det.owed.includes('render-project-md') && det.owed.includes('metrics'), 'owed must list the unfinished ops');
   assert(!det.owed.includes('maintenance-run'), 'a recorded-done op should not be re-owed on a clean crash, got ' + det.owed);
 
-  // 6. Stale lock is stealable; a held fresh lock is not. (Round-3 policy: a lock
+  // 6. Stale lock is stealable; a held fresh lock is not. (Policy: a lock
   // with a LIVE pid is never stealable at any age, so the steal scenario must be
   // set up with a DEAD-pid lock only — clear our own live generation first.)
   acquireLock(store, { sessionId: 's3' });

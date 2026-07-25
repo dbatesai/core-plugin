@@ -1,6 +1,6 @@
 /**
  * select-relevant-units.mjs — the recall-oriented candidate shortlist for the
- * abstract-relevance prototype (DC-94b, Gate G3).
+ * abstract-relevance prototype (Gate G3).
  *
  * The design seam behind obligation-3: lexical retrieval (retrieve-context.mjs) is
  * cheap but can't bridge a value→instance leap ("heritage"→El Primero). The fix isn't
@@ -15,13 +15,11 @@
  * reason over. No fixed shortlist can silently drop the gold unit as the corpus grows.
  * Retired and invalidated units never appear because the shared fresh index excludes them.
  *
- * GATE G3: promotion RATIFIED (DC-117, 2026-07-15). The 2026-07-17 scale repair
- * removes the unsafe 100-row ceiling, reuses the shipped full-body product scorer,
- * and wires an automatic no-hit directive from the per-turn hook. Queries with
+ * The per-turn hook wires an automatic no-hit directive to this path. Queries with
  * lexical hits still rely on the active model to judge insufficiency and follow
  * the Tier 3 protocol; a deterministic layer cannot judge semantic sufficiency.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by convention; .mjs (Node.js) only.
  *
  * CLI: node select-relevant-units.mjs <storePath> "<query>" [--shard N] [--shard-size N]
  */
@@ -35,7 +33,7 @@ import { productRankedScores } from './retrieve-context.mjs';
 // loadFreshIndex validates the recursive source signature on every call. This
 // module's old local loader accepted any parseable cache, which could serve a
 // retired unit into the reasoning-tier shortlist — same defect class as the
-// standalone-bm25 stale cache (Hale 2026-07-11 §4), closed at the shared loader.
+// standalone-bm25 stale cache, closed at the shared loader.
 const loadIndex = loadFreshIndex;
 
 function partitionCandidateShards(units, shardSize) {

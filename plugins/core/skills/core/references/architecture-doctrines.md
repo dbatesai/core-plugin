@@ -1,6 +1,6 @@
 # Architecture Doctrines
 
-A thin normative index of the load-bearing architectural rules CORE has converged on. Five entries: four doctrines with live consumers, plus one candidate (Doctrine 1) held at observation status until its consumer lands. Per DC-98 (doctrine-consumer coupling), **a doctrine without an active consumer is an observation, not a doctrine.** Graduation requires a named first consumer; release-review verifies the consumer still exists.
+A thin normative index of the load-bearing architectural rules CORE has converged on. Five entries: four doctrines with live consumers, plus one candidate (Doctrine 1) held at observation status until its consumer lands. Per the doctrine-consumer coupling rule (Doctrine 5 below), **a doctrine without an active consumer is an observation, not a doctrine.** Graduation requires a named first consumer; release-review verifies the consumer still exists.
 
 The doctrines live here, not in protocol prose, because they cut across protocols. When a protocol document needs to lean on a doctrine, it cites this file by anchor. Consumers cite the doctrine by name; readers come here for the rule.
 
@@ -48,9 +48,9 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 
 **How to apply.** Code that observes (read capability state, render readiness, surface hygiene metrics) sets a graceful fallback when probes return DEGRADED / NOT-YET / UNKNOWN — narrate the limitation, don't refuse to start. Code that mutates (collab event-write, PROJECT.md autonomous render, plugin-cache install) reads `mutation_permitted` from the relevant capability row and aborts with `mutation_block_reason` when false. The two paths use the same capability primitive but read different fields.
 
-**First consumer.** `capability-probe.mjs --startup` (v2.6.0, fail-open) vs `capability-probe.mjs --pre-action collab-files-mutating` (v2.6.0, fail-closed). Same script, different invocation modes; the modes embody the doctrine.
+**First consumer.** `capability-probe.mjs --startup` (fail-open) vs `capability-probe.mjs --pre-action collab-files-mutating` (fail-closed). Same script, different invocation modes; the modes embody the doctrine.
 
-**Codified in.** DC-97 (fail-open startup, fail-closed mutation). This doctrine is the cross-protocol form of DC-97 — DC-97 names the rule; this file names the consumers.
+**Codified in.** The standing fail-open-startup / fail-closed-mutation rule. This doctrine is its cross-protocol form — the rule itself, plus this file naming the consumers.
 
 ## Doctrine 5 — Doctrine-consumer coupling
 
@@ -62,7 +62,7 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 
 **First consumer.** This document itself. The graduation criteria above are the doctrine; the maintenance of this file is the consumer. When the doctrines listed here lose their first-consumers (named below each entry), the entries get demoted to observation status rather than removed silently.
 
-**Codified in.** DC-98 (schema-and-doctrine-consumer coupling — the same rule covers both, as it does at the top of this file). The metaphor: schemas have schema_version + Known Consumers list; doctrines have First Consumer + secondary-consumer roster.
+**Codified in.** The standing schema-and-doctrine-consumer coupling ruling (the same rule covers both, as it does at the top of this file). The metaphor: schemas have schema_version + Known Consumers list; doctrines have First Consumer + secondary-consumer roster.
 
 ---
 

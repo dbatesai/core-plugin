@@ -1,21 +1,20 @@
 #!/usr/bin/env node
 /**
  * metrics-package.mjs — the anonymized memory-efficacy feedback package.
- * Spec: CORE workshop `docs/specs/2026-07-16-metrics-package-spec.md`.
  *
  * ONE PURPOSE: feedback data for refining CORE itself. The package must be safe
- * to hand across strict data boundaries (the Crest/T-Mobile rule: de-identified
+ * to hand across strict data boundaries (the standing data-boundary rule: de-identified
  * aggregates only, no reconstruction risk), so the design is whitelist-generation:
  * every byte in the package is COMPUTED here from raw sources — no raw file is
  * ever copied, and the only value types that survive are numbers, dates, fixed
  * CORE vocabulary (enum states, op names, check ids, capability ids), and salted
  * pseudonyms. Free text (query words, titles, bodies, paths, validator messages)
- * is dropped, never hashed. Per DC-77 this boundary lives in prescriptive code,
- * not skill prose; per DC-80, zero dependencies.
+ * is dropped, never hashed. By design this boundary lives in prescriptive code,
+ * not skill prose; and the script carries zero dependencies.
  *
  * Pseudonyms: HMAC-SHA256 over a per-install secret salt (~/.core/metrics-package-salt,
- * 0600, NEVER shipped). Stable across packages from the same install (David's
- * ratified call, 2026-07-16) so trend lines are comparable; meaningless elsewhere.
+ * 0600, NEVER shipped). Stable across packages from the same install so trend
+ * lines are comparable; meaningless elsewhere.
  * Deleting the salt rotates every pseudonym.
  *
  * Self-healing: every source is optional — absent/unparseable sources emit
@@ -58,13 +57,13 @@ const HISTORY_DIR = 'metrics-package-history';
 const UNIT_TYPES = ['decision', 'risk', 'observation', 'person', 'reference', 'principle', 'value', 'explainer', 'review-finding', 'open-question', 'premise', 'episode'];
 const UNIT_STATUSES = ['active', 'retired', 'archived', 'superseded', 'draft'];
 const EDGE_TYPES = ['cites', 'depends-on', 'supersedes', 'supersedes-claim', 'refines', 'amends', 'conflicts-with', 'references-topic'];
-// The classifier's ACTUAL state vocabulary (classify-turns.mjs is the producer —
-// Hale's 2026-07-17 audit caught the previous invented list collapsing 5 of 6
+// The classifier's ACTUAL state vocabulary (classify-turns.mjs is the producer;
+// this list must match its output exactly — an invented list here would fold
 // canonical states to 'other').
 const RECOGNITION_STATES = ['rec-fail-tier-0', 'rec-fail-tier-1-3-trigger', 'tier-0-win', 'tier-1-3-win', 'capture-miss', 'mechanics-failure'];
-// Code-owned enums for every remaining string source (Hale audit e1490d4 finding 7:
-// a shape check like kebab-case is NOT a privacy boundary — user-derived values can
-// be kebab-shaped. Only these exact values pass; everything else folds to 'other').
+// Code-owned enums for every remaining string source. A shape check like
+// kebab-case is NOT a privacy boundary — user-derived values can
+// be kebab-shaped. Only these exact values pass; everything else folds to 'other'.
 const HYGIENE_KINDS = ['compact-project', 'demote-moves', 'demote-moves-large-batch', 'demote-state', 'demote-state-large-batch', 'project-md-over-cap', 'maintenance-run'];
 const MAINTENANCE_OPS = ['decisions-index', 'risks-index', 'summary-index'];
 const CAPABILITY_IDS = ['plugin-root-resolution', 'target-surface-collab-files', 'auto-memory-injection', 'anti-anchoring-mechanism', 'instruction-surface-resolution', 'memory-visible-in-agent-context', 'memory-accessed'];
@@ -88,7 +87,7 @@ function fold(value, whitelist) {
 }
 
 // Small-cell suppression: cells with 0 < count < k fold into one aggregate so a
-// rare category can't fingerprint the store across packages (Hale finding 6).
+// rare category can't fingerprint the store across packages.
 function suppressSmallCells(hist, k = SMALL_CELL_K) {
   const out = {};
   let suppressedCells = 0; let suppressedTotal = 0;
@@ -252,7 +251,7 @@ export function retrievalStats(projectDir, seal) {
     badLines += bad;
     for (const row of rows) entries.push({ date, row });
   }
-  // Outcomes live in the SEPARATE later outcome-log (Hale stop-note): read
+  // Outcomes live in the SEPARATE later outcome-log: read
   // them alongside retrieval rows so the join sees both sides.
   for (const { date, file } of listSessionLogs(projectDir, 'outcome-log.jsonl')) {
     const { rows, bad } = readJsonlSafe(file);
@@ -271,8 +270,7 @@ export function retrievalStats(projectDir, seal) {
     matches.push(entry);
     baseById.set(id, matches);
   }
-  // Outcome resolution (Hale corrections 5–7, 2026-07-17, sharpened in the
-  // 2026-07-17 HOLD audit: "share one authority resolver across consumers").
+  // Outcome resolution: one authority resolver, shared across consumers.
   // Only JOINED rows aggregate; orphans are surfaced as counts only. Multiple
   // rows per retrieval resolve through resolveOutcomeAuthority() — the SAME
   // function analyze-retrieval-quality.mjs uses — never first-row-wins, so an
@@ -362,7 +360,7 @@ export function retrievalStats(projectDir, seal) {
   return {
     available: true, ...trust, days, totals,
     escalation_rate: totals.events ? round3(totals.escalations / totals.events) : null,
-    // Unknown-aware (Hale: missing is not "no dip-back"): the rate divides by
+    // Unknown-aware (review note: missing is not "no dip-back"): the rate divides by
     // rows that OBSERVED the field; rows that omitted it are counted as
     // coverage, never as zeros.
     dip_back: {
@@ -407,8 +405,7 @@ export function hygieneStats(projectDir) {
 const QUESTION_KINDS = Object.keys(DEFAULT_QUOTA);
 const SELF_TEST_TRIGGERS = ['user-invoked', 'auto-regrade'];
 
-// Closes the gap named in docs/specs/2026-07-23-metrics-holistic-redesign.md
-// §3b/§5: self-test grading results (the project's own blind self-exam,
+// Self-test grading results (the project's own blind self-exam,
 // scripts/self-test-round.mjs) reach the exported package through the exact
 // same dedicated log + whitelist discipline every other block here uses.
 // Numbers, ids, and hashes only — never the question/answer text or unit
@@ -524,7 +521,7 @@ export function storeCensus(projectDir) {
     edges_by_type: suppressSmallCells(edgesByType),
     edges_total: Object.values(edgesByType).reduce((a, b) => a + b, 0),
     orphans, orphan_rate: active ? round3(orphans / active) : null,
-    // NOT 1-orphan_rate (Hale caught the earlier redundant stat): edges per
+    // NOT 1-orphan_rate: edges per
     // active unit measures graph richness; the active-to-active fraction
     // measures how much of the edge mass is traversable among live units.
     edges_per_active_unit: active ? round3(Object.values(edgesByType).reduce((a, b) => a + b, 0) / active) : null,
@@ -657,7 +654,7 @@ export function workspaceMetrics(home, workspaceId) {
       unkeyed_kept: stats.unkeyed_kept,
     };
     // Availability reflects AGGREGATEABLE in-cohort rows, not day-key count
-    // (Hale item 6, 2026-07-23): the deduper preserves empty day-keys, so an
+    //: the deduper preserves empty day-keys, so an
     // old-only store — every row excluded by the cohort gate — has day-keys but
     // zero countable turns. That store is UNAVAILABLE-with-a-coverage-gap, never
     // available-with-zero-turns.
@@ -681,7 +678,7 @@ export function workspaceMetrics(home, workspaceId) {
     try {
       const j = JSON.parse(readFileSync(calPath, 'utf8'));
       // Field names match the producer (calibrate-classifier.mjs writes
-      // labeled_count / is_calibrated — Hale's audit caught the earlier
+      // labeled_count / is_calibrated — a review caught the earlier
       // labels_count / cleared misread returning permanent nulls).
       calibration = {
         available: true,
@@ -755,7 +752,7 @@ export function headline(blocks) {
   if (w?.available && w.recognition?.available) {
     const days = Object.keys(w.recognition.days).sort();
     const last = days.length ? w.recognition.days[days[days.length - 1]] : null;
-    // Denominator floor (Hale: never headline a rate from three provisional
+    // Denominator floor (review rule: never headline a rate from three provisional
     // turns) — below 20 turns the rate ships as null with the sample size.
     if (last && last.turns) {
       h.recfail_latest_sample = last.turns;
@@ -896,7 +893,7 @@ export function collectProject(projectDir, { home, seal }) {
     'workspace-metrics': workspaceMetrics(home, workspaceId),
     'self-test': selfTestStats(projectDir),
   };
-  // Population gate on per-unit rankings (Hale finding 6): below the floor a
+  // Population gate on per-unit rankings: below the floor a
   // ranking row can fingerprint a specific unit across packages.
   const census = localBlocks['store-census'];
   const retrieval = localBlocks['retrieval-stats'];
@@ -912,26 +909,23 @@ export function collectProject(projectDir, { home, seal }) {
 
 // ---------- zip ----------
 
-// Relative archive path (David-approved fix, corrected 2026-07-18 after the
-// first attempt failed local verification): on windows-latest, tar parses a
-// Windows drive-letter path's colon (e.g. C:\Users\...\out.zip) passed to -f
+// Relative archive path: on Windows, tar parses a
+// drive-letter path's colon (e.g. C:\Users\...\out.zip) passed to -f
 // as its remote host:path syntax and exits 128 ("Cannot connect to C: resolve
-// failed") — confirmed from live CI stderr, not inferred. The first fix
-// attempt added --force-local to disable that, but macOS/Linux bsdtar (the
+// failed"). --force-local would disable that, but macOS/Linux bsdtar (the
 // same libarchive-based tar that ships on Windows too) does not recognize
-// that flag at all ("Option --force-local is not supported" — confirmed by
-// direct local invocation before this fix shipped, unlike the first attempt).
-// The portable fix instead avoids the ambiguous colon entirely: run tar with
+// that flag at all ("Option --force-local is not supported").
+// The portable approach avoids the ambiguous colon entirely: run tar with
 // destZip's directory as the process cwd and pass only its basename to -f, so
 // -f never contains a drive letter. -C's argument for the source tree stays
 // absolute and is unaffected by the process cwd change.
 // ZIP local-file-header magic number (PK\x03\x04). `-a` auto-selects the archive
 // format from destZip's extension, but ZIP support behind `-a` is NOT consistent
-// across tar builds (Meridian, live Windows box, 2026-07-20): GNU tar (what Git
-// Bash/MSYS2 put first on PATH on her machine) has no ZIP support at all and
-// silently emits an uncompressed TAR wearing a .zip extension, exit 0. The `tar -t`
-// listing check below does NOT catch this -- GNU tar happily lists its own tar
-// output, and manifest.json is right there, so the old code returned ok:true for a
+// across tar builds: GNU tar (commonly first on PATH under Git
+// Bash/MSYS2 on Windows) has no ZIP support at all and
+// silently emits an uncompressed TAR wearing a .zip extension, exit 0. A `tar -t`
+// listing check does NOT catch this -- GNU tar happily lists its own tar
+// output, and manifest.json is right there, so a listing check reports ok for a
 // file that is not actually a zip. Checking the real magic bytes is the only
 // verification that can't be fooled by a tar binary lying about its own output.
 const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
@@ -1012,7 +1006,7 @@ export function runPackage(argv, { homeOverride } = {}) {
       coverage.push({ project: collected.pseudonym, available: true });
     } catch (err) {
       // The reason is an error CODE, never err.message — raw messages embed real
-      // filesystem paths (the leak scan caught exactly this during development).
+      // filesystem paths, which the leak scan rejects.
       const code = (err && typeof err.code === 'string') ? err.code : 'collection-error';
       coverage.push({ project: seal('project', basename(dir)), available: false, reason: code });
     }
@@ -1020,14 +1014,13 @@ export function runPackage(argv, { homeOverride } = {}) {
   if (!projects.length) return { exit: 2, error: 'no project could be collected', coverage };
 
   // Deltas are computed READ-ONLY here; the history append happens only after
-  // the package actually ships (Hale: history was advancing before leakage
-  // validation — an aborted run must not consume a history slot).
+  // the package actually ships — an aborted run must not consume a history slot.
   for (const proj of projects) {
     proj.deltas = computeDeltas(home, proj.pseudonym, proj.headline);
   }
 
-  // Generator identity — honest provenance (Hale: a source-tree run must not
-  // identify itself as the released build). The manifest version is reported
+  // Generator identity — honest provenance: a source-tree run must not
+  // identify itself as the released build. The manifest version is reported
   // AS the manifest's claim; `generator` records where this code actually ran
   // from, and the source SHA is captured when the tree is a git checkout.
   let plugin = null;
@@ -1105,7 +1098,7 @@ export function runPackage(argv, { homeOverride } = {}) {
 
   // Partial detection descends one level: a workspace-metrics block whose
   // recognition/calibration/capability sub-blocks are unavailable is partial
-  // coverage too (Hale: nested missing sources must force partial status).
+  // coverage too (review rule: nested missing sources must force partial status).
   const blockPartial = (b) => b && (b.available === false
     || Object.values(b).some((v) => v && typeof v === 'object' && v.available === false));
   const partial = coverage.some(c => !c.available)

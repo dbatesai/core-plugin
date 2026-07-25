@@ -1,8 +1,8 @@
 /**
- * read-transcript.mjs — v2.9 `read-transcript` adapter verb (deterministic core).
+ * read-transcript.mjs — `read-transcript` adapter verb (deterministic core).
  *
- * The redesign audit (2026-05-29) named transcript introspection the one genuinely
- * new adapter capability: portable across harnesses but with different on-disk paths
+ * Transcript introspection is
+ * portable across harnesses but with different on-disk paths
  * and JSONL schemas. Per the central principle, native specifics live in the adapter
  * layer, not core prose — so this script resolves a transcript path per harness and
  * normalizes the lines into one ordered event shape that consumers (memory-accessed,
@@ -10,7 +10,7 @@
  * Transcript selection is session-id-exact on claude-code (MET-008); mtime-latest is
  * a documented fallback recorded in meta.transcript_resolution.
  *
- * Schemas verified on disk 2026-05-29 (evidence, not assumption):
+ * Schemas verified on disk (evidence, not assumption):
  *   - claude-code: ~/.claude/projects/<cwd-with-slashes-as-dashes>/<session>.jsonl
  *       message lines carry `message.content[]` with {type:'text'|'tool_use', ...}.
  *   - codex: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
@@ -18,7 +18,7 @@
  *       'message' carry {role, content:[{type, text}]}; payload.type 'reasoning' is
  *       encrypted (skipped); 'event_msg' carries agent_message/user_message/etc.
  *
- * Codex tool/shell extraction (v2.9 Slice F — IMPLEMENTED): function_call (exec_command
+ * Codex tool/shell extraction: function_call (exec_command
  * etc.; `arguments` is a JSON string with cmd + paths) and custom_tool_call (apply_patch
  * etc.; `input` is a string with the patch/paths) are surfaced as `tool` events with
  * name + input text — the file-access signal memory-accessed needs. Schema derived from a
@@ -28,7 +28,7 @@
  * still matches current core-codex transcripts — if a Codex version drifts the field
  * names, fix-forward (the parser fails open to no-tool-events, never throws).
  *
- * Per DC-77 the deterministic parse ships as a script; per DC-80 the plugin ships .mjs.
+ * By design the deterministic parse ships as a script; the plugin ships .mjs.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';

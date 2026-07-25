@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Governed write-time enrichment storage for DC-114/DC-115.
+ * Governed write-time enrichment storage (the model-free recall-gap closure path).
  *
  * This module never invokes a model. A cloud agent from a model family different
  * from the answering family supplies aliases, paraphrases, and likely questions.

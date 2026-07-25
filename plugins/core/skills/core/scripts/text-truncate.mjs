@@ -2,16 +2,14 @@
  * text-truncate.mjs — one grapheme-cluster-safe truncate(), shared by every
  * index generator that summarizes unit text to a character bound.
  *
- * Extracted 2026-07-19 after an independent review caught the bug fixed in
- * generate-summary-index.mjs's truncate() (String.slice splits a UTF-16
- * surrogate pair — most emoji, CJK extension characters — orphaning the high
- * surrogate, which serializes as a U+FFFD replacement character) ALSO present,
- * unfixed, in two other hand-duplicated copies: generate-decisions-index.mjs
- * and generate-risks-index.mjs. Fix-in-one-copy is exactly the failure this
- * collapses — one shared function, so there is no second copy left to drift.
+ * One shared function, so there is no second copy left to drift —
+ * hand-duplicated copies of this logic are exactly how a fix lands in one
+ * generator and misses the others. A naive String.slice splits a UTF-16
+ * surrogate pair (most emoji, CJK extension characters), orphaning the high
+ * surrogate, which serializes as a U+FFFD replacement character.
  *
- * Upgraded same day (Antigravity's review, "ponytail" pass): a surrogate-pair
- * boundary check stops literal encoding corruption (the reported bug — a
+ * A surrogate-pair
+ * boundary check stops that literal encoding corruption (the
  * U+FFFD replacement character) but is not the full correctness bar. A cut
  * between a base character and a combining diacritical mark, or inside a ZWJ
  * sequence (family emoji — multiple codepoints joined by U+200D), is still
@@ -21,7 +19,7 @@
  * no new dependency, Node 16+) way to find "the last complete user-perceived
  * character" — it already treats surrogate pairs, ZWJ sequences, and
  * base+combining-mark clusters all as one atomic segment, so respecting its
- * boundaries subsumes the narrower surrogate-only check this replaces.
+ * boundaries subsumes a narrower surrogate-only check.
  */
 
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });

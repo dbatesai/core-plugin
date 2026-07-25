@@ -1,11 +1,11 @@
 /**
- * Tier 2 edge-graph walk for CORE memory retrieval, per DC-68/retrieval.md.
+ * Tier 2 edge-graph walk for CORE memory retrieval, per retrieval.md.
  *
  * Given a seed unit, walks typed edges up to a hop cap, applying the R·S proxy
  * from priority.mjs for branch pruning. Deterministic alternative to LLM-by-hand
- * edge traversal — per DC-77, graph traversal logic ships in the plugin.
+ * edge traversal — by design, graph traversal logic ships in the plugin.
  *
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The plugin ships Node.js (.mjs) only.
  *
  * Library usage:
  *   import { walk } from './graph-walk.mjs';
@@ -42,7 +42,7 @@ function resolveTarget(target, memoriesDir, includeObservations = false, include
   if (existsSync(c1)) return c1;
   const c2 = join(memoriesDir, t);
   if (existsSync(c2)) return c2;
-  // Archive is out of scope for a default walk (Hale's 2026-07-22 finding):
+  // Archive is out of scope for a default walk:
   // an archived unit can carry status:active with no t_invalid, so neither
   // downstream suppression check (isInvalidated / isActiveStatus) would ever
   // catch it -- resolving the path at all is what has to be gated, not just
@@ -53,7 +53,7 @@ function resolveTarget(target, memoriesDir, includeObservations = false, include
     if (existsSync(c3)) return c3;
   }
   if (includeObservations) {
-    // SYN-007: edges pointing into observations/<YYYY-MM>/ resolved to null.
+    // Without this branch, edges pointing into observations/<YYYY-MM>/ resolve to null.
     const obsRoot = join(memoriesDir, 'observations');
     const flat = join(obsRoot, `${stem}.md`);
     if (existsSync(flat)) return flat;
@@ -70,7 +70,7 @@ function resolveTarget(target, memoriesDir, includeObservations = false, include
 
 // Build an inverse edge index: target-stem -> [{sourcePath, sourceId, edgeType}].
 // Top-level scan by default; includeObservations also scans observations/ and
-// its month subdirs (SYN-007) so observation units can appear as inbound neighbors.
+// its month subdirs so observation units can appear as inbound neighbors.
 export function buildInverseEdgeIndex(memoriesDir, { includeObservations = false, includeInvalidated = false } = {}) {
   const inverse = new Map();
   const scanDir = (dir) => {

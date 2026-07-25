@@ -124,19 +124,39 @@ export const PATTERNS = [
     re: /\/Users\/[A-Za-z][A-Za-z0-9._-]*/g,
     appliesTo: (p) => isProductSurface(p),
   },
-  // --- agent names hardcoded in shipped PROSE (.md): only product names ship ---
+  // --- agent names hardcoded in shipped PROSE (.md) OR shipped product code
+  // (.mjs under plugins/ — the ~80 design-provenance comments, ruled 2026-07-24:
+  // the product owner mandated no internal dev-process references in anything
+  // shippable): only product names ship ---
   {
     name: 'agent-name-in-prose',
     klass: 'agent-name',
     re: /\b(Keel|Hale|Antigravity|Crest|Meridian|Tideline)\b/g,
-    appliesTo: (p) => isMarkdown(p) && notChangelog(p),
+    appliesTo: (p) => (isMarkdown(p) && notChangelog(p)) || (inPlugins(p) && p.endsWith('.mjs')),
   },
-  // --- a specific person's name in shipped prose (identity + authorization) ---
+  // --- a specific person's name in shipped prose or shipped product code ---
   {
     name: 'person-in-prose',
     klass: 'personal-identity',
     re: /\bDavid\b/g,
-    appliesTo: (p) => isMarkdown(p) && notChangelog(p),
+    appliesTo: (p) => (isMarkdown(p) && notChangelog(p)) || (inPlugins(p) && p.endsWith('.mjs')),
+  },
+  // --- internal decision-ledger references (DC-XX) in anything user-shippable
+  // (same 2026-07-24 ruling: "not meaningful to people other than me, and this
+  // is a public repo"). tests/ keeps provenance traceability for now — an
+  // explicitly-flagged residual, not an oversight. ---
+  {
+    name: 'dc-reference',
+    klass: 'dev-process',
+    // [a-z]? covers letter-suffixed refs (DC-94a); case-insensitive because
+    // bare lowercase refs (dc-127) leak identically. The (?!-) carve-out
+    // exempts slug-continued ids (dc-12-routing-rewrite): `dc-<n>-<slug>` is
+    // the PRODUCT's own decision-unit naming convention, and schema docs
+    // legitimately show fictional examples of it. A slugged ref to an
+    // internal workshop unit is mechanically indistinguishable from such an
+    // example — that residual class is a hand-review item, not a guard item.
+    re: /\b[Dd][Cc]-\d+[a-z]?\b(?!-)/g,
+    appliesTo: (p) => isProductSurface(p) || p === 'CHANGELOG.md',
   },
   // --- names in shipped JSON config/schema files (Antigravity's 868915d review
   // gap: configs are product surface, not documentation — a name in a schema

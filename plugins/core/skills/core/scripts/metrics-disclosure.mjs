@@ -1,7 +1,7 @@
 /**
  * metrics-disclosure.mjs — one-time first-run metrics disclosure.
  *
- * dc-107 made local metrics capture default-on for every install: from a user's
+ * Local metrics capture is default-on by design for every install: from a user's
  * first `/core` invocation, turns get classified into `_metrics`/workspace metrics
  * dirs, including a `user_text` field with real excerpts of what they typed. That
  * call was reasoned about for a small set of known, controlled installs; the

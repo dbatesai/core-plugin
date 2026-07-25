@@ -6,7 +6,7 @@
  * probe script (or directly delegates to a sibling script if `delegate` is
  * declared), and returns a rows array matching `capability/row-schema.md`.
  *
- * Two invocation modes per DC-97 (fail-open observation, fail-closed mutation):
+ * Two invocation modes (fail-open observation, fail-closed mutation):
  *   --startup            Run all capabilities the current harness declares.
  *                        Fail-open: returns the rows even when some are DEGRADED
  *                        or UNKNOWN; exit code 0 even with non-PASS rows.
@@ -19,8 +19,8 @@
  * Doctrine consumer for "Fail-open observation, fail-closed mutation" — see
  * `references/architecture-doctrines.md §Doctrine 4`.
  *
- * Per DC-77 the script ships with the plugin.
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The script ships with the plugin by design.
+ * The plugin ships Node.js (.mjs) only, zero dependencies.
  */
 
 import { readFileSync, realpathSync } from 'node:fs';

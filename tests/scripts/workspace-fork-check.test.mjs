@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { symlinkCapable } from './trusted-test-tmp.mjs';
 import {
   entryPath, checkFork, canonicalPath,
 } from '../../plugins/core/skills/core/scripts/workspace-fork-check.mjs';
@@ -186,7 +187,8 @@ test('forked manifest emits canonical `path`, not legacy `project_path`', () => 
 // the CLI entry guard; resolve() alone returned the two forms unequal and
 // re-forked every startup.
 
-test('registered path reached via a symlink -> no fork (realpath normalization)', () => {
+test('registered path reached via a symlink -> no fork (realpath normalization)', (t) => {
+  if (!symlinkCapable()) return t.skip('symlink privilege unavailable (Windows non-elevated box)');
   // Don't use withFixture's realpathSync wrapper here — we need the raw symlink.
   const base = mkdtempSync(join(tmpdir(), 'fork-symlink-'));
   try {
@@ -213,7 +215,8 @@ test('registered path reached via a symlink -> no fork (realpath normalization)'
   }
 });
 
-test('canonicalPath collapses a symlink to its real target; falls back to resolve when absent', () => {
+test('canonicalPath collapses a symlink to its real target; falls back to resolve when absent', (t) => {
+  if (!symlinkCapable()) return t.skip('symlink privilege unavailable (Windows non-elevated box)');
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'canon-')));
   try {
     const real = join(base, 'real');

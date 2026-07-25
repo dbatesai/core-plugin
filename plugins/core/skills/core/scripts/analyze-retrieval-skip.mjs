@@ -3,8 +3,8 @@
  *
  * The retrieval-skip gate. memory-accessed-probe answers a session-level binary — was
  * the CORE store reached AT ALL this session? This asks the sharper, ordering-aware
- * question Hale named: was a memory-DEPENDENT turn answered WITHOUT reaching the store
- * first? That is the recognition-failure signature (DC-94): the agent used / was asked
+ * question named in review: was a memory-DEPENDENT turn answered WITHOUT reaching the store
+ * first? That is the recognition-failure signature: the agent used / was asked
  * about a project term that lives in _memories/ and answered from its own head instead
  * of grepping. memory-accessed misses it when the store is grepped later for something
  * else (core>0 → PASS) while an individual term-turn was still answered cold.
@@ -19,11 +19,11 @@
  *  - A skip means: between the question and its answer, NO tool touched a CORE surface.
  *    A store access anywhere up to and including the answer clears the turn.
  *
- * Consumes the read-transcript adapter verb (DC-75: harness paths/schemas stay there).
- * Wired into /finalize + /process-memory as a session-closeout signal (Hale: the
+ * Consumes the read-transcript adapter verb (harness paths/schemas stay there).
+ * Wired into /finalize + /process-memory as a session-closeout signal (review: the
  * consumer must be behavioral; CI is a supplement, the failure mode is session behavior).
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships with the plugin as a script; .mjs only.
  *
  * CLI:
  *   node analyze-retrieval-skip.mjs <project-root> [--harness <h>] [--transcript <path>] [--json]
@@ -48,7 +48,7 @@ const COMMON_WORDS = new Set([
   'memory', 'data', 'state', 'notes', 'people', 'risk', 'decision', 'design', 'plan',
 ]);
 
-/** True for a high-signal identifier: DC-64, R-17, IGM (acronym), BBLens (CamelCase). */
+/** True for a high-signal identifier: a DC-nn decision id, R-17, IGM (acronym), BBLens (CamelCase). */
 function isHighSignalToken(tok) {
   if (/^(?:DC|R)-\d+$/.test(tok)) return true;          // decision / risk ids
   if (/^[A-Z]{2,6}$/.test(tok)) return true;             // acronym (IGM, RTM, PRD)
@@ -89,7 +89,7 @@ export function buildProjectTerms(projectRoot) {
   return terms;
 }
 
-// Normalize id casing so a user typing "dc-64" matches the canonical "DC-64".
+// Normalize id casing so a lowercase-typed id matches its canonical uppercase form.
 function normalizeId(tok) {
   const m = tok.match(/^(dc|r)-(\d+)$/i);
   return m ? `${m[1].toUpperCase()}-${m[2]}` : tok;

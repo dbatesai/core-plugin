@@ -4,7 +4,7 @@ What it is: one canonical `<project>/CONTRACT.md` is the authoritative source of
 
 Read this when a project asks to adopt the contract system, when you're editing a contract, or when a release surfaces a contract-drift gate.
 
-## The pieces (all ship as DC-77 scripts under `skills/core/scripts/`)
+## The pieces (all ship as plugin scripts under `skills/core/scripts/`)
 
 - `contract-format.mjs` — the shared core. `parseContract` (frontmatter + `##` sections + `### <harness>-only` subsections, with schema validation), `renderForHarness`, `parseOverrides`, deterministic provenance, and `generateForHarness` (the body every generator calls).
 - `generate-claude-md.mjs` / `generate-agents-md.mjs` — thin per-harness wrappers. Modes: `--mode write|check|dry-run`.
@@ -46,7 +46,7 @@ Generated output is a pure function of the contract: `generated_at` is the contr
 
 When a harness needs something the contract doesn't cover, put it in `<harness>.md.override` (e.g. `CLAUDE.md.override`). It's appended to the generated file inside a `BEGIN/END OVERRIDE` separator and tracked by `override_block_hash` (over raw bytes). Overrides **add**; they cannot delete contract content (to remove content for one harness, edit that harness's `-only` section).
 
-## Cross-harness honesty (DC-75)
+## Cross-harness honesty
 
 The only per-harness facts in the generators are the harness name and the output filename (`HARNESS_OUTPUT`). Everything else is shared. A harness absent from `canonical_for` triggers a warning if you generate for it. This keeps the system harness-agnostic — the contract describes the project, the generators map it to each surface.
 
@@ -61,6 +61,6 @@ Net effect: a Codex user without a contract can end up with no instruction surfa
 
 ## Remaining caveats
 
-The public README/ARCHITECTURE rewrite this section used to track shipped with the v3.6.0–v3.7.0 public-docs overhaul. Still open: `audit-memory-boundary.mjs` ships as a memory-authority audit (sampled, read-only) and runs in `/finalize` and `/process-memory`, but its conflict-detection scope is deliberately deferred — describe it as shipped-with-conflict-detection-deferred, not complete.
+`audit-memory-boundary.mjs` ships as a memory-authority audit (sampled, read-only) and runs in `/finalize` and `/process-memory`, but its conflict-detection scope is deliberately deferred — describe it as shipped-with-conflict-detection-deferred, not complete.
 
-A separate instruction-surface adapter (inventorying arbitrary surfaces and planning CORE-block upserts across them) was explored and retired: everything it was reaching for is already covered by the contract-generator path above (`generate-<harness>-md.mjs`), which actually writes. A wrapper author wanting a CORE-owned block injected into a harness surface uses that path.
+There is no separate instruction-surface adapter (inventorying arbitrary surfaces and planning CORE-block upserts across them): everything such an adapter would reach for is covered by the contract-generator path above (`generate-<harness>-md.mjs`), which actually writes. A wrapper author wanting a CORE-owned block injected into a harness surface uses that path.

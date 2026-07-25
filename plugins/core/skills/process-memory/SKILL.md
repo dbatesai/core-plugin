@@ -112,11 +112,11 @@ Read the output. The validator emits three counts: PASS, WARN, FAIL.
 - `status-value: closed` on a risk unit → rewrite to `archived`.
 - `status-value: superseded` on a decision unit → rewrite to `retired`.
 - `archived-in-active`: unit has `status: archived` but sits in active dir → move to `_memories/archive/`.
-- `edge-unknown-type`: edge type not in the committed set (`cites`, `supersedes`, `superseded-by`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`, `depended-on-by`, `supersedes-claim`, `refines`, `amends`) → three cases: (a) `superseded-by`/`depended-on-by` → remove (the inverse already lives on the other unit); (b) a type in the normalize map (`relates`/`relates-to`/`related` → `cites`) → **relabel to the named target** — the validator prints the target in the warning detail, so this is a mechanical safe-fix, not a guess; (c) anything else → surface for a bless-or-relabel decision (don't invent a type). `refines` and `amends` are committed now (distinct from `supersedes`) and no longer flag.
+- `edge-unknown-type`: edge type not in the committed set (`cites`, `supersedes`, `superseded-by`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`, `depended-on-by`, `supersedes-claim`, `refines`, `amends`) → three cases: (a) `superseded-by`/`depended-on-by` → remove (the inverse already lives on the other unit); (b) a type in the normalize map (`relates`/`relates-to`/`related` → `cites`) → **relabel to the named target** — the validator prints the target in the warning detail, so this is a mechanical safe-fix, not a guess; (c) anything else → surface for a bless-or-relabel decision (don't invent a type). `refines` and `amends` are committed types (distinct from `supersedes`) and do not flag.
 - `external-ref`: a cross-store/citation/path edge target recognized as legitimately outside the unit store (benign; not a break) — no fix, leave it.
 
 **Surface for human judgment** without auto-fixing:
-- `dangling-edge` / `edge-target-missing` — a missing in-store unit (real break) or a typo; the user decides. (Recognized cross-store refs are `external-ref`, handled above — they no longer show here.)
+- `dangling-edge` / `edge-target-missing` — a missing in-store unit (real break) or a typo; the user decides. (Recognized cross-store refs are `external-ref`, handled above — they do not show here.)
 - `orphan` (no edges) — sometimes deliberate (risks often stand alone), sometimes a graduation gap.
 - Anything else the validator flags that isn't on the safe-fix list.
 
@@ -124,7 +124,7 @@ After auto-fixing, re-run the validator and report the new counts.
 
 ---
 
-## Step 4 — Run mechanical maintenance (DC-110)
+## Step 4 — Run mechanical maintenance
 
 Run the consolidated mechanical pass. It regenerates both indexes + the summary index, cleans ghost duplicates, and checks the PROJECT.md cap — signature-gated (no-op when units are unchanged) and recorded in the cadence ledger (`_memories/_maintenance-state.json`):
 
@@ -150,9 +150,9 @@ The script is the only writer of the generated block — it sits between `<!-- C
 
 ---
 
-## Step 5 — PROJECT.md tier discipline (DC-85 Phase 1b + 1c)
+## Step 5 — PROJECT.md tier discipline (Phase 1b + 1c)
 
-**Lifecycle preflight FIRST — the user-authorship boundary (the 2026-07-22 fix).** Before any PROJECT.md writer runs, classify the store's files against the last CORE baseline. This closes the exact gap a later audit caught: `/process-memory` used to auto-invoke `compact-project.mjs` with NO edit-detection gate, so an unreconciled user correction to a §Decisions entry got compacted away silently.
+**Lifecycle preflight FIRST — the user-authorship boundary.** Before any PROJECT.md writer runs, classify the store's files against the last CORE baseline. Without this edit-detection gate, an unreconciled user correction to a §Decisions entry would be compacted away silently.
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" "<project>" --json
@@ -160,7 +160,7 @@ node "${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs" "<project>" --json
 
 Handle each classification before writing: `pending-edit` → reconcile it first (propagate the user's edit back to the source unit, fire anti-resurrection for removals) — do NOT run the writers over it; `malformed` → surface by name, a manual marker fix is needed; `no-baseline` with `safeFirstWrite:false` → a pre-existing, never-reconciled file (surface it, don't auto-write over it); `missing`/`read-only` → surface plainly. Only `clean`/`generated-only`, and `no-baseline` with `safeFirstWrite:true`, are safe to write. The detector is preflight/reporting — the writers below ALSO self-refuse at their own boundary (each rechecks its live preimage and the shared PROJECT.md lock immediately before its atomic write), so a skipped preflight degrades safely rather than opening the hole again.
 
-Then run three scripts in order — demote-moves first, then compact-project, then demote-state-narrative. The first two auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs). The third is dry-run-default in v1 per DC-93 — only `--apply` writes. Each shares one PROJECT.md writer lock and re-stamps the baseline after its write, so they compose without falsely reading each other's changes as user edits; a writer that prints a `refused` line (pending-edit / stale-preimage) wrote nothing — reconcile and re-run rather than forcing past it.
+Then run three scripts in order — demote-moves first, then compact-project, then demote-state-narrative. The first two auto-apply: PROJECT.md is agent-managed, with effectiveness measured via the hygiene-log events these scripts emit (not user review of the diffs). The third is dry-run-default in v1 by decision — only `--apply` writes. Each shares one PROJECT.md writer lock and re-stamps the baseline after its write, so they compose without falsely reading each other's changes as user edits; a writer that prints a `refused` line (pending-edit / stale-preimage) wrote nothing — reconcile and re-run rather than forcing past it.
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/demote-moves.mjs" "<project>"
@@ -168,9 +168,9 @@ node "${CORE_ROOT}/skills/core/scripts/compact-project.mjs" "<project>"
 node "${CORE_ROOT}/skills/core/scripts/demote-state-narrative.mjs" "<project>"
 ```
 
-- `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` on **checkbox + age** — a done item is done regardless of its cited units' status. Age = most-recent non-future date in the bullet text (citation/backtick/wikilink/obs-id dates stripped), falling back to cited-unit dates when the bullet has no date; kept when no age is provable or age < 30 days, and archived stubs are never re-demoted. `--strict` restores the old "all cited units terminal" gate. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. A large first batch (≥20) is **held** unless re-run with `--apply-large-batch` — narrate the held count and that nothing was written.
-- `compact-project.mjs` collapses `§Decisions` paragraphs to one-line stubs pointing at units (DC-48 pattern). Auto-MIGRATE per DC-46; idempotent. Now also emits `kind: compact-project` with section-size breakdown and `kind: project-md-over-cap` when the file remains >70KB after compaction. Use `--section-sizes` to inspect the breakdown without writing.
-- `demote-state-narrative.mjs` walks §State and surfaces demotion candidates when the bullet carries a strict `*Backed by ...*` footer, ALL cited units are in terminal status (mirrors `demote-moves` set for cross-script symmetry), AND the most-recent backing-unit `updated:` date is >60 days old. **Default is dry-run in v1** per DC-93 — emits a candidate list and a `kind: demote-state` event to hygiene-log without writing. Pass `--apply` only when a §State-heavy non-CORE corpus has been exercised and produces clean candidate lists for multiple sessions; flip the default in a tracked decision then. Narrate "would demote N items" only if N > 0.
+- `demote-moves.mjs` walks §Moves and demotes closed `[x]` bullets to `PROJECT-ARCHIVE.md §Moves` on **checkbox + age** — a done item is done regardless of its cited units' status. Age = most-recent non-future date in the bullet text (citation/backtick/wikilink/obs-id dates stripped), falling back to cited-unit dates when the bullet has no date; kept when no age is provable or age < 30 days, and archived stubs are never re-demoted. `--strict` gates on "all cited units terminal" instead of checkbox + age. Emits `kind: demote-moves` to `_sessions/<date>/hygiene-log.jsonl`. A large first batch (≥20) is **held** unless re-run with `--apply-large-batch` — narrate the held count and that nothing was written.
+- `compact-project.mjs` collapses `§Decisions` paragraphs to one-line stubs pointing at units. Auto-applies as a MIGRATE; idempotent. Also emits `kind: compact-project` with section-size breakdown and `kind: project-md-over-cap` when the file remains >70KB after compaction. Use `--section-sizes` to inspect the breakdown without writing.
+- `demote-state-narrative.mjs` walks §State and surfaces demotion candidates when the bullet carries a strict `*Backed by ...*` footer, ALL cited units are in terminal status (mirrors `demote-moves` set for cross-script symmetry), AND the most-recent backing-unit `updated:` date is >60 days old. **Default is dry-run in v1** by decision — emits a candidate list and a `kind: demote-state` event to hygiene-log without writing. Pass `--apply` only when a §State-heavy non-CORE corpus has been exercised and produces clean candidate lists for multiple sessions; flip the default in a tracked decision then. Narrate "would demote N items" only if N > 0.
 
 Report the demoted count and the before/after sizes the scripts print. Over-cap warnings after all three scripts have run name what's left — §Notes overflow or the §Moves citation-discipline gap captured at [[obs-demote-moves-first-fire-2026-05-24]].
 
@@ -182,7 +182,7 @@ Report the demoted count and the before/after sizes the scripts print. Over-cap 
 wc -c "<project>/IMPROVEMENT_LOG.md"
 ```
 
-If over ~66KB, surface a recommendation but do not auto-compact — IMPROVEMENT_LOG has a count-based rotation pattern (DC-42) that needs `/finalize` discretion, not in-flight compaction.
+If over ~66KB, surface a recommendation but do not auto-compact — IMPROVEMENT_LOG has a count-based rotation pattern that needs `/finalize` discretion, not in-flight compaction.
 
 ---
 
@@ -198,7 +198,7 @@ Read the output. The three signals worth surfacing in plain voice:
 
 - **Dip-back rate** above ~50% on a unit retrieved more than 3 times → the unit isn't satisfying queries that find it. Either the body needs sharpening, the topic tags don't match what surfaces it, or it should split into two units.
 - **Tier-2+ escalation rate** above ~70% on a topic that appears in more than 3 events → the lexical layer isn't finding what it should. Either there's no unit yet for that topic, or the existing units have mismatched tags.
-- **Tier 3 fires** repeatedly on similar queries → DC-67 trip-wire territory. Note the pattern for the user.
+- **Tier 3 fires** repeatedly on similar queries → infrastructure-escalation trip-wire territory. Note the pattern for the user.
 
 Narrate one or two top anomalies in plain voice. Don't dump the raw report. If everything is clean, say so in one sentence ("Retrieval quality looked clean — 47 events, T1=60% / T2=30% / T3=11%, no unit dipping back over 30%.").
 
@@ -222,7 +222,7 @@ Surface where native harness memory (MEMORY.md / `~/.codex/memories`) holds proj
 node "${CORE_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<project>"
 ```
 
-**Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection (DC-83) says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is deferred (design Q3).
+**Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is deferred (design Q3).
 
 ---
 

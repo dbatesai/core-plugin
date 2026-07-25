@@ -1,6 +1,6 @@
 # CORE Retrieval Protocol (v2.0)
 
-How the agent (and Explore subagents acting on its behalf) gets information from the project's memory into context. Per DC-67/68/69.
+How the agent (and Explore subagents acting on its behalf) gets information from the project's memory into context, per the standing architecture: native tools first, a flat unit store, and the committed priority function.
 
 ---
 
@@ -48,14 +48,14 @@ This returns a scored, hop-ordered candidate list. Read the top results. Fall ba
 - Maximum without explicit reason: 3 hops
 - 4+ hops = a signal that the graph is too sparse for this query OR the question is semantic and should escalate to Tier 3
 
-**Edge types to follow:** All committed edge types (the DC-68 base set plus later additions — see `VALID_EDGE_TYPES` in `check-units.mjs`) are walkable in Tier 2. Body `[[wikilinks]]` are followed only at the seed step (one hop into the body), not transitively.
+**Edge types to follow:** All committed edge types (the committed base set plus later additions — see `VALID_EDGE_TYPES` in `check-units.mjs`) are walkable in Tier 2. Body `[[wikilinks]]` are followed only at the seed step (one hop into the body), not transitively.
 
-#### Score-gated termination (DC-69)
+#### Score-gated termination
 
 When following an edge to a candidate unit:
 
 1. Read the candidate's frontmatter
-2. Compute the **R·S proxy** — recency times source-type weight — using `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs:scoreProxyRS(unit)` (DC-77 — priority logic ships with the plugin, not per-project)
+2. Compute the **R·S proxy** — recency times source-type weight — using `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs:scoreProxyRS(unit)` (priority logic ships with the plugin, not per-project)
 3. If R·S < **0.3**, prune this branch — do NOT continue walking from this candidate
 4. If R·S ≥ 0.3, the candidate enters the result set; recursion continues from this candidate
 
@@ -78,7 +78,7 @@ A branch terminates when ANY of these are true:
 
 ### Tier 3 — Reasoning escalation (shortlist first, subagent second)
 
-**Step 1 — reason over exhaustive bounded shards (DC-117, ratified 2026-07-15; scale repair 2026-07-17).** The per-turn hook automatically injects this escalation when Tier 1 returns no lexical context. When Tier 1 returns context that still does not answer the question, the active model must escalate here itself; a model-free hook cannot judge semantic sufficiency. Start at shard zero:
+**Step 1 — reason over exhaustive bounded shards.** The per-turn hook automatically injects this escalation when Tier 1 returns no lexical context. When Tier 1 returns context that still does not answer the question, the active model must escalate here itself; a model-free hook cannot judge semantic sufficiency. Start at shard zero:
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/select-relevant-units.mjs" <project> "<the question>" --shard 0 --shard-size 80
@@ -94,7 +94,7 @@ The LLM reasoning inside the subagent IS the semantic layer. No precomputed embe
 
 **Degraded mode — no subagent tool available:** Some harnesses defer or omit the Agent/subagent tool, and it can be unavailable at retrieval time. Don't silently skip Tier 3 — run the same semantic pass inline: the agent performs an expanded Grep + Read loop over all topic-matched units (start from the Tier 1 lexical hits, widen the search terms with synonyms and adjacent vocabulary, read each candidate in full) and synthesizes the answer itself with file-path citations. Log the event with `tier_reached: 3` and `result: "degraded"` — or `result: "miss"` if nothing was found, since the event schema requires `miss` on an empty Tier 3 result — so retrieval-quality analysis can tell a true subagent pass from the inline fallback.
 
-**Cost discipline:** Tier 3 invocations cost tokens. Reserve for questions Tier 1+2 actually failed on. Every Tier 3 event — hit or miss — lands in the per-project retrieval log (`<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`) per the §Logging section below. The hygiene trip-wire check reads that log via `analyze-retrieval-quality.mjs` and detects repeated failures across sessions (per DC-67 trip-wire #3: documented repeated Explore-miss pattern earns a vector store).
+**Cost discipline:** Tier 3 invocations cost tokens. Reserve for questions Tier 1+2 actually failed on. Every Tier 3 event — hit or miss — lands in the per-project retrieval log (`<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`) per the §Logging section below. The hygiene trip-wire check reads that log via `analyze-retrieval-quality.mjs` and detects repeated failures across sessions (per infrastructure trip-wire #3: documented repeated Explore-miss pattern earns a vector store).
 
 ---
 
@@ -171,7 +171,7 @@ is next, and `agent-judgment` is provisional. With no evidence, leave the
 outcome unknown; never coerce missing evidence to `useful`. The writer rejects
 unknown, ambiguous, duplicate, and relabeled retrieval ids.
 
-For Tier 2 walks, log the seed unit and the result set together as one event (one JSONL line). For Tier 3 misses (Explore returned no relevant answer), set `units_retrieved: []`, `tier_reached: 3`, and add `"result": "miss"`. The DC-67 trip-wire — repeated Tier 3 misses on similar queries — now runs per-project against this log via `scripts/analyze-retrieval-quality.mjs`.
+For Tier 2 walks, log the seed unit and the result set together as one event (one JSONL line). For Tier 3 misses (Explore returned no relevant answer), set `units_retrieved: []`, `tier_reached: 3`, and add `"result": "miss"`. The infrastructure trip-wire — repeated Tier 3 misses on similar queries — now runs per-project against this log via `scripts/analyze-retrieval-quality.mjs`.
 
 ### Reading the corpus
 

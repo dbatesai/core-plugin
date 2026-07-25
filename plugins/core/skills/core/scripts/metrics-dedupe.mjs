@@ -9,7 +9,7 @@
  * rows as new evidence, mixing incompatible instruments, or inventing a state
  * for a genuine contradiction.
  *
- * The read side is TWO ordered steps (Hale's 2026-07-23 correction packet — the
+ * The read side is TWO ordered steps (the
  * order is load-bearing, not preference):
  *
  *   1. COHORT FIRST. Partition the RAW rows into the exact
@@ -28,12 +28,12 @@
  *          proxy_version, schema_version). Same identity observed more than
  *          once with the SAME state is a pure replay: one row survives, the
  *          others are counted as `replays`.
- *        - IMMUTABLE OBSERVATION DAY (Hale item 3): the surviving row keeps the
+ *        - IMMUTABLE OBSERVATION DAY: the surviving row keeps the
  *          EARLIEST/original observation day. A July 1 row replayed on July 22
  *          stays counted under July 1 — replay never moves history forward.
  *          "turns today" therefore means user turns first observed that day,
  *          not classifications produced that day.
- *        - CONFLICTS LEAVE THE DENOMINATORS (Hale item 2): same replay identity
+ *        - CONFLICTS LEAVE THE DENOMINATORS: same replay identity
  *          observed with DIFFERENT states is an equal-authority contradiction.
  *          The aggregate does not pick a winner by string order or file date —
  *          determinism is not truth, and pessimistic fabrication is still
@@ -50,7 +50,7 @@
  *
  * Consumers: metrics-rollup.mjs and metrics-package.mjs (workspaceMetrics).
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open: never throws.
+ * Ships with the plugin by convention; .mjs (Node.js) only. Fail-open: never throws.
  */
 
 const UNKEYED_SESSION = 'no-session-context';
@@ -176,7 +176,7 @@ function inCohort(row, cohort) {
 }
 
 /**
- * COHORT FIRST, then replay-dedupe inside the cohort (Hale 2026-07-23). Select
+ * COHORT FIRST, then replay-dedupe inside the cohort. Select
  * exactly one (schema_version, classifier_version, proxy_version) cohort from
  * the RAW rows; only in-cohort rows are deduped and may aggregate. Every
  * out-of-cohort raw row is excluded and reported in `coverage_gap` (count +

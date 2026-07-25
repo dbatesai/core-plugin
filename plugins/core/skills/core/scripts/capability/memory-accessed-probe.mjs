@@ -5,9 +5,9 @@
  * memory-visible (it was injected into context). This asks a different question the
  * other two miss: did the agent actually REACH FOR the CORE store this session, or
  * did it only touch harness-native scratch memory? That gap is the store-selection
- * failure surfaced empirically on core-codex (2026-05-29): 46 CORE units present, yet
- * the agent reached native ~/.codex/memories 11x vs CORE units 4x. Corpus present !=
- * corpus reached — a recognition-failure cousin (DC-94) that neither file-present nor
+ * failure: a store can hold dozens of CORE units while the agent reaches for
+ * native harness memory several times as often. Corpus present !=
+ * corpus reached — a recognition-failure cousin that neither file-present nor
  * an injection canary can detect.
  *
  * Honest boundary: this reports OBSERVED ACCESS (a tool read/grep of a CORE surface
@@ -17,14 +17,14 @@
  *
  * Consumes the read-transcript adapter verb (skills/core/scripts/read-transcript.mjs)
  * so harness-specific transcript paths/schemas stay in the adapter layer, not here
- * (DC-75). Claude Code: VERIFIED — tool events carry path/command text. Codex: now also
+ *. Claude Code: VERIFIED — tool events carry path/command text. Codex: now also
  * VERIFIED (v2.9 Slice F) — read-transcript extracts function_call/custom_tool_call, so
  * this probe classifies on Codex too (PASS on CORE reach, DEGRADED on store-selection).
  * UNKNOWN is now reserved for the genuine cases: no transcript available, or a future
  * Codex build whose tool schema drifts (extraction fails open to no tool events). It
  * never claims "not accessed" when it cannot see tool calls.
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships with the plugin as a script; .mjs only.
  */
 
 import { existsSync, readFileSync } from 'node:fs';

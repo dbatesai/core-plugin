@@ -1,21 +1,15 @@
 #!/usr/bin/env node
 // decorate-graph.mjs — in-place Obsidian-native graph decoration for a CORE
-// unit store. Replaces the export-only OKF/Obsidian projection
-// (render-okf-export.mjs): instead of a separate `_okf-export/` copy that
-// goes stale the moment it's generated, each real unit file in `_memories/`
+// unit store. Each real unit file in `_memories/`
 // gets a marker-delimited, auto-regenerated `[[wikilink]]` block appended
-// directly to its own body. Point Obsidian at the live store; there is only
+// directly to its own body — no separate export copy that goes stale the
+// moment it's generated. Point Obsidian at the live store; there is only
 // ever one copy.
 //
-// Design source: David's 2026-07-21 direction change (in-place decoration
-// over export — see mailbox thread
-// core-claude--in-place-graph-decoration-replaces-okf-export) plus
-// Antigravity's same-day architectural review (three constraints, all
-// applied below):
+// Three constraints, all applied below:
 //   1. Dangling edges to archived/retired targets are stripped, not
 //      rendered as Obsidian "ghost" nodes — a retired target is simply
-//      absent from activeById, same filtering render-okf-export.mjs
-//      already used for this.
+//      absent from activeById.
 //   2. The edges block is destructive and structurally isolated from the
 //      human-authored unit body behind strict markers, with an in-block
 //      warning comment.
@@ -53,8 +47,8 @@ function countOccurrences(text, needle) {
 }
 
 /**
- * findExistingEdgesBlock — fail-closed marker scan (Hale's 2026-07-21
- * falsifier: a naive first-begin/first-end indexOf pairing corrupts a file
+ * findExistingEdgesBlock — fail-closed marker scan
+ * (a naive first-begin/first-end indexOf pairing would corrupt a file
  * that already has a malformed marker state — e.g. one orphaned BEGIN with
  * no END, then a human-authored line, then a later run's own generated END
  * lands past it and everything in between gets silently deleted).
@@ -203,16 +197,15 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
   const activeById = new Map(units.map(u => [u.id, u]));
   const memoriesDir = join(resolve(projectDir), '_memories');
 
-  // Authorship-boundary fix (Hale's finding, 2026-07-22 — "mixed-ownership
-  // writers launder unreconciled edits"): read the state cache ONCE, before
+  // Authorship boundary: read the state cache ONCE, before
   // any of this run's writes land, as the pre-write baseline every unit gets
-  // classified against below. The bug this closes: decorate-graph used to
-  // rewrite its own generated block and then unconditionally stamp a FRESH
-  // outside_hash — even when the human-authored region had ALREADY diverged
+  // classified against below. Stamping a fresh
+  // outside_hash without that check would launder a human-authored region
+  // that had ALREADY diverged
   // from the last known-good baseline (a between-session user edit nobody
-  // had reconciled yet). The fresh stamp made that divergence permanently
-  // undetectable: the user's bytes survived, but the fact that they changed
-  // was never observed, attributed, or propagated. See
+  // has reconciled yet), making the divergence permanently
+  // undetectable: the user's bytes survive, but the fact that they changed
+  // is never observed, attributed, or propagated. See
   // classifyUnitChange below for what "already diverged" means.
   const preWriteCache = readProjectCache(projectDir);
 
@@ -253,7 +246,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     // Shared refuse-or-proceed rule (lifecycle-core.mjs) — identical logic to
     // hot-section and compact-project. A stamped file refuses on
     // 'outside-changed'/'no-baseline'; a file with NO stamp at all ALWAYS
-    // refuses now (Hale's 2026-07-22 root fix — session timing cannot prove
+    // refuses (session timing cannot prove
     // authorship). A legitimately new unit is decoratable because its creating
     // writer stamped it at creation (lifecycle-detect.mjs stampCreatedBaseline);
     // an un-stamped no-baseline unit is held and surfaced, never rewritten.
@@ -264,7 +257,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     }
 
     if (!dryRun) {
-      // Stale-byte refusal (Hale's concurrency finding): the file lock this
+      // Stale-byte refusal: the file lock this
       // script runs under is private to decorate-graph, so it doesn't
       // serialize against a hygiene pass or a hand edit landing between the
       // snapshot read and this write. Re-read right before writing and
@@ -279,9 +272,8 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
       atomicWriteFileSync(filePath, updated);
       // Stamp the state cache in the same operation, so next session's
       // edit-detection recognizes this as CORE's own write rather than a
-      // between-session user edit (Hale's finding, 2026-07-22 — this used to
-      // be a prose instruction telling the AGENT to update the cache by
-      // hand; that's now code, matching hot-section.mjs's precedent).
+      // between-session user edit (in code, never left to the agent by
+      // prose instruction — same mechanism as hot-section.mjs).
       stampEntries.push({
         path: filePath,
         hash: hashText(updated),
@@ -292,7 +284,7 @@ export function decorateStore(projectDir, { dryRun = false, now, home } = {}) {
     changed.push(u.path);
   }
 
-  // Truthful stamp-failure surfacing (Hale's point 6): the unit files landed
+  // Truthful stamp-failure surfacing: the unit files landed
   // on disk; if their authorship stamp didn't, report attribution-unknown so
   // the caller surfaces it, rather than reporting a clean decoration.
   let stampOutcome = { stamped: true };
@@ -344,8 +336,8 @@ function main(argv) {
 
   // Every refusal is a real, user-actionable problem (a malformed marker
   // state, or a stale-byte race) -- printing "none needed a change" while
-  // silently swallowing these was a genuine reporting gap (Hale's 2026-07-21
-  // finding). Always print them, and let a refusal alone still exit nonzero
+  // silently swallowing these would be a genuine reporting gap.
+  // Always print them, and let a refusal alone still exit nonzero
   // even outside --check, since it means a file was NOT decorated as asked.
   if (result.refused.length > 0) {
     process.stderr.write(`decorate-graph: ${result.refused.length} file(s) refused, need a manual look:\n`);
@@ -353,7 +345,7 @@ function main(argv) {
   }
 
   // A unit whose human-authored region already diverged from the last known
-  // baseline (Hale's authorship-laundering finding, 2026-07-22) is a real,
+  // baseline is a real,
   // user-visible signal — not a silent skip. Printing it alongside refusals
   // and treating it as exit-nonzero keeps the same "never claim quiet
   // success while something needs a look" discipline as the refused-file path.
@@ -362,7 +354,7 @@ function main(argv) {
     for (const r of result.needs_reconciliation) process.stderr.write(`  ${r.path}: ${r.classification}\n`);
   }
 
-  // Attribution failure (Hale's point 6): files wrote but a baseline stamp
+  // Attribution failure: files wrote but a baseline stamp
   // didn't land. Never report clean success over an unknown-authorship state.
   const attributionFailed = result.attribution && result.attribution.stamped === false;
   if (attributionFailed) {

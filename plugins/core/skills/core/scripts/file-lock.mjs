@@ -1,18 +1,16 @@
 /**
  * file-lock.mjs — generalized advisory file lock: generation files + verified release.
  *
- * Third design iteration (2026-07-14/15, shared-write concurrency spec + Hale's
- * advisory passes), each driven by a proven defect in the previous one:
+ * The hazards this design exists to prevent, structurally:
  *
- *   v1 (close-pass original): steal = blind atomic overwrite → two stealers could
- *      both "win"; release = unconditional rm → a revived slow owner deleted a
- *      fresh owner's lock.
- *   v2 (rename-claim): steal consumed the stale file atomically (one winner), and
- *      release verified ownership — but release-verify-then-remove kept a TOCTOU,
- *      and the rename-claim + restore repair had an irreducible three-process
- *      corner: a revived releaser could displace a fresh owner's lock while a
- *      third writer claimed the exposed path (Hale, 2026-07-15).
- *   v3 (this file): GENERATION LOCKS eliminate that corner structurally. The lock
+ *   - A blind-overwrite steal lets two stealers both "win"; an unconditional-rm
+ *      release lets a revived slow owner delete a fresh owner's lock.
+ *   - A rename-claim steal with verify-then-remove release keeps a TOCTOU, and
+ *      rename-claim + restore repair has an irreducible three-process corner:
+ *      a revived releaser can displace a fresh owner's lock while a third
+ *      writer claims the exposed path.
+ *
+ *   GENERATION LOCKS eliminate that corner structurally. The lock
  *      is a family of files `<lockPath>.g<N>` plus `.g<N>.done` tombstones:
  *
  *        - Acquire: target = (highest N over ALL generation artifacts, live or
@@ -21,7 +19,7 @@
  *          race compute the same target and the filesystem picks one winner.
  *        - Release: rename YOUR OWN generation file to its `.done` tombstone.
  *          No process ever moves, deletes, or restores another owner's lock, so
- *          the v2 corner cannot occur. The tombstone preserves the numbering:
+ *          the three-process corner cannot occur. The tombstone preserves the numbering:
  *          a later acquirer still computes max+1, so numbers never restart and a
  *          delete-then-lower-recreate split-brain is impossible.
  *        - Steal: nothing to steal — a stale live generation is simply left
@@ -37,7 +35,7 @@
  * "couldn't acquire, retry", never a crash. Callers with more than one lock
  * follow the total order: per-project lock BEFORE any global ~/.core lock.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only, node:* imports only.
+ * Ships with the plugin as prescriptive code; .mjs only, node:* imports only.
  */
 
 import {
@@ -52,10 +50,10 @@ import { randomBytes } from 'node:crypto';
 export const DEFAULT_STALE_MS = 10 * 60 * 1000;
 // Ceiling for locks whose owner CANNOT be identified (unreadable content, no pid):
 // past this they are supersedable. For locks with a READABLE, LIVE pid there is
-// deliberately no ceiling — Hale's round-3 advisory (2026-07-15): a laptop
+// deliberately no ceiling: a laptop
 // suspended mid-critical-section revives past any fixed ceiling and would overlap
 // its superseder, a mutual-exclusion break. Never steal from a live pid; the
-// recycled-pid strand this reopens is accepted as the lesser failure (availability,
+// recycled-pid strand this leaves open is accepted as the lesser failure (availability,
 // not integrity) and surfaces as a loud LOCK_HELD error naming the pid, remedied
 // by the operator force-release.
 export const DEFAULT_HARD_STALE_MS = 30 * 60 * 1000;
@@ -120,13 +118,13 @@ function inspectFromGenerations(gens, { now, staleMs, hardStaleMs }) {
   if (!lock) {
     // Unreadable content. Our writers create locks atomically (temp + link), so a
     // YOUNG unreadable lock is an outside/fallback writer mid-flight — held until
-    // it ages out; never treat a fresh file as stealable. (The v2 race test proved
-    // corrupt→stale-immediately lets a reader steal a half-written fresh lock.)
+    // it ages out; never treat a fresh file as stealable (corrupt→stale-immediately
+    // lets a reader steal a half-written fresh lock).
     const stale = ageMs > staleMs;
     return { held: !stale, lock: null, stale };
   }
   // A lock with a recorded pid: stale only when aged AND the owner is dead.
-  // NO liveness override at any age (Hale round 3): a suspended-then-revived
+  // NO liveness override at any age: a suspended-then-revived
   // owner past any ceiling would overlap its superseder. A readable lock with
   // no usable pid falls back to the hard ceiling.
   const stale = typeof lock.pid === 'number'
@@ -189,11 +187,9 @@ export function acquireFileLock(lockPath, {
   mkdirSync(dirname(lockPath), { recursive: true });
   const nonce = newNonce();
 
-  // K12 (Hale's audit, 2026-07-16; re-audited 2026-07-19): the original code
-  // read maxN from ONE listGenerations() call, then computed `held` from a
-  // SECOND, independent listGenerations() read buried inside inspectFileLock
-  // (via currentLockFile). Real I/O (statSync + readJson + a pidAlive syscall)
-  // separates those two reads in time. Under load, a full concurrent
+  // K12: maxN and the held-check MUST derive from the SAME listGenerations()
+  // snapshot. With two independent reads, real I/O (statSync + readJson + a
+  // pidAlive syscall) separates them in time; under load, a full concurrent
   // acquire-then-release cycle can complete entirely inside that window: the
   // maxN this process computed is then stale by the time it creates its own
   // generation file, and `target = maxN + 1` can collide with a generation
@@ -204,10 +200,9 @@ export function acquireFileLock(lockPath, {
   // garbage below its own (higher, correctly-computed) target and GC's it out
   // from under us while we still believe we hold the lock — two processes in
   // the critical section at once, and our eventual release reports
-  // 'not-owner' because our generation file is simply gone (Hale measured
-  // 1/8, 2/10 failure rates under concurrent load).
+  // 'not-owner' because our generation file is simply gone.
   //
-  // Fixed two ways: (1) maxN and the held-check now derive from the SAME
+  // Two defenses: (1) maxN and the held-check derive from the SAME
   // listGenerations() snapshot, closing the two-read window entirely; (2)
   // after winning exclusiveCreate, re-list and confirm no OTHER generation
   // artifact (live or done) carries n >= target — if one does, our target was
@@ -225,8 +220,8 @@ export function acquireFileLock(lockPath, {
   // CORE_FILELOCK_TEST_SIGNAL_FILE is written the instant the snapshot above
   // is taken (before the held check, before the sleep) — a real happens-before
   // a test can block on, rather than a second process racing to start at
-  // roughly the same wall-clock moment (which flaked on a loaded Windows
-  // runner: a shared start barrier alone doesn't guarantee WHICH process's
+  // roughly the same wall-clock moment (a shared start barrier alone doesn't
+  // guarantee WHICH process's
   // first listGenerations() read happens first).
   const testDelayMs = Number(process.env.CORE_FILELOCK_TEST_DELAY_MS || 0);
   if (testDelayMs > 0 && process.env.CORE_FILELOCK_TEST_SIGNAL_FILE) {
@@ -275,13 +270,13 @@ export function acquireFileLock(lockPath, {
  * Release the lock ONLY if a generation file is ours (nonce match, or `verify` —
  * a {field, value} pair for cross-process releases, e.g. close-pass's session_id).
  * Releasing = renaming OUR OWN generation file to its `.done` tombstone — we
- * never touch another owner's file, which is what eliminates the v2 three-process
+ * never touch another owner's file, which is what eliminates the three-process
  * corner. force:true removes every generation artifact (operator command).
  */
 export function releaseFileLock(lockPath, nonce, { verify = null, force = false } = {}) {
   const gens = listGenerations(lockPath);
   if (force) {
-    // The operator recovery path must not lie either (Hale round 5): a removal
+    // The operator recovery path must not lie either: a removal
     // that fails for any reason other than already-gone reports failure, naming
     // the artifact and cause — "lock released" while the lock survives is worse
     // than the stuck lock itself.
@@ -305,7 +300,7 @@ export function releaseFileLock(lockPath, nonce, { verify = null, force = false 
         // ENOENT only: our generation was superseded and GC'd — released in effect.
         // Anything else (EPERM/EACCES/EIO — sync tooling, permissions, disk) means
         // the LIVE lock file is still on disk: report failure, never false success
-        // (Hale round 4: the old blanket catch returned released:true over a live lock).
+        // (a blanket catch would return released:true over a live lock).
         if (e.code !== 'ENOENT') return { released: false, reason: 'release-failed', error: e.code || String(e) };
       }
       return { released: true };
@@ -342,13 +337,12 @@ export function withFileLock(lockPath, fn, {
     }
     sleepSync(retryDelayMs);
   }
-  // K12 (Hale's audit, 2026-07-16): this used to be `try { return fn(); }
-  // finally { releaseFileLock(...); }` — releaseFileLock's return value was
-  // discarded entirely. releaseFileLock already does the work of honestly
-  // reporting a real failure ({released:false, reason, error} — EPERM/EACCES/
-  // a generation another process claimed), but nothing ever read it, so a
-  // failed release was indistinguishable from a successful one to every caller.
-  // Fixed: a release failure is never silent now. If fn() succeeded, the
+  // K12: releaseFileLock's return value must be read, never discarded — it
+  // honestly reports a real failure ({released:false, reason, error} —
+  // EPERM/EACCES/a generation another process claimed), and a bare
+  // try/finally that drops it makes a failed release indistinguishable
+  // from a successful one to every caller.
+  // A release failure is never silent. If fn() succeeded, the
   // release failure becomes the loud signal (a real thrown error — "report
   // failure, never false success", the same rule releaseFileLock itself
   // already follows). If fn() threw, its error is still what propagates

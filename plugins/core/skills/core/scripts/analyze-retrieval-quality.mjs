@@ -6,7 +6,7 @@
  *   - per-topic tier-escalation frequency (recall proxy)
  *   - overall tier distribution
  *
- * Schema validation (2026-07-22, revised per Hale's slice-2 review): loadEvents()
+ * Schema validation: loadEvents()
  * validates every row against validateRetrievalLogRow() below and rejects —
  * never silently drops — any row that is JSON-unparseable or claims to be a
  * retrieval event (kind:'retrieval', or legacy rows without a `kind` that
@@ -23,8 +23,8 @@
  * `report.rejected` (current/legacy/other counts broken out by closed code),
  * and formatReport() always prints it, even when it's all zero.
  *
- * Per DC-77 the script lives in the plugin, not per-project.
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * By design the script lives in the plugin, not per-project.
+ * The plugin ships Node.js (.mjs) only.
  *
  * Library usage:
  *   import { buildReport, loadEvents, formatReport } from './analyze-retrieval-quality.mjs';
@@ -58,31 +58,23 @@ export function isRetrievalShapedEvent(ev) {
   );
 }
 
-// ---------- Row-level schema validation (2026-07-22, Hale's metrics-evidence-
-// lifecycle synthesis, slice 2 — revised per Hale's early review "use
-// producer schema and isolate legacy"). ----------
+// ---------- Row-level schema validation ----------
 //
-// Before this, a row that failed JSON.parse was silently dropped inside
-// loadEvents() with zero count kept anywhere, and a row that DID parse but
-// had a missing/invalid tier_reached silently fell through
-// `Number(ev.tier_reached) || 1` in every aggregation below. Neither failure
-// mode was ever visible to a caller. A first pass at a fix here (a bespoke
-// 3-field validator) was itself flagged by Hale as a weaker SIBLING schema:
-// a row could claim `kind:'retrieval'` with an invalid trigger, a tier/path
-// mismatch, or an invalid unit tier/source_stage and still pass. This
-// version closes that gap by reusing `normalizeRetrievalEvent()` from
-// record-retrieval-event.mjs — the ONE canonical producer contract — as the
-// validator for any row stamped with the CURRENT schema version, instead of
-// maintaining a second, drifting definition of "valid" here.
+// Every row is validated so that no failure mode is invisible to a caller: a
+// row that fails JSON.parse is rejected and counted (never silently dropped),
+// and a row that parses but claims to be a retrieval event while failing the
+// schema is rejected and counted too. Any row stamped with the CURRENT
+// schema version is validated by reusing `normalizeRetrievalEvent()` from
+// record-retrieval-event.mjs — the ONE canonical producer contract — instead
+// of maintaining a second, drifting definition of "valid" here.
 //
-// Rows written before `schema_version` existed (every row in every real
-// project's corpus today) cannot be held to that full contract — trigger and
-// a tier-consistent escalation_path were not always required historically.
-// Those get a NARROW backward-compatibility check instead, and the result is
-// always tagged 'legacy' — counted separately, never folded into or implied
-// to meet current-producer conformance. A row carrying some OTHER, unrecognized
-// schema_version is rejected outright as 'unknown-schema-version' rather than
-// guessed at.
+// Rows with no `schema_version` cannot be held to that full contract —
+// trigger and a tier-consistent escalation_path are not guaranteed present in
+// them. Those get a NARROW backward-compatibility check instead, and the
+// result is always tagged 'legacy' — counted separately, never folded into or
+// implied to meet current-producer conformance. A row carrying some OTHER,
+// unrecognized schema_version is rejected outright as
+// 'unknown-schema-version' rather than guessed at.
 //
 // Every rejection carries a CLOSED reason CODE only (REJECTION_CODES below) —
 // never an interpolated raw field value. A malformed row can contain
@@ -138,7 +130,7 @@ export function validateRetrievalLogRow(ev) {
 
   // Known-compatible versions, all validated under the current producer
   // contract: 1.1.0 (current — adds producer_version/producer_sha, additive)
-  // and 1.0.0 (its strict subset; every pre-v3.14.0 row on disk carries it).
+  // and 1.0.0 (its strict subset, still present in stored rows).
   // An additive bump must never turn real history into 'unknown-schema-version'.
   if (ev.schema_version === RETRIEVAL_EVENT_SCHEMA_VERSION || ev.schema_version === '1.0.0') {
     try {
@@ -205,8 +197,8 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
   const events = [];
   // Malformed rows are REJECTED and COUNTED here, not silently dropped — a
   // JSON.parse failure and a schema-invalid retrieval row both land here with
-  // a CLOSED reason code (never the raw offending value — Hale, 2026-07-22:
-  // "arbitrary malformed values must not flow into reports/packages"), and
+  // a CLOSED reason code (never the raw offending value — arbitrary
+  // malformed values must not flow into reports/packages), and
   // the local absolute file path stays here for diagnostics only. `.rejected`
   // rides along on the returned array as a plain extra property so every
   // existing `loadEvents(...)` caller that treats the result as a plain
@@ -245,7 +237,7 @@ export function computeDipBackRates(events) {
   for (const ev of events) {
     const units = Array.isArray(ev.units_retrieved) ? ev.units_retrieved : null;
     if (!units || !units.length) continue;
-    // Unknown-aware (2026-07-17): rows that OMITTED dip_back_count (the per-turn
+    // Unknown-aware: rows that OMITTED dip_back_count (the per-turn
     // hook cannot observe dip-backs) leave both numerator and denominator —
     // missing is not "no dip-back". Observed coverage rides each row.
     const observed = Number.isInteger(ev.dip_back_count);
@@ -328,12 +320,8 @@ function outcomeEvidence(events) {
     byId.set(id, rows);
   }
   // Multiple outcome rows per retrieval_id resolve via the SAME authority
-  // resolver metrics-package.mjs uses (Hale audit, 2026-07-17: "share one
-  // authority resolver across consumers" — the two consumers must never
-  // disagree about which outcome is authoritative for the same retrieval).
-  // Previously this kept whichever row appeared first, ignoring
-  // evidence_authority entirely — an automatic 'unknown' could never be
-  // displaced by stronger evidence that arrived later.
+  // resolver metrics-package.mjs uses — the two consumers must never
+  // disagree about which outcome is authoritative for the same retrieval.
   const outcomeRowsById = new Map();
   for (const ev of events) {
     if (ev?.kind !== 'retrieval-outcome' || typeof ev.retrieval_id !== 'string') continue;
@@ -388,8 +376,7 @@ export function buildUserReceipt(events) {
       user_action: 'Record an evidence-qualified answer outcome after each retrieval-backed answer.',
     };
   }
-  // NEVER `safe: true` from answer telemetry alone (Hale strengthened audit,
-  // 2026-07-17 item 2): outcome rows say nothing about privacy or
+  // NEVER `safe: true` from answer telemetry alone: outcome rows say nothing about privacy or
   // anti-resurrection state, and field telemetry is not a safety proof. The
   // strongest claim this receipt can honestly make is "no observed harm."
   return {
@@ -405,9 +392,8 @@ export function buildUserReceipt(events) {
 
 // Folds raw `.rejected` entries ({file, schema, code}) into CLOSED-vocabulary
 // counts only — no file paths, no raw values. This is the shape that is safe
-// to appear in any rendered report or, eventually, a shareable package (Hale,
-// 2026-07-22: "rejected_samples with absolute paths must not reach any
-// shareable package path — closed reason-code counts only").
+// to appear in any rendered report or shareable package: closed reason-code
+// counts only, never absolute paths.
 function summarizeRejections(rejected) {
   const current = { count: 0, by_code: {} };
   const legacy = { count: 0, by_code: {} };
@@ -459,8 +445,7 @@ export function formatReport(report) {
   const rej = report.rejected || summarizeRejections([]);
   if (!report.total_events) {
     // Zero valid events is NOT the same claim as zero rows seen — a corpus that
-    // is all malformed rows must never read identically to a truly empty one
-    // (2026-07-22, evidence-lifecycle slice 2).
+    // is all malformed rows must never read identically to a truly empty one.
     const rejectedLine = rej.total > 0
       ? `\nRejected malformed rows: ${rej.total} (${formatByCode({ by_code: { ...rej.current.by_code, ...rej.legacy.by_code, ...rej.other.by_code } })}) — these are NOT zero valid events, they are rows that failed schema validation`
       : '';
@@ -474,9 +459,9 @@ export function formatReport(report) {
   lines.push(`Calendar days with events: ${report.sessions} | Total events: ${report.total_events}`);
   lines.push(`Retrieval-shaped events: ${retrievalEvents} | telemetry-only rows: ${telemetryOnlyEvents}`);
   // Always shown, even at zero — an explicit "0 rejected" is itself evidence
-  // the row was checked, not just assumed clean (2026-07-22, evidence-lifecycle
-  // slice 2: malformed rows must be rejected AND counted, using CLOSED codes
-  // only — never an interpolated raw field value, per Hale's leak concern).
+  // the row was checked, not just assumed clean. Malformed rows are rejected
+  // AND counted, using CLOSED codes only — never an interpolated raw field
+  // value.
   const currentPart = rej.current.count > 0 ? `${rej.current.count} current-schema (${formatByCode(rej.current)})` : '0 current-schema';
   const legacyPart = rej.legacy.count > 0 ? `${rej.legacy.count} legacy (${formatByCode(rej.legacy)})` : '0 legacy';
   const otherPart = rej.other.count > 0 ? `; ${rej.other.count} unreadable (${formatByCode(rej.other)})` : '';

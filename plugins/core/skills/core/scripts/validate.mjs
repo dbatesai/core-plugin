@@ -8,15 +8,15 @@
  * Scores precision + recall against expected/forbidden unit lists
  * Writes report to <project-path>/_outputs/validation/<date>/REPORT.md
  *
- * NOT-PRODUCT-PATH (labeled per the v3.11 evaluation contract): this simulator is
+ * NOT-PRODUCT-PATH: this simulator is
  * its own term-density scorer with negation handling — it is NOT the shipped
  * retriever (`retrieve-context.mjs` productRankedScores, title ∪ body-BM25). Its
  * results are retrieval-health diagnostics; they must never be cited as product
- * baselines or used to clear a release gate. The migration to the product ranking
- * (which would change historical validation comparability) is a ceremony-scoped
- * decision, deliberately not smuggled in with the v3.11 remediation.
+ * baselines or used to clear a release gate. Migrating it to the product
+ * ranking would change historical validation comparability, so that migration
+ * is a deliberate, explicit decision — never a drive-by change.
  *
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The plugin ships Node.js (.mjs) only.
  */
 
 import { readFileSync, writeFileSync, readdirSync, mkdirSync, realpathSync } from 'node:fs';
@@ -24,7 +24,7 @@ import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export function parseFrontmatter(content) {
-  content = content.replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
+  content = content.replace(/\r\n?/g, '\n'); // CRLF tolerance
   const match = content.match(/^---\n([\s\S]*?)\n---/);
   if (!match) return {};
   const fmText = match[1];

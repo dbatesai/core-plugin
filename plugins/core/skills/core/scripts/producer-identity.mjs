@@ -2,16 +2,14 @@
  * producer-identity.mjs — ONE owner for "which build wrote this row".
  *
  * Reads version + source_sha from the plugin manifest
- * (plugins/core/.claude-plugin/plugin.json) once at module load, mirroring the
- * pattern retrieve-context-hook.mjs established (2026-07-18 self-identifying
- * build SHA spec). 'unknown' is honest for any build that isn't
+ * (plugins/core/.claude-plugin/plugin.json) once at module load, the same
+ * pattern retrieve-context-hook.mjs uses. 'unknown' is honest for any build that isn't
  * release-stamped (a --scope local dev install, or a manifest predating
  * source_sha). New row producers (self-test log, retrieval rows, turn-capture
  * evidence, scorecards, judgments) import THIS instead of hand-rolling another
- * manifest read — the guard-consolidation ratchet's "fixed once, never swept"
- * lesson applied at birth rather than after the audit.
+ * manifest read — one owner, never re-implemented per producer.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin as prescriptive code; .mjs only.
  */
 
 import { readFileSync } from 'node:fs';

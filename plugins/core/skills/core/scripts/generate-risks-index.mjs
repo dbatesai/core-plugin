@@ -6,8 +6,8 @@
  * id / status / date, pulls the H1 line from the body as the summary, sorts
  * numeric ids first then alphabetic, writes the markdown table.
  *
- * Per DC-77 the script ships with the plugin (not per-project).
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The script ships with the plugin (not per-project) by design.
+ * The plugin ships Node.js (.mjs) only, zero dependencies.
  *
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-risks-index.mjs
  *   node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-risks-index.mjs \
@@ -57,10 +57,9 @@ export function bestDate(fm) {
   return 'unknown';
 }
 
-// Independent review, 2026-07-19: a hand-duplicated copy of the surrogate-
-// splitting truncate() bug fixed in generate-summary-index.mjs — see
-// text-truncate.mjs for why this collapsed to a shared helper instead of a
-// second local fix.
+// Delegates to the shared surrogate-safe helper — see
+// text-truncate.mjs for why truncation lives in one shared helper instead of
+// per-script copies.
 export function truncate(text, maxLen = SUMMARY_MAX) {
   return sharedTruncate(text, maxLen);
 }
@@ -94,9 +93,9 @@ export function buildIndex(memoriesDir) {
   const lines = [
     '# Risks Index',
     '',
-    '> Auto-generated from `_memories/risk-*.md` frontmatter (flat layout per DC-68).',
+    '> Auto-generated from `_memories/risk-*.md` frontmatter (flat layout).',
     '> Do not edit manually — re-run `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-risks-index.mjs`',
-    '> to regenerate. Script ships with the plugin per DC-77.',
+    '> to regenerate. Script ships with the plugin.',
     '',
     `**${rows.length} risks indexed.**`,
     '',

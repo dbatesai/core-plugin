@@ -1,23 +1,15 @@
 /**
  * unit-vocab.mjs — the ONE canonical vocabulary for unit frontmatter.
  *
- * Before this module, the enforcement scripts carried four diverging copies of
- * the status vocabulary (SYN-005 / MEM-006 / SCH-003):
- *   check-units VALID_STATUSES              active/retired/archived/superseded
- *   bitemporal TERMINAL_STATUSES            retired/superseded/archived
- *   demote-moves TERMINAL_STATUSES          resolved/archived/superseded/closed
- *   demote-state-narrative TERMINAL_STATUSES resolved/archived/superseded/closed
- *   metrics-detectors STABLE_STATUSES       final/stable/foundational/closed/…
- *
- * Reconciliation (2026-06-09):
- *   - VALID_STATUSES stays the schema's four: active/retired/archived/superseded.
- *   - TERMINAL_STATUSES = VALID_STATUSES minus 'active'. 'retired' units now
- *     demote their PROJECT.md bullets — they never did, which stranded every
- *     retired-backed bullet on the agenda.
- *   - 'resolved' and 'closed' are NOT blessed: never in the schema, zero units
- *     used them on the 2026-05-27 corpus check, and check-units already WARNs
- *     status-value on them. Stores carrying them should normalize to 'retired'
- *     (work finished) or 'superseded' (replaced).
+ * Every enforcement script (check-units, bitemporal, demote-moves,
+ * demote-state-narrative, metrics-detectors) imports its status vocabulary
+ * from here, so the sets cannot diverge between consumers:
+ *   - VALID_STATUSES is the schema's four: active/retired/archived/superseded.
+ *   - TERMINAL_STATUSES = VALID_STATUSES minus 'active'. 'retired' units
+ *     demote their PROJECT.md bullets like any other terminal status.
+ *   - 'resolved' and 'closed' are NOT blessed: not in the schema, and
+ *     check-units WARNs status-value on them. Stores carrying them should
+ *     normalize to 'retired' (work finished) or 'superseded' (replaced).
  *   - confidence-level / stability-class values come straight from
  *     references/external-sources/source-registration-framework.md.
  *
@@ -63,10 +55,9 @@ export const VALID_EDGE_TYPES = new Set([
   'cites', 'supersedes', 'superseded-by', 'depends-on', 'conflicts-with',
   'references-person', 'references-topic',
   'depended-on-by', 'supersedes-claim',
-  // Blessed 2026-06-03 (2-corpus evidence, obs-20260603-edge-type-validation-gap-cross-corpus):
-  // both are semantically distinct from supersedes — 'refines' sharpens/elaborates a prior
-  // decision without replacing it (CORE); 'amends' modifies specific parts while the prior
-  // stands (local-llm-build / BBLens). Distinct intent → first-class, not relabeled away.
+  // Both are semantically distinct from supersedes — 'refines' sharpens/elaborates a prior
+  // decision without replacing it; 'amends' modifies specific parts while the prior
+  // stands. Distinct intent → first-class, not relabeled away.
   'refines', 'amends',
 ]);
 

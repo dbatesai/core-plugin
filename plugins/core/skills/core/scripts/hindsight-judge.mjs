@@ -10,8 +10,8 @@
  * with hindsight, was the delivered set right?
  *
  * That is a `mechanical grade`, and every surface that shows these verdicts
- * says so. The information asymmetry that makes it non-circular (Antigravity's
- * Gate answer): the judge sees full text + hindsight; the retriever saw a
+ * says so. The information asymmetry that makes it non-circular (from the
+ * design review): the judge sees full text + hindsight; the retriever saw a
  * truncated live prompt. It is NOT a measure of semantic rightness — the
  * LLM-judge tier remains a possible later escalation, deliberately unscoped.
  *
@@ -25,7 +25,7 @@
  *                      text: topical-but-irrelevant injection.
  *   hit-right        — delivered set matches the full-text expectation.
  *   drift-invalidated — the store changed between capture and judgment
- *                      (store_signature mismatch). Per Antigravity's Gate-A
+ *                      (store_signature mismatch). Per the design-review
  *                      ruling: flag and drop the sample — we measure causality
  *                      at the time of the event, never guess across drift.
  *                      Scorecards exclude these from grade counts.
@@ -34,14 +34,14 @@
  * `storage-gap` only when the store truly has essentially no lexical match
  * (under-report gaps rather than mislabel weak matches as gaps). Configurable
  * (opts.gapFloor / CORE_JUDGE_GAP_FLOOR) so the value can be derived from real
- * baseline data later instead of hardcoding a magic BM25 number (Antigravity,
- * Gate A).
+ * baseline data later instead of hardcoding a magic BM25 number (a
+ * design-review requirement).
  *
  * Bounded + idempotent: at most `limit` (default 50) unjudged evidence rows
  * per pass, judged set tracked via the judgment log itself. Runs on the
  * maintenance cadence. Failure never blocks the pass.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by convention; .mjs (Node.js) only.
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';

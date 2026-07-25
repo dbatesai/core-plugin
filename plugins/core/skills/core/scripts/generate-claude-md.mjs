@@ -8,7 +8,7 @@
  * Modes: write | check | dry-run. `--check` exits 1 on drift (a hand edit), so /cut-release
  * can block a release when a generated file diverged from the contract.
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships as a script with the plugin; .mjs only.
  *
  * CLI:
  *   node generate-claude-md.mjs --contract <CONTRACT.md> [--out <CLAUDE.md>]

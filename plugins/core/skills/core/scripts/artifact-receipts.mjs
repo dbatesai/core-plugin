@@ -1,11 +1,10 @@
 /**
  * artifact-receipts.mjs — the shared audit-trail mechanism for every
- * artifact-page generator (extracted and generalized from
- * render-browse-artifact.mjs, 2026-07-22, when the metrics artifact generator
- * became its second consumer — extraction over duplication, matching the
- * state-cache.mjs precedent).
+ * artifact-page generator (consumed by render-browse-artifact.mjs and the
+ * metrics artifact generator — one shared implementation, not per-generator
+ * copies).
  *
- * Two receipts, two different claims (Hale condition 4):
+ * Two receipts, two different claims:
  *
  *   - The GENERATION receipt (the preflight manifest, written by the
  *     generator before consent) records what was generated and offered —
@@ -47,7 +46,7 @@ const SHA256_RE = /^[0-9a-f]{64}$/;
  * The canonical artifact content digest: sha-256 over the EXACT bytes that were
  * (or will be) published. Generators stamp this into the generation receipt so
  * the publish receipt can bind to the specific bytes, not just a file path or a
- * kind (Hale item 7, 2026-07-23). One implementation, so producer and verifier
+ * kind. One implementation, so producer and verifier
  * can never disagree on the algorithm.
  */
 export function artifactContentDigest(html) {
@@ -55,7 +54,7 @@ export function artifactContentDigest(html) {
 }
 
 /**
- * Validate the FULL generation-receipt schema — not just `kind` (Hale item 7).
+ * Validate the FULL generation-receipt schema — not just `kind`.
  * A real generation receipt is an object with a known kind, a schema_version, a
  * generated_at instant, and a 64-hex artifact content digest binding it to the
  * exact bytes generated. A forged kind-only blob fails here. Returns the mapped
@@ -124,22 +123,22 @@ export function recordPublishOutcome({
   catch (e) {
     throw Object.assign(new Error(`cannot read generation receipt ${genPath}: ${e.message}`), { code: 'BAD_GENERATION_RECEIPT' });
   }
-  // Full-schema validation (Hale item 7): kind, schema_version, generated_at,
+  // Full-schema validation: kind, schema_version, generated_at,
   // and a real content digest — a forged kind-only blob is refused here.
   const publishKind = validateGenerationReceipt(gen, genPath);
   if (status === 'published-private' && !privateVerifiedEvidence) {
     throw Object.assign(new Error(
       "--status published-private requires --private-verified-evidence — state how privacy was actually confirmed (condition 3); without evidence the publish is 'failed', not 'published-private'"), { code: 'EVIDENCE_REQUIRED' });
   }
-  // Hale's e0a808f revise (2026-07-22): a published-private outcome without a
-  // consent record was a gap between the skill prose ("record who consented on
-  // which manifest") and this CLI contract — close it here, for every kind.
+  // A published-private outcome without a
+  // consent record would leave a gap between the skill prose ("record who consented on
+  // which manifest") and this CLI contract — closed here, for every kind.
   if (status === 'published-private' && (!consentBy || !consentMechanism)) {
     throw Object.assign(new Error(
       "--status published-private requires --consent-by and --consent-mechanism — record who consented and what they were shown (condition 4); without a consent record the publish is 'failed', not 'published-private'"), { code: 'CONSENT_REQUIRED' });
   }
   // A published-private outcome must name the exact hosted URL — a null URL is
-  // not evidence of a publish (Hale item 7). The content digest is already
+  // not evidence of a publish. The content digest is already
   // guaranteed by validateGenerationReceipt and is copied into the receipt below.
   if (status === 'published-private' && (typeof artifactUrl !== 'string' || !artifactUrl.trim())) {
     throw Object.assign(new Error(
@@ -154,7 +153,7 @@ export function recordPublishOutcome({
     kind: publishKind,
     schema_version: PUBLISH_RECEIPT_SCHEMA_VERSION,
     generation_receipt: basename(genPath),
-    // Self-contained snapshot identity (Hale's e0a808f revise, 2026-07-22):
+    // Self-contained snapshot identity:
     // copied from the validated generation receipt at record time, so this
     // receipt still names WHAT was published even if the neighbor generation
     // receipt is later moved, deleted, or altered. Browse receipts carry the
@@ -165,7 +164,7 @@ export function recordPublishOutcome({
     generation_generated_at: gen.generated_at ?? null,
     // The exact-byte identity of what was published — copied from the validated
     // generation receipt so the publish record binds to specific content, not a
-    // path or a kind (Hale item 7). Required-and-present for every status.
+    // path or a kind. Required-and-present for every status.
     artifact_sha256: gen.artifact_sha256,
     publish_status: status,
     recorded_at: at,
@@ -195,7 +194,7 @@ export function recordRevocation(publishReceiptPath, { now = () => new Date() } 
     throw Object.assign(new Error(`${p} is not a publish receipt (kind '${receipt.kind}', expected one of: ${[...PUBLISH_KINDS].join(', ')})`), { code: 'BAD_PUBLISH_RECEIPT' });
   }
   // Completed revocation is only meaningful for something that was actually
-  // published (Hale item 7): a declined/failed publish never went up, so it can
+  // published: a declined/failed publish never went up, so it can
   // never be "revoked". Refuse to stamp revoked_at on a non-published record —
   // that would overclaim a takedown that never happened.
   if (receipt.publish_status !== 'published-private') {

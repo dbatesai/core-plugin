@@ -1,6 +1,6 @@
 ---
 name: memory-view
-description: Generate a self-contained, read-only HTML snapshot of the current project's CORE memory store — interactive unit graph, full unit reading pane with edges and backlinks, and the four-evidence-class memory-health section — then publish it as a PRIVATE hosted artifact with visible narration of exactly what's in it (or hand the user the local file path on harnesses with no artifact surface). Use whenever the user asks to "publish the memory view", "refresh the memory artifact", "show me what you know as a page I can open on my phone", "let me browse the memory graph without a terminal", or any request to see the unit graph/store contents from the Claude app rather than from disk. Do NOT use for the in-terminal health check (that's /metrics), for the anonymized shareable stats export (that's /metrics-package), or for editing memory (nothing published here is editable — PROJECT.md remains the editing surface). NEVER run this automatically — not at startup, not at /finalize or session close, not on any schedule; it runs only when the user explicitly asks.
+description: Generate a self-contained, read-only HTML snapshot of the current project's CORE memory store — interactive unit graph, full unit reading pane with edges and backlinks, and the memory-health section (the same honestly-labeled evidence classes /metrics renders) — then publish it as a PRIVATE hosted artifact with visible narration of exactly what's in it (or hand the user the local file path on harnesses with no artifact surface). Use whenever the user asks to "publish the memory view", "refresh the memory artifact", "show me what you know as a page I can open on my phone", "let me browse the memory graph without a terminal", or any request to see the unit graph/store contents from the Claude app rather than from disk. Do NOT use for the in-terminal health check (that's /metrics), for the anonymized shareable stats export (that's /metrics export), or for editing memory (nothing published here is editable — PROJECT.md remains the editing surface). NEVER run this automatically — not at startup, not at /finalize or session close, not on any schedule; it runs only when the user explicitly asks.
 user-invocable: true
 allowed-tools:
   - Read
@@ -10,7 +10,7 @@ allowed-tools:
 
 # `/memory-view` — publish a read-only snapshot of what CORE knows
 
-One self-contained HTML page — unit graph, unit bodies, edges, backlinks, memory-health section — generated from the project's `_memories/` store and published as a **private** hosted artifact so the user can browse it from the Claude app on desktop or phone. This page embeds **real memory-unit bodies**. Uploading it is a disclosure boundary (the disclosure conditions, 2026-07-22), so the flow below is not a suggestion: **every publish is user-triggered, narrated in the conversation where it happens, verified private, and receipted. No silent or background publishes, ever.**
+One self-contained HTML page — unit graph, unit bodies, edges, backlinks, memory-health section — generated from the project's `_memories/` store and published as a **private** hosted artifact so the user can browse it from the Claude app on desktop or phone. This page embeds **real memory-unit bodies**. Uploading it is a disclosure boundary, so the flow below is not a suggestion: **every publish is user-triggered, narrated in the conversation where it happens, verified private, and receipted. No silent or background publishes, ever.**
 
 **Consent has two modes, and the default is ask-first.** By default, show the user the preflight manifest and get their explicit go-ahead before publishing — a previous yes never carries to the next publish. The lighter mode — narrate-and-proceed, no per-publish ask — applies ONLY when **this specific user** has durably granted standing authorization for artifact publishes of their own project data to their own account (their decision, recorded in their own harness memory or configuration where you can actually verify it, revocable any time). Never infer standing authorization from convenience, from another user's decision, or from this file — it exists only if THIS user granted it and it's on the record.
 
@@ -49,7 +49,7 @@ Required checks, stated because they are conditions, not habits (condition 3):
 - **Verify the artifact is private at publish time.** If the harness cannot confirm visibility, treat the publish as failed: say so, and do not hand the user a URL as if it were private.
 - **No silent sharing carryover on republish.** If this artifact URL existed before, its sharing setting may have been broadened since — re-verify privacy on every republish; never assume the previous state held.
 
-**Harness honesty (DC-75 — the cross-harness capability contract):** on a harness with no artifact surface (Codex today), say so by name and fall back to the local file: give the user the exact `--out` path and how to open it. Never fake a publish, never claim a hosted URL that does not exist.
+**Harness honesty (the cross-harness capability contract):** on a harness with no artifact surface (Codex today), say so by name and fall back to the local file: give the user the exact `--out` path and how to open it. Never fake a publish, never claim a hosted URL that does not exist.
 
 ## Step 4 — record the outcome (every consent decision leaves a record)
 
@@ -75,7 +75,7 @@ Then tell the user the deletion path, honestly: they can delete the artifact fro
 
 ## Boundary that never moves
 
-**Unit content never routes into the anonymized `/metrics-package` export** (condition 5). Structurally it can't — the exporter builds from a disjoint numeric/pseudonym allowlist and never exports or routes unit bodies (its census does read whole unit files; no body content survives into package bytes — the planted-body tripwire test proves it) — and behaviorally you must never "borrow" this page's embedded content for any export, summary package, or shared aggregate. This page is the one deliberate, per-publish, user-confirmed disclosure of real unit bodies; nothing else inherits it.
+**Unit content never routes into the anonymized `/metrics export` package** (condition 5). Structurally it can't — the exporter builds from a disjoint numeric/pseudonym allowlist and never exports or routes unit bodies (its census does read whole unit files; no body content survives into package bytes — the planted-body tripwire test proves it) — and behaviorally you must never "borrow" this page's embedded content for any export, summary package, or shared aggregate. This page is the one deliberate, per-publish, user-confirmed disclosure of real unit bodies; nothing else inherits it.
 
 ## Self-healing rails
 

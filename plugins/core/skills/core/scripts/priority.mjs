@@ -1,5 +1,5 @@
 /**
- * Priority function for CORE memory units, per DC-69.
+ * Priority function for CORE memory units.
  *
  * priority(unit, t) = w_R · R + w_F · F + w_S · S + w_A · A + P
  *
@@ -9,8 +9,8 @@
  * A = Jaccard overlap of unit topics with session-intent topics.
  * P = pin contribution (floor 0.7 / floor 0.9 / override 1.5; pinned:false is neutral).
  *
- * Per DC-77 the script lives in the plugin, not per-project.
- * Per DC-80 the plugin ships Node.js (.mjs) only.
+ * The script lives in the plugin, not per-project, by design.
+ * The plugin ships Node.js (.mjs) only, zero dependencies.
  *
  * Library usage:
  *   import { scoreUnitFile, scoreProxyRS } from './priority.mjs';
@@ -32,7 +32,7 @@ import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isActiveStatus } from './unit-vocab.mjs';
 
-// ---------- DC-69 constants ----------
+// ---------- priority-function constants ----------
 
 export const W_R = 0.30;
 export const W_F = 0.15;
@@ -55,12 +55,10 @@ const PIN_CONTRIBUTION = {
   floor: ['floor', 0.7],
   true: ['floor', 0.9],
   always: ['override', 1.5],
-  // `pinned: false` is NEUTRAL by decision (MEM-005, 2026-06-09): the
-  // multiply-0.3 demotion DC-69 sketched was never reachable — pinContribution
-  // short-circuits false to ['none', 0.0] — no live unit uses pinned:false,
-  // and silently activating a 70% penalty would be an unasked-for behavior
-  // change. DC-69's unit (CORE workshop store) is to be amended to record
-  // "false → neutral"; this table row was dead code and is gone.
+  // `pinned: false` is NEUTRAL by decision: pinContribution
+  // short-circuits false to ['none', 0.0]. There is deliberately no
+  // demotion multiplier for it — silently penalizing pinned:false
+  // would be an unasked-for behavior change.
 };
 
 // ---------- Frontmatter parsing ----------
@@ -233,10 +231,9 @@ export function signalF(unit) {
   return surfacesSeen.size / 6.0;
 }
 
-// MEM-018: a unit with NO sources used to default to 0.5 — equal to an
-// explicitly summary-sourced unit, so unknown provenance ranked as well as
-// known-good provenance on the S dimension. Unknown now scores the
-// session_log tier: below summary (0.5), above transcript (0.2).
+// A unit with NO sources scores the session_log tier: below summary (0.5),
+// above transcript (0.2) — unknown provenance must not rank as well as
+// known-good provenance on the S dimension.
 export const NO_SOURCES_DEFAULT_S = 0.3;
 
 export function signalS(unit) {
@@ -322,8 +319,8 @@ export function extractEdges(unit) {
 // Validity (t_valid/t_invalid) is a unit dimension — the same kind of thing as
 // topics or confidence-level. Its read predicates live here in the canonical
 // unit module so every reader (priority, retrieval suppression, bitemporal CLI,
-// impact-trace, hygiene) shares ONE definition instead of re-deriving it. Per
-// the validity-dimension consolidation (2026-06-02): no second store-walk, no
+// impact-trace, hygiene) shares ONE definition instead of re-deriving it.
+// There is no second store-walk and no
 // parallel "bi-temporal layer."
 //
 //   t_valid    when the fact became true in the world. Defaults to `created`
@@ -420,7 +417,7 @@ export function iterUnits(memoriesDir) {
       const u = loadUnit(path);
       if (!Object.keys(u.fm).length) {
         // Malformed/absent frontmatter parses to an empty map and would score
-        // on pure defaults, surfacing unflagged in ranked output (MEM-011).
+        // on pure defaults, surfacing unflagged in ranked output.
         // Tag it so rankUnits() excludes it; the stderr warn makes the damage
         // visible (check-units reports the same file as a schema failure).
         u.fm._load_error = true;
@@ -428,7 +425,7 @@ export function iterUnits(memoriesDir) {
       }
       units.push(u);
     } catch (e) {
-      // The old bare catch swallowed read failures silently (MEM-011).
+      // A bare catch would swallow read failures silently — warn instead.
       process.stderr.write(`warn: ${fname}: failed to load (${e && e.message ? e.message : e}) — excluded from ranking\n`);
     }
   }
@@ -437,14 +434,15 @@ export function iterUnits(memoriesDir) {
 
 /**
  * iterArchivedUnits — the ONE archive-aware companion to iterUnits, for the
- * explicit-history modes only (Hale's 2026-07-21 finding). Archiving a unit
+ * explicit-history modes only. Archiving a unit
  * (a separate, independent action from retiring it — see hygiene.md) is what
  * physically relocates it to `archive/`, but iterUnits is top-level-only by
  * design (default retrieval must stay non-recursive, per
- * ARCHITECTURE.md/data-storage.md). Once a unit is archived, it silently
- * disappeared from every "--include-invalid" / cold-history caller too, not
- * just default retrieval -- that's a real regression for a memory product
- * whose MVP is complete recall, not a side effect of the archive action
+ * ARCHITECTURE.md/data-storage.md). Without this companion, an archived unit
+ * would silently
+ * disappear from every "--include-invalid" / cold-history caller too, not
+ * just default retrieval -- losing complete recall there is a defect, not a
+ * side effect of the archive action
  * itself. Callers that mean to see cold history (rankUnits with
  * includeInvalidated:true, graph-walk's same flag, bitemporal's
  * inherently-historical queries) merge this in; default, non-invalidated

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { initMetrics } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 import { resolveStoragePath } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 
@@ -78,7 +79,8 @@ test('wire-in: metrics-init is idempotent (second run leaves the pin intact)', (
 // no-ops when invoked through a symlinked/virtualized path (Node resolves
 // import.meta.url to the real file, but argv[1] stays the symlink). startup.md
 // invokes it with output+exit-code discarded, so that no-op would be invisible.
-test('M1: metrics-init still runs when invoked through a symlink (entry guard canonicalizes both sides)', () => {
+test('M1: metrics-init still runs when invoked through a symlink (entry guard canonicalizes both sides)', (t) => {
+  if (!symlinkCapable()) return t.skip('symlink privilege unavailable (Windows non-elevated box)');
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
   const linkDir = mkdtempSync(join(tmpdir(), 'mi-link-'));

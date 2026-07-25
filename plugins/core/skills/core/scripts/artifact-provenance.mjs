@@ -1,11 +1,10 @@
 /**
  * artifact-provenance.mjs — truthful producer identity for every artifact-page
- * generator (extracted from render-browse-artifact.mjs, 2026-07-22, when the
- * metrics artifact generator became its second consumer — extraction over
- * duplication, matching the state-cache.mjs precedent).
+ * generator. One shared implementation (extraction over duplication), so all
+ * generators stamp provenance identically.
  *
- * The rule this module enforces (Hale condition 6, 2026-07-22 HOLD
- * correction 1): a page rendered for publish must carry REAL provenance.
+ * The rule this module enforces: a page rendered for publish must carry REAL
+ * provenance.
  *
  *   - In a source Git checkout: the real `git rev-parse HEAD` of the plugin
  *     source tree this module actually runs from — never a stale release
@@ -18,7 +17,7 @@
  *     directory, so "this module is tracked" and "the calling generator is
  *     tracked" stand or fall together.) The SHA is ALSO refused when the
  *     plugin source tree is DIRTY — any tracked, staged, or untracked change
- *     under the plugin root (Hale item 9, 2026-07-23): HEAD names the committed
+ *     under the plugin root: HEAD names the committed
  *     bytes, and the executing bytes no longer match them, so stamping HEAD
  *     would be a lie. A dirty tree fails closed exactly like no-checkout —
  *     source_sha stays null and callers refuse to render for publish.
@@ -73,7 +72,7 @@ export function truthfulProducerIdentity(scriptName) {
     // is tracked in that repo.
     execFileSync('git', ['-C', realDir, 'ls-files', '--error-unmatch', join(realDir, _moduleFile)],
       { stdio: 'ignore' });
-    // Dirty-tree guard (Hale item 9): HEAD names the committed bytes; if the
+    // Dirty-tree guard: HEAD names the committed bytes; if the
     // plugin tree has any relevant modification the executing bytes differ, so
     // fail closed rather than stamp a commit the bytes don't match.
     const pluginRoot = _pluginRootFromModule(realDir);

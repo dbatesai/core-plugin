@@ -4,7 +4,7 @@
  * The Codex equivalent of Claude Code's startup mandate: a returning Codex (or
  * Claude) session on a shared project folder runs this once to confirm the
  * install is sound, the store validates, workspace identity resolves, and the
- * harness's instruction surface (AGENTS.md) exists. Per DC-104 the project store
+ * harness's instruction surface (AGENTS.md) exists. By design the project store
  * is harness-agnostic and the two harnesses co-exist on one folder; this script
  * is harness-neutral with a thin per-harness branch.
  *
@@ -18,7 +18,7 @@
  *   node configure-project.mjs [--project <dir>] [--harness claude-code|codex]
  *                              [--apply] [--json] [--core-root <dir>]
  *
- * Per DC-77 ships as a script; per DC-80 .mjs only.
+ * Ships as a script with the plugin; .mjs only.
  *
  * ── The capability report is two-tier on purpose (JC-1) ──────────────────────
  * A node script can read what's CONFIGURED ON DISK and validate the store, but it
@@ -133,7 +133,7 @@ export function detectIdentity(projectPath, coreDir, now = new Date()) {
 export function readConfiguredMcp(projectPath, harness, home = homedir()) {
   if (harness === 'codex') {
     // Codex configures MCP in ~/.codex/config.toml (TOML). We don't bundle a TOML
-    // parser (dependency-free per DC-80), so we DON'T claim to have read the
+    // parser (dependency-free by design), so we DON'T claim to have read the
     // server list — we report the file's presence and defer the list to the
     // session-live tier. Reporting "0 servers" here would be the false-absence bug.
     const cfg = join(home, '.codex', 'config.toml');

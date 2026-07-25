@@ -24,7 +24,7 @@
  *   t_invalid  when the fact stopped being true. Empty while the fact holds;
  *              stamped by supersession (B supersedes A ⇒ A.t_invalid = B.t_valid).
  *
- * This is additive and source-agnostic (DC-102): CORE populates from its simple
+ * This is additive and source-agnostic: CORE populates from its simple
  * sources (conversation + local files, via the created-default + supersession),
  * an overlay populates t_valid from its richer registered sources via the
  * `world-time-policy` registration field. Same dimension, same readers.
@@ -38,7 +38,7 @@
  * excluded from the "currently valid" set the same way retired units are. Cold
  * history stays reachable by asOf() or an explicit supersedes-edge walk.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open.
+ * Ships with the plugin as prescriptive code; .mjs only. Fail-open.
  *
  * CLI:
  *   node bitemporal.mjs <project> --stamp [--apply]   stamp t_invalid on superseded units (dry-run unless --apply)
@@ -59,8 +59,8 @@ import { iterActiveUnits } from './check-units.mjs';
 export const BITEMPORAL_VERSION = '1.0.0';
 
 // The read-time validity predicates (effectiveValidity / validAt / isInvalidated)
-// now live in priority.mjs — the canonical unit module — so every reader shares
-// one definition (validity-dimension consolidation, 2026-06-02). Re-exported here
+// live in priority.mjs — the canonical unit module — so every reader shares
+// one definition. Re-exported here
 // for back-compat: this module's CLI, its writer/metrics functions, and any
 // existing importer keep working against the same single source.
 export { effectiveValidity, validAt, isInvalidated };
@@ -303,7 +303,7 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
     // A point-in-time reconstruction is inherently a historical query -- it
     // must see units the archive action has physically relocated to
     // archive/, or asOf() silently loses everything valid in the past that's
-    // since been archived (Hale's 2026-07-21 finding). --stamp/--metrics
+    // since been archived. --stamp/--metrics
     // above stay on the active-only pool; only --as-of needs the merge.
     const ids = asOf(units.concat(iterArchivedUnits(memoriesDir)), date);
     process.stdout.write(`bitemporal: ${ids.length} unit(s) valid as of ${date}\n`);

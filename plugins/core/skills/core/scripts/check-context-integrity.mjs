@@ -1,5 +1,5 @@
 /**
- * check-context-integrity.mjs — does the agent know when it's blind? (DC-94a)
+ * check-context-integrity.mjs — does the agent know when it's blind?
  *
  * At bootstrap the agent loads MEMORY.md (capped by the harness injection budget) and
  * reads PROJECT.md (which can exceed one Read). When either gets truncated, the agent
@@ -9,7 +9,7 @@
  * Pure function (testable, no I/O): caller passes the measured byte/line extents. The CLI
  * wrapper measures them off disk via statSync + a line count and prints the marker.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by convention; .mjs (Node.js) only.
  *
  * CLI:
  *   node check-context-integrity.mjs --memory <MEMORY.md> --project <PROJECT.md> \

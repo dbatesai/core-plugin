@@ -1,8 +1,8 @@
 /**
- * retrieve-context.mjs — deterministic per-turn retrieval (DC-94a; v3.11 product path).
+ * retrieve-context.mjs — deterministic per-turn retrieval (the product path).
  *
  * Given a query and a store, return the top-N most relevant active units as
- * {id, summary, tier, score}. Model-free (DC-114) and cheap enough to run on every
+ * {id, summary, tier, score}. Model-free and cheap enough to run on every
  * turn from a shell hook. This is the "retrieve the right thing" half of the
  * north-star: the literal/lexical tier. Abstract matches (value→instance) that
  * lexical can't bridge are the reasoning tier's job; the obligation-3 ladder
@@ -13,13 +13,13 @@
  * (title 3x, topics 2x) and body BM25 (bm25.mjs) — each normalized by its own max,
  * combined per unit as the max of the two. Then one-hop edge expansion from the
  * top hits at a 0.5x discount on the parent's normalized score, competing in the
- * final sort (a neighbor of a strong hit can beat a weak direct hit — DC-94a).
+ * final sort (a neighbor of a strong hit can beat a weak direct hit, by design).
  *
  * Reads the recursive path-bearing index via loadFreshIndex (freshness validated
  * every call). Edge data isn't in the index, so expansion reads the top-hit unit
  * files directly, resolved through the index's per-unit path (nested units included).
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin as prescriptive code; .mjs only.
  *
  * CLI: node retrieve-context.mjs <storePath> "<query>" [--top N]
  */
@@ -33,8 +33,8 @@ import { bm25DocumentScores, bm25Scores, tokenize, STOPWORDS } from './bm25.mjs'
 
 export const ENRICHMENT_WEIGHT = 0.6;
 
-// The tokenizer moved to bm25.mjs (v3.11 remediation — breaks the retrieve-context ⇄
-// bm25 import cycle Hale flagged). Re-exported here so existing importers keep working.
+// The tokenizer lives in bm25.mjs (avoids a retrieve-context ⇄ bm25 import
+// cycle). Re-exported here so existing importers keep working.
 export { tokenize, STOPWORDS };
 
 function scoreUnit(queryTokens, unit) {
@@ -72,15 +72,14 @@ export function lexicalRankedIds(query, storePath, { snapshot = null } = {}) {
  * productRankedScores — THE product ranking. One function, called by the live
  * retriever (retrieveContext), the per-turn hook (through retrieveContext), and the
  * measurement harness's `live` arm — so a harness number describes what actually
- * ships (Gate-0 product/harness identity, Hale 2026-07-11 §2).
+ * ships (the product/harness identity invariant).
  *
  * Scoring: two lexical arms produce MAGNITUDE scores — the title/topics overlap
  * scorer and body BM25. Each arm is normalized by its own maximum (scale-free), and
  * a unit's combined score is the max of its normalized arm scores. Magnitudes are
  * preserved (not flattened to rank positions) because the one-hop edge discount
  * needs ratios: "a neighbor of a STRONG hit beats a WEAK direct hit" is only
- * expressible when 0.5 × parent-strength can exceed another unit's strength — the
- * v3.10 semantic the synthetic rank scores broke (Hale 2026-07-11 §3).
+ * expressible when 0.5 × parent-strength can exceed another unit's strength.
  *
  * @returns {Array<{id, tier, score}>} every unit scoring > 0 on either arm, sorted
  *   desc by combined normalized score (ties by id), score ∈ (0, 1].
@@ -106,15 +105,15 @@ export function productRankedScores(query, storePath, preloadedIndex = null, sna
 
   let bodyScored = [];
   try {
-    // A3: the body arm reads through the SAME index as the title arm — one
+    // The body arm reads through the SAME index as the title arm — one
     // request, one snapshot, every reader sees the same bytes. With a captured
-    // snapshot (blocker 2), body BYTES come from the capture too — zero live reads.
+    // snapshot, body BYTES come from the capture too — zero live reads.
     bodyScored = bm25Scores(query, root, { preloadedIndex: index, snapshot: snap });
     _lastBm25Error = null;
   } catch (err) {
     // Fail-open (title-only) but never silent: the degradation is visible on stderr
     // (hook logs) and via storeHealth() — a product that quietly halves its recall
-    // is a health incident, not a fallback (Hale re-review §6).
+    // is a health incident, not a fallback.
     _lastBm25Error = String(err && err.message || err);
     process.stderr.write(`retrieve-context: body-BM25 arm failed (${_lastBm25Error}) — degraded to title-only for this query\n`);
   }
@@ -125,7 +124,7 @@ export function productRankedScores(query, storePath, preloadedIndex = null, sna
     if (!prev || norm > prev.score) combined.set(s.id, { id: s.id, tier: s.tier, score: norm });
   }
 
-  // DC-114/DC-115: write-time enrichment is a distinct, lower-weight arm. It
+  // By design, write-time enrichment is a distinct, lower-weight arm. It
   // never contaminates authored body text, and stale/same-family records were
   // already excluded by the captured sidecar loader.
   const enrichmentScored = bm25DocumentScores(query, snap.enrichments?.documents || []);
@@ -148,12 +147,11 @@ export function productRankedIds(query, storePath, { snapshot = null } = {}) {
 /**
  * applyTierPolicy — authority-tier ranking policy, applied to a scored list.
  *
- * BUILT REVERSIBLE, DEFAULT-OFF (P0). The v3.11 remediation measured that recursive
- * coverage buries canonical answers under raw observations at the final injected
- * context (CORE dev: 35/66 top-3 slots observations; the canonical person unit at
- * rank 14). The joint contract v2 §7 pre-registers four policies decided BY the
+ * BUILT REVERSIBLE, DEFAULT-OFF (P0). Recursive
+ * coverage can bury canonical answers under raw observations at the final injected
+ * context. The joint contract v2 §7 pre-registers four policies decided BY the
  * ceremony's final-context numbers, not by prescription. This is the mechanism they
- * select from; nothing here activates until David rules on the ceremony evidence.
+ * select from; nothing here activates until the product owner rules on the ceremony evidence.
  *
  *   P0 — flat ranking, tier is a label only (SHIPPED default; the control).
  *   P1 — canonical-preference tiebreak: within `epsilon` of normalized score, a
@@ -224,29 +222,28 @@ export function storeHealth(storePath, { snapshot = null } = {}) {
 }
 
 /**
- * runRetrievalStages — the ONE retrieval pipeline, staged (A3/A4). retrieveContext
+ * runRetrievalStages — the ONE retrieval pipeline, staged. retrieveContext
  * returns its `final`; buildRetrievalTrace records every stage. There is exactly one
  * implementation of the pipeline — a trace can never disagree with the product.
  * @returns {{snapshotId, substrate, policied, top, expanded, final}}
  */
 function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, snapshot = null } = {}) {
-  // A3 + Hale round 11: ONE ATOMIC capture per request — id, index, AND body
+  // ONE ATOMIC capture per request — id, index, AND body
   // bytes from a single read per file (captureBodies) — whether the caller is a
   // measurement (passes its run-scoped captured snapshot) or the product path
-  // (captures fresh per request). The earlier version passed the NULLABLE
-  // caller snapshot downstream, so the product path's body arm re-read live
-  // files while the trace carried a snapshotId minted from different bytes —
-  // Hale's round-11 "intra-request tear" finding. `snap`, never `snapshot`,
+  // (captures fresh per request). Passing the NULLABLE caller snapshot
+  // downstream would let the product path's body arm re-read live files while
+  // the trace carries a snapshotId minted from different bytes — an
+  // intra-request tear. `snap`, never `snapshot`,
   // flows to every reader below.
   const snap = snapshot || loadSnapshot(root, { captureBodies: true });
   const { index, snapshotId } = snap;
   const byId = new Map(index.units.map(u => [u.id, u]));
 
   // The product ranking: title/topics ∪ body-BM25, magnitudes preserved via
-  // per-arm max-normalization (see productRankedScores). Measured 2026-07-07,
-  // dev-set: the body arm lifts recall@10 ~0.68→0.86 on CORE and rescues the
-  // abstract/value rung (DC-113 Tier-A T3, model-free per DC-114).
-  // tierPolicy defaults to 'P0' (identity) so shipped behavior is unchanged; the
+  // per-arm max-normalization (see productRankedScores). The body arm materially
+  // lifts recall and rescues the abstract/value query rung (model-free by design).
+  // tierPolicy defaults to 'P0' (identity), which leaves the ranking untouched; the
   // ceremony (joint contract v2 §7) selects an active policy from measured evidence.
   const substrate = productRankedScores(query, root, index, snap);
   const policied = applyTierPolicy(
@@ -261,12 +258,11 @@ function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsi
 
   // One-hop edge expansion from the top hits, at a 0.5x discount on the parent's
   // normalized score — so a neighbor of a strong hit COMPETES with (and can beat)
-  // weak direct hits in the final ranking, the DC-94a semantic the synthetic rank
-  // scores of the first union rewrite broke (regression caught by Hale 2026-07-11;
-  // edge-bearing fixture now guards it). Edges come FROM THE CAPTURE (Hale round
-  // 12): this stage used to re-read live unit files via loadUnit, so a concurrent
-  // edge change altered expanded/final results under an unchanged snapshot_id —
-  // the third live reader found behind the id. No filesystem access here.
+  // weak direct hits in the final ranking (the neighbor-competes semantic; an
+  // edge-bearing fixture guards it). Edges come FROM THE CAPTURE: re-reading
+  // live unit files here would let a concurrent
+  // edge change alter expanded/final results under an unchanged snapshot_id.
+  // No filesystem access here.
   const seen = new Set(top.map(t => t.id));
   const expanded = [];
   for (const hit of top) {
@@ -302,18 +298,18 @@ export function retrieveContext(query, storePath, opts = {}) {
 }
 
 /**
- * buildRetrievalTrace — LOCAL-ONLY evidence record of one retrieval request (Train A
- * A3; Crest closure program 2026-07-12 §1). Runs the SAME staged pipeline as
+ * buildRetrievalTrace — LOCAL-ONLY evidence record of one retrieval request.
+ * Runs the SAME staged pipeline as
  * retrieveContext (imported, never reimplemented) and records: snapshot identity,
  * component identities, parameters, store health, ranked substrate, policy output,
  * expansion, the final candidates, the delivered pack (accepted/excluded/bytes), and
  * timing. Detailed traces stay on the machine that produced them — rows in this
- * object are project data; only the aggregate exporter (A2) produces shareable output.
+ * object are project data; only the aggregate exporter produces shareable output.
  */
 export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, byteCap = 2048, snapshot = null } = {}) {
   const root = resolve(storePath);
   const t0 = process.hrtime.bigint();
-  // Storeless probe only when there is NO injected snapshot (Hale round 14): a
+  // Storeless probe only when there is NO injected snapshot: a
   // caller holding a capture already proved the store existed at capture time,
   // and the trace must describe the CAPTURED state even if the live store
   // vanished afterward — an unconditional existsSync here returned `storeless`
@@ -356,22 +352,21 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
     },
     // `text` rides the trace so a single pipeline run can serve BOTH the injection
     // (the hook prints it) and the evidence record — the per-turn hook is this
-    // function's production caller (Hale audit e1490d4 finding 1, closed 2026-07-17).
+    // function's production caller.
     pack: { accepted: pack.accepted, excluded: pack.excluded, bytes: pack.bytes, warnings: pack.warnings, text: pack.text },
     timing_ms: +elapsedMs.toFixed(2),
   };
 }
 
 /**
- * buildFinalContextPack — THE final-context product function (Train A A4; Crest
- * closure program 2026-07-12 §2). The SOLE implementation of final ordering,
+ * buildFinalContextPack — THE final-context product function.
+ * The SOLE implementation of final ordering,
  * context budget, authority labels, warnings, formatting, and UTF-8 byte
  * accounting for the per-turn injection. The installed hook is a thin adapter
  * around this; the evaluator imports the same function — so a measured number
- * describes the exact bytes the agent receives, never a pre-cap selection
- * ("measures selection, not delivered bytes" was the named hole).
+ * describes the exact bytes the agent receives, never a pre-cap selection.
  *
- * Formatting is byte-identical to the pre-extraction hook: header line, one
+ * Formatting: header line, one
  * `- <id>[ [observation]]: <summary>` line per accepted hit, first line that
  * would exceed the cap stops packing (no skip-and-continue), degraded-store
  * warning appended only if it fits.
@@ -390,10 +385,10 @@ export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = 
   if (!hits || !hits.length) return { text: '', bytes: 0, accepted, excluded, warnings };
 
   const HEADER = 'Relevant stored context (CORE per-turn retrieval):\n';
-  // Contract fix (Hale close path §6): the cap binds ABSOLUTELY. A cap smaller
-  // than the header used to return bytes > byteCap in violation of the pack's
-  // own contract; now it delivers an empty pack, every hit excluded, and the
-  // constraint named in warnings.
+  // The cap binds ABSOLUTELY. A cap smaller
+  // than the header delivers an empty pack, every hit excluded, and the
+  // constraint named in warnings — never bytes > byteCap in violation of the
+  // pack's own contract.
   if (Buffer.byteLength(HEADER, 'utf8') > byteCap) {
     for (const h of hits) excluded.push({ id: h.id, tier: h.tier, score: h.score, reason: 'byte-cap' });
     warnings.push(`byteCap ${byteCap} is below the ${Buffer.byteLength(HEADER, 'utf8')}-byte pack header — nothing delivered`);
@@ -429,11 +424,11 @@ export function main(argv) {
   const topN = topIdx >= 0 ? Number(argv[topIdx + 1]) || 3 : 3;
   // Strip recognized flags AND --top's own value, leaving positional args.
   const args = argv.filter((a, i) => a !== '--top' && a !== '--pack' && !(topIdx >= 0 && i === topIdx + 1));
-  // Meridian's finding (live Windows box, 2026-07-20): an unrecognized flag like a
-  // fat-fingered `--query` used to fall straight into the positional args and get
-  // silently treated as the literal query text, returning a confident top result
-  // for garbage input with no error or abstention signal. Since the CLI must
-  // invoke the exact same function agents use (Train A A4), a silently-corrupted
+  // An unrecognized flag like a
+  // fat-fingered `--query` must not fall into the positional args and get
+  // silently treated as the literal query text — that returns a confident top
+  // result for garbage input with no error or abstention signal. Since the CLI
+  // invokes the exact same function agents use, a silently-corrupted
   // query here is a silently-corrupted measurement anywhere this CLI is used to
   // probe delivered bytes. Fail loud on any unrecognized `--` flag instead.
   const unrecognized = args.filter(a => a.startsWith('--'));
@@ -446,7 +441,7 @@ export function main(argv) {
   if (!storePath) { process.stderr.write('usage: retrieve-context.mjs <storePath> "<query>" [--top N] [--pack]\n'); return 2; }
   const hits = retrieveContext(query, storePath, { topN });
   if (pack) {
-    // --pack emits the EXACT delivered bytes (Train A A4): same function, same cap,
+    // --pack emits the EXACT delivered bytes: same function, same cap,
     // same health input as the installed hook — so the CLI is a truthful probe of
     // what the agent would receive, not a debug approximation of it.
     const built = buildFinalContextPack(hits, { health: storeHealth(storePath) });

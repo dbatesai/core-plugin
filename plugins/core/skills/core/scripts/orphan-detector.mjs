@@ -1,11 +1,9 @@
 /**
  * orphan-detector.mjs — definition-of-done enforcement for the plugin.
  *
- * CORE kept building mechanisms and never wiring them in (the "last-mile" debt:
- * metrics-init, adversarial-run-gate, generate-agents-md, clusters.md — a fifth
- * example, instruction-surface-adapter.mjs, was never wired and has since been
- * removed rather than kept staged). The rule adopted to stop it: a mechanism isn't done until a skill
- * invokes it AND a test asserts the wiring. This script is the standing check.
+ * The rule this enforces: a mechanism isn't done until a skill invokes it AND
+ * a test asserts the wiring — otherwise "built but never wired" debt
+ * accumulates silently. This script is the standing check.
  *
  * It flags two kinds of orphan:
  *   1. A `scripts/**.mjs` OR `hooks/*.mjs` file that nothing reaches — not named
@@ -21,16 +19,12 @@
  * to the decision that gates their activation. The detector still PRINTS them every
  * run so they stay visible and don't rot silently — "tracked, not forgotten."
  *
- * Logged gap, fixed 2026-07-19 (Antigravity's catch during the D1 security fix,
- * 2026-07-18): hook files were entirely absent from the scan, so a scripts/
- * utility imported ONLY from a hook was structurally invisible to the import
- * closure, and genuine hook-level dead code could accumulate unflagged. Hook
- * files are now scanned symmetrically with scripts/, seeded as wired from
+ * Hook files are scanned symmetrically with scripts/, seeded as wired from
  * BOTH hook manifests (not skill prose), with their import edges followed the
- * same way. No currently-shipped file changed reachability status — this
- * closes a structural blind spot, not a live incident.
+ * same way — so a scripts/ utility imported ONLY from a hook is reachable,
+ * and hook-level dead code is flagged.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only.
+ * Ships with the plugin by convention; .mjs (Node.js) only.
  *
  * CLI:  node orphan-detector.mjs [--core-root <dir>] [--json]
  *   exit 0 — no un-allowlisted orphans (allowlisted items still printed)
@@ -44,10 +38,10 @@ import { fileURLToPath } from 'node:url';
 // Scripts built ahead of their consumer on purpose. Each entry carries the
 // reason, the date it was allowlisted, and a reviewBy date — when reviewBy
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
-// can't rot into permanent exemption (MEM-017). Reviewed at /finalize.
+// can't rot into permanent exemption. Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
   'retrieval-harness.mjs': {
-    reason: 'Offline Recall@K gold harness (DC-113 Tier-A T1; arms trimmed to model-free per DC-114) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the DC-115 measurement ceremony (Crest\'s shared harness is the BBLens twin). Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
+    reason: 'Offline Recall@K gold harness (Tier-A; arms trimmed to model-free per the no-local-models rule) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the pre-registered measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
     allowlistDate: '2026-07-07',
     reviewBy: '2026-10-07',
   },
@@ -87,14 +81,10 @@ export function findOrphans({ coreRoot, allowlist = ALLOWLIST, today = new Date(
   const hooksRoot = join(coreRoot, 'skills', 'core', 'hooks');
 
   const scripts = walk(scriptsRoot, '.mjs');
-  // Logged gap (2026-07-18, Antigravity's catch during the D1 security fix):
-  // the transitive-closure walk used to only follow scripts/*.mjs import
-  // chains, so a scripts/ utility imported ONLY from a hook file was
-  // structurally invisible — allowlisted rather than fixed, to avoid
-  // scope-creeping that security patch. Fixed here: hook files are scanned
-  // for imports the same way scripts are, so a hook-only import chain is
-  // followed correctly, and a hook file itself is now a checkable object
-  // (genuine hook-level dead code no longer accumulates unflagged).
+  // Hook files are scanned for imports the same way scripts are, so a
+  // hook-only import chain is followed correctly, and a hook file itself is
+  // a checkable object (hook-level dead code gets flagged; a scripts/
+  // utility imported only from a hook is reachable).
   const hookFiles = walk(hooksRoot, '.mjs');
   const allMjs = [...scripts, ...hookFiles];
 
@@ -201,7 +191,7 @@ export function formatReport(r) {
     for (const s of r.orphanScripts) L.push(`  ✖ script  ${s}`);
     for (const p of r.orphanProtocols) L.push(`  ✖ protocol ${p} — not in the SKILL.md protocol index, so it never loads`);
   } else {
-    // Scope-honest closing line (Hale audit e1490d4 finding 2): this detector
+    // Scope-honest closing line: this detector
     // proves FILE-level reachability minus the allowlist — it does not check
     // function-level wiring inside reachable files, and allowlisted entries are
     // deliberate exceptions, not reachable mechanisms.

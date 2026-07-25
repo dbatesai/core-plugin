@@ -92,7 +92,7 @@ Find the shape that fits *this* session. Don't reach for a template.
 
 ## Step 4: Log It
 
-Append the entry to the top of `~/.core/vibes/vibe-log.md` using the Write tool. Create the file and the `~/.core/vibes/` directory if they don't exist. (Per DC-66/DC-67, v2 CORE runs on Claude Code Desktop with local filesystem; no MCP routing layer.)
+Append the entry to the top of `~/.core/vibes/vibe-log.md` using the Write tool. Create the file and the `~/.core/vibes/` directory if they don't exist. (By design, v2 CORE runs on Claude Code Desktop with local filesystem; no MCP routing layer.)
 
 The vibe log lives outside the indexed CORE store on purpose — vibes are never read back at bootstrap, so it carries no index entry and no other process needs to find it. Don't let it grow without bound, though: when the log passes about 50 entries, move the older ones to `~/.core/vibes/archive/vibe-log-<year>.md` before appending the new one.
 

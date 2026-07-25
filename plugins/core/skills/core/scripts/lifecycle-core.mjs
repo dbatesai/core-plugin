@@ -1,6 +1,6 @@
 /**
  * lifecycle-core.mjs — the user-authorship-boundary primitives shared by every
- * writer that mutates a mixed-ownership file (Hale's 2026-07-22 findings).
+ * writer that mutates a mixed-ownership file.
  * Deliberately imports NO writer module (only node:* + file-lock), so the
  * writers can depend on it without an import cycle, and `lifecycle-detect.mjs`
  * (the executable preflight) can depend on BOTH the writers and this.
@@ -17,32 +17,32 @@
  *      PROJECT.md (hot-section, compaction, moves/state demotion, full render).
  *      Writer-local locks (.hot-section.lock etc.) only serialize a writer
  *      against ITSELF; two DIFFERENT writers racing the same PROJECT.md still
- *      interleave destructively without a lock they all share (Hale's point 7).
+ *      interleave destructively without a lock they all share.
  *
- * THE AUTHORSHIP RULE (Hale's 2026-07-22 falsifier — session timing cannot prove
+ * THE AUTHORSHIP RULE (session timing cannot prove
  * authorship). A file with NO cache-stamp baseline is NEVER assumed to be
- * CORE-authored. The previous design inferred "absent from the session-start
- * inventory => CORE created it this session => safe to auto-write" — that
- * inference is false: a file the USER creates by hand partway through a session
+ * CORE-authored. Inferring "absent from the session-start
+ * inventory => CORE created it this session => safe to auto-write" is
+ * false: a file the USER creates by hand partway through a session
  * is also absent from the start-of-session inventory, so timing alone cannot
  * tell "CORE created this a moment ago" from "the user created this a moment
- * ago." That inference is removed. The ONLY way a no-baseline file becomes
+ * ago." That inference is never made. The ONLY way a no-baseline file becomes
  * writable by decorate/hot-section/compact is that the CREATING CORE writer
  * stamps the exact bytes it just wrote, at creation time (see
  * `lifecycle-detect.mjs` `stampCreatedBaseline`/`createFile`). Absent that
  * stamp, every downstream writer REFUSES the file and surfaces it as
  * `no-baseline`/`needs-reconciliation` — fail closed, never fail open.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only, node:* imports only.
+ * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
 import { join, resolve } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
 
-// ---------- Shared PROJECT.md writer lock (Hale point 7) ----------
+// ---------- Shared PROJECT.md writer lock ----------
 
-/** The ONE lock every PROJECT.md writer acquires. Distinct from each writer's
- *  old private lock, which only serialized a writer against itself. */
+/** The ONE lock every PROJECT.md writer acquires. Distinct from a writer's
+ *  private lock, which only serializes a writer against itself. */
 export function projectMdWriterLockPath(projectDir) {
   return join(resolve(projectDir), '_memories', '.project-md-writer.lock');
 }
@@ -61,11 +61,11 @@ export function withProjectMdWriterLock(projectDir, fn, opts = {}) {
 /**
  * resolveNoBaseline — the judgment for a file that has NO cache baseline at all.
  *
- * There is exactly one answer now: REFUSE. Timing-based authorship inference
- * (the old "absent from session inventory => created-this-session => safe"
- * branch) is GONE — it could not distinguish a CORE-created file from a
- * user-created one that appeared after session start (Hale's 2026-07-22
- * executable falsifier). A creating CORE writer establishes the first baseline
+ * There is exactly one answer: REFUSE. Timing-based authorship inference
+ * ("absent from session inventory => created-this-session => safe")
+ * is never applied — it cannot distinguish a CORE-created file from a
+ * user-created one that appeared after session start.
+ * A creating CORE writer establishes the first baseline
  * itself at creation time; any writer that later meets a file with no baseline
  * is, by construction, NOT its creator and must not overwrite or attribute it.
  *

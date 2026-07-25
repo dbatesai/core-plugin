@@ -13,7 +13,7 @@
  * evidence-grade until calibration clears (spec §17.12, Anvil A4; R-1 self-measuring
  * guard — CORE measuring itself must not launder its own confidence).
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open: never throws.
+ * Ships with the plugin as prescriptive code; .mjs only. Fail-open: never throws.
  *
  * CLI:  node metrics-rollup.mjs <project> [--json] [--today YYYY-MM-DD]
  */
@@ -28,7 +28,7 @@ import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from '
 
 const HEADLINE = 'rec-fail-tier-0';
 
-// Cross-date attribution — EXPLICIT POLICY (Hale item 3, 2026-07-23 correction):
+// Cross-date attribution — EXPLICIT POLICY:
 // IMMUTABLE OBSERVATION DAY. A replayed session keeps its EARLIEST/original
 // observation day; replay never moves history forward. A turn first observed on
 // day X and re-classified on day Y counts once, under day X — the day the user
@@ -50,7 +50,7 @@ const DAY_ATTRIBUTION_NOTE = 'replayed sessions keep their earliest/original obs
  * ROWS the calibration was measured against (written by calibrate-classifier.mjs).
  * The state's own `schema_version` is the calibration-FILE schema and is NOT a
  * substitute — binding to it would let a calibration taken against a different
- * row schema still claim exact-triple calibration (Hale item 5).
+ * row schema still claim exact-triple calibration.
  */
 function readCalibrationState(metaDir) {
   const f = join(metaDir, 'calibration-state.json');
@@ -79,8 +79,8 @@ function readClassified(dir, date) {
  * replay-deduped, COHORT-GATED per-day view plus store-wide dedupe stats and
  * the coverage gap. Store-wide, not per-file, because a session re-processed
  * on a later date appends the same turns under a new date — only a
- * whole-store pass keeps totals stable under that replay (Hale's
- * replay-identity falsifier). The cohort gate (Hale's 2026-07-22 addendum)
+ * whole-store pass keeps totals stable under that replay (the
+ * replay-identity review falsifier). The cohort gate
  * then keeps only rows produced by the CURRENT instrument — the same
  * (schema, classifier, proxy) triple calibration is validated against;
  * everything else is reported, never counted. The store is small (daily
@@ -164,8 +164,8 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
 
   let signal;
   if (!todayRecs.length) {
-    // provisionalTag is '' when calibrated; the old `|| ' [PROVISIONAL]'` fallback
-    // re-added the tag on a calibrated workspace, mislabeling honest metrics (M5).
+    // provisionalTag is '' when calibrated; a `|| ' [PROVISIONAL]'` fallback here
+    // would re-add the tag on a calibrated workspace, mislabeling honest metrics.
     signal = `metrics: no classified turns for ${date} yet${dedupeTag}${gapTag}${provisionalTag}`;
   } else {
     const todayPct = Math.round(headline.pct * 100);

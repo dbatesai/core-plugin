@@ -22,7 +22,7 @@ The framework defines six pieces:
 The framework relies on three existing CORE mechanisms it does not redesign:
 
 - **Observation unit schema** (per `protocols/data-storage.md`) — the in-flight draft state and the fully-graduated state are the same schema, distinguished by `status`.
-- **DC-70 promotion modes** (A autonomous / B confirmed / C explicit) — the landing-destination rule.
+- **The three promotion modes** (A autonomous / B confirmed / C explicit) — the landing-destination rule.
 - **`inbox.md`** — the existing staging surface for non-autonomous observations.
 
 ---
@@ -39,7 +39,7 @@ Project-side, in `<project>/_sources/`. One YAML file per registered source:
 
 Project-side because the registration is project context — what sources feed this project's intelligence is part of what the user sees, edits, and reasons about. This aligns with the user-control invariant: the registration is a fact about the project, owned by the project surface.
 
-The leading `_` on `_sources/` follows the DC-74 convention for CORE-managed project subdirectories.
+The leading `_` on `_sources/` follows the standing naming convention for CORE-managed project subdirectories.
 
 ### Required fields
 
@@ -57,7 +57,7 @@ extractor-pointer: <installation-specific path or identifier for the extractor i
 
 - `name` — used as the `source` field on every observation extracted from this source. Match the file basename (without `.yaml`).
 - `kind` — describes data shape, not source type. Structured = field-typed records (rows, tickets, calendar events). Semi-structured = mixed-shape content with consistent metadata (emails, documents with frontmatter). Free-text = prose without enforced structure (chat logs, transcripts, prose pages).
-- `authority` — prose, not enum. The intake protocol uses this to scaffold the `source-of-authority` unit (per DC-85). One or two sentences describing what claims this source is authoritative for in this project. Examples: *"the official project tracker for engineering work — authoritative for ticket status, ownership, and dates; not authoritative for cross-team agreements that haven't been ticketed"*; *"the team's primary async communication channel — authoritative for in-thread agreements when both participants confirm; not authoritative for unilateral statements without confirmation."*
+- `authority` — prose, not enum. The intake protocol uses this to scaffold the `source-of-authority` unit. One or two sentences describing what claims this source is authoritative for in this project. Examples: *"the official project tracker for engineering work — authoritative for ticket status, ownership, and dates; not authoritative for cross-team agreements that haven't been ticketed"*; *"the team's primary async communication channel — authoritative for in-thread agreements when both participants confirm; not authoritative for unilateral statements without confirmation."*
 - `cadence` — when/how often this source should be pulled. `always-on` = swept at every refresh. `session-pull` = pulled on demand during a session. `user-flagged` = pulled only when the user explicitly says to. `event-driven` = pulled when an external trigger fires (webhook, notification, scheduled job).
 - `confidence-default` — the default confidence-level for facts extracted from this source absent specific signal. Per-fact overrides happen via `confidence-overrides` (optional, below) or extractor judgment on content signals.
 - `relevance-contract` — prose declaration of how the extractor decides whether a given datum from this source is project-relevant. Examples: *"items mentioning project keywords or assigned to project participants"*; *"messages in chats whose members include any of the project participants"*; *"events whose subject includes a project keyword or whose attendees include any project stakeholder."*
@@ -169,7 +169,7 @@ A source becomes registered to a project through this protocol. Re-runnable when
 1. **Discover.** The installation lists sources it has available for the project. The user (or the agent in interview mode) sees what's on offer.
 
 2. **Per-source authority decision.** For each source the user wants to register, an interview question: *"What's this source's authority for this project's intelligence?"* The answer becomes:
-   - A `source-of-authority` unit in `<project>/_memories/` (per DC-85)
+   - A `source-of-authority` unit in `<project>/_memories/`
    - The `authority` field on the registration YAML
 
 3. **Confidence calibration.** Surface the source's proposed `confidence-default` (installation's suggestion) and any `confidence-overrides`. User confirms or adjusts. Final values land in the registration.
@@ -184,7 +184,7 @@ A source becomes registered to a project through this protocol. Re-runnable when
 
 When a new source is added later: protocol runs only for the new source.
 
-When a project's relationship to an existing source changes (authority shift, relevance criteria change): protocol re-runs for that source, the registration updates, and a new `source-of-authority` unit supersedes the prior one (per DC-83 supersedes-not-deletes pattern).
+When a project's relationship to an existing source changes (authority shift, relevance criteria change): protocol re-runs for that source, the registration updates, and a new `source-of-authority` unit supersedes the prior one (per the supersedes-not-deletes pattern).
 
 ### Who runs the intake
 
@@ -194,7 +194,7 @@ The intake protocol is part of CORE's startup flow — the new-workspace branch 
 
 ## 4. Promotion-mode landing destinations
 
-When the extractor produces an observation, the observation lands in one of three destinations based on DC-70 promotion modes. The mode is determined by the extractor at write time using confidence-level and content signals.
+When the extractor produces an observation, the observation lands in one of three destinations based on the promotion modes. The mode is determined by the extractor at write time using confidence-level and content signals.
 
 ### The three destinations
 
@@ -235,7 +235,7 @@ mode: B | C
 judgment-needed: <prose, required when mode is C — names what judgment is required>
 ```
 
-`mode` lets graduation distinguish Mode B (routine confirmation) from Mode C (explicit user judgment) without re-deriving the mode from criteria. `judgment-needed` is required for Mode C and carries the specific question the user must answer (e.g., *"contradicts dc-42 on the BGL date — confirm which is authoritative"*; *"reconstruction from three chat threads; verify the inferred decision is correct"*).
+`mode` lets graduation distinguish Mode B (routine confirmation) from Mode C (explicit user judgment) without re-deriving the mode from criteria. `judgment-needed` is required for Mode C and carries the specific question the user must answer (e.g., *"contradicts dc-42-bgl-date on the BGL date — confirm which is authoritative"*; *"reconstruction from three chat threads; verify the inferred decision is correct"*).
 
 Blocks land in chronological order, no source/confidence/mode sectioning required. Mode-labeled blocks in chronological order are scannable at typical volumes (under a hundred items per inbox). Installations may add structure if their volume warrants; the framework doesn't mandate it.
 
@@ -247,7 +247,7 @@ Mode A observations don't pass through `/process-memory` for graduation — they
 
 ---
 
-## 5. Annotation frameworks (source-agnostic restatement of DC-85)
+## 5. Annotation frameworks (source-agnostic restatement of the observation-filter design)
 
 ### Confidence-level
 
@@ -305,7 +305,7 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 5. **Trigger graduation** when source pulls complete and graduation is warranted. The installation decides when (after every refresh; on a schedule; when inbox count crosses a threshold). The entry point is `/process-memory` or equivalent.
 
-6. **Surface errors** via the standard notification surface (DC-78 channel-agnostic — installation uses whatever channel its harness supports).
+6. **Surface errors** via the standard notification surface (channel-agnostic by design — installation uses whatever channel its harness supports).
 
 ### Prohibited behaviors
 
@@ -316,7 +316,7 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 ### Three-filter pipeline as contract, not implementation
 
-DC-85 defines three filter steps (relevance → extraction → confidence judgment). The framework requires these three judgments happen in order; it does not require they happen in separate processes.
+The observation-filter design defines three filter steps (relevance → extraction → confidence judgment). The framework requires these three judgments happen in order; it does not require they happen in separate processes.
 
 An installation may dispatch each step as a subagent (per the model-tier matrix in `references/model-assignments.md` — Haiku filter, Sonnet extraction, Sonnet confidence judgment). Or it may run all three inline in a single agent context. The choice is installation-level and is governed by performance/cost considerations the installation owns.
 
@@ -358,7 +358,7 @@ None initially. If the file grows past a threshold (say 50MB), a hygiene pass at
 
 ### Read protocol
 
-**Not currently wired — the analyzer was deleted 2026-07-21.** `scripts/analyze-source-pull-log.mjs` shipped a read-side analyzer, but no installation had ever actually implemented the write side this section describes — no `source-pull-log.jsonl` existed anywhere it was checked. Worse, 2 of the 3 signals the analyzer promised (a registered source missing from the window, an error count climbing *this session*) were structurally undeliverable with its actual inputs: it never read `<project>/_sources/` to know what "missing" means, and its CLI received no session boundary to know what "this session" means. Three-way consensus to delete rather than patch a read side with no real writer. Wrapper authors: do not rely on monitoring being operational. If this comes back, it needs the missing inputs (the registered source set, an explicit session boundary) designed in from the start, alongside a real writer — not a read side built first and guessed at.
+**Not currently wired — CORE ships no monitoring analyzer.** Nothing reads `source-pull-log.jsonl`, and no installation is known to implement the write side this section describes. Wrapper authors: do not rely on monitoring being operational. An analyzer for this protocol needs its inputs (the registered source set, an explicit session boundary) designed in from the start, alongside a real writer — a read side with no real writer cannot deliver the signals this section describes (which sources are missing from the window, whether an error count is climbing *this session*).
 
 ---
 
@@ -369,9 +369,7 @@ Two artifacts CORE ships in support of the framework:
 1. **This framework document.** The contract.
 2. **`references/confidence-assignment-guide.md`.** Pattern catalog for confidence-level assignment, source-category-agnostic, pattern-anchored. Installations reference this when implementing extractors.
 
-(A third artifact, `scripts/analyze-source-pull-log.mjs`, shipped a monitoring-log analyzer for the §7 read protocol — deleted 2026-07-21, see §7 above for why. Not replaced yet.)
-
-These two plus the existing observation schema, DC-70 promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
+These two plus the existing observation schema, the promotion modes, `inbox.md`, `/process-memory`, and the `protocols/startup-conditional-loads.md` new-workspace intake flow constitute everything CORE provides for external-source integration. Installations build on top; CORE doesn't reach into installations.
 
 ---
 

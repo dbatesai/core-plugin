@@ -20,13 +20,13 @@
  * state distributions as evidence-grade until calibration clears. Capture (the
  * transcript) is ground truth; this interpretation is tunable and replayable.
  *
- * CADENCE (honesty, MET-003): there is NO automatic trigger for this script. It
+ * CADENCE (honesty): there is NO automatic trigger for this script. It
  * runs only from user-invoked /finalize and /process-memory. A session closed
  * without them produces no classified records, so the rollup and orient-signal
  * go STALE (not wrong) until the next finalize. Never describe the rec-fail
  * trend as continuous monitoring.
  *
- * Per DC-77 ships with the plugin; per DC-80 .mjs only. Fail-open: never throws.
+ * Ships with the plugin by convention; .mjs (Node.js) only. Fail-open: never throws.
  *
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
  */
@@ -39,33 +39,27 @@ import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 
-// 0.3.0: MET-004/MET-005 predicate honesty — PROJECT.md leaves the unconditional
-// context blob (it's a disk file; it counts as context only with transcript evidence
-// of a read this session) and the disk check now indexes unit frontmatter + first
-// heading, not filenames alone. Both shift the state distribution, so any calibration
-// cleared under 0.2.0 is invalidated by the rollup's version-match guard.
-// 0.2.0: the M6 hardening changed classification OUTPUT — word-boundary in-context matching,
-// the asked-term denylist, and wiring the previously-dead ladderReturnedContent discriminator
-// all shift the state distribution. Any behavior-affecting change MUST bump this, so the R-1
+// Version stamp for classification BEHAVIOR. Any behavior-affecting change
+// (predicates, matching rules, discriminators — anything that shifts the state
+// distribution) MUST bump this, so the R-1
 // honesty guard (metrics-rollup gates the PROVISIONAL tag on a classifier_version match)
-// correctly invalidates a calibration cleared under the old behavior.
+// correctly invalidates a calibration cleared under a different behavior.
 export const CLASSIFIER_VERSION = '0.3.0';
 
 // The classified-record schema version stamped on every row. Exported so the
 // read side (metrics-rollup.mjs, metrics-package.mjs) can select the exact
 // current-instrument cohort (schema, classifier, proxy) before aggregating —
-// Hale's 2026-07-22 finding: validating calibration against current constants
-// while aggregating rows from ANY version silently mixes instruments.
+// validating calibration against current constants
+// while aggregating rows from ANY version would silently mix instruments.
 export const CLASSIFIED_SCHEMA_VERSION = '1.0.0';
 
-// The in-context PROXY version, distinct from the classifier version. Proxy v1 was the
-// original `.includes` substring test that over-fired on a large PROJECT.md (any term
-// whose letters appeared anywhere read as "in context"). Proxy v2 is the current
-// word-boundary `containsTerm` + the MET-004 rule that PROJECT.md only counts as
+// The in-context PROXY version, distinct from the classifier version. The current
+// proxy (v2) is the
+// word-boundary `containsTerm` test plus the rule that PROJECT.md only counts as
 // in-context when this session's transcript shows it was actually read. Stamped on
-// every record (DC-94a) so the calibration layer can invalidate any label set cleared
-// under the old proxy — same R-1 honesty guard the classifier_version match enforces.
-// The label-independence half stays Gate G4 (David vouches); this only versions the proxy.
+// every record so the calibration layer can invalidate any label set cleared
+// under a different proxy — same R-1 honesty guard the classifier_version match enforces.
+// The label-independence half stays Gate G4 (the product owner vouches); this only versions the proxy.
 export const PROXY_VERSION = 2;
 
 // A clarifying question — the agent asking the user instead of answering.
@@ -93,7 +87,7 @@ export function ladderReturnedContent(toolEvents) {
  * near the clarifying phrase; else the longest capitalized/hyphenated token.
  */
 // Common English hyphenations that look like a project handle to the regex but aren't.
-// Not exhaustive — covers the noise that actually shows up in clarifying questions (M6).
+// Not exhaustive — covers the noise that actually shows up in clarifying questions.
 const COMMON_HYPHENATED = new Set([
   'opt-in', 'opt-out', 'in-context', 'out-of', 'well-known', 'real-time', 'end-to-end',
   'follow-up', 'day-to-day', 'up-to-date', 'state-of-the-art', 'so-called', 'long-term',
@@ -109,8 +103,8 @@ export function extractAskedTerm(text) {
     return structured.sort((a, b) => b.length - a.length)[0].replace(/[[\]]/g, '');
   }
   // Generic hyphenated tokens, but NOT ordinary hyphenated English ("opt-in", "well-known").
-  // M6: the old regex matched those greedily and polluted the asked-term. A denylist of common
-  // English hyphenations filters the noise while keeping lowercase project terms like
+  // A bare hyphenated-token match would take those greedily and pollute the asked-term.
+  // A denylist of common English hyphenations filters the noise while keeping lowercase project terms like
   // "register-trigger" (a structural digit/uppercase rule would wrongly drop those).
   const hyphenated = (text.match(/\b[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+){1,}\b/g) || [])
     .filter((t) => !COMMON_HYPHENATED.has(t.toLowerCase()))
@@ -199,7 +193,7 @@ const _escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 /**
  * Word-boundary containment over an already-lowercased blob. A bare `.includes` made any
  * substring (e.g. "opt-in" inside "adopt-inline") read as present; a token boundary that
- * tolerates the hyphen/colon characters in project ids (DC-99, references-topic) fixes that.
+ * tolerates the hyphen/colon characters in project ids (references-topic) fixes that.
  */
 export function containsTerm(blob, term) {
   const t = String(term || '').toLowerCase().trim();
@@ -208,9 +202,9 @@ export function containsTerm(blob, term) {
 }
 
 export function buildPredicates(project, { events = [] } = {}) {
-  // MET-004: only harness-auto-injected surfaces are unconditionally "in context"
+  // Only harness-auto-injected surfaces are unconditionally "in context"
   // (CLAUDE.md, MEMORY.md). PROJECT.md is a disk file the agent must explicitly
-  // read — counting it unconditionally under-reported rec-fail-tier-0. It joins
+  // read — counting it unconditionally would under-report rec-fail-tier-0. It joins
   // the context blob only when this session's transcript shows a tool touching it.
   const injected = ['CLAUDE.md', 'MEMORY.md'].map((f) => safeRead(join(project, f)));
   const projectMdRead = (events || []).some((e) => e.kind === 'tool' && /PROJECT\.md/i.test(e.text || ''));
@@ -233,8 +227,8 @@ export function buildPredicates(project, { events = [] } = {}) {
 }
 
 function listDiskTerms(project) {
-  // Filenames + each unit's frontmatter and first heading (MET-005: filenames alone
-  // made body-only terms read as "nowhere on disk" → false capture-miss).
+  // Filenames + each unit's frontmatter and first heading (filenames alone
+  // would make body-only terms read as "nowhere on disk" → false capture-miss).
   const parts = [];
   for (const sub of ['_memories', '_summaries', 'docs']) {
     walkNames(join(project, sub), parts);
@@ -269,7 +263,7 @@ function unitHeadTerms(path) {
 function safeRead(p) { try { return readFileSync(p, 'utf8'); } catch { return ''; } }
 
 export function runClassification({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, workspaceId, env }) {
-  // Capture gate (spec §18, DC-107): default-on, opt-out. Captures nothing
+  // Capture gate (spec §18, metrics policy): default-on, opt-out. Captures nothing
   // — reads no transcript content, writes no records — when the user has opted out.
   if (!metricsEnabled({ project, env })) {
     return { status: 'DISABLED', reason: 'metrics opted out (CORE_METRICS_ENABLED=0 or workspace.json metrics_enabled:false)', provisional: true };
@@ -286,7 +280,7 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   const records = classified.map((c) => ({
     schema_version: CLASSIFIED_SCHEMA_VERSION,
     classifier_version: CLASSIFIER_VERSION,
-    proxy_version: PROXY_VERSION, // DC-94a: versions the in-context proxy so calibration invalidates across proxy changes
+    proxy_version: PROXY_VERSION, // versions the in-context proxy so calibration invalidates across proxy changes
     harness,
     provisional: true, // honesty gate — not evidence-grade until calibration
     session_id: sid,

@@ -1,7 +1,7 @@
 # Memory extension contracts
 
 How an overlay (a downstream wrapper like a delivery-specific install) extends CORE's
-memory and metrics layers **without a core change**. This is the DC-102 separation made
+memory and metrics layers **without a core change**. This is the core-vs-extension separation made
 concrete for the additive-memory layers (Phase 4) and the observability layer (Phases 0–3):
 CORE owns the source-agnostic schema and the generic readers; the overlay populates the
 dimension from its own richer sources and adds its own interpretation in its own layer.
@@ -12,7 +12,7 @@ The governing rule, from `references/external-sources/source-registration-framew
 > this shape. The extractor is source-shaped (knows its source); the schema is source-agnostic.*
 
 So extension is **produce-into-a-shared-schema**, never method-override. There is no CORE class
-to subclass — CORE is files + scripts (DC-77/DC-80). The "interface" is the frontmatter shape
+to subclass — CORE is files + scripts (plugin-shipped, Node-only). The "interface" is the frontmatter shape
 plus documented semantics; "implementing" it is the overlay's extractor writing the field, which
 CORE's generic readers then consume.
 
@@ -44,8 +44,8 @@ something a wrapper can register locally:
 
 - **Unit types and edge types.** `VALID_TYPES` / `VALID_EDGE_TYPES` in `scripts/check-units.mjs`
   are hardcoded sets; a wrapper's novel type WARNs at validation and there is no project-local
-  override. New types get blessed into core on cross-corpus evidence — the `refines`/`amends`
-  precedent (2026-06-03, two corpora). Propose them upstream; don't carry unblessed types.
+  override. New types get blessed into core on cross-corpus evidence.
+  Propose them upstream; don't carry unblessed types.
 - **Harness adapters.** `KNOWN_HARNESSES` in `scripts/contract-format.mjs` is
   `['claude-code', 'codex']`. A new harness needs a `harnesses/<name>.md` adapter plus
   generator support in core.
@@ -113,10 +113,10 @@ recency/frequency), plus held success-criteria a latent fact can be matched agai
 | | |
 |---|---|
 | **Proposed field** | `salience` (representation TBD — categorical vs numeric). |
-| **The owed decision** | **CONTESTED — do not build against this field yet.** `salience` collides with DC-69's numeric `confidence` and the categorical `confidence-level` — whether salience is a third axis, a re-use, or a reframe of DC-94 Lock 5 is a **foundational call deferred to the parallel-critique `/core` pass**. It is deliberately NOT decided solo. The field shape (categorical vs numeric) is undecided; an overlay that writes `salience` today may have to migrate the representation when the call lands. |
+| **The owed decision** | **CONTESTED — do not build against this field yet.** `salience` collides with the priority function's numeric `confidence` and the categorical `confidence-level` — whether salience is a third axis, a re-use, or a reframe of the recognition-failure lock is a **foundational call deferred to the parallel-critique `/core` pass**. It is deliberately NOT decided solo. The field shape (categorical vs numeric) is undecided; an overlay that writes `salience` today may have to migrate the representation when the call lands. |
 | **Who populates** | Overlay (and eventually CORE) at graduation, once the representation is decided. |
-| **CORE reader (when built)** | The priority function (DC-69) absorbing salience as a fourth signal — which is itself the foundational change the `/core` pass must rule on. |
-| **Current status** | No active build. Blocked on the owed representation decision above; DC-94 (the memory-graph edge-candidate audit) is the open decision it waits behind. |
+| **CORE reader (when built)** | The priority function absorbing salience as a fourth signal — which is itself the foundational change the `/core` pass must rule on. |
+| **Current status** | No active build. Blocked on the owed representation decision above; the memory-graph edge-candidate audit is the open decision it waits behind. |
 
 ## 4. Person-node synthesis — **SPEC-ONLY (UNBUILT)** (Phase 4 layer 4)
 
@@ -161,7 +161,7 @@ The observability layer (Phases 0–3) extends the same way. An overlay adds its
   detectors are added without touching capture (`metrics-detectors.mjs` is the pattern). An
   overlay writes its own domain detectors — e.g. a delivery-specific "missed-signal" detector —
   reading the same captured ground truth.
-- **The capture gate is the deployment switch.** Metrics are default-on (DC-107); the whole
+- **The capture gate is the deployment switch.** Metrics are default-on; the whole
   substrate (classifier, detectors, rollups, bi-temporal storage metrics) runs for every workspace
   unless it opts out via `CORE_METRICS_ENABLED=0` or `workspace.json` `metrics_enabled: false`.
   Capture stays local. An overlay that wants a workspace dark sets the opt-out; everyone else
