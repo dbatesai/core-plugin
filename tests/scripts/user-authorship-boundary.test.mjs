@@ -19,7 +19,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 
 import {
   applyHotSection, clearHotSection, findExistingBlock, HOT_BEGIN, HOT_END,
@@ -35,7 +35,9 @@ import {
   recordSessionStart, detectStore, classifyFileLifecycle, createFile, stampCreatedBaseline,
 } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
 
-const SCRIPTS = new URL('../../plugins/core/skills/core/scripts', import.meta.url).pathname;
+// Windows contract: fileURLToPath, never .pathname (which yields /D:/... and
+// downstream join+pathToFileURL mangle it into D:\D:\...).
+const SCRIPTS = fileURLToPath(new URL('../../plugins/core/skills/core/scripts', import.meta.url));
 const NOW = '2026-07-22T00:00:00Z';
 
 function setup() {

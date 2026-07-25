@@ -12,14 +12,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 import {
   hashText, projectCachePath, readProjectCache, stampFiles, stampFile,
 } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
 
-const STATE_CACHE_SCRIPT = pathToFileURL(
-  join(new URL('../../plugins/core/skills/core/scripts', import.meta.url).pathname, 'state-cache.mjs')
-).href;
+// Windows contract: never .pathname on a file: URL (yields /D:/... which
+// join+pathToFileURL mangle into D:\D:\...). The URL itself is the import spec.
+const STATE_CACHE_SCRIPT = new URL('../../plugins/core/skills/core/scripts/state-cache.mjs', import.meta.url).href;
 
 // Genuinely concurrent child processes (spawnSync would serialize the "race" —
 // same pattern index-registry.test.mjs's lost-update proof uses).
