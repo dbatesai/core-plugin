@@ -33,6 +33,7 @@ import { readCaptureHealth } from './turn-capture.mjs';
 // The single source of truth for every threshold. Stamped into scorecards.
 export const TRIPWIRE_THRESHOLDS = Object.freeze({
   self_test_drop: 0.05,            // headline points (0–1 scale)
+  self_test_floor: 0.5,            // headline below this is flagged at any trend, incl. flat
   miss_trend_scorecards: 3,        // consecutive cards with strictly rising miss rate
   storage_gap_recurrence: 2,       // cards (of the recent window) with any storage gap
   capture_failure_rate: 0.10,      // failures/attempts …
@@ -71,6 +72,28 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
       tripped.push({
         kind: 'self-test-drop',
         message: `The memory system's own blind test scored ${(cur * 100).toFixed(0)}%, down ${((prev - cur) * 100).toFixed(0)} points since the last check — worth a look before trusting recall on older topics.`,
+      });
+    }
+  }
+
+  // 1b. Self-test level, independent of trend. Wire 1 compares against the
+  // previous card, so a headline that has been low since the first round is
+  // "steady" and trips nothing — the door then reports earned quiet over a
+  // number that never earned it. A differential alarm cannot report a failure
+  // that predates it, so the level is checked on its own.
+  //
+  // This flags; it does not gate. The blind round is a directional snapshot
+  // with a self-authored answer key and no preregistered pass mark, so the
+  // message says the level is low and worth reading, never that a bar was
+  // missed. Wire 1 still owns the drop case, and its message is the more
+  // specific one, so a card that is both low and falling reports only that.
+  {
+    const cur = newest.self_test && newest.self_test.headline;
+    const droppedAlready = tripped.some((t) => t.kind === 'self-test-drop');
+    if (typeof cur === 'number' && cur < thresholds.self_test_floor && !droppedAlready) {
+      tripped.push({
+        kind: 'self-test-low',
+        message: `The memory system's own blind test scored ${(cur * 100).toFixed(0)}% — it retrieves the right memory for fewer than half the questions it sets itself. Open the full report for the per-question-type breakdown before trusting recall on anything but literal wording.`,
       });
     }
   }

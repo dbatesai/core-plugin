@@ -68,6 +68,53 @@ test('self-test headline drop beyond the threshold trips', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('a blind-test headline that is low and perfectly flat still trips', () => {
+  // The drop wire compares against the previous card, so a score that has been
+  // bad since the first round reads as "steady". Without a level check the door
+  // reports earned quiet over it.
+  const root = mkdtempSync(join(tmpdir(), 'tw-low-flat-'));
+  try {
+    const project = makeProject(root);
+    const low = TRIPWIRE_THRESHOLDS.self_test_floor - 0.1;
+    plant(project, [
+      card('2026-07-20T00:00:00Z', { self_test: { headline: low, round_id: 1 } }),
+      card('2026-07-21T00:00:00Z', { self_test: { headline: low, round_id: 1 } }),
+    ]);
+    const res = evaluateTripwires(project);
+    assert.equal(res.healthy, false);
+    assert.ok(res.tripped.some((t) => t.kind === 'self-test-low'), JSON.stringify(res.tripped));
+    assert.ok(!res.tripped.some((t) => t.kind === 'self-test-drop'), 'flat score must not read as a drop');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a headline at or above the floor and flat does not trip the level wire', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tw-at-floor-'));
+  try {
+    const project = makeProject(root);
+    const atFloor = TRIPWIRE_THRESHOLDS.self_test_floor;
+    plant(project, [
+      card('2026-07-20T00:00:00Z', { self_test: { headline: atFloor, round_id: 1 } }),
+      card('2026-07-21T00:00:00Z', { self_test: { headline: atFloor, round_id: 1 } }),
+    ]);
+    const res = evaluateTripwires(project);
+    assert.ok(!res.tripped.some((t) => t.kind === 'self-test-low'), JSON.stringify(res.tripped));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a headline that is both low and dropping reports the drop only', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tw-low-drop-'));
+  try {
+    const project = makeProject(root);
+    plant(project, [
+      card('2026-07-20T00:00:00Z', { self_test: { headline: 0.45, round_id: 1 } }),
+      card('2026-07-21T00:00:00Z', { self_test: { headline: 0.20, round_id: 1 } }),
+    ]);
+    const res = evaluateTripwires(project);
+    assert.ok(res.tripped.some((t) => t.kind === 'self-test-drop'), JSON.stringify(res.tripped));
+    assert.ok(!res.tripped.some((t) => t.kind === 'self-test-low'), 'the drop message is the specific one; do not double-report');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('hindsight-miss rate strictly rising across the trend window trips', () => {
   const root = mkdtempSync(join(tmpdir(), 'tw-trend-'));
   try {
