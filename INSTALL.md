@@ -28,6 +28,7 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 |---|---|
 | `/core` | The agent. Starts the session, loads your project context (picking a thread back up with a readiness summary), and talks with you. |
 | `/finalize` | Close a session — write a summary, update project state, run memory cleanup. |
+| `/refocus` | Recenter mid-session on what matters most now, given what you have learned since you started. Read-only unless you accept a change. |
 | `/process-memory` | Clean up memory on demand — pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it's over the size cap. |
 | `/register-sources` | Point CORE at outside data that should feed the project's memory. |
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
@@ -117,7 +118,7 @@ test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
 test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 ```
 
-Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics`, `metrics-package`, `memory-view`, `self-test`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
+Codex finds the bundled skills (`core`, `finalize`, `refocus`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics`, `metrics-package`, `memory-view`, `self-test`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
 
 One difference from Claude Code worth knowing: Codex CLI 0.144.5+ supports plugin-bundled lifecycle hooks (SessionStart proven live 2026-07-17; the per-turn UserPromptSubmit hook is bundled but not yet proven compatible on Codex — payload mapping under validation), and plugin hooks are skipped until their definition is explicitly trusted. Until the per-turn path is proven, write-safety guards on Codex rest on the agent's own discipline (`harnesses/codex.md §hook-register` has the detail and the reopen conditions).
 
