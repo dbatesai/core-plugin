@@ -31,9 +31,11 @@
  *   node close-pass.mjs --self-test
  */
 
-import { readFileSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync, chmodSync } from 'node:fs';
+import { readFileSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
+import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
@@ -213,6 +215,83 @@ export function shouldSpawn(store, { didWork = false, madeDecision = false, allO
   if (didWork || madeDecision) return true;
   const det = detectCloseState(store, { allOps, storeSignature });
   return det.state === 'owed' && det.owed.length > 0;
+}
+
+/* ─────────────────── Exact-session close receipts ───────────────────
+ *
+ * The close marker (`_memories/_close-marker.json`) is keyed per STORE, so it
+ * can say "this project closed" but never "this session closed". That is why a
+ * manual finalize can be followed by a second reasoning close moments later:
+ * the marker looks satisfied to one caller and unsatisfied to the next, and
+ * neither can name the session it belongs to.
+ *
+ * Receipts key on the harness's own session id. Only a `closed` receipt
+ * suppresses a subsequent close for that same id; `failed` and `partial` stay
+ * owed so a broken close is recovered rather than silently certified.
+ */
+
+/** Statuses that certify a session as fully closed. Everything else stays owed. */
+const CERTIFIED_STATUSES = new Set(['closed']);
+
+/**
+ * Derive the stable per-session key. Throws on anything that is not a real
+ * identity — a missing session id must never be synthesized into one, which is
+ * how `auto-<timestamp>` turned repeat SessionEnd events into distinct sessions.
+ */
+export function sessionKey(sessionId) {
+  if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+    throw new TypeError('close-pass: session id must be a nonempty string; refusing to synthesize one');
+  }
+  return createHash('sha256').update(sessionId, 'utf8').digest('hex');
+}
+
+/** Resolve the receipt directory. `opts.storageRoot` keeps tests hermetic. */
+function receiptDir(store, { storageRoot = null } = {}) {
+  const root = storageRoot
+    || resolveStoragePath(resolve(store), { workspaceId: resolveWorkspaceId(resolve(store)) });
+  return join(root, 'close', 'receipts');
+}
+
+export function receiptPath(store, sessionId, opts = {}) {
+  return join(receiptDir(store, opts), `${sessionKey(sessionId)}.json`);
+}
+
+/** Read a session's receipt. Returns null when absent or unreadable — never throws on a bad file. */
+export function readCloseReceipt(store, sessionId, opts = {}) {
+  const p = receiptPath(store, sessionId, opts);
+  if (!existsSync(p)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(p, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Write a session's receipt atomically, owner-only. */
+export function writeCloseReceipt(store, receipt, opts = {}) {
+  if (!receipt || typeof receipt !== 'object') {
+    throw new TypeError('close-pass: receipt must be an object');
+  }
+  const sessionId = receipt.session_id;
+  const p = receiptPath(store, sessionId, opts);
+  mkdirSync(receiptDir(store, opts), { recursive: true });
+  atomicWriteFileSync(p, `${JSON.stringify(receipt, null, 2)}\n`);
+  chmodSync(p, 0o600);
+  return p;
+}
+
+/**
+ * Should an automatic close be enqueued for this exact session?
+ *
+ * Reads ONLY the session-keyed receipt. The store-level marker is deliberately
+ * not consulted: it cannot name a session, so reading it here would silently
+ * degrade the dedup back to per-project and reintroduce the duplicate close.
+ */
+export function shouldEnqueueClose(store, { sessionId, harness = null } = {}, opts = {}) {
+  const receipt = readCloseReceipt(store, sessionId, opts);
+  if (!receipt) return true;
+  return !CERTIFIED_STATUSES.has(receipt.status);
 }
 
 /**
