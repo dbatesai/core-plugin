@@ -36,6 +36,7 @@ import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
+import { buildCloseRecord, renderCloseSummary } from './close-payload.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
@@ -292,6 +293,53 @@ export function shouldEnqueueClose(store, { sessionId, harness = null } = {}, op
   const receipt = readCloseReceipt(store, sessionId, opts);
   if (!receipt) return true;
   return !CERTIFIED_STATUSES.has(receipt.status);
+}
+
+/**
+ * Perform the automatic close for one exact session, deterministically.
+ *
+ * Makes NO model call. Builds the record from already-normalized transcript
+ * events, renders the fixed-shape summary, writes both atomically, and returns
+ * the receipt it wrote.
+ *
+ * Status honesty: a full-coverage run records `closed`; partial coverage records
+ * `partial` and therefore stays owed, so the next startup recovers it rather
+ * than treating an incomplete observation as a finished close.
+ */
+export function runDeterministicClose(store, {
+  sessionId,
+  harness = null,
+  events = [],
+  startedAt = null,
+  endedAt = null,
+  coverage = 'full',
+  gitHead = null,
+  now = new Date().toISOString(),
+} = {}, opts = {}) {
+  const record = buildCloseRecord({
+    sessionId, harness, events, startedAt, endedAt, coverage, gitHead,
+  });
+  const summary = renderCloseSummary(record);
+
+  const summaryDir = join(receiptDir(store, opts), '..', 'summaries');
+  mkdirSync(summaryDir, { recursive: true });
+  const summaryFile = join(summaryDir, `${sessionKey(sessionId)}.md`);
+  atomicWriteFileSync(summaryFile, summary);
+  chmodSync(summaryFile, 0o600);
+
+  const receipt = {
+    session_id: sessionId,
+    status: coverage === 'full' ? 'closed' : 'partial',
+    harness,
+    closed_at: now,
+    ops: { capture: 'done', summary: 'done', 'project-state': 'skipped' },
+    summary_path: summaryFile,
+    summary_sha256: createHash('sha256').update(summary, 'utf8').digest('hex'),
+    model_calls: 0,
+    record,
+  };
+  writeCloseReceipt(store, receipt, opts);
+  return receipt;
 }
 
 /**

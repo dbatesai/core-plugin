@@ -20,7 +20,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, statSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -30,6 +30,7 @@ import {
   readCloseReceipt,
   writeCloseReceipt,
   shouldEnqueueClose,
+  runDeterministicClose,
 } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 
 function freshStore() {
@@ -188,4 +189,56 @@ test('ID-08 [oracle 4] a failed or partial close remains owed', () => {
       `a '${status}' close must remain owed and recoverable, never certified closed`,
     );
   }
+});
+
+// ─────────────────── ID-09..ID-10: the wired deterministic close ─────────────
+
+test('ID-09 runDeterministicClose writes receipt + summary and makes zero model calls', () => {
+  const store = freshStore();
+  const o = opts(store);
+
+  const receipt = runDeterministicClose(store, {
+    sessionId: SESSION_A,
+    harness: 'claude-code',
+    events: [
+      { idx: 0, kind: 'text', role: 'user', text: 'wire the deterministic close' },
+      { idx: 1, kind: 'tool', role: 'assistant', name: 'Edit', text: '{"file_path":"/repo/x.mjs"}' },
+    ],
+    startedAt: '2026-07-27T16:00:00.000Z',
+    endedAt: '2026-07-27T16:10:00.000Z',
+    now: '2026-07-27T16:10:01.000Z',
+  }, o);
+
+  assert.equal(receipt.model_calls, 0, 'automatic close must make ZERO model calls');
+  assert.equal(receipt.status, 'closed');
+  assert.equal(receipt.record.counts.mutating_tools, 1);
+  assert.match(receipt.summary_sha256, /^[0-9a-f]{64}$/);
+  assert.ok(existsSync(receipt.summary_path), 'summary must exist on disk');
+  assert.match(readFileSync(receipt.summary_path, 'utf8'), /Session close record/);
+
+  // and it must now dedup, end to end
+  assert.equal(
+    shouldEnqueueClose(store, { sessionId: SESSION_A, harness: 'claude-code' }, o),
+    false,
+    'after a real deterministic close, the same session must not re-enqueue',
+  );
+});
+
+test('ID-10 a partial-coverage deterministic close stays owed', () => {
+  const store = freshStore();
+  const o = opts(store);
+
+  const receipt = runDeterministicClose(store, {
+    sessionId: SESSION_A,
+    harness: 'claude-code',
+    events: [{ idx: 0, kind: 'text', role: 'user', text: 'x' }],
+    coverage: 'partial',
+  }, o);
+
+  assert.equal(receipt.status, 'partial', 'partial coverage never certifies closed');
+  assert.equal(
+    shouldEnqueueClose(store, { sessionId: SESSION_A, harness: 'claude-code' }, o),
+    true,
+    'a partial close must remain owed and recoverable',
+  );
 });
