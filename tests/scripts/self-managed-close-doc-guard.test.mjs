@@ -74,14 +74,19 @@ test('close hook: recursion guard + kill switch + spawn pre-check are all wired'
   assert.match(hook, /detached: true/, 'child must be detached to survive session exit');
 });
 
-test('close hook spawns the DETERMINISTIC envelope (close-pass.mjs run), NOT raw claude -p', () => {
+test('close hook spawns the DETERMINISTIC per-session close, NOT raw claude -p', () => {
   // Regression guard for the 2026-06-30 finding: a headless LLM narrated a close it never
-  // marked. The hook must spawn the `run` envelope (begin/maintenance/finish guaranteed by
-  // code), never `claude -p` directly — that would put the marker back at LLM discretion.
+  // marked. The hook must spawn a deterministic runner, never `claude -p` directly — that
+  // would put the marker back at LLM discretion.
+  //
+  // The subcommand changed from `run` (broad, whole-store) to `process-request` (one exact
+  // session) in the finalize redesign. The invariant is unchanged and now stronger: the
+  // spawned path makes zero model calls at all.
   const hook = read('skills', 'core', 'hooks', 'close-pass-hook.mjs');
   assert.match(hook, /close-pass\.mjs/, 'hook must invoke close-pass.mjs');
-  assert.match(hook, /'run'|"run"/, 'hook must spawn the run envelope');
-  assert.ok(!/spawn\(\s*['"]claude['"]/.test(hook), 'hook must NOT spawn claude directly — the envelope owns that');
+  assert.match(hook, /'process-request'|"process-request"/, 'hook must spawn the per-session close');
+  assert.match(hook, /'--session'|"--session"/, 'hook must pass the exact session through to the runner');
+  assert.ok(!/spawn\(\s*['"]claude['"]/.test(hook), 'hook must NOT spawn claude directly — the runner owns that');
 });
 
 test('finalize: envelope mode tells the agent the runner owns the marker (no double-run)', () => {
@@ -115,9 +120,14 @@ test('finalize: one method — envelope mode records judgment ops like a manual 
 test('the close op list has a single source: close-pass.mjs CLOSE_OPS', async () => {
   const { CLOSE_OPS } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
   const opsCsv = CLOSE_OPS.join(',');
+
+  // The hook no longer participates in this invariant. Under the finalize redesign it
+  // makes an exact-session enqueue decision and knows nothing about the op list — which
+  // is the point: the op list was the surface that made every close broad. The
+  // single-source rule still binds the two readers that do consume it.
   const hook = read('skills', 'core', 'hooks', 'close-pass-hook.mjs');
-  assert.ok(!/const CLOSE_OPS\s*=\s*\[/.test(hook), 'the hook must import CLOSE_OPS, not redefine it');
-  assert.match(hook, /CLOSE_OPS/, 'the hook must use the imported CLOSE_OPS');
+  assert.ok(!/const CLOSE_OPS\s*=\s*\[/.test(hook), 'the hook must never define its own op list');
+
   assert.ok(read('skills', 'core', 'protocols', 'startup.md').includes(opsCsv),
     'startup.md detect --ops must match CLOSE_OPS exactly');
   assert.ok(read('skills', 'finalize', 'SKILL.md').includes(opsCsv),

@@ -34,7 +34,7 @@ import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { shouldSpawn, isRegisteredWorkspace, CLOSE_OPS } from '../scripts/close-pass.mjs';
+import { isRegisteredWorkspace, shouldEnqueueClose } from '../scripts/close-pass.mjs';
 import { logHookEvent } from './hook-log.mjs';
 
 // SessionEnd reasons that are NOT real ends — skip them. `resume` suspends for later
@@ -76,29 +76,70 @@ function main() {
     return 0;
   }
 
-  // Guard 3 — spawn pre-check. didWork is approximated by "a transcript exists" (any real
-  // session produced one); the authoritative gate is owed-work, which shouldSpawn checks.
-  const didWork = !!payload.transcript_path && existsSync(String(payload.transcript_path));
-  if (!shouldSpawn(store, { didWork, allOps: CLOSE_OPS })) {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'nothing-owed', cwd: store });
+  // Guard 3 — the exact-session decision (pure; see decideCloseAction below).
+  const decision = decideCloseAction(payload, { store });
+  if (decision.action === 'skip') {
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: decision.reason, cwd: store });
     return 0;
   }
 
-  // Spawn the DETERMINISTIC close envelope, not raw `claude -p`. `close-pass.mjs run`
-  // guarantees the marker lifecycle (begin/finish lock + marker) and mechanical maintenance
-  // around the LLM close — the reliability spine can't be skipped by agent discretion
-  // (a headless agent can otherwise narrate a close it never marked). Detached
-  // + unref() so it survives our exit; auth-strip + output log live inside `run`.
-  const runner = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'close-pass.mjs');
+  // Spawn the DETERMINISTIC close for THIS EXACT SESSION. Detached + unref() so it
+  // survives our exit; auth-strip and output logging live inside the runner.
   try {
-    const child = spawn('node', [runner, 'run', store], { cwd: store, env: process.env, detached: true, stdio: 'ignore' });
+    const child = spawn('node', decision.args, { cwd: store, env: process.env, detached: true, stdio: 'ignore' });
     child.unref();
-    logHookEvent({ hook: 'session-end', action: 'spawn', reason: 'session-reason=' + (reason || 'unknown'), cwd: store });
+    logHookEvent({
+      hook: 'session-end', action: 'spawn',
+      reason: 'session-reason=' + (reason || 'unknown'),
+      cwd: store, session: decision.sessionId,
+    });
   } catch {
     // node/runner unavailable, or spawn failed — startup catch-up covers it. Never block exit.
     logHookEvent({ hook: 'session-end', action: 'spawn-failed', cwd: store });
   }
   return 0;
+}
+
+/**
+ * Decide what SessionEnd should do, given the payload. Pure: no spawn, no
+ * registry read, no logging — so the decision is testable without a real
+ * workspace or a child process.
+ *
+ * Two things changed from the behavior this replaces:
+ *
+ * 1. The session id is USED. It arrives on every SessionEnd payload and was
+ *    previously discarded, which is why a manual finalize could be followed by
+ *    a second reasoning close for the same session moments later.
+ * 2. "A transcript file exists" is no longer evidence that work is owed. Every
+ *    real session produces a transcript, so that gate was always true; the
+ *    exact-session receipt is the authoritative answer instead.
+ *
+ * A payload with no usable identity SKIPS rather than synthesizing one. A close
+ * that cannot be deduplicated is the failure being removed, so running it
+ * anyway would preserve the defect. Startup catch-up recovers those sessions.
+ */
+export function decideCloseAction(payload = {}, { store } = {}, opts = {}) {
+  const reason = String(payload.reason || '');
+  if (SKIP_REASONS.has(reason)) {
+    return { action: 'skip', reason: 'session-reason=' + reason };
+  }
+
+  const sessionId = typeof payload.session_id === 'string' ? payload.session_id.trim() : '';
+  if (!sessionId) {
+    return { action: 'skip', reason: 'no-session-identity' };
+  }
+
+  if (!shouldEnqueueClose(store, { sessionId }, opts)) {
+    return { action: 'skip', reason: 'already-closed', sessionId };
+  }
+
+  const runner = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'close-pass.mjs');
+  return {
+    action: 'enqueue',
+    reason: 'owed',
+    sessionId,
+    args: [runner, 'process-request', store, '--session', sessionId],
+  };
 }
 
 // Only run as the hook entry — importing this module (e.g. for buildChildEnv in tests) must
