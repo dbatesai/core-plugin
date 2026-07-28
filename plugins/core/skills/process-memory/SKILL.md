@@ -75,24 +75,9 @@ For each file in `_memories/observations/<YYYY-MM>/` not yet reviewed this sessi
 
 ---
 
-## Step 2.5 — Clean cloud-sync ghost duplicates
+## Step 2.5 — Cloud-sync ghost cleanup: folded into Step 4
 
-macOS sync engines (iCloud Drive, OneDrive, Dropbox) preserve concurrent-write conflicts by creating `<filename> 2.md` (with leading space) duplicates. When the agent writes frequently to `_memories/` files mid-session, the sync engine sees a "conflict" between its cached view and the agent's write, and keeps both. Most of these settle as exact duplicates with identical content — harmless on disk, but they pollute validator output (each ghost reports separately as a unit) and confuse counts.
-
-Find candidates and verify each is an exact duplicate of its original before deleting:
-
-```bash
-find <project>/_memories -name "* 2.md" -print0 | while IFS= read -r -d '' ghost; do
-  original="${ghost% 2.md}.md"
-  if [ -f "$original" ] && diff -q "$ghost" "$original" >/dev/null 2>&1; then
-    rm "$ghost"
-  fi
-done
-```
-
-The verification step is load-bearing — never bulk-delete `* 2.md` without confirming the content matches the original. If the ghost differs from the original, surface to the user for inspection (rare; usually means the sync engine preserved a genuinely different version that needs reconciliation, not a duplicate).
-
-Narrate: "Cleaned N ghost duplicates from `_memories/`." If zero, say nothing.
+macOS sync engines (iCloud Drive, OneDrive, Dropbox) preserve concurrent-write conflicts by creating `<filename> 2.md` (with leading space) duplicates in `_memories/`. `maintenance-run.mjs` (Step 4, below) already walks for these, verifies byte-identity to the un-suffixed original, and removes only exact duplicates. No separate pass here — see Step 4's narration for the count. If `maintenance-run` surfaces a ghost that *differs* from its original (a real sync-preserved divergence), surface it to the user; never delete an unverified ghost.
 
 ---
 

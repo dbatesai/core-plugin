@@ -108,7 +108,6 @@ See `protocols/harness.md` for the verb contract.
 Supporting references:
 
 - `references/retrieval.md` — four-tier retrieval ladder (Tier 0 in-context → Tier 1 Grep → Tier 2 typed-edge walk → Tier 3 Explore subagent).
-- `references/mailbox.md` — the per-project mailbox (`_mailbox/`): inbound messages to a project's agent from the user or other agents; checked at startup + on demand; `scripts/mailbox.mjs` posts cross-project. Read when handling or sending mailbox messages.
 - `references/model-assignments.md` — model tier per pipeline stage; consult before dispatching graduation, render, external pulls.
 - `references/hygiene-strategies.md` — deeper hygiene sub-protocols (graduation reasoning, archive integrity, edge reconciliation).
 - `references/instruction-surface-contract.md` — (v3.0) the contract→generator system: one `CONTRACT.md` generates `CLAUDE.md`/`AGENTS.md`. Read when adopting the contract system, editing a contract, or handling a contract-drift release gate.

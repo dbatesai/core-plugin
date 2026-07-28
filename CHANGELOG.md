@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **The mailbox (`_mailbox/`, `mailbox.mjs`, the per-turn unread-count hook) no longer ships in the plugin.** It was agent-to-agent coordination infrastructure for building CORE itself, not a capability any `/core` project needs — it never appeared in the user-facing docs, only in the startup protocol and one hook registration. It continues to exist as a CORE-dev-workshop-only tool, unchanged in behavior, outside the shipped tree.
+
 ### Fixed
 - **The memory-health chain can now detect its own silence.** Every check that reports on the evidence recorder needed the recorder to be running in order to say anything, so an idle recorder read as a healthy one. Volumes are now counted per reporting window as well as cumulatively (a cumulative total never returns to zero, so any past volume permanently masked present silence); the flight-recorder-dead check reads the window; a new coverage check fires when evidence is recorded for under half of hook-triggered lookups; and a new staleness check fires when no conclusion has been pinned in 14 days — the one signal that survives the whole chain going quiet. A rejected row now counts as a failed attempt, so a caller that stops supplying a required field becomes visible instead of recording nothing at all.
 - **`/metrics` states how much evidence is behind its answers.** Under 20 graded turns the default view reports the sample size rather than a verdict — a handful of turns can read 100% and mean nothing.

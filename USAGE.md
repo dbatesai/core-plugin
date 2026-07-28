@@ -8,7 +8,7 @@ For the design reasoning behind any of this, see [ARCHITECTURE.md](ARCHITECTURE.
 
 ## Commands
 
-Ten slash commands ship with the plugin: `/core` and nine companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
+Eleven slash commands ship with the plugin: `/core` and ten companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
 
 ### `/core`
 
@@ -27,6 +27,14 @@ Close a session.
 - **What it does:** reconciles state, writes a session summary, re-renders `PROJECT.md` from the units, and runs the comprehensive memory-hygiene pass (graduation, validation, index regeneration, file-cap compaction, the metrics interpretation pass, validity-dimension stamping).
 - **When to use:** at the end of a working session, so the next `/core` picks up clean.
 - **Writes:** the session summary under `_summaries/`, `PROJECT.md`, the indexes, hygiene-log entries.
+
+### `/refocus`
+
+Recenter mid-session on what matters most right now, given what became known since you started.
+
+- **What it does:** re-reads the room — the original objective, the latest direction from you, decisions already accepted, and everything that arrived after the objective was set (corrections, documents, tool/test results, repository changes, mailbox or collaboration messages, other agents' findings). Assigns each material new item an effect (confirms, weakens, contradicts, replaces, adds, no-change) and reconsiders priority accordingly.
+- **When to use:** the session has changed direction and you want the agent to reconsider what's important without losing the original thread. Not for closing a session (`/finalize`), running memory maintenance (`/process-memory`), or seeing measurement (`/metrics`).
+- **Reads:** active context only by default — retrieves more only to resolve a specific named gap. **Writes:** nothing durable unless you accept a proposed priority change.
 
 ### `/process-memory`
 
