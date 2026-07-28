@@ -26,7 +26,7 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 
 **First consumer.** `skills/core/scripts/capability/row-schema.md` (v2.6.0) — the capability row schema is the load-bearing instance of this doctrine. `resolve-plugin-root.mjs` and (future) `capability-probe.mjs` both reference it; both stamp `schema_version: '1.0.0'` on emitted rows.
 
-**Secondary consumers (planned).** `skills/core/scripts/hygiene-event-schema.md` (v2.7.0+) will give the hygiene-log events the same treatment. The metrics-spec OTel span shape will graduate to a schema file when T3 augmentation lands.
+**Secondary consumers (planned, not yet built).** Hygiene-log events are a candidate for the same sibling-schema treatment once they gain a second consumer worth coordinating; so is the metrics-spec OTel span shape once T3 augmentation lands. Neither has a schema file yet — this doctrine names the pattern they'd follow, not a claim that either file exists.
 
 ## Doctrine 3 — Schema lives only as long as its consumer
 

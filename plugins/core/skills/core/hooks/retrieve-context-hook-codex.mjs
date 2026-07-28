@@ -10,7 +10,16 @@
  * Registered on Codex's UserPromptSubmit event via hooks-codex.json. See
  * harnesses/codex.md §hook-register for the registration. This file's correctness against the
  * DOCUMENTED Codex contract is checked by this repo's tests.
+ *
+ * The import itself is inside the fail-open boundary, not just main(): a resolution or
+ * syntax failure in the shared implementation must still exit 0, the same guarantee
+ * main()'s own entry guard gives once it's running (same defect class as the Stop-side
+ * Codex wrapper).
  */
 process.env.CORE_HOOK_HARNESS = 'codex';
-const { main } = await import('./retrieve-context-hook.mjs');
-process.exit((await main()) || 0);
+try {
+  const { main } = await import('./retrieve-context-hook.mjs');
+  process.exit((await main()) || 0);
+} catch {
+  process.exit(0);
+}
