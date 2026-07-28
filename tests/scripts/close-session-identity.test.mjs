@@ -210,7 +210,9 @@ test('ID-09 runDeterministicClose writes receipt + summary and makes zero model 
   }, o);
 
   assert.equal(receipt.model_calls, 0, 'automatic close must make ZERO model calls');
-  assert.equal(receipt.status, 'closed');
+  // Spec §4.5/§2.2: automatic close is lifecycle evidence, not semantic capture -- it may
+  // write 'recorded' but never 'closed' (that status is manual /finalize's alone to certify).
+  assert.equal(receipt.status, 'recorded');
   assert.equal(receipt.record.counts.mutating_tools, 1);
   assert.match(receipt.summary_sha256, /^[0-9a-f]{64}$/);
   assert.ok(existsSync(receipt.summary_path), 'summary must exist on disk');

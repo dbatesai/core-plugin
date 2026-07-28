@@ -232,8 +232,13 @@ export function shouldSpawn(store, { didWork = false, madeDecision = false, allO
  * owed so a broken close is recovered rather than silently certified.
  */
 
-/** Statuses that certify a session as fully closed. Everything else stays owed. */
-const CERTIFIED_STATUSES = new Set(['closed']);
+/**
+ * Statuses that certify a session as terminal for duplicate-SessionEnd suppression
+ * (spec §4.5). 'closed' = manual semantic capture; 'recorded' = automatic lifecycle
+ * evidence only, no semantic capture attempted -- both stop a second close, neither
+ * implies the other. Everything else ('partial', 'failed', abandoned 'queued') stays owed.
+ */
+const CERTIFIED_STATUSES = new Set(['closed', 'recorded']);
 
 /**
  * Derive the stable per-session key. Throws on anything that is not a real
@@ -303,9 +308,11 @@ export function shouldEnqueueClose(store, { sessionId, harness = null } = {}, op
  * events, renders the fixed-shape summary, writes both atomically, and returns
  * the receipt it wrote.
  *
- * Status honesty: a full-coverage run records `closed`; partial coverage records
- * `partial` and therefore stays owed, so the next startup recovers it rather
- * than treating an incomplete observation as a finished close.
+ * Status honesty: this is the AUTOMATIC path -- it may certify lifecycle evidence
+ * (`recorded`) but never semantic capture (`closed`, spec §4.5/§2.2 — that status is
+ * manual /finalize's alone to write). Partial coverage records `partial` and therefore
+ * stays owed, so the next startup recovers it rather than treating an incomplete
+ * observation as a finished close.
  */
 export function runDeterministicClose(store, {
   sessionId,
@@ -330,7 +337,7 @@ export function runDeterministicClose(store, {
 
   const receipt = {
     session_id: sessionId,
-    status: coverage === 'full' ? 'closed' : 'partial',
+    status: coverage === 'full' ? 'recorded' : 'partial',
     harness,
     closed_at: now,
     ops: { capture: 'done', summary: 'done', 'project-state': 'skipped' },

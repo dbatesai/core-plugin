@@ -67,7 +67,9 @@ test('RC-01 [oracle 1] the real hook argv, run through the real subprocess bound
 
     const receipt = readCloseReceipt(store, SESSION_A);
     assert.ok(receipt, 'a receipt must exist after the real argv runs');
-    assert.equal(receipt.status, 'closed');
+    // Spec §4.5/§2.2: automatic close writes 'recorded' (lifecycle evidence), never 'closed'
+    // (semantic capture is manual /finalize's alone to certify).
+    assert.equal(receipt.status, 'recorded');
     assert.equal(receipt.model_calls, 0, 'the automatic close must make zero model calls');
     assert.equal(receipt.record.started_at, '2026-07-27T20:00:00.000Z');
     assert.equal(receipt.record.ended_at, '2026-07-27T20:10:00.000Z');
@@ -111,7 +113,7 @@ test('RC-03 [oracle 3] a distinct session is still processed after another sessi
 
     const receiptB = readCloseReceipt(store, SESSION_B);
     assert.ok(receiptB, 'sess-B must get its own receipt');
-    assert.equal(receiptB.status, 'closed');
+    assert.equal(receiptB.status, 'recorded');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
