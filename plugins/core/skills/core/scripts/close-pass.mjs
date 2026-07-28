@@ -45,6 +45,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
 import { runMaintenance } from './maintenance-run.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
+import { readTranscript } from './read-transcript.mjs';
 
 // A lock older than this with no live owner is stale and supersedable. Generous: a real close
 // pass (claude -p re-reading a transcript) can take a couple of minutes.
@@ -342,6 +343,22 @@ export function runDeterministicClose(store, {
   return receipt;
 }
 
+/** First and last `timestamp` field seen across a transcript's JSONL lines, or nulls if unreadable. */
+function extractTimestampRange(transcriptPath) {
+  if (!transcriptPath) return { startedAt: null, endedAt: null };
+  let raw;
+  try { raw = readFileSync(transcriptPath, 'utf8'); } catch { return { startedAt: null, endedAt: null }; }
+  let startedAt = null, endedAt = null;
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    let e; try { e = JSON.parse(line); } catch { continue; }
+    if (typeof e.timestamp !== 'string') continue;
+    if (!startedAt) startedAt = e.timestamp;
+    endedAt = e.timestamp;
+  }
+  return { startedAt, endedAt };
+}
+
 /**
  * Security gate: is `store` a CORE workspace we should auto-close?
  * A generic `_memories/` dirname is NOT proof — an attacker-supplied repo can have one, and the
@@ -572,6 +589,33 @@ function main(argv) {
         return 1;
       }
       process.stdout.write('close marked closed; lock released\n');
+      return 0;
+    }
+    case 'process-request': {
+      // The exact-session automatic close the SessionEnd hook enqueues. Zero model calls:
+      // read the transcript (if the hook could name one), build the deterministic record,
+      // write the receipt. Dedup is receipt-based (shouldEnqueueClose), not the store lock —
+      // a repeat request for an already-closed session is a cheap no-op, not a race to guard.
+      const sessionId = f.session;
+      if (!sessionId) { process.stderr.write('process-request needs --session\n'); return 2; }
+      if (!shouldEnqueueClose(store, { sessionId })) {
+        process.stdout.write(json ? JSON.stringify({ ok: true, skipped: true, reason: 'already-closed' }) + '\n' : 'already closed; nothing to do\n');
+        return 0;
+      }
+      const transcriptOverride = typeof f.transcript === 'string' ? f.transcript : null;
+      const { available, events, path: transcriptPath } = readTranscript({
+        harness: 'claude-code', cwd: store, override: transcriptOverride, sessionId,
+      });
+      const { startedAt, endedAt } = extractTimestampRange(transcriptPath);
+      let gitHead = null;
+      const g = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(store), encoding: 'utf8' });
+      if (g.status === 0 && typeof g.stdout === 'string') gitHead = g.stdout.trim();
+
+      const receipt = runDeterministicClose(store, {
+        sessionId, harness: 'claude-code', events, startedAt, endedAt, gitHead,
+        coverage: available ? 'full' : 'partial',
+      });
+      process.stdout.write(json ? JSON.stringify({ ok: true, receipt }) + '\n' : `close ${receipt.status}: ${sessionId}\n`);
       return 0;
     }
     case 'release': {

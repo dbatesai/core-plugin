@@ -134,12 +134,13 @@ export function decideCloseAction(payload = {}, { store } = {}, opts = {}) {
   }
 
   const runner = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'close-pass.mjs');
-  return {
-    action: 'enqueue',
-    reason: 'owed',
-    sessionId,
-    args: [runner, 'process-request', store, '--session', sessionId],
-  };
+  const args = [runner, 'process-request', store, '--session', sessionId];
+  // The exact transcript for THIS session, when the harness provides one — without it
+  // process-request can only record a coverage:'partial' receipt (stays owed, never
+  // silently certified 'closed' off events it never read).
+  const transcriptPath = typeof payload.transcript_path === 'string' ? payload.transcript_path.trim() : '';
+  if (transcriptPath) args.push('--transcript', transcriptPath);
+  return { action: 'enqueue', reason: 'owed', sessionId, args };
 }
 
 // Only run as the hook entry — importing this module (e.g. for buildChildEnv in tests) must
