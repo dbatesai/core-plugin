@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.1] — 2026-07-29
+
+### Fixed
+- Hook logging no longer leaks a `hook-log-write-failed` diagnostic to the user on every answer
+  in sandboxed harnesses (e.g. Codex workspace sandbox) where `~/.core` is readable but not
+  writable — permission-shaped errors now fall back to a fixed, trusted tmpdir log.
+- CI: a shell-quoting defect in the hooks-schema validation step (two possessive apostrophes
+  breaking a single-quoted `node -e` block) that made `validate plugin` exit 126 on every run.
+
+### Changed
+- Continued the v3.15.0 development-narrative cleanup: removed the remaining internal
+  review-batch labels, issue ids, and decision-lineage references from shipped comments,
+  tests, and the CHANGELOG. The dev-leakage guard's allowlist mechanism now scopes exemptions
+  to exact literal tokens instead of a whole file+pattern, so legitimate short product
+  vocabulary (the P0-P3 retrieval-policy enum) can be allowlisted without hiding an unrelated
+  internal label sharing the same file.
+
 ## [3.15.0] — 2026-07-29
 
 ### Changed
