@@ -80,24 +80,28 @@ function gitRun(args, cwd) {
  * @param {string} [opts.expectedRemote] override expected remote URL (for testing)
  */
 
+/** Canonical filesystem-path equality: resolves symlinks and Windows 8.3
+ * short names via the native realpath, then compares with separators
+ * normalized and the drive letter case-folded. */
+function samePath(a, b) {
+  const norm = (v) => String(v).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => d.toLowerCase() + ':').replace(/\/+$/, '');
+  const canon = (v) => { try { return realpathSync.native(String(v)); } catch { return null; } };
+  const ca = canon(a);
+  const cb = canon(b);
+  if (ca && cb) return norm(ca) === norm(cb);
+  return norm(a) === norm(b);
+}
+
 /**
  * Compare a declared remote with the one git reports. URL-shaped remotes
  * (scheme:// or scp-like user@host:) compare exactly. Filesystem-path remotes
- * compare with separators normalized (git stores Windows paths forward-slashed)
- * and the drive letter case-folded.
+ * compare as canonical paths.
  */
 function remoteMatchesExpected(actual, expected) {
   if (actual === expected) return true;
   const urlish = (v) => /^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^[^/\\]+@[^/\\]+:/.test(v);
   if (urlish(actual) || urlish(expected)) return false;
-  const norm = (v) => String(v).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => d.toLowerCase() + ':').replace(/\/+$/, '');
-  // A locally-resolvable path remote canonicalizes first — Windows 8.3 short
-  // names (RUNNER~1) and symlinked temp roots otherwise never compare equal.
-  const canon = (v) => { try { return realpathSync.native(String(v)); } catch { return null; } };
-  const ca = canon(actual);
-  const ce = canon(expected);
-  if (ca && ce) return norm(ca) === norm(ce);
-  return norm(actual) === norm(expected);
+  return samePath(actual, expected);
 }
 
 export async function probe(opts = {}) {
@@ -169,7 +173,7 @@ export async function probe(opts = {}) {
   }
   let actualRoot;
   try { actualRoot = realpathSync(rootResult.stdout); } catch { actualRoot = rootResult.stdout; }
-  const rootMatches = actualRoot === repoPath;
+  const rootMatches = samePath(actualRoot, repoPath);
   evidence.push({
     source: 'git-repo-root',
     value: { actual: actualRoot, configured: repoPath, matches: rootMatches },

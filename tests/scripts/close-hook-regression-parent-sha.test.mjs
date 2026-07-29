@@ -111,7 +111,10 @@ test('RC-06 [parent-SHA falsifier] a second SessionEnd for an already-closed ses
   } finally {
     // Retried: the detached child can still hold the tree briefly on Windows
     // (EBUSY on an in-use directory), and force alone does not wait it out.
-    const rm = (p) => rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    // Best-effort: the detached child can outlive the retries on a slow
+    // Windows runner; a leftover temp dir is the OS temp reaper's job, and
+    // cleanup failure must not fail assertions that already passed.
+    const rm = (p) => { try { rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* best-effort */ } };
     rm(parentTree);
     rm(store);
     rm(idxDir);

@@ -145,7 +145,7 @@ test('mutation authority requires a named destination — an unverified remote d
     assert.equal(remoteEv.agrees_with_others, false);
 
     const named = await probe({ filesRepo: dir, expectedRemote: upstream });
-    assert.equal(named.identity_status, 'PASS', 'a declared, matching destination passes');
+    assert.equal(named.identity_status, 'PASS', 'a declared, matching destination passes — evidence: ' + JSON.stringify(named.evidence));
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(upstream, { recursive: true, force: true });
