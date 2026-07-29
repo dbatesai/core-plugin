@@ -31,7 +31,7 @@
  * CLI:  node classify-turns.mjs <project> [--harness claude-code|codex] [--json]
  */
 
-import { readFileSync, readdirSync, appendFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { readFileSync, readdirSync, appendFileSync, mkdirSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -298,6 +298,43 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
     chmodSync(file, 0o600);
   } catch { /* best-effort */ }
   return { status: 'OK', provisional: true, workspace_id: wid, transcript_resolution: t.meta.transcript_resolution, ...summarize(classified), records };
+}
+
+
+/** Retention window for the classified turn log — same bound as turn capture. */
+export const CLASSIFIED_RETENTION_DAYS = 30;
+
+/**
+ * Delete classified day-files older than the window. The classified store
+ * carries turn text, so it gets the same retention bound the capture stream
+ * has. The window is validated before any deletion arithmetic runs.
+ */
+export function runClassifiedRetention(projectDir, { workspaceId, home, windowDays = CLASSIFIED_RETENTION_DAYS, now = new Date() } = {}) {
+  if (!Number.isInteger(windowDays) || windowDays <= 0) {
+    return { ran: false, reason: 'invalid-window', windowDays };
+  }
+  const wid = workspaceId || resolveWorkspaceId(projectDir);
+  const dir = join(operationalMetricsDir(wid, { home }), 'classified');
+  if (!existsSync(dir)) return { ran: true, deleted: [], kept: [], windowDays };
+  const cutoff = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
+  const cutoffDay = cutoff.toISOString().slice(0, 10);
+  const deleted = [];
+  const kept = [];
+  let names = [];
+  try { names = readdirSync(dir).filter((n) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(n)); } catch { return { ran: false, reason: 'unreadable', windowDays }; }
+  for (const name of names) {
+    const day = name.slice(0, 10);
+    if (day < cutoffDay) {
+      try {
+        rmSync(join(dir, name), { force: true });
+        if (existsSync(join(dir, name))) kept.push(`${name} (deletion-unverified)`);
+        else deleted.push(name);
+      } catch (e) {
+        kept.push(`${name} (retention-error: ${String(e && e.message).slice(0, 80)})`);
+      }
+    } else kept.push(name);
+  }
+  return { ran: true, deleted, kept, cutoff: cutoffDay, windowDays };
 }
 
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };

@@ -29,6 +29,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { VALID_TYPES } from './unit-vocab.mjs';
+import { DEFAULT_QUOTA } from './self-test-round.mjs';
 
 /**
  * collectForbiddenStrings — the reconstruction vocabulary of a local report:
@@ -126,7 +127,9 @@ const POLICY_RE = /^P\d(?:_w[0-9.]{1,6})?$/;      // P0..P2, P3_w0.8 …
 // omit real canonical types.
 const KNOWN_UNIT_TYPES = new Set([...VALID_TYPES, 'other']);
 const MIX_KEY_RE = /^[a-z][a-z-]{0,23}$/;         // shape check; KNOWN_UNIT_TYPES is the real closed-set gate below
-const RUNGS = new Set(['literal', 'category', 'value', 'cross-domain']);
+// Derived from the self-test quota so the receipt accepts every rung the gold
+// schema defines — a hand-written copy silently refused temporal/abstention.
+const RUNGS = new Set(Object.keys(DEFAULT_QUOTA));
 // Bands are short prose labels — closed by SHAPE (bounded charset; real labels
 // carry '/', ',', '_', '.' as in "enrichment/reasoning" and "P3_w0.8") — plus the
 // isPathShaped guard below, which is what actually excludes filesystem paths.

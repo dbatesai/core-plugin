@@ -390,9 +390,20 @@ function verdictBlock(mech) {
 // the browse page's explicitly-consented disclosure, not this one).
 // ============================================================
 
+// The embed ships only the sections the page itself renders — an allowlist,
+// so a field this renderer has never heard of cannot ride into a published
+// page. Dropped keys are disclosed by count.
+const EMBED_SECTIONS = ['schema_version', 'generated_at', 'producer', 'mechanics', 'readiness', 'regression', 'caveats'];
+
 export function sanitizeForEmbed(metrics) {
-  const clone = JSON.parse(JSON.stringify(metrics));
-  delete clone.report; // the terminal render — text, not data
+  const source = JSON.parse(JSON.stringify(metrics));
+  const clone = {};
+  let dropped = 0;
+  for (const [k, v] of Object.entries(source)) {
+    if (EMBED_SECTIONS.includes(k)) clone[k] = v;
+    else dropped++;
+  }
+  if (dropped > 0) clone.embed_fields_omitted = dropped;
   const triage = clone.mechanics?.store?.warning_triage;
   if (triage && Array.isArray(triage.attention_items)) {
     triage.attention_items_omitted = triage.attention_items.length;

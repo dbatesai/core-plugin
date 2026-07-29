@@ -29,6 +29,7 @@ import { generateSummaryIndex, computeSourceSignature } from './generate-summary
 import { hashText, stampFiles } from './state-cache.mjs';
 import { resolveWorkspaceId } from './log-event.mjs';
 import { runTurnCaptureRetention, purgeTurnCapture, TURN_CAPTURE_RETENTION_DAYS } from './turn-capture.mjs';
+import { runClassifiedRetention } from './classify-turns.mjs';
 import { resolveStoragePath } from './log-event.mjs';
 import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
 import { judgeUnjudgedTurns } from './hindsight-judge.mjs';
@@ -154,6 +155,24 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
     }
   } catch (e) {
     notes.push(`turn-capture retention skipped (${String(e && e.message).slice(0, 60)})`);
+  }
+
+  // 3.5b Classified-turn-log retention. The classified store carries turn text,
+  // so it gets the same 30-day bound as the capture stream. Apply-mode only —
+  // it deletes whole day-files by name, which the dry-run note above already
+  // makes legible for the capture stream this mirrors.
+  if (apply) {
+    try {
+      const cr = runClassifiedRetention(root, { workspaceId: resolveWorkspaceId(root), now: now ? new Date(now) : new Date() });
+      if (cr.ran && cr.deleted.length) {
+        ranOps.push('classified-retention');
+        notes.push(`classified-log retention: deleted ${cr.deleted.length} day file(s) older than ${cr.windowDays}d`);
+      } else if (cr.ran === false) {
+        notes.push(`classified-log retention skipped (${cr.reason})`);
+      }
+    } catch (e) {
+      notes.push(`classified-log retention skipped (${String(e && e.message).slice(0, 60)})`);
+    }
   }
 
   // 3.6 One-release sweep: remove any leftover rich-context stream directory
