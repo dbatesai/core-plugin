@@ -248,3 +248,55 @@ test('removeLegacyDriftLog: deletes the legacy non-prefixed file, idempotent, su
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// --- Drift is attributed to session lineage, not to timestamp order ---
+
+test('two overlapping sessions are not a capability change', () => {
+  // The counterexample: session A and session B run concurrently. Each is internally
+  // consistent — A always sees PASS, B always sees DEGRADED — but interleaved by
+  // timestamp they read PASS→DEGRADED→PASS: one drift and one healing, from a
+  // capability that never changed.
+  const history = [
+    entry('plugin-root', 'PASS', '2026-01-01T10:00:00Z', 's-A'),
+    entry('plugin-root', 'DEGRADED', '2026-01-01T10:05:00Z', 's-B'),
+    entry('plugin-root', 'PASS', '2026-01-01T10:10:00Z', 's-A'),
+    entry('plugin-root', 'DEGRADED', '2026-01-01T10:15:00Z', 's-B'),
+  ];
+  const { drift, healing, ambiguous } = detectDrift(history);
+  assert.equal(drift.length, 0, 'overlapping sessions are not evidence of degradation');
+  assert.equal(healing.length, 0);
+  assert.ok(ambiguous.length >= 1, 'the ambiguity is surfaced, not silently dropped');
+  assert.equal(ambiguous[0].reason, 'overlapping-sessions');
+  assert.equal(ambiguous[0].capability_id, 'plugin-root');
+});
+
+test('sessions that do not overlap still yield drift', () => {
+  const history = [
+    entry('plugin-root', 'PASS', '2026-01-01T10:00:00Z', 's-A'),
+    entry('plugin-root', 'PASS', '2026-01-01T10:05:00Z', 's-A'),
+    entry('plugin-root', 'DEGRADED', '2026-01-01T11:00:00Z', 's-B'),
+  ];
+  const { drift, ambiguous } = detectDrift(history);
+  assert.equal(drift.length, 1);
+  assert.equal(drift[0].from_session, 's-A');
+  assert.equal(drift[0].to_session, 's-B');
+  assert.equal(ambiguous.length, 0);
+});
+
+test('a status change within one session is that session\'s own resolved outcome, not drift', () => {
+  const history = [
+    entry('plugin-root', 'PASS', '2026-01-01T10:00:00Z', 's-A'),
+    entry('plugin-root', 'DEGRADED', '2026-01-01T10:01:00Z', 's-A'),
+  ];
+  assert.equal(detectDrift(history).drift.length, 0, 'one session cannot drift against itself');
+});
+
+test('entries with no session cannot be attributed to a lineage', () => {
+  const history = [
+    entry('plugin-root', 'PASS', '2026-01-01T10:00:00Z', null),
+    entry('plugin-root', 'DEGRADED', '2026-01-01T11:00:00Z', null),
+  ];
+  const { drift, ambiguous } = detectDrift(history);
+  assert.equal(drift.length, 0);
+  assert.ok(ambiguous.some(a => a.reason === 'no-session-lineage'));
+});
