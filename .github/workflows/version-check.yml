@@ -46,17 +46,26 @@ jobs:
           echo "Lockstep OK: all version fields at $PLUGIN_VERSION"
 
       - name: Check version bumped from base branch
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
+          # Compare against the branch this PR actually targets. A next → next
+          # PR is answerable only against next; measuring it against main asks
+          # the wrong question and passes or fails for the wrong reason.
+          if [ -z "$BASE_REF" ]; then
+            echo "::error::no base branch on this event — cannot compare versions"
+            exit 1
+          fi
           PR_VERSION=$(jq -r .version plugins/core/.claude-plugin/plugin.json)
-          git fetch origin main
-          BASE_VERSION=$( (git show origin/main:plugins/core/.claude-plugin/plugin.json 2>/dev/null || git show origin/main:.claude-plugin/plugin.json) | jq -r .version)
+          git fetch origin "$BASE_REF"
+          BASE_VERSION=$( (git show "origin/$BASE_REF:plugins/core/.claude-plugin/plugin.json" 2>/dev/null || git show "origin/$BASE_REF:.claude-plugin/plugin.json") | jq -r .version)
 
           if [ "$PR_VERSION" = "$BASE_VERSION" ]; then
-            echo "::error::Version not bumped: still at $BASE_VERSION. Run /cut-release on the next branch to bump before opening this PR."
+            echo "::error::Version not bumped against $BASE_REF: still at $BASE_VERSION. Run /cut-release on the next branch to bump before opening this PR."
             exit 1
           fi
 
-          echo "Version bumped: $BASE_VERSION → $PR_VERSION"
+          echo "Version bumped against $BASE_REF: $BASE_VERSION → $PR_VERSION"
 
       - name: CHANGELOG has a section for the new version
         run: |

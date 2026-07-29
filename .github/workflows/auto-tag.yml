@@ -1,22 +1,76 @@
 name: auto-tag
 
+# A tag is a release identity, so it is issued to a commit only after that exact
+# commit's required workflow has passed. The trigger is CI finishing on main —
+# not the push itself — so the candidate and its verdict are the same SHA.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit on main to tag
+        required: true
 
 permissions:
   contents: write
+  actions: read
+
+env:
+  REQUIRED_WORKFLOW: ci.yml
 
 jobs:
   auto-tag:
     runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
+      - name: Resolve the candidate commit
+        id: candidate
+        env:
+          EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          SHA="${EVENT_SHA:-$INPUT_SHA}"
+          if ! echo "$SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::candidate '$SHA' is not a full commit SHA — refusing to tag"
+            exit 1
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Candidate: $SHA"
+
       - uses: actions/checkout@v4
         with:
+          ref: ${{ steps.candidate.outputs.sha }}
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Install jq
         run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+
+      - name: Candidate is on main
+        env:
+          SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::$SHA is not reachable from main — refusing to tag"
+            exit 1
+          fi
+          echo "$SHA is on main"
+
+      - name: Required workflow concluded success for this exact commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/workflows/${REQUIRED_WORKFLOW}/runs?head_sha=${SHA}&per_page=100" > runs.json
+          node .github/scripts/require-green-candidate.mjs \
+            --sha "$SHA" --workflow "$REQUIRED_WORKFLOW" --runs-file runs.json
 
       - name: Read version from plugin.json
         id: version
@@ -28,6 +82,12 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Detected version: $VERSION"
+
+      - name: Embedded source_sha matches the release commit
+        env:
+          SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          node plugins/core/skills/core/scripts/verify-release-identity.mjs --source . --ref "$SHA"
 
       - name: Check if tag already exists
         id: check
@@ -43,10 +103,12 @@ jobs:
 
       - name: Create and push tag
         if: steps.check.outputs.exists == 'false'
+        env:
+          SHA: ${{ steps.candidate.outputs.sha }}
         run: |
           TAG="v${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$TAG"
+          git tag "$TAG" "$SHA"
           git push origin "$TAG"
-          echo "Created and pushed tag: $TAG"
+          echo "Created and pushed tag: $TAG at $SHA"

@@ -7,11 +7,14 @@
  * only true at one point in history, so two questions need separate answers:
  *
  *   --source     Is the committed stamp correct for this ref? At the release
- *                commit the stamp must equal that commit's parent. Past the
- *                release commit the stamp still names the release's source but
- *                no longer describes the working history — a distinct state,
- *                reported with its own exit code so a release gate can refuse
- *                it while ordinary development ignores it.
+ *                commit the stamp must equal that commit's parent. It stays
+ *                fresh for as long as the packaged tree is byte-identical to
+ *                that commit's — a merge that carries the release onto another
+ *                branch changes no shipped bytes and is still the same release.
+ *                Once the packaged tree moves, the stamp names a source the
+ *                package no longer matches: a distinct state, reported with its
+ *                own exit code so a release gate can refuse it while ordinary
+ *                development ignores it.
  *
  *   --installed  Does an installed plugin cache carry the identity of the
  *                candidate it is supposed to be? Compares source_sha, version,
@@ -38,8 +41,9 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const CLAUDE_REL = 'plugins/core/.claude-plugin/plugin.json';
-const CODEX_REL = 'plugins/core/.codex-plugin/plugin.json';
+const PACKAGED_SUBDIR = 'plugins/core';
+const CLAUDE_REL = `${PACKAGED_SUBDIR}/.claude-plugin/plugin.json`;
+const CODEX_REL = `${PACKAGED_SUBDIR}/.codex-plugin/plugin.json`;
 
 const OK = 0;
 const MISMATCH = 1;
@@ -126,16 +130,27 @@ function verifySource(repo, ref, log) {
     return MISMATCH;
   }
 
-  let head;
-  try { head = git(repo, ['rev-parse', ref]); } catch { head = null; }
-  if (head === point.release) {
+  // Freshness is a property of the shipped bytes, not of commit distance: the
+  // stamp still describes the package for as long as the packaged subtree is
+  // the one the release commit produced.
+  const packagedTree = (commit) => {
+    try { return git(repo, ['rev-parse', `${commit}:${PACKAGED_SUBDIR}`]); } catch { return null; }
+  };
+  const atRef = packagedTree(ref);
+  const atRelease = packagedTree(point.release);
+  if (!atRef || !atRelease) {
+    log(`indeterminate: cannot read the ${PACKAGED_SUBDIR} tree at ${ref} or ${point.release}`);
+    return INDETERMINATE;
+  }
+  if (atRef === atRelease) {
     log(`release-fresh ${point.parent} — version ${claude.version} build ${claude.build ?? 'unset'} packages this commit`);
+    log(`  packaged tree ${atRef} unchanged since release commit ${point.release}`);
     return OK;
   }
 
   let ahead = '?';
-  try { ahead = git(repo, ['rev-list', '--count', `${point.release}..${ref}`]); } catch { /* count stays unknown */ }
-  log(`stale: source_sha ${claude.source_sha} names the source of version ${claude.version}, but ${ref} is ${ahead} commit(s) past release commit ${point.release}`);
+  try { ahead = git(repo, ['rev-list', '--count', `${point.release}..${ref}`, '--', PACKAGED_SUBDIR]); } catch { /* count stays unknown */ }
+  log(`stale: source_sha ${claude.source_sha} names the source of version ${claude.version}, but ${PACKAGED_SUBDIR} has moved ${ahead} commit(s) past release commit ${point.release}`);
   return STALE;
 }
 

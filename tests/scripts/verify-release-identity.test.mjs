@@ -27,6 +27,7 @@ const SCRIPT = join(REPO_ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', '
 
 const CLAUDE_REL = join('plugins', 'core', '.claude-plugin', 'plugin.json');
 const CODEX_REL = join('plugins', 'core', '.codex-plugin', 'plugin.json');
+const SHIPPED_REL = join('plugins', 'core', 'skills', 'core', 'SKILL.md');
 
 const git = (repo, args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
 
@@ -77,6 +78,8 @@ function run(args) {
 function repoAtReleasePoint({ stamp } = {}) {
   const repo = newRepo();
   stampSource(repo, { version: '1.0.0', build: '20260101.1', sourceSha: '0'.repeat(40) });
+  mkdirSync(join(repo, dirname(SHIPPED_REL)), { recursive: true });
+  writeFileSync(join(repo, SHIPPED_REL), '# skill\n');
   writeFileSync(join(repo, 'README.md'), 'source\n');
   const packaged = commit(repo, 'source commit the release packages');
   stampSource(repo, { version: '1.1.0', build: '20260102.1', sourceSha: stamp ?? packaged });
@@ -96,15 +99,32 @@ test('source mode: a release commit whose stamp names its own parent is release-
   }
 });
 
-test('source mode: an ordinary commit past the release point is stale mid-development, not a failure', () => {
+test('source mode: a commit that changes the packaged tree is stale mid-development, not a failure', () => {
   const { repo } = repoAtReleasePoint();
   try {
-    writeFileSync(join(repo, 'README.md'), 'development continues\n');
-    commit(repo, 'ordinary development commit');
+    writeFileSync(join(repo, SHIPPED_REL), '# skill\ndevelopment continues\n');
+    commit(repo, 'ordinary development commit inside the packaged tree');
 
     const { code, out } = run(['--source', repo]);
     assert.equal(code, 3, `expected the distinct stale exit code, got ${code}:\n${out}`);
     assert.match(out, /stale/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('source mode: a commit that ships no different bytes is still the same release', () => {
+  const { repo, packaged } = repoAtReleasePoint();
+  try {
+    // The release merge onto another branch, and any change outside the shipped
+    // subtree: the package is byte-identical, so the stamp still describes it.
+    writeFileSync(join(repo, 'README.md'), 'workshop notes, not shipped\n');
+    commit(repo, 'change outside the packaged tree');
+
+    const { code, out } = run(['--source', repo]);
+    assert.equal(code, 0, `unchanged shipped bytes must stay release-fresh, got exit ${code}:\n${out}`);
+    assert.match(out, /release-fresh/);
+    assert.ok(out.includes(packaged), `verdict should still name the packaged commit:\n${out}`);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
