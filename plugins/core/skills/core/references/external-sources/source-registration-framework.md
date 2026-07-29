@@ -13,7 +13,7 @@ A source becomes part of a project's memory by being **registered** to the proje
 The framework defines six pieces:
 
 1. **Source-registration schema** — what declaring a source looks like
-2. **Observation schema during draft state** — the existing CORE observation schema, in its in-flight form
+2. **Observation schema before graduation** — the existing CORE observation schema, in its in-flight form
 3. **Intake protocol** — how sources get registered to a project at setup time
 4. **Promotion-mode landing destinations** — where observations land based on confidence + content signals
 5. **Annotation frameworks** — confidence-level and stability-class, source-agnostic
@@ -21,7 +21,7 @@ The framework defines six pieces:
 
 The framework relies on three existing CORE mechanisms it does not redesign:
 
-- **Observation unit schema** (per `protocols/data-storage.md`) — the in-flight draft state and the fully-graduated state are the same schema, distinguished by `status`.
+- **Observation unit schema** (per `protocols/data-storage.md`) — the in-flight inbox block and the graduated unit are the same schema, distinguished by `status`: `draft` in the inbox, `active` once graduation moves it into the store.
 - **The three promotion modes** (A autonomous / B confirmed / C explicit) — the landing-destination rule.
 - **`inbox.md`** — the existing staging surface for non-autonomous observations.
 
@@ -117,19 +117,21 @@ Optional project-local `connector-map.json` shape (overlay-authored; CORE only r
 
 ---
 
-## 2. Observation schema during draft state
+## 2. Observation schema before graduation
 
-The observation unit schema (per `protocols/data-storage.md`) is the same schema in draft state and graduated state. There is no separate "candidate" schema. The difference between draft and graduated is the `status` field and which fields are populated.
+The observation unit schema (per `protocols/data-storage.md`) is the same schema before and after graduation. There is no separate "candidate" schema. What differs is where the block lives and which fields are populated.
 
-### Draft state
+**The in-flight status is `draft`, and it is inbox-only.** `scripts/unit-vocab.mjs` names it once as `INBOX_DRAFT_STATUS`; `check-inbox.mjs` requires it on every inbox block and reports any other value. It is deliberately absent from the unit store's status vocabulary (`active`, `retired`, `archived`, `superseded`), so an observation written straight into `_memories/` still carrying it is a block that reached the store without graduating — `check-units.mjs` reports `status-value` and exits non-zero. Don't invent a second in-flight name.
 
-When an extractor writes a new observation:
+### Before graduation
+
+When an extractor emits a new observation, it writes this block to `<project>/inbox.md`:
 
 ```yaml
 ---
 id: <deterministic id; suggested hash(source-name + source-instance + content-prefix)>
 type: observation
-status: draft                                      # or pending, or whatever the new in-flight state is named
+status: draft
 source: <source-name from registration>
 source-instance: <opaque-to-CORE id from the source>
 extracted-at: <ISO-8601 timestamp>
@@ -148,11 +150,11 @@ topics: [<topic-tags, best-effort by extractor>]
 <context>
 ```
 
-**Required at draft time:** `id`, `type`, `status`, `source`, `source-instance`, `extracted-at`, `references-person`, `confidence-level`, body.
+**Required before graduation:** `id`, `type`, `status`, `source`, `source-instance`, `extracted-at`, `references-person`, `confidence-level`, body.
 
-**Optional at draft time:** `proposed-stability-class`, `topics`, body subsections, additional edges.
+**Optional before graduation:** `proposed-stability-class`, `topics`, body subsections, additional edges.
 
-**Populated at graduation:** `status` flips from draft to active, `stability-class` ratified from `proposed-stability-class` if applicable, `topics` refined, additional edges (`cites`, `contradicts`, `extends`, `supersedes`) added based on graduation reasoning.
+**Populated at graduation:** `status` flips from `draft` to `active`, `stability-class` ratified from `proposed-stability-class` if applicable, `topics` refined, additional edges (`cites`, `conflicts-with`, `refines`, `supersedes`) added based on graduation reasoning. Edge types come from `VALID_EDGE_TYPES` in `scripts/unit-vocab.mjs` and nowhere else — `conflicts-with` is the edge for a contradiction, `refines` for an elaboration that does not replace what it elaborates.
 
 ### Why this is the interface (and the harvester isn't)
 
@@ -209,7 +211,7 @@ A `sourced` observation may carry `proposed-stability-class` and still go Mode A
 
 Promotion-to-decision/risk is graduation's job, not the write-time mode decision. Mode A writes the observation as active; if it later warrants promotion, `/process-memory` handles it. "This observation could conceivably become a decision later" is not a Mode B trigger.
 
-**Mode B — confirmed.** Observation lands in `<project>/inbox.md` as a pending item with full proposed frontmatter inline. Next `/process-memory` or `/finalize` pass surfaces the item; user confirms or adjusts at the review.
+**Mode B — confirmed.** Observation lands in `<project>/inbox.md` as a pending item with full proposed frontmatter inline. Next `/process-memory` pass surfaces the item; user confirms or adjusts at the review.
 
 Criteria for Mode B (any of):
 - `confidence-level: inferred`
@@ -271,7 +273,7 @@ Two values, optional, ratified at graduation:
 - **durably-correct** — fact is structurally true and should not fall off the radar because nothing has challenged it recently. Defense against the priority function demoting it for low recency.
 - **durably-suspect** — fact appears stable but is wrong or unvalidated; surfaces with a flag when retrieved. Defense against silent acceptance of automation defaults, stale tracker fields, untouched governance state.
 
-Both values zero out the recency signal in the priority function (treats the unit as if just written for ranking purposes).
+Both values are annotations carried on the unit and surfaced when it is retrieved. Neither changes ranking: `priority.mjs` scores recency the same way for a stability-classed unit as for any other.
 
 The extractor may set `proposed-stability-class` when **structural criteria** are clearly met. Structural means: detectable from source provenance (field set by automation actor with no human edit; date past commitment without challenge). Age alone never qualifies.
 
@@ -297,7 +299,7 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
    Mode B/C blocks landing in `inbox.md` can be pre-flighted mechanically:
    `node <plugin-root>/skills/core/scripts/check-inbox.mjs <project>` validates block structure
-   (required draft fields, valid `mode`, `judgment-needed` on Mode C, no graduation-only
+   (required pre-graduation fields, valid `mode`, `judgment-needed` on Mode C, no graduation-only
    fields). Extractors get a pass/fail signal at write time instead of waiting for a human
    session; `/process-memory` runs the same check before its inbox walk.
 
@@ -326,7 +328,7 @@ Installations treat the model-assignment matrix (`references/model-assignments.m
 
 ## 7. Monitoring contract
 
-The orchestration skill writes a structured log of every source pull. This enables `/finalize` and other hygiene passes to surface monitoring signals.
+The orchestration skill writes a structured log of every source pull. This enables `/process-memory` and other hygiene passes to surface monitoring signals.
 
 ### Location
 

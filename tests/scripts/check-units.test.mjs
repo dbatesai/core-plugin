@@ -1,13 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
   checkIntegrity, checkSchema, exitCode, iterActiveUnits, iterAllUnitFiles,
-  isExternalRef, BENIGN_WARN_CHECKS, VALID_EDGE_TYPES, EDGE_TYPE_NORMALIZE,
+  isExternalRef, BENIGN_WARN_CHECKS, VALID_EDGE_TYPES, VALID_STATUSES, EDGE_TYPE_NORMALIZE,
   resolveChecks, checkLinkDensity,
 } from '../../plugins/core/skills/core/scripts/check-units.mjs';
+import { INBOX_DRAFT_STATUS } from '../../plugins/core/skills/core/scripts/unit-vocab.mjs';
 
 function withStore(fn) {
   const root = mkdtempSync(join(tmpdir(), 'check-units-'));
@@ -505,3 +507,84 @@ test('MEM-014: an oversized unit WARNs unit-oversize (benign)', () => withStore(
   assert.equal(report.some(f => f.check === 'unit-oversize' && f.unit_id === 'small'), false);
   assert.ok(BENIGN_WARN_CHECKS.has('unit-oversize'), 'advisory — never blocks retrieval or startup');
 }));
+
+// ---------- canonical vocabulary is the contract ----------
+//
+// unit-vocab.mjs is the one place the unit vocabulary is defined. Two ways it
+// can be bypassed without any validator going red: shipped prose can prescribe
+// a status or edge type the vocabulary does not carry, and a consumer can
+// hand-copy the sets instead of importing them. Both produce state that is
+// syntactically accepted and semantically incompatible, so both are guarded here.
+
+const SHIPPED = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
+
+function shippedMarkdown(dir = SHIPPED, out = []) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) shippedMarkdown(p, out);
+    else if (e.name.endsWith('.md')) out.push(p);
+  }
+  return out;
+}
+
+test('shipped prose prescribes only canonical statuses', () => {
+  // The unit-store vocabulary plus the one inbox-only in-flight value. Anything
+  // else in shipped prose is a status an extractor would copy and the validators
+  // would then reject.
+  const declarable = new Set([...VALID_STATUSES, INBOX_DRAFT_STATUS]);
+  const offenders = [];
+  for (const file of shippedMarkdown()) {
+    const lines = readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, i) => {
+      // A frontmatter-shaped declaration: `status: <value>` at the start of a
+      // line, which is what an extractor or unit author copies verbatim.
+      const m = /^status:\s*([a-z-]+)/.exec(line.trim());
+      if (m && !declarable.has(m[1])) offenders.push(`${file}:${i + 1} status: ${m[1]}`);
+    });
+  }
+  assert.deepEqual(offenders, [], `shipped prose declares statuses outside unit-vocab: ${offenders.join(' | ')}`);
+});
+
+test('the external-source graduation edge list names only canonical edge types', () => {
+  const framework = join(SHIPPED, 'core', 'references', 'external-sources', 'source-registration-framework.md');
+  const text = readFileSync(framework, 'utf8');
+  const m = /additional edges \(([^)]+)\)/.exec(text);
+  assert.ok(m, 'graduation edge list missing from the source-registration framework');
+  const named = [...m[1].matchAll(/`([a-z][a-z-]*)`/g)].map((x) => x[1]);
+  assert.ok(named.length >= 2, 'expected the graduation sentence to name edge types');
+  for (const edge of named) {
+    assert.ok(VALID_EDGE_TYPES.has(edge), `graduation prescribes edge type "${edge}", which unit-vocab does not carry`);
+  }
+});
+
+test('a noncanonical status is rejected non-zero and mutates nothing', () => withStore((memories) => {
+  const path = join(memories, 'obs-draft.md');
+  const bytes = unit({ id: 'obs-draft', type: 'observation' }).replace('status: active', 'status: draft');
+  writeFileSync(path, bytes);
+
+  const report = [];
+  checkSchema(iterActiveUnits(memories), memories, report);
+
+  assert.ok(report.some(f => f.check === 'status-value' && f.unit_id === 'obs-draft'), 'draft must be reported');
+  assert.notEqual(exitCode(report), 0, 'a noncanonical status must not exit clean');
+  assert.equal(readFileSync(path, 'utf8'), bytes, 'the validator must not rewrite the unit it rejects');
+}));
+
+test('noncanonical edge types are rejected non-zero and mutate nothing', () => {
+  for (const edge of ['contradicts', 'extends']) {
+    withStore((memories) => {
+      const path = join(memories, 'dc-a.md');
+      const bytes = unit({ id: 'dc-a', edges: `edges:\n  - {type: ${edge}, target: dc-b}` });
+      writeFileSync(path, bytes);
+      writeFileSync(join(memories, 'dc-b.md'), unit({ id: 'dc-b' }));
+
+      const report = [];
+      checkSchema(iterActiveUnits(memories), memories, report);
+
+      assert.ok(report.some(f => f.check === 'edge-unknown-type' && f.unit_id === 'dc-a'),
+        `edge type "${edge}" must be reported`);
+      assert.notEqual(exitCode(report), 0, `edge type "${edge}" must not exit clean`);
+      assert.equal(readFileSync(path, 'utf8'), bytes, 'the validator must not rewrite the unit it rejects');
+    });
+  }
+});

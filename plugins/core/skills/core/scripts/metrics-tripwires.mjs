@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * metrics-tripwires.mjs — proactive degradation surfacing (v3.14.0 Link 5).
+ * metrics-tripwires.mjs — proactive degradation surfacing (evidence chain, Link 5).
  *
  * A cheap session-start check over PINNED scorecards + capture health — never
  * live recomputation. Healthy → total silence (the readiness-only-escalations
@@ -20,7 +20,11 @@
  *                            consecutive failures (the streak catches a
  *                            hard-dead recorder in a short session).
  *   capture-dead           — retrieval rows exist but zero evidence rows were
- *                            captured: the flight recorder itself is down.
+ *                            captured while capture was ON: the flight recorder
+ *                            itself is down.
+ *   capture-disabled       — the same silence with capture deliberately OFF:
+ *                            a marker naming the opt-out (and any failure count
+ *                            from before it), never a fault.
  *
  * Ships with the plugin by design; .mjs only.
  */
@@ -28,17 +32,23 @@
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { latestScorecards } from './scorecard.mjs';
-import { readCaptureHealth } from './turn-capture.mjs';
+import { readCaptureHealth, turnCaptureEnabled } from './turn-capture.mjs';
 
 // The single source of truth for every threshold. Stamped into scorecards.
 export const TRIPWIRE_THRESHOLDS = Object.freeze({
   self_test_drop: 0.05,            // headline points (0–1 scale)
+  self_test_floor: 0.5,            // headline below this is flagged at any trend, incl. flat
   miss_trend_scorecards: 3,        // consecutive cards with strictly rising miss rate
   storage_gap_recurrence: 2,       // cards (of the recent window) with any storage gap
   capture_failure_rate: 0.10,      // failures/attempts …
-  capture_failure_min_attempts: 20, // … only meaningful at or above this volume (Agy)
-  capture_consecutive_failures: 3, // … or this streak, regardless of volume (Agy)
+  capture_failure_min_attempts: 20, // … only meaningful at or above this volume
+  capture_consecutive_failures: 3, // … or this streak, regardless of volume
+  capture_coverage_min: 0.5,       // captured/hook-retrieved, per window …
+  capture_coverage_min_volume: 20, // … only meaningful at or above this volume
+  scorecard_stale_days: 14,        // no pinned conclusion in this long = chain silent
 });
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 function missRate(cardRow) {
   const h = cardRow && cardRow.hindsight;
@@ -51,7 +61,7 @@ function missRate(cardRow) {
  * { healthy, tripped: [{kind, message}] }. Never throws; an unreadable
  * history is healthy silence (nothing trustworthy to alarm about).
  */
-export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWIRE_THRESHOLDS } = {}) {
+export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWIRE_THRESHOLDS, now = new Date() } = {}) {
   const tripped = [];
   let cards = [];
   try { cards = latestScorecards(projectDir, 5, { workspaceId }); } catch { cards = []; }
@@ -66,6 +76,28 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
       tripped.push({
         kind: 'self-test-drop',
         message: `The memory system's own blind test scored ${(cur * 100).toFixed(0)}%, down ${((prev - cur) * 100).toFixed(0)} points since the last check — worth a look before trusting recall on older topics.`,
+      });
+    }
+  }
+
+  // 1b. Self-test level, independent of trend. Wire 1 compares against the
+  // previous card, so a headline that has been low since the first round is
+  // "steady" and trips nothing — the door then reports earned quiet over a
+  // number that never earned it. A differential alarm cannot report a failure
+  // that predates it, so the level is checked on its own.
+  //
+  // This flags; it does not gate. The blind round is a directional snapshot
+  // with a self-authored answer key and no preregistered pass mark, so the
+  // message says the level is low and worth reading, never that a bar was
+  // missed. Wire 1 still owns the drop case, and its message is the more
+  // specific one, so a card that is both low and falling reports only that.
+  {
+    const cur = newest.self_test && newest.self_test.headline;
+    const droppedAlready = tripped.some((t) => t.kind === 'self-test-drop');
+    if (typeof cur === 'number' && cur < thresholds.self_test_floor && !droppedAlready) {
+      tripped.push({
+        kind: 'self-test-low',
+        message: `The memory system's own blind test scored ${(cur * 100).toFixed(0)}% — it retrieves the right memory for fewer than half the questions it sets itself. Open the full report for the per-question-type breakdown before trusting recall on anything but literal wording.`,
       });
     }
   }
@@ -95,9 +127,16 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
     });
   }
 
-  // 4. Capture failures — Agy's floors: rate needs volume; a streak never does.
+  // Deliberate opt-out and lost capture produce the same silence, and only one
+  // of them is a fault. The card records which; a card from before the field
+  // existed falls back to the live gate.
+  const captureEnabled = typeof newest.capture_enabled === 'boolean'
+    ? newest.capture_enabled
+    : turnCaptureEnabled({ project: projectDir });
+
+  // 4. Capture failures — two floors: the rate needs volume; a streak never does.
   const health = newest.capture_health || readCaptureHealth(projectDir, { workspaceId });
-  if (health && typeof health.attempts === 'number') {
+  if (captureEnabled && health && typeof health.attempts === 'number') {
     const streak = (health.consecutive_failures || 0) >= thresholds.capture_consecutive_failures;
     const rate = health.attempts >= thresholds.capture_failure_min_attempts
       && health.failures / health.attempts > thresholds.capture_failure_rate;
@@ -110,12 +149,57 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
   }
 
   // 5. Flight recorder dead: retrieval happening, nothing being captured.
+  // Counted over the window this card covers. A cumulative total can never
+  // return to zero, so any past volume — a demo run, an old session — would
+  // permanently mask a recorder that has since gone silent.
   const vol = newest.volumes || {};
-  if ((vol.retrieval_rows || 0) > 0 && (vol.turns_captured || 0) === 0) {
+  const capturedWindow = vol.turns_captured_window;
+  const retrievedWindow = vol.retrieval_rows_window;
+  const windowed = typeof capturedWindow === 'number' && typeof retrievedWindow === 'number';
+  const deadNow = windowed
+    ? retrievedWindow > 0 && capturedWindow === 0
+    : (vol.retrieval_rows || 0) > 0 && (vol.turns_captured || 0) === 0;
+  if (deadNow && !captureEnabled) {
+    // The same absence, told truthfully: an opt-out, plus whatever failure
+    // count the recorder logged before it was switched off. Reported only where
+    // the absence would otherwise be read as a measurement.
+    const failures = (health && health.failures) || 0;
+    tripped.push({
+      kind: 'capture-disabled',
+      message: `Turn evidence capture is off for this project, so the memory-quality numbers cover only what was recorded before it was turned off${failures ? ` (${failures} recorded write failure${failures === 1 ? '' : 's'} from before that)` : ''} — your opt-out, not a fault.`,
+    });
+  } else if (deadNow) {
     tripped.push({
       kind: 'capture-dead',
-      message: 'Memory retrieval is running but no turn evidence is being recorded at all — if you did not turn capture off yourself, the recorder is silently broken.',
+      message: 'Memory retrieval is running but no turn evidence is being recorded at all — capture is on for this project, so the recorder is silently broken.',
     });
+  }
+
+  // 6. Partial silence: the recorder runs but misses most turns. Compared only
+  // against hook-triggered retrievals, the ones that have a capture counterpart.
+  const hookWindow = vol.hook_retrieval_rows_window;
+  if (captureEnabled && !deadNow && typeof capturedWindow === 'number' && typeof hookWindow === 'number'
+      && hookWindow >= thresholds.capture_coverage_min_volume) {
+    const coverage = capturedWindow / hookWindow;
+    if (coverage < thresholds.capture_coverage_min) {
+      tripped.push({
+        kind: 'capture-coverage',
+        message: `Turn evidence is only being recorded for ${Math.round(coverage * 100)}% of memory lookups — the quality numbers below are based on a fraction of what actually happened.`,
+      });
+    }
+  }
+
+  // 7. The chain itself stopped. Every wire above needs a fresh conclusion to
+  // read; this is the one that fires when no fresh conclusion is arriving.
+  const newestTs = Date.parse(String(newest.ts || ''));
+  if (Number.isFinite(newestTs)) {
+    const ageDays = (now.getTime() - newestTs) / DAY_MS;
+    if (ageDays >= thresholds.scorecard_stale_days) {
+      tripped.push({
+        kind: 'scorecard-stale',
+        message: `The memory health numbers have not updated in ${Math.floor(ageDays)} days — the checks that produce them may have stopped running.`,
+      });
+    }
   }
 
   return { healthy: tripped.length === 0, tripped };

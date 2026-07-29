@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
-# packaged-install-smoke.sh — prove the shipped hooks work from the INSTALLED
-# artifact, not the source tree (Gate 0: installed ≠ source). Builds the package
-# the way the marketplace delivers it (git archive of plugins/core — committed
-# files ONLY, so an untracked working-tree file can't fake a pass), sets
-# CLAUDE_PLUGIN_ROOT to that copy, and smokes all three lifecycle hooks against a
-# scratch store. Touches nothing real: no live settings, no real project, no
-# network, no live headless close. Re-runnable; prints PASS/FAIL per check.
+# source-package-smoke.sh — prove the shipped hooks work from a package built
+# out of the SOURCE tree, not from the source tree in place. It builds the
+# package the way the marketplace delivers it (git archive of plugins/core —
+# committed files ONLY, so an untracked working-tree file can't fake a pass),
+# sets CLAUDE_PLUGIN_ROOT to that copy, and smokes all three lifecycle hooks
+# against a scratch store.
 #
-# COMMITTED procedure (Train A A7, Crest closure program): lives in tests/smoke/
-# (never ships — package hygiene below asserts tests/ stays out of the artifact),
-# self-locates its repo, prints its own sha256 so the evidence receipt can pin
-# the exact procedure that ran, and runs in CI (.github/workflows/ci.yml,
-# packaged-install-smoke job — full-history checkout so the rollback leg can
-# build the previous release tag).
+# What it does NOT prove: that either live installed cache carries this build.
+# A fresh source package and an installed cache are separate identities; the
+# installed one is checked by verify-release-identity.mjs --installed. Touches
+# nothing real: no live settings, no real project, no network, no live headless
+# close. Re-runnable; prints PASS/FAIL per check.
 #
-# Usage: bash tests/smoke/packaged-install-smoke.sh [<core-plugin-repo>]
+# Lives in tests/smoke/ and never ships — the package hygiene checks below
+# assert tests/ stays out of the artifact. Self-locates its repo, prints its own
+# sha256 so an evidence receipt can pin the exact procedure that ran, and runs
+# in CI (.github/workflows/ci.yml, source-package-smoke job — full-history
+# checkout so the rollback leg can build the immediate-prior release tag).
+#
+# Usage: bash tests/smoke/source-package-smoke.sh [<core-plugin-repo>]
 set -u
 REPO="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 FIXTURE="$REPO/tests/fixtures/nested-store"
@@ -45,19 +49,19 @@ find "$PKG" -name '*.test.mjs' | grep -q . && bad "*.test.mjs leaked into packag
 echo "== Clone a scratch memory store (never a real project) =="
 cp -r "$FIXTURE" "$STORE" && ok "scratch store ready" || bad "fixture clone failed"
 
-echo "== SessionStart hook (from installed path) =="
+echo "== SessionStart hook (from the packaged path) =="
 OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null node "$HOOKS/session-start-hook.mjs" 2>/dev/null)"
 echo "$OUT" | grep -q '`/core`' && ok "injects the /core directive" || bad "no /core directive (got: $OUT)"
 
-echo "== SessionStart AUTHORITY (Hale §5): hostile HOME cannot redirect the first action =="
+echo "== SessionStart AUTHORITY: hostile HOME cannot redirect the first action =="
 EVIL="$SCRATCH/attacker-home"; mkdir -p "$EVIL/.claude"
 printf '{"env":{"CORE_AUTOSTART_SKILL":"/evil:entry","CORE_AUTOSTART_ALLOWED_SKILLS":"/evil:entry"}}' > "$EVIL/.claude/settings.json"
 OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null HOME="$EVIL" USERPROFILE="$EVIL" CORE_AUTOSTART_SKILL='/evil:entry' node "$HOOKS/session-start-hook.mjs" 2>/dev/null)"
 if echo "$OUT" | grep -q '`/core`' && ! echo "$OUT" | grep -q '/evil:entry'; then ok "attacker skill rejected, fell back to /core"; else bad "AUTHORITY BYPASS: $OUT"; fi
 
-echo "== UserPromptSubmit hook: retrieval from installed path, tier label reaches output =="
+echo "== UserPromptSubmit hook: retrieval from the packaged path, tier label reaches output =="
 OUT="$(printf '{"prompt":"quokka incident","cwd":"%s"}' "$STORE" | CLAUDE_PLUGIN_ROOT="$PKG" CORE_RETRIEVAL_STORE="$STORE" node "$HOOKS/retrieve-context-hook.mjs" 2>/dev/null)"
-echo "$OUT" | grep -q 'obs-nested-note' && ok "nested unit retrieved from installed artifact" || bad "nested unit not retrieved (got: $OUT)"
+echo "$OUT" | grep -q 'obs-nested-note' && ok "nested unit retrieved from the packaged artifact" || bad "nested unit not retrieved from the packaged artifact (got: $OUT)"
 echo "$OUT" | grep -q 'obs-nested-note \[observation\]' && ok "authority tier reaches the injected context" || bad "tier label stripped (got: $OUT)"
 
 echo "== UserPromptSubmit hook: no store in cwd → no retrieval, no side effect =="
@@ -65,34 +69,58 @@ EMPTY="$SCRATCH/empty"; mkdir -p "$EMPTY"
 OUT="$(printf '{"prompt":"anything","cwd":"%s"}' "$EMPTY" | CLAUDE_PLUGIN_ROOT="$PKG" CORE_RETRIEVAL_STORE="$EMPTY" node "$HOOKS/retrieve-context-hook.mjs" 2>/dev/null)"
 [ -z "$OUT" ] && [ ! -e "$EMPTY/_memories" ] && ok "no store → empty output, no littering" || bad "wrote into a store-less dir or emitted output"
 
-echo "== SessionEnd hook: loads from installed path (full import chain) + honors kill switch =="
+echo "== SessionEnd hook: loads from the packaged path (full import chain) + honors kill switch =="
 OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null CORE_AUTO_CLOSE=0 node "$HOOKS/close-pass-hook.mjs" 2>&1; echo "rc=$?")"
 echo "$OUT" | grep -q 'rc=0' && ok "close hook loads (imports resolve in package) + kill switch exits clean" || bad "close hook failed to load/exit (got: $OUT)"
 
-echo "== Rollback / version round-trip: a store written by the NEW version, read by the OLD release, then the NEW version again =="
-# The real downgrade risk: vN writes an index with path/tier/content-sig; the user
-# rolls back to vN-1; vN-1 must not crash or resurrect; then re-upgrading must
-# regenerate cleanly (no permanent corruption from a version round-trip).
+echo "== Rollback / version round-trip: a store written by THIS version, read by the immediate-prior release, then this version again =="
+# The real downgrade risk: this version writes an index with path/tier/content-sig;
+# the user rolls back one release; that release must still ANSWER — a named unit,
+# not an empty list — without reporting units the store does not hold; then
+# re-upgrading must regenerate cleanly (no permanent corruption from a round-trip).
 ROLLSTORE="$SCRATCH/rollback-store"; cp -r "$FIXTURE" "$ROLLSTORE"
 NEWGEN="$PKG/skills/core/scripts/generate-summary-index.mjs"
 node "$NEWGEN" "$ROLLSTORE" >/dev/null 2>&1
 NEWFIELDS="$(node -e "const i=require('$ROLLSTORE/_memories/_lib/unit-summaries.json');console.log((i.units[0].path&&i.units[0].tier)?'ok':'missing')" 2>/dev/null)"
-[ "$NEWFIELDS" = "ok" ] && ok "new version wrote a path/tier index" || bad "new index missing path/tier"
-# Build the previous release (v3.10.0) the same way and read the new store with it.
-PREVTAG="$(git -C "$REPO" tag | grep -E '^v3\.10\.0$' | head -1)"
-if [ -n "$PREVTAG" ]; then
+[ "$NEWFIELDS" = "ok" ] && ok "this version wrote a path/tier index" || bad "index missing path/tier"
+
+# The immediate-prior release is the greatest release tag below the version being
+# packaged — derived, so the leg keeps testing the compatibility step users
+# actually take instead of a tag that ages out.
+CURVER="$(node -e "process.stdout.write(require('$PKG/.claude-plugin/plugin.json').version)" 2>/dev/null)"
+PREVTAG="$( { git -C "$REPO" tag --list 'v[0-9]*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'; echo "v$CURVER"; } \
+  | sort -V -u | awk -v cur="v$CURVER" '$0==cur{print prev; exit} {prev=$0}' )"
+if [ -z "$PREVTAG" ]; then
+  bad "no release tag below v$CURVER — the rollback leg has nothing to downgrade to"
+else
+  echo "  packaging v$CURVER; immediate-prior release: $PREVTAG"
   PREVPKG="$SCRATCH/prev-plugin-root"; mkdir -p "$PREVPKG"
   git -C "$REPO" archive "$PREVTAG:plugins/core" | tar -x -C "$PREVPKG"
-  OUT="$(node -e "import('$PREVPKG/skills/core/scripts/retrieve-context.mjs').then(m=>{const r=m.retrieveContext('quokka incident','$ROLLSTORE');console.log('rc-ok:'+JSON.stringify(r.map(x=>x.id)))}).catch(e=>console.log('CRASH:'+e.message))" 2>&1)"
-  echo "$OUT" | grep -q 'rc-ok:' && ok "$PREVTAG retriever reads the new-version store without crashing ($OUT)" || bad "old retriever crashed on new store: $OUT"
-  echo "$OUT" | grep -q 'obs-nested-note' && bad "old retriever resurrected a nested unit it should not reach" || ok "no resurrection on downgrade"
-  # Re-upgrade: new version reads the (now old-format-rewritten) store and regenerates.
+
+  # A named, non-empty answer. `rc-ok:[]` fails this check: a release that
+  # retrieves nothing has not demonstrated compatibility, only survival.
+  OUT="$(node -e "import('$PREVPKG/skills/core/scripts/retrieve-context.mjs').then(m=>{const r=m.retrieveContext('alpha subsystem rollout','$ROLLSTORE');console.log('rc-ok:'+JSON.stringify(r.map(x=>x.id)))}).catch(e=>console.log('CRASH:'+e.message))" 2>&1)"
+  case "$OUT" in
+    rc-ok:*) ok "$PREVTAG retriever reads the store this version wrote without crashing" ;;
+    *)       bad "$PREVTAG retriever crashed on the new store: $OUT" ;;
+  esac
+  echo "$OUT" | grep -q '"dc-strong"' \
+    && ok "$PREVTAG still returns the named unit the query asks for ($OUT)" \
+    || bad "$PREVTAG returned no named result — an empty answer is not compatibility ($OUT)"
+
+  # Every id it reports must correspond to a unit the store actually holds.
+  PHANTOM=""
+  for id in $(printf '%s' "$OUT" | sed 's/^rc-ok://' | tr -d '[]"' | tr ',' ' '); do
+    find "$ROLLSTORE/_memories" -name "$id.md" | grep -q . || PHANTOM="$PHANTOM $id"
+  done
+  [ -z "$PHANTOM" ] && ok "no phantom units on downgrade" || bad "$PREVTAG reported units the store does not hold:$PHANTOM"
+
+  # Re-upgrade: this version reads the round-tripped store and finds a unit only
+  # it can reach, proving the downgrade left nothing permanently broken.
   OUT="$(node -e "import('$NEWGEN').then(async m=>{const {retrieveContext}=await import('$PKG/skills/core/scripts/retrieve-context.mjs');const r=retrieveContext('quokka incident','$ROLLSTORE');console.log('up:'+JSON.stringify(r.map(x=>x.id)))})" 2>&1)"
   echo "$OUT" | grep -q 'obs-nested-note' && ok "re-upgrade regenerates cleanly, nested unit findable again (no round-trip corruption)" || bad "re-upgrade did not recover: $OUT"
-else
-  echo "  SKIP  v3.10.0 tag not found — rollback round-trip not run"
 fi
 
 echo
-echo "== packaged-install smoke @ $COMMIT: $pass passed, $fail failed =="
+echo "== source-package smoke @ $COMMIT: $pass passed, $fail failed =="
 [ "$fail" -eq 0 ]

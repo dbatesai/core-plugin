@@ -42,7 +42,7 @@ function runStart(env) {
   catch { /* hook exits 0; ignore */ }
 }
 
-function runClose(payload, env) {
+function spawnCloseHook(payload, env) {
   try {
     execFileSync('node', [CLOSE_HOOK], {
       input: JSON.stringify(payload),
@@ -104,7 +104,7 @@ test('SessionEnd recursion guard logs reason=recursion-guard (proves the child f
   const log = tmpLog();
   const store = mkdtempSync(join(tmpdir(), 'hook-log-store-'));
   mkdirSync(join(store, '_memories'), { recursive: true });
-  runClose({ cwd: store, reason: 'other', transcript_path: '/x' },
+  spawnCloseHook({ cwd: store, reason: 'other', transcript_path: '/x' },
     { CORE_HOOKS_LOG_FILE: log, CORE_CLOSE_PASS_ACTIVE: '1' });
   const events = readLog(log);
   assert.ok(events.some(e => e.hook === 'session-end' && e.reason === 'recursion-guard'),
@@ -112,23 +112,22 @@ test('SessionEnd recursion guard logs reason=recursion-guard (proves the child f
   rmSync(store, { recursive: true, force: true });
 });
 
-// The "trivial closed session → don't spawn" decision (the nothing-owed path) is now
-// asserted IN-PROCESS via shouldSpawn. It can't be exercised through the hook subprocess
-// anymore: the hardened trust gate (trustedHome + resolveIndexPath) checks the REAL
-// ~/.core registry, which a subprocess can't redirect via env, so a temp store can never
-// reach the nothing-owed branch — it fails closed at not-registered-workspace (covered
-// by the next test). Security anchors are DI-tested in-process; see the close-authority spec.
-test('shouldSpawn: a closed store with nothing owed does not spawn (nothing-owed decision)', async () => {
-  const { shouldSpawn, CLOSE_OPS } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+// The "trivial closed session owes nothing" invariant is asserted IN-PROCESS via
+// detectCloseState. It can't be exercised through the hook subprocess: the hardened
+// trust gate (trustedHome + resolveIndexPath) checks the REAL ~/.core registry, which
+// a subprocess can't redirect via env, so a temp store fails closed at
+// not-registered-workspace (covered by the next test).
+test('detectCloseState: a closed store with nothing owed reads closed — no catch-up work exists', async () => {
+  const { detectCloseState, CLOSE_OPS } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
   const store = mkdtempSync(join(tmpdir(), 'hook-log-closed-'));
   mkdirSync(join(store, '_memories'), { recursive: true });
   const ops = CLOSE_OPS.join(',');
   execFileSync('node', [CLOSE_PASS, 'begin', store, '--session', 's', '--ops', ops]);
   for (const op of CLOSE_OPS) execFileSync('node', [CLOSE_PASS, 'record', store, '--op', op, '--status', 'done']);
   execFileSync('node', [CLOSE_PASS, 'finish', store, '--session', 's']);
-  // didWork false, marker closed, nothing owed → must not spawn.
-  assert.equal(shouldSpawn(store, { didWork: false, allOps: CLOSE_OPS }), false,
-    'a trivial closed session must not spawn a close agent');
+  const det = detectCloseState(store, { allOps: CLOSE_OPS });
+  assert.equal(det.state, 'closed', 'a fully-recorded finished close owes nothing');
+  assert.deepEqual(det.owed, []);
   rmSync(store, { recursive: true, force: true });
 });
 
@@ -138,7 +137,7 @@ test('SessionEnd on an UNREGISTERED dir (attacker _memories/) skips — security
   mkdirSync(join(store, '_memories'), { recursive: true }); // looks like a CORE store but isn't registered
   const emptyIdx = join(store, 'idx.json');
   writeFileSync(emptyIdx, '[]');
-  runClose({ cwd: store, reason: 'other', transcript_path: '/x' }, { CORE_HOOKS_LOG_FILE: log, CORE_CLOSE_INDEX: emptyIdx });
+  spawnCloseHook({ cwd: store, reason: 'other', transcript_path: '/x' }, { CORE_HOOKS_LOG_FILE: log, CORE_CLOSE_INDEX: emptyIdx });
   const events = readLog(log);
   assert.ok(events.some(e => e.reason === 'not-registered-workspace'),
     'an unregistered dir must be rejected even with a _memories/ folder');

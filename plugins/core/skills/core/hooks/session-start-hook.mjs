@@ -88,9 +88,9 @@ export function buildDirective(skill) {
 }
 
 function main() {
-  // Recursion guard: the headless close agent (close-pass-hook spawns `claude -p "/finalize"`
-  // with CORE_CLOSE_PASS_ACTIVE=1) must NOT be told to run /core first — it has one job,
-  // /finalize. Without this, the close child gets the /core directive and never cleanly closes.
+  // A session running under CORE_CLOSE_PASS_ACTIVE=1 is discharging a close and must NOT be
+  // told to run /core first — it has one job. Without this, such a session takes the /core
+  // directive and never cleanly closes.
   if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
     logHookEvent({ hook: 'session-start', action: 'skip', reason: 'close-pass-child' });
     return 0;

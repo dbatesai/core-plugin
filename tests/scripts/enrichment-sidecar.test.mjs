@@ -83,3 +83,66 @@ test('the unit-write protocol requires different-family enrichment and the gover
   assert.match(protocol, /enrichment-sidecar\.mjs/);
   assert.match(protocol, /Never copy the authored body or hidden evaluation queries/i);
 });
+
+// Barrier-controlled lost-update proof. Every writer read the whole shared
+// sidecar, added one record to that snapshot, and atomically replaced the file.
+// Atomic replacement prevents torn bytes; it provides no read-modify-write
+// exclusion, so concurrent writers overwrite each other's records while each
+// command reports success. The barrier makes all reads land in one window
+// instead of hoping the scheduler interleaves them.
+test('barrier: concurrent writers all survive — no lost enrichment record', async () => {
+  const { spawn } = await import('node:child_process');
+  const { existsSync, mkdirSync: mkdir } = await import('node:fs');
+  const root = store();
+  const WRITERS = 12;
+  const unitFor = (i) => `race-${i}.md`;
+  for (let i = 0; i < WRITERS; i++) {
+    writeFileSync(join(root, '_memories', unitFor(i)),
+      `---\nid: race-${i}\ntype: decision\ncreated: 2026-07-28\n---\n\n# race ${i}\nbody ${i}\n`);
+  }
+  writeEnrichment(root, payload); // an existing record the racers must not erase
+
+  const barrier = join(root, '_barrier');
+  mkdir(barrier, { recursive: true });
+  const go = join(barrier, 'go');
+  const modUrl = new URL('../../plugins/core/skills/core/scripts/enrichment-sidecar.mjs', import.meta.url).href;
+
+  const child = (i) => new Promise((res) => {
+    const src = `
+      import { existsSync, writeFileSync } from 'node:fs';
+      import { writeEnrichment } from ${JSON.stringify(modUrl)};
+      writeFileSync(${JSON.stringify(join(barrier, 'ready-'))} + ${i}, '1');
+      // Busy-wait on the barrier: every writer must take its READ after the
+      // gate opens, so the snapshots genuinely overlap.
+      while (!existsSync(${JSON.stringify(go)})) { /* spin */ }
+      writeEnrichment(${JSON.stringify(root)}, {
+        unitPath: ${JSON.stringify('')} + 'race-' + ${i} + '.md',
+        writerModelFamily: 'fable', answerModelFamily: 'opus',
+        aliases: ['alias-' + ${i}],
+      });
+    `;
+    const c = spawn(process.execPath, ['--input-type=module', '-e', src], { timeout: 30000 });
+    let err = '';
+    c.stderr.on('data', (d) => { err += d; });
+    c.on('close', (status) => res({ status, err }));
+  });
+
+  const runs = Array.from({ length: WRITERS }, (_, i) => child(i));
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    const ready = Array.from({ length: WRITERS }, (_, i) => existsSync(join(barrier, `ready-${i}`)));
+    if (ready.every(Boolean)) break;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  writeFileSync(go, '1');
+  const results = await Promise.all(runs);
+  for (const r of results) assert.equal(r.status, 0, `a writer failed: ${r.err}`);
+
+  const raw = JSON.parse(readFileSync(enrichmentSidecarPath(root), 'utf8'));
+  const ids = new Set(Object.values(raw.records).map((r) => r.unit_id));
+  for (let i = 0; i < WRITERS; i++) {
+    assert.ok(ids.has(`race-${i}`), `race-${i} was lost — a concurrent writer overwrote it`);
+  }
+  assert.ok(ids.has('values-heritage'), 'the pre-existing record survived too');
+  rmSync(root, { recursive: true, force: true });
+});

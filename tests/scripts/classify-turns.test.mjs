@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -228,4 +228,23 @@ test('MET-005: a term in a unit frontmatter or first heading (not its filename) 
 test('MET-004/005: predicate changes bumped the classifier version (R-1 calibration invalidation)', () => {
   assert.notEqual(CLASSIFIER_VERSION, '0.2.0');
   assert.equal(CLASSIFIER_VERSION, '0.3.0');
+});
+
+test('classified-store retention: date files older than the window are deleted, the window is validated', async () => {
+  const { runClassifiedRetention } = await import('../../plugins/core/skills/core/scripts/classify-turns.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'classified-retention-'));
+  try {
+    const dir = join(home, '.core', 'workspaces', 'ws-x', 'metrics', 'classified');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '2026-01-01.jsonl'), '{"state":"ok"}\n');
+    writeFileSync(join(dir, '2026-07-27.jsonl'), '{"state":"ok"}\n');
+
+    const bad = runClassifiedRetention('.', { workspaceId: 'ws-x', home, windowDays: -5, now: new Date('2026-07-28T00:00:00Z') });
+    assert.equal(bad.ran, false, 'a non-positive window must refuse before naming candidates');
+
+    const r = runClassifiedRetention('.', { workspaceId: 'ws-x', home, windowDays: 30, now: new Date('2026-07-28T00:00:00Z') });
+    assert.ok(r.ran);
+    assert.ok(!existsSync(join(dir, '2026-01-01.jsonl')), 'the stale file is deleted');
+    assert.ok(existsSync(join(dir, '2026-07-27.jsonl')), 'the in-window file stays');
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

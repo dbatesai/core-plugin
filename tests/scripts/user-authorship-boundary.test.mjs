@@ -33,6 +33,7 @@ import {
 } from '../../plugins/core/skills/core/scripts/lifecycle-core.mjs';
 import {
   recordSessionStart, detectStore, classifyFileLifecycle, createFile, stampCreatedBaseline,
+  adoptExistingStore,
 } from '../../plugins/core/skills/core/scripts/lifecycle-detect.mjs';
 
 // Windows contract: fileURLToPath, never .pathname (which yields /D:/... and
@@ -448,4 +449,69 @@ test('point2: writeGuardDecision refuses on outside-changed and no-cache-baselin
   // Refuse on a real divergence or an unprovable stamp.
   assert.equal(writeGuardDecision({ cachedStamp: stamp, classification: 'outside-changed', projectDir: '/x', absPath: '/x/PROJECT.md' }).proceed, false);
   assert.equal(writeGuardDecision({ cachedStamp: stamp, classification: 'no-baseline', projectDir: '/x', absPath: '/x/PROJECT.md' }).proceed, false);
+});
+
+// ---------------------------------------------------------------------------
+// adoptExistingStore — the one-time batch-adoption ceremony for a store that
+// predates the stamping seam entirely (every unit is no-baseline on first
+// contact, not because a writer forgot to stamp anything).
+// ---------------------------------------------------------------------------
+
+test('adoptExistingStore: dry-run reports candidates and touches nothing', () => {
+  const { root, project, pm } = setup();
+  try {
+    writeFileSync(pm, '# Project\n\nPre-existing content.\n');
+    writeFileSync(join(project, '_memories', 'dc-1-widget.md'), '# DC-1\n\nPre-existing decision.\n');
+    writeFileSync(join(project, '_memories', 'dc-2-gadget.md'), '# DC-2\n\nAnother pre-existing decision.\n');
+
+    const report = adoptExistingStore(project, { apply: false });
+    assert.equal(report.applied, false);
+    assert.equal(report.candidate_count, 3, 'PROJECT.md + 2 units, all no-baseline');
+
+    // Nothing was stamped — every file still classifies no-baseline.
+    const after = detectStore(project);
+    const stillNoBaseline = after.files.filter(f => f.classification === 'no-baseline');
+    assert.equal(stillNoBaseline.length, 3, 'dry-run must not stamp anything');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('adoptExistingStore: --apply stamps every no-baseline file as of its current bytes, and only those', () => {
+  const { root, home, project, pm } = setup();
+  try {
+    writeFileSync(pm, '# Project\n\nPre-existing content.\n');
+    writeFileSync(join(project, '_memories', 'dc-1-widget.md'), '# DC-1\n\nPre-existing decision.\n');
+    const alreadyStamped = join(project, '_memories', 'dc-2-gadget.md');
+    writeFileSync(alreadyStamped, '# DC-2\n\nAlready-stamped decision.\n');
+    // dc-2 already went through the normal creation path — must be untouched by adoption.
+    stampCreatedBaseline(project, alreadyStamped, { kind: 'unit', now: NOW, home });
+
+    const before = adoptExistingStore(project, { apply: false });
+    assert.equal(before.candidate_count, 2, 'PROJECT.md + dc-1 only; dc-2 already has a baseline');
+
+    const report = adoptExistingStore(project, { apply: true, now: NOW, home });
+    assert.equal(report.applied, true);
+    assert.equal(report.candidate_count, 2);
+    assert.equal(report.stamped_count, 2);
+    assert.equal(report.failed.length, 0);
+
+    const after = detectStore(project);
+    const stillNoBaseline = after.files.filter(f => f.classification === 'no-baseline');
+    assert.equal(stillNoBaseline.length, 0, 'every previously-no-baseline file now has a baseline');
+    const clean = after.files.filter(f => f.classification === 'clean');
+    assert.equal(clean.length, 3, 'PROJECT.md + dc-1 (just adopted) + dc-2 (already stamped) all read clean');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('adoptExistingStore: an edit AFTER adoption is caught as pending-edit, same as any other unit', () => {
+  const { root, home, project, pm } = setup();
+  try {
+    writeFileSync(pm, '# Project\n\nOriginal.\n');
+    adoptExistingStore(project, { apply: true, now: NOW, home });
+
+    // A change to the human-authored region after adoption is a real divergence.
+    writeFileSync(pm, '# Project\n\nUSER EDITED THIS AFTER ADOPTION.\n');
+    const after = detectStore(project);
+    const pmClassified = after.files.find(f => f.path === resolve(pm));
+    assert.equal(pmClassified.classification, 'pending-edit', 'adoption establishes a real baseline, not a permanent bypass');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

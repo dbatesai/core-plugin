@@ -27,9 +27,9 @@
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'anti-anchoring-mechanism';
-// MET-007 honesty: 'v2.9+' became a stale promise — v2.9 through v3.7 all shipped
-// without closing R-17. No version promise until the isolation mechanism is actually
-// scheduled; CLOSURE_REQUIREMENT carries the real bar. The row stays in the startup
+// No target version is promised until the isolation mechanism is actually scheduled —
+// a version here would be a promise nothing enforces. CLOSURE_REQUIREMENT carries the
+// real bar. The row stays in the startup
 // run deliberately: the descriptor's adversarial-run-gate action fail-closes on this
 // capability, and that gate is the row's consumer. Its per-session DEGRADED entries
 // are bounded by the history retention cap and deduped by row_content_hash.

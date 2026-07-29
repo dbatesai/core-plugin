@@ -36,9 +36,13 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { INBOX_DRAFT_STATUS, VALID_CONFIDENCE_LEVELS } from './unit-vocab.mjs';
 
+export { INBOX_DRAFT_STATUS };
 export const VALID_MODES = new Set(['B', 'C']);
-export const VALID_CONFIDENCE = new Set(['sourced', 'inferred', 'reconstructed']);
+// Re-exported from unit-vocab so the inbox schema and the unit schema cannot
+// bless different confidence vocabularies.
+export const VALID_CONFIDENCE = VALID_CONFIDENCE_LEVELS;
 export const REQUIRED_BLOCK_FIELDS = ['id', 'type', 'status', 'source', 'extracted-at', 'confidence-level'];
 export const GRADUATION_ONLY_FIELDS = ['stability-class'];
 
@@ -63,17 +67,22 @@ export function hasSourceAnchor(body) {
   return SOURCE_ANCHOR_PATTERNS.some((re) => re.test(text));
 }
 
-/** Parse inbox.md into { fm, body, line } blocks. Flat key: value frontmatter only. */
-export function parseInboxBlocks(content) {
+/**
+ * Scan inbox.md into blocks plus the line of any unterminated frontmatter fence.
+ * A truncated extractor write opens a fence and never closes it; that is a
+ * reportable structural failure, not the absence of work.
+ */
+function scanInbox(content) {
   const lines = String(content).split(/\r?\n/);
   const blocks = [];
+  let unterminatedAt = null;
   let i = 0;
   while (i < lines.length) {
     if (lines[i].trim() !== '---') { i++; continue; }
     const fmStart = i + 1;
     let j = fmStart;
     while (j < lines.length && lines[j].trim() !== '---') j++;
-    if (j >= lines.length) break; // unterminated fence — not a block
+    if (j >= lines.length) { unterminatedAt = i + 1; break; }
     const fmLines = lines.slice(fmStart, j);
     if (!fmLines.some((l) => /^[A-Za-z0-9_-]+\s*:/.test(l))) { i = j + 1; continue; }
     const fm = {};
@@ -87,7 +96,12 @@ export function parseInboxBlocks(content) {
     blocks.push({ fm, body: body.join('\n').trim(), line: fmStart });
     i = k;
   }
-  return blocks;
+  return { blocks, unterminatedAt };
+}
+
+/** Parse inbox.md into { fm, body, line } blocks. Flat key: value frontmatter only. */
+export function parseInboxBlocks(content) {
+  return scanInbox(content).blocks;
 }
 
 /** Collect unit-id stems already in the project store (top level + observations/). */
@@ -118,7 +132,13 @@ export function checkInbox(projectDir) {
   const content = readFileSync(inboxPath, 'utf8');
   if (!content.trim()) return report;
 
-  const blocks = parseInboxBlocks(content);
+  const { blocks, unterminatedAt } = scanInbox(content);
+  if (unterminatedAt !== null) {
+    report.push({
+      level: 'FAIL', check: 'unterminated-frontmatter', block_id: `line-${unterminatedAt}`,
+      detail: `Frontmatter fence opened at line ${unterminatedAt} is never closed — the file is truncated; everything from that line on is unparsed`,
+    });
+  }
   const storeIds = existingUnitIds(projectDir);
   const seenIds = new Map();
 
@@ -158,8 +178,11 @@ export function checkInbox(projectDir) {
       }
     }
 
-    if (String(b.fm.status || '').trim().toLowerCase() === 'active') {
-      report.push({ level: 'WARN', check: 'status-active', block_id: bid, detail: "Inbox blocks land as draft/pending; 'active' is stamped at graduation" });
+    const blockStatus = String(b.fm.status || '').trim().toLowerCase();
+    if (blockStatus === 'active') {
+      report.push({ level: 'WARN', check: 'status-active', block_id: bid, detail: `Inbox blocks land as '${INBOX_DRAFT_STATUS}'; 'active' is stamped at graduation` });
+    } else if (blockStatus && blockStatus !== INBOX_DRAFT_STATUS) {
+      report.push({ level: 'WARN', check: 'status-value', block_id: bid, detail: `Unknown status '${blockStatus}' (inbox blocks carry '${INBOX_DRAFT_STATUS}'; graduation stamps 'active')` });
     }
 
     if (b.fm.id) {

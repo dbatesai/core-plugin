@@ -40,8 +40,15 @@ import { fileURLToPath } from 'node:url';
 // passes, the detector flags the entry REVIEW OVERDUE so deliberate staging
 // can't rot into permanent exemption. Reviewed at /finalize.
 export const ALLOWLIST = Object.freeze({
+  'orphan-detector.mjs': {
+    reason: 'The reachability gate itself — driven by its test and the release flow, not by any skill at runtime; the session close deliberately runs no development checks.',
+    allowlistDate: '2026-07-28',
+    reviewBy: '2026-10-28',
+  },
+
+
   'retrieval-harness.mjs': {
-    reason: 'Offline Recall@K gold harness (Tier-A; arms trimmed to model-free per the no-local-models rule) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the pre-registered measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
+    reason: 'Offline Recall@K gold harness (Tier-A; arms trimmed to model-free per the no-local-models rule) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the pre-registered measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility, not a runtime dependency.',
     allowlistDate: '2026-07-07',
     reviewBy: '2026-10-07',
   },

@@ -1,7 +1,7 @@
 /**
  * capability-history.mjs — append-only capability-row history with advisory lock.
  *
- * v2.7.0 deliverable (ratified collab consensus, session 52). Stores each
+ * Stores each
  * session's capability rows so drift and regression can be detected across
  * sessions (analyze-capability-drift.mjs is the consumer).
  *
@@ -10,10 +10,9 @@
  *   { observed_at, runner_version, schema_version, workspace_id,
  *     session_id, row_content_hash, row }
  *
- * STORAGE DECISION (HK pushback, HC-accepted with conditions, session 52):
- * JSONL + advisory lock, NOT Maildir. The single-writer-per-workspace
+ * STORAGE: JSONL + advisory lock, NOT Maildir. The single-writer-per-workspace
  * assumption is guarded by an advisory lock with stale recovery, and a
- * two-writer test fixture proves no lost history. See the v2.7 plan §rev.
+ * two-writer test fixture proves no lost history.
  *
  * Retention: byte-cap (default 512KB). On breach, keep the most recent
  * RETENTION_PER_CAPABILITY entries per capability_id; older drop.
@@ -22,7 +21,7 @@
  */
 
 import {
-  readFileSync, existsSync, mkdirSync,
+  readFileSync, existsSync, mkdirSync, chmodSync,
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
@@ -35,6 +34,11 @@ export const RETENTION_PER_CAPABILITY = 80;   // entries kept per capability_id 
 export const LOCK_TIMEOUT_MS = 1000;          // bounded wait (MET-011 — was a 5s spin on the startup path)
 export const LOCK_RETRY_INTERVAL_MS = 25;     // sleep slice between lock-acquire retries
 export const STALE_LOCK_MS = 30000;           // a lock older than 30s is presumed stale
+
+// Capability rows carry workspace paths, session ids, and executable identities — a map
+// of the machine. The store is owner-only, as is the directory holding it.
+const EVIDENCE_FILE_MODE = 0o600;
+const EVIDENCE_DIR_MODE = 0o700;
 
 function historyPath(workspaceId, home = homedir()) {
   return join(home, '.core', 'workspaces', workspaceId, 'capability-history.jsonl');
@@ -162,7 +166,8 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
   const now = opts.now || (() => new Date().toISOString());
   const { file, lock } = resolveStorePaths(workspaceId, opts);
   const dir = dirname(file);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: EVIDENCE_DIR_MODE });
+  try { chmodSync(dir, EVIDENCE_DIR_MODE); } catch { /* pre-existing dir, other owner */ }
 
   const release = acquireLock(lock, opts.lockOpts);
   try {
@@ -186,6 +191,7 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
     // M8: use the shared atomic writer rather than a hand-rolled temp+rename that
     // had no temp-file cleanup on failure (an orphaned .tmp-* per failed append).
     atomicWriteFileSync(file, kept.join('\n') + '\n');
+    try { chmodSync(file, EVIDENCE_FILE_MODE); } catch { /* filesystem without POSIX modes */ }
 
     return { appended: newLines.length, truncated, path: file };
   } finally {
@@ -195,15 +201,23 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
 
 /**
  * Read all history entries for a workspace (parsed). Returns [] if absent.
+ *
+ * Unreadable rows ride back as `.rejected` on the returned array. Dropping them
+ * silently makes a partly-corrupt history indistinguishable from a shorter clean one,
+ * and drift analysis reads that difference as a capability changing.
  */
 export function readHistory(workspaceId, opts = {}) {
   const { file } = resolveStorePaths(workspaceId, opts);
-  if (!existsSync(file)) return [];
-  return readFileSync(file, 'utf8')
-    .split('\n')
-    .filter(l => l.trim())
-    .map(l => { try { return JSON.parse(l); } catch { return null; } })
-    .filter(Boolean);
+  const entries = [];
+  let rejected = 0;
+  if (!existsSync(file)) return Object.assign(entries, { rejected });
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    let parsed;
+    try { parsed = JSON.parse(line); } catch { rejected += 1; continue; }
+    if (parsed) entries.push(parsed); else rejected += 1;
+  }
+  return Object.assign(entries, { rejected });
 }
 
 export { historyPath, lockPath, projectHistoryPath, projectLockPath };

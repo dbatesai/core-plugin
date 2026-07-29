@@ -222,7 +222,7 @@ export function signalF(unit) {
     if (typeof src !== 'string') continue;
     const s = src.toLowerCase();
     if (s.includes('project.md')) surfacesSeen.add('PROJECT.md');
-    else if (s.includes('dm-profile')) surfacesSeen.add('dm-profile');
+    else if (s.includes('agent-profile') || s.includes('dm-profile')) surfacesSeen.add('agent-profile');
     else if (s.includes('summary') || s.includes('handoff')) surfacesSeen.add('summaries');
     else if (s.includes('session')) surfacesSeen.add('sessions');
     else if (s.includes('output') || s.startsWith('outputs/')) surfacesSeen.add('outputs');
@@ -249,7 +249,7 @@ export function signalS(unit) {
     if (typeof src !== 'string') continue;
     const s = src.toLowerCase();
     if (s.includes('project.md')) best = Math.max(best, SOURCE_TYPE_WEIGHTS['PROJECT.md']);
-    else if (s.includes('dm-profile') || s.includes('settings') || s.includes('config')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.configuration);
+    else if (s.includes('agent-profile') || s.includes('dm-profile') || s.includes('settings') || s.includes('config')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.configuration);
     else if (s.includes('swarm-effectiveness') || s.includes('dream-cycle')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.operational);
     else if (s.includes('summary') || s.includes('handoff') || s.includes('output') || s.startsWith('outputs/')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.summary);
     else if (s.includes('session')) best = Math.max(best, SOURCE_TYPE_WEIGHTS.session_log);

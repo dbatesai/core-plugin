@@ -29,6 +29,23 @@
  *      header). Missing the stamp fails CLOSED: the file is HELD and surfaced,
  *      never silently rewritten.
  *
+ *      SECOND, NARROWER exception to "creation time only": `adoptExistingStore`
+ *      (`--adopt-existing-store`) is a one-time, explicitly-invoked ceremony for
+ *      a store that predates the stamping seam entirely — every unit hits
+ *      no-baseline on first contact, not because anyone forgot to stamp
+ *      anything, but because the seam didn't exist yet on that store's
+ *      baseline. It stamps the CURRENT bytes of every currently-no-baseline
+ *      unit as the adoption baseline going forward — the same operation as
+ *      calling `--stamp-created` once per file, just batched, and requiring
+ *      the same explicit `--apply` a human or agent must actually choose to
+ *      pass (dry-run reports the count/list by default). It does NOT decide
+ *      whether those bytes are CORE-authored versus user-authored — same as
+ *      the single-file path, it can't. What it establishes is only "these are
+ *      the bytes as of the adoption moment"; any subsequent divergence is
+ *      caught the same way `pending-edit` catches it for any other unit. This
+ *      is deliberately not automatic and not silent: run it once, on purpose,
+ *      when adopting a pre-existing store into this stamping regime.
+ *
  * Per-file classification (the point-1 enum):
  *   clean          — matches the last CORE baseline byte-for-byte.
  *   generated-only — only the marker-delimited generated region changed
@@ -56,6 +73,7 @@
  * CLI:
  *   node lifecycle-detect.mjs <project> [--record-session-start <id>] [--json]
  *   node lifecycle-detect.mjs <project> --stamp-created <path> [--kind unit|project] [--by <label>]
+ *   node lifecycle-detect.mjs <project> --adopt-existing-store [--apply] [--json]
  *     --record-session-start <id>  Snapshot which user-sensitive files exist NOW
  *                                  (diagnostic hint only — see above).
  *     --stamp-created <path>       Establish the first CORE-authored baseline for
@@ -70,7 +88,7 @@ import { readFileSync, readdirSync, existsSync, mkdirSync, realpathSync } from '
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { readProjectCache, hashText, stampFile } from './state-cache.mjs';
+import { readProjectCache, hashText, stampFile, CACHE_CORRUPT, CACHE_UNREADABLE } from './state-cache.mjs';
 import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBlock } from './hot-section.mjs';
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
 
@@ -239,9 +257,81 @@ export function detectStore(projectDir, { sessionInventory } = {}) {
   return {
     project: root,
     has_session_inventory: !!inv,
+    // A corrupt baseline classifies every file as no-baseline, which reads like
+    // a brand-new store. The status travels with the report so the caller states
+    // UNKNOWN instead of that plausible-but-wrong story.
+    baseline_status: cache.status,
+    baseline_trustworthy: cache.status !== CACHE_CORRUPT && cache.status !== CACHE_UNREADABLE,
     counts: Object.fromEntries(Object.entries(byClass).map(([k, v]) => [k, v.length])),
     needs_attention: needsAttention,
     files,
+  };
+}
+
+/**
+ * adoptExistingStore — the one-time batch-adoption ceremony (see the module
+ * header's second exception). Classifies the whole store exactly like
+ * `detectStore`, then — ONLY when `apply` is true — stamps every currently
+ * `no-baseline` file's CURRENT bytes as its adoption baseline via the same
+ * `stampCreatedBaseline` the single-file `--stamp-created` path uses, tagged
+ * `lastWrittenBy: 'adopt-existing-store'` so the adoption event is
+ * distinguishable in the cache from an ordinary creation stamp.
+ *
+ * Dry-run (`apply` false, the default) touches nothing — it only reports which
+ * files WOULD be adopted, so the caller can narrate the count before anyone
+ * commits to it. This mirrors `--stamp-created`'s own honest failure
+ * reporting: a file that fails to stamp is listed under `failed`, not silently
+ * dropped, and the overall result still reports `stamped_count` accurately for
+ * what actually landed.
+ */
+export function adoptExistingStore(projectDir, { apply = false, now, home } = {}) {
+  const root = resolve(projectDir);
+  const detected = detectStore(root);
+  // Adoption stamps over what the baseline DOESN'T cover. That is safe when
+  // the baseline is absent (the seam predates this store) or clean (a partial
+  // store adopting its unstamped remainder). It is NEVER safe when the
+  // baseline is corrupt or unreadable — that is attribution which exists and
+  // cannot be trusted or read, and stamping would replace evidence. Refuse.
+  if (detected.baseline_status === 'corrupt' || detected.baseline_status === 'unreadable') {
+    return {
+      project: root,
+      applied: false,
+      refused_reason: 'baseline-not-absent',
+      baseline_status: detected.baseline_status,
+      candidate_count: 0,
+    };
+  }
+  const candidates = detected.files.filter(f => f.classification === 'no-baseline');
+  const pmPath = resolve(join(root, 'PROJECT.md'));
+
+  if (!apply) {
+    return {
+      project: root,
+      applied: false,
+      candidate_count: candidates.length,
+      candidates: candidates.map(f => f.path),
+    };
+  }
+
+  const stamped = [];
+  const failed = [];
+  for (const f of candidates) {
+    const kind = resolve(f.path) === pmPath ? 'project' : 'unit';
+    const outcome = stampCreatedBaseline(root, f.path, { kind, lastWrittenBy: 'adopt-existing-store', now, home });
+    if (outcome && outcome.stamped === false) {
+      failed.push({ path: f.path, outcome: outcome.outcome, reason: outcome.reason });
+    } else {
+      stamped.push(f.path);
+    }
+  }
+
+  return {
+    project: root,
+    applied: true,
+    candidate_count: candidates.length,
+    stamped_count: stamped.length,
+    stamped,
+    failed,
   };
 }
 
@@ -277,6 +367,25 @@ function main(argv) {
       process.stdout.write(`lifecycle-detect: stamped creation baseline for ${basename(target)} (kind: ${kind}).\n`);
     } else {
       process.stdout.write(JSON.stringify({ stamped: true, path: target, kind }, null, 2) + '\n');
+    }
+    return 0;
+  }
+
+  // One-time batch adoption: dry-run by default, stamps only with --apply.
+  if (flags.has('adopt-existing-store')) {
+    const report = adoptExistingStore(projectDir, { apply: flags.has('apply') });
+    if (flags.has('json')) {
+      process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+    } else if (!report.applied) {
+      process.stdout.write(report.candidate_count
+        ? `lifecycle-detect: DRY RUN — ${report.candidate_count} file(s) would be adopted (re-run with --apply):\n${report.candidates.map(p => `  ${basename(p)}`).join('\n')}\n`
+        : `lifecycle-detect: DRY RUN — nothing to adopt (0 no-baseline files).\n`);
+    } else {
+      process.stdout.write(`lifecycle-detect: adopted ${report.stamped_count}/${report.candidate_count} file(s) as of today's bytes.\n`);
+      if (report.failed.length) {
+        process.stdout.write(`  FAILED (attribution unknown, recovery required): ${report.failed.map(f => basename(f.path)).join(', ')}\n`);
+        return 1;
+      }
     }
     return 0;
   }

@@ -170,9 +170,13 @@ export function validateRetrievalLogRow(ev) {
 
 // ---------- Date helpers ----------
 
-function _todayUTC() {
-  const n = new Date();
-  return new Date(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()));
+/**
+ * Midnight of a moment's UTC calendar day. Session directory names are UTC-labeled, so
+ * the bound they are compared against must be read with UTC getters — local getters
+ * shift the whole window by a day for anyone not running on UTC.
+ */
+export function utcDayStart(at = new Date()) {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
 }
 
 function _parseSessionDate(name) {
@@ -188,7 +192,7 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
   let entries;
   try { entries = readdirSync(sessionsDir); } catch { return Object.assign([], { rejected: [] }); }
 
-  const t = today || _todayUTC();
+  const t = today || utcDayStart();
   // A non-finite sinceDays (e.g. `--since-days abc` → NaN) would make the cutoff
   // NaN and silently include ALL events. Fall back to the default window instead.
   const days = Number.isFinite(sinceDays) ? sinceDays : DEFAULT_SINCE_DAYS;
@@ -343,7 +347,23 @@ function outcomeEvidence(events) {
   return { eligibleIds, outcomes, harmfulIds };
 }
 
+// Rejected rows are not just a count to print — past this share of everything read,
+// what survived is no longer a sample the verdict can rest on. A judgment built on the
+// readable remainder of a mostly-unreadable corpus reads as confident and is not.
+export const CORRUPT_ROW_UNKNOWN_RATIO = 0.1;
+
 export function buildUserReceipt(events) {
+  const rejected = Array.isArray(events.rejected) ? events.rejected : [];
+  const rowsRead = events.length + rejected.length;
+  if (rejected.length && rowsRead > 0 && rejected.length / rowsRead > CORRUPT_ROW_UNKNOWN_RATIO) {
+    return {
+      checked: `${events.length} usable row(s); ${rejected.length} of ${rowsRead} rows read were rejected as corrupt or schema-invalid`,
+      safe: null,
+      impact: 'effectiveness unknown: too much of the evidence corpus was unreadable to judge the rest',
+      action: 'repair-corrupt-evidence',
+      user_action: 'Rerun with --json for the rejection codes, repair or remove the affected retrieval/outcome logs, then recheck.',
+    };
+  }
   const retrievalCount = events.filter(isRetrievalShapedEvent).length;
   if (retrievalCount === 0) {
     return {
@@ -530,7 +550,7 @@ export function main(argv) {
 
   const today = todayArg
     ? new Date(`${todayArg}T00:00:00Z`)
-    : _todayUTC();
+    : utcDayStart();
   const events = loadEvents(root, { sinceDays, allTime, today });
   const report = buildReport(events);
 

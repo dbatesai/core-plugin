@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
-  detectCloseState, beginClose, recordOp, releaseLock, runClose,
-  claudeSpawnShell, CLOSE_OPS,
+  detectCloseState, beginClose, recordOp, releaseLock, finishClose, CLOSE_OPS,
+  certifyManualClose, readCloseReceipt, readCloseReceiptState, shouldEnqueueClose, receiptPath, writeCloseReceipt,
 } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');
@@ -43,18 +43,13 @@ function runCli(args, env = {}) {
   return res;
 }
 
-// ---- coverage additions (2026-07-20, iteration ~73): main()'s CLI dispatch,
-// selfTest() (invoked via --self-test — fully self-contained, no real process
-// spawning), and two safe pure-function branches in runClose/detectCloseState
-// had zero coverage. Deliberately NOT covering defaultSpawnFinalize (spawns a
-// real `claude` CLI process) or the CLI `run` subcommand (drives that same
-// real spawn) — those stay integration-verified, not unit-tested, per the
-// same restraint this session applied to the disputed chaos/monkey scope. ----
+// ---- CLI dispatch coverage: main()'s subcommands, selfTest() via --self-test
+// (fully self-contained), and detectCloseState's pure branches. ----
 
-test('CLI --self-test runs the built-in 8-check self-test and exits 0', () => {
+test('CLI --self-test runs the built-in 7-check self-test and exits 0', () => {
   const res = runCli(['--self-test']);
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
-  assert.match(res.stdout, /close-pass self-test: PASS \(8 checks\)/);
+  assert.match(res.stdout, /close-pass self-test: PASS \(7 checks\)/);
 });
 
 test('CLI with no subcommand or no store prints usage and exits 2', () => {
@@ -87,18 +82,6 @@ test('CLI detect: no marker → owed, all ops listed; --json emits parseable sta
     const parsed = JSON.parse(jsonRes.stdout);
     assert.equal(parsed.state, 'owed');
     assert.deepEqual(parsed.owed, ['a', 'b', 'c']);
-  } finally { rmSync(store, { recursive: true, force: true }); }
-});
-
-test('CLI should-spawn: exits 1 (no spawn) on a trivial session with nothing owed, 0 with --did-work', () => {
-  const store = freshStore();
-  try {
-    // Nothing owed: no ops in scope at all.
-    const res = runCli(['should-spawn', store]);
-    assert.equal(res.status, 1, 'no work, no ops in scope -> skip spawn');
-
-    const res2 = runCli(['should-spawn', store, '--did-work']);
-    assert.equal(res2.status, 0, 'real work -> spawn regardless of owed state');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
@@ -158,76 +141,16 @@ test('detectCloseState: crashed-mid-close with a store-signature mismatch re-owe
 // finalize protocol correctly (`_close-marker.json` on a real close shows every op recorded)
 // — so this isn't "the mechanism never works," it's "the parent trusts the child's exit code
 // as a proxy for protocol compliance, with nothing checking that compliance actually happened."
-test('runClose: a spawnFinalize that "succeeds" while recording zero judgment ops is NOT certified closed (Hale\'s root-cause catch)', () => {
-  const store = freshStore();
-  try {
-    // Simulate the pathological case directly: a spawnFinalize that "succeeds" but never
-    // shells out to record anything beyond what runClose itself records (maintenance-run).
-    // Root-fix version (2026-07-21): runClose() itself must not certify this as closed --
-    // catching it only on a LATER detectCloseState read means the certifying function lied
-    // at the moment it mattered (r.ok, the marker status, and the close-complete log line).
-    const r = runClose(store, { spawnFinalize: () => undefined });
-    assert.equal(r.ok, false, 'runClose must NOT report success when required judgment ops were never recorded');
-
-    const marker = JSON.parse(readFileSync(join(store, '_memories', '_close-marker.json'), 'utf8'));
-    assert.equal(marker.status, 'failed', 'the marker itself must not claim closed on an incomplete close');
-
-    const det = detectCloseState(store, { allOps: CLOSE_OPS });
-    assert.notEqual(det.state, 'closed', 'a closed marker missing judgment-op records must not read as a complete close');
-    for (const op of CLOSE_OPS) {
-      if (op === 'maintenance-run') continue; // this one IS mechanically recorded by runClose itself
-      assert.ok(det.owed.includes(op), `${op} was never recorded and must surface as owed, not silently trusted`);
-    }
-  } finally { rmSync(store, { recursive: true, force: true }); }
-});
-
 test('detectCloseState: a closed marker with every CLOSE_OPS entry actually recorded reads as complete (the healthy-path counterpart)', () => {
   const store = freshStore();
   try {
-    const r = runClose(store, {
-      spawnFinalize: (s) => {
-        // Simulate the real headless child: after maintenance-run (already recorded by
-        // runClose itself before this callback fires), shell out to record every remaining
-        // judgment op, exactly as finalize/SKILL.md instructs at each step.
-        for (const op of CLOSE_OPS) {
-          if (op === 'maintenance-run') continue;
-          recordOp(s, { op, status: 'done' });
-        }
-        return { ok: true };
-      },
-    });
-    assert.ok(r.ok);
+    const b = beginClose(store, { sessionId: 's-healthy', ops: CLOSE_OPS });
+    assert.ok(b.ok);
+    for (const op of CLOSE_OPS) recordOp(store, { op, status: 'done' });
+    finishClose(store, { sessionId: 's-healthy' });
     const det = detectCloseState(store, { allOps: CLOSE_OPS });
-    assert.equal(det.state, 'closed', 'a genuinely complete close must not be penalized by the new check');
+    assert.equal(det.state, 'closed', 'a genuinely complete close must not be penalized by the completeness check');
     assert.deepEqual(det.owed, []);
-  } finally { rmSync(store, { recursive: true, force: true }); }
-});
-
-test('runClose: a spawnFinalize that THROWS (not just returns ok:false) is still caught and marks the close failed', () => {
-  const store = freshStore();
-  try {
-    const r = runClose(store, { spawnFinalize: () => { throw new Error('finalize exploded'); } });
-    assert.equal(r.ok, false, 'a thrown spawnFinalize must not crash runClose or report success');
-    const det = detectCloseState(store, { allOps: [] });
-    assert.equal(det.state, 'owed', 'a failed close is re-owed, not silently treated as closed');
-  } finally { rmSync(store, { recursive: true, force: true }); }
-});
-
-test('claudeSpawnShell: true only on win32 (the .cmd-shim EINVAL workaround), false elsewhere', () => {
-  assert.equal(claudeSpawnShell('win32'), true);
-  assert.equal(claudeSpawnShell('darwin'), false);
-  assert.equal(claudeSpawnShell('linux'), false);
-});
-
-test('runClose: beginClose throwing (e.g. _memories path blocked) is caught, lock is released, close reports begin-failed', () => {
-  const store = mkdtempSync(join(tmpdir(), 'close-pass-cli-'));
-  try {
-    // No _memories dir created — instead a FILE sits where _memories/ needs to be a
-    // directory, so acquireLock's mkdirSync(..., {recursive:true}) throws ENOTDIR.
-    writeFileSync(store + '/_memories', 'not a directory');
-    const r = runClose(store);
-    assert.equal(r.ok, false);
-    assert.equal(r.reason, 'begin-failed');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
@@ -242,5 +165,136 @@ test('beginClose: a marker-write failure releases the lock it just took and reth
     rmSync(join(store, '_memories', '_close-marker.json'), { recursive: true, force: true });
     const r = beginClose(store, { sessionId: 's2', ops: ['a'] });
     assert.ok(r.ok, 'lock was released on the failed attempt, so a fresh begin can acquire it');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('CLI: the model-spawn close verb does not exist — `run` is rejected as unknown', () => {
+  const store = freshStore();
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, 'run', store], { encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'the `run` subcommand must not be a valid close entry');
+    assert.ok(!/close complete/.test(r.stdout || ''), 'no close envelope may execute via `run`');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+
+// A certified close presupposes a completed op record (the AUD-104 invariant);
+// these helpers model the real manual-close flow around certify.
+function recordCompleteClose(store, sessionId) {
+  beginClose(store, { sessionId, ops: CLOSE_OPS });
+  for (const op of CLOSE_OPS) recordOp(store, { op, status: 'done' });
+}
+
+test('certify: an explicit session id writes the closed receipt and suppresses the automatic close', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    recordCompleteClose(store, 'sess-manual-1');
+    const r = certifyManualClose(store, { sessionId: 'sess-manual-1', summaryPath: '_summaries/summary-x.md' }, opts);
+    assert.ok(r.ok, JSON.stringify(r));
+    const receipt = readCloseReceipt(store, 'sess-manual-1', opts);
+    assert.equal(receipt.status, 'closed');
+    assert.equal(receipt.summary_path, '_summaries/summary-x.md');
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'sess-manual-1' }, opts), false,
+      'a certified session must not be re-closed by the hook');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('certify: refuses to invent an identity when no session can be resolved', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const r = certifyManualClose(store, { home: join(store, 'no-such-home') }, { storageRoot: root });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'unresolved');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('certify: an already-closed session is a clean no-op, not an error or a second receipt', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    recordCompleteClose(store, 's-again');
+    certifyManualClose(store, { sessionId: 's-again', summaryPath: 'a.md' }, opts);
+    const r2 = certifyManualClose(store, { sessionId: 's-again', summaryPath: 'b.md' }, opts);
+    assert.ok(r2.ok && r2.already, 'second certify reports already-closed');
+    const receipt = readCloseReceipt(store, 's-again', opts);
+    assert.equal(receipt.summary_path, 'a.md', 'the original receipt is preserved');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('certify: auto-resolves the session from a real project-bound transcript (the SKILL.md path, no --session)', async () => {
+  const store = freshStore();
+  const home = mkdtempSync(join(tmpdir(), 'certify-home-'));
+  try {
+    const { mapProjectPathToSlug } = await import('../../plugins/core/skills/core/scripts/project-slug.mjs');
+    const { realpathSync } = await import('node:fs');
+    const canon = realpathSync(store);
+    const tdir = join(home, '.claude', 'projects', mapProjectPathToSlug(canon));
+    mkdirSync(tdir, { recursive: true });
+    writeFileSync(join(tdir, 'sess-auto-77.jsonl'), '{"type":"user"}\n');
+
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    recordCompleteClose(store, 'sess-auto-77');
+    const r = certifyManualClose(store, { summaryPath: 's.md', home }, opts);
+    assert.ok(r.ok, `auto-resolve must certify from the project transcript: ${JSON.stringify(r)}`);
+    assert.equal(r.session_id, 'sess-auto-77');
+    const receipt = readCloseReceipt(store, 'sess-auto-77', opts);
+    assert.equal(receipt.status, 'closed');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('AUD-103: a corrupt receipt is reported corrupt and its bytes survive replacement', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    const p = receiptPath(store, 's-corrupt', opts);
+    writeFileSync(p, '{torn bytes not json');
+
+    const state = readCloseReceiptState(store, 's-corrupt', opts);
+    assert.equal(state.status, 'corrupt', 'a torn receipt is corrupt, not absent');
+
+    writeCloseReceipt(store, { session_id: 's-corrupt', status: 'recorded' }, opts);
+    const dir = join(root, 'close', 'receipts');
+    const quarantined = readdirSync(dir).filter((n) => n.includes('.corrupt-'));
+    assert.equal(quarantined.length, 1, 'the corrupt bytes are quarantined beside the fresh receipt');
+    const fresh = readCloseReceipt(store, 's-corrupt', opts);
+    assert.equal(fresh.status, 'recorded');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('AUD-104: a failed required op refuses certification; a complete record certifies', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    beginClose(store, { sessionId: 's-fail', ops: CLOSE_OPS });
+    for (const op of CLOSE_OPS) recordOp(store, { op, status: op === 'session-summary' ? 'failed' : 'done' });
+    const refused = certifyManualClose(store, { sessionId: 's-fail', summaryPath: 'x.md' }, opts);
+    assert.equal(refused.ok, false, 'a failed required op must refuse certification');
+    assert.equal(refused.reason, 'required-ops-incomplete');
+    assert.ok(refused.incomplete.includes('session-summary'));
+    assert.equal(shouldEnqueueClose(store, { sessionId: 's-fail' }, opts), true,
+      'the session stays owed — no receipt was written');
+    finishClose(store, { sessionId: 's-fail', status: 'failed' });
+
+    beginClose(store, { sessionId: 's-good', ops: CLOSE_OPS });
+    for (const op of CLOSE_OPS) recordOp(store, { op, status: op === 'render-project-md' ? 'skipped' : 'done' });
+    const ok = certifyManualClose(store, { sessionId: 's-good', summaryPath: 'y.md' }, opts);
+    assert.ok(ok.ok, 'done + an explicitly recorded skip certifies: ' + JSON.stringify(ok));
+    finishClose(store, { sessionId: 's-good' });
   } finally { rmSync(store, { recursive: true, force: true }); }
 });

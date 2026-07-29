@@ -17,13 +17,14 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, cpSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname, basename, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { symlinkSync, realpathSync } from 'node:fs';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const {
-  renderBrowseArtifact, SENSITIVITY_WARNING,
+  renderBrowseArtifact, SENSITIVITY_WARNING, collectUnits,
   BROWSE_MANIFEST_SCHEMA_VERSION, producerIdentity, publishReceiptPathFor,
 } = await import(pathToFileURL(join(SCRIPTS, 'render-browse-artifact.mjs')).href);
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
@@ -525,4 +526,127 @@ rtest('CLI: stdout is exactly one JSON manifest with the stable shape', () => {
     assert.match(html, /metrics were not gathered/i, 'page carries the honest metrics-absence line');
     assert.ok(existsSync(manifest.receipt_path), 'receipt written by the CLI run');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+const { generationReceiptLocation } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
+
+test('a project-controlled workspace id cannot redirect the receipt out of the operational root', () => {
+  const home = mkdtempSync(join(tmpdir(), 'receipt-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'receipt-project-'));
+  const attempt = ['..', '..', '..', 'tmp', 'stolen'].join('/');
+  writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: attempt }));
+
+  const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z' });
+  assert.equal(loc.workspaceId, null, 'a traversal id is not a workspace id');
+  assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),
+    'it falls back to the flagged location, never to a project-chosen path');
+  assert.ok(loc.receiptPath.startsWith(join(home, '.core') + sep), 'and the receipt stays under the operational root');
+
+  writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'legit-id' }));
+  const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z' });
+  assert.equal(ok.workspaceId, 'legit-id');
+  assert.equal(ok.receiptDir, join(home, '.core', 'workspaces', 'legit-id', 'artifact-receipts'));
+
+  rmSync(home, { recursive: true, force: true });
+  rmSync(project, { recursive: true, force: true });
+});
+
+// ============================================================
+// Artifact + receipt as one transaction; canonical output containment;
+// structural loss disclosed rather than absorbed.
+// ============================================================
+
+const { publishArtifactWithReceipt, resolveArtifactDestination, artifactContentDigest } =
+  await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
+
+function publishFixture() {
+  const dir = mkdtempSync(join(tmpdir(), 'publish-tx-'));
+  const outPath = join(dir, 'out', 'page.html');
+  const receiptDir = join(dir, 'receipts');
+  const html = '<h1>page</h1>';
+  const manifest = { kind: 'core-memory-browse-preflight', artifact_sha256: artifactContentDigest(html) };
+  return { dir, outPath, receiptDir, receiptPath: join(receiptDir, 'r.json'), html, manifest };
+}
+
+test('a mutation between the artifact write and the receipt aborts publication', () => {
+  const f = publishFixture();
+  assert.throws(
+    () => publishArtifactWithReceipt({
+      ...f,
+      // Something else replaces the destination inside the window the
+      // verification exists to close.
+      afterWrite: (p) => writeFileSync(p, '<h1>not the page you rendered</h1>'),
+    }),
+    (e) => e.code === 'ARTIFACT_MUTATED',
+    'a receipt must never describe bytes other than the ones that were rendered',
+  );
+  assert.equal(existsSync(f.outPath), false, 'and the mutated artifact is not left behind to be published');
+  assert.equal(existsSync(f.receiptPath), false, 'no receipt is written for content that failed verification');
+  rmSync(f.dir, { recursive: true, force: true });
+});
+
+test('an unwritable receipt location takes the artifact with it', () => {
+  const f = publishFixture();
+  writeFileSync(f.receiptDir, 'a file where the receipt directory should be');
+  assert.throws(
+    () => publishArtifactWithReceipt(f),
+    (e) => e.code === 'RECEIPT_PREFLIGHT_FAILED',
+    'the receipt location is proven before the artifact lands',
+  );
+  assert.equal(existsSync(f.outPath), false, 'nothing publishable is left without an audit trail');
+  rmSync(f.dir, { recursive: true, force: true });
+});
+
+test('the happy path writes both and binds the receipt to the exact bytes', () => {
+  const f = publishFixture();
+  const r = publishArtifactWithReceipt(f);
+  assert.equal(readFileSync(f.outPath, 'utf8'), f.html);
+  assert.equal(JSON.parse(readFileSync(f.receiptPath, 'utf8')).artifact_sha256, r.artifact_sha256);
+  assert.equal(r.artifact_sha256, artifactContentDigest(f.html));
+  rmSync(f.dir, { recursive: true, force: true });
+});
+
+test('output containment is judged on the real path, not the spelling', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'out-contain-'));
+  const store = join(dir, 'project', '_memories');
+  mkdirSync(store, { recursive: true });
+  const outside = join(dir, 'elsewhere');
+  mkdirSync(outside, { recursive: true });
+
+  // A lexical check on this spelling sees a path outside the store; the link
+  // resolves into it.
+  const linked = join(outside, 'looks-fine.html');
+  try { symlinkSync(join(store, 'stolen.html'), linked); }
+  catch { rmSync(dir, { recursive: true, force: true }); return; }
+
+  assert.throws(() => resolveArtifactDestination(linked, { forbiddenRoot: store }),
+    (e) => e.code === 'OUT_IS_SYMLINK', 'an artifact is written to a real path, never through a link');
+
+  const linkedDir = join(outside, 'shortcut');
+  symlinkSync(store, linkedDir);
+  assert.throws(() => resolveArtifactDestination(join(linkedDir, 'page.html'), { forbiddenRoot: store }),
+    (e) => e.code === 'OUT_IN_STORE', 'a linked PARENT resolves into the store and is refused there');
+
+  assert.equal(resolveArtifactDestination(join(outside, 'real.html'), { forbiddenRoot: store }),
+    join(realpathSync(outside), 'real.html'), 'an ordinary destination outside the store is fine, canonicalized');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a truncated unit is named as unreadable, never embedded as a blank one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'structural-loss-'));
+  const mem = join(dir, '_memories');
+  mkdirSync(join(mem, 'archive'), { recursive: true });
+  writeFileSync(join(mem, 'good.md'),
+    '---\nid: good\ntype: decision\nstatus: active\ncreated: 2026-07-01\nupdated: 2026-07-01\n---\n\nA readable unit.\n');
+  // Opening fence, no closing one — the lenient parser would hand back empty
+  // metadata and let the archive path invent an id and a status for it.
+  writeFileSync(join(mem, 'archive', 'truncated.md'), '---\nid: truncated\ntype: decision\nstatus: retired\n');
+
+  const collected = collectUnits(dir, { scope: 'all-including-archive' });
+  assert.equal(collected.unreadable.length, 1, 'the damaged file is counted');
+  assert.equal(collected.unreadable[0].path, 'archive/truncated.md');
+  assert.match(collected.unreadable[0].reason, /never closed/);
+  assert.equal(collected.units.some((u) => u.id === 'truncated'), false,
+    'and it is not embedded as an apparently valid empty unit');
+  rmSync(dir, { recursive: true, force: true });
 });

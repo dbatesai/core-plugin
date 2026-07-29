@@ -37,12 +37,21 @@
  * build on.
  */
 
-import { readFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { readFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
+
+/**
+ * The residual global cache lives under the operational root, so it resolves
+ * from the OS-account home. An unresolvable one throws rather than writing
+ * beneath whatever $HOME happens to say.
+ */
+export function globalCacheDir(opts) {
+  return join(requireTrustedHome(opts), '.core');
+}
 
 export function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -59,13 +68,54 @@ export function projectCachePath(projectDir) {
   return join(resolve(projectDir), '_memories', '_lib', 'state-cache.json');
 }
 
+/** Three distinct answers, because rebuilding damage as absence destroys evidence. */
+export const CACHE_CLEAN = 'clean';
+export const CACHE_ABSENT = 'absent';
+export const CACHE_CORRUPT = 'corrupt';
+export const CACHE_UNREADABLE = 'unreadable';
+
+/**
+ * Read the project-local cache. The returned `status` separates a store that has
+ * never been stamped (`absent`) from one whose baseline is unreadable
+ * (`corrupt`) — both yield an empty `files` map, but only the first means "no
+ * prior attribution existed". A caller that cannot tell them apart converts
+ * damage into a plausible fresh start and overwrites the evidence.
+ */
 export function readProjectCache(projectDir) {
   const path = projectCachePath(projectDir);
+  let raw;
+  try { raw = readFileSync(path, 'utf8'); }
+  catch (e) {
+    // Absence is ONLY a missing file. Permission, directory-in-the-way, and
+    // every other read failure is unreadable UNKNOWN with the evidence kept —
+    // mapping those to absent would let a rebuild replace attribution that
+    // still exists on disk but couldn't be read this run.
+    if (e && e.code === 'ENOENT') return { files: {}, status: CACHE_ABSENT };
+    return {
+      files: {}, status: CACHE_UNREADABLE,
+      error: `${e && e.code ? e.code + ': ' : ''}${String(e && e.message || e).slice(0, 160)}`,
+      baseline_trustworthy_hint: false,
+    };
+  }
   try {
-    const cache = JSON.parse(readFileSync(path, 'utf8'));
-    if (cache && typeof cache === 'object' && cache.files && typeof cache.files === 'object') return cache;
-  } catch { /* absent or unparseable — start fresh */ }
-  return { files: {} };
+    const cache = JSON.parse(raw);
+    if (cache && typeof cache === 'object' && cache.files
+      && typeof cache.files === 'object' && !Array.isArray(cache.files)) {
+      return { ...cache, status: CACHE_CLEAN };
+    }
+  } catch { /* unparseable — corrupt, handled below */ }
+  return { files: {}, status: CACHE_CORRUPT };
+}
+
+/**
+ * Move a damaged cache aside, bytes intact, so the rebuild cannot destroy it.
+ * Returns the quarantine path, or null when nothing could be preserved.
+ */
+export function quarantineCache(path, now = nowIso()) {
+  if (!existsSync(path)) return null;
+  const stamp = String(now).replace(/[:.]/g, '-');
+  const dest = `${path}.corrupt-${stamp}`;
+  try { renameSync(path, dest); return dest; } catch { return null; }
 }
 
 /**
@@ -99,7 +149,7 @@ export function readProjectCache(projectDir) {
  * @param {{now?: string, home?: string}} [opts]
  * @returns {{stamped: boolean, outcome?: string, recovery?: string, reason?: string}}
  */
-export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) {
+export function stampFiles(projectDir, entries, { now, home = null } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) return { stamped: true };
   const ts = now || nowIso();
   const cachePath = projectCachePath(projectDir);
@@ -117,6 +167,31 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
     mkdirSync(dirname(cachePath), { recursive: true });
     withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
       const cache = readProjectCache(projectDir);
+      // A damaged baseline is preserved, never overwritten: the rebuild below
+      // would otherwise turn unreadable prior attribution into a plausible
+      // partial cache, and every file it used to describe would silently
+      // reclassify. The new stamp still lands; what the old bytes said is
+      // reported as unknown, with the file kept for recovery.
+      if (cache.status === CACHE_CORRUPT) {
+        const quarantined = quarantineCache(cachePath, ts);
+        stampOutcome = {
+          stamped: true,
+          outcome: 'prior-attribution-unknown',
+          recovery: 'recovery-required',
+          reason: 'corrupt-cache-quarantined',
+          quarantined,
+        };
+      } else if (cache.status === CACHE_UNREADABLE) {
+        // The bytes may be intact — the read failed (permissions, a directory
+        // in the way). Writing a rebuilt cache over them would destroy
+        // attribution we never even saw. Refuse the stamp entirely.
+        return {
+          stamped: false,
+          outcome: 'refused',
+          recovery: 'recovery-required',
+          reason: `cache-unreadable: ${cache.error || 'unknown read failure'}`,
+        };
+      }
       for (const e of entries) {
         cache.files[e.path] = {
           last_hash: e.hash,
@@ -142,11 +217,17 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
   // failure is genuinely best-effort — a held lock just defers the prune to
   // the next stamp and can't corrupt attribution — so it does NOT downgrade a
   // successful project-local stamp.
-  const globalCachePath = join(home, '.core', 'state-cache.json');
   try {
-    withFileLock(join(home, '.core', 'state-cache.lock'), () => {
+    const coreDir = home ? join(home, '.core') : globalCacheDir();
+    const globalCachePath = join(coreDir, 'state-cache.json');
+    withFileLock(join(coreDir, 'state-cache.lock'), () => {
       let gcache;
-      try { gcache = JSON.parse(readFileSync(globalCachePath, 'utf8')); } catch { gcache = null; }
+      let readable = true;
+      try { gcache = JSON.parse(readFileSync(globalCachePath, 'utf8')); }
+      catch { gcache = null; readable = !existsSync(globalCachePath); }
+      // A damaged global cache is moved aside rather than left in place to
+      // shadow the fresher per-project stamps it can no longer be pruned from.
+      if (!readable) quarantineCache(globalCachePath, ts);
       if (!gcache?.files) return;
       let changed = false;
       for (const e of entries) {

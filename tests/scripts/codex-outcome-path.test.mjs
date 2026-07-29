@@ -152,3 +152,37 @@ test('.codex-plugin/plugin.json registers hooks-codex.json explicitly (not relyi
   const manifest = JSON.parse(readFileSync(join(HOOKS_DIR, '..', '..', '..', '.codex-plugin', 'plugin.json'), 'utf8'));
   assert.equal(manifest.hooks, './hooks/hooks-codex.json');
 });
+
+// ---- Import-boundary fail-open (Crest's finding, 2026-07-27): the Codex wrappers'
+// `await import(...)` sat OUTSIDE any try/catch, so a resolution/syntax failure in the
+// shared implementation threw at the top level and exited non-zero — before main()'s own
+// entry guard ever ran. A hook must never break the user's exit on failure. Reproduced by
+// copying each wrapper next to a deliberately broken target module under the same
+// relative filename the wrapper imports.
+function runBrokenWrapper(wrapperName, targetName) {
+  const dir = mkdtempSync(join(tmpdir(), 'codex-wrapper-broken-'));
+  try {
+    const wrapperSrc = readFileSync(join(HOOKS_DIR, wrapperName), 'utf8');
+    writeFileSync(join(dir, wrapperName), wrapperSrc);
+    // Syntax error, not just a throw — proves the *import/resolution* step itself is
+    // covered, not only a runtime exception inside a successfully-imported module.
+    writeFileSync(join(dir, targetName), 'export function main( {{{ syntax error\n');
+    return execFileSync('node', [join(dir, wrapperName)], {
+      input: JSON.stringify({ cwd: dir, session_id: 'broken-import-probe' }),
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog() },
+      encoding: 'utf8',
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('Codex Stop wrapper: a broken shared module still exits 0 (fail-open covers the import, not just main())', () => {
+  assert.doesNotThrow(() => runBrokenWrapper('answer-close-hook-codex.mjs', 'answer-close-hook.mjs'),
+    'a SyntaxError in the imported module must not propagate as a non-zero exit');
+});
+
+test('Codex UserPromptSubmit wrapper: a broken shared module still exits 0 (fail-open covers the import, not just main())', () => {
+  assert.doesNotThrow(() => runBrokenWrapper('retrieve-context-hook-codex.mjs', 'retrieve-context-hook.mjs'),
+    'a SyntaxError in the imported module must not propagate as a non-zero exit');
+});

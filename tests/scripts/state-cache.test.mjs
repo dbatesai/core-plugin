@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import {
   hashText, projectCachePath, readProjectCache, stampFiles, stampFile,
+  CACHE_ABSENT, CACHE_CORRUPT,
 } from '../../plugins/core/skills/core/scripts/state-cache.mjs';
 
 // Windows contract: never .pathname on a file: URL (yields /D:/... which
@@ -49,17 +50,63 @@ test('hashText is a deterministic 16-hex digest, empty-safe', () => {
   assert.match(hashText(undefined), /^[0-9a-f]{16}$/, 'tolerates undefined input');
 });
 
-test('readProjectCache returns an empty {files:{}} shape when the cache file is absent', () => {
+test('readProjectCache reports an absent cache as absent, not as an empty clean one', () => {
   const { project } = setup();
   const cache = readProjectCache(project);
-  assert.deepEqual(cache, { files: {} });
+  assert.deepEqual(cache.files, {});
+  assert.equal(cache.status, CACHE_ABSENT);
 });
 
-test('readProjectCache tolerates a corrupt/unparseable cache file', () => {
+test('readProjectCache reports a corrupt cache as corrupt — absence and damage are different answers', () => {
   const { project, cachePath } = setup();
   mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
   writeFileSync(cachePath, 'not json{{{');
-  assert.deepEqual(readProjectCache(project), { files: {} });
+  const cache = readProjectCache(project);
+  assert.deepEqual(cache.files, {});
+  assert.equal(cache.status, CACHE_CORRUPT, 'an unparseable cache must never read as an empty clean one');
+
+  // A well-formed JSON document of the wrong shape is damage too.
+  writeFileSync(cachePath, JSON.stringify({ files: [] }));
+  assert.equal(readProjectCache(project).status, CACHE_CORRUPT);
+});
+
+test('stampFiles preserves corrupt cache bytes and reports the lost attribution', () => {
+  const { root, project, home, cachePath } = setup();
+  try {
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    const corruptBytes = '{"files": {"/kept.md": {"last_written_by": "core"';
+    writeFileSync(cachePath, corruptBytes);
+
+    const outcome = stampFiles(project, [{ path: '/a.md', hash: hashText('a'), lastWrittenBy: 'decorate-graph' }],
+      { now: '2026-07-28T00:00:00Z', home });
+
+    assert.equal(outcome.stamped, true, 'the new write is still attributed');
+    assert.equal(outcome.outcome, 'prior-attribution-unknown',
+      'but prior attribution is UNKNOWN — never silently rebuilt as an empty cache');
+    assert.equal(outcome.recovery, 'recovery-required');
+    assert.ok(outcome.quarantined, 'and the damaged file is named');
+    assert.equal(readFileSync(outcome.quarantined, 'utf8'), corruptBytes,
+      'the corrupt bytes are preserved verbatim beside the original');
+    assert.match(outcome.quarantined, /state-cache\.json\.corrupt-/);
+
+    const rebuilt = JSON.parse(readFileSync(cachePath, 'utf8'));
+    assert.equal(rebuilt.files['/a.md'].last_written_by, 'decorate-graph');
+    assert.equal('/kept.md' in rebuilt.files, false, 'the unreadable prior state is not guessed at');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('detectStore surfaces a corrupt baseline as UNKNOWN rather than a store of fresh files', async () => {
+  const { root, project, cachePath } = setup();
+  try {
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    writeFileSync(join(project, 'PROJECT.md'), '# P\n');
+    writeFileSync(cachePath, 'not json{{{');
+    const { detectStore } = await import('../../plugins/core/skills/core/scripts/lifecycle-detect.mjs');
+    const report = detectStore(project);
+    assert.equal(report.baseline_status, CACHE_CORRUPT,
+      'a damaged baseline must not be narrated as "every file needs one"');
+    assert.equal(report.baseline_trustworthy, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('stampFiles writes one entry per file, merging into any pre-existing cache without clobbering it', () => {
@@ -156,4 +203,19 @@ test("race: 40 concurrent processes each stamping a distinct file all survive �
       assert.equal(cache.files[`/concurrent-${i}.md`].last_written_by, 'concurrency-test');
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('AUD-101: an unreadable cache is not absent — only ENOENT is absence', async () => {
+  const { readProjectCache, CACHE_ABSENT } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'cache-unreadable-'));
+  try {
+    // A DIRECTORY at the cache path yields EISDIR on read — unreadable, not missing.
+    const lib = join(dir, '_memories', '_lib');
+    mkdirSync(join(lib, 'state-cache.json'), { recursive: true });
+    const r = readProjectCache(dir);
+    assert.notEqual(r.status, CACHE_ABSENT, 'EISDIR must not report absence');
+    assert.equal(r.status, 'unreadable', 'a read failure that is not ENOENT reports unreadable');
+    assert.ok(r.error, 'the original evidence is preserved');
+    assert.equal(r.baseline_trustworthy_hint, false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -90,8 +90,16 @@ function main(argv) {
     if (at >= 0) { flagIndexes.add(at); flagIndexes.add(at + 1); }
   }
   const args = argv.filter((_, index) => !flagIndexes.has(index));
-  const shard = Math.max(0, valueFlag('--shard', 0));
-  const shardSize = Math.max(1, valueFlag('--shard-size', 80));
+  const shard = valueFlag('--shard', 0);
+  const shardSize = valueFlag('--shard-size', 80);
+  if (!Number.isInteger(shard) || shard < 0) {
+    process.stderr.write('select-relevant-units: --shard must be a non-negative integer\n');
+    return 2;
+  }
+  if (!Number.isInteger(shardSize) || shardSize < 1) {
+    process.stderr.write('select-relevant-units: --shard-size must be a positive integer\n');
+    return 2;
+  }
   const storePath = args[0];
   const query = args[1] || '';
   if (!storePath) { process.stderr.write('usage: select-relevant-units.mjs <storePath> "<query>" [--shard N] [--shard-size N]\n'); return 2; }

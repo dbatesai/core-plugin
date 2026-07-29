@@ -47,7 +47,7 @@ Tier 2 edge traversal for CORE retrieval, per retrieval.md. Given a seed unit, w
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.mjs <project>/_memories/dc-67-no-mcp.md \
-    --hops 2 --intent memory-architecture --format text
+    --hops 2 --format text
 ```
 
 Used by the Tier 2 retrieval protocol: call this to get edge-reachable candidates, then Read the top results.
@@ -75,7 +75,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs <project> --mode 
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs <project> --json
 ```
 
-Exit codes: 0 = all pass, 1 = warnings, 2 = failures. Run at `/finalize` to surface hygiene work. Run `--mode schema` after writing a new unit to catch structural errors immediately.
+Exit codes: 0 = all pass, 1 = warnings, 2 = failures. Run at `/process-memory` to surface hygiene work. Run `--mode schema` after writing a new unit to catch structural errors immediately.
 
 ## What lives elsewhere
 
@@ -108,15 +108,6 @@ A `PostCompact` hook that re-injects critical workspace context into a fresh con
 
 If `workspace.json` is absent, exit 0 with a graceful message.
 
-### `pwd-guard.mjs` and `voice-reminder.mjs` — personal developer hooks
-
-These are CORE-author-specific and deliberately not shipped in the plugin — not useful to plugin users in general:
-
-- `pwd-guard.mjs` — reminds the CORE author to declare `intent: skill-edit` when writing to skill-product paths. Lives at `<CORE-dev-repo>/.claude/scripts/pwd-guard.mjs`, wired from the CORE project's `.claude/settings.json`.
-- `voice-reminder.mjs` — injects a plain-voice imperative each turn. Lives at `~/.claude/hooks/voice-reminder.mjs`, wired from `~/.claude/settings.json`.
-
-Hooks that apply only to a specific author or project belong in that author's personal or project settings, not in a plugin that ships to everyone.
-
 ### Swarm log visualization
 
 For interactive HTML visualization of multi-agent session logs (agent reasoning chains, position changes, adversarial exchanges, convergence), use the `agent-interactions` skill. It produces a single self-contained HTML file from any directory of agent logs.
@@ -143,4 +134,4 @@ If both are yes, write the script here as `.mjs`. If "deterministic across sessi
 
 The metrics stack here (six-state classifier → daily rollup → orient-signal, the silent-failure detectors, the calibration pipeline, OTel dual-write) is sized for a feedback loop that needs more corpus than a single-user install generates — the calibration pool sat at 57/100 labeled turns after months of real use. That is a deliberate forward-looking tradeoff: the architecture is being validated at small scale before it can earn its keep at larger scale, and capture is cheap while interpretation is replayable.
 
-The investment discipline until then: keep the one headline path robust — `classify-turns` → `metrics-rollup` → `orient-signal` (the rec-fail-tier-0 self-audit) — and don't grow the rest. The next investment in this layer is justified when any of these turns true: the calibration pool clears its gate, a second active user or workspace starts generating parallel corpora, or a consumer outside `/finalize` starts reading the OTel traces. Absent those, prefer hardening the headline path over adding subsystems.
+The investment discipline until then: keep the one headline path robust — `classify-turns` → `metrics-rollup` → `orient-signal` (the rec-fail-tier-0 self-audit) — and don't grow the rest. The next investment in this layer is justified when any of these turns true: the calibration pool clears its gate, a second active user or workspace starts generating parallel corpora, or a second consumer starts reading the capture streams beyond the maintenance pass. Absent those, prefer hardening the headline path over adding subsystems.

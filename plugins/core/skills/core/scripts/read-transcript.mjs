@@ -7,14 +7,16 @@
  * layer, not core prose — so this script resolves a transcript path per harness and
  * normalizes the lines into one ordered event shape that consumers (memory-accessed,
  * retrieval-skip detection, anti-anchoring ordering proofs) can read uniformly.
- * Transcript selection is session-id-exact on claude-code (MET-008); mtime-latest is
- * a documented fallback recorded in meta.transcript_resolution.
+ * Selection is bound to the requesting project and prefers exact session identity;
+ * mtime-latest applies only within that project and is recorded in
+ * meta.transcript_resolution.
  *
  * Schemas verified on disk (evidence, not assumption):
  *   - claude-code: ~/.claude/projects/<cwd-with-slashes-as-dashes>/<session>.jsonl
  *       message lines carry `message.content[]` with {type:'text'|'tool_use', ...}.
  *   - codex: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
- *       lines are {timestamp, type, payload}; type 'response_item' + payload.type
+ *       lines are {timestamp, type, payload}; the leading line is type 'session_meta'
+ *       carrying {id, cwd} — the project identity; type 'response_item' + payload.type
  *       'message' carry {role, content:[{type, text}]}; payload.type 'reasoning' is
  *       encrypted (skipped); 'event_msg' carries agent_message/user_message/etc.
  *
@@ -24,16 +26,15 @@
  * name + input text — the file-access signal memory-accessed needs. Schema derived from a
  * real `rollout-*.jsonl` (meta `codex_tool_extraction: 'implemented'`). *_output return
  * values and encrypted reasoning are skipped (access-intent lives in the call, not the
- * return). Residual: the evidence rollout is one Codex build; HC verifies the schema
- * still matches current core-codex transcripts — if a Codex version drifts the field
- * names, fix-forward (the parser fails open to no-tool-events, never throws).
+ * return). Residual: the schema evidence comes from one Codex build — if a Codex version
+ * drifts the field names, fix-forward (the parser fails open to no-tool-events, never throws).
  *
  * By design the deterministic parse ships as a script; the plugin ships .mjs.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
@@ -42,41 +43,111 @@ export const SUPPORTED_HARNESSES = new Set(['claude-code', 'codex']);
 /**
  * Resolve the transcript for a harness, with the resolution method made explicit.
  *
- * MET-008: mtime-latest selection alone is a race — if a NEW session starts before
- * the /finalize analyzers run, every derived metric reads the wrong session. For
- * claude-code the transcript filename IS the session id, so exact-match resolution
- * (explicit sessionId arg, else CLAUDE_CODE_SESSION_ID) is authoritative; mtime is
- * the DOCUMENTED FALLBACK only (no session id in scope, or the file isn't there).
- * Codex rollout filenames don't carry CODEX_THREAD_ID, so codex stays mtime-based —
- * consumers can see that in meta.transcript_resolution and weigh trust accordingly.
+ * Selection is bound to the requesting project. A transcript that cannot be shown to
+ * belong to `cwd` is never returned — the resolver reports UNKNOWN (path null, with a
+ * reason) rather than handing back whichever session happens to be newest on the box.
  *
- * Returns { path, resolution } — resolution ∈ 'override' | 'session-id'
- * | 'mtime-fallback' | null.
+ * mtime-latest selection alone is also a race: if a NEW session for the same project
+ * starts before the analyzers run, every derived metric reads the wrong session. So
+ * exact session identity wins where it exists — the claude-code transcript filename IS
+ * the session id (explicit sessionId arg, else CLAUDE_CODE_SESSION_ID), and a codex
+ * rollout carries its thread id in the leading `session_meta` line (explicit sessionId
+ * arg, else CODEX_THREAD_ID / CODEX_SESSION_ID). mtime is the documented fallback
+ * WITHIN the project, never across projects; consumers see which one applied in
+ * meta.transcript_resolution and weigh trust accordingly.
+ *
+ * Returns { path, resolution, reason } — resolution ∈ 'override' | 'session-id'
+ * | 'mtime-fallback' | null; reason ∈ 'override-missing' | 'no-project-transcript'
+ * | 'unsupported-harness' | null.
  */
 export function resolveTranscript(harness, { cwd = process.cwd(), home = homedir(), override = null, sessionId = null, env = process.env } = {}) {
-  if (override) return existsSync(override) ? { path: override, resolution: 'override' } : { path: null, resolution: null };
+  // An override is the caller naming an exact file; that is explicit authority, not selection.
+  if (override) {
+    return existsSync(override)
+      ? { path: override, resolution: 'override', reason: null }
+      : { path: null, resolution: null, reason: 'override-missing' };
+  }
   if (harness === 'claude-code') {
+    // The project slug directory IS the project binding — nothing outside it is a candidate.
     const dir = join(home, '.claude', 'projects', mapProjectPathToSlug(String(cwd)));
     const sid = sessionId || env.CLAUDE_CODE_SESSION_ID || null;
     if (sid) {
       const exact = join(dir, `${sid}.jsonl`);
-      if (existsSync(exact)) return { path: exact, resolution: 'session-id' };
+      if (existsSync(exact)) return { path: exact, resolution: 'session-id', reason: null };
     }
     const latest = latestFile(dir, (f) => f.endsWith('.jsonl'));
-    return { path: latest, resolution: latest ? 'mtime-fallback' : null };
+    return latest
+      ? { path: latest, resolution: 'mtime-fallback', reason: null }
+      : { path: null, resolution: null, reason: 'no-project-transcript' };
   }
   if (harness === 'codex') {
-    // rollout-*.jsonl nested under YYYY/MM/DD — walk the sessions tree.
-    const latest = latestFileRecursive(join(home, '.codex', 'sessions'), (f) => f.startsWith('rollout-') && f.endsWith('.jsonl'));
-    return { path: latest, resolution: latest ? 'mtime-fallback' : null };
+    // rollout-*.jsonl nested under YYYY/MM/DD — walk the sessions tree, then keep only
+    // rollouts whose own session_meta names this project. A rollout with no readable
+    // identity stays out: unattributable is UNKNOWN, not "close enough".
+    const candidates = filesRecursive(join(home, '.codex', 'sessions'), (f) => f.startsWith('rollout-') && f.endsWith('.jsonl'));
+    candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const want = canonicalPath(cwd);
+    const sid = sessionId || env.CODEX_THREAD_ID || env.CODEX_SESSION_ID || null;
+    let newestForProject = null;
+    for (const c of candidates) {
+      const identity = readCodexIdentity(c.path);
+      if (!identity || canonicalPath(identity.cwd) !== want) continue;
+      if (sid && identity.id === sid) return { path: c.path, resolution: 'session-id', reason: null };
+      if (!newestForProject) newestForProject = c.path;
+    }
+    return newestForProject
+      ? { path: newestForProject, resolution: 'mtime-fallback', reason: null }
+      : { path: null, resolution: null, reason: 'no-project-transcript' };
   }
-  // unknown harness — return null (resolver drop).
-  return { path: null, resolution: null };
+  return { path: null, resolution: null, reason: 'unsupported-harness' };
 }
 
 /** Back-compat path-only resolver. Prefer resolveTranscript for new callers. */
 export function resolveTranscriptPath(harness, opts = {}) {
   return resolveTranscript(harness, opts).path;
+}
+
+/** Compare paths by their resolved form so symlinked or unnormalized cwds still match. */
+function canonicalPath(p) {
+  const s = String(p ?? '');
+  try { return realpathSync(s); } catch { return resolve(s); }
+}
+
+// A codex rollout's leading session_meta line carries the thread id and the cwd it ran
+// in. That line is large (it embeds base instructions), so read a bounded head rather
+// than the whole multi-megabyte transcript just to learn who it belongs to.
+const IDENTITY_HEAD_BYTES = 1 << 20;
+
+/** Read a codex rollout's { id, cwd } identity. Null when the file does not declare one. */
+export function readCodexIdentity(path) {
+  const line = readFirstLine(path);
+  if (!line) return null;
+  let e;
+  try { e = JSON.parse(line); } catch { return null; }
+  if (e?.type !== 'session_meta') return null;
+  const cwd = e?.payload?.cwd;
+  if (typeof cwd !== 'string' || !cwd) return null;
+  return { id: typeof e?.payload?.id === 'string' ? e.payload.id : null, cwd };
+}
+
+function readFirstLine(path) {
+  let fd = null;
+  try {
+    const size = statSync(path).size;
+    const want = Math.min(size, IDENTITY_HEAD_BYTES);
+    if (want <= 0) return null;
+    fd = openSync(path, 'r');
+    const buf = Buffer.alloc(want);
+    const n = readSync(fd, buf, 0, want, 0);
+    const text = buf.subarray(0, n).toString('utf8');
+    const nl = text.indexOf('\n');
+    if (nl !== -1) return text.slice(0, nl);
+    return n >= size ? text : null; // truncated head — not a parseable line
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) { try { closeSync(fd); } catch { /* already closed */ } }
+  }
 }
 
 function latestFile(dir, pred) {
@@ -90,9 +161,9 @@ function latestFile(dir, pred) {
   return latest;
 }
 
-function latestFileRecursive(root, pred) {
-  if (!existsSync(root)) return null;
-  let latest = null, latestM = -1;
+function filesRecursive(root, pred) {
+  const out = [];
+  if (!existsSync(root)) return out;
   const stack = [root];
   while (stack.length) {
     const dir = stack.pop();
@@ -102,10 +173,10 @@ function latestFileRecursive(root, pred) {
       const p = join(dir, e.name);
       if (e.isDirectory()) { stack.push(p); continue; }
       if (!pred(e.name)) continue;
-      try { const m = statSync(p).mtimeMs; if (m > latestM) { latestM = m; latest = p; } } catch { /* skip */ }
+      try { out.push({ path: p, mtimeMs: statSync(p).mtimeMs }); } catch { /* skip */ }
     }
   }
-  return latest;
+  return out;
 }
 
 /**
@@ -172,9 +243,10 @@ export function parseTranscript(content, harness) {
 }
 
 /**
- * Read + normalize the latest transcript for a harness.
- * Returns { harness, path, available, events, meta }. Fail-open: never throws on a
- * missing/unreadable transcript — returns available:false with empty events.
+ * Read + normalize this project's transcript for a harness.
+ * Returns { harness, path, available, reason, events, meta }. Fail-open: never throws on
+ * a missing/unreadable transcript — returns available:false with empty events and a
+ * reason naming why, so a consumer can tell UNKNOWN apart from "nothing happened".
  */
 export function readTranscript({ harness, cwd = process.cwd(), home = homedir(), override = null, sessionId = null, env = process.env } = {}) {
   const meta = {
@@ -183,14 +255,19 @@ export function readTranscript({ harness, cwd = process.cwd(), home = homedir(),
     supported: SUPPORTED_HARNESSES.has(harness),
     codex_tool_extraction: harness === 'codex' ? 'implemented' : 'n/a',
     transcript_resolution: null,
+    transcript_unavailable_reason: null,
   };
-  if (!SUPPORTED_HARNESSES.has(harness)) return { harness, path: null, available: false, events: [], meta };
-  const { path, resolution } = resolveTranscript(harness, { cwd, home, override, sessionId, env });
+  const unavailable = (path, reason) => {
+    meta.transcript_unavailable_reason = reason;
+    return { harness, path, available: false, reason, events: [], meta };
+  };
+  if (!SUPPORTED_HARNESSES.has(harness)) return unavailable(null, 'unsupported-harness');
+  const { path, resolution, reason } = resolveTranscript(harness, { cwd, home, override, sessionId, env });
   meta.transcript_resolution = resolution;
-  if (!path || !existsSync(path)) return { harness, path, available: false, events: [], meta };
+  if (!path || !existsSync(path)) return unavailable(path, reason || 'no-project-transcript');
   let content;
-  try { content = readFileSync(path, 'utf8'); } catch { return { harness, path, available: false, events: [], meta }; }
-  return { harness, path, available: true, events: parseTranscript(content, harness), meta };
+  try { content = readFileSync(path, 'utf8'); } catch { return unavailable(path, 'unreadable'); }
+  return { harness, path, available: true, reason: null, events: parseTranscript(content, harness), meta };
 }
 
 function stringifyInput(input) {

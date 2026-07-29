@@ -257,3 +257,23 @@ test('blocker-1: a clean report + sweep still exports (shape validation is not a
   assert.ok(validateReceiptShape(receipt));
   assert.equal(receipt.receipt_schema, 'train-a-aggregate-receipt/1');
 });
+
+test('per-rung keys accept every rung the gold schema defines, including temporal and abstention', async () => {
+  const { validateReceiptShape } = await import('../../plugins/core/skills/core/scripts/aggregate-receipt.mjs');
+  const sha = 'a'.repeat(64);
+  const receipt = {
+    source: {
+      plugin_version: '3.14.1', source_commit: 'b'.repeat(40), harness_sha256: sha,
+      product_function_sha256: {}, built_artifact_sha256: sha, snapshot_id: sha,
+      gold_sha256: sha, corpus_content_sha256: sha, receipt_schema_of_source: 'train-a-aggregate-receipt/1',
+    },
+    corpus: { total_units: 1, unit_type_counts: {} },
+    evaluation: {
+      queries: 2, no_answer: 0, declared_supports: 0, latency_ms: {},
+      arms: { lexical: { recall: { 10: 0.5 }, mrr: 0.5, forbidden_rate: 0,
+        per_rung_recall: { temporal: { 10: 1 }, abstention: { 10: 1 } } } },
+    },
+    tier_sweep: null,
+  };
+  assert.ok(validateReceiptShape(receipt), 'temporal/abstention rungs are valid gold-schema rungs');
+});

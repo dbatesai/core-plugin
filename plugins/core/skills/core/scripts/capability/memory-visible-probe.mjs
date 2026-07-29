@@ -1,20 +1,20 @@
 /**
- * memory-visible-probe.mjs — v3.0 memory-visible-in-agent-context (Claude Code).
+ * memory-visible-probe.mjs — memory-visible-in-agent-context (Claude Code).
  *
  * Proves the auto-memory the harness injects at session start was actually IN the
- * agent's context — not merely present on disk (that's v2.7's auto-memory probe).
+ * agent's context — not merely present on disk (that's auto-memory-injection-probe.mjs).
  * Per-session canary: /finalize writes a fresh token into the MEMORY.md injection
  * window and records the expected token to ~/.core/workspaces/<id>/visibility-canary.json
  * (write-visibility-canary.mjs). Next session the agent echoes the token it sees in
  * injected context; THIS probe parses the Claude Code transcript JSONL and confirms
  * the echo preceded any tool that could read the canary.
  *
- * Honest boundary (HC_620/622/623): proves the token was injected into context and
+ * Honest boundary: proves the token was injected into context and
  * echoed before any potentially-reading tool — memory was VISIBLE. It does NOT prove
  * the agent attended to / acted on memory beyond the echo (memory-VISIBLE != memory-USED),
  * and it's Claude-Code-specific.
  *
- * Identity_status (HC-accepted bar, hardened per HC_623):
+ * Identity_status:
  *   PASS     — canary recorded AND actually present in the MEMORY.md injection window
  *              (memory_written + file still contains the token) AND echoed in the
  *              transcript AND no non-allowlisted tool ran before the echo.
@@ -23,19 +23,20 @@
  *              non-allowlisted tool ran before the echo (could have read the canary).
  *   NOT-YET  — no canary recorded (write step hasn't run).
  *
- * HC_623 hardening: (1) require memory injection, not just an echo; (2) before the
- * echo, ANY tool_use outside a tiny allowlist degrades — a Bash can read hidden
+ * Two rules keep the bar honest: (1) require memory injection, not just an echo; (2) before
+ * the echo, ANY tool_use outside a tiny allowlist degrades — a Bash can read hidden
  * surfaces without a literal path, so path-matching alone is too weak.
- * HC_622 #4: never print the raw expected token — redacted hash only.
+ * The raw expected token is never printed — redacted hash only.
  *
  * By design the script ships with the plugin. The plugin ships .mjs only.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { mapProjectPathToSlug } from '../project-slug.mjs';
+import { resolveTranscriptPath } from '../read-transcript.mjs';
+import { consumeCanary } from '../write-visibility-canary.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-visible-in-agent-context';
@@ -48,10 +49,10 @@ export const DEFAULT_INJECTION_LINE_WINDOW = 200;
 export const DEFAULT_INJECTION_BYTE_WINDOW = 24400;
 
 // Tools that cannot read the canary surfaces, so they're safe before the echo.
-// Deliberately tiny (HC_623 #2): everything else degrades PASS conservatively.
+// Deliberately tiny: everything else degrades PASS conservatively.
 export const ECHO_SAFE_TOOLS = new Set(['Skill']);
 
-/** Redact a token for safe logging — never emit the raw token (HC_622 #4). */
+/** Redact a token for safe logging — never emit the raw token. */
 export function redactToken(tok) {
   if (!tok) return '(none)';
   return `len=${String(tok).length} sha256:${createHash('sha256').update(String(tok)).digest('hex').slice(0, 12)}`;
@@ -69,26 +70,19 @@ function resolveWorkspaceId(cwd) {
   return null;
 }
 
-export function resolveTranscript(cwd, home, override) {
+/**
+ * The proof transcript is this project's, and this session's where the session is
+ * known — the shared resolver binds both. A transcript from another project or another
+ * session cannot evidence what THIS session had in context.
+ */
+export function resolveTranscript(cwd, home, override, sessionId = null) {
   if (override) return existsSync(override) ? override : null;
-  // Was a hand-rolled `.replace(/\//g, '-')` -- missed the Windows drive colon and
-  // any dot in the path, same bug family as auto-memory-injection-probe.mjs. Use
-  // the one canonical encoder.
-  const mapped = mapProjectPathToSlug(cwd);
-  const dir = join(home, '.claude', 'projects', mapped);
-  if (!existsSync(dir)) return null;
-  const files = readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
-  let latest = null, latestM = -1;
-  for (const f of files) {
-    const p = join(dir, f);
-    try { const m = statSync(p).mtimeMs; if (m > latestM) { latestM = m; latest = p; } } catch { /* skip */ }
-  }
-  return latest;
+  return resolveTranscriptPath('claude-code', { cwd, home, sessionId, env: {} });
 }
 
 /**
  * Scan ordered transcript lines for the canary echo and every tool_use (by name).
- * No path-matching (HC_623 #2): the classifier judges tools by the allowlist, since
+ * No path-matching: the classifier judges tools by the allowlist, since
  * a Bash command can read protected surfaces without a literal path in its input.
  */
 export function scanTranscript(lines, token) {
@@ -114,8 +108,8 @@ export function scanTranscript(lines, token) {
   return events;
 }
 
-/** Pure classifier (HC_623-hardened bar). */
-export function classify({ token, canaryFileState = 'absent', memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW }) {
+/** Pure classifier over the identity_status bar above. */
+export function classify({ token, canaryFileState = 'absent', memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW, writtenBySession = null, sessionId = null, tokenConsumption = null }) {
   if (!token) {
     // MET-006: a missing canary is almost always "/finalize didn't run last session"
     // (abrupt end), not "never installed". A distinct reason_code lets the user and
@@ -134,7 +128,7 @@ export function classify({ token, canaryFileState = 'absent', memoryWritten, mem
   // memory file exceeds the known injection window, the tail can drop silently while
   // the canary still echoes. That is DEGRADED, never PASS. The window is enforced on
   // BOTH axes — Claude Code truncates on whichever limit it hits first, and a file can
-  // be under the line window yet over the byte cap (field-observed session 56).
+  // be under the line window yet over the byte cap.
   if (Number.isFinite(memoryLineCount) && Number.isFinite(injectionLineWindow) && memoryLineCount > injectionLineWindow) {
     return { identity_status: 'DEGRADED', reason: `truncation-detected: MEMORY.md line_count=${memoryLineCount} exceeds injection window=${injectionLineWindow}` };
   }
@@ -148,11 +142,24 @@ export function classify({ token, canaryFileState = 'absent', memoryWritten, mem
   if (!firstEcho) {
     return { identity_status: 'DEGRADED', reason: 'canary token not echoed — truncation, non-injection, recognition-failure, or mismatch' };
   }
-  // Blocker 2: before the echo, ANY tool outside the tiny allowlist could have read
+  // Before the echo, ANY tool outside the tiny allowlist could have read
   // the canary (a Bash needs no literal path). Conservative: degrade.
   const badPreEcho = events.find((e) => e.kind === 'tool' && e.idx < firstEcho.idx && !ECHO_SAFE_TOOLS.has(e.name));
   if (badPreEcho) {
     return { identity_status: 'DEGRADED', reason: `pre-echo tool '${badPreEcho.name}' could have read the canary before the echo — cannot mechanically exclude the read-first cheat` };
+  }
+  // The session that wrote the canary already knows the token; echoing it proves
+  // nothing about what the harness injected.
+  if (writtenBySession != null && sessionId != null && writtenBySession === sessionId) {
+    return { identity_status: 'DEGRADED', reason_code: 'canary-echoed-in-writing-session', reason: 'the echoing session is the one that wrote this canary — it knew the token without injection' };
+  }
+  // A token proves one session. Once spent, the value is readable from the transcript
+  // that echoed it, so a later echo is a replay rather than fresh evidence.
+  if (tokenConsumption && tokenConsumption.consumed !== true) {
+    if (tokenConsumption.reason === 'already-consumed') {
+      return { identity_status: 'DEGRADED', reason_code: 'canary-token-replayed', reason: `this canary token was already spent by session ${tokenConsumption.consumed_by_session ?? '(unknown)'} — a replayed token is not proof of injection` };
+    }
+    return { identity_status: 'DEGRADED', reason_code: 'canary-consumption-unrecorded', reason: 'the canary could not be marked spent, so this echo cannot be distinguished from a later replay' };
   }
   return { identity_status: 'PASS', reason: 'canary present in MEMORY.md, echoed from injected context before any non-allowlisted tool' };
 }
@@ -163,8 +170,10 @@ export async function probe(opts = {}) {
   const workspaceId = opts.workspaceId || resolveWorkspaceId(cwd) || 'unknown';
   const observed_at = new Date().toISOString();
 
+  const sessionId = opts.sessionId || opts.env?.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || null;
+
   // Read expected token + injection facts from the side file (script-internal read).
-  let token = null, memoryWritten = false, memoryPath = null, canaryFileState = 'absent';
+  let token = null, memoryWritten = false, memoryPath = null, canaryFileState = 'absent', writtenBySession = null;
   const sideFile = canaryFilePath(workspaceId, home);
   if (existsSync(sideFile)) {
     try {
@@ -172,6 +181,7 @@ export async function probe(opts = {}) {
       token = s.token || null;
       memoryWritten = s.memory_written === true;
       memoryPath = s.memory_path || null;
+      writtenBySession = s.written_by_session ?? null;
       canaryFileState = token ? 'present' : 'invalid';
     } catch { token = null; canaryFileState = 'invalid'; }
   }
@@ -193,22 +203,26 @@ export async function probe(opts = {}) {
   const injectionLineWindow = opts.injectionLineWindow || DEFAULT_INJECTION_LINE_WINDOW;
   const injectionByteWindow = opts.injectionByteWindow || DEFAULT_INJECTION_BYTE_WINDOW;
 
-  const transcriptPath = resolveTranscript(cwd, home, opts.transcriptPath);
+  const transcriptPath = resolveTranscript(cwd, home, opts.transcriptPath, sessionId);
   let transcriptAvailable = false, events = [];
   if (transcriptPath && existsSync(transcriptPath)) {
     try { events = scanTranscript(readFileSync(transcriptPath, 'utf8').split('\n'), token); transcriptAvailable = true; } catch { transcriptAvailable = false; }
   }
 
-  const { identity_status, reason, reason_code } = classify({ token, canaryFileState, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow });
+  // Spend the token only once the echo is in hand — an unspent canary must survive a
+  // session that never echoed it, so the next session can still use it.
+  const echoed = events.some((e) => e.kind === 'echo');
+  const tokenConsumption = (token && echoed) ? consumeCanary(workspaceId, { home, sessionId }) : null;
+
+  const { identity_status, reason, reason_code } = classify({ token, canaryFileState, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, writtenBySession, sessionId, tokenConsumption });
   return buildRow({ identity_status, reason, reason_code, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, transcriptAvailable, events, cwd, observed_at });
 }
 
 // Count REAL lines. A trailing newline produces a final empty split element that is
 // NOT a real line — so a file of exactly N lines ending in `\n` must count as N, not
-// N+1, or it falsely trips truncation at an N-line injection window (HC blocker #3,
-// evt-202605291319). Live relevance: MEMORY.md sits near the 200-line window after the
-// v2.8.1 compaction, so the off-by-one was one compaction away from a false DEGRADED.
-// Exported for direct boundary testing.
+// N+1, or it falsely trips truncation at an N-line injection window. This matters in
+// practice: MEMORY.md sits near the 200-line window, so an off-by-one here is one
+// compaction away from a false DEGRADED. Exported for direct boundary testing.
 export function countLines(content) {
   if (!content) return 0;
   const lines = content.split(/\r?\n/);

@@ -65,6 +65,40 @@ export const BITEMPORAL_VERSION = '1.0.0';
 // existing importer keep working against the same single source.
 export { effectiveValidity, validAt, isInvalidated };
 
+// ---------- validity-date validation ----------
+
+/**
+ * A stored validity bound must be a real calendar day in ISO form. parseIsoDate
+ * accepts a leading prefix and never checks the round trip, so `2026-02-30` and
+ * `2026-13-01` come back as some other date — a bound nobody wrote. Anything
+ * that fails this is UNKNOWN: it is never stamped, never copied into another
+ * unit, and never counted as valid.
+ */
+export function isValidValidityDate(value) {
+  const s = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = parseIsoDate(s);
+  return !!d && d.toISOString().slice(0, 10) === s;
+}
+
+/** The malformed stored validity bounds a unit carries, if any. */
+export function malformedValidity(u) {
+  const out = [];
+  const id = basename(u.path, '.md');
+  for (const field of ['t_valid', 't_invalid']) {
+    const raw = u.fm?.[field];
+    if (raw !== undefined && raw !== null && String(raw).trim() !== '' && !isValidValidityDate(raw)) {
+      out.push({ unit: id, field, value: String(raw).trim() });
+    }
+  }
+  return out;
+}
+
+/** UTC midnight of the current calendar day — the day validity is judged on. */
+export function todayUtc(now = new Date()) {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 // ---------- supersession classification (shared by writer + metrics) ----------
 
 // Shared terminal-status contract (SYN-005): one definition in unit-vocab.mjs.
@@ -88,6 +122,12 @@ export function classifySupersessions(units) {
   const byId = new Map();
   for (const u of units) byId.set(basename(u.path, '.md'), u);
 
+  // A unit whose stored validity bound is not a real calendar day is UNKNOWN.
+  // It neither supplies a stamp nor receives one — writing a date derived from
+  // an unreadable one would mint a bound nobody authored.
+  const malformed = units.flatMap(malformedValidity);
+  const unreadable = new Set(malformed.map((m) => m.unit));
+
   const confirmedByTarget = new Map(); // targetId -> { target, t_invalid (earliest), superseders[], path }
   const loose = [];
 
@@ -98,6 +138,7 @@ export function classifySupersessions(units) {
       const a = byId.get(targetId);
       if (!a) continue; // dangling target — integrity check's job, not ours
       const bId = basename(b.path, '.md');
+      if (unreadable.has(bId) || unreadable.has(targetId)) continue;
       const aStatus = String(a.fm.status || 'active').toLowerCase();
       const bValid = effectiveValidity(b).t_valid;
 
@@ -135,7 +176,7 @@ export function classifySupersessions(units) {
       confirmed.push(c);
     }
   }
-  return { confirmed, loose, conflicts };
+  return { confirmed, loose, conflicts, malformed };
 }
 
 // ---------- writer: supersession stamps t_invalid ----------
@@ -209,7 +250,14 @@ export function storageMetrics(units, today) {
   let withExplicitValid = 0;
   const intervals = []; // closed-interval lengths in days, for invalidated facts
 
+  // A unit whose stored bound is unreadable answers neither "valid" nor
+  // "invalidated" — it is counted separately so the rollup never launders it
+  // into valid_now.
+  const malformedUnits = units.flatMap(malformedValidity);
+  const unreadable = new Set(malformedUnits.map((m) => m.unit));
+
   for (const u of units) {
+    if (unreadable.has(basename(u.path, '.md'))) continue;
     const { t_valid, t_invalid } = effectiveValidity(u);
     if (u.fm.t_valid) withExplicitValid += 1;
     if (isInvalidated(u, today)) {
@@ -248,7 +296,7 @@ export function storageMetrics(units, today) {
   unstampedTerminal.sort();
 
   const total = units.length;
-  const validNow = total - invalidated;
+  const validNow = total - invalidated - unreadable.size;
   intervals.sort((x, y) => x - y);
   const median = intervals.length ? intervals[Math.floor(intervals.length / 2)] : null;
   const mean = intervals.length ? Math.round(intervals.reduce((s, v) => s + v, 0) / intervals.length) : null;
@@ -263,6 +311,8 @@ export function storageMetrics(units, today) {
     loose_edges: looseEdges,
     validity_conflicts: conflicts.length,            // supersession stamp would predate target t_valid (surfaced, never stamped)
     conflicts,
+    malformed_validity: malformedUnits.length,       // stored bound is not a real calendar day — UNKNOWN, excluded from valid_now
+    malformed_validity_units: malformedUnits,
     unstamped_terminal: unstampedTerminal.length,    // terminal status, no t_invalid, no incoming supersedes — manual-population candidates
     unstamped_terminal_units: unstampedTerminal,
     churn_rate: total ? Math.round((invalidated / total) * 1000) / 1000 : 0,
@@ -278,14 +328,18 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();
   const memoriesDir = join(project, '_memories');
-  const today = new Date();
+  const today = todayUtc();
   let units;
   try { units = iterActiveUnits(memoriesDir); } catch { units = []; }
 
   if (argv.includes('--stamp')) {
     const stamps = planSupersessionStamps(units);
     const apply = argv.includes('--apply');
-    const { conflicts } = classifySupersessions(units);
+    const { conflicts, malformed } = classifySupersessions(units);
+    if (malformed.length) {
+      process.stdout.write(`bitemporal: ⚠ ${malformed.length} unreadable validity bound(s) — UNKNOWN, not stamped and not counted as valid:\n`);
+      for (const m of malformed) process.stdout.write(`      ${m.unit}.${m.field} = '${m.value}' is not a calendar day\n`);
+    }
     if (conflicts.length) {
       process.stdout.write(`bitemporal: ⚠ ${conflicts.length} validity conflict(s) — supersession would stamp t_invalid before the target's t_valid; surfaced, NOT stamped:\n`);
       for (const c of conflicts) process.stdout.write(`      ${c.superseded_by} supersedes ${c.target}: candidate t_invalid ${c.t_invalid_candidate} < t_valid ${c.t_valid}\n`);

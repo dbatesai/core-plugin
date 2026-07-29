@@ -21,22 +21,27 @@
  *   node index-registry.mjs update <workspace_id> --json '{"name":"New"}'   [--core-dir <dir>]
  *   node index-registry.mjs remove <workspace_id>                            [--core-dir <dir>]
  *   node index-registry.mjs touch  <workspace_id> [--when <ISO>]             [--core-dir <dir>]
+ *   node index-registry.mjs bootstrap <workspace_id> [--session-started <ISO>] [--core-dir <dir>]
  *   node index-registry.mjs last-active <workspace_id>                       [--core-dir <dir>]
  *
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
-import { trustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, assertSafeWorkspaceId, isSafeWorkspaceId } from './trusted-home.mjs';
 
-export function defaultCoreDir() {
-  return join(trustedHome() || homedir(), '.core');
+/**
+ * The operational root, anchored to the OS-account home. An unresolvable
+ * trusted home throws: the registry is a trust decision, and homedir() is the
+ * environment-controlled value that anchor exists to avoid.
+ */
+export function defaultCoreDir(opts) {
+  return join(requireTrustedHome(opts), '.core');
 }
 
 const lockPath = (coreDir) => join(coreDir, 'index.lock');
@@ -75,6 +80,7 @@ export function mutateIndex(coreDir, mutator) {
 
 export function addWorkspace(coreDir, entry) {
   if (!entry || !entry.workspace_id) throw new Error('addWorkspace: entry.workspace_id required');
+  assertSafeWorkspaceId(entry.workspace_id);
   return mutateIndex(coreDir, (entries) => {
     if (entries.some(e => e.workspace_id === entry.workspace_id)) {
       throw new Error(`addWorkspace: id already registered: ${entry.workspace_id}`);
@@ -103,19 +109,45 @@ export function removeWorkspace(coreDir, workspaceId) {
 
 // ---------- last_active (per-workspace single-owner file; no lock needed) ----------
 
-const lastActivePath = (coreDir, id) => join(coreDir, 'workspaces', id, 'last-active');
+// The id arrives from project-controlled workspace.json, so it is validated as a
+// single directory segment BEFORE it can contribute to a path under ~/.core.
+const workspaceDir = (coreDir, id) => join(coreDir, 'workspaces', assertSafeWorkspaceId(id));
+const lastActivePath = (coreDir, id) => join(workspaceDir(coreDir, id), 'last-active');
 
 /** Stamp the workspace's last-active time. Full overwrite of a single-owner file. */
 export function touchWorkspace(coreDir, workspaceId, when = new Date().toISOString()) {
   const dir = coreDir || defaultCoreDir();
-  mkdirSync(join(dir, 'workspaces', workspaceId), { recursive: true });
+  mkdirSync(workspaceDir(dir, workspaceId), { recursive: true });
   atomicWriteFileSync(lastActivePath(dir, workspaceId), when + '\n');
   return { workspace_id: workspaceId, last_active: when };
 }
 
+// ---------- bootstrap record (per-workspace single-owner file) ----------
+
+const lastBootstrapPath = (coreDir, id) => join(workspaceDir(coreDir, id), 'last-bootstrap.json');
+
+/**
+ * Record that bootstrap ran, and for which session. `session_started_at` is the
+ * first-user-message timestamp the dedup check in protocols/startup.md compares
+ * against; a torn or half-written record there reads as "bootstrap never ran"
+ * and costs a wrongly repeated startup, so the write is temp-file + rename and
+ * the file is owner-only like every other per-workspace record.
+ */
+export function recordBootstrap(coreDir, workspaceId, { sessionStartedAt, completedAt = new Date().toISOString() } = {}) {
+  const dir = coreDir || defaultCoreDir();
+  mkdirSync(workspaceDir(dir, workspaceId), { recursive: true });
+  const path = lastBootstrapPath(dir, workspaceId);
+  const record = { session_started_at: sessionStartedAt ?? null, bootstrap_completed_at: completedAt };
+  atomicWriteFileSync(path, JSON.stringify(record, null, 2) + '\n');
+  try { chmodSync(path, 0o600); } catch { /* Windows: mode is advisory */ }
+  return { path, record };
+}
+
+
 /** Read last-active: per-workspace file first, index.json field as the one-release tolerant fallback. */
 export function readLastActive(coreDir, workspaceId) {
   const dir = coreDir || defaultCoreDir();
+  if (!isSafeWorkspaceId(workspaceId)) return null;
   try { return readFileSync(lastActivePath(dir, workspaceId), 'utf8').trim() || null; } catch { /* fall back */ }
   try {
     const entry = readIndex(dir).find(e => e.workspace_id === workspaceId);
@@ -132,6 +164,7 @@ function parseArgs(argv) {
     if (a === '--json') out.json = argv[++i];
     else if (a === '--core-dir') out.coreDir = argv[++i];
     else if (a === '--when') out.when = argv[++i];
+    else if (a === '--session-started') out.sessionStarted = argv[++i];
     else out._.push(a);
   }
   return out;
@@ -163,12 +196,16 @@ export function main(argv = process.argv.slice(2)) {
         const r = touchWorkspace(coreDir, id, args.when || undefined);
         process.stdout.write(`${r.workspace_id} last-active ${r.last_active}\n`); return 0;
       }
+      case 'bootstrap': {
+        const r = recordBootstrap(coreDir, id, { sessionStartedAt: args.sessionStarted || null });
+        process.stdout.write(`${r.path}\n`); return 0;
+      }
       case 'last-active': {
         const v = readLastActive(coreDir, id);
         process.stdout.write((v || '(none)') + '\n'); return v ? 0 : 1;
       }
       default:
-        process.stderr.write('usage: index-registry.mjs <add|update|remove|touch|last-active> [id] [--json ...] [--when ISO] [--core-dir dir]\n');
+        process.stderr.write('usage: index-registry.mjs <add|update|remove|touch|bootstrap|last-active> [id] [--json ...] [--when ISO] [--session-started ISO] [--core-dir dir]\n');
         return 2;
     }
   } catch (e) {

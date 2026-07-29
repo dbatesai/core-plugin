@@ -11,7 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(__dirname, '../../plugins/core/skills/core/scripts/check-inbox.mjs');
 
 // import() needs a file:// URL — a bare drive-letter path throws ERR_UNSUPPORTED_ESM_URL_SCHEME on Windows.
-const { parseInboxBlocks, checkInbox, hasSourceAnchor } = await import(pathToFileURL(SCRIPT).href);
+const { parseInboxBlocks, checkInbox, hasSourceAnchor, INBOX_DRAFT_STATUS } = await import(pathToFileURL(SCRIPT).href);
 
 function makeProject({ inbox, units = [] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'check-inbox-'));
@@ -204,4 +204,52 @@ test('CLI exit codes: 2 on FAIL, 0 on clean, and --json emits valid JSON', () =>
     (err) => err.status === 2,
   );
   rmSync(broken, { recursive: true, force: true });
+});
+
+test('an invented in-flight status on an inbox block is reported, not accepted', () => {
+  // One in-flight name, and it comes from unit-vocab. A block carrying anything
+  // else would graduate into the store with a status no validator blesses.
+  for (const invented of ['pending', 'new', 'in-flight']) {
+    const block = VALID_B_BLOCK.replace('status: draft', `status: ${invented}`);
+    const dir = makeProject({ inbox: block });
+    const report = checkInbox(dir);
+    assert.equal(
+      report.some((r) => r.check === 'status-value' && r.detail.includes(invented)),
+      true,
+      `"${invented}" must be reported`,
+    );
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the canonical draft status passes clean', () => {
+  const dir = makeProject({ inbox: VALID_B_BLOCK.replace('status: draft', `status: ${INBOX_DRAFT_STATUS}`) });
+  const report = checkInbox(dir);
+  assert.equal(report.some((r) => r.check === 'status-value'), false);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// A truncated extractor write is the most basic malformed shape there is: the
+// opening fence lands, the closing one never does. Parsing silently stopped
+// there and the empty report was summarized as clean — the exact "malformed
+// evidence read as success" the mechanical boundary exists to prevent.
+test('an unterminated frontmatter fence is a FAIL naming the opening line', () => {
+  const truncated = VALID_B_BLOCK + '\n---\nid: obs-cut-off\ntype: observation\nmode: B\n';
+  const dir = makeProject({ inbox: truncated });
+  const report = checkInbox(dir);
+  const fails = report.filter((r) => r.level === 'FAIL');
+  assert.equal(fails.length, 1, 'the truncation must be reported, not skipped');
+  assert.equal(fails[0].check, 'unterminated-frontmatter');
+  assert.match(fails[0].detail, /line 14/, 'and it must name the opening fence line');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('CLI exits 2 on a truncated inbox rather than reporting it clean', () => {
+  const dir = makeProject({ inbox: '---\nid: obs-cut-off\ntype: observation\nmode: B\n' });
+  let status = 0, stdout = '';
+  try { stdout = execFileSync(process.execPath, [SCRIPT, dir], { encoding: 'utf8' }); }
+  catch (e) { status = e.status; stdout = String(e.stdout || ''); }
+  assert.equal(status, 2, `expected a failing exit, got ${status}: ${stdout}`);
+  assert.match(stdout, /unterminated-frontmatter/);
+  rmSync(dir, { recursive: true, force: true });
 });

@@ -24,10 +24,11 @@
  * refusals (no evidence → no published-private; one outcome per generation;
  * no double revocation).
  */
-import { readFileSync, existsSync } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
+import { readFileSync, existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs';
+import { join, resolve, basename, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { isSafeWorkspaceId, containedPath } from './trusted-home.mjs';
 
 export const PUBLISH_RECEIPT_SCHEMA_VERSION = '1.0.0';
 export const PUBLISH_STATUSES = ['declined', 'failed', 'published-private'];
@@ -77,10 +78,16 @@ export function validateGenerationReceipt(gen, genPath) {
 
 // ---------- generation-receipt location ----------
 
+/**
+ * The workspace id from the project's own workspace.json. It is
+ * project-controlled, so an id that does not name a single directory segment is
+ * treated as absent — the receipt lands in the flagged fallback rather than at a
+ * path the project chose.
+ */
 export function readWorkspaceId(projectDir) {
   try {
     const ws = JSON.parse(readFileSync(join(resolve(projectDir), 'workspace.json'), 'utf8'));
-    return typeof ws.workspace_id === 'string' && ws.workspace_id.trim() ? ws.workspace_id : null;
+    return isSafeWorkspaceId(ws.workspace_id) ? ws.workspace_id : null;
   } catch { return null; }
 }
 
@@ -100,6 +107,97 @@ export function generationReceiptLocation({ home, projectDir, generatedAt }) {
     ? join(home, '.core', 'workspaces', workspaceId, 'artifact-receipts')
     : join(home, '.core', 'artifact-receipts');
   return { workspaceId, receiptDir, receiptPath: join(receiptDir, `${sanitizeTimestamp(generatedAt)}.json`) };
+}
+
+// ---------- artifact + receipt as one transaction ----------
+
+/**
+ * Canonicalize an artifact destination and refuse one whose REAL path lands
+ * inside the memory store. A lexical check reads the spelling, so an existing
+ * symlink at the destination — or anywhere in its parents — passes it and the
+ * write then follows the link into canonical memory content.
+ */
+export function resolveArtifactDestination(outPath, { forbiddenRoot }) {
+  const outAbs = resolve(outPath);
+  // lstat, not existsSync: a link whose target does not exist yet is still a
+  // link, and existsSync follows it straight past this check.
+  let st = null;
+  try { st = lstatSync(outAbs); } catch { /* nothing there yet */ }
+  if (st && st.isSymbolicLink()) {
+    throw Object.assign(new Error(
+      `refusing --out ${outAbs} — it is a symlink; an artifact is written to a real path, never through a link`),
+    { code: 'OUT_IS_SYMLINK' });
+  }
+  if (st && !st.isFile()) {
+    throw Object.assign(new Error(`refusing --out ${outAbs} — it exists and is not a regular file`), { code: 'OUT_NOT_A_FILE' });
+  }
+  // Canonical through the nearest existing ancestor, so a linked PARENT is
+  // judged by where it really points.
+  const real = containedPath(dirname(outAbs), outAbs) || outAbs;
+  if (forbiddenRoot && containedPath(forbiddenRoot, real)) {
+    throw Object.assign(new Error(
+      `refusing --out inside the memory store (${forbiddenRoot}) — the store is read-only to this script; ${outAbs} really resolves to ${real}`),
+    { code: 'OUT_IN_STORE' });
+  }
+  return real;
+}
+
+/**
+ * Write the artifact and its generation receipt as one transaction.
+ *
+ * The receipt describes exact bytes, so the bytes are proven before it is
+ * written: the artifact is placed atomically, read back, and hashed; a digest
+ * that disagrees with the rendered content means something moved the file
+ * between render and receipt, and publication aborts. A receipt that cannot be
+ * written takes the artifact with it — an unreceipted artifact left on disk can
+ * be published by a later actor no matter what this process exits with.
+ *
+ * `afterWrite` is the injection point tests use to mutate the destination
+ * inside the window the verification exists to close.
+ */
+export function publishArtifactWithReceipt({
+  outPath, html, receiptDir, receiptPath, manifest, forbiddenRoot = null, afterWrite = null,
+}) {
+  const expected = artifactContentDigest(html);
+  if (manifest && manifest.artifact_sha256 && manifest.artifact_sha256 !== expected) {
+    throw Object.assign(new Error('manifest artifact_sha256 does not describe the rendered bytes'), { code: 'DIGEST_MISMATCH' });
+  }
+  const outAbs = resolveArtifactDestination(outPath, { forbiddenRoot });
+
+  // Preflight the receipt location BEFORE the artifact lands, so the common
+  // failure (no writable receipt directory) is caught while there is still
+  // nothing to roll back.
+  try { mkdirSync(receiptDir, { recursive: true }); }
+  catch (e) {
+    throw Object.assign(new Error(`cannot prepare the receipt directory ${receiptDir}: ${e.message} — refusing to publish an unreceipted artifact`), { code: 'RECEIPT_PREFLIGHT_FAILED' });
+  }
+
+  mkdirSync(dirname(outAbs), { recursive: true });
+  atomicWriteFileSync(outAbs, html);
+  if (afterWrite) afterWrite(outAbs);
+
+  const discard = () => { try { rmSync(outAbs, { force: true }); } catch { /* already gone */ } };
+
+  let onDisk;
+  try { onDisk = readFileSync(outAbs); }
+  catch (e) {
+    discard();
+    throw Object.assign(new Error(`cannot read back the artifact at ${outAbs}: ${e.message}`), { code: 'ARTIFACT_UNVERIFIED' });
+  }
+  const actual = artifactContentDigest(onDisk);
+  if (actual !== expected) {
+    discard();
+    throw Object.assign(new Error(
+      `the artifact on disk is not the artifact that was rendered (expected ${expected}, found ${actual}) — ` +
+      'something changed the destination between render and receipt; publication aborted'), { code: 'ARTIFACT_MUTATED' });
+  }
+
+  try { atomicWriteFileSync(receiptPath, JSON.stringify(manifest, null, 2) + '\n'); }
+  catch (e) {
+    discard();
+    throw Object.assign(new Error(`receipt write failed at ${receiptPath}: ${e.message} — the artifact was removed rather than left unreceipted`), { code: 'RECEIPT_WRITE_FAILED' });
+  }
+  return { outPath: outAbs, receiptPath, artifact_sha256: expected };
 }
 
 // ---------- publish receipt ----------

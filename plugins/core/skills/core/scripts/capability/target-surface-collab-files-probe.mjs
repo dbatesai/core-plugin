@@ -1,16 +1,17 @@
 /**
- * target-surface-collab-files-probe.mjs — v2.6.0 target-surface capability.
+ * target-surface-collab-files-probe.mjs — target-surface capability.
  *
  * Proves that this install's configured collab-files repo (if any) is
  * reachable, is the expected git repo, has a known remote, and has a
  * parseable working-tree state. Called by capability-probe.mjs when the
  * descriptor declares delegate: 'capability/target-surface-collab-files-probe.mjs'.
  *
- * Five proofs per HC critique evt-202605271654:
+ * Five proofs, all required:
  *   1. Files repo path exists at the configured location
  *   2. Git repo root matches configured path (not a sub-directory of something else)
  *   3. Working tree state is parseable (git status --porcelain exits 0)
- *   4. Remote URL matches expected upstream
+ *   4. Remote URL matches the DECLARED expected upstream — an undeclared destination is
+ *      not verified, and this surface writes, so it degrades rather than corroborates
  *   5. Write capability: git push --dry-run succeeds, OR explicitly marked unproven
  *
  * Config source, in priority order:
@@ -29,10 +30,12 @@
  * never as a value that ships pointing at anyone's personal repo.
  *
  * Identity_status:
- *   PASS    — all five proofs pass
+ *   PASS     — all five proofs pass
  *   DEGRADED — one or more proofs produce conflicting evidence (repo mismatch,
- *               wrong remote, push-dry-run failed)
- *   UNKNOWN  — probe couldn't run (repo not accessible, git not found, etc.)
+ *              wrong or undeclared remote, push-dry-run failed)
+ *   NOT-YET  — configured but the surface has not been created here yet; not ready
+ *              rather than broken, and still not a PASS, so mutation gates stay closed
+ *   UNKNOWN  — probe couldn't run (nothing configured, git not found, etc.)
  *
  * Ships with the plugin by design.
  * Node.js (.mjs) only, zero dependencies.
@@ -76,6 +79,31 @@ function gitRun(args, cwd) {
  * @param {string} [opts.filesRepo]   override files repo path (for testing)
  * @param {string} [opts.expectedRemote] override expected remote URL (for testing)
  */
+
+/** Canonical filesystem-path equality: resolves symlinks and Windows 8.3
+ * short names via the native realpath, then compares with separators
+ * normalized and the drive letter case-folded. */
+function samePath(a, b) {
+  const norm = (v) => String(v).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => d.toLowerCase() + ':').replace(/\/+$/, '');
+  const canon = (v) => { try { return realpathSync.native(String(v)); } catch { return null; } };
+  const ca = canon(a);
+  const cb = canon(b);
+  if (ca && cb) return norm(ca) === norm(cb);
+  return norm(a) === norm(b);
+}
+
+/**
+ * Compare a declared remote with the one git reports. URL-shaped remotes
+ * (scheme:// or scp-like user@host:) compare exactly. Filesystem-path remotes
+ * compare as canonical paths.
+ */
+function remoteMatchesExpected(actual, expected) {
+  if (actual === expected) return true;
+  const urlish = (v) => /^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^[^/\\]+@[^/\\]+:/.test(v);
+  if (urlish(actual) || urlish(expected)) return false;
+  return samePath(actual, expected);
+}
+
 export async function probe(opts = {}) {
   const observed_at = new Date().toISOString();
   const evidence = [];
@@ -112,14 +140,18 @@ export async function probe(opts = {}) {
   let repoPath;
   try { repoPath = realpathSync(configuredRepo); } catch { repoPath = configuredRepo; }
 
+  // A configured surface that isn't there yet has not failed — it has not been set up.
+  // Reporting that as DEGRADED tells the user something is wrong with a repo they simply
+  // have not cloned, and buries a real degradation in the same bucket. NOT-YET is the
+  // readiness state; it is not a PASS, so a mutation gate still stays closed.
   if (!existsSync(repoPath)) {
     evidence.push({
       source: 'repo-exists',
-      value: { configured: configuredRepo, resolved: repoPath, exists: false },
+      value: { configured: configuredRepo, resolved: repoPath, exists: false, note: 'configured but not present — clone or create it to enable this surface' },
       agrees_with_others: false,
       weight: 'conflicting',
     });
-    return buildRow({ identity_status: 'DEGRADED', observed_at, evidence, configuredRepo });
+    return buildRow({ identity_status: 'NOT-YET', reason_code: 'target-surface-not-scaffolded', observed_at, evidence, configuredRepo });
   }
   evidence.push({
     source: 'repo-exists',
@@ -141,7 +173,7 @@ export async function probe(opts = {}) {
   }
   let actualRoot;
   try { actualRoot = realpathSync(rootResult.stdout); } catch { actualRoot = rootResult.stdout; }
-  const rootMatches = actualRoot === repoPath;
+  const rootMatches = samePath(actualRoot, repoPath);
   evidence.push({
     source: 'git-repo-root',
     value: { actual: actualRoot, configured: repoPath, matches: rootMatches },
@@ -180,7 +212,7 @@ export async function probe(opts = {}) {
   } else {
     const actualRemote = remoteResult.stdout;
     if (expectedRemote) {
-      const remoteMatches = actualRemote === expectedRemote;
+      const remoteMatches = remoteMatchesExpected(actualRemote, expectedRemote);
       evidence.push({
         source: 'git-remote',
         value: { actual: actualRemote, expected: expectedRemote, matches: remoteMatches },
@@ -188,12 +220,15 @@ export async function probe(opts = {}) {
         weight: remoteMatches ? 'corroborating' : 'conflicting',
       });
     } else {
-      // No expected remote configured — record actual but treat as unverified, not conflicting
+      // This is a mutation surface, and the remote IS the destination a write lands on.
+      // Accepting an undeclared remote as corroborating let every other proof pass and
+      // opened the gate onto whatever origin the repo happened to carry. An unverified
+      // destination is not a destination: conflicting, so the surface degrades.
       evidence.push({
         source: 'git-remote',
-        value: { actual: actualRemote, expected: null, note: 'expected_remote not configured; cannot verify' },
-        agrees_with_others: true,
-        weight: 'corroborating',
+        value: { actual: actualRemote, expected: null, unverified_code: 'target_surface_destination_undeclared', note: 'expected_remote not configured — set CORE_COLLAB_FILES_EXPECTED_REMOTE so writes have a declared destination' },
+        agrees_with_others: false,
+        weight: 'conflicting',
       });
     }
   }
@@ -238,9 +273,10 @@ export async function probe(opts = {}) {
   return buildRow({ identity_status, observed_at, evidence, configuredRepo });
 }
 
-function buildRow({ identity_status, observed_at, evidence, configuredRepo }) {
+function buildRow({ identity_status, observed_at, evidence, configuredRepo, reason_code = null }) {
   return {
     schema_version: SCHEMA_VERSION,
+    ...(reason_code ? { reason_code } : {}),
     capability_id: CAPABILITY_ID,
     capability_name: 'Target surface — collab files transport',
     capability_kind: 'mutation',

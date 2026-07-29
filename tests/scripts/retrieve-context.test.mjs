@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { retrieveContext, tokenize, main as retrieveContextMain } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
+import { retrieveContext, buildRetrievalTrace, tokenize, main as retrieveContextMain } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
 // The obligation-3 fixture store lives in-repo under tests/fixtures/ so CI (which checks
 // out only core-plugin) can reach it. The generated _lib/ cache is gitignored + regenerated.
@@ -82,4 +82,47 @@ test('CLI main(): a real positional query still works normally', () => {
 test('CLI main(): --top and --pack are still recognized and never rejected as unknown flags', () => {
   const [code] = captured(process.stdout, () => retrieveContextMain([FIXT, 'omega speedmaster sale', '--top', '5', '--pack']));
   assert.equal(code, 0);
+});
+
+// ---------- Numeric limits are validated, not sliced ----------
+//
+// `--top` reached Array.prototype.slice unchecked. A negative limit made slice count
+// from the END and silently drop results; a fractional or infinite one produced an
+// undefined-length window; a non-numeric one collapsed to the default, so a
+// mistyped limit reported a confident answer for a request nobody made.
+
+test('CLI main(): a non-numeric --top is rejected, not silently defaulted', () => {
+  const [code, err] = captured(process.stderr, () => retrieveContextMain([FIXT, 'omega', '--top', 'abc']));
+  assert.equal(code, 2);
+  assert.match(err, /--top/);
+});
+
+test('CLI main(): a negative or zero --top is rejected, not sliced from the end', () => {
+  for (const bad of ['-5', '0']) {
+    const [code] = captured(process.stderr, () => retrieveContextMain([FIXT, 'omega', '--top', bad]));
+    assert.equal(code, 2, `--top ${bad} must be rejected`);
+  }
+});
+
+test('CLI main(): a fractional --top is rejected', () => {
+  const [code] = captured(process.stderr, () => retrieveContextMain([FIXT, 'omega', '--top', '2.5']));
+  assert.equal(code, 2);
+});
+
+test('CLI main(): a missing --top value is rejected', () => {
+  const [code] = captured(process.stderr, () => retrieveContextMain([FIXT, 'omega', '--top']));
+  assert.equal(code, 2);
+});
+
+test('retrieveContext: an invalid topN throws a named error rather than clamping', () => {
+  for (const bad of [-1, 0, 2.5, NaN, Infinity, '3']) {
+    assert.throws(() => retrieveContext('omega', FIXT, { topN: bad }), /topN/,
+      `topN ${String(bad)} must be rejected at the boundary`);
+  }
+  assert.doesNotThrow(() => retrieveContext('omega', FIXT, { topN: 3 }));
+  assert.doesNotThrow(() => retrieveContext('omega', FIXT, {}), 'omitted topN still defaults');
+});
+
+test('buildRetrievalTrace: an invalid topN throws rather than producing a window nobody asked for', () => {
+  assert.throws(() => buildRetrievalTrace('omega', FIXT, { topN: -3 }), /topN/);
 });

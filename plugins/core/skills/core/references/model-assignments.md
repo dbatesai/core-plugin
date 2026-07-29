@@ -1,8 +1,10 @@
 # Model Assignments
 
-Single source of truth for which model runs at each pipeline stage. The main agent reads this before any dispatch that has model-tier flexibility. Per the v2 memory pipeline design (session 19w).
+Which reasoning tier runs at each pipeline stage. The main agent reads this before any dispatch that has model-tier flexibility.
 
 The principle: fastest model that doesn't sacrifice quality at each stage. No Opus when Haiku suffices. No Haiku when Sonnet's judgment matters.
+
+**The tier is the portable contract; the model IDs are harness policy.** The matrix assigns a qualitative effort level — `haiku` (mechanical), `sonnet` (judgment), `opus` (hardest calls) — and that assignment holds on any harness. The alias table below resolves those tiers to Anthropic model IDs, which is Claude-harness policy and not cross-harness truth. A harness serving a different provider maps each tier to its own nearest equivalent; it does not resolve an Anthropic ID.
 
 ---
 
@@ -14,7 +16,7 @@ The principle: fastest model that doesn't sacrifice quality at each stage. No Op
 | External source — pull | Haiku subagent | Haiku | Standard | Background |
 | External source — cheap filter | Same subagent as pull (in-memory) | Haiku | Standard | Background |
 | External source — relevance + extraction | Sonnet subagent | Sonnet (default); Opus (multi-session context calls) | Standard (Sonnet); extended (Opus path) | Background → write |
-| Graduation reasoning (clear trigger) | Sonnet subagent | Sonnet | Standard | Blocking at `/finalize`; background mid-session |
+| Graduation reasoning (clear trigger) | Sonnet subagent | Sonnet | Standard | Blocking at `/process-memory`; background mid-session |
 | Graduation reasoning (complex / multi-session) | Opus subagent | Opus | Extended | Blocking |
 | Tier 3 retrieval (Explore) | Sonnet subagent | Sonnet | Standard | Blocking |
 | Priority scoring | Script (Bash) | n/a | n/a | Fast |
@@ -64,28 +66,22 @@ Both blocking when triggered by `/finalize` or on-demand. The mid-session sectio
 
 ### Background vs blocking
 
-A dispatch is **background** when the main agent doesn't need the result this turn — external pulls, hygiene archive evaluation, mid-session section updates, MEMORY.md refresh. **Blocking** when the user is waiting on the artifact — `/finalize` render, on-demand render, graduation called during the current conversation.
+A dispatch is **background** when the main agent doesn't need the result this turn — external pulls, hygiene archive evaluation, mid-session section updates, MEMORY.md refresh. **Blocking** when the user is waiting on the artifact — `/finalize` render, on-demand render, a graduation the user asked for in the current conversation.
 
 ---
 
-## Alias → model-ID resolution
+## Alias → model resolution (harness policy)
 
-The matrix uses tier aliases (`haiku`, `sonnet`, `opus`), not model IDs. Resolution depends on
-the harness:
-
-| Alias | Canonical model ID (snapshot 2026-06-09) |
-|---|---|
-| `haiku` | `claude-haiku-4-5` |
-| `sonnet` | `claude-sonnet-4-6` |
-| `opus` | `claude-opus-4-8` |
+The matrix uses tier aliases (`haiku`, `sonnet`, `opus`), not model IDs. How an alias becomes a
+concrete model is the harness's business, and the answer differs per harness:
 
 - **Claude Code resolves the bare aliases natively** in its dispatch `model` parameter — pass
-  the alias through; it tracks the current generation without a doc change here.
-- **Harnesses without alias support** (Codex and any non-Anthropic-native dispatcher) need a
-  concrete ID. Resolve the alias against the harness's live model list at dispatch time; fall
-  back to the snapshot column only when no live lookup exists. The snapshot is dated because
-  model generations move — when a dispatch 404s on a snapshot ID, the snapshot is stale: query
-  the provider's models endpoint, use the newest ID in the tier, and update this table.
+  the alias through; it tracks the current generation with no lookup and no table here.
+- **A harness that needs a concrete ID** resolves the tier against its own provider's live
+  model list at dispatch time, picking the newest model in that tier. Codex and any other
+  non-Anthropic-native dispatcher take this path. There is no snapshot table to fall back on:
+  a hard-coded ID goes stale the moment a generation moves, and a stale ID in a cross-harness
+  document is worse than a live lookup that occasionally has to retry.
 - **If a tier doesn't exist on the harness**, step UP one tier rather than down — the matrix
   assigns the cheapest model that doesn't sacrifice quality, so substituting downward breaks
   the assignment's premise.

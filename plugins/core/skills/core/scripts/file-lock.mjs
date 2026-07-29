@@ -137,7 +137,7 @@ function inspectFromGenerations(gens, { now, staleMs, hardStaleMs }) {
  * Inspect the lock. { held, lock, stale } — held means a live, non-stale owner
  * of the current generation. Read-only diagnostic entry point (close-pass.mjs
  * uses this to report lock state without acquiring); acquireFileLock does NOT
- * call this — see K12 note below for why.
+ * call this — see the single-snapshot note in acquireFileLock for why.
  */
 export function inspectFileLock(lockPath, {
   now = Date.now(),
@@ -187,7 +187,7 @@ export function acquireFileLock(lockPath, {
   mkdirSync(dirname(lockPath), { recursive: true });
   const nonce = newNonce();
 
-  // K12: maxN and the held-check MUST derive from the SAME listGenerations()
+  // maxN and the held-check MUST derive from the SAME listGenerations()
   // snapshot. With two independent reads, real I/O (statSync + readJson + a
   // pidAlive syscall) separates them in time; under load, a full concurrent
   // acquire-then-release cycle can complete entirely inside that window: the
@@ -214,7 +214,7 @@ export function acquireFileLock(lockPath, {
   const maxN = gens.reduce((m, g) => Math.max(m, g.n), 0);
   const { held, lock, stale } = inspectFromGenerations(gens, { now, staleMs, hardStaleMs });
 
-  // Test-only seam (K12 regression coverage): widen the snapshot-to-create
+  // Test-only seam: widen the snapshot-to-create
   // window deterministically so the stale-target race can be reproduced
   // without depending on real scheduler timing. Never set outside tests.
   // CORE_FILELOCK_TEST_SIGNAL_FILE is written the instant the snapshot above
@@ -337,7 +337,7 @@ export function withFileLock(lockPath, fn, {
     }
     sleepSync(retryDelayMs);
   }
-  // K12: releaseFileLock's return value must be read, never discarded — it
+  // releaseFileLock's return value must be read, never discarded — it
   // honestly reports a real failure ({released:false, reason, error} —
   // EPERM/EACCES/a generation another process claimed), and a bare
   // try/finally that drops it makes a failed release indistinguishable

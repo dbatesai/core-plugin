@@ -1,5 +1,5 @@
 /**
- * memory-accessed-probe.mjs — v2.9 memory-authority store-selection probe.
+ * memory-accessed-probe.mjs — memory-authority store-selection probe.
  *
  * The observed-access tier, between memory-file-present (it exists on disk) and
  * memory-visible (it was injected into context). This asks a different question the
@@ -17,10 +17,10 @@
  *
  * Consumes the read-transcript adapter verb (skills/core/scripts/read-transcript.mjs)
  * so harness-specific transcript paths/schemas stay in the adapter layer, not here
- *. Claude Code: VERIFIED — tool events carry path/command text. Codex: now also
- * VERIFIED (v2.9 Slice F) — read-transcript extracts function_call/custom_tool_call, so
+ *. Claude Code: VERIFIED — tool events carry path/command text. Codex: also
+ * VERIFIED — read-transcript extracts function_call/custom_tool_call, so
  * this probe classifies on Codex too (PASS on CORE reach, DEGRADED on store-selection).
- * UNKNOWN is now reserved for the genuine cases: no transcript available, or a future
+ * UNKNOWN is reserved for the genuine cases: no transcript available, or a future
  * Codex build whose tool schema drifts (extraction fails open to no tool events). It
  * never claims "not accessed" when it cannot see tool calls.
  *
@@ -39,11 +39,11 @@ export const CAPABILITY_ID = 'memory-accessed';
 // A PRECEDING-char boundary (space/quote/slash/start) keeps real path embeds — `grep foo
 // _memories/`, `"path":"_memories/"`, `Read PROJECT.md` — while rejecting word-internal
 // look-alikes like `my_memories/`. A TRAILING guard `(?![.\w])` rejects extension look-
-// alikes — `PROJECT.md.bak`, `MEMORY.md.bak`, `PROJECT.markdown` — which `\b` let through
-// (HC blocker #2, evt-202605291319). `_memories[/\\]` already excludes `_memories-old/` /
+// alikes — `PROJECT.md.bak`, `MEMORY.md.bak`, `PROJECT.markdown` — which `\b` lets through.
+// `_memories[/\\]` already excludes `_memories-old/` /
 // `_memories_archive/` (no slash immediately after `_memories`).
 // Exported as the single source of truth for "a tool touched a CORE store surface" —
-// reused by analyze-retrieval-skip.mjs (v2.9 Slice B) so the two consumers can't drift.
+// reused by analyze-retrieval-skip.mjs so the two consumers can't drift.
 export const CORE_SURFACE_RE = /(?:^|[\s/\\"'])(?:_memories[/\\]|PROJECT\.md(?![.\w]))/;
 const NATIVE_SURFACE_RE = /(?:\.codex[/\\]memories|(?:^|[\s/\\"'])MEMORY\.md(?![.\w]))/;
 
@@ -80,9 +80,9 @@ function coreStorePresentAt(cwd) {
 }
 
 // row-schema.md §"Producer expectations" #2: observed_at, harness, cwd, env_signals are
-// unconditional; workspace_id is part of the evidence-field contract. memory-accessed
-// omitted env_signals + workspace_id (HC blocker #4, evt-202605291319) — added here so
-// every row this probe emits satisfies the producer contract that drift/regression read.
+// unconditional; workspace_id is part of the evidence-field contract. Both are attached
+// here so every row this probe emits satisfies the producer contract that
+// drift/regression analysis reads.
 const ENV_SIGNAL_KEYS = ['CLAUDE_PLUGIN_ROOT', 'CODEX_PLUGIN_ROOT', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'];
 
 function gatherEnvSignals(env = {}) {

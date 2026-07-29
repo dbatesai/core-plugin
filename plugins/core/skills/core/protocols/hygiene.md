@@ -10,7 +10,7 @@ Memory hygiene is the single mechanism that keeps the memory architecture health
 
 It replaces the dream cycle. Every dream-cycle phase folded into one of the operations below.
 
-Read this before any `/finalize`, before any cleanup pass, and any time you notice the memory architecture drifting (stale units in retrieval, contradictions surfacing, indexes out of sync).
+Read this before any cleanup pass, and any time you notice the memory architecture drifting (stale units in retrieval, contradictions surfacing, indexes out of sync).
 
 ---
 
@@ -26,7 +26,7 @@ These are the operational primitives. Each has a trigger, an action, and a retri
 
 **Retrieval impact.** Archived units are not in the default candidate set. Tier 1 grep and Tier 2 graph walks skip the archive directory. Explicit queries like "historical context on X" or "show me archived units" still reach them.
 
-**Never autonomous on user-authored units.** This is the integrity-uncertainty case named in SKILL.md §"Act first, confirm when integrity is uncertain." Archive of a user-authored unit would overwrite their authorship, which triggers Mode B (propose, wait for explicit yes). Surface the candidate list at `/finalize` and let the user choose `y` (archive all), `N` (none), or `per-unit`. Even if priority math says low-value, the user may have intent the math can't see.
+**Never autonomous on user-authored units.** This is the integrity-uncertainty case named in SKILL.md §"Act first, confirm when integrity is uncertain." Archive of a user-authored unit would overwrite their authorship, which triggers Mode B (propose, wait for explicit yes). Surface the candidate list at `/process-memory` and let the user choose `y` (archive all), `N` (none), or `per-unit`. Even if priority math says low-value, the user may have intent the math can't see.
 
 ### Retire — declare no longer current truth; keep the trace
 
@@ -68,8 +68,9 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 
 | Trigger | What runs |
 |---|---|
-| `/finalize` | Comprehensive hygiene pass — archive/retire/cold-store, graduation of borderline observations, index regeneration, file-cap reconciliation, retrospective. The primary scheduled hygiene event each session. |
-| `/process-memory` (user-invoked) | On-demand pass — same hygiene work without the session-summary and render steps. Run when you want memory housekeeping mid-session. See `skills/process-memory/SKILL.md`. |
+| `/process-memory` (user-invoked) | The comprehensive hygiene pass — back-fill of auto-closed sessions, archive/retire/cold-store, graduation, index regeneration, file-cap reconciliation, validity stamps, turn classification. The primary scheduled hygiene event. See `skills/process-memory/SKILL.md`. |
+| Startup backstop | Unconditional decoration + index refresh every returning-workspace bootstrap (`protocols/startup.md §"Decoration + index refresh backstop"`) — keeps the store current even when no hygiene pass ran. |
+| `/finalize` | No hygiene. The close captures material session outcomes and certifies the receipt; it deliberately runs none of this table. |
 | On-demand user request | "Run hygiene now," "graduate this," "archive the old decisions about X." |
 | Meaningful PROJECT.md change | User removes fact → retire-trigger fires for the affected units. |
 | Edit-detection hash mismatch | Reconciliation pass runs as a follow-on after edit-detection captures the user's change. |
@@ -79,7 +80,7 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 Rapid edits in a single turn (a graduation followed by an index regen followed by a render) shouldn't trigger a separate hygiene pass each. Batch instead — and judge the batching by agent turns, which you can observe, not by wall-clock seconds, which you can't reliably measure between turns. The rule:
 
 - **Same-turn coalescing.** Multiple triggers within a single agent turn batch into one hygiene call at turn's end. If the user edits PROJECT.md and you then write two new units in the same turn, all three events fire one combined hygiene pass after your last write.
-- **Don't re-run within a turn for non-structural triggers.** If you already ran a hygiene pass this turn, don't re-fire it for a cosmetic or repeat trigger — let the next structural trigger (graduation candidate, contradiction, retire-on-removal) carry it, or the next `/finalize`. Comprehensive `/finalize` passes always run regardless.
+- **Don't re-run within a turn for non-structural triggers.** If you already ran a hygiene pass this turn, don't re-fire it for a cosmetic or repeat trigger — let the next structural trigger (graduation candidate, contradiction, retire-on-removal) carry it, or the next `/process-memory`.
 - **Stay quiet during a burst.** When you're in a long run of rapid edits, defer the pass until the edits settle rather than firing on each one.
 
 Narrate when you batch: *"Several hygiene triggers this turn — coalescing into one pass once the edits settle."*
@@ -101,7 +102,7 @@ Render-vs-hygiene collision on the same section is the seam where this matters; 
 Every hygiene operation gets logged twice:
 
 - Human-readable narrative in `<project>/autonomous-run-log.md`: `[2026-05-17 14:32] HYGIENE archive — dc-XX-<slug>: priority 0.04, last_accessed 90d, source weight 0.5 — moved to _memories/archive/`
-- Machine-readable record in `<project>/_sessions/<date>/hygiene-log.jsonl`: `{"ts": "...", "verb": "archive", "unit_id": "dc-XX-<slug>", "reason": "priority_below_threshold", "trigger": "finalize", ...}`
+- Machine-readable record in `<project>/_sessions/<date>/hygiene-log.jsonl`: `{"ts": "...", "verb": "archive", "unit_id": "dc-XX-<slug>", "reason": "priority_below_threshold", "trigger": "process-memory", ...}`
 
 The dual log is intentional. The run log is what the user reads during the session; the JSONL is what subsequent hygiene passes consult to detect patterns (over-archive, under-graduate, etc.).
 
@@ -109,7 +110,7 @@ The dual log is intentional. The run log is what the user reads during the sessi
 
 ## Mechanical maintenance — the cadence ledger
 
-The *mechanical* half of upkeep — index regeneration (decisions, risks, summary), ghost-duplicate cleanup, PROJECT.md cap check — is consolidated in `scripts/maintenance-run.mjs` and separated from the *judgment* half (graduation, retire calls) that stays in `/process-memory`. `/finalize` and `/process-memory` both invoke it:
+The *mechanical* half of upkeep — index regeneration (decisions, risks, summary), ghost-duplicate cleanup, PROJECT.md cap check — is consolidated in `scripts/maintenance-run.mjs` and separated from the *judgment* half (graduation, retire calls) that stays in `/process-memory`. `/process-memory` and the startup backstop both invoke it:
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" <project>
@@ -119,7 +120,7 @@ It is **signature-gated** (regenerates only when the unit set changed since last
 
 ### Autonomous maintenance — gated, not built
 
-Maintenance is ledger-first on purpose: it runs **at invocation** (`/finalize`, `/process-memory`, on-demand), not on a per-turn hook. Running any maintenance op unattended/autonomously is gated behind four preconditions, none yet built:
+Maintenance is ledger-first on purpose: it runs **at invocation** (`/process-memory`, the startup backstop, on-demand), not on a per-turn hook. Running any maintenance op unattended/autonomously is gated behind four preconditions, none yet built:
 
 1. a **deterministic "clear-cut" gate** (like the six-factor promotion cost gate) — no agent-adjudicated "clear-cut";
 2. a **kill switch** (env var / workspace flag);
@@ -144,26 +145,26 @@ Reversal is autonomous (Mode A) when it's a self-correction (you just archived s
 
 | Mode | What goes wrong | Mitigation |
 |---|---|---|
-| Over-aggressive archive | High-value units get archived because their priority score under-counts something | Pin frontmatter (`pinned: floor` / `true` / `always`); priority-floor for pinned units; user-gated archive surface at `/finalize` |
+| Over-aggressive archive | High-value units get archived because their priority score under-counts something | Pin frontmatter (`pinned: floor` / `true` / `always`); priority-floor for pinned units; user-gated archive surface at `/process-memory` |
 | Resurrection of retired content | A retired unit's claim shows up again because similar conversation generates a similar observation | Anti-resurrection rule — retired units check source-of-truth match before any re-promotion; successor units carry the new framing without re-promoting the old |
 | Cold-store losing edges | An edge pointing at a cold-stored unit dangles | Cold-store keeps edges intact in the moved file; retrieval treats the cold-target as a placeholder so the link doesn't 404 |
 | Mid-session conflict with user edit | You're about to render a section the user just edited | Edit-detection surfaces the change; render pauses on the conflicted section; reconcile before re-rendering |
 | Render-vs-hygiene collision (same section) | Hygiene fires on a unit flowing into a section the agent is mid-rendering | Defer hygiene until the render commits; see "Render-collision handling" above |
 | Trigger storm | Three+ hygiene triggers within a single agent turn during rapid edits | Burst suppression — batch into one pass at turn's end; if the burst spans turns, defer until a turn completes with no new trigger (per §"Mid-session batching": judge by turns, never wall-clock) |
-| Index drift | `INDEX-decisions.md` shows units that don't exist (or misses units that do) | Index regeneration runs at every `/finalize`; on detected drift, regenerate immediately |
-| Observation backlog | Observations pile up ungraduated; graduation candidates get lost in volume | Continuous self-evaluation surfaces "this observation keeps mattering" patterns; graduation passes at `/finalize` walk recent observations explicitly |
+| Index drift | `INDEX-decisions.md` shows units that don't exist (or misses units that do) | Index regeneration runs at every `/process-memory` pass and the startup backstop; on detected drift, regenerate immediately |
+| Observation backlog | Observations pile up ungraduated; graduation candidates get lost in volume | Continuous self-evaluation surfaces "this observation keeps mattering" patterns; graduation passes at `/process-memory` walk recent observations explicitly |
 
 ---
 
 ## Graduation surfaces here
 
-Graduation — observation becoming unit — is the highest-value reasoning move CORE makes. Triggers, the seven-step process, the anti-miss bias, and the hand-off to multi-agent on hard calls all live in `protocols/data-storage.md` §Graduation. Hygiene's role is to surface candidates: `/finalize` walks recent observations and flags the ones that keep mattering, and on-demand passes do the same when the user asks.
+Graduation — observation becoming unit — is the highest-value reasoning move CORE makes. Triggers, the seven-step process, the anti-miss bias, and the hand-off to multi-agent on hard calls all live in `protocols/data-storage.md` §Graduation. Hygiene's role is to surface candidates: `/process-memory` walks recent observations and flags the ones that keep mattering, and on-demand passes do the same when the user asks.
 
 ---
 
 ## Wikilink promotion
 
-Part of the reconciliation work at `/finalize` and `/process-memory`. No script — this is an agent-performed pass:
+Part of the reconciliation work at `/process-memory`. No script — this is an agent-performed pass:
 
 1. Find candidates: `grep -rn '\[\[[a-z0-9-]\+\]\]' <project>/_memories --include='*.md'`, skipping `archive/` and `cold-storage/`.
 2. Resolve each `[[id]]` to an existing unit file. An id that resolves to nothing gets flagged in the hygiene log (`verb: wikilink-unresolved`) — never auto-create a unit to satisfy a link.
@@ -196,7 +197,7 @@ Storage and retrieval aren't frozen — they evolve based on observed performanc
 
 ### Retrieval-quality surfacing — always at hygiene passes
 
-At every `/finalize` and `/process-memory` invocation, call:
+At every `/process-memory` invocation, call:
 
 ```bash
 [ -n "$CORE_ROOT" ] && node "${CORE_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs" <project>
@@ -222,7 +223,7 @@ These observations feed the structural adjustment options below — add an edge,
 
 1. **Add an edge** — a single missing `cites` or `references-topic` often fixes retrieval. Free.
 2. **Restructure a unit** — split into two, merge two into one, change the prefix. Cheap, but breaks any existing cites — handle inverse-edge updates.
-3. **Re-tune priority weights** — adjust `w_R`, `w_F`, `w_S`, or `w_A` in the plugin's `scripts/priority.mjs`. Weights live in the plugin by design so the tuning propagates to every project via the next plugin update — not per-project drift. Document the change in the hygiene retrospective (`~/.core/hygiene-cycles/<YYYY-MM-DD>.md`).
+3. **Re-tune priority weights** — adjust `w_R`, `w_F`, `w_S`, or `w_A` in the plugin's `scripts/priority.mjs`. Weights live in the plugin by design so the tuning propagates to every project via the next plugin update — not per-project drift. Document the change in the plugin changelog entry that ships it.
 4. **Evolve query shape** — change how you phrase retrieval prompts.
 5. **Escalate infrastructure** — vector store, graph DB, or other. Earned only after repeated trip-wire firings, per the infrastructure-must-be-earned framework. Two consecutive Explore-miss cycles proposing the same gap = candidate for a new DC.
 
@@ -242,7 +243,7 @@ Former dream cycle phases mapped to v2 hygiene:
 | Phase 4: pattern synthesis | Graduation reasoning — same operation, named for what it actually is |
 | Phase 5: agent roster refresh | Lives in `protocols/self-evolution.md` (effectiveness-tracking-driven) |
 
-There's no separate dream-cycle ritual anymore. The retrospective doc still gets written when hygiene does a full pass at `/finalize` — it's just now at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`, named for what it actually is. (Migration note: existing `~/.core/dream-cycles/` retrospectives stay where they are; new ones land in `~/.core/hygiene-cycles/`.)
+There's no separate dream-cycle ritual, and no retrospective file — a per-pass retrospective had no reader. What a hygiene pass learns lands where it gets read: durable lessons graduate into units, and the pass's own narration tells the user what happened.
 
 ---
 

@@ -64,18 +64,18 @@
  * --out, bad --scope, --out inside _memories/, bad record-mode input);
  * 1 fatal failure (including fail-closed producer identity).
  */
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, realpathSync } from 'node:fs';
-import { join, resolve, dirname, basename, sep } from 'node:path';
-import { homedir } from 'node:os';
+import { readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
 import { gatherMetrics } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
 import {
   PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor,
   recordPublishOutcome, recordRevocation, runRecordCli, generationReceiptLocation,
-  artifactContentDigest,
+  artifactContentDigest, publishArtifactWithReceipt, resolveArtifactDestination,
 } from './artifact-receipts.mjs';
 
 export const BROWSE_MANIFEST_SCHEMA_VERSION = '1.0.0';
@@ -110,10 +110,25 @@ export function producerIdentity() {
 // archive/retired supplement only when the caller explicitly asked for it.
 // ============================================================
 
+/**
+ * Parse a unit for display. A parse failure is reported, never converted into
+ * an empty-but-valid-looking unit: the page claims to be a complete
+ * point-in-time snapshot, and a silently blank entry is content the user
+ * approved publishing without ever seeing it was missing.
+ */
 function displayBody(rawText) {
+  const text = String(rawText).replace(/\r\n/g, '\n');
+  // The canonical parser is lenient by design: an opening fence with no closing
+  // one yields empty metadata and the raw text as body, which downstream
+  // becomes a unit with invented id and status. That is the structural loss the
+  // page must disclose, so it is detected here.
+  if (text.startsWith('---\n') && text.indexOf('\n---', 4) === -1) {
+    return { fm: {}, body: '', unreadable: 'frontmatter fence opened but never closed' };
+  }
   let fm = null, body = '';
-  try { [fm, body] = parseFrontmatter(String(rawText)); } catch { return { fm: {}, body: '' }; }
-  return { fm: fm || {}, body: stripGeneratedEdgesBlock(String(body || '')).trim() };
+  try { [fm, body] = parseFrontmatter(text); }
+  catch (e) { return { fm: {}, body: '', unreadable: String(e && e.message || e).slice(0, 120) }; }
+  return { fm: fm || {}, body: stripGeneratedEdgesBlock(String(body || '')).trim(), unreadable: null };
 }
 
 // Recursive walk of _memories/ INCLUDING archive/ (used only for
@@ -155,11 +170,16 @@ export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] 
   const units = [];
   const activePaths = new Set();
   const seenIds = new Set();
+  // Files that could not be parsed. They are named rather than embedded blank,
+  // so the preflight the user approves states what is missing.
+  const unreadable = [];
   for (const u of cap.index.units) {
     activePaths.add(u.path);
     const raw = cap.raw?.[u.path];
-    if (raw === undefined) continue;
-    const { body } = displayBody(raw.toString('utf8'));
+    if (raw === undefined) { unreadable.push({ path: u.path, reason: 'not readable from the store snapshot' }); continue; }
+    const parsed = displayBody(raw.toString('utf8'));
+    if (parsed.unreadable) { unreadable.push({ path: u.path, reason: parsed.unreadable }); continue; }
+    const { body } = parsed;
     units.push({
       id: u.id, path: u.path, type: u.type || '', status: u.status || 'active',
       topics: u.topics || [], updated: u.updated || '',
@@ -176,8 +196,11 @@ export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] 
     for (const f of walkAllUnitFiles(join(root, '_memories'))) {
       if (activePaths.has(f.rel)) continue;
       let text;
-      try { text = readFileSync(f.full, 'utf8'); } catch { continue; }
-      const { fm, body } = displayBody(text);
+      try { text = readFileSync(f.full, 'utf8'); }
+      catch (e) { unreadable.push({ path: f.rel, reason: String(e && e.code || e).slice(0, 120) }); continue; }
+      const parsed = displayBody(text);
+      if (parsed.unreadable) { unreadable.push({ path: f.rel, reason: parsed.unreadable }); continue; }
+      const { fm, body } = parsed;
       let id = fm.id !== undefined ? String(fm.id) : basename(f.rel, '.md');
       if (seenIds.has(id)) id = `${id}@${f.rel}`; // active copy keeps the plain id
       seenIds.add(id);
@@ -209,6 +232,7 @@ export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] 
     activeCount: kept.filter((u) => u.population === 'active').length,
     supplementalCount: supplementalCount === 0 ? 0 : kept.filter((u) => u.population !== 'active').length,
     excludedByTopic,
+    unreadable,
   };
 }
 
@@ -622,20 +646,22 @@ export async function renderBrowseArtifact(projectDir, {
   outPath,
   scope = 'active',
   excludeTopics = [],
-  home = homedir(),
+  home = null,
   now = () => new Date(),
   // Injectable for tests (and skippable via CLI --no-metrics): defaults to the
   // real canonical gatherer. Fails open into an honest absence line — a
   // metrics hiccup must not block the browse snapshot.
   metricsProvider = (dir) => gatherMetrics(dir),
+  // Injection point for the mutation window between the artifact write and the
+  // post-write verification.
+  onArtifactWritten = null,
 } = {}) {
   const root = resolve(projectDir);
   if (!outPath) throw Object.assign(new Error('--out <path> is required — there is no default output location'), { code: 'OUT_REQUIRED' });
-  const outAbs = resolve(outPath);
   const memoriesRoot = join(root, '_memories');
-  if (outAbs === memoriesRoot || outAbs.startsWith(memoriesRoot + sep)) {
-    throw Object.assign(new Error(`refusing --out inside the memory store (${memoriesRoot}) — the store is read-only to this script`), { code: 'OUT_IN_STORE' });
-  }
+  // Canonical containment, and the destination is claimed before the store is
+  // read: a linked --out is rejected on its real target, not its spelling.
+  const outAbs = resolveArtifactDestination(outPath, { forbiddenRoot: memoriesRoot });
   if (scope !== 'active' && scope !== 'all-including-archive') {
     throw Object.assign(new Error(`unknown --scope '${scope}' (valid: active, all-including-archive)`), { code: 'BAD_SCOPE' });
   }
@@ -679,11 +705,12 @@ export async function renderBrowseArtifact(projectDir, {
     },
   });
 
-  mkdirSync(dirname(outAbs), { recursive: true });
-  writeFileSync(outAbs, html);
-
   // No workspace.json → the flagged fallback location; the audit trail is kept anyway.
-  const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({ home, projectDir: root, generatedAt });
+  const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({
+    // The receipt is the audit trail; its root comes from the OS-account home
+    // unless a caller names one explicitly (test isolation, --home).
+    home: home || requireTrustedHome(), projectDir: root, generatedAt,
+  });
 
   const manifest = {
     kind: 'core-memory-browse-preflight',
@@ -698,6 +725,11 @@ export async function renderBrowseArtifact(projectDir, {
     active_count: collected.activeCount,
     supplemental_count: collected.supplementalCount,
     excluded_by_topic_count: collected.excludedByTopic,
+    // Structural loss is disclosed, not absorbed: a file that could not be
+    // parsed is named here rather than embedded as a blank unit, so the count
+    // above is never read as "the whole store".
+    unreadable_count: collected.unreadable.length,
+    unreadable_paths: collected.unreadable.map((u) => u.path),
     total_bytes: Buffer.byteLength(html),
     // Exact-byte identity of the generated page — the publish receipt copies
     // this and binds the publish to these specific bytes.
@@ -709,19 +741,16 @@ export async function renderBrowseArtifact(projectDir, {
     sensitivity_warning: SENSITIVITY_WARNING,
   };
 
-  let receiptWritten = true;
-  try {
-    mkdirSync(receiptDir, { recursive: true });
-    writeFileSync(receiptPath, JSON.stringify(manifest, null, 2) + '\n');
-  } catch (e) {
-    // Truthful surfacing over silent success: the receipt is disclosure condition
-    // 4's audit trail — if it didn't land, the manifest must say so.
-    receiptWritten = false;
-    manifest.receipt_path = null;
-    manifest.receipt_error = String(e && e.message || e).slice(0, 200);
-  }
+  // One transaction: the bytes are placed, read back, and proven to be the
+  // rendered bytes before the receipt that describes them is written; a receipt
+  // that cannot land takes the artifact with it rather than leaving something
+  // publishable with no audit trail.
+  publishArtifactWithReceipt({
+    outPath: outAbs, html, receiptDir, receiptPath, manifest,
+    forbiddenRoot: memoriesRoot, afterWrite: onArtifactWritten,
+  });
 
-  return { manifest, html, receiptWritten };
+  return { manifest, html, receiptWritten: true };
 }
 
 // ============================================================

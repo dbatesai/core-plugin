@@ -9,9 +9,16 @@
  *
  * Registered on Codex's Stop event via hooks-codex.json — the per-harness post-answer
  * adapter. See harnesses/codex.md §hook-register for the registration and the
- * install/trust/two-turn proof scope (proven at exact SHA 8e941de6; re-proof owed at
- * each subsequent candidate).
+ * install/trust/two-turn proof scope, which every release candidate must re-prove.
+ *
+ * The import itself is inside the fail-open boundary, not just main(): a resolution or
+ * syntax failure in the shared implementation must still exit 0, the same guarantee
+ * main()'s own entry guard gives once it's running.
  */
 process.env.CORE_HOOK_HARNESS = 'codex';
-const { main } = await import('./answer-close-hook.mjs');
-process.exit((main()) || 0);
+try {
+  const { main } = await import('./answer-close-hook.mjs');
+  process.exit((main()) || 0);
+} catch {
+  process.exit(0);
+}

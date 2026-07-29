@@ -70,7 +70,7 @@ Starting weights: `w_R=0.30, w_F=0.15, w_S=0.20, w_A=0.35`. Computed at retrieva
 
 PROJECT.md is rendered from canonical units. Three triggers:
 
-1. At `/finalize` — full regeneration.
+1. At `/finalize` — regeneration when the session materially changed §State or §Moves.
 2. On-demand — any time the user asks.
 3. In-session, autonomously — section-level re-render after each meaningful update affecting a section.
 
@@ -88,11 +88,11 @@ A unit can carry an optional validity window — `t_valid` and `t_invalid` world
 
 ## Memory hygiene
 
-One unified mechanism, three verbs. Archive moves a unit out of default retrieval but keeps it reachable on demand — trigger is `R · S < 0.05` and no reference in 90 days, surfaced as a user-gated proposal at `/finalize`. Retire flags a unit as no longer current truth while keeping the trace — trigger is explicit supersession or a user-removed PROJECT.md fact, and the unit stays in place with a frontmatter status flip. Cold-store puts the unit fully out-of-band — only deep historical queries reach it, trigger is archived AND retired AND no reference in 365 days.
+One unified mechanism, three verbs. Archive moves a unit out of default retrieval but keeps it reachable on demand — trigger is `R · S < 0.05` and no reference in 90 days, surfaced as a user-gated proposal at `/process-memory`. Retire flags a unit as no longer current truth while keeping the trace — trigger is explicit supersession or a user-removed PROJECT.md fact, and the unit stays in place with a frontmatter status flip. Cold-store puts the unit fully out-of-band — only deep historical queries reach it, trigger is archived AND retired AND no reference in 365 days.
 
 Plus graduation (observations → units), contradiction reconciliation, index regeneration, file-cap monitoring, continuous self-evaluation.
 
-Runs at `/finalize` (comprehensive), on meaningful changes (lightweight, only what's triggered), on-demand, after PROJECT.md user-edit, on hash mismatch.
+Runs at `/process-memory` (comprehensive), on meaningful changes (lightweight, only what's triggered), on-demand, after PROJECT.md user-edit, on hash mismatch.
 
 Every operation is logged twice — in plain prose in `<project>/autonomous-run-log.md`, and machine-readable in `<project>/_sessions/<date>/hygiene-log.jsonl`. Every operation can be undone.
 
@@ -144,7 +144,7 @@ The validation regime tests three things:
 
 Test corpus at `<project>/_memories/_validation/tests/test-*.yaml`. Runner at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.mjs` (invoke via `node`). Thresholds: P,R ≥ 0.8 PASS, ≥ 0.5 INVESTIGATE, < 0.5 FAIL.
 
-Cadence: weekly automatic (via memory hygiene's first /finalize of the week), on-demand, auto-on during retrieval-tuning sessions.
+Cadence: weekly automatic (via memory hygiene's first /process-memory pass of the week), on-demand, auto-on during retrieval-tuning sessions.
 
 The validation report includes a final qualitative field: *"Did retrieval feel right in real use?"* Quantitative thresholds aren't the whole story.
 
@@ -187,7 +187,7 @@ If you're building a wrapper — a plugin that mirrors these skills into its own
 - The resolved root is the loaded plugin's own root, so a wrapper ships its own copy of the scripts at the same relative path and the calls resolve there. The contract is "scripts live at `<resolved-root>/skills/core/scripts/<name>.mjs` relative to whichever plugin is loaded."
 - Custom scripts go under the wrapper's own skill directory (`skills/<wrapper-skill-name>/scripts/`), resolved the same way. Don't put custom scripts under `skills/core/` — that's the upstream-mirrored subtree, and the next refresh overwrites them.
 
-The supported overlay shape is a verbatim per-subtree copy — `rsync -a --delete --exclude '.git' --exclude '.DS_Store'` from `core-plugin/skills/<name>/` into `<wrapper-plugin>/skills/<name>/`.
+The supported overlay shape is a verbatim per-subtree copy — `rsync -a --delete --exclude '.git' --exclude '.DS_Store'` from `core-plugin/plugins/core/skills/<name>/` into `<wrapper-plugin>/skills/<name>/`. The source is repo-relative (skills sit under the plugin root at `plugins/core/`); the destination is relative to the wrapper's own plugin root.
 
 ### Version vs BUILD — releases vs iterations
 

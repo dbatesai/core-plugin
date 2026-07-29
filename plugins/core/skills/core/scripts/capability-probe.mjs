@@ -1,5 +1,5 @@
 /**
- * capability-probe.mjs — v2.6.0 capability probe runner.
+ * capability-probe.mjs — the capability probe runner.
  *
  * Reads `../schemas/harness-capability-descriptor.json` to determine which
  * capabilities the current harness should probe, invokes the per-harness
@@ -89,10 +89,10 @@ function conformRow(row, opts = {}) {
 
 // ---------- Probe invocation ----------
 
-// For v2.6.0-β, the only declared capability is `plugin-root-resolution` and
-// every harness delegates it to resolve-plugin-root.mjs directly. This switch
-// stays small; v2.7.0+ extends to per-harness probe scripts that emit multiple
-// rows per harness.
+// `plugin-root-resolution` is delegated to resolve-plugin-root.mjs directly by
+// every harness; everything else routes through a per-harness probe script that
+// may emit multiple rows. The switch stays small on purpose — new capabilities
+// arrive as delegates, not as branches here.
 async function invokeProbe(capability, opts = {}) {
   if (capability.delegate === 'resolve-plugin-root.mjs') {
     const row = resolvePluginRoot(opts);
@@ -207,26 +207,23 @@ export async function runStartup(opts = {}) {
   // Thread descriptor AND the resolved harness through opts. Resolving harness BEFORE
   // building probeOpts is load-bearing: a delegated probe like memory-accessed reads
   // opts.harness to pick the transcript parser and to label its row. Building probeOpts
-  // without it let the probe fall back to its 'claude-code' default and mislabel a Codex
-  // session (HC blocker #1, evt-202605291319). The harness key is harmless to delegates
-  // that ignore it (resolve-plugin-root, target-surface).
+  // without it lets the probe fall back to its 'claude-code' default and mislabel a
+  // Codex session. The harness key is harmless to delegates that ignore it
+  // (resolve-plugin-root, target-surface).
   const probeOpts = { ...opts, descriptor, harness };
   const harnessEntry = descriptor.harnesses[harness];
 
-  // Unknown harness or no probes declared → return one informational row
+  // An empty rowset must never be returned as a zero-count success: downstream that
+  // reads as "nothing wrong" — indistinguishable from a harness whose capabilities
+  // were all probed and all healthy. An unprobed harness is UNKNOWN, and it says so in
+  // a schema-valid row so the history store carries the gap instead of a silence.
   if (!harnessEntry || !harnessEntry.capabilities || harnessEntry.capabilities.length === 0) {
-    return {
-      harness,
-      mode: 'startup',
-      rows: [],
-      summary: {
-        total: 0,
-        pass: 0,
-        degraded: 0,
-        not_yet: 0,
-        unknown: 0,
-      },
-    };
+    const reason = harnessEntry ? 'no-capabilities-declared' : 'harness-not-in-descriptor';
+    const row = conformRow(makeUnknownRow(
+      { capability_id: 'harness-capability-set', capability_kind: 'observation' },
+      `${reason}: no capability was probed for harness '${harness}', so its capability set is unknown`,
+    ), probeOpts);
+    return { harness, mode: 'startup', complete: false, rows: [row], summary: summarize([row]) };
   }
 
   const rows = [];
@@ -236,6 +233,7 @@ export async function runStartup(opts = {}) {
   return {
     harness,
     mode: 'startup',
+    complete: rows.length === harnessEntry.capabilities.length,
     rows,
     summary: summarize(rows),
   };
@@ -244,7 +242,7 @@ export async function runStartup(opts = {}) {
 export async function runPreAction(actionName, opts = {}) {
   const descriptor = opts.descriptor || loadDescriptor();
   const harness = opts.harness || detectConsumingHarness();
-  // Resolve harness before probeOpts and thread it through (see runStartup — HC blocker #1).
+  // Resolve harness before probeOpts and thread it through (see runStartup).
   const probeOpts = { ...opts, descriptor, harness };
   const action = descriptor.consumer_actions?.[actionName];
 
@@ -301,7 +299,7 @@ export async function runPreAction(actionName, opts = {}) {
     }
   }
 
-  // Operation-scoped mutation gate per HC critique evt-202605271310. Identity
+  // Operation-scoped mutation gate. Identity
   // PASS alone is NOT a mutation permit. Apply the action profile's
   // allowed_authorities, allowed_harnesses, and target_surface against each
   // identity row, producing a per-row mutation decision with a stable

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * metrics-package.mjs — the anonymized memory-efficacy feedback package.
+ * metrics-package.mjs — the anonymized memory-metrics feedback package.
  *
  * ONE PURPOSE: feedback data for refining CORE itself. The package must be safe
  * to hand across strict data boundaries (the standing data-boundary rule: de-identified
@@ -9,8 +9,11 @@
  * ever copied, and the only value types that survive are numbers, dates, fixed
  * CORE vocabulary (enum states, op names, check ids, capability ids), and salted
  * pseudonyms. Free text (query words, titles, bodies, paths, validator messages)
- * is dropped, never hashed. By design this boundary lives in prescriptive code,
- * not skill prose; and the script carries zero dependencies.
+ * is dropped, never hashed. The rule is enforced rather than assumed: every
+ * staged object passes a declared field schema (EXPORT_SCHEMAS) first, so a key
+ * no schema names cannot reach the package at any depth, and the manifest
+ * discloses how many fields were dropped. By design this boundary lives in
+ * prescriptive code, not skill prose; and the script carries zero dependencies.
  *
  * Pseudonyms: HMAC-SHA256 over a per-install secret salt (~/.core/metrics-package-salt,
  * 0600, NEVER shipped). Stable across packages from the same install so trend
@@ -37,13 +40,14 @@ import {
 } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadUnit } from './priority.mjs';
 import { trustedHome } from './trusted-home.mjs';
+import { VALID_TYPES, VALID_STATUSES, VALID_EDGE_TYPES, isActiveStatus } from './unit-vocab.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
-import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
+import { resolveOutcomeAuthority, USEFULNESS_OUTCOMES } from './record-retrieval-outcome.mjs';
 import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
@@ -54,9 +58,11 @@ const HISTORY_DIR = 'metrics-package-history';
 
 // Closed CORE vocabulary — the only strings (besides pseudonyms, dates, and
 // numbers) allowed into the package. Anything outside a whitelist folds to 'other'.
-const UNIT_TYPES = ['decision', 'risk', 'observation', 'person', 'reference', 'principle', 'value', 'explainer', 'review-finding', 'open-question', 'premise', 'episode'];
-const UNIT_STATUSES = ['active', 'retired', 'archived', 'superseded', 'draft'];
-const EDGE_TYPES = ['cites', 'depends-on', 'supersedes', 'supersedes-claim', 'refines', 'amends', 'conflicts-with', 'references-topic'];
+// Taken from unit-vocab.mjs rather than copied, so the export cannot disclose a
+// type, status, or edge the canonical vocabulary does not carry.
+const UNIT_TYPES = [...VALID_TYPES];
+const UNIT_STATUSES = [...VALID_STATUSES];
+const EDGE_TYPES = [...VALID_EDGE_TYPES];
 // The classifier's ACTUAL state vocabulary (classify-turns.mjs is the producer;
 // this list must match its output exactly — an invented list here would fold
 // canonical states to 'other').
@@ -67,6 +73,12 @@ const RECOGNITION_STATES = ['rec-fail-tier-0', 'rec-fail-tier-1-3-trigger', 'tie
 const HYGIENE_KINDS = ['compact-project', 'demote-moves', 'demote-moves-large-batch', 'demote-state', 'demote-state-large-batch', 'project-md-over-cap', 'maintenance-run'];
 const MAINTENANCE_OPS = ['decisions-index', 'risks-index', 'summary-index'];
 const CAPABILITY_IDS = ['plugin-root-resolution', 'target-surface-collab-files', 'auto-memory-injection', 'anti-anchoring-mechanism', 'instruction-surface-resolution', 'memory-visible-in-agent-context', 'memory-accessed'];
+// check-units.mjs's own check ids. A kebab-case shape test is not a privacy
+// boundary — user-derived values can be kebab-shaped — so only these exact ids
+// name a histogram cell; anything else folds to 'other'.
+const VALIDATOR_CHECK_IDS = ['archived-in-active', 'by-when-format', 'by-when-on-wrong-type', 'cold-store-eligible', 'confidence-level-value', 'dangling-edge', 'edge-format', 'edge-missing-target', 'edge-missing-type', 'edge-unknown-type', 'external-ref', 'fresh-store', 'id-mismatch', 'index-drift', 'index-missing', 'link-density', 'load', 'orphan', 'required-field', 'required-field-empty', 'schema', 'sources-missing', 'sources-not-list', 'stability-class-value', 'stale', 'status-value', 't_invalid-format', 't_valid-after-t_invalid', 't_valid-format', 'topics-format', 'type-value', 'unit-oversize'];
+const FLAG_LEVELS = ['good', 'warning', 'serious', 'critical'];
+const FLAG_CODES = ['orphan-rate-high', 'orphan-rate-low', 'escalation-high', 'dip-back-high', 'validator-fails', 'validator-warn-volume', 'project-md-over-cap', 'capability-degraded', 'recognition-provisional', 'self-test-trap-leak'];
 // Committed trust vocabulary (proven-live / direct / proxy / provisional) — the
 // same enum /metrics uses; a separate basis string explains, never upgrades.
 const TRUST = { PROVEN_LIVE: 'proven-live', DIRECT: 'direct', PROXY: 'proxy', PROVISIONAL: 'provisional' };
@@ -490,7 +502,7 @@ export function storeCensus(projectDir) {
     ids.add(unit.id);
     const t = fold(String(unit.fm.type || 'other'), UNIT_TYPES);
     const s = fold(String(unit.fm.status || 'active'), UNIT_STATUSES);
-    if (s === 'active' || s === 'draft') activeIds.add(unit.id);
+    if (isActiveStatus(unit.fm)) activeIds.add(unit.id);
     byType[t] = (byType[t] || 0) + 1;
     byStatus[s] = (byStatus[s] || 0) + 1;
     const created = isoDay(unit.fm.created);
@@ -545,8 +557,9 @@ export function validatorStats(projectDir) {
   const out = res.stdout;
   const summary = out.match(/PASS:\s*(\d+)\s+WARN:\s*(\d+)\s+FAIL:\s*(\d+)/);
   const byCheck = {};
-  for (const m of out.matchAll(/^\s{2}([a-z0-9-]+): \[/gm)) {
-    byCheck[m[1]] = (byCheck[m[1]] || 0) + 1;
+  for (const m of out.matchAll(/^\s{2}([a-z0-9_-]+): \[/gm)) {
+    const id = fold(m[1], VALIDATOR_CHECK_IDS);
+    byCheck[id] = (byCheck[id] || 0) + 1;
   }
   return {
     available: true, _trust: TRUST.DIRECT, _trust_basis: 'validator run',
@@ -874,6 +887,275 @@ export function leakScanDir(stagingDir, patterns) {
   return hits;
 }
 
+// ---------- export field allowlist (the enforced half of whitelist-generation) ----------
+//
+// Collectors build package values field by field, but nothing stopped a value
+// they did not construct — an evolving schema, a producer's extra key, a
+// structured string on an input row — from reaching the staged bytes. This is
+// the boundary that stops it: every staged object passes through a declared
+// schema, and a key that is not named here never reaches the package at ANY
+// depth. Values must also match their declared shape, so a field whose name is
+// legitimate cannot smuggle content through by carrying the wrong kind of
+// value. Drops are counted and disclosed in the manifest, never silent.
+
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const RE_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const RE_MONTH = /^\d{4}-\d{2}$/;
+const RE_TS = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/;
+const RE_SHA256 = /^[0-9a-f]{64}$/;
+const RE_SHORT_SHA = /^[0-9a-f]{7,40}$/;
+const RE_SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
+const RE_BUILD = /^[0-9A-Za-z.]{1,24}$/;
+const RE_PSEUDONYM = /^[a-z]+-[0-9a-f]{12}$/;
+const RE_INT_KEY = /^-?\d+$/;
+// Emitted by metrics-dedupe's cohort gate; every component is already folded there.
+const RE_COHORT_LABEL = /^schema=\S+ classifier=\S+ proxy=\S+$/;
+// Node error codes plus this module's own fallback — never a raw message.
+const RE_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$|^collection-error$/;
+
+const NUM = { leaf: isNum };
+const BOOL = { leaf: (v) => typeof v === 'boolean' };
+const shaped = (re) => ({ leaf: (v) => typeof v === 'string' && re.test(v) });
+const oneOf = (...values) => ({ leaf: (v) => values.includes(v) });
+// Prose this module authors: fixed sentences with numbers interpolated. Bounded
+// so a future producer cannot turn a reason line into a content channel.
+const NOTE = { leaf: (v) => typeof v === 'string' && v.length <= 1200 };
+const obj = (fields) => ({ fields });
+const arrOf = (of) => ({ array: true, of });
+const mapOf = (keyOk, of, extra) => ({ keyOk, of, extra });
+const keyIn = (values) => (k) => values.includes(k);
+const keyRe = (re) => (k) => re.test(k);
+// suppressSmallCells folds sub-k cells into this one aggregate.
+const HIST_EXTRA = { suppressed: obj({ cells: NUM, total: NUM, k: NUM }) };
+const hist = (keyOk) => mapOf(keyOk, NUM, HIST_EXTRA);
+
+const TRUST_VALUES = Object.values(TRUST);
+const AVAILABILITY = {
+  available: BOOL,
+  reason: NOTE,
+  _trust: oneOf(...TRUST_VALUES),
+  _trust_basis: NOTE,
+};
+
+const HEADLINE_FIELDS = {
+  retrieval_events_total: NUM, escalation_rate: NUM, dip_back_rate: NUM,
+  dip_back_observed: NUM, miss_total: NUM, units_total: NUM, orphan_rate: NUM,
+  edges_per_active_unit: NUM, edges_total: NUM, warn_total: NUM, fail_total: NUM,
+  project_md_bytes: NUM, recfail_latest_sample: NUM, recfail_latest_rate: NUM,
+  self_test_latest_headline: NUM, self_test_latest_trap_leak_rate: NUM,
+  self_test_runs_total: NUM,
+};
+
+const OUTCOME_KEYS = [...USEFULNESS_OUTCOMES];
+const SELF_TEST_RUN = obj({
+  round: NUM,
+  trigger: oneOf(...SELF_TEST_TRIGGERS, 'other'),
+  corpus_snapshot_id: shaped(RE_SHA256),
+  goldset_sha256: shaped(RE_SHA256),
+  headline: NUM,
+  per_kind_r10: hist(keyIn(QUESTION_KINDS)),
+  trap_leak_rate: NUM,
+  old_vs_new_delta: NUM,
+  old_vs_new_skipped: BOOL,
+  n_queries: NUM,
+  store_units: NUM,
+});
+
+// One schema per staged file. Names match the block names collectProject emits
+// plus the two files runPackage writes itself.
+export const EXPORT_SCHEMAS = {
+  'retrieval-stats': obj({
+    ...AVAILABILITY,
+    weeks: mapOf(keyRe(RE_DAY), obj({
+      events: NUM, escalations: NUM, dip_backs: NUM, dipback_observed_rows: NUM,
+      misses: NUM, no_hits: NUM,
+      tiers: hist(keyRe(RE_INT_KEY)),
+      suppressed: hist(keyIn(['retired', 'stale', 'native'])),
+      outcomes: hist(keyIn(OUTCOME_KEYS)),
+    })),
+    totals: obj({
+      events: NUM, dip_backs: NUM, misses: NUM, escalations: NUM, no_hits: NUM,
+      outcome_rows: NUM, dipback_observed: NUM,
+    }),
+    escalation_rate: NUM,
+    dip_back: obj({ observed_rows: NUM, total_rows: NUM, rate: NUM }),
+    outcome_coverage: obj({
+      eligible_retrieval_rows: NUM, joined_outcome_rows: NUM,
+      orphan_outcome_rows: NUM, duplicate_outcome_rows: NUM, rate: NUM,
+    }),
+    top_retrieved_units: arrOf(obj({ unit: shaped(RE_PSEUDONYM), retrievals: NUM })),
+    top_retrieved_units_suppressed: NOTE,
+    malformed_lines: NUM,
+  }),
+  'hygiene-stats': obj({
+    ...AVAILABILITY,
+    weeks: mapOf(keyRe(RE_DAY), obj({ ops: hist(keyIn([...HYGIENE_KINDS, 'other'])) })),
+    demote_batches: arrOf(NUM),
+    over_cap_events: NUM,
+  }),
+  'store-census': obj({
+    ...AVAILABILITY,
+    units_total: NUM, units_active: NUM,
+    by_type: hist(keyIn([...UNIT_TYPES, 'other'])),
+    by_status: hist(keyIn([...UNIT_STATUSES, 'other'])),
+    edges_by_type: hist(keyIn([...EDGE_TYPES, 'other'])),
+    edges_total: NUM, orphans: NUM, orphan_rate: NUM,
+    edges_per_active_unit: NUM, edge_targets_active_fraction: NUM,
+    created_by_month: hist(keyRe(RE_MONTH)),
+  }),
+  validator: obj({
+    ...AVAILABILITY,
+    pass: NUM, warn: NUM, fail: NUM, exit_code: NUM,
+    warns_by_check: hist(keyIn([...VALIDATOR_CHECK_IDS, 'other'])),
+  }),
+  'project-md': obj({
+    ...AVAILABILITY,
+    bytes: NUM, estimated_tokens: NUM, over_soft_cap: BOOL,
+  }),
+  maintenance: obj({
+    ...AVAILABILITY,
+    ops: mapOf(keyIn([...MAINTENANCE_OPS, 'other']), obj({ run_count: NUM, last_run: shaped(RE_DAY) })),
+    pm_last_run: shaped(RE_DAY),
+  }),
+  'workspace-metrics': obj({
+    ...AVAILABILITY,
+    recognition: obj({
+      ...AVAILABILITY,
+      weeks: mapOf(keyRe(RE_DAY), obj({
+        turns: NUM,
+        states: hist(keyIn([...RECOGNITION_STATES, 'other'])),
+        provisional_share: NUM,
+      })),
+      instrument_cohort: obj({
+        schema_version: shaped(RE_SEMVER),
+        classifier_version: shaped(RE_SEMVER),
+        proxy_version: NUM,
+      }),
+      coverage_gap: obj({
+        rows_excluded: NUM,
+        versions: hist(keyRe(RE_COHORT_LABEL)),
+      }),
+      replay_dedupe: obj({
+        rows_read: NUM, rows_kept: NUM, replays_dropped: NUM,
+        superseded_dropped: NUM, conflicts: NUM, unkeyed_kept: NUM,
+      }),
+      day_attribution: oneOf('observation-day'),
+    }),
+    calibration: obj({
+      available: BOOL,
+      reason: NOTE,
+      labeled_count: NUM,
+      is_calibrated: BOOL,
+      provisional: BOOL,
+      classifier_version: shaped(RE_SEMVER),
+      proxy_version: NUM,
+      by_harness: mapOf(keyIn(['claude-code', 'codex']), obj({
+        is_calibrated: BOOL, labeled_count: NUM, min_labeled: NUM,
+        overall_precision: NUM, coverage_complete: BOOL, per_class_pass: BOOL,
+        blinded: BOOL, provenance_complete: BOOL,
+      })),
+    }),
+    capability: obj({
+      ...AVAILABILITY,
+      snapshots: NUM,
+      by_capability: mapOf(keyIn(CAPABILITY_IDS), obj({
+        pass: NUM, degraded: NUM, other: NUM,
+        last: oneOf('pass', 'degraded', 'other'),
+      })),
+    }),
+  }),
+  'self-test': obj({
+    ...AVAILABILITY,
+    days: mapOf(keyRe(RE_DAY), arrOf(SELF_TEST_RUN)),
+    malformed_lines: NUM, runs_total: NUM, rounds_seen: NUM,
+    latest_round: NUM,
+    latest_trigger: oneOf(...SELF_TEST_TRIGGERS, 'other'),
+    latest_headline: NUM,
+    latest_per_kind_r10: hist(keyIn(QUESTION_KINDS)),
+    latest_trap_leak_rate: NUM,
+    latest_old_vs_new_delta: NUM,
+  }),
+  headline: obj({
+    ...HEADLINE_FIELDS,
+    flags: arrOf(obj({
+      level: oneOf(...FLAG_LEVELS),
+      code: oneOf(...FLAG_CODES),
+      text: NOTE,
+    })),
+    deltas: obj({
+      available: BOOL,
+      reason: NOTE,
+      since: shaped(RE_TS),
+      changes: hist(keyIn(Object.keys(HEADLINE_FIELDS))),
+    }),
+  }),
+  manifest: obj({
+    schema_version: shaped(RE_SEMVER),
+    generated_at: shaped(RE_TS),
+    mode: oneOf('all-projects', 'single-project'),
+    plugin: obj({ manifest_version: shaped(RE_SEMVER), manifest_build: shaped(RE_BUILD) }),
+    generator: obj({
+      ran_from: oneOf('installed-cache', 'source-tree'),
+      source_sha: shaped(RE_SHORT_SHA),
+    }),
+    pseudonym_note: NOTE,
+    residual_risk: NOTE,
+    salt_rotated_this_run: BOOL,
+    field_policy: obj({
+      enforcement: oneOf('allowlist'),
+      dropped_fields: NUM,
+      note: NOTE,
+    }),
+    coverage: arrOf(obj({
+      project: shaped(RE_PSEUDONYM),
+      available: BOOL,
+      reason: shaped(RE_ERROR_CODE),
+    })),
+  }),
+};
+
+/**
+ * Filter `value` down to what `schema` declares. Unknown keys, unknown array
+ * items, and values whose shape does not match are dropped, at every depth.
+ * Returns { value, dropped } — the surviving structure and how many fields
+ * were removed.
+ */
+export function enforceExportAllowlist(value, schema) {
+  let dropped = 0;
+  const DROP = { drop: true };
+  const walk = (v, node) => {
+    if (!node) { dropped += 1; return DROP; }
+    if (v === null || v === undefined) return { value: null };
+    if (node.fields || node.keyOk) {
+      if (typeof v !== 'object' || Array.isArray(v)) { dropped += 1; return DROP; }
+      const out = {};
+      for (const [k, child] of Object.entries(v)) {
+        const spec = node.fields
+          ? node.fields[k]
+          : (node.keyOk(k) ? node.of : (node.extra && node.extra[k]));
+        if (!spec) { dropped += 1; continue; }
+        const r = walk(child, spec);
+        if (r !== DROP) out[k] = r.value;
+      }
+      return { value: out };
+    }
+    if (node.array) {
+      if (!Array.isArray(v)) { dropped += 1; return DROP; }
+      const out = [];
+      for (const item of v) {
+        const r = walk(item, node.of);
+        if (r !== DROP) out.push(r.value);
+      }
+      return { value: out };
+    }
+    if (node.leaf && node.leaf(v)) return { value: v };
+    dropped += 1;
+    return DROP;
+  };
+  const result = walk(value, schema);
+  return { value: result === DROP ? null : result.value, dropped };
+}
+
 // ---------- project collection ----------
 
 export function collectProject(projectDir, { home, seal }) {
@@ -942,6 +1224,97 @@ export function verifyZipMagic(path) {
     return { ok: false, reason: `produced file is not a real zip (magic bytes ${header.toString('hex')}, expected ${ZIP_MAGIC.toString('hex')} -- the local tar likely has no zip support and silently wrote a plain tar wearing a .zip extension)` };
   }
   return { ok: true };
+}
+
+// ---------- recoverable movement ----------
+//
+// The staged tree is the only copy of a package's bytes until it lands
+// somewhere. Nothing here deletes it on the strength of an operation having
+// been ISSUED — the source goes only after a hash receipt proves the
+// destination holds the same bytes.
+
+/** sha256 per slash-joined relative path under `dir`. */
+export function hashTree(dir) {
+  const out = new Map();
+  const walk = (d, rel) => {
+    for (const name of readdirSync(d).sort()) {
+      const p = join(d, name);
+      const r = rel ? `${rel}/${name}` : name;
+      if (statSync(p).isDirectory()) walk(p, r);
+      else out.set(r, createHash('sha256').update(readFileSync(p)).digest('hex'));
+    }
+  };
+  walk(dir, '');
+  return out;
+}
+
+/**
+ * Is `dest` EXACTLY the tree at `src`? Symmetric: names what is missing,
+ * changed, or extra. One-directional verification let a pre-existing file in
+ * the destination survive a "verified" move and ride along as package content.
+ */
+export function verifyCopiedTree(src, dest) {
+  let source;
+  try { source = hashTree(src); } catch (e) { return { ok: false, reason: `source unreadable: ${e.code || 'error'}`, missing: [], mismatched: [], extra: [] }; }
+  let copy;
+  try { copy = hashTree(dest); } catch (e) { return { ok: false, reason: `destination unreadable: ${e.code || 'error'}`, missing: [...source.keys()], mismatched: [], extra: [] }; }
+  const missing = [];
+  const mismatched = [];
+  const extra = [];
+  for (const [rel, sha] of source) {
+    if (!copy.has(rel)) missing.push(rel);
+    else if (copy.get(rel) !== sha) mismatched.push(rel);
+  }
+  for (const rel of copy.keys()) {
+    if (!source.has(rel)) extra.push(rel);
+  }
+  const ok = !missing.length && !mismatched.length && !extra.length;
+  return {
+    ok, missing, mismatched, extra,
+    reason: ok ? null : `tree mismatch (${missing.length} missing, ${mismatched.length} changed, ${extra.length} extra)`,
+  };
+}
+
+/**
+ * Copy the staged tree to `folder`, prove it arrived, and only then retire the
+ * source. An incomplete or altered copy leaves the staging dir untouched and
+ * says so in `source_retained`.
+ */
+export function moveStagingToFolder(staging, folder) {
+  try {
+    cpSync(staging, folder, { recursive: true });
+  } catch (e) {
+    return { ok: false, reason: `copy failed: ${String(e && e.message).slice(0, 120)}`, source_retained: staging };
+  }
+  const verified = verifyCopiedTree(staging, folder);
+  if (!verified.ok) {
+    return {
+      ok: false,
+      reason: verified.reason || `copy unverified (${verified.missing.length} missing, ${verified.mismatched.length} changed)`,
+      source_retained: staging,
+    };
+  }
+  rmSync(staging, { recursive: true, force: true });
+  return { ok: true, path: folder };
+}
+
+/**
+ * Byte receipt for an archive: extract it and hash-compare against the staged
+ * tree. `tar -t` proves names were listed; this proves the contents match.
+ */
+export function verifyArchiveRoundTrip(zipPath, stagingDir) {
+  const scratch = mkdtempSync(join(tmpdir(), 'core-metrics-verify-'));
+  try {
+    const res = spawnSync('tar', ['-x', '-f', basename(zipPath), '-C', scratch], { cwd: dirname(zipPath), encoding: 'utf8', timeout: 120_000 });
+    if (res.error || res.status !== 0) return { ok: false, reason: `archive did not extract (tar exit ${res.status})` };
+    const verified = verifyCopiedTree(stagingDir, scratch);
+    if (!verified.ok) {
+      return { ok: false, reason: verified.reason || `archive contents differ (${verified.missing.length} missing, ${verified.mismatched.length} changed)` };
+    }
+    return { ok: true };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 export function zipStaging(stagingDir, destZip) {
@@ -1038,10 +1411,34 @@ export function runPackage(argv, { homeOverride } = {}) {
     return out;
   })();
 
+  // Allowlist enforcement, BEFORE anything is staged or rendered: the reports
+  // read the same filtered objects the JSON blocks are written from, so no path
+  // out of this function can carry a field the schemas do not declare.
+  let droppedFields = 0;
+  for (const proj of projects) {
+    const filtered = {};
+    for (const [name, block] of Object.entries(proj.blocks)) {
+      const schema = EXPORT_SCHEMAS[name];
+      if (!schema) { droppedFields += 1; continue; } // an undeclared block ships nothing
+      const { value, dropped } = enforceExportAllowlist(block, schema);
+      droppedFields += dropped;
+      filtered[name] = value;
+    }
+    proj.blocks = filtered;
+    const head = enforceExportAllowlist(
+      { ...proj.headline, flags: proj.flags, deltas: proj.deltas }, EXPORT_SCHEMAS.headline,
+    );
+    droppedFields += head.dropped;
+    const { flags, deltas, ...headlineOnly } = head.value || {};
+    proj.headline = headlineOnly;
+    proj.flags = flags || [];
+    proj.deltas = deltas || { available: false };
+  }
+
   // stage
   const staging = mkdtempSync(join(tmpdir(), 'core-metrics-package-'));
   const generatedAt = new Date().toISOString();
-  const manifestOut = {
+  const manifestDraft = {
     schema_version: SCHEMA_VERSION,
     generated_at: generatedAt,
     mode: flagsIn.all ? 'all-projects' : 'single-project',
@@ -1050,8 +1447,16 @@ export function runPackage(argv, { homeOverride } = {}) {
     pseudonym_note: 'Ids are HMAC pseudonyms from a local salt that never ships; stable per install. Deleting ~/.core/metrics-package-salt rotates them.',
     residual_risk: 'Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across packages from one install (rotate the salt to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.',
     salt_rotated_this_run: saltCreated,
+    field_policy: {
+      enforcement: 'allowlist',
+      dropped_fields: droppedFields,
+      note: 'Every value in this package passed a declared field schema. Fields the schema does not name are dropped at every depth before staging; this count is how many were removed from this package.',
+    },
     coverage,
   };
+  const manifestFiltered = enforceExportAllowlist(manifestDraft, EXPORT_SCHEMAS.manifest);
+  const manifestOut = manifestFiltered.value;
+  manifestOut.field_policy.dropped_fields += manifestFiltered.dropped;
   writeFileSync(join(staging, 'manifest.json'), JSON.stringify(manifestOut, null, 2));
   for (const proj of projects) {
     const pdir = join(staging, 'projects', proj.pseudonym);
@@ -1079,17 +1484,34 @@ export function runPackage(argv, { homeOverride } = {}) {
   let zipPath = join(outDir, `core-metrics-package-${stamp}.zip`);
   let suffix = 2;
   while (existsSync(zipPath)) { zipPath = join(outDir, `core-metrics-package-${stamp}-${suffix}.zip`); suffix += 1; }
+  // Owner-only while the package sits where it landed: it is de-identified, not
+  // public, and the user decides where it goes next. Best-effort by platform.
+  const harden = (path, mode) => { try { chmodSync(path, mode); } catch { /* mode is advisory here */ } };
+  const hardenTree = (dir) => {
+    harden(dir, 0o700);
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) hardenTree(p);
+      else harden(p, 0o600);
+    }
+  };
   const zip = zipStaging(staging, zipPath);
+  const receipt = zip.ok ? verifyArchiveRoundTrip(zipPath, staging) : zip;
   let shipped;
-  if (zip.ok) {
+  if (receipt.ok) {
+    harden(zipPath, 0o600);
     rmSync(staging, { recursive: true, force: true });
     shipped = { kind: 'zip', path: zipPath };
   } else {
+    // An archive that cannot be proven to hold the staged bytes does not ship.
+    rmSync(zipPath, { force: true });
     // self-healing fallback: leave a folder instead of failing the run
     const folder = zipPath.replace(/\.zip$/, '');
-    cpSync(staging, folder, { recursive: true });
-    rmSync(staging, { recursive: true, force: true });
-    shipped = { kind: 'folder', path: folder, reason: zip.reason };
+    const moved = moveStagingToFolder(staging, folder);
+    if (moved.ok) hardenTree(folder);
+    shipped = moved.ok
+      ? { kind: 'folder', path: folder, reason: receipt.reason }
+      : { kind: 'staging', path: staging, reason: `${receipt.reason}; ${moved.reason}` };
   }
   // Ship succeeded — NOW the delta baseline may advance (never on abort).
   for (const proj of projects) {

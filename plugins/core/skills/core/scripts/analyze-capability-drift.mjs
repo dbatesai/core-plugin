@@ -1,7 +1,7 @@
 /**
  * analyze-capability-drift.mjs — drift + regression detection over capability history.
  *
- * v2.7.0 deliverable. Consumes capability-history.jsonl (written by capability-history.mjs)
+ * Consumes capability-history.jsonl (written by capability-history.mjs)
  * and surfaces two things:
  *   - DRIFT: a capability's identity_status changed in the DEGRADING direction between
  *     consecutive observations (PASS→DEGRADED, PASS→NOT-YET, etc.). Healing-direction
@@ -10,9 +10,9 @@
  *     session's row set (the descriptor changed / capability disappeared).
  *
  * Output: <project>/_memories/_capability-drift-log.md — a render-only file the agent reads
- * on demand. NOT a unit. Per v2.7 plan §3-4.
+ * on demand. NOT a unit.
  *
- * Attribution is HYPOTHESIS, never asserted fact (HC bar): every likely-cause line is
+ * Attribution is HYPOTHESIS, never asserted fact: every likely-cause line is
  * qualified with confidence low|med|high.
  */
 
@@ -47,30 +47,75 @@ export function groupByCapability(history) {
 }
 
 /**
- * Detect drift: identity_status transitions between consecutive observations of the
- * same capability. Returns { drift: [...], healing: [...] }.
- * drift = degrading direction (the actionable signal); healing = informational.
+ * Collapse one capability's entries into per-session observations, ordered by when
+ * each session first reported. A session's resolved status is its LAST observation —
+ * a change inside a single session is that session refining its own answer, not the
+ * capability changing between sessions.
+ */
+function sessionsForCapability(entries) {
+  const bySession = new Map();
+  for (const e of entries) {
+    const sid = e.session_id;
+    if (sid == null || sid === '') continue;
+    const rec = bySession.get(sid) || { session_id: sid, earliest: null, latest: null, last: null };
+    const at = String(e.observed_at ?? '');
+    if (rec.earliest === null || at < rec.earliest) rec.earliest = at;
+    if (rec.latest === null || at >= rec.latest) { rec.latest = at; rec.last = e; }
+    bySession.set(sid, rec);
+  }
+  return [...bySession.values()].sort((a, b) => String(a.earliest).localeCompare(String(b.earliest)));
+}
+
+/**
+ * Detect drift: identity_status changes between one session's resolved observation of a
+ * capability and the next session's. Returns { drift, healing, ambiguous }.
+ * drift = degrading direction (the actionable signal); healing = informational;
+ * ambiguous = pairs no lineage can order, surfaced rather than guessed at.
+ *
+ * Drift is a claim about a capability changing over time, so it needs a lineage to
+ * change along. Comparing timestamp-adjacent entries supplies none: two sessions
+ * running concurrently interleave into a PASS→DEGRADED→PASS sequence and report drift
+ * plus healing when each session saw one steady status the whole way. Sessions whose
+ * observation spans overlap are therefore not comparable, and entries carrying no
+ * session cannot be placed in a lineage at all.
  */
 export function detectDrift(history) {
   const drift = [];
   const healing = [];
+  const ambiguous = [];
   const byCap = groupByCapability(history);
   for (const [capabilityId, entries] of byCap) {
-    for (let i = 1; i < entries.length; i++) {
-      const prev = entries[i - 1];
-      const cur = entries[i];
-      const prevStatus = prev.row?.identity_status;
-      const curStatus = cur.row?.identity_status;
+    const untagged = entries.filter(e => e.session_id == null || e.session_id === '');
+    if (untagged.length) {
+      ambiguous.push({ capability_id: capabilityId, reason: 'no-session-lineage', entries: untagged.length });
+    }
+    const sessions = sessionsForCapability(entries);
+    for (let i = 1; i < sessions.length; i++) {
+      const prev = sessions[i - 1];
+      const cur = sessions[i];
+      if (String(prev.latest) >= String(cur.earliest)) {
+        ambiguous.push({
+          capability_id: capabilityId,
+          reason: 'overlapping-sessions',
+          from_session: prev.session_id,
+          to_session: cur.session_id,
+          from_observed_at: prev.latest,
+          to_observed_at: cur.earliest,
+        });
+        continue;
+      }
+      const prevStatus = prev.last.row?.identity_status;
+      const curStatus = cur.last.row?.identity_status;
       if (!prevStatus || !curStatus || prevStatus === curStatus) continue;
       const event = {
         capability_id: capabilityId,
         from_status: prevStatus,
         to_status: curStatus,
-        from_observed_at: prev.observed_at,
-        to_observed_at: cur.observed_at,
-        from_session: prev.session_id ?? null,
-        to_session: cur.session_id ?? null,
-        attribution: attributeDrift(prev.row, cur.row),
+        from_observed_at: prev.last.observed_at,
+        to_observed_at: cur.last.observed_at,
+        from_session: prev.session_id,
+        to_session: cur.session_id,
+        attribution: attributeDrift(prev.last.row, cur.last.row),
       };
       if (rankOf(curStatus) < rankOf(prevStatus)) {
         event.direction = 'degrading';
@@ -81,12 +126,12 @@ export function detectDrift(history) {
       }
     }
   }
-  return { drift, healing };
+  return { drift, healing, ambiguous };
 }
 
 /**
  * Hypothesize a cause for a drift event by diffing evidence-source codes.
- * ALWAYS a hypothesis with a confidence level — never asserted as fact (HC bar).
+ * ALWAYS a hypothesis with a confidence level — never asserted as fact.
  */
 export function attributeDrift(prevRow, curRow) {
   const prevSources = new Set((prevRow?.evidence ?? []).map(e => e.source));
@@ -146,7 +191,7 @@ export function detectRegression(history) {
 }
 
 /** Render the drift log markdown (render-only artifact, not a unit). */
-export function renderDriftLog(drift, healing, regressions, now) {
+export function renderDriftLog(drift, healing, regressions, now, ambiguous = []) {
   const lines = [];
   lines.push('# Capability Drift Log');
   lines.push('');
@@ -185,6 +230,16 @@ export function renderDriftLog(drift, healing, regressions, now) {
     lines.push('');
     for (const h of healing) {
       lines.push(`- ${h.to_observed_at} — ${h.capability_id}: ${h.from_status} → ${h.to_status}`);
+    }
+    lines.push('');
+  }
+  if (ambiguous.length) {
+    lines.push('## Not attributable (no lineage to compare along)');
+    lines.push('');
+    for (const a of ambiguous) {
+      lines.push(a.reason === 'overlapping-sessions'
+        ? `- ${a.capability_id}: sessions ${a.from_session} and ${a.to_session} overlap in time — any status difference between them is not evidence of change`
+        : `- ${a.capability_id}: ${a.entries} observation(s) carry no session id`);
     }
     lines.push('');
   }
@@ -248,10 +303,10 @@ export function main(argv) {
   if (!workspaceId) { process.stderr.write('could not resolve workspace id (pass --workspace-id)\n'); return 2; }
 
   const history = loadCapabilityHistory(workspaceId, project);
-  const { drift, healing } = detectDrift(history);
+  const { drift, healing, ambiguous } = detectDrift(history);
   const regressions = detectRegression(history);
   const now = new Date().toISOString();
-  const md = renderDriftLog(drift, healing, regressions, now);
+  const md = renderDriftLog(drift, healing, regressions, now, ambiguous);
 
   const outPath = join(project, '_memories', '_capability-drift-log.md');
   if (!existsSync(dirname(outPath))) mkdirSync(dirname(outPath), { recursive: true });
@@ -259,6 +314,7 @@ export function main(argv) {
   removeLegacyDriftLog(project);
   console.log(JSON.stringify({
     drift: drift.length, healing: healing.length, regressions: regressions.length,
+    not_attributable: ambiguous.length,
     history_entries: history.length, untagged_skipped: countUntaggedSessions(history), out: outPath,
   }));
   return 0;

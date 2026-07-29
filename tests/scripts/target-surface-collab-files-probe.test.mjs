@@ -103,6 +103,51 @@ test('a tilde-prefixed CORE_COLLAB_FILES_REPO env var expands against the real h
   await withEnv({ CORE_COLLAB_FILES_REPO: '~/this-almost-certainly-does-not-exist-core-probe-test', CORE_COLLAB_FILES_EXPECTED_REMOTE: undefined }, async () => {
     const row = await probe({ descriptor: { surfaces: {} } });
     assert.equal(row.target_surface, join(homedir(), 'this-almost-certainly-does-not-exist-core-probe-test'));
-    assert.equal(row.identity_status, 'DEGRADED', 'configured but the path does not exist on this machine');
+    assert.equal(row.identity_status, 'NOT-YET', 'configured but not yet present on this machine — not ready, not broken');
   });
+});
+
+// --- Readiness is not failure, and an unverified destination is not a destination ---
+
+test('a configured surface that has not been scaffolded yet reports NOT-YET, not DEGRADED', async () => {
+  const missing = join(tmpdir(), 'collab-files-never-created-12345');
+  const row = await probe({ filesRepo: missing, expectedRemote: 'git@example.com:x/y.git' });
+  assert.equal(row.identity_status, 'NOT-YET', 'absent-because-not-set-up is not the same as broken');
+  assert.equal(row.reason_code, 'target-surface-not-scaffolded');
+  assert.notEqual(row.identity_status, 'PASS', 'not-ready is still not a pass');
+});
+
+test('a path that exists but is not a git repo is still a real failure', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'collab-files-notgit-'));
+  try {
+    const row = await probe({ filesRepo: dir, expectedRemote: 'git@example.com:x/y.git' });
+    assert.notEqual(row.identity_status, 'NOT-YET', 'a present-but-wrong surface is not "not ready"');
+    assert.notEqual(row.identity_status, 'PASS');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('mutation authority requires a named destination — an unverified remote degrades', async () => {
+  // A repo whose push dry-run succeeds but with no expected remote configured: every
+  // proof passes and the gate opens onto a destination nobody declared.
+  const upstream = mkdtempSync(join(tmpdir(), 'collab-upstream-'));
+  const dir = mkdtempSync(join(tmpdir(), 'collab-files-noexp-'));
+  try {
+    git(['init', '-q', '--bare'], upstream);
+    git(['init', '-q'], dir);
+    git(['config', 'user.email', 't@t'], dir);
+    git(['config', 'user.name', 't'], dir);
+    git(['commit', '-q', '--allow-empty', '-m', 'init'], dir);
+    git(['remote', 'add', 'origin', upstream], dir);
+    const row = await probe({ filesRepo: dir });
+    assert.equal(row.identity_status, 'DEGRADED', 'an unnamed destination cannot carry mutation authority');
+    const remoteEv = row.evidence.find((e) => e.source === 'git-remote');
+    assert.equal(remoteEv.weight, 'conflicting');
+    assert.equal(remoteEv.agrees_with_others, false);
+
+    const named = await probe({ filesRepo: dir, expectedRemote: upstream });
+    assert.equal(named.identity_status, 'PASS', 'a declared, matching destination passes — evidence: ' + JSON.stringify(named.evidence));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(upstream, { recursive: true, force: true });
+  }
 });

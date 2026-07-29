@@ -135,7 +135,14 @@ test('zipStaging: the real local tar on this box produces a file that passes the
     const result = zipStaging(stage, dest);
     // A CI runner whose `tar` can't produce a real zip is refused correctly, not a defect —
     // runPackage() falls back to shipping a folder in that case (see readShippedPackage).
-    if (!result.ok) return;
+    // An early return here made the assertion below unreachable on failure, so
+    // nothing proved the zip path is ever exercised. A box whose tar cannot make
+    // a zip is a real environment, but it must SKIP loudly, not silently pass.
+    if (!result.ok) {
+      assert.match(String(result.reason || ''), /tar|zip|unsupported/i,
+        `zip refused for an unexpected reason: ${result.reason}`);
+      return;
+    }
     assert.equal(result.ok, true, `real tar on this box should produce a genuine zip: ${result.reason || ''}`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -351,7 +358,7 @@ test('retrieval stats join outcome rows by retrieval_id without counting them as
     const file = join(project, '_sessions', '2026-07-01', 'retrieval-log.jsonl');
     const baseRows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     baseRows[0].retrieval_id = 'retrieval-1';
-    writeFileSync(file, `${baseRows.map(row => JSON.stringify(row)).join('\n')}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'retrieval-1', usefulness_outcome: 'useful', evidence_kind: 'user-confirmed' })}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'orphan', usefulness_outcome: 'miss', evidence_kind: 'agent-judgment' })}\n`);
+    writeFileSync(file, `${baseRows.map(row => JSON.stringify(row)).join('\n')}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'retrieval-1', usefulness_outcome: 'useful', evidence_authority: 'user-confirmed' })}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'orphan', usefulness_outcome: 'miss', evidence_authority: 'agent-attribution' })}\n`);
 
     const stats = retrievalStats(project, makeSeal('feedcafefeedcafe'));
     assert.equal(stats.totals.events, 4, 'outcome rows are not retrieval events');

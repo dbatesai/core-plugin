@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  buildReport, formatReport, loadEvents, validateRetrievalLogRow,
+  buildReport, formatReport, loadEvents, validateRetrievalLogRow, utcDayStart,
 } from '../../plugins/core/skills/core/scripts/analyze-retrieval-quality.mjs';
 
 test('telemetry-only rows do not count as retrieval proof', () => {
@@ -105,7 +105,7 @@ test('five-field receipt stays unknown without answer outcomes and asks for evid
 test('five-field receipt reports observed outcome problems without claiming global safety', () => {
   const report = buildReport([
     { ts: '2026-07-17T03:00:00Z', kind: 'retrieval', retrieval_id: 'r-1', tier_reached: 1, units_retrieved: [{ id: 'dc-x' }] },
-    { ts: '2026-07-17T03:01:00Z', kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'noisy', evidence_kind: 'user-confirmed' },
+    { ts: '2026-07-17T03:01:00Z', kind: 'retrieval-outcome', retrieval_id: 'r-1', usefulness_outcome: 'noisy', evidence_authority: 'user-confirmed' },
   ]);
   assert.equal(report.receipt.safe, false);
   assert.match(report.receipt.checked, /1 of 1 answer outcome/);
@@ -434,3 +434,57 @@ test('formatReport: an all-rejected corpus (zero valid events) still names the r
   assert.match(text, /Rejected malformed rows: 1/);
   assert.match(text, /NOT zero valid events/);
 }));
+
+// --- UTC-labeled day bounds are computed with UTC getters ---
+
+test('the UTC day bound is the UTC calendar day, not the local one', () => {
+  // A machine east of UTC late in its local day is already on the NEXT UTC day; a
+  // machine west of UTC early in its local day is still on the PREVIOUS one. Feeding
+  // local getters into Date.UTC labels either as "UTC" and shifts the whole window.
+  const at = new Date('2026-07-28T23:30:00.000Z');
+  assert.equal(utcDayStart(at).toISOString(), '2026-07-28T00:00:00.000Z');
+  const early = new Date('2026-07-28T00:30:00.000Z');
+  assert.equal(utcDayStart(early).toISOString(), '2026-07-28T00:00:00.000Z');
+});
+
+// --- Corrupt rows change the verdict; they are never silently elided ---
+
+const okRow = (id) => ({
+  kind: 'retrieval', schema_version: '1.0.0', ts: '2026-07-28T00:00:00.000Z',
+  retrieval_id: id, tier_reached: 1, units_retrieved: [{ id: 'u-1' }], intent_topics: [],
+});
+
+test('a corpus that is mostly unreadable produces UNKNOWN, not a verdict on the survivors', () => {
+  const events = Object.assign([okRow('r-1')], {
+    rejected: [
+      { file: '/x/retrieval-log.jsonl', schema: 'unknown', code: 'invalid-json' },
+      { file: '/x/retrieval-log.jsonl', schema: 'unknown', code: 'invalid-json' },
+      { file: '/x/retrieval-log.jsonl', schema: 'current', code: 'invalid-tier' },
+    ],
+  });
+  const report = buildReport(events);
+  assert.equal(report.receipt.safe, null);
+  assert.equal(report.receipt.action, 'repair-corrupt-evidence');
+  assert.match(report.receipt.checked, /3/, 'the rejected count is stated, not dropped');
+  assert.equal(report.rejected.total, 3);
+});
+
+test('the receipt keeps its five-field shape when corruption forces UNKNOWN', () => {
+  const events = Object.assign([okRow('r-1')], {
+    rejected: [{ file: '/x/retrieval-log.jsonl', schema: 'unknown', code: 'invalid-json' }, { file: '/x/y', schema: 'unknown', code: 'invalid-json' }],
+  });
+  assert.deepEqual(Object.keys(buildReport(events).receipt), ['checked', 'safe', 'impact', 'action', 'user_action']);
+});
+
+test('a corpus with no corrupt rows still reaches its ordinary verdict', () => {
+  const events = Object.assign([okRow('r-1')], { rejected: [] });
+  assert.notEqual(buildReport(events).receipt.action, 'repair-corrupt-evidence');
+});
+
+test('a negligible share of corrupt rows does not suppress the verdict', () => {
+  const rows = Array.from({ length: 40 }, (_, i) => okRow(`r-${i}`));
+  const events = Object.assign(rows, { rejected: [{ file: '/x/y', schema: 'unknown', code: 'invalid-json' }] });
+  const report = buildReport(events);
+  assert.notEqual(report.receipt.action, 'repair-corrupt-evidence');
+  assert.equal(report.rejected.total, 1, 'still counted and reported');
+});

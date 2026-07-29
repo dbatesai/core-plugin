@@ -28,7 +28,7 @@ The structural adjustment options, in order of cost:
 
 1. **Add an edge.** A single missing `cites` or `references-topic` often fixes retrieval. Free.
 2. **Restructure a unit.** Split into two, merge two into one, change the prefix. Cheap but breaks existing cites — handle inverse-edge updates.
-3. **Re-tune priority weights** in the plugin's `scripts/priority.mjs` (weights live in the plugin and propagate via plugin update, not per-project copies). Document the change in the hygiene retrospective.
+3. **Re-tune priority weights** in the plugin's `scripts/priority.mjs` (weights live in the plugin and propagate via plugin update, not per-project copies). Document the change in the changelog entry that ships it.
 4. **Evolve query shape** — change how you phrase retrieval prompts internally.
 5. **Escalate infrastructure** — vector store, graph DB, or other. Earned only after repeated trip-wire firings per the native-tools-first stance. Two consecutive Explore-miss cycles pointing at the same gap means it's time for a new DC.
 
@@ -45,7 +45,7 @@ One cycle of a trip-wire firing is a signal. Two consecutive cycles = propose a 
 
 ## Harness-local recall (every session)
 
-Harness-local recall — Claude Code's `MEMORY.md`, Codex's `~/.codex/memories/`, equivalents — is scratch cache, not authoritative state. By design it's surface 4 in the authority stack (see `protocols/data-storage.md §"Authority ordering"`). The harness writes Claude Code's `MEMORY.md` autonomously at `/finalize`; Codex memory is explicit-save only via the `save-recall-note` adapter verb in `harnesses/codex.md`. You treat the recall surface as a fast-access summary of what was learned, but on every bootstrap, it's re-verified against PROJECT.md (for project facts) and `dm-profile.md` (for cross-project patterns). If it disagrees with synthesis, synthesis wins.
+Harness-local recall — Claude Code's `MEMORY.md`, Codex's `~/.codex/memories/`, equivalents — is scratch cache, not authoritative state. By design it's surface 4 in the authority stack (see `protocols/data-storage.md §"Authority ordering"`). The harness writes Claude Code's `MEMORY.md` autonomously at `/finalize`; Codex memory is explicit-save only via the `save-recall-note` adapter verb in `harnesses/codex.md`. You treat the recall surface as a fast-access summary of what was learned, but on every bootstrap, it's re-verified against PROJECT.md (for project facts) and `agent-profile.md` (for cross-project patterns). If it disagrees with synthesis, synthesis wins.
 
 Why scratch cache: the user's control over project knowledge runs through PROJECT.md. If harness recall were authoritative, the user could delete a fact from synthesis and you'd still "remember" it — breaking the user-control invariant. Recall's role is acceleration, not persistence.
 
@@ -56,7 +56,7 @@ Why scratch cache: the user's control over project knowledge runs through PROJEC
 2. Save effective agent configurations from multi-agent runs to `~/.core/agents/<name>.md` for future reuse.
 3. Save effective analysis-protocol configurations by task type to `~/.core/task-configs/<type>.md`. Check this folder before composing a new swarm.
 4. Record strategy effectiveness per problem type.
-5. Sync cross-project learnings to `dm-profile.md` — user preferences, personality refinements, portfolio patterns. Never project-specific facts.
+5. Sync cross-project learnings to `agent-profile.md` — user preferences, personality refinements, portfolio patterns. Never project-specific facts.
 6. Update PROJECT.md §Decisions & Risks, §Moves, §Notes, §People as the session-close step. The corresponding units get the matching frontmatter updates.
 
 **Bootstrap invariant:** on the next session start, if the `read-auto-memory` surface carries a project-specific fact not present in PROJECT.md or `_memories/`, you treat the fact as deleted-by-user. On Claude Code, rebuild `MEMORY.md` from current synthesis. On Codex, surface the divergence rather than silently rewriting (explicit-save only). That's the structural enforcement of the user-control invariant.
@@ -67,11 +67,11 @@ Why scratch cache: the user's control over project knowledge runs through PROJEC
 2. Make concrete self-improvement recommendations. "Try X next session" beats "do better at Y."
 3. Write the improvement summary to the screen for the user at session close.
 
-## Analysis-protocol efficacy narrative
+## Analysis-protocol effectiveness narrative
 
 After running a multi-agent analysis via `protocols/analysis.md`, append to the workspace narrative at `~/.core/workspaces/<id>/swarm-narrative.md`. Not a mechanical record — a reflective account written for your own future swarm runs in this workspace.
 
-Each entry captures: what this swarm revealed about agent effectiveness, what you chose to eliminate and why, what you preserved and why, and what questions remain open. Workspace-scoped — stays distinct from cross-workspace learnings in `dm-profile.md`.
+Each entry captures: what this swarm revealed about agent effectiveness, what you chose to eliminate and why, what you preserved and why, and what questions remain open. Workspace-scoped — stays distinct from cross-workspace learnings in `agent-profile.md`.
 
 ## Analysis-protocol effectiveness report
 
@@ -104,7 +104,7 @@ When in doubt, escalate. Changes that affect how CORE processes all future tasks
 
 ## Memory hygiene
 
-Every meaningful change, every `/finalize`, and on-demand: memory hygiene runs. Read `protocols/hygiene.md` for the canonical mechanism. The deeper sub-protocols (edge-integrity sweep, session-log auto-prune, etc.) live in `references/hygiene-strategies.md`.
+Every meaningful change, every `/process-memory`, and on-demand: memory hygiene runs. Read `protocols/hygiene.md` for the canonical mechanism. The deeper sub-protocols (edge-integrity sweep, session-log auto-prune, etc.) live in `references/hygiene-strategies.md`.
 
 There's no separate dream-cycle ritual anymore — the operations got named for what they actually do, and they fire on the natural triggers (size, signals, edits) rather than on a fixed cadence.
 

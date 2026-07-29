@@ -61,6 +61,6 @@ Net effect: a Codex user without a contract can end up with no instruction surfa
 
 ## Remaining caveats
 
-`audit-memory-boundary.mjs` ships as a memory-authority audit (sampled, read-only) and runs in `/finalize` and `/process-memory`, but its conflict-detection scope is deliberately deferred — describe it as shipped-with-conflict-detection-deferred, not complete.
+`audit-memory-boundary.mjs` ships as a memory-authority audit (sampled, read-only) and runs in `/process-memory`, but its conflict-detection scope is deliberately deferred — describe it as shipped-with-conflict-detection-deferred, not complete.
 
 There is no separate instruction-surface adapter (inventorying arbitrary surfaces and planning CORE-block upserts across them): everything such an adapter would reach for is covered by the contract-generator path above (`generate-<harness>-md.mjs`), which actually writes. A wrapper author wanting a CORE-owned block injected into a harness surface uses that path.

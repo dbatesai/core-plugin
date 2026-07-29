@@ -10,7 +10,7 @@ The agent checks these in order and stops as soon as the answer is sufficient. E
 
 ### Tier 0 — Already loaded
 
-At session start, `<project>/PROJECT.md` and `~/.core/dm-profile.md` are read. Files Read this session are in context. If the answer is there, no further retrieval happens. This is free.
+At session start, `<project>/PROJECT.md` and `~/.core/agent-profile.md` are read. Files Read this session are in context. If the answer is there, no further retrieval happens. This is free.
 
 **When to escalate:** The question references a fact or unit not visible in PROJECT.md or recently-read files.
 
@@ -35,7 +35,7 @@ At session start, `<project>/PROJECT.md` and `~/.core/dm-profile.md` are read. F
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.mjs <seed-unit-path> \
-    --intent topic1,topic2 --format json
+    --format json
 ```
 
 This returns a scored, hop-ordered candidate list. Read the top results. Fall back to manual traversal only if the script isn't reachable in the current harness context.
@@ -181,7 +181,7 @@ The analyzer ships in the plugin:
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project> [--since-days N | --all] [--json]
 ```
 
-Default window is 30 days. Output: tier distribution, top dip-back units (precision proxy), top escalation topics (recall proxy). `/process-memory` and `/finalize` call this script and surface anomalies in plain language.
+Default window is 30 days. Output: tier distribution, top dip-back units (precision proxy), top escalation topics (recall proxy). `/process-memory` calls this script and surface anomalies in plain language.
 
 ---
 

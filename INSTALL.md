@@ -27,25 +27,26 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | Slash command | What it does |
 |---|---|
 | `/core` | The agent. Starts the session, loads your project context (picking a thread back up with a readiness summary), and talks with you. |
-| `/finalize` | Close a session — write a summary, update project state, run memory cleanup. |
-| `/process-memory` | Clean up memory on demand — pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it's over the size cap. |
+| `/finalize` | Close a session — capture what must survive, write the resume summary, certify the exact-session receipt. |
+| `/refocus` | Recenter mid-session on what matters most now, given what you have learned since you started. Read-only unless you accept a change. |
+| `/process-memory` | Clean up memory on demand — back-fill auto-closed sessions, pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it is over the size cap. |
 | `/register-sources` | Point CORE at outside data that should feed the project's memory. |
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
 | `/metrics` | The one door to memory health. Default: three plain-language answers (storing the right memories? loading them when needed? passing its own blind test?) from pinned history. Modes: `/metrics full` (complete instrument readout), `/metrics export` (anonymized stats zip), `/metrics self-test` (a blind test round now). |
 | `/memory-view` | Browse what CORE knows as one read-only page — graph, unit bodies, backlinks, health section. Published as a private artifact only after you confirm the preflight manifest; never automatic. |
-| `/metrics-package` | Deprecated shim (removal v3.15.0) — now `/metrics export`. |
-| `/self-test` | Deprecated shim (removal v3.15.0) — now `/metrics self-test`. |
+| `/orient` | Deprecated shim (removal 2026-08-15) — session bootstrap folded into `/core`. |
 
 ### Shipped hooks (installed with the plugin)
 
-Installing CORE registers three hooks via `plugins/core/hooks/hooks.json` — they are what make CORE self-running, and each has an opt-out:
+Installing CORE registers four hooks via `plugins/core/hooks/hooks.json` — they are what make CORE self-running, and each has an opt-out:
 
 | Hook | What it does | Opt out |
 |---|---|---|
 | SessionStart | Injects the directive to run `/core` first, so you never type it. A wrapper entry point (`CORE_AUTOSTART_SKILL`) is honored only when registered in your own user-level `~/.claude/settings.json`, resolved from the OS account database (`os.userInfo()`), so neither a project's settings nor a hostile `HOME`/`USERPROFILE` can redirect it. | `CORE_AUTOSTART=0` |
 | UserPromptSubmit | Per-turn retrieval: injects the top matching memory units for each prompt (deterministic, byte-capped, fail-open). | `CORE_RETRIEVAL_HOOK=0` |
-| SessionEnd | Discharges the session close in the background, so you never type `/finalize`. | `CORE_AUTO_CLOSE=0` |
+| Stop | Closes out each answered turn: records locally whether the memory delivered that turn was used, so retrieval quality can be graded later. Nothing leaves your machine. | `CORE_METRICS_ENABLED=0` |
+| SessionEnd | Records a deterministic lifecycle receipt for the exact session that ended — zero model calls; `/process-memory` back-fills the memory processing later. | `CORE_AUTO_CLOSE=0` |
 
 ### Optional hooks (manual)
 
@@ -117,9 +118,13 @@ test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
 test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 ```
 
-Codex finds the bundled skills (`core`, `finalize`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics`, `metrics-package`, `memory-view`, `self-test`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
+Codex finds the bundled skills (`core`, `finalize`, `refocus`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics`, `memory-view`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
 
-One difference from Claude Code worth knowing: Codex CLI 0.144.5+ supports plugin-bundled lifecycle hooks (SessionStart proven live 2026-07-17; the per-turn UserPromptSubmit hook is bundled but not yet proven compatible on Codex — payload mapping under validation), and plugin hooks are skipped until their definition is explicitly trusted. Until the per-turn path is proven, write-safety guards on Codex rest on the agent's own discipline (`harnesses/codex.md §hook-register` has the detail and the reopen conditions).
+Two differences from Claude Code worth knowing.
+
+**Codex gets two of the four hooks.** `plugins/core/hooks/hooks-codex.json` registers `UserPromptSubmit` (per-turn retrieval) and `Stop` (per-turn outcome close). Codex has no session-start or session-end event, so there is nothing to register there. Concretely: nothing runs `/core` for you, and no close fires when you quit. Type `/core` to start a session — that is what loads your project and discharges any close the last session left owed — and `/finalize` to close one. Plugin hooks also stay skipped until you explicitly trust their definition.
+
+**Pre-execution guards don't exist on Codex.** Claude Code can block a tool call before it runs; Codex's hook surface can't, so write-safety on Codex rests on the agent's own discipline. `harnesses/codex.md §hook-register` has the detail and the conditions for reopening this.
 
 If a previous install used a different marketplace name (say `local-core` from a hand-rolled shim), remove it first: `codex plugin remove core@local-core`, then `codex plugin marketplace remove local-core`.
 

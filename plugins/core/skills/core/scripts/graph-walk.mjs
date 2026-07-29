@@ -10,8 +10,7 @@
  * Library usage:
  *   import { walk } from './graph-walk.mjs';
  *   const candidates = walk('_memories/dc-67-no-mcp.md',
- *                           { memoriesDir: '_memories', hops: 2,
- *                             sessionTopics: ['memory-architecture'] });
+ *                           { memoriesDir: '_memories', hops: 2 });
  *
  * Validity-suppression: invalidated units (t_invalid in the past) are excluded
  * from the candidate set the same way retired units are, and the branch stops
@@ -19,7 +18,7 @@
  *
  * CLI:
  *   node graph-walk.mjs <seed-unit-path> [--memories <dir>] [--hops 2]
- *                       [--budget 15] [--intent t1,t2] [--prune 0.3]
+ *                       [--budget 15] [--prune 0.3]
  *                       [--include-invalid] [--include-observations]
  *                       [--format json|text]
  */
@@ -32,16 +31,23 @@ import {
   SCORE_PRUNE_THRESHOLD,
 } from './priority.mjs';
 import { isActiveStatus } from './unit-vocab.mjs';
+import { regularFileWithin } from './trusted-home.mjs';
+
+/**
+ * Every hop target is project-authored frontmatter, so a candidate counts only
+ * when its REAL path is a regular file beneath realpath(memoriesDir). An
+ * absolute target, a `..` spelling, and a link out of the store all resolve to
+ * nothing rather than pulling foreign markdown into agent context.
+ */
+const containedUnit = (memoriesDir, candidate) => regularFileWithin(memoriesDir, candidate);
 
 function resolveTarget(target, memoriesDir, includeObservations = false, includeInvalidated = false) {
   const t = target.trim();
-  const direct = resolve(t);
-  if (existsSync(direct)) return direct;
   const stem = t.replace(/\.md$/, '');
-  const c1 = join(memoriesDir, `${stem}.md`);
-  if (existsSync(c1)) return c1;
-  const c2 = join(memoriesDir, t);
-  if (existsSync(c2)) return c2;
+  const c1 = containedUnit(memoriesDir, join(memoriesDir, `${stem}.md`));
+  if (c1) return c1;
+  const c2 = containedUnit(memoriesDir, join(memoriesDir, t));
+  if (c2) return c2;
   // Archive is out of scope for a default walk:
   // an archived unit can carry status:active with no t_invalid, so neither
   // downstream suppression check (isInvalidated / isActiveStatus) would ever
@@ -49,20 +55,20 @@ function resolveTarget(target, memoriesDir, includeObservations = false, include
   // whether it later surfaces. Cold-history walks (includeInvalidated:true)
   // still need it, same as the inverse-edge archive scan below.
   if (includeInvalidated) {
-    const c3 = join(memoriesDir, 'archive', `${stem}.md`);
-    if (existsSync(c3)) return c3;
+    const c3 = containedUnit(memoriesDir, join(memoriesDir, 'archive', `${stem}.md`));
+    if (c3) return c3;
   }
   if (includeObservations) {
     // Without this branch, edges pointing into observations/<YYYY-MM>/ resolve to null.
     const obsRoot = join(memoriesDir, 'observations');
-    const flat = join(obsRoot, `${stem}.md`);
-    if (existsSync(flat)) return flat;
+    const flat = containedUnit(memoriesDir, join(obsRoot, `${stem}.md`));
+    if (flat) return flat;
     let months;
     try { months = readdirSync(obsRoot, { withFileTypes: true }); } catch { months = []; }
     for (const m of months) {
       if (!m.isDirectory()) continue;
-      const c = join(obsRoot, m.name, `${stem}.md`);
-      if (existsSync(c)) return c;
+      const c = containedUnit(memoriesDir, join(obsRoot, m.name, `${stem}.md`));
+      if (c) return c;
     }
   }
   return null;
@@ -79,7 +85,8 @@ export function buildInverseEdgeIndex(memoriesDir, { includeObservations = false
     for (const fname of files) {
       if (!fname.endsWith('.md')) continue;
       if (fname.startsWith('_') || fname.startsWith('INDEX')) continue;
-      const filePath = join(dir, fname);
+      const filePath = containedUnit(memoriesDir, join(dir, fname));
+      if (!filePath) continue; // a link out of the store is not an indexable unit
       let unit;
       try { unit = loadUnit(filePath); } catch { continue; }
       for (const e of extractEdges(unit)) {
@@ -119,18 +126,22 @@ export function walk(seedPath, {
   memoriesDir = '_memories',
   hops = 2,
   budget = 15,
-  sessionTopics: _sessionTopics = [],
   pruneThreshold = SCORE_PRUNE_THRESHOLD,
   today = null,
   includeInvalidated = false,
   includeObservations = false,
   stats = null,
+  now = null,
 } = {}) {
-  const n = new Date();
-  const t = today || new Date(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()));
+  // UTC calendar fields, not local ones: the validity policy is UTC, and local
+  // getters shift the day by one either side of midnight in a non-UTC zone.
+  const n = now || new Date();
+  const t = today || new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
   const mDir = resolve(memoriesDir);
   const seed = loadUnit(seedPath);
-  const seedResolved = resolve(String(seedPath));
+  // Canonical, so the seed matches the canonical paths every hop resolves to and
+  // is never re-emitted as its own neighbor.
+  const seedResolved = containedUnit(mDir, seedPath) || resolve(String(seedPath));
   const inverse = buildInverseEdgeIndex(mDir, { includeObservations, includeInvalidated });
 
   // Validity-suppression: a unit whose t_invalid is in the past is excluded from
@@ -216,7 +227,6 @@ export function main(argv) {
   let memoriesArg = null;
   let hops = 2;
   let budget = 15;
-  let intentStr = '';
   let prune = SCORE_PRUNE_THRESHOLD;
   let todayArg = null;
   let format = 'json';
@@ -228,13 +238,15 @@ export function main(argv) {
     if (a === '--memories') { memoriesArg = argv[++i]; }
     else if (a === '--hops') { hops = parseInt(argv[++i], 10); }
     else if (a === '--budget') { budget = parseInt(argv[++i], 10); }
-    else if (a === '--intent') { intentStr = argv[++i]; }
     else if (a === '--prune') { prune = parseFloat(argv[++i]); }
     else if (a === '--today') { todayArg = argv[++i]; }
     else if (a === '--format') { format = argv[++i]; }
     else if (a === '--include-invalid') { includeInvalidated = true; }
     else if (a === '--include-observations') { includeObservations = true; }
-    else if (!a.startsWith('--')) { seedArg = a; }
+    // An unrecognized flag must not fall through to the seed slot, where its VALUE
+    // would silently become the unit being walked.
+    else if (a.startsWith('--')) { process.stderr.write(`error: unrecognized flag ${a}\n`); return 2; }
+    else { seedArg = a; }
   }
 
   if (!seedArg) { process.stderr.write('usage: node graph-walk.mjs <seed-unit-path> [options]\n'); return 2; }
@@ -244,10 +256,9 @@ export function main(argv) {
 
   const memoriesDir = memoriesArg ? resolve(memoriesArg) : dirname(seedPath);
   const today = todayArg ? (parseIsoDate(todayArg) || new Date()) : null;
-  const sessionTopics = intentStr ? intentStr.split(',').map(s => s.trim()).filter(Boolean) : [];
 
   const stats = {};
-  const candidates = walk(seedPath, { memoriesDir, hops, budget, sessionTopics, pruneThreshold: prune, today, includeInvalidated, includeObservations, stats });
+  const candidates = walk(seedPath, { memoriesDir, hops, budget, pruneThreshold: prune, today, includeInvalidated, includeObservations, stats });
 
   if (format === 'json') {
     const out = candidates.map(c => ({

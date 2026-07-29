@@ -54,7 +54,7 @@ node ${CORE_ROOT}/skills/core/scripts/validate.mjs <project-path>
 
 The runner walks `<project-path>/_memories/_validation/tests/test-*.yaml`, runs each test, scores precision and recall, writes a report to `<project-path>/_outputs/validation/<YYYY-MM-DD>/REPORT.md`, and exits with status 0 on pass / 1 on any FAIL.
 
-Two scripts get loosely called "the validator," and they do different jobs. `check-units.mjs` checks unit schema and edge integrity — the store check `/finalize` runs at every close. `validate.mjs`, this runner, simulates retrieval against the test corpus and scores precision and recall. When a protocol says "validate the store," that means `check-units.mjs`; this file owns the retrieval suite.
+Two scripts get loosely called "the validator," and they do different jobs. `check-units.mjs` checks unit schema and edge integrity — the store check `/process-memory` runs every pass. `validate.mjs`, this runner, simulates retrieval against the test corpus and scores precision and recall. When a protocol says "validate the store," that means `check-units.mjs`; this file owns the retrieval suite.
 
 The current runner simulates Tier 1 retrieval (OR-of-terms grep) only, and it is **NOT the product retrieval path** — the shipped retriever is `retrieve-context.mjs` (title ∪ body-BM25 over the recursive index, the same function the per-turn hook and the measurement harness call). The runner's numbers are retrieval-health diagnostics; never cite them as product baselines or use them to clear a release gate (`retrieval-harness.mjs` is the product-path instrument).
 
@@ -84,7 +84,7 @@ Aggregate pass rate is reported alongside individual results.
 
 ## Cadence
 
-- **Weekly automatic** — fires from memory hygiene's comprehensive pass at the first `/finalize` of each calendar week.
+- **Weekly automatic** — fires from memory hygiene's comprehensive pass at the first `/process-memory` of each calendar week.
 - **On-demand** — user can request a run any time, or the agent can self-trigger when retrieval starts feeling off.
 - **Auto-on for retrieval-tuning sessions** — when you're adjusting priority weights or edge structure, validation runs before and after to measure the delta.
 
@@ -101,7 +101,7 @@ The autonomous-first contract from the execution plan applies: try autonomous re
 
 ## User's subjective read
 
-Quantitative thresholds aren't the whole story. The validation report includes a final field: *"Did retrieval feel right in real use?"* The user's subjective experience is data — if the numbers say 90% pass but conversations felt thin, the regime is missing something. Surface the subjective read in the next hygiene retrospective.
+Quantitative thresholds aren't the whole story. The validation report includes a final field: *"Did retrieval feel right in real use?"* The user's subjective experience is data — if the numbers say 90% pass but conversations felt thin, the regime is missing something. Surface the subjective read in the validation report itself.
 
 ## Extending the corpus
 

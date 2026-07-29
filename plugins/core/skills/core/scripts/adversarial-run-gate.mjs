@@ -1,10 +1,10 @@
 /**
- * adversarial-run-gate.mjs — v2.7.0 consumer gate for multi-agent adversarial runs.
+ * adversarial-run-gate.mjs — consumer gate for multi-agent adversarial runs.
  *
  * This is the CONSUMER that makes the `anti-anchoring-mechanism` capability row
  * load-bearing. A row that says mutation_permitted=false is only worth anything
  * if something reads it; this module reads the actual row (not a policy string)
- * and turns it into a typed authority/advisory decision per HC's policy:
+ * and turns it into a typed authority/advisory decision:
  *
  *   - fail-OPEN for advisory analysis/review generation — allowed, but loudly
  *     watermarked DEGRADED/trust-based; independent agent/human acceptance is
@@ -13,10 +13,10 @@
  *     (graduating a unit, rendering PROJECT.md, approving a release gate,
  *     merging/publishing, writing canonical plan state). Authority requires a
  *     PASS-grade anti-anchoring mechanism — which on Claude Code is DEGRADED
- *     (trust-based, R-17) until v2.8.0 staging lands.
+ *     (trust-based, R-17) until physical isolation staging ships.
  *
- * Boundary: this is v2.7 consumer ENFORCEMENT only. It does not provide the
- * v2.8 staged/physical isolation proof or any v3 memory-visibility proof.
+ * Boundary: this is consumer ENFORCEMENT only. It does not provide the
+ * staged/physical isolation proof or any memory-visibility proof.
  *
  * The script ships with the plugin by convention. The plugin ships .mjs (Node.js) only.
  */
@@ -29,7 +29,7 @@ export const ADVERSARIAL_ACTION = 'multi-agent-adversarial-run';
 export const ADVISORY_WATERMARK =
   'DEGRADED/trust-based (R-17): advisory only — independent agent/human acceptance required before any canonical mutation';
 
-// Machine-readable decision enum (HC_555 hardening): a consumer branches on the
+// Machine-readable decision enum: a consumer branches on the
 // single `decision` string instead of re-deriving intent from the booleans +
 // watermark, which is too easy to misread (ADVISORY must never look like AUTHORIZED).
 export const ADVERSARIAL_DECISIONS = Object.freeze(['AUTHORIZED', 'ADVISORY', 'BLOCKED']);
@@ -66,7 +66,7 @@ export function classifyAdversarialRun(preActionResult) {
     // and sets row.mutation_permitted=false with a stable mutation_block_reason when an
     // otherwise-PASS row is denied for THIS action — e.g. the adversarial action declares
     // allowed_harnesses, so an unknown/mismatched consuming harness blocks mutation even on
-    // a PASS identity. A consumer is mandated (HC_555) to branch on `decision`, so the
+    // a PASS identity. A consumer must branch on `decision`, so the
     // operation-scoped denial has to be folded INTO `decision` or it's invisible: AUTHORIZED
     // would mutate on a gate the runner already closed. Only an explicit `false` blocks —
     // an undefined field (identity-only row, e.g. startup mode) keeps the AUTHORIZED path.
@@ -114,11 +114,9 @@ export async function evaluateAdversarialRun(opts = {}) {
 }
 
 // --- CLI entry --------------------------------------------------------------
-// Library-only through v3.2.x: the gate had no runnable entry, so analysis.md
-// (its only consumer) couldn't actually invoke it and the gate shipped dormant.
-// This entry makes it runnable from a skill via Bash and prints the typed
-// `decision` so the protocol branches on one string instead of re-deriving
-// intent from booleans (the HC_555 hazard).
+// The gate is runnable from a skill via Bash — analysis.md, its only consumer,
+// invokes it here. It prints the typed `decision` so the protocol branches on
+// one string instead of re-deriving intent from booleans.
 
 function parseFlags(argv) {
   const flags = new Map();

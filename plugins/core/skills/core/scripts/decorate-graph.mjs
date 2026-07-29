@@ -87,8 +87,8 @@ function wikiLink(id) {
 }
 
 /**
- * renderEdgesBlock — deterministic edge order (type, then target — same
- * convention as render-okf-export.mjs), filtered to active-store targets
+ * renderEdgesBlock — deterministic edge order (type, then target),
+ * filtered to active-store targets
  * only. Returns '' when a unit has no kept edges (nothing to render, and
  * findExistingEdgesBlock below removes any stale block in that case).
  */
@@ -183,9 +183,9 @@ export function classifyUnitChange(cachedStamp, currentText) {
 }
 
 /**
- * decorateStore — the store-wide pass. One atomic snapshot (same
- * loadSnapshot(..., {captureBodies:true, retainRaw:true}) render-okf-export
- * uses), so ids/edges/raw bytes all derive from the same read — no
+ * decorateStore — the store-wide pass. One atomic snapshot
+ * (loadSnapshot(..., {captureBodies:true, retainRaw:true})), so ids/edges/raw
+ * bytes all derive from the same read — no
  * TOCTOU window between deciding what to link and what bytes to patch.
  *
  * Only ever touches top-level active units (loadSnapshot's own population);

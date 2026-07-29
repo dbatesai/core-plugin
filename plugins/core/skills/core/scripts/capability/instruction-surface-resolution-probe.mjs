@@ -1,13 +1,13 @@
 /**
- * instruction-surface-resolution-probe.mjs — v2.7.0 §5 Claude-Code observability.
+ * instruction-surface-resolution-probe.mjs — Claude-Code instruction-surface observability.
  *
  * A PARTIAL filesystem heuristic over the documented Claude Code memory surfaces
  * for the current cwd — user/project/.claude/local CLAUDE.md files — reported in
  * precedence order. It OBSERVES a partial surface; it does NOT resolve @imports,
  * managed-policy memory, excludes, or .claude/rules, and it does not generate or
- * normalize instructions (that's v3.0's instruction-surface adapter). The row
- * carries documented_surfaces_not_probed so it never overclaims full "resolution"
- * (HC_614 #2). Docs: https://docs.anthropic.com/en/docs/claude-code/memory
+ * normalize instructions (that's the instruction-surface adapter, contract-format.mjs).
+ * The row carries documented_surfaces_not_probed so it never overclaims full
+ * "resolution". Docs: https://docs.anthropic.com/en/docs/claude-code/memory
  *
  * Precedence chain (partial, filesystem-only):
  *   1. user-global  ~/.claude/CLAUDE.md
@@ -142,7 +142,7 @@ function buildRow({ identity_status, evidence, cwd, instruction_chain, observed_
     harness: 'claude-code',
     cwd,
     instruction_chain,           // ordered resolved files, precedence order (partial)
-    // Honest residual (HC_614 #2): documented Claude Code memory surfaces this
+    // Honest residual: documented Claude Code memory surfaces this
     // filesystem heuristic does NOT probe — so the row never reads as full resolution.
     documented_surfaces_not_probed: ['managed-policy-memory', '@imports', 'excludes', '.claude/rules'],
     identity_status,

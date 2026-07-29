@@ -1,0 +1,609 @@
+{
+  "schema_version": "1.0.0",
+  "surfaces": [
+    {
+      "name": "SessionEnd:close-pass-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "SessionStart:session-start-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "Stop:answer-close-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "UserPromptSubmit:retrieve-context-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "Stop:answer-close-hook-codex.mjs",
+      "kind": "hook",
+      "harness": "codex",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "UserPromptSubmit:retrieve-context-hook-codex.mjs",
+      "kind": "hook",
+      "harness": "codex",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "adversarial-run-gate",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "aggregate-receipt",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "analyze-capability-drift",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "analyze-retrieval-quality",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "analyze-retrieval-skip",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "artifact-identity",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "artifact-provenance",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "artifact-receipts",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "audit-memory-boundary",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "backfill-memory",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "bitemporal",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "bm25",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "calibrate-classifier",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "capability-history",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "capability-probe",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "check-context-integrity",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "check-inbox",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "check-units",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "classify-turns",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "close-pass",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "close-payload",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "compact-project",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "configure-project",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "contract-format",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "decorate-graph",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "demote-moves",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "demote-state-narrative",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "enrichment-sidecar",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "file-lock",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "frontmatter-flat",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "fs-atomic",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-agents-md",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-claude-md",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-decisions-index",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-memory-index",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-risks-index",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-summary-index",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "graph-walk",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "hardware-budget",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "hindsight-judge",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "hot-section",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "impact-trace",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "index-registry",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "lifecycle-core",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "lifecycle-detect",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "log-event",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "maintenance-run",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-check",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-dedupe",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-detectors",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-disclosure",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-init",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-package",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-package-report",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-rollup",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "metrics-tripwires",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "migrate-to-contract",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "orphan-detector",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "priority",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "producer-identity",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "project-slug",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "read-transcript",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "record-capability-snapshot",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "record-retrieval-event",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "record-retrieval-outcome",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "render-browse-artifact",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "render-metrics-artifact",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "resolve-plugin-root",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "retrieval-harness",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "retrieve-context",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "scorecard",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "select-relevant-units",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "self-test-round",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "state-cache",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "text-truncate",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "trusted-home",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "turn-capture",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "unit-vocab",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "validate",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "validate-adversarial-artifacts",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "workspace-fork-check",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "write-visibility-canary",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
+      "name": "configure-project",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "core",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "finalize",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "memory-view",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "metrics",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "orient",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "deprecated",
+      "invocation": "user"
+    },
+    {
+      "name": "process-memory",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "refocus",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "register-sources",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "vibecheck",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    }
+  ]
+}

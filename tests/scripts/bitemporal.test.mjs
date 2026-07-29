@@ -303,3 +303,43 @@ test('TERMINAL_STATUSES covers retired/superseded/archived', () => {
   assert.ok(TERMINAL_STATUSES.has('archived'));
   assert.ok(!TERMINAL_STATUSES.has('active'));
 });
+
+// ============================================================
+// malformed validity dates — rejected, never written, never silently valid
+// ============================================================
+
+test('a malformed validity date is reported, and never becomes a stamp', () => {
+  const superseder = unit({ id: 'b', type: 'decision', created: '2026-03-01', t_valid: '2026-02-30',
+    edges: [{ type: 'supersedes', target: 'a' }] });
+  const target = unit({ id: 'a', type: 'decision', created: '2026-01-01', status: 'retired' });
+  const { confirmed, malformed } = classifySupersessions([superseder, target]);
+
+  assert.equal(confirmed.length, 0, 'a date that is not a real calendar day cannot become a t_invalid');
+  assert.deepEqual(malformed.map((m) => m.unit), ['b']);
+  assert.equal(malformed[0].field, 't_valid');
+  assert.equal(malformed[0].value, '2026-02-30');
+  assert.equal(planSupersessionStamps([superseder, target]).length, 0);
+});
+
+test('a unit carrying a malformed t_invalid is UNKNOWN, not valid-by-default', () => {
+  const broken = unit({ id: 'broken', type: 'decision', created: '2026-01-01', t_invalid: 'last tuesday' });
+  const clean = unit({ id: 'clean', type: 'decision', created: '2026-01-01' });
+  const m = storageMetrics([broken, clean], new Date(Date.UTC(2026, 6, 28)));
+
+  assert.equal(m.malformed_validity, 1, 'the damaged unit is counted, not absorbed into valid_now');
+  assert.deepEqual(m.malformed_validity_units, [{ unit: 'broken', field: 't_invalid', value: 'last tuesday' }]);
+  assert.equal(m.valid_now, 1, 'only the readable unit is claimed as currently valid');
+  assert.equal(m.total, 2);
+});
+
+test('the validity day is the UTC calendar day', async () => {
+  const { todayUtc } = await import('../../plugins/core/skills/core/scripts/bitemporal.mjs');
+  const savedTz = process.env.TZ;
+  try {
+    process.env.TZ = 'Pacific/Kiritimati'; // UTC+14: local calendar is already tomorrow
+    const t = todayUtc(new Date('2026-05-28T18:00:00Z'));
+    assert.equal(t.toISOString(), '2026-05-28T00:00:00.000Z');
+  } finally {
+    if (savedTz === undefined) delete process.env.TZ; else process.env.TZ = savedTz;
+  }
+});

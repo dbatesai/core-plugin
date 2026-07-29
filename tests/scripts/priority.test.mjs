@@ -218,3 +218,10 @@ test('MEM-005: pinned:false is neutral — identical score to an unpinned unit (
   const pinnedFalse = { fm: { created: '2026-06-01', topics: ['a'], pinned: false } };
   assert.equal(score(pinnedFalse, [], today), score(base, [], today));
 });
+
+test('signalS: both agent-profile and the legacy dm-profile source paths score as configuration', () => {
+  const modern = signalS({ fm: { sources: ['~/.core/agent-profile.md'] } });
+  const legacy = signalS({ fm: { sources: ['~/.core/dm-profile.md'] } });
+  assert.equal(modern, legacy, 'renamed profile path must not change a unit\'s provenance score');
+  assert.ok(modern > NO_SOURCES_DEFAULT_S, 'profile-sourced units outrank unknown provenance');
+});

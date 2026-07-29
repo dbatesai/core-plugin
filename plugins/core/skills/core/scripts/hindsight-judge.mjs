@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * hindsight-judge.mjs — the mechanical-grade hindsight pass (v3.14.0 Link 2).
+ * hindsight-judge.mjs — the mechanical-grade hindsight pass (evidence chain, Link 2).
  *
  * What it measures, honestly: TRUNCATION IMPACT. The live retrieval hook saw a
  * byte-capped view (≤8 keyword tokens) of the user's prompt; this judge, later
@@ -25,9 +25,9 @@
  *                      text: topical-but-irrelevant injection.
  *   hit-right        — delivered set matches the full-text expectation.
  *   drift-invalidated — the store changed between capture and judgment
- *                      (store_signature mismatch). Per the design-review
- *                      ruling: flag and drop the sample — we measure causality
- *                      at the time of the event, never guess across drift.
+ *                      (store_signature mismatch): flag and drop the sample —
+ *                      a turn is judged only against the store state at the
+ *                      time of the event, never guessed across drift.
  *                      Scorecards exclude these from grade counts.
  *
  * GAP FLOOR: deliberately conservative — a LOW bar, so a turn is called
@@ -44,14 +44,14 @@
  * Ships with the plugin by convention; .mjs (Node.js) only.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
-import { listTurnCaptureFiles, computeStoreSignature } from './turn-capture.mjs';
+import { listTurnCaptureFiles, computeStoreSignature, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 import { buildRetrievalTrace } from './retrieve-context.mjs';
 
 // Bump when verdict semantics change — scorecards stamp this so a rate shift
@@ -62,7 +62,7 @@ export const JUDGE_VERSION = '1.0.0';
 export const DEFAULT_GAP_FLOOR = 0.5;
 
 export function judgmentLogPath(projectDir, { workspaceId } = {}) {
-  return join(resolveStoragePath(projectDir, { workspaceId }), 'judgment-log.jsonl');
+  return join(resolveStoragePath(projectDir, { workspaceId }), JUDGMENT_LOG_FILENAME);
 }
 
 function judgmentLockPath(projectDir, { workspaceId } = {}) {
@@ -135,7 +135,7 @@ export function judgeUnjudgedTurns(projectDir, { limit = 50, gapFloor, workspace
       && ev.store_signature !== 'unknown'
       && ev.store_signature !== sigNow;
     if (drifted) {
-      verdict = 'drift-invalidated'; // flag and drop, never guess across drift (Agy, Gate A)
+      verdict = 'drift-invalidated'; // flag and drop, never guess across drift
     } else {
       let trace = null;
       try { trace = buildRetrievalTrace(ev.prompt_text, projectDir, { topN: Math.max(3, deliveredIds.length) }); }
@@ -171,6 +171,9 @@ export function judgeUnjudgedTurns(projectDir, { limit = 50, gapFloor, workspace
       withFileLock(judgmentLockPath(projectDir, { workspaceId: wsId }), () => {
         mkdirSync(resolveStoragePath(projectDir, { workspaceId: wsId }), { recursive: true });
         appendFileSync(logFile, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+        // Judgments name the units a real conversation retrieved: owner-only,
+        // re-asserted every append. Best-effort — not every filesystem chmods.
+        try { chmodSync(logFile, 0o600); } catch { /* mode is advisory here */ }
       });
     } catch (e) {
       return { judged: 0, skipped: result.skipped, verdicts: {}, error: String(e && e.message).slice(0, 120) };

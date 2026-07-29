@@ -13,7 +13,9 @@ allowed-tools:
 
 # `/process-memory`
 
-Run the memory housekeeping pass. After this finishes, the project's memory-related files should be in tip-top shape: inbox empty, observations graduated where ready, every unit validated, both indexes current, PROJECT.md under the file cap, anything that needs your judgment surfaced.
+Run the memory housekeeping pass: pull the inbox, graduate the observations that are ready, validate the units, regenerate both indexes, compact `PROJECT.md` when it's over the file cap.
+
+The pass is best-effort, not a guarantee. Some work is deliberately left open and named rather than forced: a Mode C block the user defers stays in the inbox, a unit that fails validation is surfaced for judgment instead of auto-fixed, and `PROJECT.md` or `IMPROVEMENT_LOG.md` can finish over cap with a recommendation rather than a rewrite. Step 8 narrates whatever remains open, so the honest postcondition is "everything resolvable is resolved, and anything still open is named."
 
 Runs synchronously in the current session.
 
@@ -43,6 +45,24 @@ Then narrate in plain voice: "Captured N observations from this session before p
 
 ---
 
+## Step 0.5 — Back-fill sessions the automatic close preserved without memory processing
+
+The automatic session close is deterministic and makes zero model calls, so an auto-closed session gets a lifecycle receipt but no observation capture. This step is where that work happens.
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/backfill-memory.mjs" list "<project>" --json --limit 5
+```
+
+For each pending session (newest first, at most 5 per pass so one long gap doesn't blow up the run): read its transcript via `read-transcript.mjs` (the receipt carries the session id), apply the same Step-0 capture patterns to what you find, then stamp it done:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/backfill-memory.mjs" mark "<project>" --session <session-id>
+```
+
+Mark a session even when it produced nothing — processed-and-empty is a result; unmarked means unprocessed. If the list reports corrupt receipts, name the count — that's evidence in an unknown state, not nothing. If `total_pending` exceeds the limit, say how many remain for the next pass.
+
+---
+
 ## Step 1 — Pull inbox
 
 If `<project>/inbox.md` is non-empty, run the mechanical pre-flight first:
@@ -51,7 +71,7 @@ If `<project>/inbox.md` is non-empty, run the mechanical pre-flight first:
 node "${CORE_ROOT}/skills/core/scripts/check-inbox.mjs" "<project>"
 ```
 
-It validates block structure — required draft fields, valid `mode` values, `judgment-needed` present on Mode C, no graduation-only fields (a ratified `stability-class` belongs to graduation, not the extractor). FAILs name the block and field; fix or bounce the block back to its source rather than graduating it on a guess. WARNs ride along into the walk as context. Then walk the entries. Two shapes can appear:
+It validates block structure — required pre-graduation fields, valid `mode` values, `judgment-needed` present on Mode C, no graduation-only fields (a ratified `stability-class` belongs to graduation, not the extractor). FAILs name the block and field; fix or bounce the block back to its source rather than graduating it on a guess. WARNs ride along into the walk as context. Then walk the entries. Two shapes can appear:
 
 **Mode-tagged observation blocks** carry full frontmatter (id, type, status, source, source-instance, extracted-at, references-person, confidence-level, body) plus two framework fields: `mode: B | C` and, when Mode C, `judgment-needed: <prose>`. These come from extractors implementing the source-registration framework (see `references/external-sources/source-registration-framework.md §4`). The mode tells you the routing without re-deriving it from criteria. The two framework fields (`mode`, `judgment-needed`) are inbox-only annotations — strip them from the frontmatter before writing the graduated unit.
 
@@ -75,24 +95,9 @@ For each file in `_memories/observations/<YYYY-MM>/` not yet reviewed this sessi
 
 ---
 
-## Step 2.5 — Clean cloud-sync ghost duplicates
+## Step 2.5 — Cloud-sync ghost cleanup: folded into Step 4
 
-macOS sync engines (iCloud Drive, OneDrive, Dropbox) preserve concurrent-write conflicts by creating `<filename> 2.md` (with leading space) duplicates. When the agent writes frequently to `_memories/` files mid-session, the sync engine sees a "conflict" between its cached view and the agent's write, and keeps both. Most of these settle as exact duplicates with identical content — harmless on disk, but they pollute validator output (each ghost reports separately as a unit) and confuse counts.
-
-Find candidates and verify each is an exact duplicate of its original before deleting:
-
-```bash
-find <project>/_memories -name "* 2.md" -print0 | while IFS= read -r -d '' ghost; do
-  original="${ghost% 2.md}.md"
-  if [ -f "$original" ] && diff -q "$ghost" "$original" >/dev/null 2>&1; then
-    rm "$ghost"
-  fi
-done
-```
-
-The verification step is load-bearing — never bulk-delete `* 2.md` without confirming the content matches the original. If the ghost differs from the original, surface to the user for inspection (rare; usually means the sync engine preserved a genuinely different version that needs reconciliation, not a duplicate).
-
-Narrate: "Cleaned N ghost duplicates from `_memories/`." If zero, say nothing.
+macOS sync engines (iCloud Drive, OneDrive, Dropbox) preserve concurrent-write conflicts by creating `<filename> 2.md` (with leading space) duplicates in `_memories/`. `maintenance-run.mjs` (Step 4, below) already walks for these, verifies byte-identity to the un-suffixed original, and removes only exact duplicates. No separate pass here — see Step 4's narration for the count. If `maintenance-run` surfaces a ghost that *differs* from its original (a real sync-preserved divergence), surface it to the user; never delete an unverified ghost.
 
 ---
 
@@ -176,6 +181,16 @@ Report the demoted count and the before/after sizes the scripts print. Over-cap 
 
 ---
 
+## Step 5.5 — Validity-dimension stamp + impact pass (storage hygiene)
+
+Three operations over the world-time validity dimension, on the project's own corpus:
+
+1. `node "${CORE_ROOT}/skills/core/scripts/bitemporal.mjs" "<project>" --stamp` — **dry-run first.** Lists the `t_invalid` stamps a supersedes-edge would set and any loose supersedes edges (a supersedes edge pointing at a still-active target). The writer is conservative (terminal-status targets only, never overwriting an explicit value), but `t_invalid` writes to historical units — eyeball the stamps, then re-run with `--apply` if they look right. Name loose edges as fix candidates. If the dry-run itself errors, skip the whole sub-step and say so — never `--apply` past a failed dry-run.
+2. `node "${CORE_ROOT}/skills/core/scripts/bitemporal.mjs" "<project>" --metrics` — the storage-health readout. Surface only what's actionable.
+3. `node "${CORE_ROOT}/skills/core/scripts/impact-trace.mjs" "<project>" --superseded-impact` — for anything invalidated this pass, what still depends on it. `clean` → silence.
+
+---
+
 ## Step 6 — Cap-check IMPROVEMENT_LOG.md
 
 ```bash
@@ -238,6 +253,21 @@ It reads `~/.core/workspaces/<id>/capability-history.jsonl` (appended each sessi
 
 ---
 
+## Step 6.7 — Turn classification + rollup (keeps the startup signal fresh)
+
+Run the mechanical recognition pipeline — capture-gated like everything metrics (a workspace that opted out prints `DISABLED`; say so once and move on):
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/classify-turns.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/metrics-rollup.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/metrics-detectors.mjs" "<project>"
+node "${CORE_ROOT}/skills/core/scripts/calibrate-classifier.mjs" "<project>" --check
+```
+
+The rollup writes the one-line recognition signal the next startup reads, so this pass is what keeps that signal current. Classifier output is PROVISIONAL until calibration clears — narrate the headline as a self-audit signal, never a graded metric. Surface citation-resolver/stale-context findings in plain voice; `clean` → a sentence or silence. The interpretation and verdict layer stays behind `/metrics`.
+
+---
+
 ## Step 7 — Write state
 
 Update `<project>/_memories/_pm-state.json` with the current timestamp:
@@ -254,6 +284,7 @@ Create the file if it doesn't exist.
 
 Tell the user what happened across all steps in one tight block:
 - Look-back: count captured from this session, or "nothing missed"
+- Back-fill: sessions processed and marked, remaining count, any corrupt receipts
 - Inbox: count processed / surfaced
 - Observations: count graduated / surfaced
 - Validation: before/after counts (PASS/WARN/FAIL) + names of any issues surfaced for user judgment
