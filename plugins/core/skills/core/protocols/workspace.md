@@ -66,5 +66,5 @@ When the user indicates completion:
 
 1. Present objective status from PROJECT.md — deliverables done/outstanding, open moves, remaining risks, quality assessment.
 2. Run a retrospective scaled to project complexity.
-3. Promote generalizable learnings — patterns that apply across projects — to `~/.core/dm-profile.md §Cross-Project Learnings`. Never promote project-specific facts to the profile; those stay in PROJECT.md.
+3. Promote generalizable learnings — patterns that apply across projects — to `~/.core/agent-profile.md §Cross-Project Learnings`. Never promote project-specific facts to the profile; those stay in PROJECT.md.
 4. PROJECT.md is the durable record of what happened on this project. The workspace's manifest + swarm-narrative can carry operational observations about how the work was run, but the project's story lives in PROJECT.md.

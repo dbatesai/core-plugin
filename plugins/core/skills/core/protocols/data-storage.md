@@ -14,7 +14,7 @@ Three surfaces, three responsibilities. Don't mix them.
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed by convention so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
-- **Agent operational meta** — `~/.core/` — your operational layer across projects. `dm-profile.md` is your cross-project home. `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
+- **Agent operational meta** — `~/.core/` — your operational layer across projects. `agent-profile.md` is your cross-project home (legacy installs: `dm-profile.md` until the startup migration renames it). `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
 
 - **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
 
@@ -361,7 +361,7 @@ You reason about three modes internally. In conversation with the user, plain la
 
 ### What triggers integrity uncertainty (the Mode B switch)
 
-- Destination is durable (PROJECT.md, dm-profile.md, canonical unit) — except a graduation writing a new, non-conflicting unit, which stays Mode A per "Mode A vs Mode B at graduation" above; that section's supersede/conflict trigger is the narrower rule for that specific action, not this general one.
+- Destination is durable (PROJECT.md, agent-profile.md, canonical unit) — except a graduation writing a new, non-conflicting unit, which stays Mode A per "Mode A vs Mode B at graduation" above; that section's supersede/conflict trigger is the narrower rule for that specific action, not this general one.
 - Action would overwrite content the user authored.
 - New structural pattern the user hasn't endorsed.
 - Action is irreversible or hard to undo.
@@ -411,7 +411,7 @@ The user owns PROJECT.md. Manage it in whatever way best serves accuracy and tho
 
 ## Edit detection
 
-Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json` — single-owner ACROSS PROJECTS (two projects closing at once write separate files, so they can't clobber each other), but NOT single-owner WITHIN a project: `decorate-graph.mjs`, `hot-section.mjs`, and `maintenance-run.mjs` can all stamp the same project-local cache in the same window, so the read-modify-write itself is locked (`stampFiles`/`stampFile` in `state-cache.mjs`, under `<project>/_memories/_lib/.state-cache.lock` via `withFileLock` — an unlocked stamp loses writes under concurrent processes). A small global `~/.core/state-cache.json` remains for genuinely cross-project files (`dm-profile.md`, `topics.md`). **One-release union-read:** read both, and where the same file appears in each, the newer `last_written` wins — old-version sessions still write the global file until every install picks the release up; each per-project stamp prunes its file's global entry (under the lock), so the union converges. Cache shape, either surface:
+Hash-based comparison against the state cache. The cache of record is **per-project** at `<project>/_memories/_lib/state-cache.json` — single-owner ACROSS PROJECTS (two projects closing at once write separate files, so they can't clobber each other), but NOT single-owner WITHIN a project: `decorate-graph.mjs`, `hot-section.mjs`, and `maintenance-run.mjs` can all stamp the same project-local cache in the same window, so the read-modify-write itself is locked (`stampFiles`/`stampFile` in `state-cache.mjs`, under `<project>/_memories/_lib/.state-cache.lock` via `withFileLock` — an unlocked stamp loses writes under concurrent processes). A small global `~/.core/state-cache.json` remains for genuinely cross-project files (`agent-profile.md`, `topics.md`). **One-release union-read:** read both, and where the same file appears in each, the newer `last_written` wins — old-version sessions still write the global file until every install picks the release up; each per-project stamp prunes its file's global entry (under the lock), so the union converges. Cache shape, either surface:
 
 ```json
 {
@@ -468,13 +468,13 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
   serialize the read-modify-write under `<project>/_memories/_lib/.state-cache.lock` (an
   unlocked stamp loses writes under concurrent processes). The residual global cache (cross-project files
   only) is written under `~/.core/state-cache.lock` via `withFileLock`.
-- **`dm-profile.md`, `topics.md`** — rare, usually interactive writes. Atomic
+- **`agent-profile.md`, `topics.md`** — rare, usually interactive writes. Atomic
   write-temp-then-rename stays mandatory; if the file changed under you mid-session, re-read,
   merge your entry into the fresh copy, and narrate the collision in one line.
 - **Lock order (deadlock prevention):** a per-project lock (e.g. the close pass's
   `_close.lock`) is always taken BEFORE any global `~/.core/` lock, never after.
 - A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace —
-  `~/.core/<wrapper>/` — and must not write `index.json`, `state-cache.json`, `dm-profile.md`,
+  `~/.core/<wrapper>/` — and must not write `index.json`, `state-cache.json`, `agent-profile.md`,
   or `topics.md`.
 
 Accepted residual, named: a crashed writer's lock stalls registry writes for the stale window
@@ -562,7 +562,7 @@ The anti-resurrection rule fires. You don't re-promote the retired unit. If the 
 
 ### Cross-project drift (different projects, same fact, different framings)
 
-You don't auto-reconcile across projects. The cross-project store is `~/.core/research/` for shared knowledge; `dm-profile.md` is cross-project patterns only. Project facts stay in their project. If the user switches projects mid-conversation and starts referencing facts from a different project, surface the project-switch and either context-shift to the other project or ask the user to restate the relevant facts.
+You don't auto-reconcile across projects. The cross-project store is `~/.core/research/` for shared knowledge; `agent-profile.md` is cross-project patterns only. Project facts stay in their project. If the user switches projects mid-conversation and starts referencing facts from a different project, surface the project-switch and either context-shift to the other project or ask the user to restate the relevant facts.
 
 ### No-response-inference default
 
@@ -671,7 +671,7 @@ Three rings, one read at runtime.
 
 ```
 ~/.core/
-├── dm-profile.md                  ← cross-project personality, portfolio observations
+├── agent-profile.md                  ← cross-project personality, portfolio observations
 ├── index.json                     ← global workspace registry
 ├── topics.md                      ← controlled vocabulary
 ├── state-cache.json               ← edit-detection hashes
