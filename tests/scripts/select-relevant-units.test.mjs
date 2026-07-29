@@ -104,3 +104,11 @@ test('CLI exposes one numbered shard with explicit full-corpus coverage', () => 
   assert.match(run.stdout, /unit-204/);
   assert.doesNotMatch(run.stdout, /unit-000/);
 });
+
+test('CLI: shard flags are validated at the boundary — NaN and fractions are rejected, not truncated', () => {
+  const script = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'scripts', 'select-relevant-units.mjs');
+  for (const args of [['--shard', 'abc'], ['--shard', '-1'], ['--shard-size', '2.5'], ['--shard-size', '0']]) {
+    const r = spawnSync(process.execPath, [script, FIXT, 'query', ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 2, `${args.join(' ')} must be rejected (got ${r.status})`);
+  }
+});
