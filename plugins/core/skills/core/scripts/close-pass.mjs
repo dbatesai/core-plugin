@@ -423,6 +423,48 @@ export const CLOSE_OPS = [
   'metrics', 'session-summary', 'memory-refresh',
 ];
 
+
+/**
+ * Certify a manual close: write this exact session's `closed` receipt so a
+ * subsequent SessionEnd for the same session is suppressed. `closed` is the
+ * manual close's status alone — the automatic path writes `recorded`.
+ *
+ * When no session id is given, resolve the current session from the newest
+ * project-bound transcript. Refuses to synthesize an identity: an unresolvable
+ * session returns { ok:false, reason:'unresolved' } and writes nothing.
+ */
+export function certifyManualClose(store, { sessionId = null, summaryPath = null, home = null, now = new Date().toISOString() } = {}, opts = {}) {
+  let sid = sessionId;
+  let transcriptPath = null;
+  if (!sid) {
+    try {
+      const resolveOpts = { cwd: resolve(store) };
+      if (home) resolveOpts.home = home;
+      const t = resolveTranscript('claude-code', resolveOpts);
+      transcriptPath = t && t.path ? t.path : null;
+      if (transcriptPath) {
+        const base = transcriptPath.split(/[\\/]/).pop();
+        if (base && base.endsWith('.jsonl')) sid = base.slice(0, -'.jsonl'.length);
+      }
+    } catch { /* fall through to unresolved */ }
+  }
+  if (!sid) return { ok: false, reason: 'unresolved' };
+
+  const existing = readCloseReceipt(store, sid, opts);
+  if (existing && existing.status === 'closed') return { ok: true, already: true, session_id: sid };
+
+  const receipt = {
+    session_id: sid,
+    status: 'closed',
+    harness: 'claude-code',
+    closed_at: now,
+    summary_path: summaryPath || null,
+    transcript_path: transcriptPath,
+  };
+  writeCloseReceipt(store, receipt, opts);
+  return { ok: true, session_id: sid };
+}
+
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function parseFlags(argv) {
@@ -504,6 +546,15 @@ function main(argv) {
         coverage: available ? 'full' : 'partial',
       });
       process.stdout.write(json ? JSON.stringify({ ok: true, receipt }) + '\n' : `close ${receipt.status}: ${sessionId}\n`);
+      return 0;
+    }
+    case 'certify': {
+      const r = certifyManualClose(store, {
+        sessionId: typeof f.session === 'string' ? f.session : null,
+        summaryPath: typeof f.summary === 'string' ? f.summary : null,
+      });
+      if (!r.ok) { process.stdout.write('UNRESOLVED: no session identity could be established; pass --session <id>\n'); return 1; }
+      process.stdout.write(json ? JSON.stringify(r) + '\n' : (r.already ? 'already certified\n' : `certified ${r.session_id}\n`));
       return 0;
     }
     case 'release': {

@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
   detectCloseState, beginClose, recordOp, releaseLock, finishClose, CLOSE_OPS,
+  certifyManualClose, readCloseReceipt, shouldEnqueueClose,
 } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 import { writeFileSync, readFileSync } from 'node:fs';
 
@@ -190,5 +191,46 @@ test('CLI: the model-spawn close verb does not exist — `run` is rejected as un
     const r = spawnSync(process.execPath, [SCRIPT, 'run', store], { encoding: 'utf8' });
     assert.notEqual(r.status, 0, 'the `run` subcommand must not be a valid close entry');
     assert.ok(!/close complete/.test(r.stdout || ''), 'no close envelope may execute via `run`');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('certify: an explicit session id writes the closed receipt and suppresses the automatic close', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    const r = certifyManualClose(store, { sessionId: 'sess-manual-1', summaryPath: '_summaries/summary-x.md' }, opts);
+    assert.ok(r.ok, JSON.stringify(r));
+    const receipt = readCloseReceipt(store, 'sess-manual-1', opts);
+    assert.equal(receipt.status, 'closed');
+    assert.equal(receipt.summary_path, '_summaries/summary-x.md');
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'sess-manual-1' }, opts), false,
+      'a certified session must not be re-closed by the hook');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('certify: refuses to invent an identity when no session can be resolved', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const r = certifyManualClose(store, { home: join(store, 'no-such-home') }, { storageRoot: root });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'unresolved');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('certify: an already-closed session is a clean no-op, not an error or a second receipt', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    certifyManualClose(store, { sessionId: 's-again', summaryPath: 'a.md' }, opts);
+    const r2 = certifyManualClose(store, { sessionId: 's-again', summaryPath: 'b.md' }, opts);
+    assert.ok(r2.ok && r2.already, 'second certify reports already-closed');
+    const receipt = readCloseReceipt(store, 's-again', opts);
+    assert.equal(receipt.summary_path, 'a.md', 'the original receipt is preserved');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
