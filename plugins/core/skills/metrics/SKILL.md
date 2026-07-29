@@ -56,7 +56,6 @@ The report covers **three separately-labeled evidence classes** — never one bl
 2. **Retrieval regression** — the newest blind self-test round when one exists (per-kind breakdown, trap-leak rate, old-vs-new overfitting delta), else the small static gold set. Labeled `provisional`, never `proven-live`: the execution is live, the answer key's authority is not independently established. A regression *snapshot*, never a passing *gate*.
 3. **Measurement readiness** — the recognition signal (inverted bar: fuller = healthier) and the calibration pool gating it.
 
-*(A fourth class — user benefit — rendered "not evaluated" through v3.13.x. REMOVED by ruling: the matched on/off comparison is unobservable, so the question left scope by decision, not by gap. Never resurrect the row; if asked, say exactly that.)*
 
 The **verdict heading is scoped to mechanics only** (`MECHANICS: HEALTHY` / `HEALTHY — with caveats` / `DEGRADED` / `MACHINERY WORKING, NO STORE`) — never read it as covering the other classes. Trust labels: **proven-live** = demonstrated this run on the real product path; **direct** = real measurement read from disk, not exercised this run; **proxy** = a stand-in signal, never a correctness proof; **provisional** = the instrument or its reference isn't independently validated; **not-evaluated** = no instrument exists for this project yet.
 
@@ -93,4 +92,4 @@ The scheduled path authors rounds automatically when the current one goes stale 
 
 ## Never (all modes)
 
-Pad the default view with sections it doesn't have; hand-edit bars, verdicts, or narrative; claim the gold-set/self-test snapshot is `proven-live`; resurrect the user-benefit row; run against a guessed `CORE_ROOT`; publish an artifact without narrating it; let any display source a different data object than the script emitted.
+Pad the default view with sections it doesn't have; hand-edit bars, verdicts, or narrative; claim the gold-set/self-test snapshot is `proven-live`; run against a guessed `CORE_ROOT`; publish an artifact without narrating it; let any display source a different data object than the script emitted.

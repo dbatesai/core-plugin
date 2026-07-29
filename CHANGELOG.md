@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.15.0] — 2026-07-29
+
 ### Changed
 - **`/finalize` is the bounded close.** It captures what the session made true that isn't yet durable, writes a resume summary capped near 400 words, renders `PROJECT.md` only when the session materially changed it, refreshes harness memory, and certifies the exact session's close receipt — and does nothing else. Memory maintenance lives in `/process-memory`, analytics in `/metrics`, the session-perspective critique in `/refocus`, and development checks in the test suite. The close op set narrows to four (`material-capture`, `render-project-md`, `session-summary`, `memory-refresh`), the startup catch-up recovers exactly those, and hygiene's own trigger table names `/process-memory` and the unconditional startup backstop as its owners.
 - **The agent's name is per workspace.** An optional `agent_name` field on the workspace manifest carries the emergent name the agent picks for each project; the cross-project profile (voice, patterns, user model — one lineage everywhere) moves to `~/.core/agent-profile.md`, with a one-time startup migration from the legacy `dm-profile.md` path and fallback reads wherever the old path appeared.
