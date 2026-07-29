@@ -147,7 +147,7 @@ test('M10: a NOT-YET row (maker emits env_signals:{}) is backfilled to the 4-key
   assert.equal(row.env_signals.CODEX_THREAD_ID, 'thr-9');
 });
 
-test('MET-014: a long probe crash message is captured up to 1000 chars, not cut at 300', async () => {
+test('a long probe crash message is captured up to 1000 chars, not cut at 300', async () => {
   const longMsg = 'E'.repeat(600);
   const throwingImporter = async () => ({ probe: async () => { throw new Error(longMsg); } });
   const res = await runStartup({ harness: 'claude-code', descriptor: descriptorWith('capability/fixture.mjs'), _importer: throwingImporter });

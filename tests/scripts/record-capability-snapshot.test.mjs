@@ -19,7 +19,7 @@ test('resolveSessionId honors the harness env vars in order', () => {
 
 // Characterization: with no harness env the fallback is NOT a fixed sentinel — it is a
 // per-invocation `session-<base36 ts>-<hex>` id, distinct across calls, so per-session
-// history buckets never collapse (HC_614 blocker 1).
+// history buckets never collapse.
 test('resolveSessionId with an empty env generates a distinct per-invocation fallback', () => {
   const a = resolveSessionId({ env: {} });
   const b = resolveSessionId({ env: {} });

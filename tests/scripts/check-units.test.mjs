@@ -296,7 +296,7 @@ test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail 
   assert.equal(exitCode([]), 0);
 });
 
-test('SYN-005: unknown confidence-level and stability-class values WARN', () => withStore((memories) => {
+test('unknown confidence-level and stability-class values WARN', () => withStore((memories) => {
   writeFileSync(join(memories, 'annotated.md'), [
     '---', 'id: annotated', 'type: observation', 'status: active',
     'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
@@ -312,7 +312,7 @@ test('SYN-005: unknown confidence-level and stability-class values WARN', () => 
   assert.ok(report.some(f => f.check === 'stability-class-value'), 'garbage must WARN');
 }));
 
-test('SYN-005: schema confidence-level and stability-class values pass clean', () => withStore((memories) => {
+test('schema confidence-level and stability-class values pass clean', () => withStore((memories) => {
   writeFileSync(join(memories, 'clean.md'), [
     '---', 'id: clean', 'type: observation', 'status: active',
     'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
@@ -328,7 +328,7 @@ test('SYN-005: schema confidence-level and stability-class values pass clean', (
   assert.equal(report.some(f => f.check === 'stability-class-value'), false);
 }));
 
-test('SYN-005 follow-up: legacy annotation WARNs are benign-class — store exits 0, not degraded', () => withStore((memories) => {
+test('legacy annotation WARNs are benign-class — store exits 0, not degraded', () => withStore((memories) => {
   // Pre-framework annotations like confidence-level: high / stability-class: stable
   // get WARN-level visibility but must NOT degrade an otherwise-healthy store.
   writeFileSync(join(memories, 'legacy.md'), [
@@ -349,7 +349,7 @@ test('SYN-005 follow-up: legacy annotation WARNs are benign-class — store exit
   assert.equal(exitCode(report), 0, 'legacy annotations alone must not degrade the store');
 }));
 
-test('SYN-007: observation-subdir units are audited only with includeObservations', () => withStore((memories) => {
+test('observation-subdir units are audited only with includeObservations', () => withStore((memories) => {
   const obsDir = join(memories, 'observations', '2026-05');
   mkdirSync(obsDir, { recursive: true });
   writeFileSync(join(obsDir, 'obs-thing-2026-05-20.md'), [
@@ -369,9 +369,9 @@ test('SYN-007: observation-subdir units are audited only with includeObservation
     'the full-store audit reaches the observation and flags its bogus status');
 }));
 
-// ---------- D7 / MEM-018: sources-missing provenance advisory ----------
+// ---------- sources-missing provenance advisory ----------
 
-test('MEM-018: an aged active non-observation unit with no sources WARNs sources-missing (benign)', () => withStore((memories) => {
+test('an aged active non-observation unit with no sources WARNs sources-missing (benign)', () => withStore((memories) => {
   writeFileSync(join(memories, 'aged.md'), [
     '---', 'id: aged', 'type: decision', 'status: active',
     'created: 2026-01-01', 'updated: 2026-01-01', 'topics: [tests]',
@@ -413,7 +413,7 @@ test('scalar sources string WARNs sources-not-list (benign)', () => withStore((m
   assert.equal(exitCode(report), 0, 'a scalar sources field alone must not degrade the store');
 }));
 
-test('MEM-018: fresh units and observations are exempt from sources-missing', () => withStore((memories) => {
+test('fresh units and observations are exempt from sources-missing', () => withStore((memories) => {
   writeFileSync(join(memories, 'fresh.md'), unit({ id: 'fresh' })); // created 2026-05-30, today below makes it 10d old
   writeFileSync(join(memories, 'obs-young.md'), unit({ id: 'obs-young', type: 'observation' }));
 
@@ -477,9 +477,9 @@ test("archived-in-active: an unrelated ancestor directory literally named 'archi
   } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
-// ---------- D8 / MEM-008 + MEM-014: empty required fields FAIL, oversize WARNs ----------
+// ---------- empty required fields FAIL, oversize WARNs ----------
 
-test('MEM-008: a present-but-empty required field FAILs (type: with blank value)', () => withStore((memories) => {
+test('a present-but-empty required field FAILs (type: with blank value)', () => withStore((memories) => {
   // `type: ` parses to an empty list (the parser treats a blank value as a
   // list opener), which passed both the key-presence check and the truthiness-
   // guarded value check.
@@ -496,7 +496,7 @@ test('MEM-008: a present-but-empty required field FAILs (type: with blank value)
     'blank type must FAIL, not pass silently');
 }));
 
-test('MEM-014: an oversized unit WARNs unit-oversize (benign)', () => withStore((memories) => {
+test('an oversized unit WARNs unit-oversize (benign)', () => withStore((memories) => {
   writeFileSync(join(memories, 'big.md'), unit({ id: 'big', body: '# big\n\n' + 'x'.repeat(11_000) }));
   writeFileSync(join(memories, 'small.md'), unit({ id: 'small' }));
 

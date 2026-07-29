@@ -38,7 +38,7 @@ test('probe: evidence points at the tracked risk unit', async () => {
 test('probe: declares an honest closure target (not a false exact promise) + requirement + mechanism', async () => {
   const row = await probe();
   assert.equal(row.closure_target, CLOSURE_TARGET);
-  // MET-007: 'v2.9+' became a stale promise the moment v2.9–v3.7 shipped without
+  // 'v2.9+' became a stale promise the moment v2.9–v3.7 shipped without
   // closure. 'unscheduled' is the honest state; CLOSURE_REQUIREMENT carries the bar.
   assert.equal(CLOSURE_TARGET, 'unscheduled');
   assert.match(CLOSURE_REQUIREMENT, /requires physical anti-anchoring isolation/);

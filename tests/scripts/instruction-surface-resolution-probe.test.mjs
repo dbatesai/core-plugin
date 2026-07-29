@@ -15,7 +15,7 @@ test('buildPrecedenceChain: user-global first; project + .claude + local at each
   const chain = buildPrecedenceChain('/a/b/c', '/home');
   assert.equal(chain[0].scope, 'user-global');
   assert.equal(chain[0].path, '/home/.claude/CLAUDE.md');
-  // broadened documented surfaces (HC_614 #2)
+  // broadened documented surfaces
   assert.ok(chain.some(c => c.path === '/a/b/c/CLAUDE.md' && c.scope === 'project'));
   assert.ok(chain.some(c => c.path === '/a/b/c/.claude/CLAUDE.md' && c.scope === 'project-claude-dir'), 'includes ./.claude/CLAUDE.md');
   assert.ok(chain.some(c => c.path === '/a/b/c/CLAUDE.local.md' && c.scope === 'local'), 'includes CLAUDE.local.md');
@@ -120,7 +120,7 @@ test('e2e: instruction-surface-resolution row flows through runStartup', async (
   assert.ok(['PASS', 'DEGRADED', 'NOT-YET', 'UNKNOWN'].includes(row.identity_status));
 });
 
-test('probe: detects ./.claude/CLAUDE.md and is honest about residual (HC_614 #2)', async () => {
+test('probe: detects ./.claude/CLAUDE.md and is honest about residual', async () => {
   await withTemp(async (root) => {
     const home = join(root, 'home');
     const cwd = join(root, 'proj');

@@ -78,7 +78,7 @@ test('classifyAuthority: unrecognized location still fails closed to unknown', (
   assert.equal(classifyAuthority('C:\\Temp\\random', 'C:\\Users\\david'), 'unknown');
 });
 
-// ---------- HARNESS-010: common Windows dev paths must classify, not fail closed ----------
+// ---------- common Windows dev paths must classify, not fail closed ----------
 
 test('classifyAuthority: Visual Studio default source\\repos classifies as canonical-source', () => {
   assert.equal(
@@ -186,7 +186,7 @@ test('re-point makes Step 4 corroborate the consuming harness env var', () => {
 
 import { execFileSync } from 'node:child_process';
 
-// ---------- SYN-002: --print-root (single cross-shell CORE_ROOT source) ----------
+// ---------- --print-root (single cross-shell CORE_ROOT source) ----------
 // startup.md's resolver block delegates to `node resolve-plugin-root.mjs
 // --print-root` instead of bash-only parameter expansion. Contract: print
 // exactly one line — the plugin root with forward slashes — and exit 0; or

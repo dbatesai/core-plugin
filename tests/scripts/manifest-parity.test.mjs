@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// HARNESS-012: the two plugin manifests are intentionally asymmetric — this
+// the two plugin manifests are intentionally asymmetric — this
 // test pins which fields MUST agree (so a release can't ship a split-brain
 // plugin) and which differ by design (so the asymmetry is verified, not drift).
 

@@ -303,7 +303,7 @@ test('dryRun on a returning workspace still reports no-fork', () => {
   );
 });
 
-// ---------- HARNESS-007: data_path must be an expanded absolute path ----------
+// ---------- data_path must be an expanded absolute path ----------
 // Node does not expand ~ (only POSIX shells do); a tilde-literal data_path is
 // unusable by any consumer that reads it as a path, and doubly broken on Windows.
 

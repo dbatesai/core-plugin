@@ -49,7 +49,7 @@ test('codex.md preserves the schedule DROP (DC-75 parity boundary)', () => {
   assert.ok(/DROP/i.test(s), 'Codex schedule remains a documented drop');
 });
 
-test('harness.md defines the drop-handling runtime contract (SYN-017)', () => {
+test('harness.md defines the drop-handling runtime contract', () => {
   const s = readFileSync(join(BASE, 'protocols', 'harness.md'), 'utf8');
   assert.match(s, /## Drop handling/, 'drop-handling section exists');
   assert.match(s, /once per session/i, 'once-per-session surfacing rule named');

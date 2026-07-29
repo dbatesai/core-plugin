@@ -413,10 +413,10 @@ test('state write failure cannot return OK', () => {
 });
 
 // ============================================================
-// MET-002: workspace-configurable calibration gate
+// workspace-configurable calibration gate
 // ============================================================
 
-test('MET-002: resolveMinLabeled defaults to 100 with no workspace.json', () => {
+test('resolveMinLabeled defaults to 100 with no workspace.json', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cal-min-'));
   try { assert.equal(resolveMinLabeled(dir), 100); }
   finally { rmSync(dir, { recursive: true, force: true }); }
@@ -438,7 +438,7 @@ test('terminal evidence floor cannot be lowered by workspace configuration', () 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('MET-002: resolveMinLabeled rejects values below the floor and non-integers', () => {
+test('resolveMinLabeled rejects values below the floor and non-integers', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cal-min3-'));
   try {
     writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ calibration_min_labeled: 5 }));

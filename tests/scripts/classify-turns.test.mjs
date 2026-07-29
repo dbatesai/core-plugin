@@ -45,7 +45,7 @@ test('M6: containsTerm matches on a word boundary, not a bare substring', () => 
 
 test('DC-94a: isInContext proxy does not over-fire on a substring inside a large blob', () => {
   // The plan's exact scenario: "master" must NOT count as in-context just because
-  // "speedmaster" appears somewhere in a 180KB blob. (Already fixed by M6/MET-004;
+  // "speedmaster" appears somewhere in a 180KB blob. (Already fixed;
   // this locks the specific large-PROJECT.md case as a regression guard.)
   const bigDoc = 'x'.repeat(120000) + ' speedmaster ' + 'y'.repeat(60000);
   assert.equal(containsTerm(bigDoc, 'master'), false, 'substring of speedmaster must not count');
@@ -137,7 +137,7 @@ test('classifyTurns + summarize produce a state distribution', () => {
   assert.equal(s.distribution['rec-fail-tier-0'], 1);
 });
 
-test('MET-008: runClassification classifies the session passed in, not the newest transcript', () => {
+test('runClassification classifies the session passed in, not the newest transcript', () => {
   const home = mkdtempSync(join(tmpdir(), 'ct-sid-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-proj-'));
   try {
@@ -203,7 +203,7 @@ function predicateFixture() {
   return project;
 }
 
-test('MET-004: PROJECT.md is NOT in-context unless the transcript shows it was read', () => {
+test('PROJECT.md is NOT in-context unless the transcript shows it was read', () => {
   const project = predicateFixture();
   try {
     const cold = buildPredicates(project, { events: [] });
@@ -215,7 +215,7 @@ test('MET-004: PROJECT.md is NOT in-context unless the transcript shows it was r
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 
-test('MET-005: a term in a unit frontmatter or first heading (not its filename) reads as on-disk', () => {
+test('a term in a unit frontmatter or first heading (not its filename) reads as on-disk', () => {
   const project = predicateFixture();
   try {
     const p = buildPredicates(project, { events: [] });
@@ -225,7 +225,7 @@ test('MET-005: a term in a unit frontmatter or first heading (not its filename) 
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 
-test('MET-004/005: predicate changes bumped the classifier version (R-1 calibration invalidation)', () => {
+test('predicate changes bumped the classifier version (R-1 calibration invalidation)', () => {
   assert.notEqual(CLASSIFIER_VERSION, '0.2.0');
   assert.equal(CLASSIFIER_VERSION, '0.3.0');
 });

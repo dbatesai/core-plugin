@@ -99,7 +99,7 @@ test('mappedNativePath: dotted username maps dots→dashes (matches Claude proje
   );
 });
 
-test('MET-009: the report self-declares its current-project-only scope', () => {
+test('the report self-declares its current-project-only scope', () => {
   const report = auditMemoryBoundary({ nativeEntries: [], coreTerms: new Set(), coreText: '' });
   assert.match(report.scope, /current project only/i);
   assert.match(report.scope, /cross-project/i, 'names what it does NOT detect');

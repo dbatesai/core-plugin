@@ -112,7 +112,7 @@ function captureStdout(fn) {
   return lines.join('\n');
 }
 
-test('MEM-012: --check names the §Decisions-only scope and the sibling scripts', () => {
+test('--check names the §Decisions-only scope and the sibling scripts', () => {
   const dir = mkdtempSync(join(tmpdir(), 'compact-'));
   try {
     mkdirSync(join(dir, '_memories'), { recursive: true });

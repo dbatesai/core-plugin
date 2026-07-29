@@ -178,7 +178,7 @@ test('every number is explained in its sentence; no bare metric jargon in the ch
   assert.match(chrome, /a human needs to hand-check 100 of its judgments/);
   assert.match(chrome, /answered by the fast first-pass search/);
   assert.match(chrome, /every record is well-formed — none were malformed or thrown out/);
-  // Banned insider vocabulary (David's explicit plain-language correction).
+  // Banned insider vocabulary — the report reads in plain language.
   for (const banned of ['R@3', 'R@10', 'Recall', 'rec-fail', 'bm25', 'BM25', 'tier-0', 'Tier 2', 'gold set', 'gold-set', 'context3', 'calibration pool']) {
     assert.ok(!chrome.includes(banned), `chrome must not contain bare jargon '${banned}'`);
   }
@@ -518,7 +518,7 @@ test('--record-publish on a metrics generation receipt lands kind core-metrics-a
       '--generation-receipt', genPath, '--status', 'published-private',
       '--artifact-url', 'https://claude.ai/code/artifact/test-1111',
       '--private-verified-evidence', 'gallery shows private; share menu never opened',
-      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
+      '--consent-by', 'the-project-owner', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
       { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     const receiptPath = publishReceiptPathFor(genPath);
@@ -531,7 +531,7 @@ test('--record-publish on a metrics generation receipt lands kind core-metrics-a
     assert.equal(receipt.data_generated_at, '2026-07-22T20:00:00.000Z', 'data-gathering instant copied into the receipt');
     assert.ok(receipt.generation_generated_at, 'generation instant copied into the receipt');
     assert.equal(receipt.snapshot_id, null, 'metrics pages have no store snapshot — recorded honestly as null');
-    assert.equal(receipt.consent.granted_by, 'David');
+    assert.equal(receipt.consent.granted_by, 'the-project-owner');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -562,7 +562,7 @@ test('browse-kind publish receipt copies snapshot_id from the generation receipt
       '--generation-receipt', genPath, '--status', 'published-private',
       '--artifact-url', 'https://claude.ai/code/artifact/browse-1',
       '--private-verified-evidence', 'verified private in gallery',
-      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
+      '--consent-by', 'the-project-owner', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
       { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     unlinkSync(genPath);
@@ -603,7 +603,7 @@ test('--record-revocation stamps revoked_at on a PUBLISHED-PRIVATE receipt, then
       '--generation-receipt', genPath, '--status', 'published-private',
       '--artifact-url', 'https://claude.ai/code/artifact/rev-1',
       '--private-verified-evidence', 'gallery shows private',
-      '--consent-by', 'David', '--consent-mechanism', 'explicit yes'], { encoding: 'utf8' });
+      '--consent-by', 'the-project-owner', '--consent-mechanism', 'explicit yes'], { encoding: 'utf8' });
     assert.equal(pub.status, 0, pub.stderr);
     const p = publishReceiptPathFor(genPath);
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
@@ -721,7 +721,7 @@ test('sanitizeForEmbed: an unknown top-level field never reaches the embed, and 
   assert.equal(out.embed_fields_omitted, 1, 'the drop count is disclosed');
 });
 
-test('AUD-105: a nested planted secret inside a known section never reaches the embed', async () => {
+test('a nested planted secret inside a known section never reaches the embed', async () => {
   const { sanitizeForEmbed } = await import('../../plugins/core/skills/core/scripts/render-metrics-artifact.mjs');
   const out = sanitizeForEmbed({
     schema_version: '1.0.0', generated_at: 't', producer: {},

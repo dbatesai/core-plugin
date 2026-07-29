@@ -4,7 +4,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Guards the doc-code truth boundary (SYN-001):
+// Guards the doc-code truth boundary:
 // hooks.json is empty, so no public doc may claim hooks register automatically,
 // and INSTALL.md's skill lists must match the shipped skill directories.
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');

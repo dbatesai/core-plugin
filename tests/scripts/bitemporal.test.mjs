@@ -270,7 +270,7 @@ test('storageMetrics counts invalidated, loose edges, and intervals', () => {
   assert.equal(m.closed_interval_days.count, 1);
 });
 
-test('SYN-006: storageMetrics counts terminal units the conservative writer can never stamp', () => {
+test('storageMetrics counts terminal units the conservative writer can never stamp', () => {
   const units = [
     // terminal, no t_invalid, NO incoming supersedes — unreachable by the writer
     unit({ id: 'dc-stranded', status: 'retired', created: '2026-01-01' }),
@@ -286,7 +286,7 @@ test('SYN-006: storageMetrics counts terminal units the conservative writer can 
 const BITEMPORAL_SRC = readFileSync(
   new URL('../../plugins/core/skills/core/scripts/bitemporal.mjs', import.meta.url), 'utf8');
 
-test('MEM-009: unit stamps route through atomicWriteFileSync, never a bare writeFileSync', () => {
+test('unit stamps route through atomicWriteFileSync, never a bare writeFileSync', () => {
   // An interrupted bare write truncates the unit — body and frontmatter gone.
   // Crash-safety is not behaviorally testable without fault injection
   // (fs-atomic.test.mjs covers the helper), so this is the static guard the

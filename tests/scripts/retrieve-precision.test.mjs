@@ -51,7 +51,7 @@ test('precision@3 clears the recorded threshold', () => {
   assert.ok(precision >= 0.80, `precision@3 (${precision.toFixed(3)}) fell below the ratcheted 0.80 floor`);
 });
 
-test('N sweep recorded (2 vs 3 vs 5) — default top-N stays David\'s call (G2)', () => {
+test('N sweep recorded (2 vs 3 vs 5) — the default top-N stays an open choice (G2)', () => {
   for (const n of [2, 3, 5]) {
     const { precision, recall } = precisionRecallAt(n);
     // eslint-disable-next-line no-console

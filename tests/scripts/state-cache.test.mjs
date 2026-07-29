@@ -205,7 +205,7 @@ test("race: 40 concurrent processes each stamping a distinct file all survive �
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('AUD-101: an unreadable cache is not absent — only ENOENT is absence', async () => {
+test('an unreadable cache is not absent — only ENOENT is absence', async () => {
   const { readProjectCache, CACHE_ABSENT } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'cache-unreadable-'));
   try {

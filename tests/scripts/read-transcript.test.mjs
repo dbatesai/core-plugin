@@ -156,9 +156,9 @@ test('SUPPORTED_HARNESSES covers the two target harnesses', () => {
   ['claude-code', 'codex'].forEach((h) => assert.ok(SUPPORTED_HARNESSES.has(h)));
 });
 
-// --- MET-008: session-id-exact resolution; mtime is a documented fallback ---
+// --- session-id-exact resolution; mtime is a documented fallback ---
 
-test('MET-008: explicit sessionId resolves the exact transcript even when another file is newer', () => {
+test('explicit sessionId resolves the exact transcript even when another file is newer', () => {
   const home = mkdtempSync(join(tmpdir(), 'rt-sid-'));
   try {
     const cwd = '/work/Proj';
@@ -174,7 +174,7 @@ test('MET-008: explicit sessionId resolves the exact transcript even when anothe
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('MET-008: CLAUDE_CODE_SESSION_ID env is used when no explicit sessionId is passed', () => {
+test('CLAUDE_CODE_SESSION_ID env is used when no explicit sessionId is passed', () => {
   const home = mkdtempSync(join(tmpdir(), 'rt-env-'));
   try {
     const cwd = '/work/Proj';
@@ -189,7 +189,7 @@ test('MET-008: CLAUDE_CODE_SESSION_ID env is used when no explicit sessionId is 
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('MET-008: no file matches the session id → documented mtime fallback', () => {
+test('no file matches the session id → documented mtime fallback', () => {
   const home = mkdtempSync(join(tmpdir(), 'rt-fb-'));
   try {
     const cwd = '/work/Proj';
@@ -203,7 +203,7 @@ test('MET-008: no file matches the session id → documented mtime fallback', ()
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('MET-008: readTranscript stamps meta.transcript_resolution', () => {
+test('readTranscript stamps meta.transcript_resolution', () => {
   const home = mkdtempSync(join(tmpdir(), 'rt-meta-'));
   try {
     const cwd = '/work/Proj';

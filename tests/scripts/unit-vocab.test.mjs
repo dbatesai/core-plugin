@@ -18,13 +18,13 @@ import {
   TERMINAL_STATUSES as dsTerminal, classifyStateBullet, parseStateBullets,
 } from '../../plugins/core/skills/core/scripts/demote-state-narrative.mjs';
 
-test('SYN-005: TERMINAL_STATUSES is exactly VALID_STATUSES minus active', () => {
+test('TERMINAL_STATUSES is exactly VALID_STATUSES minus active', () => {
   assert.deepEqual([...TERMINAL_STATUSES].sort(), ['archived', 'retired', 'superseded']);
   for (const s of TERMINAL_STATUSES) assert.ok(VALID_STATUSES.has(s), `${s} must be a valid status`);
   assert.ok(VALID_STATUSES.has('active') && !TERMINAL_STATUSES.has('active'));
 });
 
-test('SYN-005: retired is terminal; resolved/closed are not blessed anywhere', () => {
+test('retired is terminal; resolved/closed are not blessed anywhere', () => {
   assert.ok(TERMINAL_STATUSES.has('retired'), 'retired units must demote their bullets');
   for (const s of ['resolved', 'closed']) {
     assert.ok(!VALID_STATUSES.has(s), `${s} was never a schema status`);
@@ -32,7 +32,7 @@ test('SYN-005: retired is terminal; resolved/closed are not blessed anywhere', (
   }
 });
 
-test('SYN-005: every enforcement script shares the SAME Set objects (one vocabulary, not four copies)', () => {
+test('every enforcement script shares the SAME Set objects (one vocabulary, not four copies)', () => {
   assert.equal(cuStatuses, VALID_STATUSES);
   assert.equal(cuTerminal, TERMINAL_STATUSES);
   assert.equal(cuTypes, VALID_TYPES);
@@ -42,7 +42,7 @@ test('SYN-005: every enforcement script shares the SAME Set objects (one vocabul
   assert.equal(dsTerminal, TERMINAL_STATUSES);
 });
 
-test('SYN-005: annotation vocabularies match the source-registration framework', () => {
+test('annotation vocabularies match the source-registration framework', () => {
   assert.deepEqual([...VALID_CONFIDENCE_LEVELS].sort(), ['inferred', 'reconstructed', 'sourced']);
   assert.deepEqual([...VALID_STABILITY_CLASSES].sort(), ['durably-correct', 'durably-suspect']);
 });
@@ -77,7 +77,7 @@ test('an old, untouched premise unit does NOT get flagged as an archive candidat
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SYN-005: a §State bullet backed by a retired unit now demotes', () => {
+test('a §State bullet backed by a retired unit now demotes', () => {
   const dir = mkdtempSync(join(tmpdir(), 'vocab-state-'));
   try {
     const mem = join(dir, '_memories');

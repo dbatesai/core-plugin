@@ -242,7 +242,7 @@ test('acquireLock: times out when lock held and not stale', () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('MET-011: contention waits via injected sleep in bounded retries — no busy-spin', () => {
+test('contention waits via injected sleep in bounded retries — no busy-spin', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ch-spin-'));
   try {
     const lf = join(dir, 'x.lock');
@@ -263,7 +263,7 @@ test('MET-011: contention waits via injected sleep in bounded retries — no bus
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('MET-011: default lock timeout is bounded at 1s, not 5s', () => {
+test('default lock timeout is bounded at 1s, not 5s', () => {
   assert.equal(LOCK_TIMEOUT_MS, 1000);
 });
 

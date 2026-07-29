@@ -258,7 +258,7 @@ test('--strict end-to-end keeps a cited-active item that the loosened default de
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SYN-005: strict mode demotes when the cited unit is retired (the schema terminal status)', () => {
+test('strict mode demotes when the cited unit is retired (the schema terminal status)', () => {
   const dir = scratchProject({ 'dc-50-old': { status: 'retired', updated: '2026-03-01' } });
   const b = bullet('- [x] **Closed an old decision** — see `dc-50-old`.');
   const r = classifyBullet(b, dir, { today: TODAY, strict: true });
@@ -266,7 +266,7 @@ test('SYN-005: strict mode demotes when the cited unit is retired (the schema te
   assert.equal(r.decision, 'demote');
 });
 
-test('MEM-013: crash-retry does not duplicate the archive block', () => {
+test('crash-retry does not duplicate the archive block', () => {
   const dir = scratchProject();
   const original = ['# P', '', '## Moves', '',
     '- [x] **Old thing 2026-03-01** — done.', '', '## Notes', ''].join('\n');

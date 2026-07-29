@@ -150,7 +150,7 @@ test('equal-authority disagreeing outcomes resolve to unknown, not first-wins', 
   assert.equal(report.receipt.action, 'collect-answer-outcomes');
 });
 
-test('MET-015: report header says calendar days and names the T1 exclusion rule', () => {
+test('report header says calendar days and names the T1 exclusion rule', () => {
   const report = buildReport([
     { ts: '2026-06-09T10:00:00Z', tier_reached: 1, units_retrieved: [{ id: 'u1' }], intent_topics: ['x'], escalation_path: [1] },
   ]);

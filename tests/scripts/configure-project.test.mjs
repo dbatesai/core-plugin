@@ -27,7 +27,7 @@ const CONTRACT = `---
 schema_version: 1.0
 contract_id: demo-project
 canonical_for: ["claude-code", "codex"]
-maintained_by: David
+maintained_by: the-project-owner
 last_revised: 2026-04-01
 ---
 
@@ -180,7 +180,7 @@ test('detectIdentity: a registered path is returning', async () => {
   });
 });
 
-// ---------- JC-1: configured MCP is read honestly, never asserts absence ----------
+// ---------- configured MCP is read honestly, never asserts absence ----------
 
 test('readConfiguredMcp (claude): reads ~/.claude.json and reports declared servers', async () => {
   await withFixture({ claudeJson: { mcpServers: { foo: {}, bar: {} } } }, ({ projectPath, home }) => {

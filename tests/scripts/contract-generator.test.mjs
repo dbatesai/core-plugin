@@ -12,7 +12,7 @@ const FIXTURE = `---
 schema_version: 1.0
 contract_id: demo-project
 canonical_for: ["claude-code", "codex"]
-maintained_by: David
+maintained_by: the-project-owner
 last_revised: 2026-04-01
 ---
 

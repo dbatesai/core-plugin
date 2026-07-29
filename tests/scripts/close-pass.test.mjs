@@ -178,7 +178,7 @@ test('CLI: the model-spawn close verb does not exist — `run` is rejected as un
 });
 
 
-// A certified close presupposes a completed op record (the AUD-104 invariant);
+// A certified close presupposes a completed op record;
 // these helpers model the real manual-close flow around certify.
 function recordCompleteClose(store, sessionId) {
   beginClose(store, { sessionId, ops: CLOSE_OPS });
@@ -254,7 +254,7 @@ test('certify: auto-resolves the session from a real project-bound transcript (t
   }
 });
 
-test('AUD-103: a corrupt receipt is reported corrupt and its bytes survive replacement', () => {
+test('a corrupt receipt is reported corrupt and its bytes survive replacement', () => {
   const store = freshStore();
   try {
     const root = join(store, '_metrics');
@@ -275,7 +275,7 @@ test('AUD-103: a corrupt receipt is reported corrupt and its bytes survive repla
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('AUD-104: a failed required op refuses certification; a complete record certifies', () => {
+test('a failed required op refuses certification; a complete record certifies', () => {
   const store = freshStore();
   try {
     const root = join(store, '_metrics');

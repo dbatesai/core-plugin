@@ -383,7 +383,7 @@ rtest('--record-publish published-private: atomic linked receipt with consent + 
       '--generation-receipt', genPath, '--status', 'published-private',
       '--artifact-url', 'https://claude.ai/code/artifact/test-0000',
       '--private-verified-evidence', 'gallery shows private; share menu never opened',
-      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'];
+      '--consent-by', 'the-project-owner', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'];
     const res = spawnSync(process.execPath, args, { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     const out = JSON.parse(res.stdout);
@@ -397,7 +397,7 @@ rtest('--record-publish published-private: atomic linked receipt with consent + 
     assert.equal(receipt.artifact_url, 'https://claude.ai/code/artifact/test-0000');
     assert.equal(receipt.private_verified.evidence, 'gallery shows private; share menu never opened');
     assert.ok(receipt.private_verified.at);
-    assert.equal(receipt.consent.granted_by, 'David');
+    assert.equal(receipt.consent.granted_by, 'the-project-owner');
     assert.equal(receipt.revoked_at, null);
     // Atomic write leaves no temp residue beside the receipts.
     assert.ok(!readdirSync(dirname(genPath)).some((f) => f.includes('.tmp-')), 'no temp files left behind');
@@ -464,7 +464,7 @@ test('--record-revocation stamps revoked_at and preserves a manually-authored re
       publish_status: 'published-private',
       published_at: '2026-07-22T22:47:00Z',
       artifact_url: 'https://claude.ai/code/artifact/614ae328-0cb8-4c4a-95fe-d4a798f21a00',
-      consent: { granted_by: 'David', granted_at: '2026-07-22T22:46:00Z', mechanism: 'explicit yes on the rendered preflight manifest' },
+      consent: { granted_by: 'the-project-owner', granted_at: '2026-07-22T22:46:00Z', mechanism: 'explicit yes on the rendered preflight manifest' },
       private_verified: { at: '2026-07-22T22:47:00Z', evidence: 'publish tool confirms artifacts are private unless shared' },
       known_defect_at_publish: 'stale producer sha at publish time',
       revoked_at: null,

@@ -176,7 +176,7 @@ test('a disabled workspace produces no rollup artifacts', () => {
   });
 });
 
-test('MET-013: detector output (anticipation-gap) can never reach the headline signal', () => {
+test('detector output (anticipation-gap) can never reach the headline signal', () => {
   const home = mkdtempSync(join(tmpdir(), 'mr-det-'));
   const project = mkdtempSync(join(tmpdir(), 'mr-proj-'));
   try {

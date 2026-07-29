@@ -11,7 +11,7 @@ import { resolveStoragePath } from '../../plugins/core/skills/core/scripts/log-e
 
 const METRICS_INIT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/metrics-init.mjs', import.meta.url));
 
-// HC_603-style bar: prove the actual scaffold + the actual consume path, not prose.
+// prove the actual scaffold + the actual consume path, not prose.
 // metrics-init pins the storage path; log-event must resolve to that pin.
 test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pin', () => {
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));

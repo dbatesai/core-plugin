@@ -97,7 +97,7 @@ test('verdict grading: gaps drive the storing line; hit rate drives the loading 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('the default view is jargon-free (the David test)', () => {
+test('the default view is jargon-free (a reader with no CORE vocabulary)', () => {
   const root = mkdtempSync(join(tmpdir(), 'ans-voice-'));
   try {
     const project = makeProject(root);

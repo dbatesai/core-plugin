@@ -130,18 +130,18 @@ test('record-retrieval-event CLI writes an analyzer-visible row', () => withTemp
   assert.equal(buildReport(loadEvents(root, { allTime: true })).retrieval_events, 1);
 }));
 
-test('MET-010: sanitizeAttributeValue caps string length with an explicit truncation marker', () => {
+test('sanitizeAttributeValue caps string length with an explicit truncation marker', () => {
   const long = 'x'.repeat(MAX_ATTRIBUTE_STRING + 4000);
   const out = sanitizeAttributeValue(long);
   assert.ok(out.length <= MAX_ATTRIBUTE_STRING + 40, 'bounded');
   assert.match(out, /truncated 4000 chars/, 'truncation is visible, not silent');
 });
 
-test('MET-010: sanitizeAttributeValue strips control chars but keeps newlines/tabs', () => {
+test('sanitizeAttributeValue strips control chars but keeps newlines/tabs', () => {
   assert.equal(sanitizeAttributeValue('a\u0000b\u001bc\nd\te'), 'abc\nd\te');
 });
 
-test('MET-010: sanitizeAttributeValue sanitizes nested objects recursively, depth-capped', () => {
+test('sanitizeAttributeValue sanitizes nested objects recursively, depth-capped', () => {
   const out = sanitizeAttributeValue({
     note: 'y'.repeat(5000),
     evil: 'a\u0000b\u001bc',
@@ -152,7 +152,7 @@ test('MET-010: sanitizeAttributeValue sanitizes nested objects recursively, dept
   assert.match(JSON.stringify(out.deep), /depth-capped/);
 });
 
-test('MET-010: normalizeRetrievalEvent sanitizes unit ids and topics', () => {
+test('normalizeRetrievalEvent sanitizes unit ids and topics', () => {
   const r = normalizeRetrievalEvent({
     trigger: 'session-start',
     intent_topics: ['memory\u0000-arch'],

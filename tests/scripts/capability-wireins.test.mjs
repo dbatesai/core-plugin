@@ -7,7 +7,7 @@ import { recordSnapshot, resolveSessionId } from '../../plugins/core/skills/core
 import { readHistory } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 import { detectDrift, detectRegression } from '../../plugins/core/skills/core/scripts/analyze-capability-drift.mjs';
 
-// HC_603 bar: the wire-in must actually APPEND and actually be CONSUMED, not just
+// the wire-in must actually APPEND and actually be CONSUMED, not just
 // be mentioned in prose. These fixtures exercise the real append + read path.
 
 test('wire-in: record-capability-snapshot appends real probe rows to capability-history', async () => {
@@ -66,7 +66,7 @@ test('wire-in: drift analysis CONSUMES the appended history across two sessions'
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('wire-in: default session id is non-null and distinct per session (HC_614 #1)', async () => {
+test('wire-in: default session id is non-null and distinct per session', async () => {
   const home = mkdtempSync(join(tmpdir(), 'capwire-'));
   try {
     const wid = 'ws-session';
@@ -83,7 +83,7 @@ test('wire-in: default session id is non-null and distinct per session (HC_614 #
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('resolveSessionId: explicit → env → fallback, never null (HC_614 #1)', () => {
+test('resolveSessionId: explicit → env → fallback, never null', () => {
   assert.equal(resolveSessionId({ sessionId: 'explicit' }), 'explicit');
   assert.equal(resolveSessionId({ env: { CLAUDE_CODE_SESSION_ID: 'cc-sess' } }), 'cc-sess');
   assert.equal(resolveSessionId({ env: { CODEX_THREAD_ID: 'cdx' } }), 'cdx');

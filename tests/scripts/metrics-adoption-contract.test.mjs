@@ -18,7 +18,7 @@ function scratch(workspaceJson) {
 }
 
 // ---------- 1. Capture gate: DEFAULT-ON, opt-out (DC-107) ----------
-// Changed from default-off to default-on per David 2026-06-04: the instrumented-
+// Default-on rather than default-off: the instrumented-
 // memory thesis needs the corpus, and the calibration gate was starving under opt-in.
 // Opt out via env CORE_METRICS_ENABLED=0 or per-workspace metrics_enabled:false.
 // Explicit env wins over the workspace flag in both directions. Capture stays local.

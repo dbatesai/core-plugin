@@ -35,7 +35,7 @@ test('null/undefined input is safe', () => {
   assert.deepEqual(parseFlatFrontmatter(undefined), [{}, '']);
 });
 
-// MEM-016: priority.mjs keeps its own (nested, coercing) parser beside this
+// priority.mjs keeps its own (nested, coercing) parser beside this
 // flat one ON PURPOSE — but nothing guaranteed the two stay in agreement on
 // the fields both handle. This guard parses representative unit shapes with
 // BOTH parsers and asserts the top-level scalars agree, so a YAML-handling
@@ -50,7 +50,7 @@ const REPRESENTATIVE_UNITS = [
 ];
 const CONFORMANT_SCALARS = ['id', 'type', 'status', 'created', 'updated'];
 
-test('MEM-016: both parsers agree on top-level scalar fields across representative units', () => {
+test('both parsers agree on top-level scalar fields across representative units', () => {
   for (const text of REPRESENTATIVE_UNITS) {
     const [flat] = parseFlatFrontmatter(text);
     const [canon] = parseFrontmatter(text);

@@ -110,7 +110,7 @@ test('write-canary: records side-file with token + memory_written; return is red
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-// --- classify (HC_623-hardened) ---
+// --- classify ---
 
 test('classify PASS: injected + echoed + no non-allowlisted pre-echo tool', () => {
   const events = [{ idx: 1, kind: 'echo' }, { idx: 2, kind: 'tool', name: 'Bash' }];
@@ -285,10 +285,10 @@ test('probe NOT-YET when no canary side-file', async () => {
   });
 });
 
-// --- startup echo-ordering wire-in (HC_627): the doc represents the order, and the
+// --- startup echo-ordering wire-in: the doc represents the order, and the
 //     documented order satisfies the verifier ---
 
-test('SKILL.md documents the canary echo-first startup order (HC_627)', () => {
+test('SKILL.md documents the canary echo-first startup order', () => {
   const md = readFileSync(SKILL_MD, 'utf8');
   assert.match(md, /CORE-VISIBILITY-CANARY/, 'names the canary tag');
   assert.match(md, /VISIBILITY-CANARY-ECHO/, 'names the echo line format');
@@ -319,20 +319,20 @@ test('probe PASS for the documented startup order: Skill → echo → Read start
   });
 });
 
-test('MET-006: NOT-YET carries reason_code finalize-not-run when no canary side file exists', () => {
+test('NOT-YET carries reason_code finalize-not-run when no canary side file exists', () => {
   const r = classify({ token: null, canaryFileState: 'absent', memoryWritten: false, memoryHasToken: false, transcriptAvailable: false, events: [] });
   assert.equal(r.identity_status, 'NOT-YET');
   assert.equal(r.reason_code, 'finalize-not-run');
   assert.match(r.reason, /finalize/i, 'names the /finalize dependency, not a generic not-set-up');
 });
 
-test('MET-006: NOT-YET distinguishes an unreadable/token-less side file from never-run', () => {
+test('NOT-YET distinguishes an unreadable/token-less side file from never-run', () => {
   const r = classify({ token: null, canaryFileState: 'invalid', memoryWritten: false, memoryHasToken: false, transcriptAvailable: false, events: [] });
   assert.equal(r.identity_status, 'NOT-YET');
   assert.equal(r.reason_code, 'canary-file-invalid');
 });
 
-test('MET-006: probe row surfaces the reason_code when no side file exists', async () => {
+test('probe row surfaces the reason_code when no side file exists', async () => {
   const home = mkdtempSync(join(tmpdir(), 'mv-rc-'));
   try {
     const row = await probe({ home, cwd: '/no/such/project', workspaceId: 'mv-rc-ws' });

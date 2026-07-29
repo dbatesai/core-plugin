@@ -171,7 +171,7 @@ test('export-obsidian: fully retired — no shipped skill, no lingering command 
   }
 });
 
-// The 2026-07-22 direct-verification backstop (David's direction: startup must ensure all
+// The direct-verification backstop (startup must ensure all
 // data is indexed and processed, not just infer it from close-pass bookkeeping). These guard
 // the same "op is really wired, not a phantom string" invariant as the decorate-graph tests
 // above, applied to the new unconditional startup step rather than the close-time wiring.

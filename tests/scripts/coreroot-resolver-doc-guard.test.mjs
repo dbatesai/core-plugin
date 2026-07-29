@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 //   B. live smoke — the ACTUAL resolver block from the doc runs under a fixture
 //      HOME and resolves correctly (this leg would have caught the SyntaxError)
 //   C. delegation guard — the block delegates to resolve-plugin-root.mjs
-//      --print-root (SYN-002), with the env var demoted to script-locating only
+//      --print-root, with the env var demoted to script-locating only
 // The Windows-Git-Bash leg is an on-box smoke; it cannot run on macOS CI.
 
 const STARTUP = join(
@@ -28,7 +28,7 @@ const STARTUP = join(
 const md = readFileSync(STARTUP, 'utf8');
 
 // Extract the first ```bash fenced block that contains the --print-root call —
-// that's the resolver block (SYN-002: single node call, no inline node -e).
+// that's the resolver block: a single node call, no inline node -e.
 function resolverBlock(src) {
   const blocks = [...src.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]);
   const block = blocks.find((b) => b.includes('--print-root'));
@@ -201,9 +201,9 @@ test('M16: CORE_ROOT-resolving skills invoke scripts via ${CORE_ROOT}, not ${CLA
   }
 });
 
-// SYN-002 sweep: hygiene.md commands and the register-sources path rule no longer
+// Sweep: hygiene.md commands and the register-sources path rule no longer
 // lean on ${CLAUDE_PLUGIN_ROOT} as a primary source.
-test('SYN-002: hygiene.md uses resolved CORE_ROOT; register-sources derives from the loaded path', () => {
+test('hygiene.md uses resolved CORE_ROOT; register-sources derives from the loaded path', () => {
   const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
   const hygiene = readFileSync(join(base, 'core', 'protocols', 'hygiene.md'), 'utf8');
   assert.doesNotMatch(hygiene, /\$\{CLAUDE_PLUGIN_ROOT\}/, 'hygiene.md swept to ${CORE_ROOT}');
