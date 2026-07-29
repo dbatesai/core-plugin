@@ -363,9 +363,6 @@ function graderVerificationRow(readiness) {
   });
 }
 
-// There is deliberately NO user-benefit section: the matched on/off comparison
-// is unobservable, so that question is out of scope by decision — a row for it
-// would imply the question is still open.
 
 // ---- The verdict block, scoped to mechanics exactly like the terminal heading ----
 function verdictBlock(mech) {

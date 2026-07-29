@@ -18,7 +18,7 @@
  *     project's real validator counts, unit census, and plain-count telemetry
  *     capture (from analyze-retrieval-quality.mjs's real retrieval-log rows).
  *     Real, proven evidence that the STORE MECHANICS work. Says nothing about
- *     retrieval quality or user benefit.
+ *     retrieval quality.
  *  2. RETRIEVAL REGRESSION (provisional / not-evaluated): does retrieval
  *     itself work well against a reference answer key? Exactly one signal —
  *     a LIVE gold-set Recall@K run via retrieval-harness.mjs against this
@@ -167,11 +167,8 @@ export const TRUST = {
 //                 threshold — a regression SNAPSHOT, not a passing GATE).
 //   readiness   — is the measurement instrumentation itself ready to be
 //                 trusted? Recognition signal + the calibration pool that
-//                 gates it. Neither is retrieval regression or user benefit.
-//
-// User benefit — whether delivered answers measurably help the user — is out
-// of scope: what the user did with a delivered answer is unobservable from
-// here, so no class claims it.
+//                 gates it. Neither is retrieval regression.
+
 // ============================================================
 export const SECTION = { MECHANICS: 'mechanics', REGRESSION: 'regression', READINESS: 'readiness' };
 
@@ -301,7 +298,7 @@ export async function checkGoldRegression(project, { goldPath = join(resolve(pro
 // buildReport() over this project's real retrieval-log/outcome-log rows (the
 // live per-turn hook's product output, not a simulator). Its own docstring
 // calls these numbers "precision proxy" / "recall proxy" — never regression
-// PASS/FAIL, never user benefit. Read-only, no new capture.
+// PASS/FAIL. Read-only, no new capture.
 // ============================================================
 
 // Renders a {count, by_code} bucket as a short CLOSED-vocabulary summary —
