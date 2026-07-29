@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * generate-door-inventory.mjs — the shipped tree's own answer to "what doors exist?"
+ * generate-shipped-surface-inventory.mjs — the shipped tree's own answer to "what doors exist?"
  *
  * A door is anything a user or a harness can enter the plugin through: a skill
  * (typed as a slash command), a hook (fired by a harness event), or a script
@@ -13,7 +13,7 @@
  * claim going stale and the guard going red.
  *
  * Usage:
- *   node generate-door-inventory.mjs [--root <plugin-root>] [--out <path>]
+ *   node generate-shipped-surface-inventory.mjs [--root <plugin-root>] [--out <path>]
  *
  * With no --out the JSON goes to stdout. Exit codes: 0 = emitted, 3 = the
  * plugin root could not be resolved or does not hold a shipped tree.
@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 export const SCHEMA_VERSION = '1.0.0';
 
 // scripts/ -> core/ -> skills/ -> <plugin root>
-const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core');
 
 // Which harness fires a hook manifest's doors. A skill or script is shared:
 // the same file serves whichever harness loaded the plugin.
@@ -124,8 +124,11 @@ function collectScripts(root) {
       name: basename(e.name, '.mjs'),
       kind: 'script',
       harness: 'shared',
-      status: 'active',
-      invocation: 'automatic',
+      // Presence in the shipped tree is all this walk can prove. Registration,
+      // callers, and invocation class are NOT claimed here — the orphan
+      // detector carries static reachability, and door claims require
+      // registered-door evidence this generator does not gather.
+      surface: 'shipped',
     }));
 }
 

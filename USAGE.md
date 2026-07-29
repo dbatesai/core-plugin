@@ -1,6 +1,6 @@
 # Usage
 
-A reference for what each part of CORE does. Commands come first — those are what you type, and every one of them is listed. Protocols and scripts follow as supporting detail; you rarely touch them directly, but they're what the commands run on. The script section groups the ones worth reading or running by hand rather than naming all of them — `docs/door-inventory.json` is the generated list of every shipped skill, hook, and script.
+A reference for what each part of CORE does. Commands come first — those are what you type, and every one of them is listed. Protocols and scripts follow as supporting detail; you rarely touch them directly, but they're what the commands run on. The script section groups the ones worth reading or running by hand rather than naming all of them — `docs/shipped-surface-inventory.json` is the generated list of every shipped skill, hook door, and script file (what ships — registration and callers are proven separately).
 
 For the design reasoning behind any of this, see [ARCHITECTURE.md](ARCHITECTURE.md). For install, see [INSTALL.md](INSTALL.md).
 

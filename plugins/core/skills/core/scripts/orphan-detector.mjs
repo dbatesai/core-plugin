@@ -45,16 +45,8 @@ export const ALLOWLIST = Object.freeze({
     allowlistDate: '2026-07-28',
     reviewBy: '2026-10-28',
   },
-  'generate-door-inventory.mjs': {
-    reason: 'Release-gate tool: regenerates docs/door-inventory.json, which the door-inventory guard test compares against the shipped tree. Driven by tests/CI and the release flow, not by a skill at runtime.',
-    allowlistDate: '2026-07-28',
-    reviewBy: '2026-10-28',
-  },
-  'verify-release-identity.mjs': {
-    reason: 'Release-gate tool: asserts the embedded source SHA matches the release commit and an installed cache matches its candidate. Driven by tests/CI and the release flow, not by a skill at runtime.',
-    allowlistDate: '2026-07-28',
-    reviewBy: '2026-10-28',
-  },
+
+
   'retrieval-harness.mjs': {
     reason: 'Offline Recall@K gold harness (Tier-A; arms trimmed to model-free per the no-local-models rule) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the pre-registered measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility, not a runtime dependency.',
     allowlistDate: '2026-07-07',

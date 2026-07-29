@@ -33,7 +33,7 @@
  *   node close-pass.mjs --self-test
  */
 
-import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, existsSync, renameSync } from 'node:fs';
+import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';

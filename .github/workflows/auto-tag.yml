@@ -87,7 +87,7 @@ jobs:
         env:
           SHA: ${{ steps.candidate.outputs.sha }}
         run: |
-          node plugins/core/skills/core/scripts/verify-release-identity.mjs --source . --ref "$SHA"
+          node scripts/release/verify-release-identity.mjs --source . --ref "$SHA"
 
       - name: Check if tag already exists
         id: check

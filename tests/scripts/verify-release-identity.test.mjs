@@ -23,7 +23,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const SCRIPT = join(REPO_ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', 'verify-release-identity.mjs');
+const SCRIPT = join(REPO_ROOT, 'scripts', 'release', 'verify-release-identity.mjs');
 
 const CLAUDE_REL = join('plugins', 'core', '.claude-plugin', 'plugin.json');
 const CODEX_REL = join('plugins', 'core', '.codex-plugin', 'plugin.json');

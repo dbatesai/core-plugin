@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildInventory, serialize, activeCompanions, deprecatedSkills,
-} from '../../plugins/core/skills/core/scripts/generate-door-inventory.mjs';
+} from '../../scripts/release/generate-shipped-surface-inventory.mjs';
 
 // A green test suite coexisted with public docs that contradicted the shipped
 // tree and each other: one surface said nine companions, another ten, the
@@ -17,13 +17,13 @@ import {
 // surface that claims a complete count is checked against it. Adding or removing
 // a door makes this file red until the snapshot is regenerated:
 //
-//   node plugins/core/skills/core/scripts/generate-door-inventory.mjs \
-//     --out docs/door-inventory.json
+//   node scripts/release/generate-shipped-surface-inventory.mjs \
+//     --out docs/shipped-surface-inventory.json
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PLUGIN = join(ROOT, 'plugins', 'core');
-const SNAPSHOT = join(ROOT, 'docs', 'door-inventory.json');
-const REGENERATE = 'node plugins/core/skills/core/scripts/generate-door-inventory.mjs --out docs/door-inventory.json';
+const SNAPSHOT = join(ROOT, 'docs', 'shipped-surface-inventory.json');
+const REGENERATE = 'node scripts/release/generate-shipped-surface-inventory.mjs --out docs/shipped-surface-inventory.json';
 
 const inventory = buildInventory(PLUGIN);
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
@@ -48,7 +48,7 @@ function claims(text, nounPattern) {
 }
 
 test('the committed inventory matches the shipped tree', () => {
-  assert.ok(existsSync(SNAPSHOT), `docs/door-inventory.json is missing — run: ${REGENERATE}`);
+  assert.ok(existsSync(SNAPSHOT), `docs/shipped-surface-inventory.json is missing — run: ${REGENERATE}`);
   assert.equal(
     readFileSync(SNAPSHOT, 'utf8'),
     serialize(inventory),
