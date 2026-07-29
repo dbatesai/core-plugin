@@ -45,11 +45,12 @@ test('ratchet: slug-encoders outside project-slug.mjs do not grow (target: 0)', 
     `slug-encoder copies grew past baseline 4 (target 0 — import mapProjectPathToSlug): ${files.map(f => basename(f))}`);
 });
 
-test('ratchet: local frontmatter fence-parsers do not grow (target: 1)', () => {
-  // Multiple hand-rolled "--- ... ---" parsers with subtly different quoting/list
-  // handling. frontmatter-flat.mjs / priority.mjs own the canonical ones.
+test('ban: hand-rolled frontmatter fence-parsers do not come back', () => {
+  // frontmatter-flat.mjs / priority.mjs own the canonical parsers; every
+  // hand-rolled copy has been consolidated, so the count is a hard zero — a
+  // single new copy fails this immediately.
   const n = countMatching(/indexOf\('\\n---'\)|split\(\/\^---/);
-  assert.ok(n <= 2, `frontmatter fence-parser copies grew past baseline 2 (target 1): ${n}`);
+  assert.equal(n, 0, `a hand-rolled frontmatter fence-parser appeared (import frontmatter-flat.mjs instead): ${n}`);
 });
 
 test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {

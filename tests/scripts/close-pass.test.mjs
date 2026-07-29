@@ -43,13 +43,8 @@ function runCli(args, env = {}) {
   return res;
 }
 
-// ---- coverage additions (2026-07-20, iteration ~73): main()'s CLI dispatch,
-// selfTest() (invoked via --self-test — fully self-contained, no real process
-// spawning), and two safe pure-function branches in runClose/detectCloseState
-// had zero coverage. Deliberately NOT covering defaultSpawnFinalize (spawns a
-// real `claude` CLI process) or the CLI `run` subcommand (drives that same
-// real spawn) — those stay integration-verified, not unit-tested, per the
-// same restraint this session applied to the disputed chaos/monkey scope. ----
+// ---- CLI dispatch coverage: main()'s subcommands, selfTest() via --self-test
+// (fully self-contained), and detectCloseState's pure branches. ----
 
 test('CLI --self-test runs the built-in 8-check self-test and exits 0', () => {
   const res = runCli(['--self-test']);
