@@ -650,3 +650,63 @@ test('a truncated unit is named as unreadable, never embedded as a blank one', (
     'and it is not embedded as an apparently valid empty unit');
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ============================================================
+// Obsidian-grade browse experience — local/focus graph, properties panel,
+// interactive filters, edge-type styling. Chrome-safety (zero external refs)
+// and the pointer-capture selection contract are already covered above;
+// these assert the new behavior actually shipped, not just that nothing broke.
+// ============================================================
+
+test('collectUnits carries every frontmatter field as properties — not just the curated badge subset', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'properties-'));
+  const mem = join(dir, '_memories');
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'dc-1-props.md'),
+    '---\nid: dc-1-props\ntype: decision\nstatus: active\nupdated: 2026-07-01\ncustom_field: a value only in frontmatter\n---\n\nBody.\n');
+  const collected = collectUnits(dir);
+  const u = collected.units.find((x) => x.id === 'dc-1-props');
+  assert.ok(u.properties, 'properties field present');
+  assert.equal(u.properties.custom_field, 'a value only in frontmatter',
+    'a field with no dedicated badge/column still reaches the page via properties');
+  assert.equal(u.properties.id, 'dc-1-props');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+rtest('page ships the focus-mode graph, interactive filters, edge-type styling, and a properties panel — not just the old global-only graph', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const { html } = await generate(root, home);
+    const { raw, data } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    // Focus/local-graph mode (the defining Obsidian feature the old page lacked).
+    assert.match(chrome, /data-mode="global"/, 'global mode control present');
+    assert.match(chrome, /data-mode="focus"/, 'focus mode control present');
+    assert.match(chrome, /function computeFocus/, 'neighborhood layout function shipped');
+    assert.match(chrome, /function neighborhoodOf/, 'neighborhood computation shipped');
+    // Interactive type/status filters (click to dim, not just a static legend).
+    assert.match(chrome, /id="typeFilters"/);
+    assert.match(chrome, /id="statusFilters"/);
+    assert.match(chrome, /classList\.toggle\('off'/, 'chip toggling wired');
+    // Edge-type visual encoding.
+    assert.match(chrome, /var EDGE_STYLE/, 'edge type styles defined');
+    assert.match(chrome, /supersedes/, 'a real edge type is styled, not just "cites"');
+    // Properties panel — every frontmatter field, not the four-badge subset.
+    assert.match(chrome, /function renderProperties/);
+    assert.match(data, /"properties":/, 'properties embedded in the unit data, not just derived badges');
+    // Zero-external-reference guarantee still holds with all the above added.
+    assert.doesNotMatch(chrome, /https?:\/\//, 'no http(s) URL anywhere in chrome');
+    assert.doesNotMatch(chrome, /url\(/i, 'no CSS url() references — arrowheads/markers must not use url() refs');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+rtest('focus mode never fully removes the rest of the store from view — non-neighborhood nodes stay as dimmed ghost context', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const { html } = await generate(root, home);
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    assert.match(chrome, /Ghost context/i, 'the deliberate fade-not-hide design decision is implemented, not just described');
+    assert.match(chrome, /node dim/, 'a dim class exists for out-of-focus nodes');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
