@@ -42,6 +42,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadUnit } from './priority.mjs';
 import { trustedHome } from './trusted-home.mjs';
+import { VALID_TYPES, VALID_STATUSES, VALID_EDGE_TYPES, isActiveStatus } from './unit-vocab.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
 import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
 import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
@@ -54,9 +55,11 @@ const HISTORY_DIR = 'metrics-package-history';
 
 // Closed CORE vocabulary — the only strings (besides pseudonyms, dates, and
 // numbers) allowed into the package. Anything outside a whitelist folds to 'other'.
-const UNIT_TYPES = ['decision', 'risk', 'observation', 'person', 'reference', 'principle', 'value', 'explainer', 'review-finding', 'open-question', 'premise', 'episode'];
-const UNIT_STATUSES = ['active', 'retired', 'archived', 'superseded', 'draft'];
-const EDGE_TYPES = ['cites', 'depends-on', 'supersedes', 'supersedes-claim', 'refines', 'amends', 'conflicts-with', 'references-topic'];
+// Taken from unit-vocab.mjs rather than copied, so the export cannot disclose a
+// type, status, or edge the canonical vocabulary does not carry.
+const UNIT_TYPES = [...VALID_TYPES];
+const UNIT_STATUSES = [...VALID_STATUSES];
+const EDGE_TYPES = [...VALID_EDGE_TYPES];
 // The classifier's ACTUAL state vocabulary (classify-turns.mjs is the producer;
 // this list must match its output exactly — an invented list here would fold
 // canonical states to 'other').
@@ -490,7 +493,7 @@ export function storeCensus(projectDir) {
     ids.add(unit.id);
     const t = fold(String(unit.fm.type || 'other'), UNIT_TYPES);
     const s = fold(String(unit.fm.status || 'active'), UNIT_STATUSES);
-    if (s === 'active' || s === 'draft') activeIds.add(unit.id);
+    if (isActiveStatus(unit.fm)) activeIds.add(unit.id);
     byType[t] = (byType[t] || 0) + 1;
     byStatus[s] = (byStatus[s] || 0) + 1;
     const created = isoDay(unit.fm.created);

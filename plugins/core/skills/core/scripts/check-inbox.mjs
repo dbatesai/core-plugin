@@ -36,9 +36,13 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { INBOX_DRAFT_STATUS, VALID_CONFIDENCE_LEVELS } from './unit-vocab.mjs';
 
+export { INBOX_DRAFT_STATUS };
 export const VALID_MODES = new Set(['B', 'C']);
-export const VALID_CONFIDENCE = new Set(['sourced', 'inferred', 'reconstructed']);
+// Re-exported from unit-vocab so the inbox schema and the unit schema cannot
+// bless different confidence vocabularies.
+export const VALID_CONFIDENCE = VALID_CONFIDENCE_LEVELS;
 export const REQUIRED_BLOCK_FIELDS = ['id', 'type', 'status', 'source', 'extracted-at', 'confidence-level'];
 export const GRADUATION_ONLY_FIELDS = ['stability-class'];
 
@@ -158,8 +162,11 @@ export function checkInbox(projectDir) {
       }
     }
 
-    if (String(b.fm.status || '').trim().toLowerCase() === 'active') {
-      report.push({ level: 'WARN', check: 'status-active', block_id: bid, detail: "Inbox blocks land as draft/pending; 'active' is stamped at graduation" });
+    const blockStatus = String(b.fm.status || '').trim().toLowerCase();
+    if (blockStatus === 'active') {
+      report.push({ level: 'WARN', check: 'status-active', block_id: bid, detail: `Inbox blocks land as '${INBOX_DRAFT_STATUS}'; 'active' is stamped at graduation` });
+    } else if (blockStatus && blockStatus !== INBOX_DRAFT_STATUS) {
+      report.push({ level: 'WARN', check: 'status-value', block_id: bid, detail: `Unknown status '${blockStatus}' (inbox blocks carry '${INBOX_DRAFT_STATUS}'; graduation stamps 'active')` });
     }
 
     if (b.fm.id) {

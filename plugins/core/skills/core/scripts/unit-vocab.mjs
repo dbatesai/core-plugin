@@ -19,6 +19,14 @@
 
 export const VALID_STATUSES = new Set(['active', 'retired', 'archived', 'superseded']);
 
+// The one in-flight status, and it is INBOX-ONLY. An observation waiting on
+// graduation is a block in inbox.md, not a unit in the store: check-inbox
+// requires this value on the block, and graduation stamps 'active' when it
+// writes the unit. Deliberately absent from VALID_STATUSES — a unit carrying it
+// is a block that reached the store without graduating, which check-units
+// reports as status-value. One name, so an extractor cannot invent another.
+export const INBOX_DRAFT_STATUS = 'draft';
+
 // Every valid status except 'active'. A terminal unit's fact is no longer
 // load-bearing: demotion treats its citations as closed, and the bitemporal
 // writer may stamp t_invalid on it when a supersedes edge confirms the
