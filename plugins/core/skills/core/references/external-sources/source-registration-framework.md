@@ -211,7 +211,7 @@ A `sourced` observation may carry `proposed-stability-class` and still go Mode A
 
 Promotion-to-decision/risk is graduation's job, not the write-time mode decision. Mode A writes the observation as active; if it later warrants promotion, `/process-memory` handles it. "This observation could conceivably become a decision later" is not a Mode B trigger.
 
-**Mode B — confirmed.** Observation lands in `<project>/inbox.md` as a pending item with full proposed frontmatter inline. Next `/process-memory` or `/finalize` pass surfaces the item; user confirms or adjusts at the review.
+**Mode B — confirmed.** Observation lands in `<project>/inbox.md` as a pending item with full proposed frontmatter inline. Next `/process-memory` pass surfaces the item; user confirms or adjusts at the review.
 
 Criteria for Mode B (any of):
 - `confidence-level: inferred`
@@ -328,7 +328,7 @@ Installations treat the model-assignment matrix (`references/model-assignments.m
 
 ## 7. Monitoring contract
 
-The orchestration skill writes a structured log of every source pull. This enables `/finalize` and other hygiene passes to surface monitoring signals.
+The orchestration skill writes a structured log of every source pull. This enables `/process-memory` and other hygiene passes to surface monitoring signals.
 
 ### Location
 

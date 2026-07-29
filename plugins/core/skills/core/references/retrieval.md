@@ -181,7 +181,7 @@ The analyzer ships in the plugin:
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/analyze-retrieval-quality.mjs <project> [--since-days N | --all] [--json]
 ```
 
-Default window is 30 days. Output: tier distribution, top dip-back units (precision proxy), top escalation topics (recall proxy). `/process-memory` and `/finalize` call this script and surface anomalies in plain language.
+Default window is 30 days. Output: tier distribution, top dip-back units (precision proxy), top escalation topics (recall proxy). `/process-memory` calls this script and surface anomalies in plain language.
 
 ---
 

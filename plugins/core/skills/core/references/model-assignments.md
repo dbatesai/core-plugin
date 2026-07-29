@@ -16,7 +16,7 @@ The principle: fastest model that doesn't sacrifice quality at each stage. No Op
 | External source — pull | Haiku subagent | Haiku | Standard | Background |
 | External source — cheap filter | Same subagent as pull (in-memory) | Haiku | Standard | Background |
 | External source — relevance + extraction | Sonnet subagent | Sonnet (default); Opus (multi-session context calls) | Standard (Sonnet); extended (Opus path) | Background → write |
-| Graduation reasoning (clear trigger) | Sonnet subagent | Sonnet | Standard | Blocking at `/finalize`; background mid-session |
+| Graduation reasoning (clear trigger) | Sonnet subagent | Sonnet | Standard | Blocking at `/process-memory`; background mid-session |
 | Graduation reasoning (complex / multi-session) | Opus subagent | Opus | Extended | Blocking |
 | Tier 3 retrieval (Explore) | Sonnet subagent | Sonnet | Standard | Blocking |
 | Priority scoring | Script (Bash) | n/a | n/a | Fast |
@@ -66,7 +66,7 @@ Both blocking when triggered by `/finalize` or on-demand. The mid-session sectio
 
 ### Background vs blocking
 
-A dispatch is **background** when the main agent doesn't need the result this turn — external pulls, hygiene archive evaluation, mid-session section updates, MEMORY.md refresh. **Blocking** when the user is waiting on the artifact — `/finalize` render, on-demand render, graduation called during the current conversation.
+A dispatch is **background** when the main agent doesn't need the result this turn — external pulls, hygiene archive evaluation, mid-session section updates, MEMORY.md refresh. **Blocking** when the user is waiting on the artifact — `/finalize` render, on-demand render, a graduation the user asked for in the current conversation.
 
 ---
 

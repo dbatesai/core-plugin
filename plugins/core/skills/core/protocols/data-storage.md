@@ -226,7 +226,7 @@ The graduation step is where the LLM's value lives — noticing connections acro
 - Pattern recognition: multiple observations connect into a substantive implication → graduate.
 - Continuous self-evaluation flags an observation as "this keeps mattering" → graduate.
 - Explicit user cue ("this matters," "remember this") → graduate.
-- Scheduled graduation pass at `/finalize` and on-demand.
+- Scheduled graduation pass at `/process-memory` and on-demand.
 
 ### Process
 
@@ -252,7 +252,7 @@ Graduation runs as a subagent, not in the main agent's context. Classify the cal
 
 | Signal | Path |
 |---|---|
-| Clear trigger (explicit user cue, direct repeated references, in-conversation decision with one clear successor) | **Sonnet, standard reasoning, background mid-session / blocking at `/finalize`** |
+| Clear trigger (explicit user cue, direct repeated references, in-conversation decision with one clear successor) | **Sonnet, standard reasoning, background mid-session / blocking at `/process-memory`** |
 | Complex call (multi-session pattern, ambiguous relationship to existing units, implications touch several units non-obviously) | **Opus, extended thinking, blocking** |
 | You find yourself reasoning "this might connect to several things and I'm not sure how" | **Opus** |
 | Genuinely unsure which path applies | **Opus** |
@@ -310,7 +310,7 @@ Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYY
 | `_sessions/<date>/retrieval-log.jsonl` | `retrieval`, `hot-section-synthesis`, `hot-section-over-budget`, `synthesis-pass-behavior` (Phase 3) | `record-retrieval-event.mjs`, `hot-section.mjs` |
 | `_sessions/<date>/hygiene-log.jsonl` | `demote-moves`, `demote-moves-large-batch`, `compact-project`, `demote-state-narrative`, `project-md-over-cap` | `demote-moves.mjs`, `compact-project.mjs`, `demote-state-narrative.mjs` |
 
-The startup protocol surfaces the signals that matter from these logs in the readiness summary; the Phase 5 quality-pass analyzer (when it ships) reads the full corpus.
+The startup protocol surfaces the signals that matter from these logs in the readiness summary; a future quality-pass analyzer (when it ships) reads the full corpus.
 
 ### Two capture streams, one exporter boundary
 
@@ -387,7 +387,7 @@ If origin owner doesn't match what the user authorized (e.g., the user authorize
 
 PROJECT.md is rendered from canonical units. Three triggers:
 
-1. **At `/finalize`** — full regeneration. Walk canonical units, compose the six sections, show the draft, accept-or-edit, commit.
+1. **At `/finalize`** — regeneration only when the session materially changed §State or §Moves (recorded `skipped` otherwise). Walk canonical units, compose the affected sections, show the draft, accept-or-edit, commit.
 2. **On-demand** — any time the user asks.
 3. **In-session, autonomously** — section-level re-render after each meaningful update affecting a section. New decision → re-render Decisions & Risks. New risk → re-render Decisions & Risks. Status-shifting event → re-render State.
 
@@ -440,7 +440,7 @@ CORE's own writes are not user edits. Scripts that render PROJECT.md or a unit f
 Runs at:
 - startup (full sweep).
 - Before any autonomous render (just-in-time).
-- `/finalize` (full sweep).
+- `/finalize` (scoped to PROJECT.md via the edit gate).
 - On-demand.
 
 When a user edit is detected → ground truth → propagate back to source-of-truth units → anti-resurrection fires for removals → audit trail captured in the autonomous run log.

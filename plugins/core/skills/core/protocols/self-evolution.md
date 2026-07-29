@@ -104,7 +104,7 @@ When in doubt, escalate. Changes that affect how CORE processes all future tasks
 
 ## Memory hygiene
 
-Every meaningful change, every `/finalize`, and on-demand: memory hygiene runs. Read `protocols/hygiene.md` for the canonical mechanism. The deeper sub-protocols (edge-integrity sweep, session-log auto-prune, etc.) live in `references/hygiene-strategies.md`.
+Every meaningful change, every `/process-memory`, and on-demand: memory hygiene runs. Read `protocols/hygiene.md` for the canonical mechanism. The deeper sub-protocols (edge-integrity sweep, session-log auto-prune, etc.) live in `references/hygiene-strategies.md`.
 
 There's no separate dream-cycle ritual anymore — the operations got named for what they actually do, and they fire on the natural triggers (size, signals, edits) rather than on a fixed cadence.
 

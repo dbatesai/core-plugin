@@ -75,7 +75,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs <project> --mode 
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs <project> --json
 ```
 
-Exit codes: 0 = all pass, 1 = warnings, 2 = failures. Run at `/finalize` to surface hygiene work. Run `--mode schema` after writing a new unit to catch structural errors immediately.
+Exit codes: 0 = all pass, 1 = warnings, 2 = failures. Run at `/process-memory` to surface hygiene work. Run `--mode schema` after writing a new unit to catch structural errors immediately.
 
 ## What lives elsewhere
 
@@ -134,4 +134,4 @@ If both are yes, write the script here as `.mjs`. If "deterministic across sessi
 
 The metrics stack here (six-state classifier → daily rollup → orient-signal, the silent-failure detectors, the calibration pipeline, OTel dual-write) is sized for a feedback loop that needs more corpus than a single-user install generates — the calibration pool sat at 57/100 labeled turns after months of real use. That is a deliberate forward-looking tradeoff: the architecture is being validated at small scale before it can earn its keep at larger scale, and capture is cheap while interpretation is replayable.
 
-The investment discipline until then: keep the one headline path robust — `classify-turns` → `metrics-rollup` → `orient-signal` (the rec-fail-tier-0 self-audit) — and don't grow the rest. The next investment in this layer is justified when any of these turns true: the calibration pool clears its gate, a second active user or workspace starts generating parallel corpora, or a consumer outside `/finalize` starts reading the OTel traces. Absent those, prefer hardening the headline path over adding subsystems.
+The investment discipline until then: keep the one headline path robust — `classify-turns` → `metrics-rollup` → `orient-signal` (the rec-fail-tier-0 self-audit) — and don't grow the rest. The next investment in this layer is justified when any of these turns true: the calibration pool clears its gate, a second active user or workspace starts generating parallel corpora, or a second consumer starts reading the capture streams beyond the maintenance pass. Absent those, prefer hardening the headline path over adding subsystems.

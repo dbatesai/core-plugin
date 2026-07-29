@@ -65,7 +65,7 @@ When the user wants to change an existing source's authority, relevance, confide
 
 Tell the user what happened in one or two sentences. Names of sources registered or modified, what changed, where the files landed. If the registration round-trips into anything else the user should know about — e.g., the installation's orchestration skill needs to be re-pointed at the new registration — say so.
 
-If the user added the project's first source, mention that the installation now needs to write to `~/.core/workspaces/<id>/source-pull-log.jsonl` per the monitoring contract (framework §7) — `/finalize` will surface signals from this log on session close.
+If the user added the project's first source, mention that the installation now needs to write to `~/.core/workspaces/<id>/source-pull-log.jsonl` per the monitoring contract (framework §7) — `/process-memory` will surface signals from this log on its next pass.
 
 ---
 
