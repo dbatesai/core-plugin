@@ -284,9 +284,24 @@ function runRetrievalStages(query, root, { topN = 3, tierPolicy = 'P0', tierEpsi
 }
 
 /**
+ * Candidate limits reach Array.prototype.slice, which accepts anything: a negative
+ * limit counts from the END and silently drops results, a fractional or infinite one
+ * produces a window nobody requested, and NaN collapses to the default so a mistyped
+ * limit still answers confidently. A limit is a finite positive integer or it is an
+ * error — never a clamp, which would be the same silent substitution one layer up.
+ */
+export function requirePositiveInt(value, name) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new Error(`invalid retrieval limit: ${name} must be a finite positive integer`);
+  }
+  return value;
+}
+
+/**
  * @returns {Array<{id, summary, score}>}
  */
 export function retrieveContext(query, storePath, opts = {}) {
+  if (opts.topN !== undefined) requirePositiveInt(opts.topN, 'topN');
   const root = resolve(storePath);
   // The per-turn hook runs in every directory the user opens. If there's no CORE
   // store here, retrieve nothing and — critically — write nothing: generating the
@@ -307,6 +322,7 @@ export function retrieveContext(query, storePath, opts = {}) {
  * object are project data; only the aggregate exporter produces shareable output.
  */
 export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = 'P0', tierEpsilon, tierWeight, byteCap = 2048, snapshot = null } = {}) {
+  requirePositiveInt(topN, 'topN');
   const root = resolve(storePath);
   const t0 = process.hrtime.bigint();
   // Storeless probe only when there is NO injected snapshot: a
@@ -421,7 +437,17 @@ export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = 
 export function main(argv) {
   const pack = argv.includes('--pack');
   const topIdx = argv.indexOf('--top');
-  const topN = topIdx >= 0 ? Number(argv[topIdx + 1]) || 3 : 3;
+  let topN = 3;
+  if (topIdx >= 0) {
+    const raw = argv[topIdx + 1];
+    // Number('') is 0 and Number(undefined) is NaN — both must reach the validator, so
+    // parse without a `|| default` that would swallow the operator's mistake.
+    topN = raw === undefined ? NaN : Number(raw);
+    try { requirePositiveInt(topN, '--top'); } catch (e) {
+      process.stderr.write(`error: ${e.message} (got ${JSON.stringify(raw ?? null)})\n`);
+      return 2;
+    }
+  }
   // Strip recognized flags AND --top's own value, leaving positional args.
   const args = argv.filter((a, i) => a !== '--top' && a !== '--pack' && !(topIdx >= 0 && i === topIdx + 1));
   // An unrecognized flag like a
