@@ -213,20 +213,17 @@ export async function runStartup(opts = {}) {
   const probeOpts = { ...opts, descriptor, harness };
   const harnessEntry = descriptor.harnesses[harness];
 
-  // Unknown harness or no probes declared → return one informational row
+  // An empty rowset used to be returned as a zero-count success, which downstream
+  // reads as "nothing wrong" — indistinguishable from a harness whose capabilities
+  // were all probed and all healthy. An unprobed harness is UNKNOWN, and it says so in
+  // a schema-valid row so the history store carries the gap instead of a silence.
   if (!harnessEntry || !harnessEntry.capabilities || harnessEntry.capabilities.length === 0) {
-    return {
-      harness,
-      mode: 'startup',
-      rows: [],
-      summary: {
-        total: 0,
-        pass: 0,
-        degraded: 0,
-        not_yet: 0,
-        unknown: 0,
-      },
-    };
+    const reason = harnessEntry ? 'no-capabilities-declared' : 'harness-not-in-descriptor';
+    const row = conformRow(makeUnknownRow(
+      { capability_id: 'harness-capability-set', capability_kind: 'observation' },
+      `${reason}: no capability was probed for harness '${harness}', so its capability set is unknown`,
+    ), probeOpts);
+    return { harness, mode: 'startup', complete: false, rows: [row], summary: summarize([row]) };
   }
 
   const rows = [];
@@ -236,6 +233,7 @@ export async function runStartup(opts = {}) {
   return {
     harness,
     mode: 'startup',
+    complete: rows.length === harnessEntry.capabilities.length,
     rows,
     summary: summarize(rows),
   };

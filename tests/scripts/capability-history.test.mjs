@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, utimesSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   appendRows, readHistory, canonicalRowHash, applyRetention, acquireLock,
@@ -281,5 +281,35 @@ test('appendRows: sequential writes under lock lose no history (two-writer proof
     const hist = readHistory('ws1', { home });
     assert.equal(hist.length, 3, 'all three writes preserved — no lost update');
     assert.deepEqual(hist.map(h => h.session_id), ['w1', 'w2', 'w3']);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// --- The history store is owner-only, and malformed rows are counted ---
+
+test('history file and directory are owner-only', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ch-mode-'));
+  try {
+    const r = appendRows('w-mode', [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
+    assert.equal(statSync(r.path).mode & 0o777, 0o600, 'capability evidence is not world-readable');
+    assert.equal(statSync(dirname(r.path)).mode & 0o777, 0o700);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('readHistory reports how many persisted rows were unreadable', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ch-corrupt-'));
+  try {
+    const r = appendRows('w-corrupt', [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
+    writeFileSync(r.path, `${readFileSync(r.path, 'utf8')}{ not json\nalso not json\n`);
+    const rows = readHistory('w-corrupt', { home });
+    assert.equal(rows.length, 1, 'the readable row still comes back');
+    assert.equal(rows.rejected, 2, 'the unreadable ones are counted, not silently gone');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('a clean history reports zero rejected', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ch-clean-'));
+  try {
+    appendRows('w-clean', [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
+    assert.equal(readHistory('w-clean', { home }).rejected, 0);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

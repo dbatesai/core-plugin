@@ -51,3 +51,21 @@ test('recordSnapshot appends to the workspace history rather than clobbering it'
     assert.deepEqual(lines2.slice(0, lines1.length), lines1, 'first snapshot rows untouched');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test('a snapshot over an unprobed harness is reported incomplete, not as a clean snapshot', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'rcs-unknown-'));
+  try {
+    const r = await recordSnapshot({ workspaceId: 'ws-unknown', harness: 'no-such-harness', home, sessionId: 's-1' });
+    assert.equal(r.complete, false, 'an unprobed capability set is not a complete snapshot');
+    assert.equal(r.summary.unknown, 1, 'the gap is recorded as an UNKNOWN row');
+    assert.equal(r.appended, 1, 'the UNKNOWN row is persisted so history carries the gap');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('a snapshot over a probed harness is reported complete', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'rcs-complete-'));
+  try {
+    const r = await recordSnapshot({ workspaceId: 'ws-ok', harness: 'claude-code', home, sessionId: 's-1' });
+    assert.equal(r.complete, true);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

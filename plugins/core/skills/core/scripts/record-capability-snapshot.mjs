@@ -96,6 +96,9 @@ export async function recordSnapshot(opts = {}) {
     workspace_id: workspaceId,
     harness: startup.harness,
     session_id: sessionId,
+    // Carried through from the probe run: an appended count says how much was written,
+    // never whether the harness's declared capability set was actually covered.
+    complete: startup.complete === true,
     appended: rows.length,
     path: appendResult.path,
     storage,

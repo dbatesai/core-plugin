@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {
   loadDescriptor,
   detectConsumingHarness,
+  runStartup,
   SCHEMA_VERSION,
 } from '../../plugins/core/skills/core/scripts/capability-probe.mjs';
 
@@ -39,4 +40,30 @@ test('an empty env falls back to the documented default: unknown', () => {
     detectConsumingHarness({ CLAUDE_PLUGIN_ROOT: '/x', CODEX_PLUGIN_ROOT: '/y' }),
     'unknown'
   );
+});
+
+// --- An empty rowset is UNKNOWN, not a clean startup ---
+
+test('an unknown harness yields one explicit UNKNOWN row, not silence', async () => {
+  const r = await runStartup({ harness: 'no-such-harness', env: {}, cwd: '/tmp' });
+  assert.equal(r.rows.length, 1, 'silence and "nothing to report" must not look the same');
+  assert.equal(r.rows[0].identity_status, 'UNKNOWN');
+  assert.equal(r.rows[0].capability_id, 'harness-capability-set');
+  assert.equal(r.summary.unknown, 1);
+  assert.equal(r.complete, false, 'the rowset does not cover the declared capabilities');
+});
+
+test('a harness declaring no capabilities is also UNKNOWN, with its own reason', async () => {
+  const descriptor = { schema_version: SCHEMA_VERSION, harnesses: { 'bare': { capabilities: [] } } };
+  const r = await runStartup({ harness: 'bare', descriptor, env: {}, cwd: '/tmp' });
+  assert.equal(r.rows.length, 1);
+  assert.equal(r.rows[0].identity_status, 'UNKNOWN');
+  assert.equal(r.complete, false);
+  assert.match(JSON.stringify(r.rows[0].evidence), /no-capabilities-declared/);
+});
+
+test('a harness with declared capabilities reports a complete rowset', async () => {
+  const r = await runStartup({ harness: 'claude-code', env: { CLAUDE_PLUGIN_ROOT: '/x/plugins/core' }, cwd: '/tmp' });
+  assert.equal(r.complete, true);
+  assert.ok(r.rows.length >= 1);
 });
