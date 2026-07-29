@@ -60,7 +60,7 @@ At most **350 words**, in these sections, in this order:
 1. **Current focus** — what matters most now, and whether that changed
 2. **What changed** — the material evidence, each with its effect and provenance
 3. **Earlier thread** — every prior workstream with its status
-4. **Uncertainty** — unresolved contradictions and confidence limits; omit when there are none
+4. **Uncertainty** — unresolved contradictions and confidence limits; omit when there are none. When the session produced a decision or conclusion, turn one critical pass on it here: did agreement come too fast, did a commitment slip through without being surfaced as a decision, is a conclusion resting on the session's own momentum rather than evidence? Name anything real; silence means you checked and found nothing.
 5. **Next move** — one immediate action, the best one
 6. **Proposed durable change** — only when warranted
 
