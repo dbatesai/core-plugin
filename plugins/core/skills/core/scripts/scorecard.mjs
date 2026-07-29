@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
-import { readCaptureHealth, listTurnCaptureFiles, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
+import { readCaptureHealth, listTurnCaptureFiles, turnCaptureEnabled, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 
 export const SCORECARD_SCHEMA_VERSION = '1.0.0';
 
@@ -147,6 +147,9 @@ export function computeScorecard(projectDir, { now, thresholds = null, workspace
       hook_retrieval_rows_window: hookRetrievalRowsWindow,
     },
     capture_health: readCaptureHealth(projectDir, { workspaceId: wsId }),
+    // Whether the recorder was ON for this window. Without it, zero captured
+    // turns reads the same whether the user opted out or the recorder died.
+    capture_enabled: turnCaptureEnabled({ project: projectDir }),
   };
 }
 

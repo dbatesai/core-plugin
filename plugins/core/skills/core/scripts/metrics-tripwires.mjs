@@ -20,7 +20,11 @@
  *                            consecutive failures (the streak catches a
  *                            hard-dead recorder in a short session).
  *   capture-dead           — retrieval rows exist but zero evidence rows were
- *                            captured: the flight recorder itself is down.
+ *                            captured while capture was ON: the flight recorder
+ *                            itself is down.
+ *   capture-disabled       — the same silence with capture deliberately OFF:
+ *                            a marker naming the opt-out (and any failure count
+ *                            from before it), never a fault.
  *
  * Ships with the plugin by design; .mjs only.
  */
@@ -28,7 +32,7 @@
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { latestScorecards } from './scorecard.mjs';
-import { readCaptureHealth } from './turn-capture.mjs';
+import { readCaptureHealth, turnCaptureEnabled } from './turn-capture.mjs';
 
 // The single source of truth for every threshold. Stamped into scorecards.
 export const TRIPWIRE_THRESHOLDS = Object.freeze({
@@ -123,9 +127,16 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
     });
   }
 
+  // Deliberate opt-out and lost capture produce the same silence, and only one
+  // of them is a fault. The card records which; a card from before the field
+  // existed falls back to the live gate.
+  const captureEnabled = typeof newest.capture_enabled === 'boolean'
+    ? newest.capture_enabled
+    : turnCaptureEnabled({ project: projectDir });
+
   // 4. Capture failures — Agy's floors: rate needs volume; a streak never does.
   const health = newest.capture_health || readCaptureHealth(projectDir, { workspaceId });
-  if (health && typeof health.attempts === 'number') {
+  if (captureEnabled && health && typeof health.attempts === 'number') {
     const streak = (health.consecutive_failures || 0) >= thresholds.capture_consecutive_failures;
     const rate = health.attempts >= thresholds.capture_failure_min_attempts
       && health.failures / health.attempts > thresholds.capture_failure_rate;
@@ -148,17 +159,26 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
   const deadNow = windowed
     ? retrievedWindow > 0 && capturedWindow === 0
     : (vol.retrieval_rows || 0) > 0 && (vol.turns_captured || 0) === 0;
-  if (deadNow) {
+  if (deadNow && !captureEnabled) {
+    // The same absence, told truthfully: an opt-out, plus whatever failure
+    // count the recorder logged before it was switched off. Reported only where
+    // the absence would otherwise be read as a measurement.
+    const failures = (health && health.failures) || 0;
+    tripped.push({
+      kind: 'capture-disabled',
+      message: `Turn evidence capture is off for this project, so the memory-quality numbers cover only what was recorded before it was turned off${failures ? ` (${failures} recorded write failure${failures === 1 ? '' : 's'} from before that)` : ''} — your opt-out, not a fault.`,
+    });
+  } else if (deadNow) {
     tripped.push({
       kind: 'capture-dead',
-      message: 'Memory retrieval is running but no turn evidence is being recorded at all — if you did not turn capture off yourself, the recorder is silently broken.',
+      message: 'Memory retrieval is running but no turn evidence is being recorded at all — capture is on for this project, so the recorder is silently broken.',
     });
   }
 
   // 6. Partial silence: the recorder runs but misses most turns. Compared only
   // against hook-triggered retrievals, the ones that have a capture counterpart.
   const hookWindow = vol.hook_retrieval_rows_window;
-  if (!deadNow && typeof capturedWindow === 'number' && typeof hookWindow === 'number'
+  if (captureEnabled && !deadNow && typeof capturedWindow === 'number' && typeof hookWindow === 'number'
       && hookWindow >= thresholds.capture_coverage_min_volume) {
     const coverage = capturedWindow / hookWindow;
     if (coverage < thresholds.capture_coverage_min) {
