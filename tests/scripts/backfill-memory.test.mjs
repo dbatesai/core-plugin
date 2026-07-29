@@ -25,9 +25,13 @@ function storageRoot(store) {
 }
 
 function receipt(sessionId, status, extra = {}) {
+  // Mirrors runDeterministicClose's real shape: the session end lives inside
+  // record.ended_at; closed_at is the receipt-write time.
   return {
     session_id: sessionId, status, harness: 'claude-code',
-    ended_at: '2026-07-28T10:00:00Z', ...extra,
+    closed_at: '2026-07-28T10:05:00Z',
+    record: { ended_at: '2026-07-28T10:00:00Z' },
+    ...extra,
   };
 }
 
@@ -93,8 +97,8 @@ test('CLI: list emits JSON with pending sessions ordered newest-first and honors
   try {
     const root = storageRoot(store);
     const opts = { storageRoot: root };
-    writeCloseReceipt(store, receipt('s-old', 'recorded', { ended_at: '2026-07-20T10:00:00Z' }), opts);
-    writeCloseReceipt(store, receipt('s-new', 'recorded', { ended_at: '2026-07-28T10:00:00Z' }), opts);
+    writeCloseReceipt(store, receipt('s-old', 'recorded', { record: { ended_at: '2026-07-20T10:00:00Z' } }), opts);
+    writeCloseReceipt(store, receipt('s-new', 'recorded', { record: { ended_at: '2026-07-28T10:00:00Z' } }), opts);
 
     const r = spawnSync(process.execPath, [SCRIPT, 'list', store, '--json', '--limit', '1', '--storage-root', root], { encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);

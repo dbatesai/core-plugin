@@ -70,7 +70,6 @@ export function isExternalRef(target) {
 }
 
 export const ARCHIVE_RS_THRESHOLD = 0.05;
-export const STALE_DAYS = 90;
 export const SOURCES_WARN_AGE_DAYS = 14;
 
 // PROJECT.md and the hot section are capped; this is the size signal for a

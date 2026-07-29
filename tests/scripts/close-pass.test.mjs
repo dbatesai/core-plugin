@@ -46,10 +46,10 @@ function runCli(args, env = {}) {
 // ---- CLI dispatch coverage: main()'s subcommands, selfTest() via --self-test
 // (fully self-contained), and detectCloseState's pure branches. ----
 
-test('CLI --self-test runs the built-in 8-check self-test and exits 0', () => {
+test('CLI --self-test runs the built-in 7-check self-test and exits 0', () => {
   const res = runCli(['--self-test']);
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
-  assert.match(res.stdout, /close-pass self-test: PASS \(8 checks\)/);
+  assert.match(res.stdout, /close-pass self-test: PASS \(7 checks\)/);
 });
 
 test('CLI with no subcommand or no store prints usage and exits 2', () => {
@@ -82,18 +82,6 @@ test('CLI detect: no marker → owed, all ops listed; --json emits parseable sta
     const parsed = JSON.parse(jsonRes.stdout);
     assert.equal(parsed.state, 'owed');
     assert.deepEqual(parsed.owed, ['a', 'b', 'c']);
-  } finally { rmSync(store, { recursive: true, force: true }); }
-});
-
-test('CLI should-spawn: exits 1 (no spawn) on a trivial session with nothing owed, 0 with --did-work', () => {
-  const store = freshStore();
-  try {
-    // Nothing owed: no ops in scope at all.
-    const res = runCli(['should-spawn', store]);
-    assert.equal(res.status, 1, 'no work, no ops in scope -> skip spawn');
-
-    const res2 = runCli(['should-spawn', store, '--did-work']);
-    assert.equal(res2.status, 0, 'real work -> spawn regardless of owed state');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
@@ -228,4 +216,29 @@ test('certify: an already-closed session is a clean no-op, not an error or a sec
     const receipt = readCloseReceipt(store, 's-again', opts);
     assert.equal(receipt.summary_path, 'a.md', 'the original receipt is preserved');
   } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('certify: auto-resolves the session from a real project-bound transcript (the SKILL.md path, no --session)', async () => {
+  const store = freshStore();
+  const home = mkdtempSync(join(tmpdir(), 'certify-home-'));
+  try {
+    const { mapProjectPathToSlug } = await import('../../plugins/core/skills/core/scripts/project-slug.mjs');
+    const { realpathSync } = await import('node:fs');
+    const canon = realpathSync(store);
+    const tdir = join(home, '.claude', 'projects', mapProjectPathToSlug(canon));
+    mkdirSync(tdir, { recursive: true });
+    writeFileSync(join(tdir, 'sess-auto-77.jsonl'), '{"type":"user"}\n');
+
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    const r = certifyManualClose(store, { summaryPath: 's.md', home }, opts);
+    assert.ok(r.ok, `auto-resolve must certify from the project transcript: ${JSON.stringify(r)}`);
+    assert.equal(r.session_id, 'sess-auto-77');
+    const receipt = readCloseReceipt(store, 'sess-auto-77', opts);
+    assert.equal(receipt.status, 'closed');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
 });

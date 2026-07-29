@@ -10,7 +10,7 @@
  *   4. a failed/partial sess-A remains owed and recoverable.
  *
  * Root cause these target: the close marker is keyed per STORE
- * (`_memories/_close-marker.json`), never per session, and `shouldSpawn()`
+ * (`_memories/_close-marker.json`), never per session, and the owed-work check
  * returns true on `didWork` before asking whether this exact session already
  * closed. The SessionEnd hook receives `session_id` and drops it. That is why a
  * manual finalize can be followed 59.7s later by a second reasoning close.
@@ -142,7 +142,7 @@ test('ID-06 [oracle 2] the store-level legacy marker cannot certify an exact ses
   const o = opts(store);
 
   // The pre-existing per-store marker says "this project closed". That is the
-  // surface today's shouldSpawn()/detectCloseState() reason over, and it cannot
+  // surface today's detectCloseState() reason over, and it cannot
   // distinguish which session closed. It must not be readable as exact-session
   // proof, or the dedup silently degrades back to per-project.
   writeFileSync(

@@ -143,12 +143,6 @@ export function recordBootstrap(coreDir, workspaceId, { sessionStartedAt, comple
   return { path, record };
 }
 
-/** Read the bootstrap record, or null when absent or unreadable. */
-export function readBootstrap(coreDir, workspaceId) {
-  const dir = coreDir || defaultCoreDir();
-  if (!isSafeWorkspaceId(workspaceId)) return null;
-  try { return JSON.parse(readFileSync(lastBootstrapPath(dir, workspaceId), 'utf8')); } catch { return null; }
-}
 
 /** Read last-active: per-workspace file first, index.json field as the one-release tolerant fallback. */
 export function readLastActive(coreDir, workspaceId) {

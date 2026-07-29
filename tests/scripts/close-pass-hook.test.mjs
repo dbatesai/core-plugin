@@ -53,7 +53,7 @@ function runHook(payload, env = {}) {
   }
 }
 
-// A CORE workspace dir that has closed cleanly with nothing owed → shouldSpawn is false,
+// A CORE workspace dir that has closed cleanly with nothing owed → no close is owed,
 // so the hook no-ops without spawning. This is the "core workspace, no work" baseline.
 function freshClosedStore() {
   const store = mkdtempSync(join(tmpdir(), 'close-hook-test-'));
@@ -105,7 +105,7 @@ test('not a CORE workspace: no workspace.json or _memories → no-op', () => {
 
 test('spawn pre-check: closed store, nothing owed, no transcript → no spawn', () => {
   const store = freshClosedStore();
-  // No transcript_path → didWork false; marker is closed → nothing owed → shouldSpawn false.
+  // No transcript_path → didWork false; marker is closed → nothing owed → no spawn.
   const { out, code } = runHook({ cwd: store, reason: 'other' }, { CORE_CLOSE_INDEX: join(store, 'idx.json') });
   assert.equal(code, 0);
   assert.equal(out.trim(), '', 'a trivial closed session must not spawn a close agent');

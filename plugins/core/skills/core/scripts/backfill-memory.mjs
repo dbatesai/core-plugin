@@ -61,7 +61,11 @@ export function listPendingBackfill(store, opts = {}) {
     if (typeof parsed.memory_processed_at === 'string' && parsed.memory_processed_at) continue;
     pending.push(parsed);
   }
-  pending.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')));
+  // A real receipt carries the session's end inside record.ended_at (the
+  // transcript range) with closed_at as the receipt-write time — sort on the
+  // session end, fall back to the receipt time.
+  const endOf = (r) => String((r.record && r.record.ended_at) || r.closed_at || '');
+  pending.sort((a, b) => endOf(b).localeCompare(endOf(a)));
   return { pending, corrupt };
 }
 
@@ -126,7 +130,8 @@ function main(argv) {
         process.stdout.write(`${pending.length} session(s) pending memory back-fill`
           + (corrupt ? `; ${corrupt} corrupt receipt(s) need a look` : '') + '\n');
         for (const p of limited) {
-          process.stdout.write(`- ${p.session_id} (${p.status}, ended ${p.ended_at || 'unknown'})\n`);
+          const ended = (p.record && p.record.ended_at) || p.closed_at || 'unknown';
+          process.stdout.write(`- ${p.session_id} (${p.status}, ended ${ended})\n`);
         }
       }
       return 0;

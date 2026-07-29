@@ -1,19 +1,20 @@
 /**
  * close-pass.mjs — session-close orchestration: lock, per-op marker, three-state detection.
  *
- * The reliability spine of self-managed maintenance. The exit hook
- * (Stop-hook claude -p) and the startup catch-up both drive close work through this
- * script so neither can lie about a half-finished close or race a second close agent.
+ * The reliability spine of the session close. The SessionEnd hook's deterministic
+ * per-session request, the manual /finalize, and the startup catch-up all drive
+ * close work through this script so none of them can lie about a half-finished
+ * close or race a second one.
  *
  * Three problems it solves:
  *   1. Partial close — a boolean "closed" marker can sit over a half-maintained store if
- *      the close agent dies mid-run. So the marker is PER-OP: it records which ops finished,
+ *      a close dies mid-run. So the marker is PER-OP: it records which ops finished,
  *      and startup discharges whatever's still owed instead of trusting marker-presence.
- *   2. Concurrent close — close-then-reopen can put two agents against the same store. A
+ *   2. Concurrent close — close-then-reopen can put two closes against the same store. A
  *      single-flight lock (atomic 'wx' create, stale-stealable) serializes them, and
  *      detection reports a third state (in-progress) the boolean marker couldn't express.
- *   3. Wasted spawn — shouldSpawn() gates the exit-hook agent so a trivial session that
- *      did no real work and owes nothing never pays for a close agent.
+ *   3. Duplicate close — receipts key on the harness's own session id, so a session
+ *      that already certified (manual) or recorded (automatic) is never closed twice.
  *
  * NOT a judgment engine. It tracks completion; it does not decide whether an op's WRITE is
  * safe — PROJECT.md-mutating ops stay edit-gated in startup.md/finalize, and the autonomous
@@ -23,10 +24,11 @@
  *
  * CLI:
  *   node close-pass.mjs detect <store> [--session <id>]      → prints state + owed ops (JSON on --json)
- *   node close-pass.mjs should-spawn <store> [--did-work] [--made-decision]  → exit 0 spawn / 1 skip
  *   node close-pass.mjs begin <store> --session <id> --ops a,b,c             → acquire lock + in-progress marker
  *   node close-pass.mjs record <store> --op <op> --status done|failed|skipped [--note "..."]
  *   node close-pass.mjs finish <store> [--session <id>]      → mark closed, release lock
+ *   node close-pass.mjs certify <store> [--session <id>] [--summary <path>]  → write the manual closed receipt
+ *   node close-pass.mjs process-request <store> --session <id> [--transcript <path>]  → the deterministic auto-close
  *   node close-pass.mjs release <store>                       → force-release a stale lock
  *   node close-pass.mjs --self-test
  */
@@ -43,12 +45,11 @@ import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
-import { runMaintenance } from './maintenance-run.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
-import { readTranscript } from './read-transcript.mjs';
+import { readTranscript, resolveTranscript } from './read-transcript.mjs';
 
-// A lock older than this with no live owner is stale and supersedable. Generous: a real close
-// pass (claude -p re-reading a transcript) can take a couple of minutes.
+// A lock older than this with no live owner is stale and supersedable. Generous
+// enough for a manual close that renders and summarizes before finishing.
 export const LOCK_STALE_MS = 10 * 60 * 1000;
 // Ceiling for locks whose owner can't be identified (unreadable payload, no pid). A lock with
 // a READABLE LIVE pid is never auto-superseded at ANY age: a laptop
@@ -207,16 +208,6 @@ const STORE_DERIVED = new Set([
 ]);
 export function isStoreDerived(op) { return STORE_DERIVED.has(op); }
 
-/**
- * Spawn pre-check for the exit hook: is it worth spawning a close agent at all?
- * Spawn when the session did real work OR made a decision OR there's owed work pending.
- * A read-only trivial session that owes nothing → skip (no agent cost).
- */
-export function shouldSpawn(store, { didWork = false, madeDecision = false, allOps = [], storeSignature = null } = {}) {
-  if (didWork || madeDecision) return true;
-  const det = detectCloseState(store, { allOps, storeSignature });
-  return det.state === 'owed' && det.owed.length > 0;
-}
 
 /* ─────────────────── Exact-session close receipts ───────────────────
  *
@@ -368,7 +359,7 @@ function extractTimestampRange(transcriptPath) {
 /**
  * Security gate: is `store` a CORE workspace we should auto-close?
  * A generic `_memories/` dirname is NOT proof — an attacker-supplied repo can have one, and the
- * close spawns a detached, tool-enabled `claude -p`. The trust anchor is the ~/.core/index.json
+ * close enqueues the deterministic per-session close. The trust anchor is the ~/.core/index.json
  * registry, which an attacker can't plant from inside a project dir. Requires the canonicalized
  * (realpath'd) store to match a registered workspace path.
  */
@@ -437,7 +428,9 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
   let transcriptPath = null;
   if (!sid) {
     try {
-      const resolveOpts = { cwd: resolve(store) };
+      let canon;
+      try { canon = realpathSync(store); } catch { canon = resolve(store); }
+      const resolveOpts = { cwd: canon };
       if (home) resolveOpts.home = home;
       const t = resolveTranscript('claude-code', resolveOpts);
       transcriptPath = t && t.path ? t.path : null;
@@ -445,7 +438,9 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
         const base = transcriptPath.split(/[\\/]/).pop();
         if (base && base.endsWith('.jsonl')) sid = base.slice(0, -'.jsonl'.length);
       }
-    } catch { /* fall through to unresolved */ }
+    } catch (e) {
+      return { ok: false, reason: 'unresolved', detail: String(e && e.message || e).slice(0, 120) };
+    }
   }
   if (!sid) return { ok: false, reason: 'unresolved' };
 
@@ -486,7 +481,7 @@ function main(argv) {
   const f = parseFlags(argv.slice(1));
   const store = f._[0];
   const json = !!f.json;
-  if (!sub || !store) { process.stderr.write('usage: close-pass.mjs <detect|should-spawn|begin|record|finish|release> <store> [...]\n'); return 2; }
+  if (!sub || !store) { process.stderr.write('usage: close-pass.mjs <detect|begin|record|finish|certify|process-request|release> <store> [...]\n'); return 2; }
 
   const ops = typeof f.ops === 'string' ? f.ops.split(',').map(s => s.trim()).filter(Boolean) : [];
 
@@ -495,11 +490,6 @@ function main(argv) {
       const det = detectCloseState(store, { allOps: ops });
       process.stdout.write(json ? JSON.stringify(det) + '\n' : `${det.state}${det.owed?.length ? ' owed=' + det.owed.join(',') : ''}\n`);
       return 0;
-    }
-    case 'should-spawn': {
-      const spawn = shouldSpawn(store, { didWork: !!f['did-work'], madeDecision: !!f['made-decision'], allOps: ops });
-      if (json) process.stdout.write(JSON.stringify({ spawn }) + '\n');
-      return spawn ? 0 : 1;
     }
     case 'begin': {
       const r = beginClose(store, { sessionId: f.session || null, ops });
@@ -617,15 +607,6 @@ function selfTest() {
   const stolen = acquireLock(store, { sessionId: 's4', now: Date.now() + 11 * 60 * 1000 });
   assert(stolen.ok, 'stale lock (dead pid, old) must be stealable');
 
-  // 7. shouldSpawn: trivial session that owes nothing → false; work done → true.
-  releaseLock(store);
-  finishClose(store, { sessionId: 's4' });
-  // mark everything done so nothing is owed
-  for (const op of ALL) recordOp(store, { op });
-  finishClose(store, { sessionId: 's4' });
-  assert(shouldSpawn(store, { didWork: false, madeDecision: false, allOps: ALL }) === false, 'no work + nothing owed → no spawn');
-  assert(shouldSpawn(store, { didWork: true, allOps: ALL }) === true, 'real work → spawn');
-
   // 8. Store changed after a clean close → store-derived ops re-owed, transcript ops not.
   releaseLock(store);
   beginClose(store, { sessionId: 's5', ops: ALL, storeSignature: 'SIG-A' });
@@ -639,7 +620,7 @@ function selfTest() {
     'store-changed re-owes store-derived ops only, got ' + d8.owed);
 
   rmSync(store, { recursive: true, force: true });
-  process.stdout.write('close-pass self-test: PASS (8 checks)\n');
+  process.stdout.write('close-pass self-test: PASS (7 checks)\n');
   return 0;
 }
 

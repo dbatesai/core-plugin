@@ -4,7 +4,7 @@
  * Slice 4, RED-first.
  *
  * The hook currently receives `session_id` on the SessionEnd payload and drops
- * it: `didWork` is set from "a transcript file exists", `shouldSpawn()` answers
+ * it: `didWork` is set from "a transcript file exists", the owed-work check answers
  * on store-level state, and the spawned command carries no session at all. That
  * is the production half of the duplicate close — the mechanism from slices 1–2
  * cannot help while the caller never names the session.
