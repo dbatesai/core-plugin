@@ -224,11 +224,6 @@ export const ALLOWLIST = [
   // (test username, technical note). Rewriting shipped history is out of scope.
   { file: 'CHANGELOG.md', patterns: ['personal-name', 'person-in-prose'], reason: 'historical changelog technical note (dotted-username bug test vector)' },
 
-  // P2/P3 here name the retrieval-policy tiers themselves (product vocabulary,
-  // same contract as the six allowlist entries above) — load-bearing history,
-  // not a review-batch label.
-  { file: 'CHANGELOG.md', patterns: ['internal-review-label-bare'], matches: ['P0', 'P1', 'P2', 'P3'], reason: 'P2/P3 name the shipped retrieval-policy tiers described by this entry, consumed by retrieve-context.mjs::applyTierPolicy' },
-
   // Path→slug / plugin-root / transcript mapping tests: these EXIST to prove the
   // username-generalization logic. Real-looking usernames are the test vectors.
   { file: 'tests/scripts/project-slug.test.mjs', patterns: ['personal-home-username', 'personal-name', 'person-in-prose'], reason: 'path→slug encoding test vectors (dbates, David.Bates28)' },
