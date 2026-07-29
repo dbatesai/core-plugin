@@ -70,11 +70,16 @@ test('session-start hook: injects the /core directive, honors the opt-out', () =
   assert.match(hook, /CORE_AUTOSTART/, 'must carry the opt-out env var');
 });
 
-test('close hook: recursion guard + kill switch + spawn pre-check are all wired', () => {
+test('close hook: env suppression + kill switch + workspace trust + spawn pre-check are all wired', () => {
   const hook = read('skills', 'core', 'hooks', 'close-pass-hook.mjs');
-  assert.match(hook, /CORE_CLOSE_PASS_ACTIVE/, 'recursion guard');
+  assert.match(hook, /CORE_CLOSE_PASS_ACTIVE/, 'environment suppression');
   assert.match(hook, /CORE_AUTO_CLOSE/, 'kill switch');
-  assert.match(hook, /shouldSpawn/, 'spawn pre-check');
+  assert.match(hook, /isRegisteredWorkspace/, 'workspace trust anchor');
+  // The pre-check the hook actually calls. Naming a function the hook does not
+  // call passes on a header that merely mentions it — which is how this guard
+  // stayed green while the header described an architecture that was gone.
+  assert.match(hook, /shouldEnqueueClose/, 'exact-session pre-check');
+  assert.match(hook, /decideCloseAction\(payload/, 'the decision must gate the spawn');
   assert.match(hook, /detached: true/, 'child must be detached to survive session exit');
 });
 
