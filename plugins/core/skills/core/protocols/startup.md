@@ -200,9 +200,9 @@ Narrate per `feedback_readiness_only_escalations` — only when something non-tr
 
 This is a backstop, not a replacement for the `/finalize` and `/process-memory` wiring, which still run decoration and index regeneration as part of the normal close. The two layers are deliberately redundant on a healthy store: on any ordinary session, close-time maintenance already left the store current, so this step is a fast no-op. Its value is entirely in the failure mode close-time maintenance can't self-detect — an op quietly missing from the tracked list, or bookkeeping that's wrong about what it covers — which only shows up if something runs the real thing directly, on a fixed schedule, without asking the ledger for permission first.
 
-## Startup catch-up — discharge an owed close
+## Startup catch-up — recover an owed close for the exact session
 
-The last session's close runs itself at session end (the SessionEnd hook spawns `claude -p "/finalize"` headless — `close-pass-hook.mjs`). But that hook can miss: a hard terminal kill never fires SessionEnd, or `claude` wasn't on PATH, or the close agent died mid-run. This is the backstop — startup detects an owed or partial close and discharges the remainder before composing readiness. It is the third discharge path; the manual command and the exit hook are the other two.
+The SessionEnd hook enqueues a deterministic, zero-model close for the exact session that ended (`close-pass-hook.mjs` → `close-pass.mjs process-request`). It can still miss: a hard terminal kill never fires SessionEnd, or the request died mid-run. This is the backstop — startup detects an owed close and recovers the remainder before composing readiness. Recovery is exact-session and bounded: it discharges the close's own four ops, never a maintenance sweep (the decoration/index backstop above already keeps the store current, and `/process-memory` owns the rest).
 
 **Edit-detection runs FIRST and wins.** The catch-up runs *after* the edit-detection block above, never before. If the user edited PROJECT.md between sessions, that edit is already reconciled and anti-resurrection has fired; only then does a deferred render proceed — so a catch-up render can never clobber a user edit. This ordering is non-negotiable.
 
@@ -211,13 +211,13 @@ Run three-state detection (skip silently if `CORE_ROOT` is unresolved or `CORE_A
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && [ "$CORE_AUTO_CLOSE" != "0" ] && \
 node "${CORE_ROOT}/skills/core/scripts/close-pass.mjs" detect <project> \
-  --ops maintenance-run,render-project-md,hot-section,demote-moves,compact-project,demote-state,check-units,decorate-graph,reflection-a,reflection-b,metrics,session-summary,memory-refresh \
+  --ops material-capture,render-project-md,session-summary,memory-refresh \
   || echo "(close detect skipped)"
 ```
 
 - **`closed`** — last session closed cleanly and the store is unchanged. Nothing to do; proceed to readiness.
-- **`in-progress`** — a close is running right now (a detached exit-hook agent the single-flight lock is protecting). Do NOT race it; skip catch-up and note it in readiness (*"last session's close is still finishing in the background"*).
-- **`owed`** (with the `owed=` list) — no marker, a crash mid-close, or the store changed since the close. Discharge the owed ops now, edit-detection-having-already-cleared: run only the listed ops (they map 1:1 to the `/finalize` steps), then `close-pass.mjs finish`. Keep it lean — this is catch-up, not a full re-close; the reflection tasks only re-run if `reflection-a`/`reflection-b` are in the owed list. Narrate it in one line as part of readiness (*"Last session's close didn't finish — discharged the owed maintenance (indexes, hot section) before readiness."*).
+- **`in-progress`** — a close is running right now (the single-flight lock is protecting it). Do NOT race it; skip catch-up and note it in readiness (*"last session's close is still finishing in the background"*).
+- **`owed`** (with the `owed=` list) — no marker, a crash mid-close, or a materially changed store since the close. Discharge only the listed ops (they map 1:1 to the `/finalize` steps), then `close-pass.mjs finish`. Sessions the automatic close preserved without memory processing are NOT recovered here — `backfill-memory.mjs list` names them and `/process-memory` works them. Narrate in one line (*"Last session's close didn't finish — wrote the owed resume summary before readiness."*).
 
 A `render-pending-accept` flag in `~/.core/workspaces/<id>/` (left by a headless close that materially changed §State/§Moves) is surfaced here too: show the user the pending render for accept rather than treating it as canonical, then clear the flag.
 

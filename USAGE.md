@@ -24,9 +24,9 @@ The agent. Type it to start or resume work on a project.
 
 Close a session.
 
-- **What it does:** reconciles state, writes a session summary, re-renders `PROJECT.md` from the units, and runs the comprehensive memory-hygiene pass (graduation, validation, index regeneration, file-cap compaction, the metrics interpretation pass, validity-dimension stamping).
-- **When to use:** at the end of a working session, so the next `/core` picks up clean.
-- **Writes:** the session summary under `_summaries/`, `PROJECT.md`, the indexes, hygiene-log entries.
+- **What it does:** the bounded close — captures what the session made true that isn't yet durable (decisions, corrections, open work), writes a resume summary (at most ~400 words), re-renders `PROJECT.md` only when the session materially changed it, refreshes harness memory, and certifies the exact session's close receipt so the automatic close never runs a second pass over it. Memory maintenance deliberately does not run here — that's `/process-memory`; analytics are `/metrics`.
+- **When to use:** at the end of a working session, so the next `/core` picks up clean. Skipping it is safe: the SessionEnd hook records a deterministic, zero-model lifecycle receipt for the session, and `/process-memory` back-fills the memory processing later.
+- **Writes:** the session summary under `_summaries/`, `PROJECT.md` when owed, the close receipt.
 
 ### `/refocus`
 
@@ -40,7 +40,7 @@ Recenter mid-session on what matters most right now, given what became known sin
 
 A memory-housekeeping pass without the full session close.
 
-- **What it does:** looks back over the session for observations that should have been captured and writes them, pulls the inbox, graduates observations into units where they've earned it, validates the unit store, regenerates the indexes, compacts `PROJECT.md` if it's over the file cap, and surfaces anything that needs your judgment. Also runs the retrieval-quality, retrieval-skip, and capability-drift scans.
+- **What it does:** looks back over the session for observations that should have been captured and writes them, back-fills the memory processing for sessions the automatic close preserved without it, pulls the inbox, graduates observations into units where they've earned it, validates the unit store, regenerates the indexes, stamps the validity dimension, compacts `PROJECT.md` if it's over the file cap, and surfaces anything that needs your judgment. Also runs the retrieval-quality, retrieval-skip, capability-drift, and turn-classification scans.
 - **When to use:** mid-session housekeeping, or any time you want the memory in tip-top shape without closing out.
 - **Writes:** observations, graduated units, indexes, `PROJECT.md` (when over cap), `_pm-state.json`.
 

@@ -28,7 +28,7 @@ The structural adjustment options, in order of cost:
 
 1. **Add an edge.** A single missing `cites` or `references-topic` often fixes retrieval. Free.
 2. **Restructure a unit.** Split into two, merge two into one, change the prefix. Cheap but breaks existing cites — handle inverse-edge updates.
-3. **Re-tune priority weights** in the plugin's `scripts/priority.mjs` (weights live in the plugin and propagate via plugin update, not per-project copies). Document the change in the hygiene retrospective.
+3. **Re-tune priority weights** in the plugin's `scripts/priority.mjs` (weights live in the plugin and propagate via plugin update, not per-project copies). Document the change in the changelog entry that ships it.
 4. **Evolve query shape** — change how you phrase retrieval prompts internally.
 5. **Escalate infrastructure** — vector store, graph DB, or other. Earned only after repeated trip-wire firings per the native-tools-first stance. Two consecutive Explore-miss cycles pointing at the same gap means it's time for a new DC.
 

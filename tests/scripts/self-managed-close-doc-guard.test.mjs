@@ -26,14 +26,18 @@ test('startup: catch-up runs AFTER the edit-detection block (edit-detection-firs
 test('finalize: every PROJECT.md write is edit-gated', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
   assert.match(f, /every PROJECT\.md write is edit-gated/i, 'the control-surface rule must be stated');
-  assert.match(f, /CORE_CLOSE_HEADLESS/, 'finalize must branch on headless mode');
   assert.match(f, /CORE_AUTO_CLOSE=0/, 'finalize must name the kill switch');
+  assert.ok(!f.includes('CORE_CLOSE_HEADLESS') && !f.includes('CORE_CLOSE_ENVELOPE'),
+    'the spawned-agent close modes are gone — finalize must not document their env vars');
 });
 
-test('finalize: reflection Task A + Task B are both present', () => {
+test('finalize: material capture is the close; the perspective critique lives in /refocus', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
-  assert.match(f, /Reflection Task A/i, 'Task A (resynthesis) must be present');
-  assert.match(f, /Reflection Task B/i, 'Task B (perspective) must be present');
+  assert.match(f, /material capture/i, 'the close must name its capture step');
+  assert.ok(!/Reflection Task/i.test(f), 'the old reflection-task machinery must be gone from the close');
+  const r = read('skills', 'refocus', 'SKILL.md');
+  assert.match(r, /critical pass|agreement come too fast|surfaced as a decision/i,
+    'the perspective critique must live in refocus');
 });
 
 test('hooks.json: SessionEnd registers the close hook (NOT Stop — per-turn would mis-fire the heavy close)', () => {
@@ -89,32 +93,27 @@ test('close hook spawns the DETERMINISTIC per-session close, NOT raw claude -p',
   assert.ok(!/spawn\(\s*['"]claude['"]/.test(hook), 'hook must NOT spawn claude directly — the runner owns that');
 });
 
-test('finalize: envelope mode tells the agent the runner owns the marker (no double-run)', () => {
+test('finalize: the automatic close is deterministic and zero-model; no envelope machinery remains', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
-  assert.match(f, /CORE_CLOSE_ENVELOPE/, 'finalize must document the envelope signal');
-  assert.match(f, /runner owns/i, 'finalize must say the runner owns the marker lifecycle');
+  assert.match(f, /deterministic and zero-model/i, 'finalize must state what the automatic close is');
+  assert.ok(!f.includes('CORE_CLOSE_ENVELOPE'), 'the envelope signal is gone');
+  assert.match(f, /recovery evidence, not canonical project truth/i,
+    'auto-close receipts must be framed as recovery evidence');
 });
 
-test('finalize: full narrative summary every close, never sourced from prior summaries', () => {
-  // David 2026-07-02: the stub-only close is reversed — headless runs invisibly, so the full
-  // narrative costs the user nothing. And the 2026-07-01 close copied a stale claim out of an
-  // old summary, so the compose-from-current-state rule is load-bearing, not style.
+test('finalize: bounded resume summary, never sourced from prior summaries', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
-  assert.match(f, /full narrative summary/i, 'the summary must be the full narrative, not a stub');
-  assert.match(f, /every close, both modes/i, 'the summary must be written on every close in both modes');
+  assert.match(f, /400 words/, 'the summary bound must be stated');
   assert.match(f, /never from prior summaries/i, 'summaries must not be composed from prior summaries');
   assert.match(f, /Record op `session-summary`/, 'the summary op must be recorded under its real name');
-  assert.ok(!f.includes('summary-stub'), 'the old stub op name must be gone from finalize');
 });
 
-test('finalize: one method — envelope mode records judgment ops like a manual run', () => {
-  // The unification (David 2026-07-02): mode moves the audience, never the method. The runner
-  // owns begin/maintenance/finish; the agent records its judgment ops in BOTH modes, which is
-  // safe because the runner spawns finalize synchronously and finishes only after it returns.
+test('finalize: certifies the exact session and records every op it runs', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
-  assert.match(f, /record each judgment op you complete exactly as in a manual run/i,
-    'envelope mode must record per-op like manual — a headless close must not be opaque in the marker');
-  assert.match(f, /mode moves the audience, never the method/i, 'the unification rule must be stated');
+  assert.match(f, /close-pass\.mjs certify/, 'the manual close must certify its exact session receipt');
+  assert.match(f, /Record op `material-capture`/, 'per-op trail: material capture');
+  assert.match(f, /Record op `render-project-md`/, 'per-op trail: render');
+  assert.match(f, /Record op `memory-refresh`/, 'per-op trail: memory refresh');
 });
 
 test('the close op list has a single source: close-pass.mjs CLOSE_OPS', async () => {
@@ -134,26 +133,22 @@ test('the close op list has a single source: close-pass.mjs CLOSE_OPS', async ()
     'finalize SKILL.md begin --ops must match CLOSE_OPS exactly');
 });
 
-// Graph decoration (`/export-obsidian` retired 2026-07-22 — see CHANGELOG) is
-// now wired into the automatic maintenance passes the same way demote-moves
-// and compact-project are: a tracked close op the LLM half of /finalize (and
-// the on-demand /process-memory pass) actually invokes and records, not just
-// a string sitting in an array. close-pass.mjs itself never calls the
-// decorator directly — like every other judgment op except maintenance-run,
-// execution is the agent's job per finalize/SKILL.md; this only guards that
-// the wiring instructions are actually present, not silently dropped.
-test('decorate-graph: tracked as a real close op (STORE_DERIVED + CLOSE_OPS), not a phantom string', async () => {
+// Graph decoration is maintenance, not close work: it runs in /process-memory
+// and the unconditional startup backstop. The close op list must stay narrow.
+test('the close op list is the bounded four — maintenance ops must not creep back in', async () => {
   const mod = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
-  assert.ok(mod.CLOSE_OPS.includes('decorate-graph'), 'CLOSE_OPS must list decorate-graph');
-  assert.equal(mod.isStoreDerived('decorate-graph'), true,
-    'decorate-graph rewrites unit files, so it must re-owe on a post-close store change like demote-moves/compact-project/check-units');
+  assert.deepEqual(mod.CLOSE_OPS, ['material-capture', 'render-project-md', 'session-summary', 'memory-refresh']);
+  for (const op of ['decorate-graph', 'maintenance-run', 'demote-moves', 'compact-project', 'check-units', 'metrics', 'reflection-a', 'reflection-b', 'hot-section', 'demote-state']) {
+    assert.ok(!mod.CLOSE_OPS.includes(op), `${op} is maintenance/analytics, not close work`);
+  }
 });
 
-test('decorate-graph: finalize/SKILL.md actually invokes the script and records the op', () => {
+test('finalize does not run maintenance or analytics scripts', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
-  assert.match(f, /node \$\{CORE_ROOT\}\/skills\/core\/scripts\/decorate-graph\.mjs <project>/,
-    'finalize must run decorate-graph.mjs, not just mention it');
-  assert.match(f, /Record op `decorate-graph`/, 'the decoration sub-step must record its op like its siblings');
+  for (const script of ['decorate-graph.mjs', 'maintenance-run.mjs', 'demote-moves.mjs', 'compact-project.mjs', 'classify-turns.mjs', 'metrics-rollup.mjs', 'bitemporal.mjs', 'orphan-detector.mjs']) {
+    assert.ok(!f.includes(script), `finalize must not invoke ${script} — that work moved out of the close`);
+  }
+  assert.match(f, /process-memory/, 'finalize must point at where the moved work lives');
 });
 
 test('decorate-graph: process-memory/SKILL.md actually invokes the script', () => {
@@ -232,13 +227,11 @@ test('startup: the backstop is framed as unconditional and independent of close-
   assert.match(block, /feedback_readiness_only_escalations/, 'must narrate per the only-escalate convention, not routine housekeeping');
 });
 
-test('startup: maintenance-run.mjs is the real index-regeneration entry point (matches /finalize\'s own "folded into maintenance-run" convention)', async () => {
-  // Guards against reinventing raw generate-*-index.mjs calls in the new step when the
-  // codebase already has one canonical, signature-gated bundling entry point for this.
+test('startup: maintenance-run.mjs is the real index-regeneration entry point', async () => {
+  // Guards against reinventing raw generate-*-index.mjs calls when the codebase
+  // has one canonical, signature-gated bundling entry point for this.
   const { runMaintenance } = await import('../../plugins/core/skills/core/scripts/maintenance-run.mjs');
   assert.equal(typeof runMaintenance, 'function', 'maintenance-run.mjs must export runMaintenance');
-  const f = read('skills', 'finalize', 'SKILL.md');
-  assert.match(f, /folded into `maintenance-run`/, 'finalize must still treat maintenance-run as the single index-regen entry point');
 });
 
 test('codex: the exit-hook drop names startup-catch-up as the equivalent', () => {

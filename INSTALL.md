@@ -27,9 +27,9 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | Slash command | What it does |
 |---|---|
 | `/core` | The agent. Starts the session, loads your project context (picking a thread back up with a readiness summary), and talks with you. |
-| `/finalize` | Close a session — write a summary, update project state, run memory cleanup. |
+| `/finalize` | Close a session — capture what must survive, write the resume summary, certify the exact-session receipt. |
 | `/refocus` | Recenter mid-session on what matters most now, given what you have learned since you started. Read-only unless you accept a change. |
-| `/process-memory` | Clean up memory on demand — pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it's over the size cap. |
+| `/process-memory` | Clean up memory on demand — back-fill auto-closed sessions, pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it is over the size cap. |
 | `/register-sources` | Point CORE at outside data that should feed the project's memory. |
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
@@ -48,7 +48,7 @@ Installing CORE registers four hooks via `plugins/core/hooks/hooks.json` — the
 | SessionStart | Injects the directive to run `/core` first, so you never type it. A wrapper entry point (`CORE_AUTOSTART_SKILL`) is honored only when registered in your own user-level `~/.claude/settings.json`, resolved from the OS account database (`os.userInfo()`), so neither a project's settings nor a hostile `HOME`/`USERPROFILE` can redirect it. | `CORE_AUTOSTART=0` |
 | UserPromptSubmit | Per-turn retrieval: injects the top matching memory units for each prompt (deterministic, byte-capped, fail-open). | `CORE_RETRIEVAL_HOOK=0` |
 | Stop | Closes out each answered turn: records locally whether the memory delivered that turn was used, so retrieval quality can be graded later. Nothing leaves your machine. | `CORE_METRICS_ENABLED=0` |
-| SessionEnd | Discharges the session close in the background, so you never type `/finalize`. | `CORE_AUTO_CLOSE=0` |
+| SessionEnd | Records a deterministic lifecycle receipt for the exact session that ended — zero model calls; `/process-memory` back-fills the memory processing later. | `CORE_AUTO_CLOSE=0` |
 
 ### Optional hooks (manual)
 

@@ -34,7 +34,7 @@ Entries get archived to keep PROJECT.md lean — but archived entries can become
 
 For each archive file not modified recently, extract decision/risk/assumption IDs and grep the current read surface (PROJECT.md, recent session summaries, protocols, skill references) for references beyond each entry's own stub line. Surface candidates above the match threshold to the user, who decides: promote the stub back to §D&R, reject, or suppress for N cycles.
 
-Suppression state persists at `~/.core/swarm-effectiveness/archive-reconciliation-state.json`. Log all outcomes in the hygiene retrospective.
+Suppression state persists at `~/.core/swarm-effectiveness/archive-reconciliation-state.json`. Narrate all outcomes in the pass's own report.
 
 **Calibration defaults** — starting points to tune after a few cycles, not fixed rules: 14-day recency gate (skip files modified too recently), ≥3 match threshold (below this is noise), top-10 candidates per cycle.
 
@@ -56,9 +56,9 @@ The rule that matters: for structural edge types (`supersedes`, `depends-on`, `c
 
 Session logs in `<project>/_sessions/` are ephemeral by design and grow without bound unless pruned. A log is eligible if all three conditions hold: older than 90 days, no unit's `sources:` or `cites:` edge references it, no session summary references it.
 
-The citation check is what decides. If a session log got cited by a unit, someone reached back for it — preserve it. Age and summary-reference checks filter the rest. Log every deletion in the retrospective; clean up empty directories.
+The citation check is what decides. If a session log got cited by a unit, someone reached back for it — preserve it. Age and summary-reference checks filter the rest. Narrate every deletion in the pass's report; clean up empty directories.
 
-What this phase never touches: session summaries, outputs, swarm-effectiveness reports, hygiene retrospectives, or any cited session log.
+What this phase never touches: session summaries, outputs, swarm-effectiveness reports, or any cited session log.
 
 ## Phase 4: Pattern Synthesis
 
@@ -73,7 +73,7 @@ Look across surviving entries for meta-patterns — recurring themes, consistent
 | Semantic miss pattern | Repeated Tier 3 misses on similar queries across sessions | Vector store behind MCP |
 | Concurrent-writer conflict | Second writer enters system AND direct-write conflicts arise | Event-log + materializer |
 
-One firing cycle is a signal; two consecutive cycles is grounds to propose a DC for the next-step infrastructure. Log each trip-wire's current status in the hygiene retrospective.
+One firing cycle is a signal; two consecutive cycles is grounds to propose a DC for the next-step infrastructure. Surface each trip-wire's current status in the pass's narration, and graduate a unit when one fires.
 
 ## Phase 5: Agent Refresh
 
@@ -83,7 +83,7 @@ Review agents that participated in recent swarms. Files at `~/.core/agents/<keba
 
 Every hygiene run produces:
 1. Updated memory files (modified, merged, archived, deleted)
-2. A retrospective at `~/.core/hygiene-cycles/<YYYY-MM-DD>.md`
-3. Updated index files reflecting any additions or removals
-4. If 3b ran: refreshed `archive-reconciliation-state.json` + Phase 3b section in retrospective
-5. If 3b promoted any stubs: corresponding PROJECT.md §D&R edits, gated on secondary confirmation
+2. Updated index files reflecting any additions or removals
+3. If 3b ran: refreshed `archive-reconciliation-state.json`
+4. If 3b promoted any stubs: corresponding PROJECT.md §D&R edits, gated on secondary confirmation
+5. Plain-voice narration of what changed — durable lessons graduate into units rather than a side file

@@ -201,10 +201,9 @@ export function detectCloseState(store, { allOps = [], storeSignature = null, no
 }
 
 // Ops whose correctness depends on the unit store; re-owed when the store changes after close.
-// (Transcript-derived ops aren't here — they always run when a close runs, gated by shouldSpawn.)
+// (Session-derived ops aren't here — their truth comes from the session, not the store.)
 const STORE_DERIVED = new Set([
-  'maintenance-run', 'render-project-md', 'hot-section', 'demote-moves',
-  'compact-project', 'demote-state', 'check-units', 'validity-stamp', 'decorate-graph',
+  'render-project-md',
 ]);
 export function isStoreDerived(op) { return STORE_DERIVED.has(op); }
 
@@ -416,11 +415,11 @@ export function isRegisteredWorkspace(store, { indexPath = resolveIndexPath() } 
   });
 }
 
-// The full op set the close envelope is responsible for (the hook imports this list — single source).
+// The op set a session close is responsible for (single source — docs and the
+// startup catch-up mirror this list). The close preserves and certifies the
+// session; maintenance belongs to /process-memory, analytics to /metrics.
 export const CLOSE_OPS = [
-  'maintenance-run', 'render-project-md', 'hot-section', 'demote-moves',
-  'compact-project', 'demote-state', 'check-units', 'decorate-graph', 'reflection-a', 'reflection-b',
-  'metrics', 'session-summary', 'memory-refresh',
+  'material-capture', 'render-project-md', 'session-summary', 'memory-refresh',
 ];
 
 
