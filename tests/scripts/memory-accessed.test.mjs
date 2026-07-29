@@ -39,11 +39,11 @@ test('classifyAccess UNKNOWN: transcript unavailable (no false "not accessed")',
   assert.equal(r.identity_status, 'UNKNOWN');
 });
 
-test('classifyAccess UNKNOWN: Codex tool extraction pending — refuses false negative', () => {
-  // Codex events have no tool kind yet (read-transcript residual); must not say "not accessed".
+test('classifyAccess UNKNOWN: tool extraction unavailable — refuses false negative', () => {
+  // When tool events cannot be extracted for a harness, the probe must not say "not accessed".
   const r = classifyAccess({ harness: 'codex', transcriptAvailable: true, toolExtractionPending: true, events: [], coreStorePresent: true });
   assert.equal(r.identity_status, 'UNKNOWN');
-  assert.match(r.reason, /pending/);
+  assert.match(r.reason, /not mechanically observable/);
 });
 
 test('classifyAccess PASS: PROJECT.md read counts as CORE access', () => {
