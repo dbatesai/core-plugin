@@ -667,13 +667,6 @@
       "invocation": "user"
     },
     {
-      "name": "metrics-package",
-      "kind": "skill",
-      "harness": "shared",
-      "status": "deprecated",
-      "invocation": "user"
-    },
-    {
       "name": "orient",
       "kind": "skill",
       "harness": "shared",
@@ -699,13 +692,6 @@
       "kind": "skill",
       "harness": "shared",
       "status": "active",
-      "invocation": "user"
-    },
-    {
-      "name": "self-test",
-      "kind": "skill",
-      "harness": "shared",
-      "status": "deprecated",
       "invocation": "user"
     },
     {

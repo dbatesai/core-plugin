@@ -8,13 +8,13 @@ CORE is a single agent backed by a unit-based memory store (one fact per file, w
 
 - [README.md](README.md): what CORE is, why it exists, how it works, and install commands.
 - [INSTALL.md](INSTALL.md): install on Claude Code or Codex, run a local copy, troubleshoot.
-- [USAGE.md](USAGE.md): the reference for every command (`/core`, eight companions, and three deprecation shims), every protocol, and the scripts you would run or read directly.
+- [USAGE.md](USAGE.md): the reference for every command (`/core`, eight companions, and one deprecation shim), every protocol, and the scripts you would run or read directly.
 
 ## How to use it
 
 - **Install (Claude Code):** `/plugin marketplace add dbatesai/core-plugin` then `/plugin install core@core`. From the terminal: `claude plugins marketplace add dbatesai/core-plugin` then `claude plugins install core@core`.
 - **Run:** type `/core` to start or resume a project. It loads your project context and prints a readiness summary before doing anything else.
-- **Companions:** `/finalize` (close a session), `/refocus` (recenter mid-session on what matters most now, given what you've learned since you started), `/process-memory` (memory housekeeping on demand), `/register-sources` (point CORE at an outside data source), `/configure-project` (bootstrap and health-check a project), `/vibecheck` (capture the session's vibe), `/metrics` (the one door to memory health — plain-language answers by default, with `full`/`export`/`self-test` modes), `/memory-view` (browse the memory store as a read-only page, published as a private artifact only after an explicit, per-publish confirmation). - **Deprecation shims:** `/metrics-package` and `/self-test` moved behind the `/metrics` door; `/orient` folded into `/core`. All three still register and forward.
+- **Companions:** `/finalize` (close a session), `/refocus` (recenter mid-session on what matters most now, given what you've learned since you started), `/process-memory` (memory housekeeping on demand), `/register-sources` (point CORE at an outside data source), `/configure-project` (bootstrap and health-check a project), `/vibecheck` (capture the session's vibe), `/metrics` (the one door to memory health — plain-language answers by default, with `full`/`export`/`self-test` modes), `/memory-view` (browse the memory store as a read-only page, published as a private artifact only after an explicit, per-publish confirmation). - **Deprecation shim:** `/orient` folded into `/core`; it still registers and forwards (removal scheduled 2026-08-15).
 
 ## Design
 

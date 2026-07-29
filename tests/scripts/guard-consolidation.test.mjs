@@ -102,5 +102,9 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // 62 -> 63 (2026-07-24, v3.14.0 Link 5): metrics-tripwires.mjs, the
   // session-start degradation check (startup protocol consumes its stdout) —
   // a genuinely-new CLI tool with its own entry point, not a copy.
-  assert.ok(n <= 63, `CLI-entry-guard occurrences grew past baseline 63 (target: one shared helper): ${n}`);
+  // 63 -> 65 (2026-07-28): backfill-memory.mjs (memory back-fill discovery for
+  // zero-model closes) and generate-door-inventory.mjs (the source-derived
+  // completeness inventory) — both genuinely-new CLI tools with their own
+  // entry points, not copies. Still target one shared isCliEntry() helper.
+  assert.ok(n <= 65, `CLI-entry-guard occurrences grew past baseline 65 (target: one shared helper): ${n}`);
 });
