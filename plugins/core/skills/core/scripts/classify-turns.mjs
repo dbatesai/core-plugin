@@ -58,8 +58,9 @@ export const CLASSIFIED_SCHEMA_VERSION = '1.0.0';
 // word-boundary `containsTerm` test plus the rule that PROJECT.md only counts as
 // in-context when this session's transcript shows it was actually read. Stamped on
 // every record so the calibration layer can invalidate any label set cleared
-// under a different proxy — same R-1 honesty guard the classifier_version match enforces.
-// The label-independence half stays Gate G4 (the product owner vouches); this only versions the proxy.
+// under a different proxy — the same honesty guard the classifier_version match
+// enforces. This versions the proxy only; label independence is not mechanically
+// enforced here.
 export const PROXY_VERSION = 2;
 
 // A clarifying question — the agent asking the user instead of answering.

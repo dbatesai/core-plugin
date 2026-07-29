@@ -20,7 +20,7 @@
  * Match function is deterministic high-signal-term overlap, so paraphrases can
  * read as "absent" — which is exactly why output is candidates, not a verdict.
  *
- * SCOPE (MET-009): current-project-only by design. The audit reads only this
+ * SCOPE: current-project-only by design. The audit reads only this
  * project's native surface and this project's unit store, so it cannot detect
  * cross-project contamination (a fact from Project A landing in Project B's
  * MEMORY.md). If that becomes a real concern, the right tool is a separate

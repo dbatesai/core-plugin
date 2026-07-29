@@ -189,7 +189,7 @@ function makeUnknownRow(capability, errorMessage) {
     evidence: [
       {
         source: 'probe-execution',
-        // MET-014: 1000 chars keeps a usable stack head; 300 cut real traces mid-frame.
+        // 1000 chars keeps a usable stack head; 300 cuts real traces mid-frame.
         value: { error: String(errorMessage).slice(0, 1000), capability_id: capability.capability_id },
         agrees_with_others: false,
         weight: 'conflicting',

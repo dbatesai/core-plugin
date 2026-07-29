@@ -135,7 +135,7 @@ export function resolveSessionId({ explicit } = {}) {
   return 'no-session-context';
 }
 
-// MET-010: bound and sanitize what lands in metrics payloads. Project content
+// Bound and sanitize what lands in metrics payloads. Project content
 // (unit ids, file paths, free text) reaches logEvent calls; without a cap, an
 // adversarial or just-huge value is serialized verbatim into the trace JSONL.
 export const MAX_ATTRIBUTE_STRING = 1000;

@@ -111,7 +111,7 @@ export function scanTranscript(lines, token) {
 /** Pure classifier over the identity_status bar above. */
 export function classify({ token, canaryFileState = 'absent', memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW, writtenBySession = null, sessionId = null, tokenConsumption = null }) {
   if (!token) {
-    // MET-006: a missing canary is almost always "/finalize didn't run last session"
+    // A missing canary is almost always "/finalize didn't run last session"
     // (abrupt end), not "never installed". A distinct reason_code lets the user and
     // the readiness pass tell those apart instead of a generic NOT-YET.
     if (canaryFileState === 'invalid') {

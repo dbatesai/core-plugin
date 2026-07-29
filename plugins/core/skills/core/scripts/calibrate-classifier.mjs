@@ -46,21 +46,19 @@ export const INTERVAL_LOWER_THRESHOLD = 0.5;
 export const CALIBRATION_HARNESSES = ['claude-code', 'codex'];
 
 /**
- * MET-002 honesty fix: the 100-turn gate is structurally slow on a single-user
- * install (the CORE-on-CORE pool sat at 57/100 after months), so PROVISIONAL is
- * the EXPECTED steady state at that scale — not a failure to nag about. A
- * workspace that wants a reachable gate sets `calibration_min_labeled` in
- * <project>/workspace.json (floor 30: below that, per-class precision across six
- * states is noise, and lowering further would launder confidence — the R-1 guard).
- * REOPEN CONDITION for revisiting the 100 default: the pool clears 100 labeled
- * turns anyway, or the install grows beyond a single user.
+ * The 100-turn gate is structurally slow on a single-user install, where a pool
+ * can sit well short of it for months. PROVISIONAL is therefore the EXPECTED
+ * steady state at that scale — not a failure to nag about. A workspace that
+ * wants a reachable gate sets `calibration_min_labeled` in
+ * <project>/workspace.json. The floor is 30: below that, per-class precision
+ * across six states is noise, and lowering further would launder confidence.
  */
 export function resolveMinLabeled(project) {
   void project;
   return MIN_LABELED;
 }
 
-// The six recognition states classify-turns can emit. M7: the gate must measure per-class
+// The six recognition states classify-turns can emit. The gate must measure per-class
 // coverage against this canonical set so it can't clear while whole states sit unmeasured.
 export const CANONICAL_STATES = [
   'tier-0-win', 'tier-1-3-win', 'rec-fail-tier-0',
