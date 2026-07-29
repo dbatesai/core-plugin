@@ -1,11 +1,10 @@
 /**
- * record-capability-snapshot.mjs — v2.7.0 capability-history append path.
+ * record-capability-snapshot.mjs — the capability-history append path.
  *
- * The missing wire between the producer and the store: startup runs the
- * capability probe and writes capability-state.json, but nothing appended the
- * rows to the per-workspace history, so drift/regression analysis had nothing
- * to read across sessions. This script runs runStartup() and appends the rows
- * to ~/.core/workspaces/<id>/capability-history.jsonl via appendRows().
+ * The wire between the producer and the store: startup runs the capability probe
+ * and writes capability-state.json; this script runs runStartup() and appends the
+ * rows to ~/.core/workspaces/<id>/capability-history.jsonl via appendRows(), which
+ * is what gives drift/regression analysis something to read across sessions.
  *
  * Used by protocols/startup.md (once per session, fail-open) so each session
  * leaves a capability snapshot; analyze-capability-drift.mjs then reads the
@@ -26,7 +25,7 @@ import { appendRows } from './capability-history.mjs';
 
 /**
  * Resolve a NON-NULL session id so per-session history buckets never collapse
- * (HC_614 blocker 1). Order: explicit id → harness session env var → a
+ * Order: explicit id → harness session env var → a
  * per-invocation fallback (timestamp + random) that is distinct across sessions.
  * A null session id would land every session in one bucket and break
  * regression detection, which delimits sessions by session_id.

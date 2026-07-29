@@ -1,7 +1,7 @@
 /**
  * capability-history.mjs — append-only capability-row history with advisory lock.
  *
- * v2.7.0 deliverable (ratified collab consensus, session 52). Stores each
+ * Stores each
  * session's capability rows so drift and regression can be detected across
  * sessions (analyze-capability-drift.mjs is the consumer).
  *
@@ -10,10 +10,9 @@
  *   { observed_at, runner_version, schema_version, workspace_id,
  *     session_id, row_content_hash, row }
  *
- * STORAGE DECISION (HK pushback, HC-accepted with conditions, session 52):
- * JSONL + advisory lock, NOT Maildir. The single-writer-per-workspace
+ * STORAGE: JSONL + advisory lock, NOT Maildir. The single-writer-per-workspace
  * assumption is guarded by an advisory lock with stale recovery, and a
- * two-writer test fixture proves no lost history. See the v2.7 plan §rev.
+ * two-writer test fixture proves no lost history.
  *
  * Retention: byte-cap (default 512KB). On breach, keep the most recent
  * RETENTION_PER_CAPABILITY entries per capability_id; older drop.

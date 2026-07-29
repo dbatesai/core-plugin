@@ -1,5 +1,5 @@
 /**
- * validate-adversarial-artifacts.mjs — v2.9/v3.0 Slice E (validator half).
+ * validate-adversarial-artifacts.mjs — the adversarial-artifact validator.
  *
  * Validates the structured artifacts CORE's anti-anchoring discipline produces:
  * initial-frame.json (per agent, Phase 1), persuasion-log.jsonl, mind-changes.jsonl.

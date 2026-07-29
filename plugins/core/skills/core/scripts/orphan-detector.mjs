@@ -56,7 +56,7 @@ export const ALLOWLIST = Object.freeze({
     reviewBy: '2026-10-28',
   },
   'retrieval-harness.mjs': {
-    reason: 'Offline Recall@K gold harness (Tier-A; arms trimmed to model-free per the no-local-models rule) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the pre-registered measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility like score-ladder.mjs.',
+    reason: 'Offline Recall@K gold harness (Tier-A; arms trimmed to model-free per the no-local-models rule) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the pre-registered measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility, not a runtime dependency.',
     allowlistDate: '2026-07-07',
     reviewBy: '2026-10-07',
   },

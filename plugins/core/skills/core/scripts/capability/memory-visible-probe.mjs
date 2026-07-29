@@ -1,20 +1,20 @@
 /**
- * memory-visible-probe.mjs — v3.0 memory-visible-in-agent-context (Claude Code).
+ * memory-visible-probe.mjs — memory-visible-in-agent-context (Claude Code).
  *
  * Proves the auto-memory the harness injects at session start was actually IN the
- * agent's context — not merely present on disk (that's v2.7's auto-memory probe).
+ * agent's context — not merely present on disk (that's auto-memory-injection-probe.mjs).
  * Per-session canary: /finalize writes a fresh token into the MEMORY.md injection
  * window and records the expected token to ~/.core/workspaces/<id>/visibility-canary.json
  * (write-visibility-canary.mjs). Next session the agent echoes the token it sees in
  * injected context; THIS probe parses the Claude Code transcript JSONL and confirms
  * the echo preceded any tool that could read the canary.
  *
- * Honest boundary (HC_620/622/623): proves the token was injected into context and
+ * Honest boundary: proves the token was injected into context and
  * echoed before any potentially-reading tool — memory was VISIBLE. It does NOT prove
  * the agent attended to / acted on memory beyond the echo (memory-VISIBLE != memory-USED),
  * and it's Claude-Code-specific.
  *
- * Identity_status (HC-accepted bar, hardened per HC_623):
+ * Identity_status:
  *   PASS     — canary recorded AND actually present in the MEMORY.md injection window
  *              (memory_written + file still contains the token) AND echoed in the
  *              transcript AND no non-allowlisted tool ran before the echo.
@@ -23,10 +23,10 @@
  *              non-allowlisted tool ran before the echo (could have read the canary).
  *   NOT-YET  — no canary recorded (write step hasn't run).
  *
- * HC_623 hardening: (1) require memory injection, not just an echo; (2) before the
- * echo, ANY tool_use outside a tiny allowlist degrades — a Bash can read hidden
+ * Two rules keep the bar honest: (1) require memory injection, not just an echo; (2) before
+ * the echo, ANY tool_use outside a tiny allowlist degrades — a Bash can read hidden
  * surfaces without a literal path, so path-matching alone is too weak.
- * HC_622 #4: never print the raw expected token — redacted hash only.
+ * The raw expected token is never printed — redacted hash only.
  *
  * By design the script ships with the plugin. The plugin ships .mjs only.
  */
@@ -49,10 +49,10 @@ export const DEFAULT_INJECTION_LINE_WINDOW = 200;
 export const DEFAULT_INJECTION_BYTE_WINDOW = 24400;
 
 // Tools that cannot read the canary surfaces, so they're safe before the echo.
-// Deliberately tiny (HC_623 #2): everything else degrades PASS conservatively.
+// Deliberately tiny: everything else degrades PASS conservatively.
 export const ECHO_SAFE_TOOLS = new Set(['Skill']);
 
-/** Redact a token for safe logging — never emit the raw token (HC_622 #4). */
+/** Redact a token for safe logging — never emit the raw token. */
 export function redactToken(tok) {
   if (!tok) return '(none)';
   return `len=${String(tok).length} sha256:${createHash('sha256').update(String(tok)).digest('hex').slice(0, 12)}`;
@@ -82,7 +82,7 @@ export function resolveTranscript(cwd, home, override, sessionId = null) {
 
 /**
  * Scan ordered transcript lines for the canary echo and every tool_use (by name).
- * No path-matching (HC_623 #2): the classifier judges tools by the allowlist, since
+ * No path-matching: the classifier judges tools by the allowlist, since
  * a Bash command can read protected surfaces without a literal path in its input.
  */
 export function scanTranscript(lines, token) {
@@ -108,7 +108,7 @@ export function scanTranscript(lines, token) {
   return events;
 }
 
-/** Pure classifier (HC_623-hardened bar). */
+/** Pure classifier over the identity_status bar above. */
 export function classify({ token, canaryFileState = 'absent', memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW, writtenBySession = null, sessionId = null, tokenConsumption = null }) {
   if (!token) {
     // MET-006: a missing canary is almost always "/finalize didn't run last session"
@@ -128,7 +128,7 @@ export function classify({ token, canaryFileState = 'absent', memoryWritten, mem
   // memory file exceeds the known injection window, the tail can drop silently while
   // the canary still echoes. That is DEGRADED, never PASS. The window is enforced on
   // BOTH axes — Claude Code truncates on whichever limit it hits first, and a file can
-  // be under the line window yet over the byte cap (field-observed session 56).
+  // be under the line window yet over the byte cap.
   if (Number.isFinite(memoryLineCount) && Number.isFinite(injectionLineWindow) && memoryLineCount > injectionLineWindow) {
     return { identity_status: 'DEGRADED', reason: `truncation-detected: MEMORY.md line_count=${memoryLineCount} exceeds injection window=${injectionLineWindow}` };
   }
@@ -142,7 +142,7 @@ export function classify({ token, canaryFileState = 'absent', memoryWritten, mem
   if (!firstEcho) {
     return { identity_status: 'DEGRADED', reason: 'canary token not echoed — truncation, non-injection, recognition-failure, or mismatch' };
   }
-  // Blocker 2: before the echo, ANY tool outside the tiny allowlist could have read
+  // Before the echo, ANY tool outside the tiny allowlist could have read
   // the canary (a Bash needs no literal path). Conservative: degrade.
   const badPreEcho = events.find((e) => e.kind === 'tool' && e.idx < firstEcho.idx && !ECHO_SAFE_TOOLS.has(e.name));
   if (badPreEcho) {
@@ -220,10 +220,9 @@ export async function probe(opts = {}) {
 
 // Count REAL lines. A trailing newline produces a final empty split element that is
 // NOT a real line — so a file of exactly N lines ending in `\n` must count as N, not
-// N+1, or it falsely trips truncation at an N-line injection window (HC blocker #3,
-// evt-202605291319). Live relevance: MEMORY.md sits near the 200-line window after the
-// v2.8.1 compaction, so the off-by-one was one compaction away from a false DEGRADED.
-// Exported for direct boundary testing.
+// N+1, or it falsely trips truncation at an N-line injection window. This matters in
+// practice: MEMORY.md sits near the 200-line window, so an off-by-one here is one
+// compaction away from a false DEGRADED. Exported for direct boundary testing.
 export function countLines(content) {
   if (!content) return 0;
   const lines = content.split(/\r?\n/);

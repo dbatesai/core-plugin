@@ -99,11 +99,11 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
   // A5 strictness: the Recall@K instrument refuses an under-declared gold set and
   // an unclassifiable store the same way the tier sweep does — zero silent skips.
   validateGold(gold);
-  // Blocker 2: ONE immutable captured corpus — index AND body
+  // ONE immutable captured corpus — index AND body
   // bytes — minted before any measurement; every arm and every policy consumes it.
   // No reader below touches live unit files after snapshot_id is computed, so a
   // store mutation mid-run cannot change what any number describes. An injected
-  // snapshot (round 13) makes that a TESTABLE end-to-end property: two runs with
+  // snapshot makes that a TESTABLE end-to-end property: two runs with
   // the same capture must be identical regardless of on-disk mutation.
   const snapshot = injectedSnapshot || loadSnapshot(store, { captureBodies: true });
   assertKnownTiers(snapshot.index);
@@ -407,7 +407,7 @@ export function runTierPolicySweep(store, gold, { topN = 3, snapshot: injectedSn
       let band;
       if (rescuer) band = `tier-ordering (rescued by ${rescuer[0]})`;
       else {
-        const inSubstrate = productRankedIds(q.query, store, { snapshot }).includes(g); // round 13: fourth review reading — banding must consume the sweep's own capture
+        const inSubstrate = productRankedIds(q.query, store, { snapshot }).includes(g); // banding must consume the sweep's own capture
         band = inSubstrate ? 'deep-but-present (topN x tier coupled; no policy reaches at this topN)' : 'recall (absent from ranking; enrichment/reasoning, not tier)';
       }
       bands.push({ query: q.id, gold: g, band }); // ids are the caller's local gold labels

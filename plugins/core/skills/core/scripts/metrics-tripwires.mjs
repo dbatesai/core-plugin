@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * metrics-tripwires.mjs — proactive degradation surfacing (v3.14.0 Link 5).
+ * metrics-tripwires.mjs — proactive degradation surfacing (evidence chain, Link 5).
  *
  * A cheap session-start check over PINNED scorecards + capture health — never
  * live recomputation. Healthy → total silence (the readiness-only-escalations
@@ -41,8 +41,8 @@ export const TRIPWIRE_THRESHOLDS = Object.freeze({
   miss_trend_scorecards: 3,        // consecutive cards with strictly rising miss rate
   storage_gap_recurrence: 2,       // cards (of the recent window) with any storage gap
   capture_failure_rate: 0.10,      // failures/attempts …
-  capture_failure_min_attempts: 20, // … only meaningful at or above this volume (Agy)
-  capture_consecutive_failures: 3, // … or this streak, regardless of volume (Agy)
+  capture_failure_min_attempts: 20, // … only meaningful at or above this volume
+  capture_consecutive_failures: 3, // … or this streak, regardless of volume
   capture_coverage_min: 0.5,       // captured/hook-retrieved, per window …
   capture_coverage_min_volume: 20, // … only meaningful at or above this volume
   scorecard_stale_days: 14,        // no pinned conclusion in this long = chain silent
@@ -134,7 +134,7 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
     ? newest.capture_enabled
     : turnCaptureEnabled({ project: projectDir });
 
-  // 4. Capture failures — Agy's floors: rate needs volume; a streak never does.
+  // 4. Capture failures — two floors: the rate needs volume; a streak never does.
   const health = newest.capture_health || readCaptureHealth(projectDir, { workspaceId });
   if (captureEnabled && health && typeof health.attempts === 'number') {
     const streak = (health.consecutive_failures || 0) >= thresholds.capture_consecutive_failures;

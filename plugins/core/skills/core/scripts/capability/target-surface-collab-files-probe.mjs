@@ -1,12 +1,12 @@
 /**
- * target-surface-collab-files-probe.mjs — v2.6.0 target-surface capability.
+ * target-surface-collab-files-probe.mjs — target-surface capability.
  *
  * Proves that this install's configured collab-files repo (if any) is
  * reachable, is the expected git repo, has a known remote, and has a
  * parseable working-tree state. Called by capability-probe.mjs when the
  * descriptor declares delegate: 'capability/target-surface-collab-files-probe.mjs'.
  *
- * Five proofs per HC critique evt-202605271654:
+ * Five proofs, all required:
  *   1. Files repo path exists at the configured location
  *   2. Git repo root matches configured path (not a sub-directory of something else)
  *   3. Working tree state is parseable (git status --porcelain exits 0)

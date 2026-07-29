@@ -1,5 +1,5 @@
 /**
- * analyze-retrieval-skip.mjs — v2.9 Slice B: the behavioral consumer of read-transcript.
+ * analyze-retrieval-skip.mjs — the behavioral consumer of read-transcript.
  *
  * The retrieval-skip gate. memory-accessed-probe answers a session-level binary — was
  * the CORE store reached AT ALL this session? This asks the sharper, ordering-aware
@@ -97,8 +97,9 @@ function normalizeId(tok) {
 }
 
 // The project's own name appears constantly (skill prompt, headings, every summary) and
-// is not a retrieval trigger — drop it so it doesn't flood candidates (live-smoke caught
-// "CORE" self-flagging session 56). Sources: project dir basename + workspace.json name.
+// is not a retrieval trigger — drop it so it doesn't flood candidates (without this, a
+// project named CORE self-flags on every line). Sources: project dir basename +
+// workspace.json name.
 function projectSelfNames(projectRoot) {
   const names = new Set();
   const base = String(projectRoot).replace(/[/\\]+$/, '').split(/[/\\]/).pop();

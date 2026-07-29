@@ -160,8 +160,8 @@ export function spliceSection(memoryMdText, newSection) {
 // The writer computes the priority block from <source>/_memories and writes it
 // into the --memory-md target. Nothing structural stops you from pairing one
 // project's _memories with another project's MEMORY.md — and when that happens
-// the target's units are silently overwritten with the source's (a real,
-// destructive cross-project contamination that bit us in session 60).
+// the target's units are silently overwritten with the source's — a destructive
+// cross-project contamination with no recovery path.
 //
 // Claude Code maps a project cwd to ~/.claude/projects/<mapped-cwd>/memory/MEMORY.md
 // where <mapped-cwd> is the absolute cwd with path separators turned into dashes.

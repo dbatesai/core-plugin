@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * turn-capture.mjs — the every-turn evidence layer (v3.14.0 Link 1).
+ * turn-capture.mjs — the every-turn evidence layer (evidence chain, Link 1).
  *
  * Why this exists (evidence-chain spec): the closed-schema telemetry
  * (`retrieval-log.jsonl`) records THAT retrieval happened — ≤8 keyword tokens,
@@ -175,7 +175,7 @@ export function normalizeTurnEvidenceRow(input) {
       score: numOrNull(r && r.score),
       source_stage: strOrNull(r && r.source_stage, 40),
     }));
-  // Tail density (Agy, Gate A): the score of the FIRST candidate the bound
+  // Tail density: the score of the FIRST candidate the bound
   // dropped, so a reader knows how hot the truncated tail was. Null when
   // nothing was dropped.
   const rejectedCutoffScore = rejectedAll.length > TURN_CAPTURE_MAX_REJECTED
@@ -251,7 +251,7 @@ function bumpHealth(projectDir, wsId, { failed, reason, ts }) {
     health.attempts += 1;
     if (failed) {
       health.failures += 1;
-      // Streak feeds the tripwire floor (Agy, Gate A): "10% failure rate with
+      // Streak feeds the tripwire floor: "10% failure rate with
       // ≥20 attempts, OR 3 consecutive failures" — the streak catches a
       // hard-dead recorder in a short session where the rate floor can't.
       health.consecutive_failures = (health.consecutive_failures || 0) + 1;
@@ -307,12 +307,10 @@ export function captureTurnEvidence(projectDir, input, { workspaceId, now, env =
         try {
           mkdirSync(dir, { recursive: true, mode: TURN_CAPTURE_DIR_MODE });
           hardenPath(dir, TURN_CAPTURE_DIR_MODE);
-          // Self-exclusion from git (found live on the CORE project during
-          // the v3.14.0 demo): the stream holds real conversation content,
-          // and a git-tracked project would otherwise be one `git add -A`
-          // away from committing it — the exact content-in-repo-tree footgun
-          // the retired trace stream had. The stream protects itself; no
-          // project-level .gitignore is relied on.
+          // Self-exclusion from git: the stream holds real conversation
+          // content, and a git-tracked project would otherwise be one
+          // `git add -A` away from committing it. The stream protects itself;
+          // no project-level .gitignore is relied on.
           const gitignore = join(dir, '.gitignore');
           if (!existsSync(gitignore)) {
             writeFileSync(gitignore, '*\n');

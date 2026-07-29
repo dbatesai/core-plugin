@@ -1,7 +1,7 @@
 /**
  * analyze-capability-drift.mjs — drift + regression detection over capability history.
  *
- * v2.7.0 deliverable. Consumes capability-history.jsonl (written by capability-history.mjs)
+ * Consumes capability-history.jsonl (written by capability-history.mjs)
  * and surfaces two things:
  *   - DRIFT: a capability's identity_status changed in the DEGRADING direction between
  *     consecutive observations (PASS→DEGRADED, PASS→NOT-YET, etc.). Healing-direction
@@ -10,9 +10,9 @@
  *     session's row set (the descriptor changed / capability disappeared).
  *
  * Output: <project>/_memories/_capability-drift-log.md — a render-only file the agent reads
- * on demand. NOT a unit. Per v2.7 plan §3-4.
+ * on demand. NOT a unit.
  *
- * Attribution is HYPOTHESIS, never asserted fact (HC bar): every likely-cause line is
+ * Attribution is HYPOTHESIS, never asserted fact: every likely-cause line is
  * qualified with confidence low|med|high.
  */
 
@@ -131,7 +131,7 @@ export function detectDrift(history) {
 
 /**
  * Hypothesize a cause for a drift event by diffing evidence-source codes.
- * ALWAYS a hypothesis with a confidence level — never asserted as fact (HC bar).
+ * ALWAYS a hypothesis with a confidence level — never asserted as fact.
  */
 export function attributeDrift(prevRow, curRow) {
   const prevSources = new Set((prevRow?.evidence ?? []).map(e => e.source));

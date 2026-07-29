@@ -1,11 +1,11 @@
 /**
- * resolve-plugin-root.mjs — v2.6.0 identity gate.
+ * resolve-plugin-root.mjs — the identity gate.
  *
- * The foundational primitive every other piece of v2.6.0 depends on. Returns
+ * The foundational primitive the rest of the capability layer depends on. Returns
  * a capability row (per skills/core/scripts/capability/row-schema.md) describing
  * what plugin we're actually running and how confident we are in that answer.
  *
- * Six invariants per HC's locked list (collab evt-202605271247-core-codex-5fd2):
+ * Six invariants, all binding:
  *   1. Deterministic. No network, no writes.
  *   2. Read-only. No file writes, no env mutations, no process side effects.
  *   3. realpath from executing module (NOT cwd). Cwd is evidence only.
@@ -15,7 +15,7 @@
  *
  * Identity quality is the four-state enum (PASS / DEGRADED / NOT-YET / UNKNOWN).
  * Mutation permission is a separate dimension — consumers read mutation_permitted
- * + mutation_block_reason, not identity_status. (HC refinement, same event.)
+ * + mutation_block_reason, not identity_status.
  *
  * By design the script ships with the plugin.
  * The plugin ships Node.js (.mjs) only.
@@ -28,8 +28,7 @@ import { homedir } from 'node:os';
 
 export const SCHEMA_VERSION = '1.0.0';
 
-// Ordered: most-likely-Codex-first because Codex empirical work is the
-// v2.6.0 wedge target. Order doesn't change semantics — first match wins
+// Ordered Codex-first. Order doesn't change semantics — first match wins
 // during the walk-up since each anchor is harness-specific.
 export const PLUGIN_ROOT_ANCHORS = [
   { file: '.codex-plugin/plugin.json',  harness: 'codex' },
@@ -135,14 +134,13 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
 // ---------- Public API ----------
 
 // Detect the harness consuming this invocation — distinct from manifest_harness
-// (which the realpath walk found). Per HC critique evt-202605271310:
-// "Downstream scripts should not infer the active harness from whichever manifest
-// anchor won the root walk." The consuming harness lives in env signals; absence
-// of evidence is itself a state (UNKNOWN), not a guess.
+// (which the realpath walk found). Downstream scripts must not infer the active
+// harness from whichever manifest anchor won the root walk. The consuming harness
+// lives in env signals; absence of evidence is itself a state (UNKNOWN), not a guess.
 //
-// v2.6.0-delta: collect-all-signals first, then classify as unanimous/conflict/absent.
+// Collect all signals first, then classify as unanimous/conflict/absent.
 // First-match-wins is unsafe when multiple signals are present — a Codex run that also
-// inherits CLAUDE_PLUGIN_ROOT from the parent env would have silently resolved to
+// inherits CLAUDE_PLUGIN_ROOT from the parent env would silently resolve to
 // claude-code. Conflict → consuming_harness: unknown, source: conflict, identity DEGRADES.
 // Signal weight distinguishes *_PLUGIN_ROOT (strong, explicit plugin context) from
 // CLAUDE_CODE_SESSION_ID / CODEX_THREAD_ID (weak, env presence only).
@@ -188,12 +186,12 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
   };
   const evidence = [];
 
-  // Consuming-harness detection lives apart from manifest-walk (HC critique
-  // evt-202605271310). Detect first; surface as separate fields. UNKNOWN
-  // consuming-harness with PASS identity is a valid state.
+  // Consuming-harness detection lives apart from manifest-walk. Detect first;
+  // surface as separate fields. UNKNOWN consuming-harness with PASS identity
+  // is a valid state.
   const consuming = detectConsumingHarnessSignal(env);
 
-  // Step 1: starting path (HC invariant #3 — module-relative, never cwd)
+  // Step 1: starting path (invariant #3 — module-relative, never cwd)
   const startingPath = from || fileURLToPath(import.meta.url);
   let effective_script_root;
   try { effective_script_root = realpathSync(startingPath); }
@@ -289,7 +287,7 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
     weight: 'primary',
   });
 
-  // Step 4: env signal reconciliation (HC invariant #4 — corroborating only)
+  // Step 4: env signal reconciliation (invariant #4 — corroborating only)
   const envVarName = ENV_VAR_BY_HARNESS[found.harness];
   const envValue = env_signals[envVarName];
   if (envValue != null) {
@@ -381,8 +379,7 @@ export function resolvePluginRoot({ from, env = process.env, cwd = process.cwd()
   // truth about WHERE we are. mutation_permitted is the operational contract
   // that runners apply via per-action profiles (allowed_authorities,
   // allowed_harnesses, target_surface). This delegate never sets mutation_permitted
-  // to true on its own — that's a v2.6.0-β bug HC critique evt-202605271310
-  // surfaced. Runner gates; delegate reports.
+  // to true on its own. Runner gates; delegate reports.
   const conflictingCount = evidence.filter(e => e.weight === 'conflicting').length;
   const identity_status = conflictingCount === 0 ? 'PASS' : 'DEGRADED';
 
@@ -414,7 +411,7 @@ function buildRow(f) {
     observed_at: f.observed_at,
     // manifest_harness = what the realpath walk found at the plugin-root anchor
     // consuming_harness = which harness is actually running (from env signals)
-    // These are distinct dimensions per HC critique evt-202605271310. A
+    // These are distinct dimensions. A
     // multi-harness plugin root can have manifest_harness=codex while the
     // consuming_harness is claude-code; downstream consumers that need to
     // know which harness is running must read consuming_harness, not manifest_harness.

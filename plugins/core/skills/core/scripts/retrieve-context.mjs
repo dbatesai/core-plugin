@@ -335,7 +335,7 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
       query, snapshot_id: null, stages: null, pack: null, timing_ms: 0 };
   }
   const stages = runRetrievalStages(query, root, { topN, tierPolicy, tierEpsilon, tierWeight, snapshot });
-  const health = storeHealth(root, { snapshot: stages.snapshot }); // round 13: health from the run's own capture, never the cached file
+  const health = storeHealth(root, { snapshot: stages.snapshot }); // health from the run's own capture, never the cached file
   const pack = buildFinalContextPack(stages.final, { byteCap, health });
   const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
   const componentHash = (rel) => {

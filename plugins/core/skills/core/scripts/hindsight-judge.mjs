@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * hindsight-judge.mjs — the mechanical-grade hindsight pass (v3.14.0 Link 2).
+ * hindsight-judge.mjs — the mechanical-grade hindsight pass (evidence chain, Link 2).
  *
  * What it measures, honestly: TRUNCATION IMPACT. The live retrieval hook saw a
  * byte-capped view (≤8 keyword tokens) of the user's prompt; this judge, later
@@ -135,7 +135,7 @@ export function judgeUnjudgedTurns(projectDir, { limit = 50, gapFloor, workspace
       && ev.store_signature !== 'unknown'
       && ev.store_signature !== sigNow;
     if (drifted) {
-      verdict = 'drift-invalidated'; // flag and drop, never guess across drift (Agy, Gate A)
+      verdict = 'drift-invalidated'; // flag and drop, never guess across drift
     } else {
       let trace = null;
       try { trace = buildRetrievalTrace(ev.prompt_text, projectDir, { topN: Math.max(3, deliveredIds.length) }); }

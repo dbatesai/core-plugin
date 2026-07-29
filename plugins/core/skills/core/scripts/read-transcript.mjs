@@ -26,9 +26,8 @@
  * name + input text — the file-access signal memory-accessed needs. Schema derived from a
  * real `rollout-*.jsonl` (meta `codex_tool_extraction: 'implemented'`). *_output return
  * values and encrypted reasoning are skipped (access-intent lives in the call, not the
- * return). Residual: the evidence rollout is one Codex build; HC verifies the schema
- * still matches current core-codex transcripts — if a Codex version drifts the field
- * names, fix-forward (the parser fails open to no-tool-events, never throws).
+ * return). Residual: the schema evidence comes from one Codex build — if a Codex version
+ * drifts the field names, fix-forward (the parser fails open to no-tool-events, never throws).
  *
  * By design the deterministic parse ships as a script; the plugin ships .mjs.
  */
