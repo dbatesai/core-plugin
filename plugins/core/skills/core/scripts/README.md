@@ -108,15 +108,6 @@ A `PostCompact` hook that re-injects critical workspace context into a fresh con
 
 If `workspace.json` is absent, exit 0 with a graceful message.
 
-### `pwd-guard.mjs` and `voice-reminder.mjs` — personal developer hooks
-
-These are CORE-author-specific and deliberately not shipped in the plugin — not useful to plugin users in general:
-
-- `pwd-guard.mjs` — reminds the CORE author to declare `intent: skill-edit` when writing to skill-product paths. Lives at `<CORE-dev-repo>/.claude/scripts/pwd-guard.mjs`, wired from the CORE project's `.claude/settings.json`.
-- `voice-reminder.mjs` — injects a plain-voice imperative each turn. Lives at `~/.claude/hooks/voice-reminder.mjs`, wired from `~/.claude/settings.json`.
-
-Hooks that apply only to a specific author or project belong in that author's personal or project settings, not in a plugin that ships to everyone.
-
 ### Swarm log visualization
 
 For interactive HTML visualization of multi-agent session logs (agent reasoning chains, position changes, adversarial exchanges, convergence), use the `agent-interactions` skill. It produces a single self-contained HTML file from any directory of agent logs.

@@ -295,7 +295,7 @@ Then refresh the auto-memory index. Two parts:
 
 Do this inline in the main agent — don't dispatch a subagent. Subagent dispatch can require `git worktree`, which fails on non-git workspaces (any cloud-sync-backed project, any non-versioned project directory) — and per CORE's harness-agnostic design intent, git is not a precondition for project intelligence. Project intelligence workspaces hold data, not code — versioning isn't the right tool here. The script does the heavy lifting; the curation pass stays in the main agent.
 
-Narrate the refresh plainly: *"Refreshing MEMORY.md priority block from the top 30 units now."*
+Narrate the refresh plainly, naming the same number the command writes: *"Refreshing MEMORY.md priority block from the top 15 units now."*
 
 **Write the visibility canary (memory-visible-in-agent-context).** After the MEMORY.md refresh above, write a fresh per-session canary so the *next* session can prove memory was actually injected into context — not merely present on disk:
 

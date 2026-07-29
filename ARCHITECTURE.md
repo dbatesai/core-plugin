@@ -187,7 +187,7 @@ If you're building a wrapper — a plugin that mirrors these skills into its own
 - The resolved root is the loaded plugin's own root, so a wrapper ships its own copy of the scripts at the same relative path and the calls resolve there. The contract is "scripts live at `<resolved-root>/skills/core/scripts/<name>.mjs` relative to whichever plugin is loaded."
 - Custom scripts go under the wrapper's own skill directory (`skills/<wrapper-skill-name>/scripts/`), resolved the same way. Don't put custom scripts under `skills/core/` — that's the upstream-mirrored subtree, and the next refresh overwrites them.
 
-The supported overlay shape is a verbatim per-subtree copy — `rsync -a --delete --exclude '.git' --exclude '.DS_Store'` from `core-plugin/skills/<name>/` into `<wrapper-plugin>/skills/<name>/`.
+The supported overlay shape is a verbatim per-subtree copy — `rsync -a --delete --exclude '.git' --exclude '.DS_Store'` from `core-plugin/plugins/core/skills/<name>/` into `<wrapper-plugin>/skills/<name>/`. The source is repo-relative (skills sit under the plugin root at `plugins/core/`); the destination is relative to the wrapper's own plugin root.
 
 ### Version vs BUILD — releases vs iterations
 

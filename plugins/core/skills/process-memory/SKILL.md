@@ -13,7 +13,9 @@ allowed-tools:
 
 # `/process-memory`
 
-Run the memory housekeeping pass. After this finishes, the project's memory-related files should be in tip-top shape: inbox empty, observations graduated where ready, every unit validated, both indexes current, PROJECT.md under the file cap, anything that needs your judgment surfaced.
+Run the memory housekeeping pass: pull the inbox, graduate the observations that are ready, validate the units, regenerate both indexes, compact `PROJECT.md` when it's over the file cap.
+
+The pass is best-effort, not a guarantee. Some work is deliberately left open and named rather than forced: a Mode C block the user defers stays in the inbox, a unit that fails validation is surfaced for judgment instead of auto-fixed, and `PROJECT.md` or `IMPROVEMENT_LOG.md` can finish over cap with a recommendation rather than a rewrite. Step 8 narrates whatever remains open, so the honest postcondition is "everything resolvable is resolved, and anything still open is named."
 
 Runs synchronously in the current session.
 
