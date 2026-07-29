@@ -10,7 +10,7 @@ You're closing the session. Project state has been updating continuously — obs
 
 Everything the old close did beyond that has a different home: memory maintenance runs in `/process-memory`, analytics in `/metrics`, priority recentering in `/refocus`, plugin-development checks in the test suite. Do not run those here. A close that reruns maintenance "to be safe" is a defect, not diligence.
 
-**Script path resolution.** Commands invoke scripts as `${CORE_ROOT}/skills/core/scripts/<script>.mjs`. `${CLAUDE_PLUGIN_ROOT}` is not reliably injected into agent Bash calls, so resolve `CORE_ROOT` the same way startup does: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/finalize/SKILL.md`. Reuse the session's already-resolved value when you have it. If you cannot resolve a concrete root, skip the affected script step and say so plainly — never run `node` against a guessed base.
+**Script path resolution.** Commands invoke scripts as `${CORE_ROOT}/skills/core/scripts/<script>.mjs`. `${CLAUDE_PLUGIN_ROOT}` is not reliably injected into agent Bash tool calls, so resolve `CORE_ROOT` the same way startup does: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/finalize/SKILL.md`. Reuse the session's already-resolved value when you have it. If you cannot resolve a concrete root, skip the affected script step and say so plainly — never run `node` against a guessed base.
 
 **Kill switch.** `CORE_AUTO_CLOSE=0` disables the automatic close hook, not this command — the user typed `/finalize`, so run it. But while it's set, don't perform unattended autonomous writes beyond what this skill names.
 
