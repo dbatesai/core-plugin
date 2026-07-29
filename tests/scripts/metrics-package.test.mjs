@@ -358,7 +358,7 @@ test('retrieval stats join outcome rows by retrieval_id without counting them as
     const file = join(project, '_sessions', '2026-07-01', 'retrieval-log.jsonl');
     const baseRows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     baseRows[0].retrieval_id = 'retrieval-1';
-    writeFileSync(file, `${baseRows.map(row => JSON.stringify(row)).join('\n')}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'retrieval-1', usefulness_outcome: 'useful', evidence_kind: 'user-confirmed' })}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'orphan', usefulness_outcome: 'miss', evidence_kind: 'agent-judgment' })}\n`);
+    writeFileSync(file, `${baseRows.map(row => JSON.stringify(row)).join('\n')}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'retrieval-1', usefulness_outcome: 'useful', evidence_authority: 'user-confirmed' })}\n${JSON.stringify({ kind: 'retrieval-outcome', retrieval_id: 'orphan', usefulness_outcome: 'miss', evidence_authority: 'agent-attribution' })}\n`);
 
     const stats = retrievalStats(project, makeSeal('feedcafefeedcafe'));
     assert.equal(stats.totals.events, 4, 'outcome rows are not retrieval events');

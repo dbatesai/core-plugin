@@ -347,7 +347,23 @@ function outcomeEvidence(events) {
   return { eligibleIds, outcomes, harmfulIds };
 }
 
+// Rejected rows are not just a count to print — past this share of everything read,
+// what survived is no longer a sample the verdict can rest on. A judgment built on the
+// readable remainder of a mostly-unreadable corpus reads as confident and is not.
+export const CORRUPT_ROW_UNKNOWN_RATIO = 0.1;
+
 export function buildUserReceipt(events) {
+  const rejected = Array.isArray(events.rejected) ? events.rejected : [];
+  const rowsRead = events.length + rejected.length;
+  if (rejected.length && rowsRead > 0 && rejected.length / rowsRead > CORRUPT_ROW_UNKNOWN_RATIO) {
+    return {
+      checked: `${events.length} usable row(s); ${rejected.length} of ${rowsRead} rows read were rejected as corrupt or schema-invalid`,
+      safe: null,
+      impact: 'effectiveness unknown: too much of the evidence corpus was unreadable to judge the rest',
+      action: 'repair-corrupt-evidence',
+      user_action: 'Rerun with --json for the rejection codes, repair or remove the affected retrieval/outcome logs, then recheck.',
+    };
+  }
   const retrievalCount = events.filter(isRetrievalShapedEvent).length;
   if (retrievalCount === 0) {
     return {

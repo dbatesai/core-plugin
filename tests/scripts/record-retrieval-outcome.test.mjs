@@ -145,3 +145,44 @@ test('fails closed while another outcome writer owns the scan-and-append lock', 
     assert.equal(rows.length, 1);
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
+
+// --- An unrecognized authority is not evidence, and a corrupt base row is not absence ---
+
+test('an unrecognized evidence_authority is rejected, not ranked alongside unobservable', () => {
+  // Ranking an unknown authority at 0 put it level with the honest 'unobservable'
+  // floor, so a row with a drifted or hand-edited authority could win a tie and set
+  // the resolved outcome.
+  const rows = [
+    { usefulness_outcome: 'unknown', evidence_authority: 'unobservable' },
+    { usefulness_outcome: 'useful', evidence_authority: 'vibes' },
+  ];
+  assert.equal(resolveOutcomeAuthority(rows), 'unknown', 'the recognized row resolves; the unrecognized one is not evidence');
+  assert.equal(resolveOutcomeAuthority([{ usefulness_outcome: 'useful', evidence_authority: 'vibes' }]), null,
+    'nothing recognizable to resolve');
+  assert.equal(resolveOutcomeAuthority([{ usefulness_outcome: 'useful' }]), null,
+    'a missing authority is unrecognized too');
+});
+
+test('a corrupt retrieval log row is reported, not silently read as "no such retrieval"', () => {
+  const project = fixture();
+  try {
+    const log = join(project, '_sessions', '2026-07-17', 'retrieval-log.jsonl');
+    writeFileSync(log, `${readFileSync(log, 'utf8')}{ this is not json\n`);
+    assert.throws(() => recordRetrievalOutcome(project, {
+      retrieval_id: 'r-absent', usefulness_outcome: 'unknown', evidence_authority: 'unobservable',
+      harness: 'claude-code', session_id: 's-1', answer_turn_id: 't-1', producer_version: '1.0.0', producer_sha: 'deadbeef',
+    }, { today: '2026-07-17' }), /unreadable|corrupt/i,
+      'the operator must see that rows were unreadable, not just "found 0"');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('a clean log still resolves an existing retrieval exactly', () => {
+  const project = fixture();
+  try {
+    const r = recordRetrievalOutcome(project, {
+      retrieval_id: 'r-1', usefulness_outcome: 'unknown', evidence_authority: 'unobservable',
+      harness: 'claude-code', session_id: 's-1', answer_turn_id: 't-1', producer_version: '1.0.0', producer_sha: 'deadbeef',
+    }, { today: '2026-07-17' });
+    assert.equal(r.written, true);
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});

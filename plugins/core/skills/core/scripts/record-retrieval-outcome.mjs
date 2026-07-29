@@ -39,9 +39,12 @@ export const AUTHORITY_RANK = { 'user-confirmed': 4, 'objective-task-success': 3
 
 export function resolveOutcomeAuthority(rows) {
   if (!rows || !rows.length) return null;
+  // An authority outside the closed set is not weak evidence, it is unrecognized
+  // evidence. Ranking it at 0 put it level with the honest 'unobservable' floor, where
+  // a drifted or hand-edited row could win a tie and set the resolved outcome.
   const ranked = rows
-    .filter((r) => r && USEFULNESS_OUTCOMES.has(r.usefulness_outcome))
-    .map((r) => ({ outcome: r.usefulness_outcome, rank: AUTHORITY_RANK[String(r.evidence_authority)] ?? 0 }));
+    .filter((r) => r && USEFULNESS_OUTCOMES.has(r.usefulness_outcome) && EVIDENCE_AUTHORITY.has(r.evidence_authority))
+    .map((r) => ({ outcome: r.usefulness_outcome, rank: AUTHORITY_RANK[r.evidence_authority] }));
   if (!ranked.length) return null;
   ranked.sort((a, b) => b.rank - a.rank);
   const top = ranked.filter((r) => r.rank === ranked[0].rank);
@@ -49,20 +52,26 @@ export function resolveOutcomeAuthority(rows) {
   return distinct.size === 1 ? top[0].outcome : 'unknown';
 }
 
+// Unreadable rows are counted, not dropped. A corrupt line could be the very retrieval
+// being matched, so "found 0" over a partly-unreadable log is a different claim from
+// "found 0" over a log that was read in full — the caller has to be able to tell them apart.
 function retrievalRows(projectDir) {
   const sessions = join(projectDir, '_sessions');
-  if (!existsSync(sessions)) return [];
   const rows = [];
+  let unreadable = 0;
+  if (!existsSync(sessions)) return Object.assign(rows, { unreadable });
   for (const date of readdirSync(sessions).sort()) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
     const file = join(sessions, date, 'retrieval-log.jsonl');
     if (!existsSync(file)) continue;
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
+    let raw;
+    try { raw = readFileSync(file, 'utf8'); } catch { unreadable += 1; continue; }
+    for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
-      try { rows.push(JSON.parse(line)); } catch { /* malformed evidence is not a match */ }
+      try { rows.push(JSON.parse(line)); } catch { unreadable += 1; }
     }
   }
-  return rows;
+  return Object.assign(rows, { unreadable });
 }
 
 function requireStr(value, field) {
@@ -125,7 +134,10 @@ export function recordRetrievalOutcome(projectDir, input, opts = {}) {
   try {
     const rows = retrievalRows(projectDir);
     const bases = rows.filter(row => row.kind === 'retrieval' && row.retrieval_id === record.retrieval_id);
-    if (bases.length !== 1) throw new Error(`retrieval_id must identify exactly one retrieval; found ${bases.length}`);
+    if (bases.length !== 1) {
+      const unreadable = rows.unreadable ? ` (${rows.unreadable} log row(s) were unreadable and could not be matched)` : '';
+      throw new Error(`retrieval_id must identify exactly one retrieval; found ${bases.length}${unreadable}`);
+    }
     // A second (or Nth) outcome row for the same retrieval_id is EXPECTED, not
     // an error — an automatic unknown must never block
     // stronger later evidence. The auto-close path writes 'unknown' the
