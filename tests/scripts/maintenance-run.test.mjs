@@ -25,8 +25,8 @@ function testHome(root) {
   return home;
 }
 
-// M1: mechanical maintenance is signature-gated (regen only when units changed),
-// narrated (never silent), and ledger-recorded (the cadence data for the M2 observe step).
+// Mechanical maintenance is signature-gated (regen only when units changed),
+// narrated (never silent), and ledger-recorded (the cadence data for the observe step).
 
 function makeProject() {
   const root = mkdtempSync(join(tmpdir(), 'core-maint-'));

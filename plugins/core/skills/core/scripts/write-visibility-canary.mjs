@@ -35,7 +35,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 
 export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
-// M16: match only the MANAGED canary line, not any prose that mentions the tag. The old
+// Match only the MANAGED canary line, not any prose that mentions the tag. The old
 // `/^.*CORE-VISIBILITY-CANARY\b.*$/gm` deleted every line containing the literal — including
 // documentation that explains the canary mechanism (this self-referential project's own
 // memory surfaces carry such prose). Two anchored shapes, never a bare-tag mention:

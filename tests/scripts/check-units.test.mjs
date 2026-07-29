@@ -71,7 +71,7 @@ test('link-density is a benign WARN (does not degrade exit code)', () => {
   assert.equal(exitCode(report), 0, 'an under-linked unit warns but does not block');
 });
 
-test('H3: --schema and --integrity together run BOTH checks (additive, not last-wins)', () => {
+test('--schema and --integrity together run BOTH checks (additive, not last-wins)', () => {
   // The old parser set mode= on each flag, so `--schema --integrity` silently
   // resolved to integrity-only and the schema check never fired — exactly what
   // /finalize was unknowingly doing. Flags are additive now.
@@ -81,7 +81,7 @@ test('H3: --schema and --integrity together run BOTH checks (additive, not last-
   assert.equal(both.mode, 'all', 'label resolves to all');
 });
 
-test('H3: single flags and --mode still resolve as before (back-compat)', () => {
+test('single flags and --mode still resolve as before (back-compat)', () => {
   assert.deepEqual(resolveChecks(['--schema']), { schema: true, integrity: false, mode: 'schema' });
   assert.deepEqual(resolveChecks(['--integrity']), { schema: false, integrity: true, mode: 'integrity' });
   assert.deepEqual(resolveChecks(['--mode', 'schema']), { schema: true, integrity: false, mode: 'schema' });
@@ -148,7 +148,7 @@ test('checkIntegrity: edge targets resolve for ordinary real units', () => withS
 
 // --- Track A: validator fixes (Codex co-existence workstream, 2026-06-01) ---
 
-test('A1: flow-style YAML topics array does NOT trigger topics-format warning', () => withStore((memories) => {
+test('flow-style YAML topics array does NOT trigger topics-format warning', () => withStore((memories) => {
   // Inline array form — valid YAML, was being parsed as a scalar string.
   writeFileSync(join(memories, 'flow.md'), [
     '---', 'id: flow', 'type: decision', 'status: active',
@@ -164,7 +164,7 @@ test('A1: flow-style YAML topics array does NOT trigger topics-format warning', 
   assert.equal(topicsWarn.length, 0, 'flow-style array must parse as a list');
 }));
 
-test('A2: references-topic edge to vocabulary is NOT a dangling-edge', () => withStore((memories) => {
+test('references-topic edge to vocabulary is NOT a dangling-edge', () => withStore((memories) => {
   writeFileSync(join(memories, 'has-topic-edge.md'), unit({
     id: 'has-topic-edge',
     edges: 'edges:\n  - {type: references-topic, target: memory-boundary}\n  - {type: cites, target: real-target}',
@@ -279,7 +279,7 @@ test('relates flags edge-unknown-type and names its normalize target', () => wit
   assert.equal(EDGE_TYPE_NORMALIZE['relates'], 'cites');
 }));
 
-test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail (2)', () => {
+test('exit-code tiers — benign warnings pass (0), degraded warn (1), fail (2)', () => {
   // Orphan/stale only → pass-with-warnings → 0 (must not block startup).
   assert.equal(exitCode([
     { level: 'WARN', check: 'orphan' },

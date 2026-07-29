@@ -116,7 +116,7 @@ function _parseInlineMap(text) {
 }
 
 /** Normalize CRLF (and lone CR) to LF so frontmatter delimiter detection and
- *  line splitting work on Windows/OneDrive-authored units (review M1). */
+ *  line splitting work on Windows/OneDrive-authored units. */
 export function normalizeNewlines(text) {
   return typeof text === 'string' ? text.replace(/\r\n?/g, '\n') : text;
 }
@@ -484,7 +484,7 @@ export function rankUnits(memoriesDir, { sessionTopics = [], today = null, inclu
 export function _todayFromArg(arg) {
   // A malformed --today (fails parseIsoDate's regex) must fall back to today, not
   // null — a null `today` then throws TypeError at today.toISOString() in the
-  // display path. Siblings (graph-walk, check-units) defend the same way (M3).
+  // display path. Siblings (graph-walk, check-units) defend the same way.
   return (arg && parseIsoDate(arg)) || _todayUTC();
 }
 

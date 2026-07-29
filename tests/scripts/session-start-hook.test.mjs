@@ -18,7 +18,7 @@ const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 // override. Setting it once at module load covers every in-process call for
 // the lifetime of this file (these tests don't assert on the log's content,
 // only that they never touch the real one).
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core, so os.tmpdir() no longer qualifies.
 const _sessionStartLogDir = mkdtempSync(join(trustedTestTmpRoot(), 'session-start-hook-log-'));
 process.env.CORE_HOOKS_LOG_FILE = join(_sessionStartLogDir, 'hooks-log.jsonl');

@@ -19,7 +19,7 @@ const EXPECTED_PRODUCER_SHA = (() => {
     return String(m.source_sha || 'unknown');
   } catch { return 'unknown'; }
 })();
-// D1: CORE_RETRIEVAL_STORE is absent from the product hooks entirely — no
+// CORE_RETRIEVAL_STORE is absent from the product hooks entirely — no
 // legitimate production use, and its trust check was lexical-only
 // (symlink-bypassable). Tests pass
 // the store via `cwd` in the JSON payload, the same trusted channel the real
@@ -33,7 +33,7 @@ const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'ob
 // concurrent test runs, can behave differently across environments. Every
 // call gets its own fresh temp path unless the test explicitly needs a
 // specific one (those pass CORE_HOOKS_LOG_FILE in `env`, which wins here).
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core, so os.tmpdir() no longer
 // qualifies. Unlike os.tmpdir(), ~/.core isn't auto-cleaned — every created
 // dir is tracked and removed in the after() below.
@@ -66,7 +66,7 @@ function runHookProcess(prompt, env, cwd = FIXT) {
   });
 }
 
-test('default ON: flag unset → injects (shipped on, opt-out — G2 resolved)', () => {
+test('default ON: flag unset → injects (shipped on, opt-out)', () => {
   const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '' });
   assert.match(out, /want-omega-speedmaster-on-sale-wait/, 'default-on hook injects with no flag set');
 });
@@ -311,7 +311,7 @@ test('metrics-off CORE_REASONING_ARM=always-on still forces the directive', () =
 
 test('telemetry write failure is observable in the hook log, and the turn is never blocked', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-wfail-')));
-  // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so the
+  // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so the
   // log can no longer live alongside the (os.tmpdir()-rooted) store fixture.
   const logFile = isolatedHooksLog();
   try {
@@ -356,7 +356,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
   ];
   for (const b of branches) {
     const root = mkdtempSync(join(trustedTestTmpRoot(), `rh-recpt-${b.name}-`));
-    // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so
+    // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so
     // the log can no longer live alongside the (os.tmpdir()-rooted) store
     // fixture — isolatedHooksLog() is rooted correctly and self-tracks cleanup.
     const logFile = isolatedHooksLog();
@@ -366,7 +366,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       else if (b.needStore !== false) makeStore(root);
       if (b.setup) b.setup(root);
       // breakHookLog needs an unwritable path that still resolves inside the
-      // trusted ~/.core (else the D1 gate silently substitutes the real
+      // trusted ~/.core (else the gate silently substitutes the real
       // default instead of hitting the write failure this branch tests for).
       // Nested under `root` (already mkdtemp-unique) rather than a fixed
       // name under the shared trusted-tmp root -- a fixed name collided
@@ -410,7 +410,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
 
 test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked telemetry)', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-recpt-optout2-')));
-  // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now.
+  // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now.
   const logFile = isolatedHooksLog();
   try {
     runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: logFile }, root);

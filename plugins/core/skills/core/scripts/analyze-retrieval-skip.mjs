@@ -222,7 +222,7 @@ function isMain() {
  * Index-advancing arg parse. The first BARE token is the project root — but
  * space-form flag values (`--harness codex`) are bare tokens too, so a `.find()`
  * over non-`--` tokens grabbed `codex` as the root and reported NO-STORE on a
- * directory with no `_memories/` (M4). Advancing past known value-flags fixes it.
+ * directory with no `_memories/`. Advancing past known value-flags fixes it.
  * Returns rawRoot un-resolved (null if none) so callers/tests stay deterministic.
  */
 export function parseSkipArgs(args) {

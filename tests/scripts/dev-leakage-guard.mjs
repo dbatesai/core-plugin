@@ -1,19 +1,18 @@
 #!/usr/bin/env node
 /**
- * dev-leakage-guard.mjs — deny-pattern scan for development leakage across the
- * ENTIRE shipped tree (marketplace installs pull the whole git repo, so every
- * file ships: plugins/**, both manifests, root docs, .github/**, and tests/**).
+ * dev-leakage-guard.mjs — deny-pattern scan for development leakage.
  *
- * The invariant: a marketplace install pulls the whole public repository, so no
- * tracked file may carry personal identity tokens, personal filesystem paths,
- * machine names, notification channels, internal agent names, or internal
- * development-process references (issue ids, review lineage, acceptance labels).
- * This guard fails CI (and the /cut-release gate) on any hit.
- *
- * Agent-name and internal-process checks apply to ALL tracked text — shipped
- * prose, product code, tests, and the changelog alike. Every legitimate
- * occurrence is listed in ALLOWLIST with a reason; the allowlist stays narrow:
- * author/license identity fields and deliberate scanner/test fixtures only.
+ * The contract: a marketplace install pulls the whole public repository, so no
+ * tracked file — shipped prose, product code, tests, and the changelog alike —
+ * may carry personal identity tokens, personal filesystem paths, machine
+ * names, notification channels, internal agent names, or internal
+ * development-process references (issue ids, review lineage, review-batch
+ * labels), with ONE exception the scan cannot cover: this scanner
+ * implementation itself, whose PATTERNS hold the literal deny tokens as
+ * machine data (see SCAN_EXCLUDE below). Every other legitimate occurrence is
+ * listed in ALLOWLIST with a reason; the allowlist stays narrow: author/
+ * license identity fields and deliberate scanner/test fixtures only. This
+ * guard fails CI (and the /cut-release gate) on any hit.
  *
  * Not covered, by design: the BBLens / T-Mobile wrapper EXAMPLE used
  * pedagogically throughout is product-chosen example content, not leakage.
@@ -38,10 +37,15 @@ const isRootDoc = (p) =>
 // (which legitimately carry path vectors and personas) and NOT CHANGELOG history.
 const isProductSurface = (p) => inPlugins(p) || isRootDoc(p);
 
-// Files that ARE the scanner (they contain the deny tokens as data) — never scan.
+// The ONE file the scan cannot cover: this scanner implementation, whose
+// PATTERNS hold the literal deny tokens as machine data — scanning it can only
+// ever false-positive on its own pattern definitions. That limitation is
+// stated here instead of claiming whole-tree coverage. The guard's TEST file
+// is NOT excluded: its planted tokens are fragment-constructed at runtime, so
+// it is scanned like any other tracked file (a blanket self-exclusion was a
+// blind spot exactly where leaks get pasted).
 export const SCAN_EXCLUDE = new Set([
   'tests/scripts/dev-leakage-guard.mjs',
-  'tests/scripts/dev-leakage-guard.test.mjs',
 ]);
 
 /**
@@ -115,11 +119,14 @@ export const PATTERNS = [
     appliesTo: (p) => isProductSurface(p),
   },
   // --- internal agent names, hardcoded anywhere in tracked text: only product
-  // names ship ---
+  // names ship. Case-insensitive with ALPHANUMERIC boundaries: \b treats _ as
+  // a word char, so a slug like reference_keel_handoff_channels slipped a
+  // \b-bounded case-sensitive match. Letters guard the flanks (inhale/shale
+  // never match; per-agy-review and _keel_ do). ---
   {
     name: 'agent-name-in-prose',
     klass: 'agent-name',
-    re: /\b(Keel|Hale|Agy|Antigravity|Crest|Meridian|Tideline)\b/g,
+    re: /(?<![A-Za-z0-9])(?:keel|hale|agy|antigravity|crest|meridian|tideline)(?![A-Za-z0-9])/gi,
     appliesTo: () => true,
   },
   // --- a specific person's name anywhere in tracked text ---
@@ -170,6 +177,22 @@ export const PATTERNS = [
     re: /ACCEPTANCE\s+(?:Keel|Hale|Agy|Antigravity|Crest|Meridian)[-\s]/g,
     appliesTo: () => true,
   },
+  // --- internal review-batch labels: strong families are unambiguous ---
+  {
+    name: 'internal-review-label',
+    klass: 'dev-process',
+    re: /(?<![A-Za-z0-9])(?:FM-\d+|blocker-\d+|Train [A-Z]|Gate [A-Z]|Slice [A-Z]|HOOK-\d+|RC-\d+|ID-\d+)(?![A-Za-z0-9])/g,
+    appliesTo: () => true,
+  },
+  // --- bare single-letter review-batch labels (M14, K17, A5, D1, G2, F9,
+  // P3, B6a). Legitimate domain data exists in this shape, so exemptions are
+  // EXACT files with a semantic reason — never a directory or the family. ---
+  {
+    name: 'internal-review-label-bare',
+    klass: 'dev-process',
+    re: /(?<![A-Za-z0-9])[MKADGFPB]\d{1,2}[a-z]?(?![A-Za-z0-9])/g,
+    appliesTo: () => true,
+  },
   // --- names in shipped JSON config/schema files: configs are product
   // surface — a name in a schema default or manifest description ships to
   // every install. Owner/author fields in the manifests are allowlisted;
@@ -177,7 +200,7 @@ export const PATTERNS = [
   {
     name: 'name-in-json-config',
     klass: 'personal-identity',
-    re: /\b(Keel|Hale|Agy|Antigravity|Crest|Meridian|Tideline|David)\b/g,
+    re: /(?<![A-Za-z0-9])(?:keel|hale|agy|antigravity|crest|meridian|tideline|david)(?![A-Za-z0-9])/gi,
     appliesTo: (p) => p.endsWith('.json'),
   },
 ];
@@ -200,6 +223,11 @@ export const ALLOWLIST = [
   // Historical changelog entry describing the dotted-username slug-encoding bug
   // (test username, technical note). Rewriting shipped history is out of scope.
   { file: 'CHANGELOG.md', patterns: ['personal-name', 'person-in-prose'], reason: 'historical changelog technical note (dotted-username bug test vector)' },
+
+  // P2/P3 here name the retrieval-policy tiers themselves (product vocabulary,
+  // same contract as the six allowlist entries above) — load-bearing history,
+  // not a review-batch label.
+  { file: 'CHANGELOG.md', patterns: ['internal-review-label-bare'], matches: ['P0', 'P1', 'P2', 'P3'], reason: 'P2/P3 name the shipped retrieval-policy tiers described by this entry, consumed by retrieve-context.mjs::applyTierPolicy' },
 
   // Path→slug / plugin-root / transcript mapping tests: these EXIST to prove the
   // username-generalization logic. Real-looking usernames are the test vectors.
@@ -230,13 +258,30 @@ export const ALLOWLIST = [
   { file: 'tests/scripts/metrics-detectors.test.mjs', patterns: ['dc-reference'], reason: 'CITATION_RE extraction vectors' },
   { file: 'tests/scripts/compact-project.test.mjs', patterns: ['dc-reference'], reason: 'the compactor parses **DC-<n>: Label** entries; fixtures must carry that shape' },
   { file: 'tests/scripts/user-authorship-boundary.test.mjs', patterns: ['dc-reference'], reason: 'PROJECT.md decision-entry format fixtures' },
+
+  // P0-P3 are retrieval-policy enum values consumed by
+  // retrieve-context.mjs::applyTierPolicy; renaming would break the runtime
+  // policy contract. The bare-label pattern can't distinguish this product
+  // enum from an internal review-batch label of the same shape, so each
+  // production consumer and its test coverage is allowlisted by exact file.
+  { file: 'plugins/core/skills/core/scripts/retrieve-context.mjs', patterns: ['internal-review-label-bare'], matches: ['P0', 'P1', 'P2', 'P3'], reason: 'P0-P3 are retrieval-policy enum values defined and consumed by applyTierPolicy; renaming would break the runtime policy contract' },
+  { file: 'plugins/core/skills/core/scripts/retrieval-harness.mjs', patterns: ['internal-review-label-bare'], matches: ['P0', 'P1', 'P2', 'P3'], reason: 'P0-P3 retrieval-policy enum values measured against retrieve-context.mjs::applyTierPolicy — the harness names the same runtime contract it evaluates' },
+  { file: 'plugins/core/skills/core/scripts/aggregate-receipt.mjs', patterns: ['internal-review-label-bare'], matches: ['P0', 'P1', 'P2', 'P3'], reason: 'P0-P3 retrieval-policy enum values validated by POLICY_RE against retrieve-context.mjs::applyTierPolicy\'s runtime contract' },
+  { file: 'tests/scripts/aggregate-receipt.test.mjs', patterns: ['internal-review-label-bare'], matches: ['P0', 'P1', 'P2', 'P3'], reason: 'exercises aggregate-receipt.mjs::POLICY_RE, which validates the P0-P3 enum consumed by retrieve-context.mjs::applyTierPolicy' },
+  { file: 'tests/scripts/policy-safety.test.mjs', patterns: ['internal-review-label-bare'], matches: ['P0', 'P1', 'P2', 'P3'], reason: 'exercises retrieve-context.mjs::applyTierPolicy\'s P0-P3 tier-policy contract directly, including the P2 canonical-promotion safety risk' },
+  { file: 'tests/scripts/retrieval-premise.test.mjs', patterns: ['internal-review-label-bare'], matches: ['P0', 'P1', 'P2', 'P3'], reason: 'exercises retrieve-context.mjs::applyTierPolicy\'s P0-P3 tier-policy contract directly, including the byte-identical-default control' },
 ];
 
-function isAllowed(relPath, patternName) {
+// An entry's `matches` array, when present, narrows the exemption to those
+// exact literal tokens only — the file+pattern otherwise stays fully scanned,
+// so an unrelated bare label sharing the file (e.g. a genuine review-batch
+// label alongside the P0-P3 policy enum) still gets caught.
+function isAllowed(relPath, patternName, matchValue) {
   return ALLOWLIST.some(
     (e) =>
       (e.file === relPath || (e.dirPrefix && relPath.startsWith(e.dirPrefix))) &&
-      (e.patterns === '*' || e.patterns.includes(patternName)),
+      (e.patterns === '*' || e.patterns.includes(patternName)) &&
+      (!e.matches || e.matches.includes(matchValue)),
   );
 }
 
@@ -309,15 +354,16 @@ export function scanTree(opts = {}) {
         p.re.lastIndex = 0;
         let m;
         while ((m = p.re.exec(text)) !== null) {
-          if (isAllowed(rel, p.name)) break; // whole (file,pattern) is allowlisted
-          findings.push({
-            file: rel,
-            line: i + 1,
-            klass: p.klass,
-            pattern: p.name,
-            match: m[0],
-            text: text.trim().slice(0, 200),
-          });
+          if (!isAllowed(rel, p.name, m[0])) {
+            findings.push({
+              file: rel,
+              line: i + 1,
+              klass: p.klass,
+              pattern: p.name,
+              match: m[0],
+              text: text.trim().slice(0, 200),
+            });
+          }
           if (m.index === p.re.lastIndex) p.re.lastIndex++; // zero-width guard
         }
       }

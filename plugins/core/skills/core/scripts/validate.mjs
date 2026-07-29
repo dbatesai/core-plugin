@@ -204,7 +204,7 @@ export function main(argv) {
     // that's the designed semantic (see the "not first, but still in the candidate set" test).
     const forbiddenHits = candidates.filter(x => forbidden.includes(x));
     let [p, r] = scorePrecisionRecall(retrieved, expected, forbidden);
-    // M8: scorePrecisionRecall only sees the scoreK slice, so a forbidden ranked between
+    // scorePrecisionRecall only sees the scoreK slice, so a forbidden ranked between
     // scoreK and candidateK left status=FAIL while P/R both read 1.0 — the confusing
     // `FAIL | 1.0 | 1.0` row. A contaminated candidate pool zeroes the run's precision so
     // the row is internally consistent (FAIL | 0.0 | R) without weakening the forbidden check.

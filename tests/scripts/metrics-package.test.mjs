@@ -236,7 +236,7 @@ test('orphan rate counts active units only; archived orphans excluded; small cel
 
 test('per-turn hook emits the canonical retrieval event from the product path', () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-hook-'));
-  // Rooted under ~/.core (D1 fix, 2026-07-18): os.tmpdir() no longer qualifies
+  // Rooted under ~/.core (fix, 2026-07-18): os.tmpdir() no longer qualifies
   // for CORE_HOOKS_LOG_FILE — declared outside try so finally can clean it up.
   const hooksLogDir = mkdtempSync(join(trustedTestTmpRoot(), 'mp-hook-log-'));
   try {

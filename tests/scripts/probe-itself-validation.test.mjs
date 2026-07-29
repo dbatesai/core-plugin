@@ -108,7 +108,7 @@ test('§7: a healthy probe passes through unchanged with descriptor-stamped id',
   assert.equal(row.capability_kind, 'runtime', 'runner stamps kind from descriptor');
 });
 
-test('M10: the runner backfills the unconditional fields a delegate omitted', async () => {
+test('the runner backfills the unconditional fields a delegate omitted', async () => {
   // A delegate that returns a bare row (no observed_at/harness/cwd/env_signals) — exactly
   // the shape 5 of 6 probes produce. row-schema.md makes those four unconditional, and
   // drift/regression read them off the history store, so the orchestrator must backfill.
@@ -133,7 +133,7 @@ test('M10: the runner backfills the unconditional fields a delegate omitted', as
   assert.equal(row.env_signals.CODEX_THREAD_ID, null, 'null where unset');
 });
 
-test('M10: a NOT-YET row (maker emits env_signals:{}) is backfilled to the 4-key shape', async () => {
+test('a NOT-YET row (maker emits env_signals:{}) is backfilled to the 4-key shape', async () => {
   // makeNotYetRow/makeUnknownRow ship env_signals:{}; conformRow must backfill the empty object,
   // not just a null. A failing importer yields the NOT-YET row.
   const failingImporter = async () => { throw new Error('Cannot find module'); };
@@ -156,7 +156,7 @@ test('a long probe crash message is captured up to 1000 chars, not cut at 300', 
   assert.ok(pe.value.error.length >= 600, `full 600-char message retained, got ${pe.value.error.length}`);
 });
 
-test('M10: the runner never overwrites a field the probe already set', async () => {
+test('the runner never overwrites a field the probe already set', async () => {
   const richImporter = async () => ({
     probe: async () => ({
       schema_version: '1.0.0', identity_status: 'PASS',

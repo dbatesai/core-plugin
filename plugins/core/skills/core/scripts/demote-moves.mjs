@@ -160,7 +160,7 @@ function readUnit(memoriesDir, id) {
   return { id, path, fm };
 }
 
-// Flat frontmatter map for a unit (M1: shared parser, was a local copy).
+// Flat frontmatter map for a unit (shared parser).
 function parseFrontmatter(text) {
   return parseFlatFrontmatter(text)[0];
 }

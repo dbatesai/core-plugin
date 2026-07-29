@@ -20,7 +20,7 @@ function readLog(file) {
   return readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(l => JSON.parse(l));
 }
 
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
 // isn't auto-cleaned — every created dir is tracked and removed below.
 const _isolatedLogDirs = [];
@@ -144,7 +144,7 @@ test('SessionEnd on an UNREGISTERED dir (attacker _memories/) skips — security
   rmSync(store, { recursive: true, force: true });
 });
 
-// D1: CORE_HOOKS_LOG_FILE was read
+// CORE_HOOKS_LOG_FILE was read
 // unconditionally, an arbitrary-file-append primitive reachable via a hostile
 // project's forwarded settings.json env. Same fix shape and same test shape
 // as close-index-path-validation.test.mjs's resolveIndexPath coverage.
@@ -169,7 +169,7 @@ test('resolveHookLogPath: no env var falls back to the default', () => {
   assert.equal(resolveHookLogPath({}), join(homedir(), '.core', 'hooks-log.jsonl'));
 });
 
-// D1 second pass: resolveHookLogPath()'s
+// Second pass: resolveHookLogPath()'s
 // lexical check alone is a CWE-22-shaped gap — a symlink placed under the
 // trusted ~/.core pointing outside it passes the string check while writes
 // go through it to the real outside target. logHookEvent()'s canonical

@@ -27,7 +27,7 @@ test('mapProjectPathToSlug: Windows backslashes and the drive colon convert', ()
     'C--Users-David-Bates28-proj');
 });
 
-test('projectIdentityMismatch: dotted username does NOT false-refuse (P1 regression)', () => {
+test('projectIdentityMismatch: dotted username does NOT false-refuse (regression)', () => {
   // Same project, dotted username. The target MEMORY.md lives in Claude's
   // dot→hyphen encoded folder; the source _memories is the dotted real path.
   const memoriesDir = '/Users/David.Bates28/proj/_memories';
@@ -46,7 +46,7 @@ test('projectIdentityMismatch: genuinely different project still refuses', () =>
   assert.ok(r && r.actualMapped !== r.expectedMapped, 'cross-project write still guarded');
 });
 
-test('mappedMemoryPath: dotted username resolves the right MEMORY.md (P2 regression)', () => {
+test('mappedMemoryPath: dotted username resolves the right MEMORY.md (regression)', () => {
   assert.equal(
     mappedMemoryPath('/Users/David.Bates28/proj', '/home/u'),
     '/home/u/.claude/projects/-Users-David-Bates28-proj/memory/MEMORY.md',

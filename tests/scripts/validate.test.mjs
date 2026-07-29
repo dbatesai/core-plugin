@@ -118,7 +118,7 @@ test('validate CLI treats negated query terms as exclusions, not positive matche
   assert.match(report, /Forbidden hits: \[\]/);
 });
 
-test('M8: a forbidden-hit FAIL row is internally consistent (no FAIL | 1 | 1), precision zeroed', () => {
+test('a forbidden-hit FAIL row is internally consistent (no FAIL | 1 | 1), precision zeroed', () => {
   // The forbidden fixture ranks the forbidden unit in the candidate pool but below the
   // scoreK precision cut, so before the fix the row read FAIL | 1 | 1 — status and P/R
   // disagreeing. A contaminated candidate pool must zero the run's precision.

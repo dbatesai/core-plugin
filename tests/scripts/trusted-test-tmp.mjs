@@ -2,7 +2,7 @@
  * trusted-test-tmp.mjs — shared root for hostile-env-var isolation tests.
  *
  * Once CORE_HOOKS_LOG_FILE/CORE_RETRIEVAL_STORE/CORE_CLOSE_STORE only honor
- * overrides that resolve inside the trusted ~/.core (D1 fix, mirroring
+ * overrides that resolve inside the trusted ~/.core (mirroring
  * resolveIndexPath's CORE_CLOSE_INDEX gate), test fixtures that redirect any
  * of them for isolation have to live there too — os.tmpdir() no longer
  * qualifies. Not auto-cleaned by the OS the way os.tmpdir() is, so callers

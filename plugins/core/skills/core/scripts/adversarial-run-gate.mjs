@@ -61,7 +61,7 @@ export function classifyAdversarialRun(preActionResult) {
   }
 
   if (row.identity_status === 'PASS') {
-    // M9 / Doctrine 4 (fail-closed mutation): identity PASS alone is NOT authority.
+    // Doctrine 4 (fail-closed mutation): identity PASS alone is NOT authority.
     // runPreAction applies operation-scoped gates (authority, harness, signal-weight)
     // and sets row.mutation_permitted=false with a stable mutation_block_reason when an
     // otherwise-PASS row is denied for THIS action — e.g. the adversarial action declares

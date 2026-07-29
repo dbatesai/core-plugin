@@ -59,7 +59,7 @@ export function tokenize(text) {
  * recursive source signature on every call).
  */
 export function loadActiveBodies(store, preloadedIndex = null) {
-  // A3: a caller holding a request-scoped snapshot passes its index so every
+  // A caller holding a request-scoped snapshot passes its index so every
   // reader in the request sees the same bytes; standalone callers still get a
   // sig-validated fresh load (active-only, retired excluded). The walk itself
   // has ONE owner: generate-summary-index.mjs loadUnitBodies.

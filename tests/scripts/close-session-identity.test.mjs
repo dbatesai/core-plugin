@@ -1,5 +1,5 @@
 /**
- * close-session-identity.test.mjs — exact-session close receipts (ID-01 … ID-08).
+ * close-session-identity.test.mjs — exact-session close receipts.
  *
  * RED-first for the finalize/refocus redesign. These encode four oracles:
  *
@@ -58,9 +58,9 @@ function terminalReceipt(sessionId, status = 'closed') {
   };
 }
 
-// ─────────────────────────── ID-01 … ID-02: identity primitives ───────────────
+// ─────────────────────────── Identity primitives ─────────────────────────────
 
-test('ID-01 sessionKey() derives a stable key and refuses a non-identity', () => {
+test('sessionKey() derives a stable key and refuses a non-identity', () => {
   const k1 = sessionKey(SESSION_A);
   const k2 = sessionKey(SESSION_A);
   assert.equal(k1, k2, 'same session id must derive the same key');
@@ -76,7 +76,7 @@ test('ID-01 sessionKey() derives a stable key and refuses a non-identity', () =>
   }
 });
 
-test('ID-02 receiptPath() is session-keyed and lives outside the project store', () => {
+test('receiptPath() is session-keyed and lives outside the project store', () => {
   const store = freshStore();
   const o = opts(store);
   const p = receiptPath(store, SESSION_A, o);
@@ -89,7 +89,7 @@ test('ID-02 receiptPath() is session-keyed and lives outside the project store',
 
 // ─────────────────────────── ORACLE 1: manual close writes a receipt ──────────
 
-test('ID-03 [oracle 1] a manual close writes a terminal receipt that reads back', () => {
+test('[oracle 1] a manual close writes a terminal receipt that reads back', () => {
   const store = freshStore();
   const o = opts(store);
 
@@ -106,7 +106,7 @@ test('ID-03 [oracle 1] a manual close writes a terminal receipt that reads back'
   assert.equal(got.summary_sha256, 'a'.repeat(64));
 });
 
-test('ID-04 receipts are owner-only on disk', { skip: process.platform === 'win32' ? 'POSIX mode bits are not enforceable on Windows' : false }, () => {
+test('receipts are owner-only on disk', { skip: process.platform === 'win32' ? 'POSIX mode bits are not enforceable on Windows' : false }, () => {
   const store = freshStore();
   const o = opts(store);
   writeCloseReceipt(store, terminalReceipt(SESSION_A), o);
@@ -117,7 +117,7 @@ test('ID-04 receipts are owner-only on disk', { skip: process.platform === 'win3
 
 // ─────────────────────────── ORACLE 2: no second close for the same session ───
 
-test('ID-05 [oracle 2] a closed session is never enqueued again', () => {
+test('[oracle 2] a closed session is never enqueued again', () => {
   const store = freshStore();
   const o = opts(store);
 
@@ -136,7 +136,7 @@ test('ID-05 [oracle 2] a closed session is never enqueued again', () => {
   );
 });
 
-test('ID-06 [oracle 2] the store-level legacy marker cannot certify an exact session', () => {
+test('[oracle 2] the store-level legacy marker cannot certify an exact session', () => {
   const store = freshStore();
   const o = opts(store);
 
@@ -158,7 +158,7 @@ test('ID-06 [oracle 2] the store-level legacy marker cannot certify an exact ses
 
 // ─────────────────────────── ORACLE 3: other sessions still close ─────────────
 
-test('ID-07 [oracle 3] closing sess-A does not suppress a distinct sess-B', () => {
+test('[oracle 3] closing sess-A does not suppress a distinct sess-B', () => {
   const store = freshStore();
   const o = opts(store);
 
@@ -175,7 +175,7 @@ test('ID-07 [oracle 3] closing sess-A does not suppress a distinct sess-B', () =
 
 // ─────────────────────────── ORACLE 4: failure stays recoverable ──────────────
 
-test('ID-08 [oracle 4] a failed or partial close remains owed', () => {
+test('[oracle 4] a failed or partial close remains owed', () => {
   for (const status of ['failed', 'partial']) {
     const store = freshStore();
     const o = opts(store);
@@ -190,9 +190,9 @@ test('ID-08 [oracle 4] a failed or partial close remains owed', () => {
   }
 });
 
-// ─────────────────── ID-09..ID-10: the wired deterministic close ─────────────
+// ─────────────────── The wired deterministic close ───────────────────────────
 
-test('ID-09 runDeterministicClose writes receipt + summary and makes zero model calls', () => {
+test('runDeterministicClose writes receipt + summary and makes zero model calls', () => {
   const store = freshStore();
   const o = opts(store);
 
@@ -225,7 +225,7 @@ test('ID-09 runDeterministicClose writes receipt + summary and makes zero model 
   );
 });
 
-test('ID-10 a partial-coverage deterministic close stays owed', () => {
+test('a partial-coverage deterministic close stays owed', () => {
   const store = freshStore();
   const o = opts(store);
 

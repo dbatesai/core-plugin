@@ -87,7 +87,7 @@ test('audit: empty native surface → clean, zero candidates', () => {
   assert.equal(r.stats.nativeTotal, 0);
 });
 
-// --- mappedNativePath: canonical slug for the default MEMORY.md location (M2) ---
+// --- mappedNativePath: canonical slug for the default MEMORY.md location ---
 
 test('mappedNativePath: dotted username maps dots→dashes (matches Claude projects folder)', () => {
   // The default native surface is ~/.claude/projects/<slug>/memory/MEMORY.md.

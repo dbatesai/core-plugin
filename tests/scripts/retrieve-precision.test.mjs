@@ -6,7 +6,7 @@ import { retrieveContext } from '../../plugins/core/skills/core/scripts/retrieve
 
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
-// A small labeled query set over the fixture store (validates A4 — does the lexical
+// A small labeled query set over the fixture store (does the lexical
 // hook inject relevant units, or noise?). Each query lists the unit ids a human would
 // call genuinely relevant. These are LEXICAL-tier queries (the literal/keyword cases);
 // the abstract value/category leaps are deliberately out of scope here — those are the
@@ -41,7 +41,7 @@ function precisionRecallAt(n) {
 
 test('precision@3 clears the recorded threshold', () => {
   const { precision, recall } = precisionRecallAt(3);
-  // Recorded actuals (see build log A4): the lexical hook is high-precision on
+  // Recorded actuals: the lexical hook is high-precision on
   // keyword-overlap queries because scoring is title/topic-weighted and the corpus
   // is small with little token collision.
   // eslint-disable-next-line no-console
@@ -51,7 +51,7 @@ test('precision@3 clears the recorded threshold', () => {
   assert.ok(precision >= 0.80, `precision@3 (${precision.toFixed(3)}) fell below the ratcheted 0.80 floor`);
 });
 
-test('N sweep recorded (2 vs 3 vs 5) — the default top-N stays an open choice (G2)', () => {
+test('N sweep recorded (2 vs 3 vs 5) — the default top-N stays an open choice', () => {
   for (const n of [2, 3, 5]) {
     const { precision, recall } = precisionRecallAt(n);
     // eslint-disable-next-line no-console

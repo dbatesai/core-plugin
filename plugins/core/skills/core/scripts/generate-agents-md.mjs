@@ -28,7 +28,7 @@ export async function generate({ contractPath, outputPath, overridePath = null, 
 }
 
 function isMain() {
-  // Canonicalize BOTH sides (M1/M2): argv[1] AND import.meta.url, so a symlinked or
+  // Canonicalize BOTH sides: argv[1] AND import.meta.url, so a symlinked or
   // case/separator-variant install path can't spuriously match or mismatch on Windows.
   const canon = (p) => { try { return realpathSync(p); } catch { return p; } };
   try { return canon(process.argv[1]) === canon(fileURLToPath(import.meta.url)); } catch { return false; }

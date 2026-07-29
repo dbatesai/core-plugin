@@ -155,7 +155,7 @@ export function attributeDrift(prevRow, curRow) {
  */
 export function detectRegression(history) {
   // Group entries by session, preserving session order by earliest observed_at.
-  // M14: entries with no session_id can't be session-delimited. The old code merged them
+  // Entries with no session_id can't be session-delimited. The old code merged them
   // ALL into one `__no-session__` pseudo-session — which then collides with the last-2-session
   // comparison below and produces spurious or masked regressions (a capability present in some
   // untagged rows but not others reads as a session-to-session change it never was). Skip them
@@ -257,7 +257,7 @@ export function loadCapabilityHistory(workspaceId, project = null, opts = {}) {
   if (project) {
     try { histories.push(...readHistory(workspaceId, { project })); } catch { /* unavailable project history */ }
   }
-  // M14: the same observation can exist in BOTH the home and project store. Concatenating
+  // The same observation can exist in BOTH the home and project store. Concatenating
   // double-counts it, inflating drift transitions and regression comparisons. Dedup on the
   // fields that identify one observation — session, timestamp, capability, content hash.
   const seen = new Set();

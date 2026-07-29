@@ -42,7 +42,7 @@ function repoWithUnpushableRemote() {
   return { dir, bogusRemote };
 }
 
-test('M11: a mutation-kind surface with a failed write-proof degrades fail-closed (was a false PASS)', async () => {
+test('a mutation-kind surface with a failed write-proof degrades fail-closed (was a false PASS)', async () => {
   const { dir, bogusRemote } = repoWithUnpushableRemote();
   try {
     const row = await probe({ filesRepo: dir, expectedRemote: bogusRemote });

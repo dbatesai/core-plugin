@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { buildRollup, writeRollup, readOrientSignal } from '../../plugins/core/skills/core/scripts/metrics-rollup.mjs';
 import { metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 
-test('M5: a calibrated workspace with no turns must not mislabel the signal PROVISIONAL', () => {
+test('a calibrated workspace with no turns must not mislabel the signal PROVISIONAL', () => {
   withClassified({}, ({ home, project }) => {
     const metaDir = join(home, '.core', 'workspaces', WID, 'metrics');
     writeFileSync(join(metaDir, 'calibration-state.json'),

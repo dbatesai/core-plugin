@@ -1,5 +1,5 @@
 /**
- * fs-atomic.mjs — atomic file writes for irreplaceable surfaces (M4 / H3).
+ * fs-atomic.mjs — atomic file writes for irreplaceable surfaces.
  *
  * The hygiene mutators (demote-moves, demote-state-narrative, compact-project,
  * hot-section) and workspace-fork-check all rewrite files the user cannot easily

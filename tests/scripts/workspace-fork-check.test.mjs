@@ -90,7 +90,7 @@ test('copied workspace (id resolves to a project_path elsewhere) -> fork', () =>
       const forked = idx.find(e => e.workspace_id === r.new_id);
       assert.ok(forked && entryPath(forked), 'forked entry carries a resolvable path');
 
-      // H3: the local pointer is written atomically (no leftover temp file in cwd) and the
+      // The local pointer is written atomically (no leftover temp file in cwd) and the
       // pointer now names the new id (the multi-file fork completed consistently).
       const cwdLeftovers = readdirSync(cwd).filter(n => n.includes('.tmp-'));
       assert.deepEqual(cwdLeftovers, [], 'atomic pointer write must leave no temp file in the project dir');
@@ -105,12 +105,12 @@ test('copied workspace (id resolves to a project_path elsewhere) -> fork', () =>
   );
 });
 
-// ---------- H3 crash-simulation: the meta→index→pointer write order is recoverable ----------
+// ---------- crash-simulation: the meta→index→pointer write order is recoverable ----------
 // The fork mutates three surfaces. checkFork resolves path-match (index path==cwd) BEFORE
 // id-match, so the safe order is meta-dir → index → pointer, all atomic. These tests assert
 // that a crash at each inter-file boundary leaves a recoverable state.
 
-test('H3 crash-sim: index entry landed but pointer not (crash before pointer) → path-match resolves, no re-fork', () => {
+test('crash-sim: index entry landed but pointer not (crash before pointer) → path-match resolves, no re-fork', () => {
   // Simulates: meta dir + index entry written for newId, pointer still names the old id.
   withFixture(
     { workspace_id: 'orig', name: 'p' },                       // pointer NOT yet rewritten
@@ -129,7 +129,7 @@ test('H3 crash-sim: index entry landed but pointer not (crash before pointer) �
   );
 });
 
-test('H3 crash-sim: meta dir landed but index entry not (crash before index) → clean re-fork, leftover meta dir harmless', () => {
+test('crash-sim: meta dir landed but index entry not (crash before index) → clean re-fork, leftover meta dir harmless', () => {
   // Simulates: a prior fork wrote the meta dir then crashed before the index entry. The pointer
   // still names the copied-from id (registered at a foreign path), so this must re-fork cleanly.
   withFixture(
@@ -149,7 +149,7 @@ test('H3 crash-sim: meta dir landed but index entry not (crash before index) →
   );
 });
 
-test('H3: a real fork leaves no temp file in ~/.core (index + manifest written atomically)', () => {
+test('a real fork leaves no temp file in ~/.core (index + manifest written atomically)', () => {
   withFixture(
     { workspace_id: 'origAtomic', name: 'p' },
     [{ workspace_id: 'origAtomic', name: 'p', path: '/elsewhere' }],
@@ -180,7 +180,7 @@ test('forked manifest emits canonical `path`, not legacy `project_path`', () => 
   );
 });
 
-// ---------- B7: path-identity is symlink-stable (the resolve()-vs-realpath bug) ----------
+// ---------- path-identity is symlink-stable (the resolve()-vs-realpath bug) ----------
 // A registered workspace reached through a symlinked root (macOS /tmp ->
 // /private/tmp, OneDrive/Dropbox sync roots, a symlinked ~/Projects) must NOT
 // re-fork. The fork decision canonicalizes both sides with realpathSync to match
@@ -232,7 +232,7 @@ test('canonicalPath collapses a symlink to its real target; falls back to resolv
   }
 });
 
-// ---------- B7: identity is path-based; harness is irrelevant ----------
+// ---------- identity is path-based; harness is irrelevant ----------
 // A folder registered by one harness (Claude Code) opened by another (Codex) is a
 // RETURNING workspace, not a fork. checkFork takes no harness input by design —
 // this test pins that property so a future "harness-aware" change can't silently

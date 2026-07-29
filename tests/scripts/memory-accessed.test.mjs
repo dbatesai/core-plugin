@@ -67,7 +67,7 @@ test('probe: CC transcript showing _memories grep → PASS', async () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('probe: Codex harness now CLASSIFIES via tool extraction (Slice F) — PASS on _memories/ access', async () => {
+test('probe: Codex harness now CLASSIFIES via tool extraction — PASS on _memories/ access', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     const tpath = join(dir, 'rollout.jsonl');
@@ -172,7 +172,7 @@ test('runStartup({harness:codex}) labels memory-accessed codex + honest UNKNOWN 
   try {
     writeFileSync(join(dir, 'PROJECT.md'), '# proj');
     // transcript unavailable (nonexistent path) → UNKNOWN; the load-bearing assertion is
-    // that the row is labeled codex, not the claude-code default (the bug). (Post Slice F,
+    // that the row is labeled codex, not the claude-code default (the bug). (With tool extraction,
     // UNKNOWN here is the transcript-unavailable case, not the old extraction-pending one.)
     const res = await runStartup({ harness: 'codex', cwd: dir, transcriptPath: '/nonexistent-rollout.jsonl' });
     const row = res.rows.find((r) => r.capability_id === 'memory-accessed');

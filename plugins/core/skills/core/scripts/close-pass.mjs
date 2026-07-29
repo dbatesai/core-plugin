@@ -18,7 +18,7 @@
  *
  * NOT a judgment engine. It tracks completion; it does not decide whether an op's WRITE is
  * safe — PROJECT.md-mutating ops stay edit-gated in startup.md/finalize, and the autonomous
- * judgment tier stays behind the self-management M3 preconditions. This is plumbing under that policy.
+ * judgment tier stays behind the self-management preconditions. This is plumbing under that policy.
  *
  * Ships with the plugin as prescriptive code; .mjs only. Cross-platform (no shell, no bash-isms).
  *

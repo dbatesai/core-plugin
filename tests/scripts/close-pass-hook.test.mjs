@@ -15,7 +15,7 @@ const CLOSE_PASS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 // Isolate every hook test log (the first isolation pass missed this file): a
 // subprocess hook run that doesn't override CORE_HOOKS_LOG_FILE defaults to
 // the real machine-wide ~/.core/hooks-log.jsonl.
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
 // isn't auto-cleaned — every created dir is tracked and removed below.
 const _isolatedLogDirs = [];
@@ -126,10 +126,10 @@ test('isRegisteredWorkspace: only a path in ~/.core/index.json passes (security 
 });
 
 test('inspectLock: a LIVE pid is never stealable at any age; a DEAD pid is stealable past staleMs', async () => {
-  // POLICY FLIP: the old P2 anti-strand rule made a
-  // very old lock stealable regardless of pid liveness — but a laptop suspended
-  // mid-close revives past any fixed ceiling and would overlap its superseder
-  // (mutual-exclusion break, integrity). Now: live pid → held at ANY age; the
+  // The prior anti-strand rule made a very old lock stealable regardless of
+  // pid liveness — but a laptop suspended mid-close revives past any fixed
+  // ceiling and would overlap its superseder (mutual-exclusion break,
+  // integrity). Now: live pid → held at ANY age; the
   // recycled-pid strand this reopens is the accepted lesser failure (availability),
   // surfaced loudly and remedied by the operator `release` command.
   const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');

@@ -143,7 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **"Delivery Manager"/"DM" retired** — user-facing skill prose now says "agent" ("lead agent" in swarm contexts) throughout. Internal machine identifiers (`dm-profile.md`, `dm_notes`) are unchanged, pending a separate per-project identity rework.
 
 ### Fixed
-- **Security (D1)** — `CORE_HOOKS_LOG_FILE`, `CORE_RETRIEVAL_STORE`, and `CORE_CLOSE_STORE` can no longer be used to redirect telemetry writes outside the trusted `~/.core` boundary; the two store variables were removed outright, the log-file variable hardened against symlink bypass.
+- **Security** — `CORE_HOOKS_LOG_FILE`, `CORE_RETRIEVAL_STORE`, and `CORE_CLOSE_STORE` can no longer be used to redirect telemetry writes outside the trusted `~/.core` boundary; the two store variables were removed outright, the log-file variable hardened against symlink bypass.
 - A concurrency-related test-isolation bug in the retrieve-hook test suite (a shared fixture path collided under concurrent invocation).
 - A Windows-only tar-extraction bug in the test harness.
 

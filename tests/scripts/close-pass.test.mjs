@@ -17,7 +17,7 @@ const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 
 // Same isolation as close-pass-hook.test.mjs: logHookEvent() reads
 // CORE_HOOKS_LOG_FILE from process.env directly, and it only honors overrides
-// inside the trusted ~/.core (D1 fix) — os.tmpdir() doesn't qualify. This file
+// inside the trusted ~/.core — os.tmpdir() doesn't qualify. This file
 // doesn't assert on log content, only that runClose/CLI paths never touch the
 // real machine-wide ~/.core/hooks-log.jsonl.
 const _isolatedLogDirs = [];
@@ -134,7 +134,7 @@ test('detectCloseState: crashed-mid-close with a store-signature mismatch re-owe
 });
 
 // The close-marker semantic gap: a spawnFinalize that returns
-// success (or a test-stub `undefined`, treated as success per P1/P5) WITHOUT the headless
+// success (or a test-stub `undefined`, treated as success) WITHOUT the headless
 // child ever calling `close-pass.mjs record --op <op>` for the ten judgment ops (everything
 // beyond maintenance-run) must not read back as a complete, nothing-owed close. Confirmed
 // live production markers DO carry all twelve ops when the headless child follows the
@@ -154,7 +154,7 @@ test('detectCloseState: a closed marker with every CLOSE_OPS entry actually reco
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('beginClose: a marker-write failure releases the lock it just took and rethrows (P3)', () => {
+test('beginClose: a marker-write failure releases the lock it just took and rethrows', () => {
   const store = freshStore();
   try {
     // Pre-create the marker path AS A DIRECTORY so atomicWriteFileSync's write fails.

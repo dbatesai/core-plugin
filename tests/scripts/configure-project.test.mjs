@@ -208,7 +208,7 @@ test('readConfiguredMcp (codex): does not parse config.toml; defers server list 
   });
 });
 
-// ---------- B5: optional overlay-provided connector map ----------
+// ---------- optional overlay-provided connector map ----------
 
 test('readConnectorMap: absent -> CORE ships none', async () => {
   await withFixture({}, ({ projectPath }) => {
@@ -225,7 +225,7 @@ test('readConnectorMap: an overlay-provided map is read + counted', async () => 
     });
 });
 
-// ---------- B6a: AGENTS.md guarded on CONTRACT.md ----------
+// ---------- AGENTS.md guarded on CONTRACT.md ----------
 
 test('planAgentsMd: no CONTRACT.md -> skipped, never crashes (the common case)', async () => {
   await withFixture({}, async ({ projectPath }) => {
@@ -243,7 +243,7 @@ test('planAgentsMd: CONTRACT.md present, dry-run -> would-generate', async () =>
   });
 });
 
-test('planAgentsMd: CONTRACT.md present + apply -> actually generates AGENTS.md (B6a wiring)', async () => {
+test('planAgentsMd: CONTRACT.md present + apply -> actually generates AGENTS.md', async () => {
   await withFixture({ contract: true }, async ({ projectPath }) => {
     const a = await planAgentsMd(projectPath, { apply: true });
     assert.equal(a.status, 'generated');

@@ -13,7 +13,7 @@ import {
   score, signalS, NO_SOURCES_DEFAULT_S,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
-test('M3: a malformed --today falls back to today, never null (no TypeError at toISOString)', () => {
+test('a malformed --today falls back to today, never null (no TypeError at toISOString)', () => {
   const d = _todayFromArg('garbage');
   assert.ok(d instanceof Date, 'returns a Date, not null');
   assert.doesNotThrow(() => d.toISOString(), 'the display path can stamp it');
@@ -68,7 +68,7 @@ test('isInvalidated: true once t_invalid is at/before today, false while open', 
   assert.equal(isInvalidated(u({ created: '2026-01-01' }), today), false);
 });
 
-// ---------- CRLF tolerance (review M1) ----------
+// ---------- CRLF tolerance ----------
 
 test('parseFrontmatter parses a CRLF unit the same as an LF unit', () => {
   const lf = '---\nid: x\ntype: decision\ncreated: 2026-01-01\n---\n\nbody line';
@@ -195,7 +195,7 @@ test('a frontmatter-less unit is excluded from ranking and warned to stderr', ()
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ---------- D7: priority scoring calibration ----------
+// ---------- priority scoring calibration ----------
 
 test('no-sources units score S=0.3 — below summary-sourced, above transcript', () => {
   assert.equal(NO_SOURCES_DEFAULT_S, 0.3);

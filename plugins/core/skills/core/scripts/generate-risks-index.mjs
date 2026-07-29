@@ -27,12 +27,12 @@ export const RISK_NUMERIC = /^risk-(\d+)-.+\.md$/;
 export const RISK_NAMED = /^risk-([a-z][a-z0-9-]*)\.md$/;
 export const SUMMARY_MAX = 100;
 
-// M1: delegates to the shared flat parser (was a local copy). Export kept for the callsite.
+// Delegates to the shared flat parser. Export kept for the callsite.
 export function parseFrontmatter(text) {
   return parseFlatFrontmatter(text);
 }
 
-// M12: a `|` in any cell value splits the markdown table row and corrupts the substring
+// A `|` in any cell value splits the markdown table row and corrupts the substring
 // check-units index-drift detection relies on. Escape pipes + flatten newlines per cell.
 export function escapeCell(v) {
   return String(v ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ');
@@ -140,7 +140,7 @@ export function main(argv) {
 
   const indexPath = join(memoriesDir, 'INDEX-risks.md');
   const content = buildIndex(memoriesDir);
-  // Atomic write (M9 sibling): same crash-safety as the decisions index; a
+  // Atomic write: same crash-safety as the decisions index; a
   // half-written index would mislead check-units' drift detection.
   atomicWriteFileSync(indexPath, content);
   console.log(`Wrote ${indexPath}`);

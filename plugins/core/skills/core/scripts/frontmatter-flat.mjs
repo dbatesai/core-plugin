@@ -27,7 +27,7 @@
  */
 
 export function parseFlatFrontmatter(text) {
-  const t = String(text == null ? '' : text).replace(/\r\n?/g, '\n'); // CRLF tolerance (review M1)
+  const t = String(text == null ? '' : text).replace(/\r\n?/g, '\n'); // CRLF tolerance
   if (!t.startsWith('---\n')) return [{}, t];
   const end = t.indexOf('\n---', 4);
   if (end === -1) return [{}, t];

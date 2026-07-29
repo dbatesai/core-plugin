@@ -26,7 +26,7 @@ function fixture() {
   return project;
 }
 
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
 // isn't auto-cleaned — every created dir is tracked and removed below.
 const _isolatedLogDirs = [];

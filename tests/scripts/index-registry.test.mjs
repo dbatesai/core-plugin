@@ -35,8 +35,8 @@ test('add/update/remove roundtrip; duplicate add refuses', () => {
   const coreDir = setup();
   addWorkspace(coreDir, { workspace_id: 'a', name: 'A', path: '/p/a' });
   assert.throws(() => addWorkspace(coreDir, { workspace_id: 'a', name: 'dup', path: '/p/dup' }), /already registered/);
-  updateWorkspace(coreDir, 'a', { name: 'A2' });
-  assert.equal(readIdx(coreDir)[0].name, 'A2');
+  updateWorkspace(coreDir, 'a', { name: 'Renamed' });
+  assert.equal(readIdx(coreDir)[0].name, 'Renamed');
   removeWorkspace(coreDir, 'a');
   assert.equal(readIdx(coreDir).length, 0);
   assert.throws(() => updateWorkspace(coreDir, 'ghost', {}), /unknown id/);

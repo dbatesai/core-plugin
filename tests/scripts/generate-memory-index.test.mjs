@@ -58,7 +58,7 @@ test('no file anywhere uses new URL(...).pathname (H1 sweep — Windows-safe)', 
   assert.deepEqual(offenders, [], `these files use URL .pathname (breaks on Windows): ${offenders.join(', ')}`);
 });
 
-// --- M13: --top must be a positive integer; a NaN top must never thin MEMORY.md ---
+// --- --top must be a positive integer; a NaN top must never thin MEMORY.md ---
 
 const CURATED = '# idx\n\n## Top project units (refreshed from priority.mjs --top 30, 2026-06-01)\n\n- [a](a.md) — one\n- [b](b.md) — two\n';
 
@@ -71,7 +71,7 @@ function scratchMemoryMd() {
 }
 
 for (const bad of ['garbage', '0', '-5', '3.5', '']) {
-  test(`M13: --top ${JSON.stringify(bad)} is rejected (exit 2) and leaves MEMORY.md untouched`, () => {
+  test(`--top ${JSON.stringify(bad)} is rejected (exit 2) and leaves MEMORY.md untouched`, () => {
     const { dir, memMd } = scratchMemoryMd();
     try {
       const code = quietStderr(() => main([join(dir, '_memories'), '--memory-md', memMd, '--top', bad]));

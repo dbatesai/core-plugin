@@ -188,7 +188,7 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
     const all = [...existing, ...newLines];
     const { kept, truncated } = applyRetention(all, opts.retentionOpts);
 
-    // M8: use the shared atomic writer rather than a hand-rolled temp+rename that
+    // Use the shared atomic writer rather than a hand-rolled temp+rename that
     // had no temp-file cleanup on failure (an orphaned .tmp-* per failed append).
     atomicWriteFileSync(file, kept.join('\n') + '\n');
     try { chmodSync(file, EVIDENCE_FILE_MODE); } catch { /* filesystem without POSIX modes */ }

@@ -140,7 +140,7 @@ export function classifyTurn(turn, ctx) {
   if (inContext) return { state: 'rec-fail-tier-0', evidence: { term, found: 'context', context_excerpt: contextExcerpt } };
   if (onDisk) {
     if (!ladder) return { state: 'rec-fail-tier-1-3-trigger', evidence: { term, found: 'disk', ladder_walk: false, disk_excerpt: diskExcerpt } };
-    // M6: mechanics-failure is defined as "agent walked the ladder; it came back EMPTY anyway"
+    // Mechanics-failure is defined as "agent walked the ladder; it came back EMPTY anyway"
     // — so it requires the ladder to have surfaced nothing. The dead ladderReturnedContent
     // discriminator is the test. If the ladder walked AND returned content but the agent still
     // asked, the mechanism worked — the content was effectively in context for this turn — so

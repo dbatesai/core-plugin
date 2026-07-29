@@ -7,7 +7,7 @@ import {
   classifyRetrievalSkips, buildProjectTerms, formatReport, parseSkipArgs,
 } from '../../plugins/core/skills/core/scripts/analyze-retrieval-skip.mjs';
 
-test('M4: a space-form flag value is not mistaken for the project root', () => {
+test('a space-form flag value is not mistaken for the project root', () => {
   // `--harness codex` with no explicit root must NOT set the root to "codex"
   // (which has no _memories/ and would report NO-STORE on the real project).
   const a = parseSkipArgs(['--harness', 'codex']);

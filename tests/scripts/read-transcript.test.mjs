@@ -54,7 +54,7 @@ test('parseCodex: event_msg agent/user messages surfaced', () => {
   assert.equal(ev[1].role, 'user');
 });
 
-// --- Codex tool/shell extraction (Slice F — schema from a real rollout-*.jsonl) ---
+// --- Codex tool/shell extraction (schema from a real rollout-*.jsonl) ---
 // Verified shapes: function_call {name, arguments(JSON string), call_id};
 // custom_tool_call {name, input(string), call_id}. The arguments/input carry the shell
 // command / patch path, which is what CORE_SURFACE_RE matches for memory-accessed.
@@ -118,7 +118,7 @@ test('resolveTranscriptPath: claude-code picks latest .jsonl by mtime', () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('resolveTranscriptPath: dotted username maps dots→dashes to match Claude projects folder (M2)', () => {
+test('resolveTranscriptPath: dotted username maps dots→dashes to match Claude projects folder', () => {
   // A corporate dotted username: Claude Code's ~/.claude/projects/<slug> encodes
   // dots AND slashes to dashes. A slash-only replace leaves the dot and looks in
   // the wrong dir → transcript not found → classifier silently UNAVAILABLE.
@@ -141,7 +141,7 @@ test('readTranscript: fail-open on missing transcript (available:false, no throw
   assert.deepEqual(r.events, []);
 });
 
-test('readTranscript: codex meta reports tool extraction implemented (Slice F)', () => {
+test('readTranscript: codex meta reports tool extraction implemented', () => {
   const r = readTranscript({ harness: 'codex', home: '/tmp/none' });
   assert.equal(r.meta.codex_tool_extraction, 'implemented');
 });

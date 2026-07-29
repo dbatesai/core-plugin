@@ -4,9 +4,29 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { scanTree, formatReport, PATTERNS, ALLOWLIST } from './dev-leakage-guard.mjs';
+import { scanTree, formatReport, PATTERNS, ALLOWLIST, SCAN_EXCLUDE } from './dev-leakage-guard.mjs';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+// This file IS scanned by the guard (it is deliberately NOT in SCAN_EXCLUDE):
+// a scanner whose own test file is exempt has a blind spot exactly where leaks
+// are most likely to be pasted. Every planted deny token below is therefore
+// CONSTRUCTED FROM FRAGMENTS at runtime — the source of this file never
+// contains a matchable token, so the live-tree scan stays clean while the
+// planted trees still exercise every pattern.
+const FRAG = {
+  user: 'dba' + 'tes',                      // personal username
+  person: 'Da' + 'vid',                     // personal first name
+  personFull: 'Da' + 'vid ' + 'Ba' + 'tes', // personal full name
+  agent: 'Ha' + 'le',                       // reviewer agent name
+  agent2: 'A' + 'gy',                       // second reviewer agent name
+  agentLower: 'ke' + 'el',                  // lowercase agent name
+  filesRepo: '~/fi' + 'les',
+  machine: 'Jennifer-' + 'Aniston',
+  machine2: 'R' + '11',
+  dc: (n) => 'DC-' + n,                     // decision-ledger ref
+  issue: (p, n) => p + n,                   // internal issue id, e.g. issue('AUD-', '104')
+};
 
 function withTree(fn) {
   const root = mkdtempSync(join(tmpdir(), 'leakguard-'));
@@ -33,10 +53,19 @@ test('the current shipped tree has no development leakage', () => {
   );
 });
 
+// ---------- the exclusion set is exactly the scanner implementation ----------
+test('only the scanner implementation is excluded from scanning, and the exclusion is honest', () => {
+  // The implementation must stay excluded — its PATTERNS hold literal deny
+  // tokens as machine data, so scanning it can only ever false-positive. This
+  // test file must NOT be excluded — its planted tokens are fragment-built.
+  assert.deepEqual([...SCAN_EXCLUDE], ['tests/scripts/dev-leakage-guard.mjs'],
+    'the exclusion set must be exactly the scanner implementation, nothing more');
+});
+
 // ---------- RED: a planted leak in each class is caught ----------
 test('planted personal path in a skill file is caught', () => {
   withTree(({ root, w }) => {
-    w('plugins/core/skills/core/protocols/planted.md', 'See /Users/dbates/secret for the config.\n');
+    w('plugins/core/skills/core/protocols/planted.md', `See /Users/${FRAG.user}/secret for the config.\n`);
     const findings = scanTree({ root });
     assert.ok(
       findings.some((f) => f.pattern === 'personal-home-username' && f.file.endsWith('planted.md')),
@@ -49,10 +78,10 @@ test('planted personal path in a skill file is caught', () => {
   });
 });
 
-test('planted agent name is caught in shipped prose AND in shipped code comments (2026-07-24 ruling)', () => {
+test('planted agent name is caught in shipped prose AND in shipped code comments', () => {
   withTree(({ root, w }) => {
-    w('plugins/core/skills/core/protocols/planted.md', "Per Hale's finding, this is fixed.\n");
-    w('plugins/core/skills/core/scripts/planted.mjs', "// Per Hale's finding — shipped code comment, scanned since the 2026-07-24 ruling.\n");
+    w('plugins/core/skills/core/protocols/planted.md', `Per ${FRAG.agent}'s finding, this is fixed.\n`);
+    w('plugins/core/skills/core/scripts/planted.mjs', `// Per ${FRAG.agent}'s finding — a shipped code comment.\n`);
     const findings = scanTree({ root });
     assert.ok(
       findings.some((f) => f.pattern === 'agent-name-in-prose' && f.file.endsWith('planted.md')),
@@ -60,16 +89,30 @@ test('planted agent name is caught in shipped prose AND in shipped code comments
     );
     assert.ok(
       findings.some((f) => f.pattern === 'agent-name-in-prose' && f.file.endsWith('planted.mjs')),
-      'agent name in shipped plugins/ code comment not caught (no-dev-process-references ruling)',
+      'agent name in shipped plugins/ code comment not caught',
     );
+  });
+});
+
+test('agent-name boundaries: lowercase, uppercase, underscore-slug, and hyphen-slug all match', () => {
+  withTree(({ root, w }) => {
+    w('plugins/core/skills/core/protocols/planted.md', [
+      `the ${FRAG.agentLower} convention`,             // bare lowercase
+      `${FRAG.agentLower.toUpperCase()} SAID SO`,      // bare uppercase
+      `reference_${FRAG.agentLower}_handoff_channels`, // underscore slug (\b cannot see this)
+      `per-${FRAG.agent2.toLowerCase()}-review`,       // hyphen slug
+    ].join('\n') + '\n');
+    const findings = scanTree({ root }).filter((f) => f.pattern === 'agent-name-in-prose');
+    assert.equal(findings.length, 4,
+      `all four boundary/case forms must be findings, got:\n${formatReport(findings)}`);
   });
 });
 
 test('planted DC-reference is caught everywhere: product surface, CHANGELOG, and tests/', () => {
   withTree(({ root, w }) => {
-    w('plugins/core/skills/core/protocols/planted.md', 'Graduation links per DC-94a.\n');
-    w('CHANGELOG.md', '- Fixed per DC-114.\n');
-    w('tests/scripts/planted.test.mjs', '// ACCEPTANCE DC-116 item 3 — provenance traceability stays.\n');
+    w('plugins/core/skills/core/protocols/planted.md', `Graduation links per ${FRAG.dc('94a')}.\n`);
+    w('CHANGELOG.md', `- Fixed per ${FRAG.dc('114')}.\n`);
+    w('tests/scripts/planted.test.mjs', `// ACCEPTANCE ${FRAG.dc('116')} item 3 — provenance traceability stays.\n`);
     const findings = scanTree({ root });
     assert.ok(
       findings.some((f) => f.pattern === 'dc-reference' && f.file.endsWith('planted.md')),
@@ -88,31 +131,31 @@ test('planted DC-reference is caught everywhere: product surface, CHANGELOG, and
 
 test('planted personal-authorization prose (a name in .md) is caught', () => {
   withTree(({ root, w }) => {
-    w('plugins/core/skills/core/protocols/planted.md', 'Standing authorization for pushes, David 2026.\n');
+    w('plugins/core/skills/core/protocols/planted.md', `Standing authorization for pushes, ${FRAG.person} 2026.\n`);
     const findings = scanTree({ root });
     assert.ok(
-      findings.some((f) => f.pattern === 'person-in-prose' && f.match === 'David'),
+      findings.some((f) => f.pattern === 'person-in-prose' && f.match === FRAG.person),
       'person-in-prose not caught',
     );
   });
 });
 
-test('planted ~/files default and machine name are caught', () => {
+test('planted personal-files default and machine name are caught', () => {
   withTree(({ root, w }) => {
-    w('plugins/core/skills/core/schemas/planted.json', '{"target_surface": "~/files/collabs/"}\n');
-    w('plugins/core/skills/core/protocols/planted.md', 'Ran on Jennifer-Aniston box, R11.\n');
+    w('plugins/core/skills/core/schemas/planted.json', `{"target_surface": "${FRAG.filesRepo}/collabs/"}\n`);
+    w('plugins/core/skills/core/protocols/planted.md', `Ran on ${FRAG.machine} box, ${FRAG.machine2}.\n`);
     const findings = scanTree({ root });
-    assert.ok(findings.some((f) => f.pattern === 'personal-files-repo'), '~/files not caught');
+    assert.ok(findings.some((f) => f.pattern === 'personal-files-repo'), 'personal files repo not caught');
     assert.ok(findings.some((f) => f.pattern === 'machine-name-jennifer'), 'machine name not caught');
-    assert.ok(findings.some((f) => f.pattern === 'machine-name-r11'), 'R11 not caught');
+    assert.ok(findings.some((f) => f.pattern === 'machine-name-r11'), 'second machine name not caught');
   });
 });
 
 // ---------- allowlist behaves ----------
 test('owner/copyright name is allowlisted; the same name in prose is not', () => {
   withTree(({ root, w }) => {
-    w('LICENSE', 'Copyright (c) 2026 David Bates\n'); // allowlisted file+pattern
-    w('plugins/core/skills/core/protocols/planted.md', 'David Bates decided this.\n'); // David + David Bates in prose
+    w('LICENSE', `Copyright (c) 2026 ${FRAG.personFull}\n`); // allowlisted file+pattern
+    w('plugins/core/skills/core/protocols/planted.md', `${FRAG.personFull} decided this.\n`);
     const findings = scanTree({ root });
     assert.ok(
       !findings.some((f) => f.file === 'LICENSE'),
@@ -120,14 +163,14 @@ test('owner/copyright name is allowlisted; the same name in prose is not', () =>
     );
     assert.ok(
       findings.some((f) => f.file.endsWith('planted.md') && f.pattern === 'personal-name'),
-      'David Bates in prose should still be caught',
+      'a personal full name in prose should still be caught',
     );
   });
 });
 
 test('path-mapping test vectors are allowlisted', () => {
   withTree(({ root, w }) => {
-    w('tests/scripts/project-slug.test.mjs', "mapProjectPathToSlug('/Users/dbates/x');\n");
+    w('tests/scripts/project-slug.test.mjs', `mapProjectPathToSlug('/Users/${FRAG.user}/x');\n`);
     const findings = scanTree({ root });
     assert.ok(
       !findings.some((f) => f.file === 'tests/scripts/project-slug.test.mjs'),
@@ -136,12 +179,29 @@ test('path-mapping test vectors are allowlisted', () => {
   });
 });
 
-test('the guard never scans its own source (which contains the deny tokens)', () => {
+test('the scanner implementation stays excluded; its own TEST file is scanned', () => {
   withTree(({ root, w }) => {
-    // Copy of the guard name in the excluded slot must be skipped even with tokens.
-    w('tests/scripts/dev-leakage-guard.mjs', 'const x = "/Users/dbates ~/files Hale";\n');
+    const tokens = `const x = "/Users/${FRAG.user} ${FRAG.filesRepo} ${FRAG.agent}";\n`;
+    // Tokens at the implementation path are skipped (literal pattern data lives there)…
+    w('tests/scripts/dev-leakage-guard.mjs', tokens);
+    assert.equal(scanTree({ root }).length, 0, 'the scanner implementation must stay excluded');
+    // …but the SAME tokens at the test-file path are findings: the old blanket
+    // self-exclusion recreated a blind spot, and this pins that it stays gone.
+    w('tests/scripts/dev-leakage-guard.test.mjs', tokens);
+    assert.ok(scanTree({ root }).length > 0, 'the guard test file must be scanned like any other tracked file');
+  });
+});
+
+// ---------- FALSIFIER: a dated reviewer/ruling sentence outside literal-pattern data is RED ----------
+test('a dated reviewer ruling sentence planted in the guard TEST file is a finding', () => {
+  withTree(({ root, w }) => {
+    w('tests/scripts/dev-leakage-guard.test.mjs',
+      `// ${FRAG.agent} ruled 2026-07-24: tests keep provenance traceability.\n`);
     const findings = scanTree({ root });
-    assert.equal(findings.length, 0, 'the scanner must exclude its own files');
+    assert.ok(
+      findings.some((f) => f.pattern === 'agent-name-in-prose' && f.file === 'tests/scripts/dev-leakage-guard.test.mjs'),
+      'a dated reviewer/ruling sentence in the guard test file must be RED',
+    );
   });
 });
 
@@ -150,7 +210,7 @@ test('a named-review line planted in a test file is a finding', () => {
   withTree(({ root, w }) => {
     w(
       'tests/scripts/some-feature.test.mjs',
-      "test('AUD-104 refusal path (Hale round-2 retest)', () => {});\n",
+      `test('${FRAG.issue('AUD-', '104')} refusal path (${FRAG.agent} round-2 retest)', () => {});\n`,
     );
     const hits = scanTree({ root }).filter((f) => f.file === 'tests/scripts/some-feature.test.mjs');
     assert.ok(
@@ -166,7 +226,7 @@ test('a named-review line planted in a test file is a finding', () => {
 
 test('a named-review line planted in CHANGELOG.md is a finding', () => {
   withTree(({ root, w }) => {
-    w('CHANGELOG.md', '## [9.9.9]\n- Fixed per Agy mailbox round 2; HC_539 closed.\n');
+    w('CHANGELOG.md', `## [9.9.9]\n- Fixed per ${FRAG.agent2} mailbox round 2; ${FRAG.issue('HC_', '539')} closed.\n`);
     const hits = scanTree({ root }).filter((f) => f.file === 'CHANGELOG.md');
     assert.ok(
       hits.some((f) => f.pattern === 'agent-name-in-prose'),

@@ -109,7 +109,7 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
   const oid = treeOid(repo, ref, subdir);
   const { content_manifest_sha256, file_count } = manifestFromGit(repo, ref, subdir);
   return {
-    mode: 'git', // K17: mode-blind — see directoryIdentity below
+    mode: 'git', // mode-blind — see directoryIdentity below
     ref,
     subdir,
     tree_oid: oid,
@@ -127,7 +127,7 @@ export function artifactIdentity(repo, ref, subdir = 'plugins/core') {
 }
 
 /**
- * K17: "mode-blind" — the
+ * "Mode-blind" — the
  * CLI's --dir output was a bare manifestHash() result with no field naming
  * which computation path produced it. The first fix added a `mode` field but
  * also embedded the canonical absolute local directory in `dir` and in

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { escapeCell, buildIndex, truncate, SUMMARY_MAX } from '../../plugins/core/skills/core/scripts/generate-risks-index.mjs';
 
-test('M9: INDEX-risks.md is written atomically (crash-safety, consistent with the decisions index)', () => {
+test('INDEX-risks.md is written atomically (crash-safety, consistent with the decisions index)', () => {
   const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/generate-risks-index.mjs', import.meta.url)), 'utf8');
   assert.match(src, /from '\.\/fs-atomic\.mjs'/, 'imports the atomic writer');
   assert.match(src, /atomicWriteFileSync\(indexPath/, 'index written atomically');
@@ -40,7 +40,7 @@ function scratchMemories(units) {
   return mem;
 }
 
-test('M12: a risk H1 containing a pipe renders one well-formed, escaped table row', () => {
+test('a risk H1 containing a pipe renders one well-formed, escaped table row', () => {
   const mem = scratchMemories({
     'risk-9-piped.md': '---\nid: risk-9\nstatus: open\ndate: 2026-06-02\n---\n\n# R-9: convergence on A | B infrastructure\n',
   });

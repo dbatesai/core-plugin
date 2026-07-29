@@ -10,7 +10,7 @@ import {
 } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 import { currentLockFile } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
 
-test('M8: appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {
+test('appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {
   const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/capability-history.mjs', import.meta.url)), 'utf8');
   assert.match(src, /from '\.\/fs-atomic\.mjs'/, 'imports the shared atomic writer');
   assert.match(src, /atomicWriteFileSync\(file,/, 'history file written atomically');

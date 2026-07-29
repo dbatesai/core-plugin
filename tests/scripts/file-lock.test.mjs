@@ -127,11 +127,11 @@ test('withFileLock throws LOCK_HELD after retry budget on a live contended lock'
   releaseFileLock(lock, got.nonce);
 });
 
-// K12: the finally block used to discard
+// The finally block used to discard
 // releaseFileLock's return value entirely, so a real release failure (another
 // process already superseded/GC'd the generation, a filesystem error) was
 // indistinguishable from success to every caller.
-test('K12: a genuine release failure is never silent when fn() succeeds — it becomes the thrown error', () => {
+test('a genuine release failure is never silent when fn() succeeds — it becomes the thrown error', () => {
   const lock = tmpLock();
   assert.throws(
     () => withFileLock(lock, () => {
@@ -148,7 +148,7 @@ test('K12: a genuine release failure is never silent when fn() succeeds — it b
   );
 });
 
-test('K12: a real fn() error still propagates (unmasked) even when release also fails, with the release failure attached', () => {
+test('a real fn() error still propagates (unmasked) even when release also fails, with the release failure attached', () => {
   const lock = tmpLock();
   assert.throws(
     () => withFileLock(lock, () => {
@@ -162,7 +162,7 @@ test('K12: a real fn() error still propagates (unmasked) even when release also 
   );
 });
 
-test('K12 control: a clean release (fn succeeds, release succeeds) still returns fn\'s value with no throw', () => {
+test('control: a clean release (fn succeeds, release succeeds) still returns fn\'s value with no throw', () => {
   const lock = tmpLock();
   const result = withFileLock(lock, () => 'clean-result');
   assert.equal(result, 'clean-result');
@@ -306,14 +306,14 @@ test('race A/B/C: C can never acquire during a revived owner\'s wrong-owner rele
   rmSync(dir, { recursive: true, force: true });
 });
 
-// K12: a delayed acquirer's maxN snapshot can go
+// A delayed acquirer's maxN snapshot can go
 // stale mid-acquisition — a full concurrent acquire+release cycle completing
 // entirely inside the snapshot-to-create window used to resurrect an already-
 // retired generation number instead of a fresh one, corrupting the numbering
 // invariant and producing later 'not-owner' release failures (1/8, 2/10 under
 // load). CORE_FILELOCK_TEST_DELAY_MS widens that window deterministically so
 // this is reproduced on demand rather than left to scheduler luck.
-test('K12: a stale maxN snapshot is caught post-win and backed off, never silently resurrected', async () => {
+test('a stale maxN snapshot is caught post-win and backed off, never silently resurrected', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'file-lock-k12-'));
   const lock = join(dir, 'stale-target.lock');
   const snapshotTaken = join(dir, 'snapshot-taken');

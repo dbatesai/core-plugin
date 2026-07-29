@@ -1,5 +1,5 @@
 /**
- * buildFinalContextPack — Train A A4 acceptance tests.
+ * buildFinalContextPack — acceptance tests.
  *
  * The contract: one function owns final ordering, authority labels, warnings,
  * formatting, UTF-8 byte accounting, and the byte cap; hook + CLI + evaluator +
@@ -17,7 +17,7 @@ import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK = join(ROOT, 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
-// D1 fix, 2026-07-18, second pass: CORE_RETRIEVAL_STORE was removed from the
+// Second pass, 2026-07-18: CORE_RETRIEVAL_STORE was removed from the
 // product hook entirely — the subprocess call below passes the store via
 // `cwd` in the JSON payload instead, no symlink workaround needed anymore.
 const _createdDirs = [];
@@ -26,11 +26,11 @@ after(() => { for (const d of _createdDirs) rmSync(d, { recursive: true, force: 
 const { buildFinalContextPack, retrieveContext, storeHealth } =
   await import(new URL('../../plugins/core/skills/core/scripts/retrieve-context.mjs', import.meta.url).href);
 
-test('A4 equivalence: hook subprocess output === pack function output, byte-exact, on the same fixture', () => {
+test('equivalence: hook subprocess output === pack function output, byte-exact, on the same fixture', () => {
   const prompt = 'omega speedmaster sale';
   // Isolate the hook test log — default
   // ~/.core/hooks-log.jsonl is a real machine-wide file, not a test fixture.
-  // Rooted under ~/.core (D1): os.tmpdir() does not qualify.
+  // Rooted under ~/.core: os.tmpdir() does not qualify.
   const hooksLogDir = mkdtempSync(join(trustedTestTmpRoot(), 'a4-hook-log-'));
   _createdDirs.push(hooksLogDir);
   const hooksLog = join(hooksLogDir, 'hooks-log.jsonl');
@@ -121,7 +121,7 @@ test('empty hits → empty pack (no header emitted for nothing)', () => {
   assert.deepEqual(pack.accepted, []);
 });
 
-test('A3 snapshot: loadSnapshot returns a content-derived id that changes only when store bytes change', async () => {
+test('snapshot: loadSnapshot returns a content-derived id that changes only when store bytes change', async () => {
   const { loadSnapshot } = await import(new URL('../../plugins/core/skills/core/scripts/generate-summary-index.mjs', import.meta.url).href);
   const a = loadSnapshot(FIXT);
   const b = loadSnapshot(FIXT);
@@ -130,7 +130,7 @@ test('A3 snapshot: loadSnapshot returns a content-derived id that changes only w
   assert.ok(Array.isArray(a.index.units) && a.index.units.length > 0, 'snapshot carries the loaded index');
 });
 
-test('A3 threading: bm25Scores with a preloaded snapshot index equals a standalone load', async () => {
+test('threading: bm25Scores with a preloaded snapshot index equals a standalone load', async () => {
   const { loadSnapshot } = await import(new URL('../../plugins/core/skills/core/scripts/generate-summary-index.mjs', import.meta.url).href);
   const { bm25Scores } = await import(new URL('../../plugins/core/skills/core/scripts/bm25.mjs', import.meta.url).href);
   const { index } = loadSnapshot(FIXT);
@@ -139,7 +139,7 @@ test('A3 threading: bm25Scores with a preloaded snapshot index equals a standalo
   assert.deepEqual(threaded, standalone, 'one-snapshot read path scores identically on an unchanged store');
 });
 
-test('A3 trace: buildRetrievalTrace records snapshot id, stages, delivered pack, and timing — final agrees with retrieveContext', async () => {
+test('trace: buildRetrievalTrace records snapshot id, stages, delivered pack, and timing — final agrees with retrieveContext', async () => {
   const { buildRetrievalTrace } = await import(new URL('../../plugins/core/skills/core/scripts/retrieve-context.mjs', import.meta.url).href);
   const query = 'omega speedmaster sale';
   const trace = buildRetrievalTrace(query, FIXT, { topN: 3 });
@@ -161,7 +161,7 @@ test('A3 trace: buildRetrievalTrace records snapshot id, stages, delivered pack,
   assert.ok(trace.component_identity['retrieve-context.mjs'], 'component hash recorded');
 });
 
-test('A3 trace: storeless directory → explicit storeless trace, no crash, no writes', async () => {
+test('trace: storeless directory → explicit storeless trace, no crash, no writes', async () => {
   const { buildRetrievalTrace } = await import(new URL('../../plugins/core/skills/core/scripts/retrieve-context.mjs', import.meta.url).href);
   const { mkdtempSync, rmSync, readdirSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -174,7 +174,7 @@ test('A3 trace: storeless directory → explicit storeless trace, no crash, no w
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('A4 CLI: --pack emits the exact delivered bytes (same function, same cap, same health)', () => {
+test('CLI: --pack emits the exact delivered bytes (same function, same cap, same health)', () => {
   const CLI = join(ROOT, 'plugins', 'core', 'skills', 'core', 'scripts', 'retrieve-context.mjs');
   const query = 'omega speedmaster sale';
   const cliOut = execFileSync('node', [CLI, FIXT, query, '--pack'], { encoding: 'utf8' });
@@ -182,7 +182,7 @@ test('A4 CLI: --pack emits the exact delivered bytes (same function, same cap, s
   assert.equal(cliOut, pack.text, 'CLI --pack and the product function must emit identical bytes');
 });
 
-test('A4 harness: context3 arm reports DELIVERED identities (pack-accepted), not pre-cap selection', async () => {
+test('harness: context3 arm reports DELIVERED identities (pack-accepted), not pre-cap selection', async () => {
   const { runHarness } = await import(new URL('../../plugins/core/skills/core/scripts/retrieval-harness.mjs', import.meta.url).href);
   const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');

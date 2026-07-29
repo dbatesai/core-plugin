@@ -36,13 +36,13 @@ function resolverBlock(src) {
   return block;
 }
 
-test('A1: resolver block contains no inline node -e payload (the Windows quoting footgun class)', () => {
+test('resolver block contains no inline node -e payload (the Windows quoting footgun class)', () => {
   const block = resolverBlock(md);
   assert.ok(!block.includes('node -e'), 'no inline node -e — resolution lives in resolve-plugin-root.mjs');
   assert.ok(!block.includes('\\\\'), 'no escaped-backslash sequences in the block');
 });
 
-test('A2: no bash-only separator normalization remains (script normalizes)', () => {
+test('no bash-only separator normalization remains (script normalizes)', () => {
   assert.ok(!md.includes('${CORE_ROOT//'), 'bash parameter-expansion swap removed from startup.md — --print-root prints forward slashes');
 });
 
@@ -52,7 +52,7 @@ test('C1: resolver block delegates to --print-root with the env-var fallback for
   assert.match(block, /\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/core\/scripts\/resolve-plugin-root\.mjs/, 'env-var fallback locates the script, never asserts the root');
 });
 
-test('A3: the structural gate and loud marker are present', () => {
+test('the structural gate and loud marker are present', () => {
   const block = resolverBlock(md);
   assert.ok(
     block.includes('[ -d "$CORE_ROOT/skills/core/scripts" ]'),
@@ -68,7 +68,7 @@ test('A3: the structural gate and loud marker are present', () => {
   );
 });
 
-test('A4: every node "${CORE_ROOT}/..." call site is mechanically guarded', () => {
+test('every node "${CORE_ROOT}/..." call site is mechanically guarded', () => {
   // No bare invocation may sit at the start of a line / after && without a
   // preceding scripts-dir or non-empty guard. We check each call line has a
   // guard token on the same logical command.
@@ -93,7 +93,7 @@ test('A4: every node "${CORE_ROOT}/..." call site is mechanically guarded', () =
   }
 });
 
-test('A5: readiness surfacing for an unresolved root is loud, not silent', () => {
+test('readiness surfacing for an unresolved root is loud, not silent', () => {
   assert.ok(
     /couldn't resolve the CORE plugin root/.test(md),
     'readiness receipt surfaces an unresolved CORE_ROOT to the user',
@@ -133,7 +133,7 @@ function runResolver(home, pluginRootSub) {
   });
 }
 
-test('B1: substituted block resolves the install path via --print-root (no quoting failure)', () => {
+test('substituted block resolves the install path via --print-root (no quoting failure)', () => {
   const { home, installPath } = fixtureHome({ withScripts: true });
   try {
     const out = runResolver(home, installPath);
@@ -146,7 +146,7 @@ test('B1: substituted block resolves the install path via --print-root (no quoti
   }
 });
 
-test('B2: an unsubstituted/wrong PLUGIN_ROOT blanks CORE_ROOT and emits the loud marker', () => {
+test('an unsubstituted/wrong PLUGIN_ROOT blanks CORE_ROOT and emits the loud marker', () => {
   const { home } = fixtureHome({ withScripts: false });
   try {
     const out = runResolver(home, join(home, 'install'));
@@ -157,11 +157,11 @@ test('B2: an unsubstituted/wrong PLUGIN_ROOT blanks CORE_ROOT and emits the loud
   }
 });
 
-// M16: finalize/process-memory/validation must agree with startup.md that
+// finalize/process-memory/validation must agree with startup.md that
 // ${CLAUDE_PLUGIN_ROOT} is NOT reliably injected into Bash calls, and resolve the
 // root from the loaded skill path instead. The old prose ("set on Claude Code
 // marketplace installs") contradicted startup and assumed the var was present.
-test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and defer to the startup resolver', () => {
+test('skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and defer to the startup resolver', () => {
   const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
   for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md']) {
     const src = readFileSync(join(base, rel), 'utf8');
@@ -175,13 +175,13 @@ test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and d
     'validation.md must agree the env var is unreliable and defer to the startup resolver');
 });
 
-// M16 idiom lock — SCOPED to the skill entry-points that resolve CORE_ROOT
+// Idiom lock — SCOPED to the skill entry-points that resolve CORE_ROOT
 // themselves. These two each establish CORE_ROOT (finalize/process-memory via a
 // "Script path resolution" preamble) and so MUST reference that resolved variable
 // in their own command bodies — not ${CLAUDE_PLUGIN_ROOT}, which the same surfaces
 // document as unreliable in Bash.
 // validation.md and startup.md are the other two CORE_ROOT surfaces (covered by
-// the doctrine test above + the resolver tests A1–B2).
+// the doctrine test above + the resolver tests).
 //
 // Deliberately OUT of scope: references/retrieval.md,
 // references/hygiene-strategies.md, protocols/data-storage.md, scripts/README.md,
@@ -190,7 +190,7 @@ test('M16: skill surfaces do not claim CLAUDE_PLUGIN_ROOT is reliably set, and d
 // sub-references the core skill loads AFTER startup resolved CORE_ROOT), so the
 // env-var form is documentation shorthand there, not a runnable idiom mismatch.
 // Whether to unify the whole tree on ${CORE_ROOT} is a separate, larger call.
-test('M16: CORE_ROOT-resolving skills invoke scripts via ${CORE_ROOT}, not ${CLAUDE_PLUGIN_ROOT}', () => {
+test('CORE_ROOT-resolving skills invoke scripts via ${CORE_ROOT}, not ${CLAUDE_PLUGIN_ROOT}', () => {
   const base = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills');
   for (const rel of ['finalize/SKILL.md', 'process-memory/SKILL.md']) {
     const src = readFileSync(join(base, rel), 'utf8');

@@ -10,9 +10,9 @@ import {
   CANONICAL_STATES,
 } from '../../plugins/core/skills/core/scripts/calibrate-classifier.mjs';
 
-// --- M7: per-class coverage gate ---
+// --- per-class coverage gate ---
 
-test('M7: computePrecision flags a gold state the heuristic never predicted as unmeasured', () => {
+test('computePrecision flags a gold state the heuristic never predicted as unmeasured', () => {
   const turns = [
     { heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' },
     { heuristic_state: 'tier-0-win', gold_state: 'capture-miss' }, // capture-miss in gold, never predicted
@@ -22,14 +22,14 @@ test('M7: computePrecision flags a gold state the heuristic never predicted as u
   assert.ok(p.unmeasured_gold_states.includes('capture-miss'));
 });
 
-test('M7: computePrecision reports complete coverage when every gold state is predicted', () => {
+test('computePrecision reports complete coverage when every gold state is predicted', () => {
   const turns = CANONICAL_STATES.map((state) => ({ heuristic_state: state, gold_state: state }));
   const p = computePrecision(turns);
   assert.equal(p.coverage_complete, true);
   assert.deepEqual(p.unmeasured_gold_states, []);
 });
 
-test('M7: the gate does NOT clear at high precision while a gold state sits unmeasured', () => {
+test('the gate does NOT clear at high precision while a gold state sits unmeasured', () => {
   const dir = mkdtempSync(join(tmpdir(), 'calib-cov-'));
   try {
     // 100 labeled turns: 95 correct tier-0-win (precision 0.95) + 5 where gold=capture-miss
@@ -299,7 +299,7 @@ test('worksheet is self-contained for labeling but keeps predictions blind', () 
   });
 });
 
-test('M7: re-running exportWorksheet the same day overwrites, never accumulates duplicate rows', () => {
+test('re-running exportWorksheet the same day overwrites, never accumulates duplicate rows', () => {
   withTmp((dir) => {
     const cd = join(dir, 'classified');
     mkdirSync(cd);

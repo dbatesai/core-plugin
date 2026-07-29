@@ -57,7 +57,7 @@ export function detectConsumingHarness(env = process.env) {
   return detectConsumingHarnessSignal(env).harness;
 }
 
-// ---------- Row conformance (M10) ----------
+// ---------- Row conformance ----------
 
 // row-schema.md §"Producer expectations": observed_at, harness, cwd, env_signals are
 // UNCONDITIONAL on every row. Only memory-accessed-probe emits env_signals; the other

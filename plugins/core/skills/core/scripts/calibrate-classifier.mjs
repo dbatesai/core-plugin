@@ -176,7 +176,7 @@ export function computePrecision(labeledTurns) {
   const vals = Object.values(by_state).filter((v) => v !== null);
   const overall = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
 
-  // M7 coverage: the macro average above only spans classes the heuristic PREDICTED, so a
+  // Coverage: the macro average above only spans classes the heuristic PREDICTED, so a
   // classifier that emits 2 of 6 states can clear 0.7 with the other 4 unmeasured. A gold
   // state the heuristic never predicts is an unmeasured class — surface it so the gate can
   // refuse to clear until every state present in the gold labels has at least one prediction.
@@ -275,7 +275,7 @@ export function exportWorksheet({ project: _project, harness, classifiedDir, cal
   // write ONCE — appending in a loop into a date-stamped file meant a same-day
   // re-run (a retry, or a different --count) accumulated duplicate/mixed turn_ids,
   // which importLabels then double-counts toward MIN_LABELED and the precision
-  // average — corrupting the gate that decides whether the classifier is trusted (M7).
+  // average — corrupting the gate that decides whether the classifier is trusted.
   const predictions = {};
   const jsonlRows = sample.map((t) => {
     const turnId = `${t.session_id}-${t.turn_idx}`;

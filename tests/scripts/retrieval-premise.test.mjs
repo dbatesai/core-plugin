@@ -191,7 +191,7 @@ test('tier sweep — NON-TAUTOLOGICAL safety: no policy surfaces a retired stron
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('validateGold — rejects duplicate ids and non-array expected (completeness; A5-strict rows)', () => {
+test('validateGold — rejects duplicate ids and non-array expected (completeness; strict rows)', () => {
   assert.throws(() => validateGold([{ id: 'a', query: 'q', rung: 'literal', expected: ['x'] }, { id: 'a', query: 'q', rung: 'literal', expected: ['x'] }]), /duplicate/);
   assert.throws(() => validateGold([{ id: 'a', query: 'q', rung: 'literal', expected: 'x' }]), /must be an array/);
   assert.throws(() => validateGold([]), /empty/);

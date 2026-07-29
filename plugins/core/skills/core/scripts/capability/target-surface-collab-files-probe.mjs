@@ -245,7 +245,7 @@ export async function probe(opts = {}) {
       weight: 'corroborating',
     });
   } else {
-    // M11 / Doctrine 4 (fail-closed mutation): this is a `mutation`-kind surface, and the
+    // Doctrine 4 (fail-closed mutation): this is a `mutation`-kind surface, and the
     // runner's ONLY mutation lever is identity_status (runPreAction gates mutation on
     // identity PASS). "Unproven ≠ conflicting" is the right epistemics for an *observation*,
     // but on a mutation surface an unproven write must not yield a PASS that authorizes a

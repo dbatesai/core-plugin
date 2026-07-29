@@ -72,7 +72,7 @@ export function logHookEvent(entry) {
     if (file !== '/dev/null') {
       const dir = dirname(file);
       try { mkdirSync(dir, { recursive: true }); } catch { /* dir exists or unwritable */ }
-      // Canonical re-check (D1 second pass): the directory is guaranteed to exist now,
+      // Canonical re-check: the directory is guaranteed to exist now,
       // so realpathSync can't throw ENOENT here — dereferences any symlink and confirms
       // the TRUE target still lands inside a trusted root, closing the lexical-only gap.
       const home = trustedHome();

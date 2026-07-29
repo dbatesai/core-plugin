@@ -96,7 +96,7 @@ function fmt(v) { return v === null || v === undefined ? '  —  ' : v.toFixed(2
 export async function runHarness(store, goldPath, { snapshot: injectedSnapshot = null } = {}) {
   const goldRaw = readFileSync(goldPath, 'utf8');
   const gold = JSON.parse(goldRaw).queries;
-  // A5 strictness: the Recall@K instrument refuses an under-declared gold set and
+  // Strictness: the Recall@K instrument refuses an under-declared gold set and
   // an unclassifiable store the same way the tier sweep does — zero silent skips.
   validateGold(gold);
   // ONE immutable captured corpus — index AND body
@@ -111,7 +111,7 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     lexical: { run: (q) => lexicalRankedIds(q, store, { snapshot }) },   // title+topics only (pre-T3 baseline)
     ranking: { run: (q) => productRankedIds(q, store, { snapshot }) },   // RANKING SUBSTRATE — the function retrieveContext ranks with, BEFORE edge expansion/topN (not the final context)
     // FINAL product context — DELIVERED identities, not selection: routed through
-    // buildFinalContextPack so the byte cap participates (Train A A4 — a hit
+    // buildFinalContextPack so the byte cap participates (a hit
     // retrieveContext selects but the cap drops is NOT counted as delivered).
     // Reported at K=3 ONLY: the delivered list is at most
     // three items, so R@5/R@10/… on it would relabel R@3 as deeper recall.
@@ -154,7 +154,7 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     const { execFileSync } = await import('node:child_process');
     sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dirname(fileURLToPath(import.meta.url)), encoding: 'utf8' }).trim();
   } catch { /* not a git checkout (packaged install) — stays null, never guessed */ }
-  // A5: a receipt without hashes is not reproducible.
+  // A receipt without hashes is not reproducible.
   // Product-function hashes cover the three modules the pipeline runs; the
   // built-artifact hash is null in a dev tree BY DESIGN (it names the packaged
   // archive; the packet's freeze step supplies it — never guessed here).
@@ -283,7 +283,7 @@ export function validateGold(gold) {
     if (!q.query || typeof q.query !== 'string' || !q.query.trim()) throw new Error(`${q.id}: missing query text`);
     if (q.expected !== undefined && !Array.isArray(q.expected)) throw new Error(`${q.id}: expected must be an array`);
     if (q.forbidden !== undefined && !Array.isArray(q.forbidden)) throw new Error(`${q.id}: forbidden must be an array`);
-    // A5 strictness: every query DECLARES its support — at
+    // Strictness: every query DECLARES its support — at
     // least one expected id, or an explicit no_answer:true. An empty expected with
     // no declaration is how a gold set silently shrinks its own denominator.
     const expected = q.expected || [];
@@ -328,8 +328,8 @@ export function validateGold(gold) {
 export const GOLD_RUNGS = new Set(['literal', 'category', 'value', 'cross-domain', 'temporal', 'abstention']);
 
 /**
- * assertKnownTiers — evaluator-side fail-closed authority enum (A5, review correction
- * #5). The PRODUCT path tolerates unknown tiers (defaults canonical — a ranking path
+ * assertKnownTiers — evaluator-side fail-closed authority enum.
+ * The PRODUCT path tolerates unknown tiers (defaults canonical — a ranking path
  * never throws); the MEASUREMENT path must not: an unknown tier silently classified
  * as canonical would corrupt every tier-policy number. Throws on the first unknown.
  */
@@ -380,7 +380,7 @@ export function runTierPolicySweep(store, gold, { topN = 3, snapshot: injectedSn
   const finalCtx = {}; // policy -> {qid -> [ids]}
   for (const [label, opts] of POLICIES) {
     finalCtx[label] = {};
-    // Delivered identities (pack-accepted), not selection — same A4 routing as the context3 arm.
+    // Delivered identities (pack-accepted), not selection — same routing as the context3 arm.
     for (const q of gold) finalCtx[label][q.id] = buildFinalContextPack(retrieveContext(q.query, store, { topN, ...opts, snapshot })).accepted.map(a => a.id);
   }
   const perPolicy = POLICIES.map(([label]) => {
@@ -395,7 +395,7 @@ export function runTierPolicySweep(store, gold, { topN = 3, snapshot: injectedSn
     return { policy: label, r3: mean === null ? null : +mean.toFixed(3), n: recalls.length, forbidden3: forbidQ ? +(forbid / forbidQ).toFixed(3) : 0 };
   });
   // Counterfactual bands on P0 misses: RUN the policies, don't infer from rank.
-  // A5: banding is per (query, gold) pair over ALL declared
+  // Banding is per (query, gold) pair over ALL declared
   // supports — first-support-only banding collapsed the multi-valued estimand
   // (recallAtK is fractional over all expected; the bands must match it).
   const bands = [];

@@ -137,9 +137,10 @@ test('missing or empty inbox.md exits 0', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-// FM-1: a unit graduated 'sourced' off a transcript that
-// was never actually read, flattening a hedged statement into a settled fact. P1 fix:
-// 'sourced' must carry a verbatim quote or a locator into the cited source.
+// A unit graduated 'sourced' off a transcript that was never actually read
+// flattens a hedged statement into a settled fact. The fix this fixture
+// exercises: 'sourced' must carry a verbatim quote or a locator into the
+// cited source.
 const SOURCED_BLOCK = VALID_B_BLOCK.replace('confidence-level: inferred', 'confidence-level: sourced');
 
 test('hasSourceAnchor recognizes quotes, locators, and dates; rejects bare prose', () => {

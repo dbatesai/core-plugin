@@ -158,7 +158,7 @@ export function readConfiguredMcp(projectPath, harness, home = homedir()) {
   }
 }
 
-// ── Optional project-local connector map (B5 extension point) ────────────────
+// ── Optional project-local connector map (extension point) ───────────────────
 // CORE ships NO connector-map (connector specifics are overlay-owned — see
 // source-registration-framework.md §"What CORE does NOT ship"). configure-project
 // only READS a map an overlay/project may provide and reports it.

@@ -27,12 +27,12 @@ export const DC_NUMERIC = /^dc-(\d+)-.+\.md$/;
 export const DC_NAMED = /^dc-([a-z][a-z0-9-]*)\.md$/;
 export const SUMMARY_MAX = 100;
 
-// M1: delegates to the shared flat parser (was a local copy). Export kept for the callsite.
+// Delegates to the shared flat parser. Export kept for the callsite.
 export function parseFrontmatter(text) {
   return parseFlatFrontmatter(text);
 }
 
-// M12: a `|` in any cell value (a decision H1 like "DC-NN: A | B") splits the markdown
+// A `|` in any cell value (a decision H1 like "DC-NN: A | B") splits the markdown
 // table row and corrupts the substring check-units index-drift detection relies on.
 // Escape pipes and flatten any stray newline so each value stays one well-formed cell.
 export function escapeCell(v) {
@@ -137,7 +137,7 @@ export function main(argv) {
 
   const indexPath = join(memoriesDir, 'INDEX-decisions.md');
   const content = buildIndex(memoriesDir);
-  // Atomic write (M9): a crash mid-write leaves a truncated index, and check-units
+  // Atomic write: a crash mid-write leaves a truncated index, and check-units
   // reads its substring form for drift detection — a half-written index produces
   // FALSE drift reports, worse than a clean failure. Regenerable, but cheap to protect.
   atomicWriteFileSync(indexPath, content);

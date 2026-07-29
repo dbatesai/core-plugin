@@ -84,13 +84,13 @@ test('missing status is treated as active', () => {
   assert.ok(res.units.map(u => u.id).includes('dc-3-nostatus'));
 });
 
-// K04: anti-resurrection was not structural — the
+// Anti-resurrection was not structural — the
 // cache staleness check was pure content-hash (source_sig), so a unit whose
 // t_invalid date arrives with zero byte changes anywhere in the store kept
 // serving from a stale cache indefinitely. Fixed by baking next_invalidation_at
 // into the index at generation time and having loadFreshIndex force a
 // regenerate once `now` reaches it, independent of content hashing.
-test('K04: stale cache past its own next_invalidation_at regenerates and excludes the now-invalid unit, even though byte content is unchanged', () => {
+test('stale cache past its own next_invalidation_at regenerates and excludes the now-invalid unit, even though byte content is unchanged', () => {
   const root = mkdtempSync(join(tmpdir(), 'core-idx-k04-'));
   const mem = join(root, '_memories');
   const lib = join(mem, '_lib');
@@ -128,7 +128,7 @@ test('K04: stale cache past its own next_invalidation_at regenerates and exclude
   assert.ok(ids.includes('dc-5-alive'), 'a still-valid unit must survive the forced regenerate');
 });
 
-test('K04 control: an index with no next_invalidation_at (nothing time-bound) is still served from cache on a byte match', () => {
+test('control: an index with no next_invalidation_at (nothing time-bound) is still served from cache on a byte match', () => {
   const root = mkdtempSync(join(tmpdir(), 'core-idx-k04-control-'));
   const mem = join(root, '_memories');
   const lib = join(mem, '_lib');

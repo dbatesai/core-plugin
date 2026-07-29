@@ -347,7 +347,7 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
   };
   return {
     kind: 'retrieval-trace',
-    local_only: true, // rows are project data; share only through the A2 aggregate exporter
+    local_only: true, // rows are project data; share only through the aggregate exporter
     store: root,
     query,
     snapshot_id: stages.snapshotId,

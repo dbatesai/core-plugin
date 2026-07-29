@@ -43,9 +43,9 @@ test('lexicalRankedIds: returns a ranked id list (shipped scorer, no slice)', ()
 // normalized-magnitude ranking landed; a test kept alive for dead code would
 // document a combiner the product doesn't have.)
 
-// ── A5 strict evaluator (Train A) ──
+// ── Strict evaluator ──
 
-test('A5 validateGold: empty expected without no_answer:true is rejected — zero silent skips', () => {
+test('validateGold: empty expected without no_answer:true is rejected — zero silent skips', () => {
   assert.throws(() => validateGold([{ id: 'q1', query: 'something', rung: 'literal' }]), /no_answer/);
   assert.throws(() => validateGold([{ id: 'q1', query: 'something', rung: 'literal', expected: [] }]), /no_answer/);
   assert.ok(validateGold([{ id: 'q1', query: 'something', rung: 'literal', no_answer: true }]), 'declared absence is valid');
@@ -57,7 +57,7 @@ test('A5 validateGold: empty expected without no_answer:true is rejected — zer
 
 // ── Blocker 4: evaluator validation fails CLOSED ──
 
-test('blocker-4 validateGold: unknown or missing rung is refused (closed reporting enum)', () => {
+test('validateGold: unknown or missing rung is refused (closed reporting enum)', () => {
   assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'vibes', expected: ['u1'] }]),
     /rung 'vibes'/, 'unknown rung refused');
   assert.throws(() => validateGold([{ id: 'q1', query: 'x', expected: ['u1'] }]),
@@ -65,19 +65,19 @@ test('blocker-4 validateGold: unknown or missing rung is refused (closed reporti
   assert.ok(validateGold([{ id: 'q1', query: 'x', rung: 'cross-domain', expected: ['u1'] }]));
 });
 
-test('blocker-4 validateGold: duplicate supports are refused, not deduped', () => {
+test('validateGold: duplicate supports are refused, not deduped', () => {
   assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'literal', expected: ['u1', 'u1'] }]),
     /duplicate ids in expected/);
   assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'literal', expected: ['u1'], forbidden: ['f1', 'f1'] }]),
     /duplicate ids in forbidden/);
 });
 
-test('blocker-4 validateGold: an id in both expected and forbidden is contradictory gold — refused', () => {
+test('validateGold: an id in both expected and forbidden is contradictory gold — refused', () => {
   assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'literal', expected: ['u1', 'u2'], forbidden: ['u2'] }]),
     /both expected and forbidden \(u2\)/);
 });
 
-test('A5+blocker-4 assertKnownTiers: unknown AND missing authority tiers fail closed in the evaluator', () => {
+test('assertKnownTiers: unknown AND missing authority tiers fail closed in the evaluator', () => {
   assert.ok(assertKnownTiers({ units: [{ id: 'a', tier: 'canonical' }, { id: 'b', tier: 'observation' }] }));
   assert.throws(() => assertKnownTiers({ units: [{ id: 'x', tier: 'mystery' }] }), /fails closed/);
   // The exact hole: a unit with NO tier used to pass silently and
@@ -86,7 +86,7 @@ test('A5+blocker-4 assertKnownTiers: unknown AND missing authority tiers fail cl
   assert.throws(() => assertKnownTiers({ units: [{ id: 'd', tier: '' }] }), /missing authority tier/);
 });
 
-test('A5 sweep: bands are per (query, gold) pair — multi-valued estimand preserved — and the sweep pins its snapshot', () => {
+test('sweep: bands are per (query, gold) pair — multi-valued estimand preserved — and the sweep pins its snapshot', () => {
   const gold = [{
     id: 'multi', query: 'zz-nonexistent-token-zz', rung: 'literal',
     expected: ['ghost-unit-one', 'ghost-unit-two'], // never retrievable → both must band
@@ -100,7 +100,7 @@ test('A5 sweep: bands are per (query, gold) pair — multi-valued estimand prese
   assert.equal(sweep.counts.declared_supports, 2);
 });
 
-test('A5 receipt: runHarness manifest carries product-function hashes, snapshot id, schema, and declared counts', async () => {
+test('receipt: runHarness manifest carries product-function hashes, snapshot id, schema, and declared counts', async () => {
   const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const dir = mkdtempSync(join(tmpdir(), 'a5-gold-'));
@@ -121,7 +121,7 @@ test('A5 receipt: runHarness manifest carries product-function hashes, snapshot 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('A5 runHarness: under-declared gold set is refused before any arm runs', async () => {
+test('runHarness: under-declared gold set is refused before any arm runs', async () => {
   const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
   const dir = mkdtempSync(join((await import('node:os')).tmpdir(), 'a5-badgold-'));
   const goldPath = join(dir, 'gold.json');
@@ -135,7 +135,7 @@ test('A5 runHarness: under-declared gold set is refused before any arm runs', as
 // Compare a DETERMINISTIC PROJECTION (ranks per arm,
 // snapshot id), never whole receipts (latency fields legitimately vary).
 
-test('blocker-2 falsifier A: mutating unit files after capture cannot change any measured rank (capture-leak test)', async () => {
+test('falsifier A: mutating unit files after capture cannot change any measured rank (capture-leak test)', async () => {
   const { mkdtempSync, cpSync, rmSync, appendFileSync, readdirSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
@@ -167,7 +167,7 @@ test('blocker-2 falsifier A: mutating unit files after capture cannot change any
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('blocker-2 falsifier B: every arm completes against the capture with the store UNREADABLE (fs-stub equivalent)', { skip: process.platform === 'win32' }, async () => {
+test('falsifier B: every arm completes against the capture with the store UNREADABLE (fs-stub equivalent)', { skip: process.platform === 'win32' }, async () => {
   const { mkdtempSync, cpSync, rmSync, chmodSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);

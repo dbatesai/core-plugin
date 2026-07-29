@@ -1,5 +1,5 @@
 /**
- * metrics-init.mjs — T1 storage scaffold for the metrics & observability layer
+ * metrics-init.mjs — storage scaffold for the metrics & observability layer
  *
  * What it does:
  *   - Default storage: `<project>/_metrics/` on Mac, Linux, Windows-no-OneDrive.
