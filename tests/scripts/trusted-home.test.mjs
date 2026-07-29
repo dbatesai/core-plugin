@@ -78,3 +78,21 @@ test('containedPath / regularFileWithin: a symlink is judged by its real target'
   assert.equal(regularFileWithin(root, internal), inside, 'a link resolving inside the store is contained');
   assert.equal(regularFileWithin(root, root), null, 'a directory is not a regular file');
 });
+
+// Every trusted-tree consumer in this packet resolves ~/.core from the OS
+// account home. The audit's case is the one where it cannot be established:
+// falling back to homedir() there bypasses the hardening at exactly the moment
+// it matters, so each of these fails closed instead.
+test('trusted-tree consumers fail closed when the account home is unavailable', async () => {
+  const noHome = { resolve: () => null };
+  const { defaultCoreDir } = await import('../../plugins/core/skills/core/scripts/index-registry.mjs');
+  const { defaultForkCoreDir } = await import('../../plugins/core/skills/core/scripts/workspace-fork-check.mjs');
+  const { globalCacheDir } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
+  for (const [name, fn] of [
+    ['index-registry.defaultCoreDir', defaultCoreDir],
+    ['workspace-fork-check.defaultForkCoreDir', defaultForkCoreDir],
+    ['state-cache.globalCacheDir', globalCacheDir],
+  ]) {
+    assert.throws(() => fn(noHome), (e) => e.code === 'NO_TRUSTED_HOME', `${name} must fail closed`);
+  }
+});

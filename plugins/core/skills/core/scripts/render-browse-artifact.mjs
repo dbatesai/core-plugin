@@ -66,12 +66,12 @@
  */
 import { readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
 import { gatherMetrics } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
 import {
   PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor,
   recordPublishOutcome, recordRevocation, runRecordCli, generationReceiptLocation,
@@ -646,7 +646,7 @@ export async function renderBrowseArtifact(projectDir, {
   outPath,
   scope = 'active',
   excludeTopics = [],
-  home = homedir(),
+  home = null,
   now = () => new Date(),
   // Injectable for tests (and skippable via CLI --no-metrics): defaults to the
   // real canonical gatherer. Fails open into an honest absence line — a
@@ -706,7 +706,11 @@ export async function renderBrowseArtifact(projectDir, {
   });
 
   // No workspace.json → the flagged fallback location; the audit trail is kept anyway.
-  const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({ home, projectDir: root, generatedAt });
+  const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({
+    // The receipt is the audit trail; its root comes from the OS-account home
+    // unless a caller names one explicitly (test isolation, --home).
+    home: home || requireTrustedHome(), projectDir: root, generatedAt,
+  });
 
   const manifest = {
     kind: 'core-memory-browse-preflight',

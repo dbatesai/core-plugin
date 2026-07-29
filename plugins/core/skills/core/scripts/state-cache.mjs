@@ -38,11 +38,20 @@
  */
 
 import { readFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
+
+/**
+ * The residual global cache lives under the operational root, so it resolves
+ * from the OS-account home. An unresolvable one throws rather than writing
+ * beneath whatever $HOME happens to say.
+ */
+export function globalCacheDir(opts) {
+  return join(requireTrustedHome(opts), '.core');
+}
 
 export function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -128,7 +137,7 @@ export function quarantineCache(path, now = nowIso()) {
  * @param {{now?: string, home?: string}} [opts]
  * @returns {{stamped: boolean, outcome?: string, recovery?: string, reason?: string}}
  */
-export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) {
+export function stampFiles(projectDir, entries, { now, home = null } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) return { stamped: true };
   const ts = now || nowIso();
   const cachePath = projectCachePath(projectDir);
@@ -186,9 +195,10 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
   // failure is genuinely best-effort — a held lock just defers the prune to
   // the next stamp and can't corrupt attribution — so it does NOT downgrade a
   // successful project-local stamp.
-  const globalCachePath = join(home, '.core', 'state-cache.json');
   try {
-    withFileLock(join(home, '.core', 'state-cache.lock'), () => {
+    const coreDir = home ? join(home, '.core') : globalCacheDir();
+    const globalCachePath = join(coreDir, 'state-cache.json');
+    withFileLock(join(coreDir, 'state-cache.lock'), () => {
       let gcache;
       let readable = true;
       try { gcache = JSON.parse(readFileSync(globalCachePath, 'utf8')); }

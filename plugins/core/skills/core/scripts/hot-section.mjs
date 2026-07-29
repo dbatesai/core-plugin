@@ -26,7 +26,6 @@
  */
 
 import { readFileSync, realpathSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { resolve, join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iterUnits, score } from './priority.mjs';
@@ -227,7 +226,7 @@ export function classifyProjectMdChange(cachedStamp, currentText) {
   return hashOutsideHotBlock(currentText) === cachedStamp.outside_hash ? 'hot-block-only' : 'outside-changed';
 }
 
-export function recordProjectMdWrite(projectMdPath, { now = null, home = homedir() } = {}) {
+export function recordProjectMdWrite(projectMdPath, { now = null, home = null } = {}) {
   const currentText = (() => {
     try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
   })();

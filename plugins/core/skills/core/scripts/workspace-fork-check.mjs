@@ -24,9 +24,8 @@
 
 import { readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { mutateIndex, touchWorkspace } from './index-registry.mjs';
+import { mutateIndex, touchWorkspace, defaultCoreDir } from './index-registry.mjs';
 import { resolve, join, basename } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 export function slugify(name) {
@@ -181,10 +180,19 @@ export function checkFork({ cwd, coreDir, now = new Date(), dryRun = false }) {
   };
 }
 
+/**
+ * The operational root a fork mutates. A fork rewrites the registry, the meta
+ * directory, and the local pointer — a trust decision, so it resolves from the
+ * OS-account home and throws rather than falling back to a spoofable one.
+ */
+export function defaultForkCoreDir(opts) {
+  return defaultCoreDir(opts);
+}
+
 export function main(argv) {
   const { cwd: cwdArg, coreDir: coreDirArg } = parseArgv(argv);
   const cwd = cwdArg ? resolve(cwdArg) : process.cwd();
-  const coreDir = coreDirArg ? resolve(coreDirArg) : join(homedir(), '.core');
+  const coreDir = coreDirArg ? resolve(coreDirArg) : defaultForkCoreDir();
 
   let result;
   try { result = checkFork({ cwd, coreDir }); }

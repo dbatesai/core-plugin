@@ -59,10 +59,10 @@
  */
 import { readFileSync, realpathSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { gatherMetrics, parseRecognitionSignal } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
 import {
   generationReceiptLocation, runRecordCli, artifactContentDigest,
   publishArtifactWithReceipt, resolveArtifactDestination,
@@ -593,7 +593,7 @@ function validateCanonicalMetrics(obj, source) {
 export async function renderMetricsArtifact(projectDir, {
   outPath,
   jsonIn = null,
-  home = homedir(),
+  home = null,
   now = () => new Date(),
   // Injectable for tests: defaults to the real canonical gatherer.
   metricsProvider = (dir) => gatherMetrics(dir),
@@ -638,7 +638,11 @@ export async function renderMetricsArtifact(projectDir, {
   const generatedAt = now().toISOString();
   const html = buildMetricsArtifactHtml(metrics, { projectName: basename(root), producer });
 
-  const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({ home, projectDir: root, generatedAt });
+  const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({
+    // The receipt is the audit trail; its root comes from the OS-account home
+    // unless a caller names one explicitly (test isolation, --home).
+    home: home || requireTrustedHome(), projectDir: root, generatedAt,
+  });
 
   const manifest = {
     kind: 'core-metrics-artifact-preflight',
