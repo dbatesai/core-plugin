@@ -46,7 +46,7 @@
  *   node self-test-round.mjs status    <project>
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, chmodSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -55,6 +55,23 @@ import { runHarness, validateGold } from './retrieval-harness.mjs';
 import { logEvent } from './log-event.mjs';
 import { loadEvents, computeTierDistribution } from './analyze-retrieval-quality.mjs';
 import { producerIdentity } from './producer-identity.mjs';
+
+// A round directory holds the answer key, the frozen question set, and the
+// corpus snapshot they were registered against — owner-only, best-effort
+// (not every filesystem honors POSIX modes).
+const ROUND_DIR_MODE = 0o700;
+const ROUND_FILE_MODE = 0o600;
+function harden(path, mode) {
+  try { chmodSync(path, mode); } catch { /* mode is advisory here */ }
+}
+function makeRoundDir(dir) {
+  mkdirSync(dir, { recursive: true, mode: ROUND_DIR_MODE });
+  harden(dir, ROUND_DIR_MODE);
+}
+function writeRoundFile(path, data) {
+  writeFileSync(path, data, { mode: ROUND_FILE_MODE });
+  harden(path, ROUND_FILE_MODE);
+}
 
 // Dedicated log file for self-test grading results — deliberately its OWN
 // file, never the organic retrieval/outcome/hygiene logs (a self-test run is
@@ -236,7 +253,7 @@ export function newRound(project, { quota } = {}) {
   }
   const round = (listRounds(project).slice(-1)[0] || 0) + 1;
   const dir = roundDir(project, round);
-  mkdirSync(dir, { recursive: true });
+  makeRoundDir(dir);
 
   const { identity } = captureCorpusIdentity(project);
   const { quota: resolvedQuota, adjustments } = quota
@@ -252,10 +269,10 @@ export function newRound(project, { quota } = {}) {
     quota_adjustments: adjustments,
     overlap_required_kinds: [...OVERLAP_REQUIRED],
   };
-  writeFileSync(join(dir, 'quota.json'), JSON.stringify(quotaRecord, null, 2));
-  writeFileSync(join(dir, 'corpus-snapshot.json'), JSON.stringify(identity, null, 2));
+  writeRoundFile(join(dir, 'quota.json'), JSON.stringify(quotaRecord, null, 2));
+  writeRoundFile(join(dir, 'corpus-snapshot.json'), JSON.stringify(identity, null, 2));
   const brief = renderBrief(quotaRecord);
-  writeFileSync(join(dir, 'brief.md'), brief);
+  writeRoundFile(join(dir, 'brief.md'), brief);
 
   return { round, dir, briefPath: join(dir, 'brief.md'), identity, quota: resolvedQuota, adjustments };
 }
@@ -490,7 +507,7 @@ export function register(project, round, goldsetFile) {
   // record is what a run must echo — the question-set hash and the corpus it was
   // registered against, timestamped.
   const frozenPath = join(dir, 'goldset.json');
-  writeFileSync(frozenPath, goldRaw);
+  writeRoundFile(frozenPath, goldRaw);
   const prereg = {
     round: Number(round),
     registered_at: new Date().toISOString(),
@@ -503,7 +520,7 @@ export function register(project, round, goldsetFile) {
     author_model: (goldset.meta || {}).author_model || null,
     warnings,
   };
-  writeFileSync(preregPath, JSON.stringify(prereg, null, 2));
+  writeRoundFile(preregPath, JSON.stringify(prereg, null, 2));
   return { ok: true, warnings, counts, prereg, frozenPath };
 }
 
@@ -648,7 +665,7 @@ function writeSelfTestLog(project, record, { trigger }) {
 export async function runRound(project, round, opts = {}) {
   const { record, dir } = await measureRound(project, round, opts);
   const outPath = join(dir, `results-${record.ran_at.replace(/[:.]/g, '-')}.json`);
-  writeFileSync(outPath, JSON.stringify(record, null, 2));
+  writeRoundFile(outPath, JSON.stringify(record, null, 2));
   writeSelfTestLog(project, record, { trigger: 'user-invoked' });
   return { record, outPath };
 }
@@ -731,8 +748,8 @@ export function shouldAuthorFreshRound(project, { now = new Date().toISOString()
 /** Stamp the weekly-cap marker when a trigger is emitted. */
 export function markAutoAuthorTriggered(project, { now = new Date().toISOString() } = {}) {
   try {
-    mkdirSync(selfTestDir(project), { recursive: true });
-    writeFileSync(join(selfTestDir(project), AUTO_AUTHOR_STATE), JSON.stringify({ last_trigger_ts: now }) + '\n');
+    makeRoundDir(selfTestDir(project));
+    writeRoundFile(join(selfTestDir(project), AUTO_AUTHOR_STATE), JSON.stringify({ last_trigger_ts: now }) + '\n');
     return true;
   } catch { return false; }
 }

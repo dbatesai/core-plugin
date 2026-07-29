@@ -44,7 +44,7 @@
  * Ships with the plugin by convention; .mjs (Node.js) only.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -171,6 +171,9 @@ export function judgeUnjudgedTurns(projectDir, { limit = 50, gapFloor, workspace
       withFileLock(judgmentLockPath(projectDir, { workspaceId: wsId }), () => {
         mkdirSync(resolveStoragePath(projectDir, { workspaceId: wsId }), { recursive: true });
         appendFileSync(logFile, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+        // Judgments name the units a real conversation retrieved: owner-only,
+        // re-asserted every append. Best-effort — not every filesystem chmods.
+        try { chmodSync(logFile, 0o600); } catch { /* mode is advisory here */ }
       });
     } catch (e) {
       return { judged: 0, skipped: result.skipped, verdicts: {}, error: String(e && e.message).slice(0, 120) };

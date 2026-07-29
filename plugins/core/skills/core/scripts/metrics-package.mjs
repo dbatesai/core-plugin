@@ -1472,10 +1472,22 @@ export function runPackage(argv, { homeOverride } = {}) {
   let zipPath = join(outDir, `core-metrics-package-${stamp}.zip`);
   let suffix = 2;
   while (existsSync(zipPath)) { zipPath = join(outDir, `core-metrics-package-${stamp}-${suffix}.zip`); suffix += 1; }
+  // Owner-only while the package sits where it landed: it is de-identified, not
+  // public, and the user decides where it goes next. Best-effort by platform.
+  const harden = (path, mode) => { try { chmodSync(path, mode); } catch { /* mode is advisory here */ } };
+  const hardenTree = (dir) => {
+    harden(dir, 0o700);
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) hardenTree(p);
+      else harden(p, 0o600);
+    }
+  };
   const zip = zipStaging(staging, zipPath);
   const receipt = zip.ok ? verifyArchiveRoundTrip(zipPath, staging) : zip;
   let shipped;
   if (receipt.ok) {
+    harden(zipPath, 0o600);
     rmSync(staging, { recursive: true, force: true });
     shipped = { kind: 'zip', path: zipPath };
   } else {
@@ -1484,6 +1496,7 @@ export function runPackage(argv, { homeOverride } = {}) {
     // self-healing fallback: leave a folder instead of failing the run
     const folder = zipPath.replace(/\.zip$/, '');
     const moved = moveStagingToFolder(staging, folder);
+    if (moved.ok) hardenTree(folder);
     shipped = moved.ok
       ? { kind: 'folder', path: folder, reason: receipt.reason }
       : { kind: 'staging', path: staging, reason: `${receipt.reason}; ${moved.reason}` };

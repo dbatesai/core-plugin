@@ -25,7 +25,7 @@
  * Ships with the plugin by design; .mjs only, zero dependencies.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -159,6 +159,8 @@ export function appendScorecard(projectDir, card, { workspaceId } = {}) {
     withFileLock(scorecardLockPath(projectDir, { workspaceId: wsId }), () => {
       mkdirSync(base, { recursive: true });
       appendFileSync(file, JSON.stringify(card) + '\n');
+      // Owner-only, re-asserted every append (the stream it summarizes is too).
+      try { chmodSync(file, 0o600); } catch { /* mode is advisory here */ }
     });
     return { written: true, path: file };
   } catch (e) {
