@@ -117,10 +117,10 @@ export function eventLogPath(projectDir, filename, { today } = {}) {
 /**
  * Resolve the session id for trace bucketing.
  *
- * Chain per RC Turn evt-c97d empirical confirmation:
+ * Resolution chain, in order:
  *   1. explicit option
- *   2. CLAUDE_CODE_SESSION_ID (Claude Code's native env var per Probe 2)
- *   3. CODEX_THREAD_ID (Codex Desktop on Windows; observed `019e6287-...` shape — RC Turn c97d)
+ *   2. CLAUDE_CODE_SESSION_ID (Claude Code's native env var)
+ *   3. CODEX_THREAD_ID (Codex Desktop on Windows; a `019e6287-...`-shaped id)
  *   4. sentinel `no-session-context`
  *
  * Codex's THREAD_ID is per-thread/per-conversation, good enough for trace
@@ -135,7 +135,7 @@ export function resolveSessionId({ explicit } = {}) {
   return 'no-session-context';
 }
 
-// MET-010: bound and sanitize what lands in metrics payloads. Project content
+// Bound and sanitize what lands in metrics payloads. Project content
 // (unit ids, file paths, free text) reaches logEvent calls; without a cap, an
 // adversarial or just-huge value is serialized verbatim into the trace JSONL.
 export const MAX_ATTRIBUTE_STRING = 1000;

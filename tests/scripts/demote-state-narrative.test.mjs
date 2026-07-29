@@ -26,7 +26,7 @@ function project(bullets) {
     'nothing here', '',
   ].join('\n'));
   // Establish the PROJECT.md creation baseline the render step now does — a
-  // no-baseline PROJECT.md fails closed (Hale's 2026-07-22 root fix).
+  // no-baseline PROJECT.md fails closed.
   const home = join(dir, 'home');
   mkdirSync(join(home, '.core'), { recursive: true });
   stampCreatedBaseline(dir, join(dir, 'PROJECT.md'), { kind: 'project', home });

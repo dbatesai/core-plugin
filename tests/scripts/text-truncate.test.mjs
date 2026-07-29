@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { truncate } from '../../plugins/core/skills/core/scripts/text-truncate.mjs';
 
 // The one shared truncate() behind generate-summary-index.mjs,
-// generate-decisions-index.mjs, and generate-risks-index.mjs — collapsed
-// 2026-07-19 after an independent review found the surrogate-splitting bug
-// fixed in one of the three hand-duplicated copies but not the other two.
+// generate-decisions-index.mjs, and generate-risks-index.mjs — collapsed from
+// three hand-duplicated copies after the surrogate-splitting bug turned out to
+// be fixed in one of them but not the other two.
 
 test('is a no-op under the max and appends an ellipsis only when it actually cuts', () => {
   assert.equal(truncate('short', 100), 'short');
@@ -29,7 +29,7 @@ test('handles null/undefined input as an empty string, never throws', () => {
   assert.equal(truncate(undefined, 10), '');
 });
 
-// Antigravity's review, 2026-07-19: a surrogate-pair-only check stops literal
+// A surrogate-pair-only check stops literal
 // encoding corruption but not VISUAL/semantic corruption — a cut between a
 // base character and a combining mark, or inside a ZWJ sequence (family
 // emoji), is still valid UTF-16/UTF-8 (no thrown error, no replacement

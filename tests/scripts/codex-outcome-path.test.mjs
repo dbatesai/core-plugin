@@ -7,21 +7,20 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
-// Codex-shaped product-path tests (Hale's fresh audit, 2026-07-17, second
-// round: "add Codex-shaped UserPromptSubmit/Stop product-path tests"). These
+// Codex-shaped product-path tests (UserPromptSubmit/Stop). These
 // exercise the Codex wrapper entry files exactly as hooks-codex.json invokes
 // them — real subprocess spawns, real payload shapes per the documented
 // Codex contract (session_id + turn_id) — not the shared implementation's
 // internals directly. What these CANNOT prove: that a live Codex install
 // actually delivers this payload shape, fires Stop once per turn, or sets
-// PLUGIN_ROOT in a hook subprocess's env. That's Hale's/Crest's step.
+// PLUGIN_ROOT in a hook subprocess's env. That's a separate on-harness step.
 
 const HOOKS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks');
 const RETRIEVE_HOOK = join(HOOKS_DIR, 'retrieve-context-hook-codex.mjs');
 const ANSWER_HOOK = join(HOOKS_DIR, 'answer-close-hook-codex.mjs');
 
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
 // isn't auto-cleaned — every created dir is tracked and removed below.
 const _isolatedLogDirs = [];
@@ -153,7 +152,7 @@ test('.codex-plugin/plugin.json registers hooks-codex.json explicitly (not relyi
   assert.equal(manifest.hooks, './hooks/hooks-codex.json');
 });
 
-// ---- Import-boundary fail-open (Crest's finding, 2026-07-27): the Codex wrappers'
+// ---- Import-boundary fail-open: the Codex wrappers'
 // `await import(...)` sat OUTSIDE any try/catch, so a resolution/syntax failure in the
 // shared implementation threw at the top level and exited non-zero — before main()'s own
 // entry guard ever ran. A hook must never break the user's exit on failure. Reproduced by

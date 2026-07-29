@@ -44,7 +44,7 @@ source-instance: PROJ-991
 extracted-at: 2026-06-09T11:00:00Z
 confidence-level: reconstructed
 mode: C
-judgment-needed: contradicts dc-42 on the BGL date — confirm which is authoritative
+judgment-needed: contradicts dc-42-bgl-date on the BGL date — confirm which is authoritative
 ---
 Reconstructed from three comments: the BGL date moved to Aug 1.
 `;
@@ -54,7 +54,7 @@ test('parseInboxBlocks extracts frontmatter and body', () => {
   assert.equal(blocks.length, 2);
   assert.equal(blocks[0].fm.mode, 'B');
   assert.match(blocks[0].body, /Budget owner shifted/);
-  assert.equal(blocks[1].fm['judgment-needed'].startsWith('contradicts dc-42'), true);
+  assert.equal(blocks[1].fm['judgment-needed'].startsWith('contradicts dc-42-bgl-date'), true);
 });
 
 test('valid Mode B + Mode C blocks pass with no FAIL/WARN', () => {
@@ -137,9 +137,10 @@ test('missing or empty inbox.md exits 0', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-// Crest's FM-1 report (2026-07-16): a unit graduated 'sourced' off a transcript that
-// was never actually read, flattening a hedged statement into a settled fact. P1 fix:
-// 'sourced' must carry a verbatim quote or a locator into the cited source.
+// A unit graduated 'sourced' off a transcript that was never actually read
+// flattens a hedged statement into a settled fact. The fix this fixture
+// exercises: 'sourced' must carry a verbatim quote or a locator into the
+// cited source.
 const SOURCED_BLOCK = VALID_B_BLOCK.replace('confidence-level: inferred', 'confidence-level: sourced');
 
 test('hasSourceAnchor recognizes quotes, locators, and dates; rejects bare prose', () => {

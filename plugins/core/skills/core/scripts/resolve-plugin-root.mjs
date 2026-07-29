@@ -119,7 +119,7 @@ export function classifyAuthority(pluginRoot, home = homedir()) {
   if (r.includes(`${h}/src/`)) return 'canonical-source';
   if (r.includes(`${h}/work/`)) return 'canonical-source';
 
-  // Windows-common dev locations (HARNESS-010). Same conservative posture:
+  // Windows-common dev locations. Same conservative posture:
   // recognize the well-known conventions, fail closed on everything else.
   if (r.includes(`${h}/source/repos/`)) return 'canonical-source'; // Visual Studio default
   if (r.includes(`${h}/Projects/`)) return 'canonical-source';     // home-level Projects (any OS)
@@ -451,7 +451,7 @@ export function main(argv) {
   const row = resolvePluginRoot({ from });
   // --print-root takes precedence over --json when both are passed.
   if (printRoot) {
-    // Single-line contract for startup.md's resolver block (SYN-002): print the
+    // Single-line contract for startup.md's resolver block: print the
     // plugin root with forward slashes — valid for Node on every platform and
     // safe to interpolate under bash, zsh, Git-Bash, PowerShell, and CMD — or
     // print nothing and exit 2. Root LOCATION is knowable even when identity is

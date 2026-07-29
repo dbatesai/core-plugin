@@ -1,7 +1,7 @@
 /**
- * captureStore — the atomic single-read capture (Hale round 11).
+ * captureStore — the atomic single-read capture.
  *
- * His deterministic reproduction against the two-walk version:
+ * The deterministic reproduction against the two-walk version:
  * {"id_stayed_old":true,"measured_new_body":true,"fresh_id_changed":true} —
  * loadSnapshot hashed the store in one walk and re-read bodies in another, so a
  * concurrent write between walks made snapshot_id identify OLD bytes while the
@@ -44,14 +44,14 @@ test('round-11 barrier: under a LIVE concurrent writer, the id and the measured 
   // the writer already SENT before the window began can still arrive late
   // (IPC delivery queuing) and be mistaken for in-window progress, which
   // would satisfy a naive "any message after loopStarted" check without the
-  // writer having actually advanced during the observed window (Hale,
-  // 2026-07-22). Instead: the parent sends 'probe' only after the window
+  // writer having actually advanced during the observed window.
+  // Instead: the parent sends 'probe' only after the window
   // starts; the writer can only reply with its current epoch once it has
   // actually processed that probe, which is itself proof the reply's epoch
   // value was read at a point strictly after the window began. Requiring one
   // MORE epoch beyond that value is then genuine in-window advancement, not
   // an artifact of delivery timing. (A fixed sleep proved even less than any
-  // of this — Hale's watchdog caught 0-epoch runs, 2026-07-17.)
+  // of this — a watchdog caught 0-epoch runs.)
   const writer = `
     import { writeFileSync, renameSync, existsSync } from 'node:fs';
     const fm = ${JSON.stringify(fm)};
@@ -182,9 +182,9 @@ test('round-11: two captures spanning a mutation mint DIFFERENT ids; identical s
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// Hale round 12: edge expansion used to re-read live unit files after the id was
+// Edge expansion used to re-read live unit files after the id was
 // minted — a concurrent EDGE change altered expanded/final results under an
-// unchanged snapshot_id. His required proof: a barrier-controlled concurrent-edge
+// unchanged snapshot_id. The required proof: a barrier-controlled concurrent-edge
 // writer, with snapshot_id, expansion, final results, and the trace all agreeing
 // with the SAME captured state, every iteration.
 test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/trace always match the captured bytes', async () => {
@@ -261,7 +261,7 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
   try {
     const seenTargets = new Set();
     child.send('probe'); // sent only now, strictly after the window begins
-    // 45s, not 20s: Meridian found this window flakes ~1-in-6 on real Windows
+    // 45s, not 20s: this window flakes ~1-in-6 on real Windows
     // hardware (including the very first cold run) even though it's already
     // wall-clock- not iteration-bounded -- Windows process scheduling can
     // give both the writer and this reader loop meaningfully fewer turns per
@@ -308,7 +308,7 @@ test('round-12 barrier: under a LIVE concurrent EDGE writer, expansion/final/tra
   }
 });
 
-// Hale round 13: reader-by-reader fixes were masking an incomplete invariant.
+// Reader-by-reader fixes were masking an incomplete invariant.
 // The whole-harness proof: with ONE injected capture, the complete evaluator —
 // every arm, the sweep, every manifest field — must produce an identical
 // timing-free projection across two runs separated by an on-disk mutation storm.
@@ -347,10 +347,10 @@ test('round-13 whole-harness barrier: a mutation storm between runs cannot chang
   } finally { rm(dir, { recursive: true, force: true }); }
 });
 
-// Hale round 14: buildRetrievalTrace ran its storeless existsSync probe BEFORE
+// buildRetrievalTrace ran its storeless existsSync probe BEFORE
 // honoring an injected snapshot — if the live store vanished after capture, the
 // trace returned `storeless` instead of describing the captured state, and the
-// round-13 whole-harness barrier couldn't see it (trace was outside the barrier).
+// whole-harness barrier couldn't see it (trace was outside the barrier).
 test('round-14: with an injected capture, the trace describes the CAPTURED state even when the store is GONE', async () => {
   const { buildRetrievalTrace } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);
   const dir = mkdtempSync(join(tmpdir(), 'trace-gone-'));

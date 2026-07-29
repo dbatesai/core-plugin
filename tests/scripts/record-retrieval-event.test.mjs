@@ -130,18 +130,18 @@ test('record-retrieval-event CLI writes an analyzer-visible row', () => withTemp
   assert.equal(buildReport(loadEvents(root, { allTime: true })).retrieval_events, 1);
 }));
 
-test('MET-010: sanitizeAttributeValue caps string length with an explicit truncation marker', () => {
+test('sanitizeAttributeValue caps string length with an explicit truncation marker', () => {
   const long = 'x'.repeat(MAX_ATTRIBUTE_STRING + 4000);
   const out = sanitizeAttributeValue(long);
   assert.ok(out.length <= MAX_ATTRIBUTE_STRING + 40, 'bounded');
   assert.match(out, /truncated 4000 chars/, 'truncation is visible, not silent');
 });
 
-test('MET-010: sanitizeAttributeValue strips control chars but keeps newlines/tabs', () => {
+test('sanitizeAttributeValue strips control chars but keeps newlines/tabs', () => {
   assert.equal(sanitizeAttributeValue('a\u0000b\u001bc\nd\te'), 'abc\nd\te');
 });
 
-test('MET-010: sanitizeAttributeValue sanitizes nested objects recursively, depth-capped', () => {
+test('sanitizeAttributeValue sanitizes nested objects recursively, depth-capped', () => {
   const out = sanitizeAttributeValue({
     note: 'y'.repeat(5000),
     evil: 'a\u0000b\u001bc',
@@ -152,21 +152,20 @@ test('MET-010: sanitizeAttributeValue sanitizes nested objects recursively, dept
   assert.match(JSON.stringify(out.deep), /depth-capped/);
 });
 
-test('MET-010: normalizeRetrievalEvent sanitizes unit ids and topics', () => {
+test('normalizeRetrievalEvent sanitizes unit ids and topics', () => {
   const r = normalizeRetrievalEvent({
     trigger: 'session-start',
     intent_topics: ['memory\u0000-arch'],
     tier_reached: 1,
     escalation_path: [1],
-    units_retrieved: [{ id: 'dc-1\u001b-evil', tier: 1 }],
+    units_retrieved: [{ id: 'dc-1-e\u001bvil', tier: 1 }],
   });
   assert.equal(r.intent_topics[0], 'memory-arch');
   assert.equal(r.units_retrieved[0].id, 'dc-1-evil');
 });
 
 // ---------------------------------------------------------------------------
-// schema_version stamping (2026-07-22, Hale's metrics-evidence-lifecycle
-// slice-2 review): every row this producer writes must carry the CURRENT
+// schema_version stamping: every row this producer writes must carry the CURRENT
 // schema version so a reader can tell "written under the fully-enforced
 // current contract" apart from pre-versioning history — and the producer's
 // own stamp must always win over anything a caller tries to supply.

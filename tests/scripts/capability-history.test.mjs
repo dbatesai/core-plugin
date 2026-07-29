@@ -10,7 +10,7 @@ import {
 } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 import { currentLockFile } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
 
-test('M8: appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {
+test('appendRows writes the history file via the shared atomic writer (no orphan temp files)', () => {
   const src = readFileSync(fileURLToPath(new URL('../../plugins/core/skills/core/scripts/capability-history.mjs', import.meta.url)), 'utf8');
   assert.match(src, /from '\.\/fs-atomic\.mjs'/, 'imports the shared atomic writer');
   assert.match(src, /atomicWriteFileSync\(file,/, 'history file written atomically');
@@ -183,7 +183,7 @@ test('acquireLock: recovers a stale lock', () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('acquireLock: fails closed while the recorded pid is ALIVE, even past staleMs (Hale 2026-07-15)', () => {
+test('acquireLock: fails closed while the recorded pid is ALIVE, even past staleMs', () => {
   const home = tmpHome();
   try {
     const lf = join(home, 'live.lock');
@@ -197,7 +197,7 @@ test('acquireLock: fails closed while the recorded pid is ALIVE, even past stale
       /could not acquire lock/,
       'age alone must not steal from a live writer'
     );
-    // Round 3 (Hale): a LIVE pid is never auto-superseded at ANY age — even far
+    // A LIVE pid is never auto-superseded at ANY age — even far
     // past the old hard ceiling (a suspended laptop revives and must not overlap).
     assert.throws(
       () => acquireLock(lf, { timeoutMs: 80, staleMs: 60_000, now: () => Date.now() + 700_000 }),
@@ -242,7 +242,7 @@ test('acquireLock: times out when lock held and not stale', () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('MET-011: contention waits via injected sleep in bounded retries — no busy-spin', () => {
+test('contention waits via injected sleep in bounded retries — no busy-spin', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ch-spin-'));
   try {
     const lf = join(dir, 'x.lock');
@@ -263,18 +263,18 @@ test('MET-011: contention waits via injected sleep in bounded retries — no bus
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('MET-011: default lock timeout is bounded at 1s, not 5s', () => {
+test('default lock timeout is bounded at 1s, not 5s', () => {
   assert.equal(LOCK_TIMEOUT_MS, 1000);
 });
 
-// --- two-writer fixture (HC's required proof: no lost history) ---
+// --- two-writer fixture (the required proof: no lost history) ---
 
 test('appendRows: sequential writes under lock lose no history (two-writer proof)', () => {
   const home = tmpHome();
   try {
     // Simulate two writers appending; lock serializes them.
     // (Node test is single-threaded, but this proves the read-modify-write
-    //  under lock preserves prior entries — the lost-update scenario HC named.)
+    //  under lock preserves prior entries — the lost-update scenario.)
     appendRows('ws1', [sampleRow({ identity_status: 'PASS' })], { session_id: 'w1' }, { home });
     appendRows('ws1', [sampleRow({ identity_status: 'DEGRADED' })], { session_id: 'w2' }, { home });
     appendRows('ws1', [sampleRow({ identity_status: 'NOT-YET' })], { session_id: 'w3' }, { home });

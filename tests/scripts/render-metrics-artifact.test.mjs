@@ -13,8 +13,8 @@
  *   - CLI contract: --out required, --json-in replay path, manifest shape
  *     (content_class aggregates-only), generation receipt;
  *   - shared helpers: truthful provenance (artifact-provenance.mjs) and the
- *     generalized publish receipts (artifact-receipts.mjs) — including Hale's
- *     e0a808f revise: self-contained snapshot identity copied into the
+ *     generalized publish receipts (artifact-receipts.mjs) — with a
+ *     self-contained snapshot identity copied into the
  *     publish receipt, and published-private refusing to record without a
  *     consent record (--consent-by + --consent-mechanism), for BOTH kinds.
  */
@@ -36,7 +36,7 @@ const { truthfulProducerIdentity } = await import(pathToFileURL(join(SCRIPTS, 'a
 const { publishReceiptPathFor, artifactContentDigest } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'render-metrics-artifact.mjs');
 
-// Fix 9 (Hale item 9) makes the shared provenance helper FAIL CLOSED on a dirty
+// Fix 9 makes the shared provenance helper FAIL CLOSED on a dirty
 // plugin tree — HEAD no longer names the executing bytes. So the real-render
 // tests below only get a source_sha (and can render) when the tree is clean; on
 // a dirty working tree the renderer correctly refuses. Detect the state once so
@@ -140,7 +140,7 @@ test('page carries the four plain-question sections, legend, banner, verdict, an
   assert.match(html, /1 &middot; Does the machinery work\?/);
   assert.match(html, /2 &middot; How good is the memory search\?/);
   assert.match(html, /3 &middot; Can we trust CORE's self-measurements\?/);
-  assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section removed per DC-129');
+  assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section removed by decision');
   assert.match(html, /How to read the colored tags on each line/);
   assert.match(html, /SNAPSHOT &mdash; DOES NOT UPDATE ITSELF/);
   assert.match(html, /Ask the agent to republish for fresh numbers\./);
@@ -178,7 +178,7 @@ test('every number is explained in its sentence; no bare metric jargon in the ch
   assert.match(chrome, /a human needs to hand-check 100 of its judgments/);
   assert.match(chrome, /answered by the fast first-pass search/);
   assert.match(chrome, /every record is well-formed — none were malformed or thrown out/);
-  // Banned insider vocabulary (David's explicit plain-language correction).
+  // Banned insider vocabulary — the report reads in plain language.
   for (const banned of ['R@3', 'R@10', 'Recall', 'rec-fail', 'bm25', 'BM25', 'tier-0', 'Tier 2', 'gold set', 'gold-set', 'context3', 'calibration pool']) {
     assert.ok(!chrome.includes(banned), `chrome must not contain bare jargon '${banned}'`);
   }
@@ -325,7 +325,7 @@ test('memory files needing attention render counts, warn gauge, and census tiles
 
 // ---------- CLI: --json-in replay path + manifest contract ----------
 
-test('ACCEPTANCE Hale-2026-07-23 item 8 (real pipeline): render-metrics --json-in consumes the ACTUAL metrics-check --json producer output', (t) => {
+test('ACCEPTANCE (real pipeline): render-metrics --json-in consumes the ACTUAL metrics-check --json producer output', (t) => {
   if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
   const METRICS_CHECK = join(SCRIPTS, 'metrics-check.mjs');
   const { root, home } = fixtureProject();
@@ -426,7 +426,7 @@ test('CLI live path: real gatherMetrics run produces a truthful manifest and pag
     assert.ok(manifest.data_generated_at, 'data timestamp from the live gather');
     const html = readFileSync(out, 'utf8');
     assert.match(html, /Passed, demonstrated just now\./, 'live round-trip proof rendered');
-    assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section stays gone on a live run (DC-129)');
+    assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section stays gone on a live run');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -452,7 +452,7 @@ test('truthfulProducerIdentity: in a CLEAN git checkout, the SHA is the real HEA
   }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 9 (dirty-tree provenance): pluginTreeDirty is true on a modified tracked file and false when committed, and identity fails closed while dirty', async () => {
+test('ACCEPTANCE (dirty-tree provenance): pluginTreeDirty is true on a modified tracked file and false when committed, and identity fails closed while dirty', async () => {
   const { execFileSync: exec } = await import('node:child_process');
   const { pluginTreeDirty } = await import(pathToFileURL(join(SCRIPTS, 'artifact-provenance.mjs')).href);
   // Controlled fixture: a throwaway git repo with a plugin-root-shaped subtree.
@@ -518,11 +518,11 @@ test('--record-publish on a metrics generation receipt lands kind core-metrics-a
       '--generation-receipt', genPath, '--status', 'published-private',
       '--artifact-url', 'https://claude.ai/code/artifact/test-1111',
       '--private-verified-evidence', 'gallery shows private; share menu never opened',
-      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
+      '--consent-by', 'the-project-owner', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
       { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     const receiptPath = publishReceiptPathFor(genPath);
-    // Self-containment (Hale's e0a808f revise): delete the generation receipt,
+    // Self-containment: delete the generation receipt,
     // the publish receipt must still carry the snapshot identity on its own.
     unlinkSync(genPath);
     const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
@@ -531,7 +531,7 @@ test('--record-publish on a metrics generation receipt lands kind core-metrics-a
     assert.equal(receipt.data_generated_at, '2026-07-22T20:00:00.000Z', 'data-gathering instant copied into the receipt');
     assert.ok(receipt.generation_generated_at, 'generation instant copied into the receipt');
     assert.equal(receipt.snapshot_id, null, 'metrics pages have no store snapshot — recorded honestly as null');
-    assert.equal(receipt.consent.granted_by, 'David');
+    assert.equal(receipt.consent.granted_by, 'the-project-owner');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -562,7 +562,7 @@ test('browse-kind publish receipt copies snapshot_id from the generation receipt
       '--generation-receipt', genPath, '--status', 'published-private',
       '--artifact-url', 'https://claude.ai/code/artifact/browse-1',
       '--private-verified-evidence', 'verified private in gallery',
-      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
+      '--consent-by', 'the-project-owner', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'],
       { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     unlinkSync(genPath);
@@ -603,7 +603,7 @@ test('--record-revocation stamps revoked_at on a PUBLISHED-PRIVATE receipt, then
       '--generation-receipt', genPath, '--status', 'published-private',
       '--artifact-url', 'https://claude.ai/code/artifact/rev-1',
       '--private-verified-evidence', 'gallery shows private',
-      '--consent-by', 'David', '--consent-mechanism', 'explicit yes'], { encoding: 'utf8' });
+      '--consent-by', 'the-project-owner', '--consent-mechanism', 'explicit yes'], { encoding: 'utf8' });
     assert.equal(pub.status, 0, pub.stderr);
     const p = publishReceiptPathFor(genPath);
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
@@ -615,9 +615,9 @@ test('--record-revocation stamps revoked_at on a PUBLISHED-PRIVATE receipt, then
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ---------- ACCEPTANCE: Hale 2026-07-23 item 7 — receipt hardening ----------
+// ---------- ACCEPTANCE: receipt hardening ----------
 
-test('ACCEPTANCE Hale-2026-07-23 item 7a: a forged generation receipt with no content digest is REFUSED (full schema, not just kind)', () => {
+test('ACCEPTANCE (receipt hardening): a forged generation receipt with no content digest is REFUSED (full schema, not just kind)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'receipts-forged-'));
   try {
     // A blob with a VALID kind but no content digest — the old check passed on
@@ -645,7 +645,7 @@ test('ACCEPTANCE Hale-2026-07-23 item 7a: a forged generation receipt with no co
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 7b: the artifact content digest is copied into the publish receipt', () => {
+test('ACCEPTANCE (receipt hardening): the artifact content digest is copied into the publish receipt', () => {
   const dir = mkdtempSync(join(tmpdir(), 'receipts-digest-'));
   const genPath = join(dir, 'gen.json');
   try {
@@ -661,7 +661,7 @@ test('ACCEPTANCE Hale-2026-07-23 item 7b: the artifact content digest is copied 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 7c: published-private REFUSES a null artifact_url', () => {
+test('ACCEPTANCE (receipt hardening): published-private REFUSES a null artifact_url', () => {
   const dir = mkdtempSync(join(tmpdir(), 'receipts-nourl-'));
   const genPath = join(dir, 'gen.json');
   try {
@@ -676,7 +676,7 @@ test('ACCEPTANCE Hale-2026-07-23 item 7c: published-private REFUSES a null artif
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 7d: a declined/failed receipt can NEVER be marked revoked', () => {
+test('ACCEPTANCE (receipt hardening): a declined/failed receipt can NEVER be marked revoked', () => {
   for (const status of ['declined', 'failed']) {
     const dir = mkdtempSync(join(tmpdir(), `receipts-${status}-`));
     const genPath = join(dir, 'gen.json');
@@ -721,7 +721,7 @@ test('sanitizeForEmbed: an unknown top-level field never reaches the embed, and 
   assert.equal(out.embed_fields_omitted, 1, 'the drop count is disclosed');
 });
 
-test('AUD-105: a nested planted secret inside a known section never reaches the embed', async () => {
+test('a nested planted secret inside a known section never reaches the embed', async () => {
   const { sanitizeForEmbed } = await import('../../plugins/core/skills/core/scripts/render-metrics-artifact.mjs');
   const out = sanitizeForEmbed({
     schema_version: '1.0.0', generated_at: 't', producer: {},

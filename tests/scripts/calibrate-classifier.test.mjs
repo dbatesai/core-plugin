@@ -10,9 +10,9 @@ import {
   CANONICAL_STATES,
 } from '../../plugins/core/skills/core/scripts/calibrate-classifier.mjs';
 
-// --- M7: per-class coverage gate ---
+// --- per-class coverage gate ---
 
-test('M7: computePrecision flags a gold state the heuristic never predicted as unmeasured', () => {
+test('computePrecision flags a gold state the heuristic never predicted as unmeasured', () => {
   const turns = [
     { heuristic_state: 'tier-0-win', gold_state: 'tier-0-win' },
     { heuristic_state: 'tier-0-win', gold_state: 'capture-miss' }, // capture-miss in gold, never predicted
@@ -22,14 +22,14 @@ test('M7: computePrecision flags a gold state the heuristic never predicted as u
   assert.ok(p.unmeasured_gold_states.includes('capture-miss'));
 });
 
-test('M7: computePrecision reports complete coverage when every gold state is predicted', () => {
+test('computePrecision reports complete coverage when every gold state is predicted', () => {
   const turns = CANONICAL_STATES.map((state) => ({ heuristic_state: state, gold_state: state }));
   const p = computePrecision(turns);
   assert.equal(p.coverage_complete, true);
   assert.deepEqual(p.unmeasured_gold_states, []);
 });
 
-test('M7: the gate does NOT clear at high precision while a gold state sits unmeasured', () => {
+test('the gate does NOT clear at high precision while a gold state sits unmeasured', () => {
   const dir = mkdtempSync(join(tmpdir(), 'calib-cov-'));
   try {
     // 100 labeled turns: 95 correct tier-0-win (precision 0.95) + 5 where gold=capture-miss
@@ -287,7 +287,7 @@ test('worksheet is self-contained for labeling but keeps predictions blind', () 
     assert.ok(existsSync(r.predictions_path), 'sealed prediction companion exists for post-label import');
     // Windows: chmod cannot express owner-only (it only toggles the read-only
     // attribute), so mode stays 0o666 there regardless -- structurally
-    // unsatisfiable, not a regression (Meridian, 2026-07-21). Every other
+    // unsatisfiable, not a regression. Every other
     // 0o600 write path in this codebase already treats mode as advisory on
     // Windows with a try/catch; this assertion is the one place that still
     // hard-required the POSIX bits, so it's platform-guarded here instead.
@@ -299,7 +299,7 @@ test('worksheet is self-contained for labeling but keeps predictions blind', () 
   });
 });
 
-test('M7: re-running exportWorksheet the same day overwrites, never accumulates duplicate rows', () => {
+test('re-running exportWorksheet the same day overwrites, never accumulates duplicate rows', () => {
   withTmp((dir) => {
     const cd = join(dir, 'classified');
     mkdirSync(cd);
@@ -413,10 +413,10 @@ test('state write failure cannot return OK', () => {
 });
 
 // ============================================================
-// MET-002: workspace-configurable calibration gate
+// workspace-configurable calibration gate
 // ============================================================
 
-test('MET-002: resolveMinLabeled defaults to 100 with no workspace.json', () => {
+test('resolveMinLabeled defaults to 100 with no workspace.json', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cal-min-'));
   try { assert.equal(resolveMinLabeled(dir), 100); }
   finally { rmSync(dir, { recursive: true, force: true }); }
@@ -438,7 +438,7 @@ test('terminal evidence floor cannot be lowered by workspace configuration', () 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('MET-002: resolveMinLabeled rejects values below the floor and non-integers', () => {
+test('resolveMinLabeled rejects values below the floor and non-integers', () => {
   const dir = mkdtempSync(join(tmpdir(), 'cal-min3-'));
   try {
     writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ calibration_min_labeled: 5 }));

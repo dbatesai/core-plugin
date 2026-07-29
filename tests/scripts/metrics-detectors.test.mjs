@@ -164,7 +164,7 @@ test('runAbsenceWithDeadline flags active open-questions past their by-when', ()
 });
 
 test('runStaleContextTripwire skips terminal/durably-correct units regardless of age', () => {
-  // fixtures changed from the out-of-schema 'final'/'stable' (SYN-005)
+  // fixtures changed from the out-of-schema 'final'/'stable'
   withStore(
     {
       'dc-final.md': unitContent({ status: 'retired', updated: '2020-01-01' }),
@@ -181,7 +181,7 @@ test('runStaleContextTripwire skips terminal/durably-correct units regardless of
   );
 });
 
-test('SYN-005: out-of-schema status final is NOT stable — an aged final unit trips stale-context', () => {
+test('out-of-schema status final is NOT stable — an aged final unit trips stale-context', () => {
   withStore(
     { 'dc-bogus.md': unitContent({ status: 'final', updated: '2020-01-01' }) },
     (mem) => {
@@ -335,7 +335,7 @@ test('runAnticipationGap dedupes terms within a single turn', () => {
   });
 });
 
-test('MET-013: anticipation-gap records are stamped provisional + low severity at the source', () => {
+test('anticipation-gap records are stamped provisional + low severity at the source', () => {
   const home = mkdtempSync(join(tmpdir(), 'md-prov-'));
   const project = mkdtempSync(join(tmpdir(), 'md-proj-'));
   try {

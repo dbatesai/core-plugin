@@ -1,5 +1,5 @@
 /**
- * retrieval-premise.test.mjs — the v3.11 premise tests (Hale 2026-07-11 blockers).
+ * retrieval-premise.test.mjs — the v3.11 premise tests.
  *
  * These test the CLAIMS, not just the code: (1) every eligible note — including
  * nested ones — is in the retrieval population; (2) the harness `live` arm is the
@@ -27,7 +27,7 @@ const { retrieveContext, productRankedIds, productRankedScores, applyTierPolicy 
 
 // The committed fixture is NEVER touched by tests — even "read" paths write the
 // cached index (_lib/unit-summaries.json) as a side effect, which polluted the
-// committed tree and failed in read-only checkouts (Hale re-review). Every test
+// committed tree and failed in read-only checkouts. Every test
 // runs against a clone; STORE is the shared clone for non-mutating tests.
 function cloneStore() {
   const dir = mkdtempSync(join(tmpdir(), 'nested-store-'));
@@ -82,8 +82,8 @@ test('premise 2 — product/harness identity: the live arm IS retrieveContext\'s
 test('premise 3 — one-hop edge expansion survives the default topN (the v3.10.0 regression)', () => {
   // dc-strong matches all three query terms; the weak units match one. dc-neighbor
   // shares NO query vocabulary (guarded below — the first version of this fixture
-  // leaked "alpha query" into the body, making the test pass on the BROKEN baseline;
-  // Hale's re-review caught it) and is reachable only through dc-strong's edge.
+  // leaked "alpha query" into the body, making the test pass on the BROKEN
+  // baseline) and is reachable only through dc-strong's edge.
   // Red/green proven: these assertions FAIL at 0d00539 (neighbor absent) and pass here.
   const neighborBody = readFileSync(join(FIXT, '_memories', 'dc-neighbor.md'), 'utf8').toLowerCase();
   for (const term of ['alpha', 'subsystem', 'rollout']) {
@@ -97,7 +97,7 @@ test('premise 3 — one-hop edge expansion survives the default topN (the v3.10.
 });
 
 test('premise 4b — PRESERVED-TIMESTAMP attack: a retire with its original mtime restored still invalidates (content-derived signature)', () => {
-  // Hale re-review §4: rewrote a unit as retired, restored the timestamp, and the
+  // A unit rewritten as retired with its original timestamp restored left the
   // mtime signature stayed identical — the retired unit kept ranking. The signature
   // is content-derived now; timestamp equality can no longer certify content equality.
   const dir = cloneStore();
@@ -113,7 +113,7 @@ test('premise 4b — PRESERVED-TIMESTAMP attack: a retire with its original mtim
 });
 
 test('duplicate ids — an observation can never shadow canonical truth, and the store goes loudly degraded', () => {
-  // Hale re-review §1: first-wins let a nested observation (walks first) silently
+  // First-wins let a nested observation (walks first) silently
   // discard a canonical unit with the same id. Resolution is authority-aware now,
   // and the conflict is recorded on the index (degraded flag) — never silent.
   const dir = cloneStore();
@@ -132,7 +132,7 @@ test('duplicate ids — an observation can never shadow canonical truth, and the
 });
 
 test('cache validation covers EVERY record — a path stripped from a later record forces regeneration', () => {
-  // Hale re-review §4: loadFreshIndex validated only units[0].path; damaging a later
+  // loadFreshIndex validated only units[0].path; damaging a later
   // record left the cache accepted and the nested unit silently lost.
   const dir = cloneStore();
   try {
@@ -169,7 +169,7 @@ test('tier policy — P0 is the identity control; P1/P2/P3 each do what they cla
   assert.equal(scored[0].id, 'obs-a');
 });
 
-test('tier sweep — NON-TAUTOLOGICAL safety: no policy surfaces a retired strong-vocab unit (Crest #6)', async () => {
+test('tier sweep — NON-TAUTOLOGICAL safety: no policy surfaces a retired strong-vocab unit', async () => {
   // The poison unit is RETIRED but present on disk with the strongest query vocab —
   // it would top the ranking if it weren't excluded. Every tier policy (incl. P2's
   // deeper slot reservation) operates on the active-only index, so it can never leak.
@@ -191,7 +191,7 @@ test('tier sweep — NON-TAUTOLOGICAL safety: no policy surfaces a retired stron
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('validateGold — rejects duplicate ids and non-array expected (Crest #5 completeness; A5-strict rows)', () => {
+test('validateGold — rejects duplicate ids and non-array expected (completeness; strict rows)', () => {
   assert.throws(() => validateGold([{ id: 'a', query: 'q', rung: 'literal', expected: ['x'] }, { id: 'a', query: 'q', rung: 'literal', expected: ['x'] }]), /duplicate/);
   assert.throws(() => validateGold([{ id: 'a', query: 'q', rung: 'literal', expected: 'x' }]), /must be an array/);
   assert.throws(() => validateGold([]), /empty/);
@@ -208,7 +208,7 @@ test('premise 4 — standalone bm25 cannot resurrect a retired unit through a st
   const dir = cloneStore();
   try {
     // Build the cache while active, then retire the unit and call the STANDALONE
-    // path again — the pre-remediation tree kept serving it (Hale §4).
+    // path again — the pre-remediation tree kept serving it.
     assert.ok(bm25Rank('quokka incident', dir).includes('obs-nested-note'), 'active unit ranks');
     const f = join(dir, '_memories', 'observations', '2026-07', 'obs-nested-note.md');
     writeFileSync(f, readFileSync(f, 'utf8').replace('status: active', 'status: retired'));

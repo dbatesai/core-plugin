@@ -7,7 +7,7 @@ import {
 const VALID_WEIGHTS = new Set(['primary', 'corroborating', 'conflicting']);
 const VALID_KINDS = new Set(['identity', 'runtime', 'mutation', 'observation']);
 
-test('probe: honestly demotes to DEGRADED with mechanism trust-based (R-17)', async () => {
+test('probe: honestly demotes to DEGRADED with mechanism trust-based', async () => {
   const row = await probe({ cwd: '/work/Any' });
   assert.equal(row.identity_status, 'DEGRADED');
   assert.equal(row.mechanism, 'trust-based');
@@ -27,7 +27,7 @@ test('probe: DEGRADED carries a conflicting evidence entry; all weights schema-v
   for (const e of row.evidence) assert.ok(VALID_WEIGHTS.has(e.weight), `bad weight: ${e.weight}`);
 });
 
-test('probe: evidence points at the R-17 risk unit', async () => {
+test('probe: evidence points at the tracked risk unit', async () => {
   const row = await probe();
   const ptr = row.evidence.find(e => e.source === 'risk-unit-pointer');
   assert.ok(ptr, 'must carry a risk-unit-pointer');
@@ -38,7 +38,7 @@ test('probe: evidence points at the R-17 risk unit', async () => {
 test('probe: declares an honest closure target (not a false exact promise) + requirement + mechanism', async () => {
   const row = await probe();
   assert.equal(row.closure_target, CLOSURE_TARGET);
-  // MET-007: 'v2.9+' became a stale promise the moment v2.9–v3.7 shipped without
+  // 'v2.9+' became a stale promise the moment v2.9–v3.7 shipped without
   // closure. 'unscheduled' is the honest state; CLOSURE_REQUIREMENT carries the bar.
   assert.equal(CLOSURE_TARGET, 'unscheduled');
   assert.match(CLOSURE_REQUIREMENT, /requires physical anti-anchoring isolation/);

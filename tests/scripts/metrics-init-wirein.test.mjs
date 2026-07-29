@@ -11,7 +11,7 @@ import { resolveStoragePath } from '../../plugins/core/skills/core/scripts/log-e
 
 const METRICS_INIT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/metrics-init.mjs', import.meta.url));
 
-// HC_603-style bar: prove the actual scaffold + the actual consume path, not prose.
+// prove the actual scaffold + the actual consume path, not prose.
 // metrics-init pins the storage path; log-event must resolve to that pin.
 test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pin', () => {
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
@@ -75,11 +75,11 @@ test('wire-in: metrics-init is idempotent (second run leaves the pin intact)', (
   }
 });
 
-// M1: the CLI entry guard must canonicalize BOTH sides, or the script silently
+// The CLI entry guard must canonicalize BOTH sides, or the script silently
 // no-ops when invoked through a symlinked/virtualized path (Node resolves
 // import.meta.url to the real file, but argv[1] stays the symlink). startup.md
 // invokes it with output+exit-code discarded, so that no-op would be invisible.
-test('M1: metrics-init still runs when invoked through a symlink (entry guard canonicalizes both sides)', (t) => {
+test('metrics-init still runs when invoked through a symlink (entry guard canonicalizes both sides)', (t) => {
   if (!symlinkCapable()) return t.skip('symlink privilege unavailable (Windows non-elevated box)');
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));

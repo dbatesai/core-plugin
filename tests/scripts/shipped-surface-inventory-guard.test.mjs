@@ -28,7 +28,12 @@ const REGENERATE = 'node scripts/release/generate-shipped-surface-inventory.mjs 
 const inventory = buildInventory(PLUGIN);
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
 
-const SURFACES = ['README.md', 'USAGE.md', 'llms.txt', 'INSTALL.md', join('.claude-plugin', 'marketplace.json')];
+const SURFACES = [
+  'README.md', 'USAGE.md', 'llms.txt', 'INSTALL.md',
+  join('.claude-plugin', 'marketplace.json'),
+  join('plugins', 'core', '.claude-plugin', 'plugin.json'),
+  join('plugins', 'core', '.codex-plugin', 'plugin.json'),
+];
 
 const NUMBER_WORDS = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
@@ -170,4 +175,66 @@ test('every relative link in the root documentation surfaces resolves', () => {
       assert.ok(existsSync(join(ROOT, target)), `${doc} links ${m[1]}, which does not exist`);
     }
   }
+});
+
+// --- public manifest rosters are governed surfaces: membership, not count alone ---
+// A manifest description can state an accurate COUNT while naming the wrong
+// roster (advertising a removed command, omitting a live one). Both source
+// manifests' public description text is therefore checked for membership.
+const MANIFESTS = [
+  join('plugins', 'core', '.claude-plugin', 'plugin.json'),
+  join('plugins', 'core', '.codex-plugin', 'plugin.json'),
+];
+
+function manifestDescriptionText(rel) {
+  const j = JSON.parse(read(rel));
+  return [j.description, j.interface?.shortDescription, j.interface?.longDescription]
+    .filter(Boolean).join('\n');
+}
+
+// Pure over a description text so the planted falsifier below can exercise the
+// same checks the live test runs.
+export function rosterProblems(text, inv) {
+  const problems = [];
+  for (const c of activeCompanions(inv)) {
+    const name = c.name ?? c;
+    if (!new RegExp(`(?<![A-Za-z0-9])/${name}(?![a-z0-9-])`).test(text)) {
+      problems.push(`omits active companion /${name}`);
+    }
+  }
+  for (const s of deprecatedSkills(inv)) {
+    // A deprecated command may be mentioned, but only labeled as such nearby.
+    const re = new RegExp(`(?<![A-Za-z0-9])/${s.name ?? s}(?![a-z0-9-])`, 'g');
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const near = text.slice(Math.max(0, m.index - 120), m.index + 120);
+      if (!/shim|deprecat/i.test(near)) problems.push(`describes deprecated /${s.name ?? s} as active`);
+    }
+  }
+  const known = new Set([
+    ...activeCompanions(inv).map((c) => c.name ?? c), 'core',
+    ...deprecatedSkills(inv).map((s) => s.name ?? s),
+  ]);
+  for (const m of text.matchAll(/(?<![A-Za-z0-9])\/([a-z][a-z0-9-]{2,})(?![a-z0-9-])/g)) {
+    if (!known.has(m[1])) problems.push(`advertises /${m[1]}, which does not ship`);
+  }
+  return problems;
+}
+
+test('both source manifests describe exactly the shipped companion roster', () => {
+  for (const rel of MANIFESTS) {
+    const problems = rosterProblems(manifestDescriptionText(rel), inventory);
+    assert.deepEqual(problems, [], `${rel}:\n  ${problems.join('\n  ')}`);
+  }
+});
+
+test('FALSIFIER: a planted removed command plus an omitted active command is RED', () => {
+  const real = manifestDescriptionText(MANIFESTS[1]);
+  // Plant a command that does not ship, and delete a live companion's mention.
+  const mutated = real.replace('/refocus', '/metrics-package');
+  const problems = rosterProblems(mutated, inventory);
+  assert.ok(problems.some((p) => p.includes('omits active companion /refocus')),
+    'removing a live companion from the description must be a problem');
+  assert.ok(problems.some((p) => p.includes('advertises /metrics-package')),
+    'advertising a command that does not ship must be a problem');
 });

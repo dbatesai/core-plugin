@@ -99,14 +99,13 @@ test('parseRecognitionSignal: empty/missing text is unavailable', () => {
 });
 
 // ---------------------------------------------------------------------------
-// computeRows — seven rows across FOUR evidence-class sections (2026-07-22,
-// Hale's slice-1 revise: mechanics / retrieval-regression / measurement-
-// readiness / user-benefit; retrieval-log coverage and tier-distribution
-// moved OUT of regression into mechanics as plain-count instrumentation;
-// recognition + calibration moved into their own readiness section).
+// computeRows — seven rows across FOUR evidence-class sections: mechanics /
+// retrieval-regression / measurement-readiness / user-benefit. Retrieval-log
+// coverage and tier-distribution belong to mechanics as plain-count
+// instrumentation; recognition + calibration belong to the readiness section.
 // ---------------------------------------------------------------------------
 
-// The canonical four-class object (2026-07-22, Hale's acceptance revise):
+// The canonical four-class object:
 // mechanics/regression/readiness/benefit at the top level, machine verdict
 // scoped at mechanics.status, identity stamped — the SAME object --json
 // emits and the renderer consumes.
@@ -140,7 +139,7 @@ function baseOut(overrides = {}) {
 
 test('computeRows: returns seven rows across mechanics/regression/readiness sections', () => {
   // Seven as of v3.14.0: the turn-capture state line ALWAYS renders (+1), and
-  // the benefit row is REMOVED per DC-129 (-1, the question left scope by
+  // the benefit row is REMOVED (-1, the question left scope by
   // decision, not by gap).
   const rows = computeRows(baseOut());
   assert.equal(rows.length, 7);
@@ -227,8 +226,8 @@ test('computeRows: no store present renders "no store" and zero pct for store-de
 
 // --- Telemetry capture row (MECHANICS): replaces the old percentage-based
 // "Retrieval-log coverage" + "Live retrieval proxy" regression rows with a
-// single COUNTS-ONLY, no-gauge mechanics/instrumentation row (Hale, 2026-07-22
-// slice-1 revise: "rows÷days is an invalid denominator... show counts"). ---
+// single COUNTS-ONLY, no-gauge mechanics/instrumentation row: rows÷days is an
+// invalid denominator, so the row shows counts. ---
 
 test('computeRows: Telemetry capture is a no-gauge MECHANICS row with plain counts, no percentage claim', () => {
   const rows = computeRows(baseOut({
@@ -284,7 +283,7 @@ test('computeRows: Telemetry capture absent still renders an honest absence, no-
 
 // --- Gold-set snapshot row (REGRESSION): present-with-evidence vs honestly-
 // absent. Trust is `provisional` — a live run does not validate its own
-// reference answers (Hale, 2026-07-22 slice-1 revise, item 5). ---
+// reference answers. ---
 
 test('computeRows: gold-set snapshot absent renders NOT_EVALUATED with a plain reason, never silently omitted', () => {
   const rows = computeRows(baseOut());
@@ -320,10 +319,10 @@ test('computeRows: gold-set harness failure surfaces its reason as NOT_EVALUATED
   assert.match(gold.value, /harness run failed/);
 });
 
-// --- Benefit row REMOVED (DC-129, 2026-07-24): user-benefit measurement left
+// --- Benefit row REMOVED: user-benefit measurement left
 // scope by decision. The row must be GONE, not renamed or softened. ---
 
-test('computeRows: no benefit/matched-comparison row exists anymore (DC-129)', () => {
+test('computeRows: no benefit/matched-comparison row exists anymore', () => {
   const rows = computeRows(baseOut());
   assert.ok(!rows.some((r) => r.label === 'Matched comparison'), 'the benefit row is removed, not renamed');
   assert.ok(!rows.some((r) => r.section === 'benefit'), 'no row in a benefit section');
@@ -390,14 +389,14 @@ test('buildNarrative: mentions the telemetry-capture and gold-set-snapshot numbe
   assert.match(n, /not a passing gate/);
 });
 
-test('buildNarrative: no benefit sentence remains (DC-129 — out of scope by decision)', () => {
+test('buildNarrative: no benefit sentence remains (out of scope by decision)', () => {
   const n = buildNarrative(baseOut());
   assert.doesNotMatch(n, /memory-on\/off|hasn't been measured/);
 });
 
 // ---------------------------------------------------------------------------
 // renderReport — full assembled text: MECHANICS-scoped verdict heading, four
-// labeled evidence-class sections (2026-07-22, Hale's slice-1 revise), a
+// labeled evidence-class sections, a
 // no-gauge Telemetry-capture row, and a quoted narrative.
 // ---------------------------------------------------------------------------
 
@@ -408,7 +407,7 @@ test('renderReport: verdict heading is scoped to MECHANICS and reads HEALTHY, no
   assert.equal(lines[2], 'CORE Memory Health — demo-project');
 });
 
-test('renderReport: renders five gauged rows across three labeled sections (benefit gone per DC-129)', () => {
+test('renderReport: renders five gauged rows across three labeled sections (benefit row gone by decision)', () => {
   const text = renderReport(baseOut(), { workspaceName: 'demo-project' });
   const rowLines = text.split('\n').filter((l) => l.includes('[') && l.includes(']'));
   assert.equal(rowLines.length, 5, 'seven total rows minus the two no-gauge rows (Telemetry capture, Turn capture)');
@@ -588,8 +587,8 @@ test('checkLiveRetrievalProxy: real retrieval-log rows produce a genuine tier-di
 });
 
 // ---------------------------------------------------------------------------
-// Retrieval-event schema validation surfacing (2026-07-22, evidence-lifecycle
-// slice 2, revised per Hale's "use producer schema and isolate legacy": a
+// Retrieval-event schema validation surfacing (producer schema, legacy rows
+// isolated): a
 // malformed row must be REJECTED and COUNTED with a CLOSED code, split
 // current/legacy — never silently dropped, never a raw echoed value.
 // ---------------------------------------------------------------------------
@@ -677,7 +676,7 @@ test('gatherMetrics: real end-to-end run surfaces a rejected row in the rendered
 });
 
 // ---------------------------------------------------------------------------
-// CLI --json contract (2026-07-22, Hale's acceptance revise): the machine
+// CLI --json contract: the machine
 // output must carry the SAME four-evidence-class taxonomy the rendered report
 // does — exact class placement, producer/schema identity, and the ABSENCE of
 // the old contradictory fields (top-level verdict/probe/store/calibration,
@@ -694,7 +693,7 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
     writeFileSync(join(day, 'retrieval-log.jsonl'),
       JSON.stringify({ ts: '2026-07-22T10:00:00Z', kind: 'retrieval', schema_version: '1.0.0', trigger: 'session-start', intent_topics: ['alpha'], tier_reached: 1, escalation_path: [1], units_retrieved: [{ id: 'u1', tier: 1 }] }) + '\n');
 
-    // Fix 8 (Hale item 8): --json emits EXACTLY ONE JSON document — no human
+    // Fix 8: --json emits EXACTLY ONE JSON document — no human
     // report on the same stream — so the whole stdout parses as JSON.
     const stdout = execFileSync('node', [SCRIPT, root, '--json'], { encoding: 'utf8', timeout: 120000 });
     assert.doesNotThrow(() => JSON.parse(stdout), '--json stdout must be a single valid JSON document');
@@ -741,7 +740,7 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
     // ---- readiness: recognition + calibration, together, as their own class.
     assert.deepEqual(Object.keys(out.readiness).sort(), ['calibration', 'recognition_signal']);
 
-    // ---- benefit: GONE per DC-129 — the key must not exist at all.
+    // ---- benefit: GONE by decision — the key must not exist at all.
     assert.ok(!('benefit' in out), 'the benefit class is removed from the canonical object');
 
     // ---- single source of truth: the report string in the JSON is exactly
@@ -756,8 +755,8 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
 });
 
 // ---------------------------------------------------------------------------
-// Turn-capture evidence — the ALWAYS-VISIBLE state line (v3.14.0, default-ON
-// per DC-129). Because the stream is on unless the user acted, BOTH states
+// Turn-capture evidence — the ALWAYS-VISIBLE state line (v3.14.0,
+// default-ON). Because the stream is on unless the user acted, BOTH states
 // render: ON carries the disclosure + off-switches; OFF confirms the opt-out.
 // ---------------------------------------------------------------------------
 

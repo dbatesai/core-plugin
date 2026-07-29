@@ -1,5 +1,5 @@
 // Behavioral test for the one-time first-run metrics disclosure (Fix 1 of the
-// dc-107 public-marketplace gap: metrics capture is default-on but was never
+// The public-marketplace gap: metrics capture is default-on but was never
 // disclosed to users). HOME is redirected to a temp dir so the manifest write
 // under `~/.core/workspaces/<id>/workspace.json` never touches the real ~/.core.
 import { test } from 'node:test';

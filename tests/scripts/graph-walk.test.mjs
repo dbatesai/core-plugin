@@ -24,7 +24,7 @@ function vault() {
   // sources uses flow-style array form: signalS only reads Array sources, so the
   // old scalar `sources: PROJECT.md` silently scored the NO-sources default —
   // these fixtures only survived the R·S prune while that default was 0.5 (it is
-  // 0.3 since MEM-018). The array form gives the S=1.0 the fixtures always meant.
+  // 0.3 for a sourceless unit). The array form gives the S=1.0 the fixtures always meant.
   write('seed', { type: 'decision', created: '2026-05-25', sources: '[PROJECT.md]' },
     [{ type: 'depends-on', target: 'a-valid' }, { type: 'supersedes', target: 'b-invalid' },
      { type: 'cites', target: 'obs-inbound-2026-05-20' }]);
@@ -33,7 +33,7 @@ function vault() {
   // validity-suppression is the only reason it leaves the valid candidate set.
   write('b-invalid', { type: 'decision', created: '2026-05-25', t_invalid: '2026-05-28', sources: '[PROJECT.md]' });
   // Observation unit in observations/<YYYY-MM>/ — invisible to the walk by
-  // default, reachable only with includeObservations (SYN-007).
+  // default, reachable only with includeObservations.
   const obsDir = join(mem, 'observations', '2026-05');
   mkdirSync(obsDir, { recursive: true });
   writeFileSync(join(obsDir, 'obs-inbound-2026-05-20.md'), [
@@ -65,7 +65,7 @@ test('includeInvalidated:true brings cold history back into the candidate set', 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('includeInvalidated:true reaches an archived, historically-invalidated edge target (Hale\'s 2026-07-21 finding)', () => {
+test('includeInvalidated:true reaches an archived, historically-invalidated edge target', () => {
   const { dir, mem } = vault();
   try {
     const archive = join(mem, 'archive');
@@ -87,7 +87,7 @@ test('includeInvalidated:true reaches an archived, historically-invalidated edge
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a canonical archived-active unit (status:active, archived:true, no t_invalid) is absent by default and present only with includeInvalidated (Hale's 2026-07-22 finding)", () => {
+test("a canonical archived-active unit (status:active, archived:true, no t_invalid) is absent by default and present only with includeInvalidated", () => {
   const { dir, mem } = vault();
   try {
     const archive = join(mem, 'archive');
@@ -125,7 +125,7 @@ test('an open-interval unit (no t_invalid) is never suppressed', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SYN-007: observation units are invisible to the walk by default (back-compat)', () => {
+test('observation units are invisible to the walk by default (back-compat)', () => {
   const { dir, mem } = vault();
   try {
     const ids = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY }).map(c => c.unit_id);
@@ -133,7 +133,7 @@ test('SYN-007: observation units are invisible to the walk by default (back-comp
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SYN-007: includeObservations surfaces inbound observation neighbors and resolves subdir targets', () => {
+test('includeObservations surfaces inbound observation neighbors and resolves subdir targets', () => {
   const { dir, mem } = vault();
   try {
     const ids = walk(join(mem, 'seed.md'), { memoriesDir: mem, today: TODAY, includeObservations: true })

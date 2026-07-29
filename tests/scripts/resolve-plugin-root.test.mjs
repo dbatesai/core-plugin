@@ -48,7 +48,7 @@ const codexEnv = (root) => ({ CODEX_PLUGIN_ROOT: root, CODEX_THREAD_ID: 't' });
 // On Windows homedir() returns a backslash path; the bucket literals use forward
 // slashes. Before the fix the interpolated comparison string was mixed-separator
 // and matched nothing, so every Windows path classified as 'unknown' and every
-// mutation gate failed closed for Windows users (Meridian, issue #45).
+// mutation gate failed closed for Windows users (issue #45).
 
 test('classifyAuthority: Windows backslash installed-cache classifies (not unknown)', () => {
   const home = 'C:\\Users\\david';
@@ -78,7 +78,7 @@ test('classifyAuthority: unrecognized location still fails closed to unknown', (
   assert.equal(classifyAuthority('C:\\Temp\\random', 'C:\\Users\\david'), 'unknown');
 });
 
-// ---------- HARNESS-010: common Windows dev paths must classify, not fail closed ----------
+// ---------- common Windows dev paths must classify, not fail closed ----------
 
 test('classifyAuthority: Visual Studio default source\\repos classifies as canonical-source', () => {
   assert.equal(
@@ -107,7 +107,7 @@ test('classifyAuthority: still fails closed outside recognized locations', () =>
 // The collapsed plugins/core/ layout co-locates .codex-plugin and .claude-plugin
 // in one dir. findPluginRootAnchor is codex-first-match-wins, so without the
 // re-point a Claude session resolved manifest_harness=codex, tripped the
-// step-6.5(b) split-brain check, and DEGRADED on every resolution (Meridian #45).
+// step-6.5(b) split-brain check, and DEGRADED on every resolution (issue #45).
 
 test('co-located manifests + Claude env -> PASS (re-points to claude-code)', () => {
   withFixture(['codex', 'claude'], ({ pluginRoot, from }) => {
@@ -159,7 +159,7 @@ test('claude-only manifest + Codex env -> DEGRADED (genuine wrong-plugin)', () =
 });
 
 test('co-located + WEAK Claude signal (session id only) -> PASS — mirrors Windows-bash', () => {
-  // Meridian's on-box Windows harness injects only CLAUDE_CODE_SESSION_ID, not
+  // The on-box Windows harness injects only CLAUDE_CODE_SESSION_ID, not
   // the strong CLAUDE_PLUGIN_ROOT — the weak signal is still enough to set
   // consuming_harness=claude-code and trip the pre-fix split-brain. This pins
   // the exact scenario she re-runs.
@@ -186,7 +186,7 @@ test('re-point makes Step 4 corroborate the consuming harness env var', () => {
 
 import { execFileSync } from 'node:child_process';
 
-// ---------- SYN-002: --print-root (single cross-shell CORE_ROOT source) ----------
+// ---------- --print-root (single cross-shell CORE_ROOT source) ----------
 // startup.md's resolver block delegates to `node resolve-plugin-root.mjs
 // --print-root` instead of bash-only parameter expansion. Contract: print
 // exactly one line — the plugin root with forward slashes — and exit 0; or

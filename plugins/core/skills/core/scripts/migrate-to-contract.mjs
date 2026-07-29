@@ -8,7 +8,7 @@
  *   - a line unique to one harness → that harness's harness-only section
  *   - an existing generated-provenance header is stripped (never migrated)
  *
- * SAFETY (per the v3.0 plan): output is a DRAFT for explicit user review — this never
+ * SAFETY: output is a DRAFT for explicit user review — this never
  * auto-adopts. The agent shows the draft; the user accepts; then generate-* takes over.
  * dry-run by default; --write only writes the draft file when asked.
  *

@@ -2,7 +2,7 @@
  * calibrate-classifier.mjs — Phase 3 calibration harness for classify-turns.mjs.
  *
  * The heuristic classifier is PROVISIONAL until precision clears 0.7 on a
- * 100–200 hand-labeled turn set (spec §17.12, Anvil A4; R-1 self-measuring guard).
+ * 100–200 hand-labeled turn set (spec §17.12: the self-measurement honesty guard).
  * This script provides the three-command pipeline:
  *
  *   --check              Print current calibration state. Exit 0 if calibrated, 1 if not.
@@ -46,21 +46,19 @@ export const INTERVAL_LOWER_THRESHOLD = 0.5;
 export const CALIBRATION_HARNESSES = ['claude-code', 'codex'];
 
 /**
- * MET-002 honesty fix: the 100-turn gate is structurally slow on a single-user
- * install (the CORE-on-CORE pool sat at 57/100 after months), so PROVISIONAL is
- * the EXPECTED steady state at that scale — not a failure to nag about. A
- * workspace that wants a reachable gate sets `calibration_min_labeled` in
- * <project>/workspace.json (floor 30: below that, per-class precision across six
- * states is noise, and lowering further would launder confidence — the R-1 guard).
- * REOPEN CONDITION for revisiting the 100 default: the pool clears 100 labeled
- * turns anyway, or the install grows beyond a single user.
+ * The 100-turn gate is structurally slow on a single-user install, where a pool
+ * can sit well short of it for months. PROVISIONAL is therefore the EXPECTED
+ * steady state at that scale — not a failure to nag about. A workspace that
+ * wants a reachable gate sets `calibration_min_labeled` in
+ * <project>/workspace.json. The floor is 30: below that, per-class precision
+ * across six states is noise, and lowering further would launder confidence.
  */
 export function resolveMinLabeled(project) {
   void project;
   return MIN_LABELED;
 }
 
-// The six recognition states classify-turns can emit. M7: the gate must measure per-class
+// The six recognition states classify-turns can emit. The gate must measure per-class
 // coverage against this canonical set so it can't clear while whole states sit unmeasured.
 export const CANONICAL_STATES = [
   'tier-0-win', 'tier-1-3-win', 'rec-fail-tier-0',
@@ -178,7 +176,7 @@ export function computePrecision(labeledTurns) {
   const vals = Object.values(by_state).filter((v) => v !== null);
   const overall = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
 
-  // M7 coverage: the macro average above only spans classes the heuristic PREDICTED, so a
+  // Coverage: the macro average above only spans classes the heuristic PREDICTED, so a
   // classifier that emits 2 of 6 states can clear 0.7 with the other 4 unmeasured. A gold
   // state the heuristic never predicts is an unmeasured class — surface it so the gate can
   // refuse to clear until every state present in the gold labels has at least one prediction.
@@ -277,7 +275,7 @@ export function exportWorksheet({ project: _project, harness, classifiedDir, cal
   // write ONCE — appending in a loop into a date-stamped file meant a same-day
   // re-run (a retry, or a different --count) accumulated duplicate/mixed turn_ids,
   // which importLabels then double-counts toward MIN_LABELED and the precision
-  // average — corrupting the gate that decides whether the classifier is trusted (M7).
+  // average — corrupting the gate that decides whether the classifier is trusted.
   const predictions = {};
   const jsonlRows = sample.map((t) => {
     const turnId = `${t.session_id}-${t.turn_idx}`;

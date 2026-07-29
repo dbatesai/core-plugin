@@ -160,7 +160,7 @@ function readUnit(memoriesDir, id) {
   return { id, path, fm };
 }
 
-// Flat frontmatter map for a unit (M1: shared parser, was a local copy).
+// Flat frontmatter map for a unit (shared parser).
 function parseFrontmatter(text) {
   return parseFlatFrontmatter(text)[0];
 }
@@ -316,8 +316,8 @@ function appendToArchiveMoves(archivePath, block) {
   atomicWriteFileSync(archivePath, text);
 }
 
-// MEM-013: crash-retry idempotency. The write order is archive-append THEN
-// PROJECT.md (deliberate — see the M4 note below); a crash between the two
+// Crash-retry idempotency. The write order is archive-append THEN
+// PROJECT.md (deliberate — see the write-order note below); a crash between the two
 // leaves the bullets archived but still on the agenda, and a retry would
 // append a duplicate archive block. Skip any bullet whose exact raw lines are
 // already in the archive; the retry still stubs it out of PROJECT.md.
@@ -464,8 +464,8 @@ export function demoteMoves(projectDir, { today, dryRun = false, strict = false,
     if (live !== text) { stats.refused = true; stats.refusedReason = 'stale-preimage'; return; }
 
     // Guard cleared — safe to append the archive and write PROJECT.md last.
-    // M4 order preserved: on a crash after the archive append, the worst case
-    // is a harmless extra archive block (MEM-013 alreadyArchived dedups it),
+    // Write order is deliberate: on a crash after the archive append, the worst
+    // case is a harmless extra archive block (alreadyArchived dedups it),
     // never a truncated PROJECT.md.
     const archivePath = ensureArchiveFile(projectDir);
     const freshDemotions = demotions.filter(d => !alreadyArchived(archivePath, d.bullet));

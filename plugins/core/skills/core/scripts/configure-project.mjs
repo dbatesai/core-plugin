@@ -20,7 +20,7 @@
  *
  * Ships as a script with the plugin; .mjs only.
  *
- * ── The capability report is two-tier on purpose (JC-1) ──────────────────────
+ * ── The capability report is two-tier on purpose ─────────────────────────────
  * A node script can read what's CONFIGURED ON DISK and validate the store, but it
  * CANNOT see whether an MCP connector is actually reachable + authed THIS session
  * — that's agent/session context, not the filesystem. So the report splits:
@@ -127,7 +127,7 @@ export function detectIdentity(projectPath, coreDir, now = new Date()) {
 }
 
 // ── Configured MCP connectors (script-visible: DECLARED-in-config, not verified) ─
-// JC-1: read the RIGHT file per harness and frame the result as "checked <file>,
+// Read the RIGHT file per harness and frame the result as "checked <file>,
 // found N" — never assert absence as "no connectors". Whether a configured server
 // is reachable+authed this session is session-live (agent-reported), not here.
 export function readConfiguredMcp(projectPath, harness, home = homedir()) {
@@ -158,7 +158,7 @@ export function readConfiguredMcp(projectPath, harness, home = homedir()) {
   }
 }
 
-// ── Optional project-local connector map (B5 extension point) ────────────────
+// ── Optional project-local connector map (extension point) ───────────────────
 // CORE ships NO connector-map (connector specifics are overlay-owned — see
 // source-registration-framework.md §"What CORE does NOT ship"). configure-project
 // only READS a map an overlay/project may provide and reports it.
@@ -174,7 +174,7 @@ export function readConnectorMap(projectPath) {
   }
 }
 
-// ── AGENTS.md (B6a, guarded on CONTRACT.md — JC-3) ───────────────────────────
+// ── AGENTS.md (guarded on CONTRACT.md) ───────────────────────────────────────
 // The common case for a Codex project today is NO CONTRACT.md → skip cleanly.
 // Generate only under --apply AND when CONTRACT.md exists. Reports, never crashes.
 export async function planAgentsMd(projectPath, { apply = false } = {}) {

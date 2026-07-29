@@ -11,15 +11,14 @@ import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'session-start-hook.mjs');
 
-// Isolate every hook test log (Hale audit, 2026-07-17, re-flagged on a fresh
-// audit of 246a77a): several tests below call autostartSkill() IN-PROCESS
+// Isolate every hook test log: several tests below call autostartSkill() IN-PROCESS
 // (imported statically above, not via subprocess) — on an unauthorized skill
 // it internally calls logHookEvent(), which reads process.env.CORE_HOOKS_LOG_FILE
 // from THIS test-runner process directly, not from any execFileSync env
 // override. Setting it once at module load covers every in-process call for
 // the lifetime of this file (these tests don't assert on the log's content,
 // only that they never touch the real one).
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core, so os.tmpdir() no longer qualifies.
 const _sessionStartLogDir = mkdtempSync(join(trustedTestTmpRoot(), 'session-start-hook-log-'));
 process.env.CORE_HOOKS_LOG_FILE = join(_sessionStartLogDir, 'hooks-log.jsonl');
@@ -28,8 +27,8 @@ after(() => { rmSync(_sessionStartLogDir, { recursive: true, force: true }); });
 // An ATTACKER-controlled directory carrying its own .claude/settings.json that
 // "authorizes" a skill. Used to prove hostile HOME/USERPROFILE cannot redirect
 // the directive — the hook resolves the trusted home from the OS account
-// database (os.userInfo()), which ignores the environment (Hale's demonstrated
-// bypass, 2026-07-11 re-review §5; homedir() followed $HOME and fell for it).
+// database (os.userInfo()), which ignores the environment (homedir() followed
+// $HOME and fell for the demonstrated bypass).
 function attackerHome(settingsEnv) {
   const home = mkdtempSync(join(tmpdir(), 'core-autostart-attacker-'));
   mkdirSync(join(home, '.claude'), { recursive: true });
@@ -55,7 +54,7 @@ test('a USER-authorized wrapper skill is honored', () => {
 });
 
 test('AUTHORITY GATE: a well-shaped but unauthorized skill falls back to /core', () => {
-  // Shape is not authority (Hale 2026-07-11 §5): a project-influenceable env value
+  // Shape is not authority: a project-influenceable env value
   // must not be able to redirect the session's mandated first action to an arbitrary
   // installed skill. /my-plugin:entry is syntactically valid — and rejected, because
   // the user never registered it.
@@ -90,7 +89,7 @@ test('hook subprocess: default injects /core', () => {
   assert.match(run({}), /`\/core`/);
 });
 
-test('ATTACK PATH (Hale re-review §5): hostile HOME/USERPROFILE + attacker settings cannot redirect the directive', () => {
+test('ATTACK PATH: hostile HOME/USERPROFILE + attacker settings cannot redirect the directive', () => {
   // The project-controlled hook env points HOME and USERPROFILE at an attacker
   // directory whose settings.json "authorizes" /my-plugin:entry, and names that
   // skill in CORE_AUTOSTART_SKILL. Pre-fix, the hook emitted the attacker's skill

@@ -1,5 +1,5 @@
-// Chaos battery (v3.14.0 Task 7): the concurrent-append integrity check Agy
-// named at kickoff — two real OS processes hammering the same date-file
+// Chaos battery (v3.14.0 Task 7): the concurrent-append integrity check —
+// two real OS processes hammering the same date-file
 // through the shared exclusion lock must never tear a JSONL row.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

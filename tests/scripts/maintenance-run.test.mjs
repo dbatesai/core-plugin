@@ -25,8 +25,8 @@ function testHome(root) {
   return home;
 }
 
-// DC-110 M1: mechanical maintenance is signature-gated (regen only when units changed),
-// narrated (never silent), and ledger-recorded (the cadence data for the M2 observe step).
+// Mechanical maintenance is signature-gated (regen only when units changed),
+// narrated (never silent), and ledger-recorded (the cadence data for the observe step).
 
 function makeProject() {
   const root = mkdtempSync(join(tmpdir(), 'core-maint-'));
@@ -120,7 +120,7 @@ test('dry-run does not write the ledger or indexes', () => {
   assert.ok(res.ranOps.length > 0, 'still reports what it would do');
 });
 
-// ---- state-cache stamping (Hale's finding, 2026-07-22): maintenance-run
+// ---- state-cache stamping: maintenance-run
 // writes INDEX-decisions.md, INDEX-risks.md, and the summary index on the
 // user's behalf — those writes must be stamped in code, same pattern as
 // decorate-graph.mjs and hot-section.mjs, so edit-detection never

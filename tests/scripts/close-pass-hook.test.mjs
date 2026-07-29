@@ -12,11 +12,10 @@ const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const CLOSE_PASS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');
 
-// Isolate every hook test log (Hale audit, 2026-07-17, re-flagged on a fresh
-// audit of 246a77a after the first isolation pass missed this file): a
+// Isolate every hook test log (the first isolation pass missed this file): a
 // subprocess hook run that doesn't override CORE_HOOKS_LOG_FILE defaults to
 // the real machine-wide ~/.core/hooks-log.jsonl.
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core. Unlike os.tmpdir(), that dir
 // isn't auto-cleaned — every created dir is tracked and removed below.
 const _isolatedLogDirs = [];
@@ -27,7 +26,7 @@ function isolatedHooksLog() {
 }
 after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
-// SEPARATE leak (found on Hale's fresh audit): several tests below call
+// SEPARATE leak: several tests below call
 // close-pass.mjs's runClose/beginClose IN-PROCESS via dynamic import — not a
 // subprocess — so the execFileSync-level CORE_HOOKS_LOG_FILE override above
 // never applies to them. logHookEvent() inside close-pass.mjs reads
@@ -126,11 +125,11 @@ test('isRegisteredWorkspace: only a path in ~/.core/index.json passes (security 
   rmSync(evil, { recursive: true, force: true });
 });
 
-test('inspectLock: a LIVE pid is never stealable at any age; a DEAD pid is stealable past staleMs (Hale round 3)', async () => {
-  // POLICY FLIP (2026-07-15, Hale's advisory): the old P2 anti-strand rule made a
-  // very old lock stealable regardless of pid liveness — but a laptop suspended
-  // mid-close revives past any fixed ceiling and would overlap its superseder
-  // (mutual-exclusion break, integrity). Now: live pid → held at ANY age; the
+test('inspectLock: a LIVE pid is never stealable at any age; a DEAD pid is stealable past staleMs', async () => {
+  // The prior anti-strand rule made a very old lock stealable regardless of
+  // pid liveness — but a laptop suspended mid-close revives past any fixed
+  // ceiling and would overlap its superseder (mutual-exclusion break,
+  // integrity). Now: live pid → held at ANY age; the
   // recycled-pid strand this reopens is the accepted lesser failure (availability),
   // surfaced loudly and remedied by the operator `release` command.
   const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');

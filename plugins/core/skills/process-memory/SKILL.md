@@ -237,7 +237,7 @@ Surface where native harness memory (MEMORY.md / `~/.codex/memories`) holds proj
 node "${CORE_ROOT}/skills/core/scripts/audit-memory-boundary.mjs" "<project>"
 ```
 
-**Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is deferred (design Q3).
+**Honest framing — these are candidates, never auto-promote.** A native-only entry is NOT automatically a missing unit: it may be a fact the user *deleted* from CORE, and anti-resurrection says deleted facts stay deleted. If candidates surface, name them in plain voice as graduation *prompts* ("native memory mentions R-99 with no CORE unit — promote it, or is it intentionally gone?"), and let the normal graduation path (which respects anti-resurrection) decide. `0 native-only` → one sentence or silence. Sampled + read-only; never a gate. Conflict detection is not performed — it is too noisy without a stronger matcher.
 
 ---
 

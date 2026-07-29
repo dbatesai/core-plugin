@@ -2,9 +2,8 @@
 /**
  * hot-section.mjs — manage the rendered hot section atop <project>/PROJECT.md.
  *
- * Phase 1a of the memory architecture redesign. The hot section is a
- * short (target 5-7 lines, hard cap enforced in Phase 1b) agent-composed
- * synthesis of what matters right now. The priority function surfaces
+ * The hot section is a short (target 5-7 lines, hard-capped by the token
+ * budget below) agent-composed synthesis of what matters right now. The priority function surfaces
  * candidates; the agent composes the prose; this script handles file plumbing.
  *
  * Subcommands:
@@ -41,9 +40,9 @@ export const HOT_END = '<!-- HOT-SECTION:END -->';
 export const HOT_HEADING = '## Right now';
 export const DEFAULT_CANDIDATE_COUNT = 12;
 
-// Phase 1b — token budget enforcement.
-// The memory-architecture ruling caps the hot tier at 500 tokens. Char-to-token factor 0.30 matches
-// the convention shared with compact-project.mjs's PROJECT_MD_CAP_BYTES math.
+// Token budget enforcement. The hot tier is capped at 500 tokens. Char-to-token
+// factor 0.30 matches the convention shared with compact-project.mjs's
+// PROJECT_MD_CAP_BYTES math.
 export const HOT_SECTION_TOKEN_BUDGET = 500;
 export const TOKENS_PER_BYTE = 0.30;
 

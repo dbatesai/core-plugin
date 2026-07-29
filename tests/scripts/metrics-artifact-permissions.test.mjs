@@ -48,7 +48,7 @@ test('the hindsight judgment log is owner-only', { skip: IS_WIN && 'POSIX modes'
     captureTurnEvidence(project, {
       retrieval_id: 'rid-perm-1',
       prompt_text: 'how does retrieval quality grading work',
-      delivered: [{ id: 'dc-0', score: 5 }],
+      delivered: [{ id: 'dc-0-seed', score: 5 }],
     }, { env });
     judgeUnjudgedTurns(project);
     const log = judgmentLogPath(project);

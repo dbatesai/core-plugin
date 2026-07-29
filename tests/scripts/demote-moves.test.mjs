@@ -17,7 +17,7 @@ function bullet(text) {
 }
 
 // Establish PROJECT.md's creation baseline the way the render step now does — a
-// no-baseline PROJECT.md fails closed (Hale's 2026-07-22 root fix), so a demote
+// no-baseline PROJECT.md fails closed, so a demote
 // writer only proceeds against a file CORE has stamped at creation.
 function stampPm(dir) {
   const home = join(dir, 'home');
@@ -79,7 +79,7 @@ test('completed item with an old bullet-text date demotes regardless of backing 
 
 test('completed item demotes even when its cited unit is STILL ACTIVE (the citation-discipline gap fix)', () => {
   const dir = scratchProject({ 'dc-94-thing': { status: 'active', updated: '2026-06-01' } });
-  const b = bullet('- [x] **DC-94 external critique shipped 2026-04-10** — see `dc-94-thing`.');
+  const b = bullet('- [x] **External critique shipped 2026-04-10** — see `dc-94-thing`.');
   const r = classifyBullet(b, dir, { today: TODAY });
   // Old strict gate kept this as 'cited-unit-still-active'; loosened gate demotes on the text date.
   assert.equal(r.decision, 'demote');
@@ -192,8 +192,8 @@ test('a demotion stub is never re-demoted (already-stubbed) — fixes the HIGH i
 });
 
 test('extractMostRecentDate ignores citation, backtick, and future dates', () => {
-  // (DC-106, date) is this project's citation style — the date is the unit's, not the work's.
-  assert.equal(extractMostRecentDate('Closed the loop (DC-106, 2026-06-01)', TODAY), null);
+  // (dc-106-closed-loop, date) is this project's citation style — the date is the unit's, not the work's.
+  assert.equal(extractMostRecentDate('Closed the loop (dc-106-closed-loop, 2026-06-01)', TODAY), null);
   assert.equal(extractMostRecentDate('bumped `cfg-2026-09-01`', TODAY), null);          // backtick span
   assert.equal(extractMostRecentDate('target ship 2099-01-01', TODAY), null);            // future
   assert.equal(extractMostRecentDate('done 2026-03-01, target 2099-01-01', TODAY), '2026-03-01'); // past wins over future
@@ -201,7 +201,7 @@ test('extractMostRecentDate ignores citation, backtick, and future dates', () =>
 
 test('classifyBullet keeps an item whose only date is a leaked citation (no-age-signal)', () => {
   const dir = scratchProject();
-  const r = classifyBullet(bullet('- [x] **Did a thing** — see (DC-106, 2026-01-01)'), dir, { today: TODAY });
+  const r = classifyBullet(bullet('- [x] **Did a thing** — see (dc-106-closed-loop, 2026-01-01)'), dir, { today: TODAY });
   assert.equal(r.decision, 'keep');
   assert.equal(r.reason, 'no-age-signal');
 });
@@ -249,16 +249,16 @@ test('multi-bullet demotion preserves an adjacent kept bullet (rewriteMovesWithS
 });
 
 test('--strict end-to-end keeps a cited-active item that the loosened default demotes', () => {
-  const dir = scratchProject({ 'dc-99': { status: 'active', updated: '2026-03-01' } });
+  const dir = scratchProject({ 'dc-99-ghost': { status: 'active', updated: '2026-03-01' } });
   writeFileSync(join(dir, 'PROJECT.md'),
-    ['# P', '', '## Moves', '', '- [x] **Item 2026-03-01** — see `dc-99`.', '', '## Notes', ''].join('\n'));
+    ['# P', '', '## Moves', '', '- [x] **Item 2026-03-01** — see `dc-99-ghost`.', '', '## Notes', ''].join('\n'));
   try {
     assert.equal(demoteMoves(dir, { today: TODAY, strict: true }).demoted, 0, 'strict keeps it (cited unit active)');
     assert.equal(demoteMoves(dir, { today: TODAY }).demoted, 1, 'loosened default demotes it');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SYN-005: strict mode demotes when the cited unit is retired (the schema terminal status)', () => {
+test('strict mode demotes when the cited unit is retired (the schema terminal status)', () => {
   const dir = scratchProject({ 'dc-50-old': { status: 'retired', updated: '2026-03-01' } });
   const b = bullet('- [x] **Closed an old decision** — see `dc-50-old`.');
   const r = classifyBullet(b, dir, { today: TODAY, strict: true });
@@ -266,7 +266,7 @@ test('SYN-005: strict mode demotes when the cited unit is retired (the schema te
   assert.equal(r.decision, 'demote');
 });
 
-test('MEM-013: crash-retry does not duplicate the archive block', () => {
+test('crash-retry does not duplicate the archive block', () => {
   const dir = scratchProject();
   const original = ['# P', '', '## Moves', '',
     '- [x] **Old thing 2026-03-01** — done.', '', '## Notes', ''].join('\n');
@@ -275,8 +275,8 @@ test('MEM-013: crash-retry does not duplicate the archive block', () => {
 
   demoteMoves(dir, { today: TODAY });               // completes: archive + stub + baseline stamp
   writeFileSync(join(dir, 'PROJECT.md'), original); // simulate crash AFTER archive append, BEFORE PROJECT.md write
-  // The PROJECT.md write and its baseline stamp are now COUPLED under one lock
-  // (Hale's 2026-07-22 boundary fix): a crash "before the PROJECT.md write"
+  // The PROJECT.md write and its baseline stamp are COUPLED under one lock:
+  // a crash "before the PROJECT.md write"
   // means neither the write NOR the stamp landed. The reverted content is the
   // CORE-authored `original` render, so re-establish its creation baseline (as
   // the render step would) — otherwise the demoted-content stamp still on disk
@@ -354,7 +354,7 @@ test('demoteMoves: size pressure reports no escalation when the escalated floor 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("demoteMoves: Hale's catch (2026-07-21) — one old item no longer masks other over-floor items still over cap", () => {
+test("demoteMoves: one old item no longer masks other over-floor items still over cap", () => {
   // Pre-fix bug: the escalation only fired when the normal floor found ZERO
   // candidates. Here the normal floor finds the 93-day item, so escalation
   // never ran under the old gate — the 10-day item sat untouched even though

@@ -37,18 +37,18 @@ function fixtureStore() {
   const mem = join(root, '_memories');
   mkdirSync(mem, { recursive: true });
   writeFileSync(join(mem, 'dc-1-alpha.md'),
-    `---\nid: dc-1-alpha\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-2-beta\n  - type: supersedes\n    target: dc-3-retired\n---\n\n# DC-1 — Alpha\n\nBody.\n`);
+    `---\nid: dc-1-alpha\ntype: decision\nstatus: active\nedges:\n  - type: cites\n    target: dc-2-beta\n  - type: supersedes\n    target: dc-3-retired\n---\n\n# DC-1-alpha — Alpha\n\nBody.\n`);
   writeFileSync(join(mem, 'dc-2-beta.md'),
-    '---\nid: dc-2-beta\ntype: decision\nstatus: active\n---\n\n# DC-2 — Beta\n\nBody.\n');
+    '---\nid: dc-2-beta\ntype: decision\nstatus: active\n---\n\n# DC-2-beta — Beta\n\nBody.\n');
   writeFileSync(join(mem, 'dc-3-retired.md'),
-    '---\nid: dc-3-retired\ntype: decision\nstatus: retired\n---\n\n# DC-3 — Retired\n\nMust never be linked to.\n');
+    '---\nid: dc-3-retired\ntype: decision\nstatus: retired\n---\n\n# DC-3-gamma — Retired\n\nMust never be linked to.\n');
   writeFileSync(join(mem, 'dc-4-orphan.md'),
-    '---\nid: dc-4-orphan\ntype: observation\nstatus: active\n---\n\n# DC-4 — No edges\n\nBody.\n');
+    '---\nid: dc-4-orphan\ntype: observation\nstatus: active\n---\n\n# DC-4-delta — No edges\n\nBody.\n');
   writeFileSync(join(mem, 'INDEX.md'), '# scaffolding — must be excluded');
   // dc-1-alpha is the only unit here that will gain an edges block, so it is
   // the only one that reaches the write guard. Stamp its creation baseline the
   // way graduation does (lifecycle-detect stampCreatedBaseline --kind unit) —
-  // a no-baseline unit now fails closed (Hale's 2026-07-22 root fix), and a
+  // a no-baseline unit fails closed, and a
   // freshly-graduated unit is decoratable precisely because its creating writer
   // stamped it at creation. The other units gain no block, short-circuit before
   // the guard, and need no baseline (so the orphan-never-stamped invariant holds).
@@ -59,60 +59,60 @@ function fixtureStore() {
 }
 
 test('renders a [[wikilink]] block for an active edge, filters an edge to a retired target', () => {
-  const activeById = new Map([['dc-1', {}], ['dc-2', {}]]);
-  const edges = [{ type: 'cites', target: 'dc-2' }, { type: 'supersedes', target: 'dc-3-retired' }];
-  const block = renderEdgesBlock('dc-1', edges, activeById);
-  assert.match(block, /\[\[dc-2\]\]/);
+  const activeById = new Map([['dc-1-alpha', {}], ['dc-2-beta', {}]]);
+  const edges = [{ type: 'cites', target: 'dc-2-beta' }, { type: 'supersedes', target: 'dc-3-retired' }];
+  const block = renderEdgesBlock('dc-1-alpha', edges, activeById);
+  assert.match(block, /\[\[dc-2-beta\]\]/);
   assert.doesNotMatch(block, /dc-3-retired/);
   assert.ok(block.includes(EDGES_BEGIN) && block.includes(EDGES_END));
 });
 
 test('no kept edges renders an empty block (nothing to add)', () => {
-  const activeById = new Map([['dc-1', {}]]);
-  const block = renderEdgesBlock('dc-1', [{ type: 'cites', target: 'dc-9-missing' }], activeById);
+  const activeById = new Map([['dc-1-alpha', {}]]);
+  const block = renderEdgesBlock('dc-1-alpha', [{ type: 'cites', target: 'dc-9-missing' }], activeById);
   assert.equal(block, '');
 });
 
 test('decorateUnitText appends a new block when none exists', () => {
-  const activeById = new Map([['dc-1', {}], ['dc-2', {}]]);
-  const text = '---\nid: dc-1\ntype: decision\nstatus: active\n---\n\n# dc-1\n\nBody.\n';
-  const out = decorateUnitText(text, 'dc-1', [{ type: 'cites', target: 'dc-2' }], activeById);
+  const activeById = new Map([['dc-1-alpha', {}], ['dc-2-beta', {}]]);
+  const text = '---\nid: dc-1-alpha\ntype: decision\nstatus: active\n---\n\n# dc-1-alpha\n\nBody.\n';
+  const out = decorateUnitText(text, 'dc-1-alpha', [{ type: 'cites', target: 'dc-2-beta' }], activeById);
   assert.ok(out.startsWith(text.trimEnd()), 'human-authored body precedes the appended block');
-  assert.match(out, /\[\[dc-2\]\]/);
+  assert.match(out, /\[\[dc-2-beta\]\]/);
 });
 
 test('decorateUnitText replaces an existing block rather than duplicating it', () => {
-  const activeById = new Map([['dc-1', {}], ['dc-2', {}], ['dc-3', {}]]);
-  const withOldBlock = `---\nid: dc-1\ntype: decision\nstatus: active\n---\n\n# dc-1\n\nBody.\n\n${EDGES_BEGIN}\nstale content\n${EDGES_END}\n`;
-  const out = decorateUnitText(withOldBlock, 'dc-1', [{ type: 'cites', target: 'dc-3' }], activeById);
+  const activeById = new Map([['dc-1-alpha', {}], ['dc-2-beta', {}], ['dc-3-gamma', {}]]);
+  const withOldBlock = `---\nid: dc-1-alpha\ntype: decision\nstatus: active\n---\n\n# dc-1-alpha\n\nBody.\n\n${EDGES_BEGIN}\nstale content\n${EDGES_END}\n`;
+  const out = decorateUnitText(withOldBlock, 'dc-1-alpha', [{ type: 'cites', target: 'dc-3-gamma' }], activeById);
   assert.equal((out.match(new RegExp(EDGES_BEGIN.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), 'g')) || []).length, 1,
     'exactly one begin marker — no duplication');
   assert.doesNotMatch(out, /stale content/);
-  assert.match(out, /\[\[dc-3\]\]/);
+  assert.match(out, /\[\[dc-3-gamma\]\]/);
 });
 
 test('decorateUnitText is idempotent — a second pass with the same edges is a byte-identical no-op', () => {
-  const activeById = new Map([['dc-1', {}], ['dc-2', {}]]);
-  const text = '---\nid: dc-1\ntype: decision\nstatus: active\n---\n\n# dc-1\n\nBody.\n';
-  const edges = [{ type: 'cites', target: 'dc-2' }];
-  const once = decorateUnitText(text, 'dc-1', edges, activeById);
-  const twice = decorateUnitText(once, 'dc-1', edges, activeById);
+  const activeById = new Map([['dc-1-alpha', {}], ['dc-2-beta', {}]]);
+  const text = '---\nid: dc-1-alpha\ntype: decision\nstatus: active\n---\n\n# dc-1-alpha\n\nBody.\n';
+  const edges = [{ type: 'cites', target: 'dc-2-beta' }];
+  const once = decorateUnitText(text, 'dc-1-alpha', edges, activeById);
+  const twice = decorateUnitText(once, 'dc-1-alpha', edges, activeById);
   assert.equal(once, twice);
 });
 
 test('decorateUnitText cleanly removes a stale block once its edges are gone', () => {
-  const activeById = new Map([['dc-1', {}]]);
-  const withBlock = `---\nid: dc-1\ntype: decision\nstatus: active\n---\n\n# dc-1\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-2]]\n${EDGES_END}\n`;
-  const out = decorateUnitText(withBlock, 'dc-1', [], activeById);
+  const activeById = new Map([['dc-1-alpha', {}]]);
+  const withBlock = `---\nid: dc-1-alpha\ntype: decision\nstatus: active\n---\n\n# dc-1-alpha\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-2-beta]]\n${EDGES_END}\n`;
+  const out = decorateUnitText(withBlock, 'dc-1-alpha', [], activeById);
   assert.deepEqual(findExistingEdgesBlock(out), { ok: true, block: null });
   assert.doesNotMatch(out, /CORE:BEGIN_EDGES/);
 });
 
-test('findExistingEdgesBlock fails closed on a malformed marker state (Hale\'s falsifier)', () => {
+test('findExistingEdgesBlock fails closed on a malformed marker state', () => {
   // One orphaned BEGIN, no END, a human-authored line after it — exactly the
   // shape that used to let a later regenerated END pair with the wrong BEGIN
   // and silently delete everything in between.
-  const malformed = `# dc-1\n\nBody.\n\n${EDGES_BEGIN}\nHUMAN-MUST-SURVIVE\n`;
+  const malformed = `# dc-1-alpha\n\nBody.\n\n${EDGES_BEGIN}\nHUMAN-MUST-SURVIVE\n`;
   assert.deepEqual(findExistingEdgesBlock(malformed), { ok: false, block: null });
 });
 
@@ -127,10 +127,10 @@ test('findExistingEdgesBlock fails closed when END precedes BEGIN', () => {
 });
 
 test('decorateUnitText throws MALFORMED_EDGES_MARKERS instead of corrupting a malformed file', () => {
-  const activeById = new Map([['dc-1', {}], ['dc-2', {}]]);
-  const malformed = `# dc-1\n\nBody.\n\n${EDGES_BEGIN}\nHUMAN-MUST-SURVIVE\n`;
+  const activeById = new Map([['dc-1-alpha', {}], ['dc-2-beta', {}]]);
+  const malformed = `# dc-1-alpha\n\nBody.\n\n${EDGES_BEGIN}\nHUMAN-MUST-SURVIVE\n`;
   assert.throws(
-    () => decorateUnitText(malformed, 'dc-1', [{ type: 'cites', target: 'dc-2' }], activeById),
+    () => decorateUnitText(malformed, 'dc-1-alpha', [{ type: 'cites', target: 'dc-2-beta' }], activeById),
     (e) => e.code === 'MALFORMED_EDGES_MARKERS',
   );
 });
@@ -181,8 +181,8 @@ test('decorateStore: writes changed units, skips unchanged, never touches a reti
   try {
     const home = testHome(root);
     const result = decorateStore(root, { home });
-    assert.equal(result.changed.includes('dc-1-alpha.md'), true, 'dc-1 gained a real edge to dc-2');
-    assert.equal(result.changed.includes('dc-4-orphan.md'), false, 'dc-4 has no edges — nothing to write');
+    assert.equal(result.changed.includes('dc-1-alpha.md'), true, 'dc-1-alpha gained a real edge to dc-2-beta');
+    assert.equal(result.changed.includes('dc-4-orphan.md'), false, 'dc-4-delta has no edges — nothing to write');
 
     const alpha = readFileSync(join(root, '_memories', 'dc-1-alpha.md'), 'utf8');
     assert.match(alpha, /\[\[dc-2-beta\]\]/);
@@ -228,7 +228,7 @@ test('decorateStore --dry-run (dryRun option) reports changes without writing th
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- state-cache stamping (Hale's finding, 2026-07-22): decorate-graph must
+// ---- state-cache stamping: decorate-graph must
 // stamp the per-project state cache in the SAME operation it rewrites a unit
 // file, in code — not rely on a prose instruction telling the agent to do it
 // by hand afterward. Mirrors hot-section.mjs's precedent for PROJECT.md. ----
@@ -275,7 +275,7 @@ test('classifyUnitChange: a subsequent decorate-only rewrite reads as edges-bloc
     // schema/target-set change re-renders JUST the edges block (same shape
     // as a real re-run — the human-authored region is untouched).
     writeFileSync(join(root, '_memories', 'dc-2-beta.md'),
-      '---\nid: dc-2-beta\ntype: decision\nstatus: retired\n---\n\n# DC-2 — Beta\n\nBody.\n');
+      '---\nid: dc-2-beta\ntype: decision\nstatus: retired\n---\n\n# DC-2-beta — Beta\n\nBody.\n');
     decorateStore(root, { now: '2026-07-22T01:00:00Z', home });
     const currentText = readFileSync(alphaPath, 'utf8');
 
@@ -313,31 +313,31 @@ test('classifyUnitChange: no baseline (pre-fix or never-stamped entry) reports n
 });
 
 test('hashOutsideEdgesBlock is identical regardless of what changes INSIDE the edges block', () => {
-  const withOne = `# dc-1\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-2]]\n${EDGES_END}\n`;
-  const withOther = `# dc-1\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-9]]\n- supersedes: [[dc-3]]\n${EDGES_END}\n`;
+  const withOne = `# dc-1-alpha\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-2-beta]]\n${EDGES_END}\n`;
+  const withOther = `# dc-1-alpha\n\nBody.\n\n${EDGES_BEGIN}\n- cites: [[dc-9-missing]]\n- supersedes: [[dc-3-gamma]]\n${EDGES_END}\n`;
   assert.equal(hashOutsideEdgesBlock(withOne), hashOutsideEdgesBlock(withOther));
 });
 
-test('decorateUnitText is CRLF-safe (Meridian\'s Windows review, 2026-07-21)', () => {
+test('decorateUnitText is CRLF-safe (Windows line endings)', () => {
   // Marker lookup is plain string indexOf on the literal marker text, not a
   // newline-spanning regex, so a file rewritten with \r\n by Obsidian or a
   // Windows editor must not break block detection, idempotence, or removal.
-  const activeById = new Map([['dc-1', {}], ['dc-2', {}]]);
-  const crlfText = '---\r\nid: dc-1\r\ntype: decision\r\nstatus: active\r\n---\r\n\r\n# dc-1\r\n\r\nBody with CRLF.\r\n';
-  const edges = [{ type: 'cites', target: 'dc-2' }];
+  const activeById = new Map([['dc-1-alpha', {}], ['dc-2-beta', {}]]);
+  const crlfText = '---\r\nid: dc-1-alpha\r\ntype: decision\r\nstatus: active\r\n---\r\n\r\n# dc-1-alpha\r\n\r\nBody with CRLF.\r\n';
+  const edges = [{ type: 'cites', target: 'dc-2-beta' }];
 
-  const once = decorateUnitText(crlfText, 'dc-1', edges, activeById);
-  assert.match(once, /\[\[dc-2\]\]/);
+  const once = decorateUnitText(crlfText, 'dc-1-alpha', edges, activeById);
+  assert.match(once, /\[\[dc-2-beta\]\]/);
 
-  const twice = decorateUnitText(once, 'dc-1', edges, activeById);
+  const twice = decorateUnitText(once, 'dc-1-alpha', edges, activeById);
   assert.equal(once, twice, 'idempotent on a CRLF file');
 
-  const removed = decorateUnitText(once, 'dc-1', [], activeById);
+  const removed = decorateUnitText(once, 'dc-1-alpha', [], activeById);
   assert.doesNotMatch(removed, /CORE:BEGIN_EDGES/);
   assert.match(removed, /Body with CRLF\.\r\n/, 'human-authored CRLF line endings survive block removal');
 });
 
-test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stderr, with no false-success claim on stdout (Hale's 2026-07-22 test-boundary finding)", () => {
+test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stderr, with no false-success claim on stdout", () => {
   const root = mkdtempSync(join(tmpdir(), 'decorate-graph-cli-refuse-'));
   try {
     const mem = join(root, '_memories');
@@ -352,9 +352,8 @@ test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stde
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- Authorship-laundering regression (Hale's finding, 2026-07-22: mailbox
-// "premaintenance-authorship-falsifier", "723c24a-authorship-ordering-repro",
-// "mixed-ownership-writers-launder-unreconciled-edits"). Exact reproduction:
+// ---- Authorship-laundering regression — mixed-ownership writers must not
+// launder unreconciled edits. Exact reproduction:
 // decorate a unit (establishes a baseline), the user edits the body OUTSIDE
 // the edges block, the unit's edge TARGET retires (so the edges block goes
 // stale too), decoration runs again. Before the fix: decorateStore rewrote
@@ -383,7 +382,7 @@ function authorshipFixture(root) {
   stampCreatedBaseline(root, join(mem, 'dc-alpha.md'), { kind: 'unit', home });
 }
 
-test("decorateStore refuses to rewrite/re-stamp a unit whose human-authored body already diverged from its baseline, and reports needs_reconciliation (Hale's authorship-laundering finding)", () => {
+test("decorateStore refuses to rewrite/re-stamp a unit whose human-authored body already diverged from its baseline, and reports needs_reconciliation", () => {
   const root = mkdtempSync(join(tmpdir(), 'decorate-graph-authorship-'));
   try {
     const home = testHome(root);

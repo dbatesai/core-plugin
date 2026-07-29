@@ -27,7 +27,7 @@ const CONTRACT = `---
 schema_version: 1.0
 contract_id: demo-project
 canonical_for: ["claude-code", "codex"]
-maintained_by: David
+maintained_by: the-project-owner
 last_revised: 2026-04-01
 ---
 
@@ -180,7 +180,7 @@ test('detectIdentity: a registered path is returning', async () => {
   });
 });
 
-// ---------- JC-1: configured MCP is read honestly, never asserts absence ----------
+// ---------- configured MCP is read honestly, never asserts absence ----------
 
 test('readConfiguredMcp (claude): reads ~/.claude.json and reports declared servers', async () => {
   await withFixture({ claudeJson: { mcpServers: { foo: {}, bar: {} } } }, ({ projectPath, home }) => {
@@ -208,7 +208,7 @@ test('readConfiguredMcp (codex): does not parse config.toml; defers server list 
   });
 });
 
-// ---------- B5: optional overlay-provided connector map ----------
+// ---------- optional overlay-provided connector map ----------
 
 test('readConnectorMap: absent -> CORE ships none', async () => {
   await withFixture({}, ({ projectPath }) => {
@@ -225,7 +225,7 @@ test('readConnectorMap: an overlay-provided map is read + counted', async () => 
     });
 });
 
-// ---------- B6a: AGENTS.md guarded on CONTRACT.md ----------
+// ---------- AGENTS.md guarded on CONTRACT.md ----------
 
 test('planAgentsMd: no CONTRACT.md -> skipped, never crashes (the common case)', async () => {
   await withFixture({}, async ({ projectPath }) => {
@@ -243,7 +243,7 @@ test('planAgentsMd: CONTRACT.md present, dry-run -> would-generate', async () =>
   });
 });
 
-test('planAgentsMd: CONTRACT.md present + apply -> actually generates AGENTS.md (B6a wiring)', async () => {
+test('planAgentsMd: CONTRACT.md present + apply -> actually generates AGENTS.md', async () => {
   await withFixture({ contract: true }, async ({ projectPath }) => {
     const a = await planAgentsMd(projectPath, { apply: true });
     assert.equal(a.status, 'generated');

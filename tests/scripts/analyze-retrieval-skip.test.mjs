@@ -7,7 +7,7 @@ import {
   classifyRetrievalSkips, buildProjectTerms, formatReport, parseSkipArgs,
 } from '../../plugins/core/skills/core/scripts/analyze-retrieval-skip.mjs';
 
-test('M4: a space-form flag value is not mistaken for the project root', () => {
+test('a space-form flag value is not mistaken for the project root', () => {
   // `--harness codex` with no explicit root must NOT set the root to "codex"
   // (which has no _memories/ and would report NO-STORE on the real project).
   const a = parseSkipArgs(['--harness', 'codex']);
@@ -107,7 +107,7 @@ test('multiple turns: each turn is judged on its own interval', () => {
   assert.equal(r.skips[0].userIdx, 1);
 });
 
-// Real-corpus false-positive class caught on the live smoke (session 56): an injected
+// Real-corpus false-positive class caught on a live smoke: an injected
 // skill prompt / system-reminder is a huge "user" turn full of project terms but is NOT
 // a question — and its content is already in-context, so it is not store-dependent.
 test('no false positive: skill-scaffolding turn is not memory-dependent', () => {

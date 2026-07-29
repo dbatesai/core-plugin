@@ -29,34 +29,34 @@ test('extractAskedTerm pulls DC-ids, [[wikilinks]], and hyphenated handles', () 
   assert.equal(extractAskedTerm('what does register-trigger mean'), 'register-trigger');
 });
 
-test('M6: extractAskedTerm does not treat ordinary hyphenated English as a project term', () => {
+test('extractAskedTerm does not treat ordinary hyphenated English as a project term', () => {
   assert.equal(extractAskedTerm('should this be opt-in or always on?'), null, 'opt-in is not a project handle');
   assert.equal(extractAskedTerm('is this real-time or batched?'), null);
   // A real lowercase project term is still picked even when an English hyphenation is present.
   assert.equal(extractAskedTerm('is register-trigger opt-in?'), 'register-trigger');
 });
 
-test('M6: containsTerm matches on a word boundary, not a bare substring', () => {
+test('containsTerm matches on a word boundary, not a bare substring', () => {
   assert.equal(containsTerm('please opt-in to the beta', 'opt-in'), true);
   assert.equal(containsTerm('we adopt-inline rendering here', 'opt-in'), false, 'substring of a larger word must not match');
   assert.equal(containsTerm('see dc-104 for the rationale', 'DC-104'), true, 'case-insensitive, id with digits');
   assert.equal(containsTerm('see dc-1040 for the rationale', 'DC-104'), false, 'dc-104 must not match inside dc-1040');
 });
 
-test('DC-94a: isInContext proxy does not over-fire on a substring inside a large blob', () => {
+test('isInContext proxy does not over-fire on a substring inside a large blob', () => {
   // The plan's exact scenario: "master" must NOT count as in-context just because
-  // "speedmaster" appears somewhere in a 180KB blob. (Already fixed by M6/MET-004;
+  // "speedmaster" appears somewhere in a 180KB blob. (Already fixed;
   // this locks the specific large-PROJECT.md case as a regression guard.)
   const bigDoc = 'x'.repeat(120000) + ' speedmaster ' + 'y'.repeat(60000);
   assert.equal(containsTerm(bigDoc, 'master'), false, 'substring of speedmaster must not count');
   assert.equal(containsTerm('we discussed the speedmaster today', 'speedmaster'), true, 'whole-token hit still fires');
 });
 
-test('DC-94a: PROXY_VERSION is 2 (word-boundary + read-gated, supersedes the v1 .includes proxy)', () => {
+test('PROXY_VERSION is 2 (word-boundary + read-gated, supersedes the v1 .includes proxy)', () => {
   assert.equal(PROXY_VERSION, 2);
 });
 
-test('M6: ladder walked AND returned content but the agent still asked → rec-fail-tier-0 (discriminator wired)', () => {
+test('ladder walked AND returned content but the agent still asked → rec-fail-tier-0 (discriminator wired)', () => {
   const longResult = 'Read _memories/dc-104.md ' + 'x'.repeat(100); // >80 chars on a ladder surface
   const r = classifyTurn(
     { assistantText: 'What is DC-104? Remind me.', toolEvents: [{ kind: 'tool', text: longResult }] },
@@ -137,7 +137,7 @@ test('classifyTurns + summarize produce a state distribution', () => {
   assert.equal(s.distribution['rec-fail-tier-0'], 1);
 });
 
-test('MET-008: runClassification classifies the session passed in, not the newest transcript', () => {
+test('runClassification classifies the session passed in, not the newest transcript', () => {
   const home = mkdtempSync(join(tmpdir(), 'ct-sid-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-proj-'));
   try {
@@ -162,7 +162,7 @@ test('MET-008: runClassification classifies the session passed in, not the newes
   }
 });
 
-test('DC-94a: each classified record is stamped with proxy_version', () => {
+test('each classified record is stamped with proxy_version', () => {
   const home = mkdtempSync(join(tmpdir(), 'ct-pv-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-pvp-'));
   try {
@@ -183,7 +183,7 @@ test('DC-94a: each classified record is stamped with proxy_version', () => {
     const classifiedFile = join(home, '.core', 'workspaces', 'ct-pv-ws', 'metrics', 'classified', '2026-06-01.jsonl');
     // Windows: chmod cannot express owner-only (only toggles read-only), so
     // mode stays 0o666 regardless -- structurally unsatisfiable there, not a
-    // regression (Meridian, 2026-07-21).
+    // regression.
     if (process.platform !== 'win32') {
       assert.equal(statSync(classifiedFile).mode & 0o777, 0o600, 'raw calibration evidence is owner-only');
     }
@@ -203,7 +203,7 @@ function predicateFixture() {
   return project;
 }
 
-test('MET-004: PROJECT.md is NOT in-context unless the transcript shows it was read', () => {
+test('PROJECT.md is NOT in-context unless the transcript shows it was read', () => {
   const project = predicateFixture();
   try {
     const cold = buildPredicates(project, { events: [] });
@@ -215,7 +215,7 @@ test('MET-004: PROJECT.md is NOT in-context unless the transcript shows it was r
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 
-test('MET-005: a term in a unit frontmatter or first heading (not its filename) reads as on-disk', () => {
+test('a term in a unit frontmatter or first heading (not its filename) reads as on-disk', () => {
   const project = predicateFixture();
   try {
     const p = buildPredicates(project, { events: [] });
@@ -225,7 +225,7 @@ test('MET-005: a term in a unit frontmatter or first heading (not its filename) 
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 
-test('MET-004/005: predicate changes bumped the classifier version (R-1 calibration invalidation)', () => {
+test('predicate changes bumped the classifier version (R-1 calibration invalidation)', () => {
   assert.notEqual(CLASSIFIER_VERSION, '0.2.0');
   assert.equal(CLASSIFIER_VERSION, '0.3.0');
 });

@@ -1,6 +1,6 @@
 /**
  * select-relevant-units.mjs — the recall-oriented candidate shortlist for the
- * abstract-relevance prototype (Gate G3).
+ * abstract-relevance prototype.
  *
  * The design seam behind obligation-3: lexical retrieval (retrieve-context.mjs) is
  * cheap but can't bridge a value→instance leap ("heritage"→El Primero). The fix isn't

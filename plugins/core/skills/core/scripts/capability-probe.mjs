@@ -57,7 +57,7 @@ export function detectConsumingHarness(env = process.env) {
   return detectConsumingHarnessSignal(env).harness;
 }
 
-// ---------- Row conformance (M10) ----------
+// ---------- Row conformance ----------
 
 // row-schema.md §"Producer expectations": observed_at, harness, cwd, env_signals are
 // UNCONDITIONAL on every row. Only memory-accessed-probe emits env_signals; the other
@@ -189,7 +189,7 @@ function makeUnknownRow(capability, errorMessage) {
     evidence: [
       {
         source: 'probe-execution',
-        // MET-014: 1000 chars keeps a usable stack head; 300 cut real traces mid-frame.
+        // 1000 chars keeps a usable stack head; 300 cuts real traces mid-frame.
         value: { error: String(errorMessage).slice(0, 1000), capability_id: capability.capability_id },
         agrees_with_others: false,
         weight: 'conflicting',

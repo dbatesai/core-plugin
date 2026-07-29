@@ -5,13 +5,13 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 
-test('AUD-102: adoption refuses a corrupt or unreadable baseline; absent and clean-partial baselines adopt their unstamped remainder', async () => {
+test('adoption refuses a corrupt or unreadable baseline; absent and clean-partial baselines adopt their unstamped remainder', async () => {
   const { adoptExistingStore } = await import('../../plugins/core/skills/core/scripts/lifecycle-detect.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'adopt-corrupt-'));
   try {
     const lib = join(dir, '_memories', '_lib');
     mkdirSync(lib, { recursive: true });
-    writeFileSync(join(dir, '_memories', 'dc-1.md'), '---\nid: dc-1\n---\nbody\n');
+    writeFileSync(join(dir, '_memories', 'dc-1-alpha.md'), '---\nid: dc-1-alpha\n---\nbody\n');
     writeFileSync(join(lib, 'state-cache.json'), '{corrupt not json');
     const r = adoptExistingStore(dir, { apply: true });
     assert.equal(r.applied, false, 'a corrupt baseline must stop adoption');

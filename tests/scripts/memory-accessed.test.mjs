@@ -39,11 +39,11 @@ test('classifyAccess UNKNOWN: transcript unavailable (no false "not accessed")',
   assert.equal(r.identity_status, 'UNKNOWN');
 });
 
-test('classifyAccess UNKNOWN: Codex tool extraction pending — refuses false negative', () => {
-  // Codex events have no tool kind yet (read-transcript residual); must not say "not accessed".
+test('classifyAccess UNKNOWN: tool extraction unavailable — refuses false negative', () => {
+  // When tool events cannot be extracted for a harness, the probe must not say "not accessed".
   const r = classifyAccess({ harness: 'codex', transcriptAvailable: true, toolExtractionPending: true, events: [], coreStorePresent: true });
   assert.equal(r.identity_status, 'UNKNOWN');
-  assert.match(r.reason, /pending/);
+  assert.match(r.reason, /not mechanically observable/);
 });
 
 test('classifyAccess PASS: PROJECT.md read counts as CORE access', () => {
@@ -67,7 +67,7 @@ test('probe: CC transcript showing _memories grep → PASS', async () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('probe: Codex harness now CLASSIFIES via tool extraction (Slice F) — PASS on _memories/ access', async () => {
+test('probe: Codex harness now CLASSIFIES via tool extraction — PASS on _memories/ access', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     const tpath = join(dir, 'rollout.jsonl');
@@ -88,7 +88,7 @@ test('probe: Codex harness → DEGRADED when extraction works but no CORE access
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// --- HC blocker #2 (evt-202605291319): path false-positives must not count as access ---
+// --- path false-positives must not count as access ---
 
 test('classifyAccess: PROJECT.md.bak does NOT count as a CORE access (extension look-alike)', () => {
   const r = classifyAccess({ harness: 'claude-code', transcriptAvailable: true, toolExtractionPending: false, events: [toolEv('cat PROJECT.md.bak')], coreStorePresent: true });
@@ -117,9 +117,9 @@ test('classifyAccess: a real absolute _memories/ path still PASSes after tighten
   assert.equal(r.core, 1, 'preceding-slash boundary still admits real path embeds');
 });
 
-// --- HC blocker #4: producer-contract row fields (env_signals + workspace_id) ---
+// --- producer-contract row fields (env_signals + workspace_id) ---
 
-test('probe row carries env_signals with the full standard key set (HC blocker #4)', async () => {
+test('probe row carries env_signals with the full standard key set', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     const tpath = join(dir, 'session.jsonl');
@@ -132,7 +132,7 @@ test('probe row carries env_signals with the full standard key set (HC blocker #
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('probe reads workspace_id from <cwd>/workspace.json (HC blocker #4)', async () => {
+test('probe reads workspace_id from <cwd>/workspace.json', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ workspace_id: 'core-framework' }));
@@ -154,7 +154,7 @@ test('probe row has workspace_id key even when no workspace.json present (null, 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// --- HC blocker #1: runStartup must wire memory-accessed AND thread the resolved harness ---
+// --- runStartup must wire memory-accessed AND thread the resolved harness ---
 
 test('runStartup wires memory-accessed (no longer orphan) + labels it claude-code', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
@@ -172,7 +172,7 @@ test('runStartup({harness:codex}) labels memory-accessed codex + honest UNKNOWN 
   try {
     writeFileSync(join(dir, 'PROJECT.md'), '# proj');
     // transcript unavailable (nonexistent path) → UNKNOWN; the load-bearing assertion is
-    // that the row is labeled codex, not the claude-code default (the bug). (Post Slice F,
+    // that the row is labeled codex, not the claude-code default (the bug). (With tool extraction,
     // UNKNOWN here is the transcript-unavailable case, not the old extraction-pending one.)
     const res = await runStartup({ harness: 'codex', cwd: dir, transcriptPath: '/nonexistent-rollout.jsonl' });
     const row = res.rows.find((r) => r.capability_id === 'memory-accessed');

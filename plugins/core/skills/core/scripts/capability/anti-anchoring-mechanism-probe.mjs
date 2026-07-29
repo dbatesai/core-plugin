@@ -1,5 +1,5 @@
 /**
- * anti-anchoring-mechanism-probe.mjs — R-17 honest demotion (Claude Code).
+ * anti-anchoring-mechanism-probe.mjs — honest demotion for trust-based anti-anchoring (Claude Code).
  *
  * Reports the mechanism behind CORE's adversarial anti-anchoring discipline. On
  * Claude Code today it is TRUST-BASED: when the protocol runs the Critic before
@@ -10,7 +10,7 @@
  * implicit PASS.
  *
  * Emits identity_status DEGRADED with mechanism 'trust-based',
- * evidence pointing at the R-17 risk unit, and a stated closure target. A
+ * evidence pointing at the tracked risk unit, and a stated closure target. A
  * stronger two-row split (staged-initial-frame-isolation PASS +
  * physical-filesystem-isolation NOT-YET) plus a negative-read proof would be
  * required to earn PASS; neither is shipped.

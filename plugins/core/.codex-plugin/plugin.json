@@ -1,6 +1,6 @@
 {
   "name": "core",
-  "version": "3.15.0",
+  "version": "3.15.1",
   "description": "CORE is a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis; reaches for multi-agent adversarial analysis when stakes warrant. Use CORE for project work where continuity matters: ongoing development, architecture decisions, risk surfacing, decision tracking. Ships with eight companion utilities (finalize, refocus, process-memory, register-sources, vibecheck, configure-project, metrics, memory-view) that CORE invokes internally and can be invoked directly.",
   "author": {
     "name": "David Bates",
@@ -23,7 +23,7 @@
   "interface": {
     "displayName": "CORE",
     "shortDescription": "Project intelligence with a critic baked in",
-    "longDescription": "CORE is a single agent that knows your project across sessions. It maintains a unit-based memory architecture in your project folder, renders a six-section project synthesis (state, people, moves, decisions and risks), surfaces decisions and risks proactively, and challenges overconfidence. When stakes warrant, it reaches for multi-agent adversarial analysis with explicit anti-convergence discipline. Ships with nine companion utilities (/finalize, /process-memory, /register-sources, /vibecheck, /configure-project, /metrics, /metrics-package, /memory-view, /self-test) that CORE invokes internally and that you can also call directly.",
+    "longDescription": "CORE is a single agent that knows your project across sessions. It maintains a unit-based memory architecture in your project folder, renders a six-section project synthesis (state, people, moves, decisions and risks), surfaces decisions and risks proactively, and challenges overconfidence. When stakes warrant, it reaches for multi-agent adversarial analysis with explicit anti-convergence discipline. Ships with eight companion utilities (/finalize, /refocus, /process-memory, /register-sources, /vibecheck, /configure-project, /metrics, /memory-view) that CORE invokes internally and that you can also call directly, plus one deprecation shim: /orient.",
     "developerName": "David Bates",
     "category": "Productivity",
     "capabilities": [
@@ -40,5 +40,5 @@
     "brandColor": "#1F2937",
     "screenshots": []
   },
-  "source_sha": "a21e447f9df4622190be807326145d84bea45e5e"
+  "source_sha": "774721ba6d11d702656d1115bca74cbe39460ea1"
 }

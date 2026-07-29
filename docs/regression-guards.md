@@ -1,6 +1,6 @@
 # Regression guards — keeping the five failure patterns from coming back
 
-The 2026-07-01 audit found the plugin's defects cluster into five repeating shapes. The `change-review-prompt.md` in this directory is the *manual* check (a fresh agent, run on a diff). This file is the *automatic* one: a growing set of `tests/scripts/guard-*.test.mjs` files that run every CI pass, so a regression fails the build instead of relying on someone remembering to look.
+The plugin's defects cluster into five repeating shapes. The `change-review-prompt.md` in this directory is the *manual* check (a fresh agent, run on a diff). This file is the *automatic* one: a growing set of `tests/scripts/guard-*.test.mjs` files that run every CI pass, so a regression fails the build instead of relying on someone remembering to look.
 
 They run with the normal suite — CI already does `node --test tests/scripts/*.test.mjs`, and `guard-*.test.mjs` matches that glob. No extra wiring.
 

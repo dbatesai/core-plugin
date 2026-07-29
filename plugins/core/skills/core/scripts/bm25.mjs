@@ -59,7 +59,7 @@ export function tokenize(text) {
  * recursive source signature on every call).
  */
 export function loadActiveBodies(store, preloadedIndex = null) {
-  // A3: a caller holding a request-scoped snapshot passes its index so every
+  // A caller holding a request-scoped snapshot passes its index so every
   // reader in the request sees the same bytes; standalone callers still get a
   // sig-validated fresh load (active-only, retired excluded). The walk itself
   // has ONE owner: generate-summary-index.mjs loadUnitBodies.
@@ -72,8 +72,8 @@ export function loadActiveBodies(store, preloadedIndex = null) {
  * which retrieve-context's normalized union needs (rank positions can't express
  * "a neighbor of a STRONG hit beats a weak direct hit"). Deterministic, no dependency.
  *
- * Blocker 2: pass `snapshot` (a loadSnapshot(..., {captureBodies:true}) result) and
- * the ranking consumes ONLY captured bytes — zero live file reads after the id.
+ * Pass `snapshot` (a loadSnapshot(..., {captureBodies:true}) result) and the
+ * ranking consumes ONLY captured bytes — zero live file reads after the id.
  */
 export function bm25Scores(query, store, { k1 = 1.5, b = 0.75, preloadedIndex = null, snapshot = null } = {}) {
   const bodies = snapshot?.bodies || loadActiveBodies(store, snapshot?.index || preloadedIndex);

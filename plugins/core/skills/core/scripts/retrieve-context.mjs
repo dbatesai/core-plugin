@@ -149,9 +149,9 @@ export function productRankedIds(query, storePath, { snapshot = null } = {}) {
  *
  * BUILT REVERSIBLE, DEFAULT-OFF (P0). Recursive
  * coverage can bury canonical answers under raw observations at the final injected
- * context. The joint contract v2 §7 pre-registers four policies decided BY the
- * ceremony's final-context numbers, not by prescription. This is the mechanism they
- * select from; nothing here activates until the product owner rules on the ceremony evidence.
+ * context. Four policies are pre-registered so the choice among them is settled by
+ * measured final-context numbers rather than by prescription. This is the mechanism
+ * that choice selects from; nothing here activates until a policy is selected.
  *
  *   P0 — flat ranking, tier is a label only (SHIPPED default; the control).
  *   P1 — canonical-preference tiebreak: within `epsilon` of normalized score, a
@@ -347,7 +347,7 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
   };
   return {
     kind: 'retrieval-trace',
-    local_only: true, // rows are project data; share only through the A2 aggregate exporter
+    local_only: true, // rows are project data; share only through the aggregate exporter
     store: root,
     query,
     snapshot_id: stages.snapshotId,

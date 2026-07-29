@@ -31,7 +31,7 @@ import { acquireFileLock, releaseFileLock } from './file-lock.mjs';
 
 export const BYTE_CAP = 512 * 1024;           // 512KB per workspace
 export const RETENTION_PER_CAPABILITY = 80;   // entries kept per capability_id on cap breach
-export const LOCK_TIMEOUT_MS = 1000;          // bounded wait (MET-011 — was a 5s spin on the startup path)
+export const LOCK_TIMEOUT_MS = 1000;          // bounded wait on the startup path
 export const LOCK_RETRY_INTERVAL_MS = 25;     // sleep slice between lock-acquire retries
 export const STALE_LOCK_MS = 30000;           // a lock older than 30s is presumed stale
 
@@ -94,7 +94,7 @@ export function canonicalRowHash(row) {
 
 /** CPU-yielding synchronous sleep. Atomics.wait blocks without spinning — the
  * callers are short-lived CLI processes, so blocking-but-idle is the honest
- * tradeoff (MET-011); the busy-wait it replaces burned a core for up to 5s. */
+ * tradeoff; a busy-wait would burn a core for the whole timeout. */
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -103,7 +103,7 @@ function sleepSync(ms) {
  * Acquire an advisory lock via exclusive file creation (wx flag).
  * Recovers stale locks (older than STALE_LOCK_MS). Returns a release function.
  * Throws if it can't acquire within timeoutMs — bounded retries with a
- * CPU-yielding sleep between attempts (MET-011), never a busy-spin.
+ * CPU-yielding sleep between attempts, never a busy-spin.
  */
 export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT_MS, staleMs = STALE_LOCK_MS, sleep = sleepSync } = {}) {
   const deadline = now() + timeoutMs;
@@ -112,7 +112,7 @@ export function acquireLock(lockFile, { now = Date.now, timeoutMs = LOCK_TIMEOUT
   // the next generation file; release tombstones our OWN generation only; a stale
   // lock's owner is respected while its pid is alive (fail closed), with the 10×
   // hard ceiling as the recycled-pid escape. This file keeps only the bounded
-  // retry/timeout loop and its injectable now/sleep test seams (MET-011).
+  // retry/timeout loop and its injectable now/sleep test seams.
   for (;;) {
     const got = acquireFileLock(lockFile, { now: now(), staleMs, hardStaleMs: staleMs * 10 });
     if (got.ok) return () => { releaseFileLock(lockFile, got.nonce); };
@@ -188,7 +188,7 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
     const all = [...existing, ...newLines];
     const { kept, truncated } = applyRetention(all, opts.retentionOpts);
 
-    // M8: use the shared atomic writer rather than a hand-rolled temp+rename that
+    // Use the shared atomic writer rather than a hand-rolled temp+rename that
     // had no temp-file cleanup on failure (an orphaned .tmp-* per failed append).
     atomicWriteFileSync(file, kept.join('\n') + '\n');
     try { chmodSync(file, EVIDENCE_FILE_MODE); } catch { /* filesystem without POSIX modes */ }

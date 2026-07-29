@@ -40,7 +40,7 @@ test('totals are stable under replay: processing a session twice equals once', (
 // ---------- classified: different instruments are NOT ranked (corrected policy) ----------
 
 test('two instrument versions for one turn are two instruments, never a supersession', () => {
-  // Corrected policy (Hale 2026-07-23): the deduper keys ON the instrument
+  // Policy: the deduper keys ON the instrument
   // version, so different-version rows for the same turn never collide, never
   // supersede, never conflict. The cohort gate — not the deduper — decides
   // which instrument counts.
@@ -54,9 +54,9 @@ test('two instrument versions for one turn are two instruments, never a superses
   }
 });
 
-// ---------- ACCEPTANCE: Hale 2026-07-23 item 1 — cohort-first ordering ----------
+// ---------- ACCEPTANCE: cohort-first ordering ----------
 
-test("ACCEPTANCE Hale-2026-07-23 item 1 (cohort-first): current 0.3.0 row + same-turn future 0.4.0 row yields a NON-empty 0.3.0 cohort containing the 0.3.0 row", () => {
+test("ACCEPTANCE (cohort-first): current 0.3.0 row + same-turn future 0.4.0 row yields a NON-empty 0.3.0 cohort containing the 0.3.0 row", () => {
   // The falsifier: before cohort-first, cross-instrument dedupe let the future
   // 0.4.0 row supersede the current 0.3.0 row, which was then excluded by the
   // cohort filter — an EMPTY 0.3.0 cohort. Cohort-first partitions raw rows to
@@ -76,9 +76,9 @@ test("ACCEPTANCE Hale-2026-07-23 item 1 (cohort-first): current 0.3.0 row + same
   assert.deepEqual(coverage_gap.versions, { 'schema=1.0.0 classifier=0.4.0 proxy=2': 1 });
 });
 
-// ---------- ACCEPTANCE: Hale 2026-07-23 item 2 — conflicts leave the denominators ----------
+// ---------- ACCEPTANCE: conflicts leave the denominators ----------
 
-test("ACCEPTANCE Hale-2026-07-23 item 2 (conflicts excluded): a same-instrument tier-1-3-win vs rec-fail-tier-0 contradiction returns NO aggregate row and is counted as a conflict", () => {
+test("ACCEPTANCE (conflicts excluded): a same-instrument tier-1-3-win vs rec-fail-tier-0 contradiction returns NO aggregate row and is counted as a conflict", () => {
   // The falsifier: the old lexicographic tiebreak returned rec-fail-tier-0 as a
   // COUNTED aggregate row. Corrected: neither state is chosen; the whole group
   // is excluded from numerator AND denominator, counted once as a conflict.
@@ -95,9 +95,9 @@ test("ACCEPTANCE Hale-2026-07-23 item 2 (conflicts excluded): a same-instrument 
   }
 });
 
-// ---------- ACCEPTANCE: Hale 2026-07-23 item 3 — immutable observation day ----------
+// ---------- ACCEPTANCE: immutable observation day ----------
 
-test("ACCEPTANCE Hale-2026-07-23 item 3 (immutable observation day): an unchanged row replayed on a later date stays on its EARLIEST observation day", () => {
+test("ACCEPTANCE (immutable observation day): an unchanged row replayed on a later date stays on its EARLIEST observation day", () => {
   const { days, stats } = dedupeClassifiedByDay([
     { day: '2026-07-01', rows: [row({ turn_idx: 0 }), row({ turn_idx: 1 })] },
     { day: '2026-07-22', rows: [row({ turn_idx: 0 }), row({ turn_idx: 1 })] },
@@ -108,9 +108,9 @@ test("ACCEPTANCE Hale-2026-07-23 item 3 (immutable observation day): an unchange
   assert.equal(stats.replays_dropped, 2);
 });
 
-// ---------- ACCEPTANCE: Hale 2026-07-23 item 4 — detector dedupe deleted ----------
+// ---------- ACCEPTANCE: detector dedupe deleted ----------
 
-test('ACCEPTANCE Hale-2026-07-23 item 4 (YAGNI): the unused detector dedupe API is gone', () => {
+test('ACCEPTANCE (YAGNI): the unused detector dedupe API is gone', () => {
   assert.equal(dedupeModule.dedupeDetectorsByDay, undefined, 'dedupeDetectorsByDay removed — no production reader');
   assert.equal(dedupeModule.dedupeDetectorRows, undefined, 'dedupeDetectorRows removed — no production reader');
 });
@@ -150,7 +150,7 @@ test('every input day key survives in the output, even when emptied by dedupe', 
 
 // ---------- classified: instrument-cohort gate ----------
 
-test("Hale's mixed-instrument falsifier: an old-version row with no newer counterpart never crosses into the cohort", () => {
+test("mixed-instrument falsifier: an old-version row with no newer counterpart never crosses into the cohort", () => {
   // One 0.2.0-only row plus one 0.3.0 row. Cohort-first partitions the 0.2.0
   // row into the coverage gap BEFORE dedupe; only the 0.3.0 row aggregates.
   const { days, stats, cohort, coverage_gap } = cohortClassifiedByDay([{

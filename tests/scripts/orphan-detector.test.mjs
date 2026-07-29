@@ -72,7 +72,7 @@ test('findOrphans: a probe reached only via a .json delegate is wired (not a fal
   });
 });
 
-// Logged gap, fixed 2026-07-19 (Antigravity's catch, 2026-07-18): hook files
+// A logged gap: hook files
 // were entirely absent from the scan, so a scripts/ utility imported ONLY
 // from a hook was structurally invisible to the import closure.
 test('findOrphans: a hook registered in hooks.json wires in the scripts/ utility it ONLY imports', () => {
@@ -122,7 +122,7 @@ test('shipped allowlist contains no obsolete obligation-ladder scorer', () => {
   assert.equal(Object.hasOwn(ALLOWLIST, 'score-ladder.mjs'), false);
 });
 
-test('MEM-017: a past reviewBy flags the allowlist entry as stale and the report says so', () => {
+test('a past reviewBy flags the allowlist entry as stale and the report says so', () => {
   withPlugin(({ root }) => {
     const allow = { 'staged.mjs': { reason: 'deliberately staged pending decision X — full reason here', allowlistDate: '2026-01-01', reviewBy: '2026-02-01' } };
     const r = findOrphans({ coreRoot: root, allowlist: allow, today: new Date('2026-06-09') });
@@ -131,7 +131,7 @@ test('MEM-017: a past reviewBy flags the allowlist entry as stale and the report
   });
 });
 
-test('MEM-017: a future reviewBy is not stale; legacy string entries never go stale', () => {
+test('a future reviewBy is not stale; legacy string entries never go stale', () => {
   withPlugin(({ root }) => {
     const future = { 'staged.mjs': { reason: 'deliberately staged pending decision X — full reason here', allowlistDate: '2026-06-01', reviewBy: '2027-01-01' } };
     assert.deepEqual(findOrphans({ coreRoot: root, allowlist: future, today: new Date('2026-06-09') }).staleAllowlisted, []);

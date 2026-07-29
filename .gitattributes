@@ -1,6 +1,6 @@
 # Normalize line endings to LF in the working tree on every platform.
 # CORE's frontmatter parsers detect the `---\n` delimiter; a CRLF checkout on
-# Windows/OneDrive would otherwise break unit parsing silently (review M1).
+# Windows/OneDrive would otherwise break unit parsing silently.
 *.md   text eol=lf
 *.mjs  text eol=lf
 *.json text eol=lf

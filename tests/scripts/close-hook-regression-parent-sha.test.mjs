@@ -1,10 +1,10 @@
 /**
  * close-hook-regression-parent-sha.test.mjs — the production duplicate-close defect,
- * proven bookend-style against the actual parent SHA (RC-06).
+ * proven bookend-style against the actual parent SHA.
  *
- * Hale's ask (2026-07-27 HOLD, repeating an earlier objection): RED-01/RED-04's evidence
- * for the exact-session redesign is a missing-export SyntaxError, invalid under the team's
- * test contract because it never executes a real oracle. A parent-SHA-compatible falsifier
+ * RED-01/RED-04's evidence for the exact-session redesign is a missing-export
+ * SyntaxError, invalid under the test contract because it never executes a real
+ * oracle. A parent-SHA-compatible falsifier
  * has to run at e81903fc5c58529f7ab0b05421df126c3f9e4f2d (last release, before this branch
  * added any new export) without import-erroring, reach a real assertion, fail there, then
  * pass at the fixed tip.
@@ -16,7 +16,7 @@
  * SessionEnd for the SAME sess-A with a real transcript on the payload (didWork=true at
  * that SHA), must not spawn a second close. It does, at e81903f — that IS the reported
  * defect (a manual finalize followed 59.7s later by a second reasoning close). At the
- * current tip, wired end to end by close-process-request.test.mjs's RC-01..RC-05, it
+ * current tip, wired end to end by close-process-request.test.mjs, it
  * does not.
  */
 
@@ -52,7 +52,7 @@ function registeredStore() {
   const store = mkdtempSync(join(tmpdir(), 'close-parent-store-'));
   mkdirSync(join(store, '_memories'), { recursive: true });
   // CORE_CLOSE_INDEX is only honored when it resolves inside the trusted ~/.core
-  // (D1 fix) — a project-forwarded env pointing outside it is ignored, so the index
+  // A project-forwarded env pointing outside it is ignored, so the index
   // file itself (unlike the store it lists) has to live under trustedTestTmpRoot().
   const idxDir = mkdtempSync(join(trustedTestTmpRoot(), 'close-parent-idx-'));
   const idxPath = join(idxDir, 'index.json');
@@ -73,7 +73,7 @@ function spawnedClose(logFile) {
     .some((l) => { try { const e = JSON.parse(l); return e.hook === 'session-end' && e.action === 'spawn'; } catch { return false; } });
 }
 
-test('RC-06 [parent-SHA falsifier] a second SessionEnd for an already-closed session re-spawns at e81903f (the reported defect), and does not at the fixed tip', () => {
+test('[parent-SHA falsifier] a second SessionEnd for an already-closed session re-spawns at e81903f (the reported defect), and does not at the fixed tip', () => {
   const parentTree = materializeParentTree();
   const { store, idxPath, idxDir } = registeredStore();
   const transcriptPath = join(store, 'transcript.jsonl');

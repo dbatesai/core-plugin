@@ -19,21 +19,21 @@ const EXPECTED_PRODUCER_SHA = (() => {
     return String(m.source_sha || 'unknown');
   } catch { return 'unknown'; }
 })();
-// D1 fix, 2026-07-18, second pass: CORE_RETRIEVAL_STORE was removed from the
-// product hooks entirely (Hale + Antigravity: no legitimate production use,
-// and its trust check was lexical-only — symlink-bypassable). Tests now pass
+// CORE_RETRIEVAL_STORE is absent from the product hooks entirely — no
+// legitimate production use, and its trust check was lexical-only
+// (symlink-bypassable). Tests pass
 // the store via `cwd` in the JSON payload, the same trusted channel the real
 // harness always used — no env var, no symlink workaround needed anymore.
 const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
 
-// Isolate every hook test log (Hale audit, 2026-07-17): a subprocess hook run
+// Isolate every hook test log: a subprocess hook run
 // that doesn't override CORE_HOOKS_LOG_FILE defaults to the real machine-wide
 // ~/.core/hooks-log.jsonl (hook-log.mjs's default path) — tests writing there
 // pollute the developer's real log and, under a sandboxed/CI HOME or
 // concurrent test runs, can behave differently across environments. Every
 // call gets its own fresh temp path unless the test explicitly needs a
 // specific one (those pass CORE_HOOKS_LOG_FILE in `env`, which wins here).
-// Rooted under ~/.core (D1 fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
+// Rooted under ~/.core (fix, 2026-07-18): CORE_HOOKS_LOG_FILE now only
 // honors overrides inside the trusted ~/.core, so os.tmpdir() no longer
 // qualifies. Unlike os.tmpdir(), ~/.core isn't auto-cleaned — every created
 // dir is tracked and removed in the after() below.
@@ -66,7 +66,7 @@ function runHookProcess(prompt, env, cwd = FIXT) {
   });
 }
 
-test('default ON: flag unset → injects (shipped on, opt-out — G2 resolved)', () => {
+test('default ON: flag unset → injects (shipped on, opt-out)', () => {
   const out = runHook('omega speedmaster sale', { CORE_RETRIEVAL_HOOK: '' });
   assert.match(out, /want-omega-speedmaster-on-sale-wait/, 'default-on hook injects with no flag set');
 });
@@ -101,7 +101,7 @@ test('integration: bootstrap integrity marker + hook injection coexist under a c
   assert.ok(Buffer.byteLength(combined, 'utf8') <= 4096, 'startup marker + per-turn injection together stay bounded');
 });
 
-test('hook output carries the authority tier for observation hits (Hale re-review §6 — the label used to be stripped)', async () => {
+test('hook output carries the authority tier for observation hits (the label must survive to the hook output)', async () => {
   const { mkdtempSync, cpSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const NESTED = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'nested-store');
@@ -117,7 +117,7 @@ test('hook output carries the authority tier for observation hits (Hale re-revie
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ---- Per-turn event semantics (Hale live-hook audit, 2026-07-17) ----
+// ---- Per-turn event semantics ----
 // Every field must be an OBSERVED value: ladder tier from the producing stage
 // (never the unit authority tier), no fabricated escalation on empty results,
 // observed query terms, correlation id, and an OBSERVABLE write outcome.
@@ -220,7 +220,7 @@ test('CORE_REASONING_ARM=always-on with no hits: directive fires, reason stays h
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// UTF-8 byte-cap fix (Hale's re-audit, 2026-07-19): the final pack+directive
+// UTF-8 byte cap: the final pack+directive
 // combine step used to re-truncate with String.slice(0, 2048) — UTF-16 code
 // units, not bytes — which can both exceed the preregistered 2048-byte budget
 // on non-ASCII content and split a multi-byte character (or a surrogate pair)
@@ -256,7 +256,7 @@ test('CORE_REASONING_ARM unset behaves identically to "automatic" (no requested_
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// Hale catch (2026-07-19, blueprint review): the preregistration's
+// The preregistration's
 // "escalation-only" arm IS today's shipped default behavior -- the pilot
 // legitimately requests it by explicitly setting CORE_REASONING_ARM=automatic
 // (not by leaving the var unset, which is what a real user does). The prior
@@ -281,7 +281,7 @@ test('metrics opt-out means zero telemetry rows', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// Hale catch (2026-07-19, second review pass): the directive_fired ordering
+// The directive_fired ordering
 // fix moved directive construction inside the metricsEnabled() branch, which
 // meant CORE_METRICS_ENABLED=0 silently suppressed the Tier 3 escalation
 // directive itself -- not just its telemetry row. Opting out of telemetry
@@ -311,7 +311,7 @@ test('metrics-off CORE_REASONING_ARM=always-on still forces the directive', () =
 
 test('telemetry write failure is observable in the hook log, and the turn is never blocked', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-wfail-')));
-  // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so the
+  // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so the
   // log can no longer live alongside the (os.tmpdir()-rooted) store fixture.
   const logFile = isolatedHooksLog();
   try {
@@ -333,14 +333,14 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
     { name: 'delivered-ok', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'ok' } },
     { name: 'metrics-opt-out', env: { CORE_METRICS_ENABLED: '0' }, prompt: 'widget decision', expect: { action: 'delivered', reason: 'metrics-opt-out' } },
     { name: 'pipeline-error', env: {}, prompt: 'widget', expect: { action: 'failed', reason: 'pipeline-error' }, directReceipt: true, needStore: false },
-    // 2026-07-18, Hale-authorized: the branch above only ever calls receipt()
+    // The branch above only ever calls receipt()
     // directly, proving the logging contract but never that a GENUINE uncaught
     // exception through the real subprocess pipeline actually reaches the
     // catch and still exits 0. This one forces buildRetrievalTrace to throw
     // via the explicit CORE_TEST_FORCE_PIPELINE_ERROR seam and runs the real
     // subprocess end to end — fail-open proven, not assumed.
     { name: 'pipeline-error-genuine-crash', env: { CORE_TEST_FORCE_PIPELINE_ERROR: '1' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
-    // Hale catch, 2026-07-19: resolveReasoningArm's throw originally landed
+    // resolveReasoningArm's throw originally landed
     // OUTSIDE every try/catch in main(), so it escaped to the outer
     // main().catch(() => process.exit(0)) with no receipt() call at all —
     // exit 0 was right (never block the turn) but the promised typed
@@ -356,7 +356,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
   ];
   for (const b of branches) {
     const root = mkdtempSync(join(trustedTestTmpRoot(), `rh-recpt-${b.name}-`));
-    // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so
+    // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now, so
     // the log can no longer live alongside the (os.tmpdir()-rooted) store
     // fixture — isolatedHooksLog() is rooted correctly and self-tracks cleanup.
     const logFile = isolatedHooksLog();
@@ -366,7 +366,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
       else if (b.needStore !== false) makeStore(root);
       if (b.setup) b.setup(root);
       // breakHookLog needs an unwritable path that still resolves inside the
-      // trusted ~/.core (else the D1 gate silently substitutes the real
+      // trusted ~/.core (else the gate silently substitutes the real
       // default instead of hitting the write failure this branch tests for).
       // Nested under `root` (already mkdtemp-unique) rather than a fixed
       // name under the shared trusted-tmp root -- a fixed name collided
@@ -410,7 +410,7 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
 
 test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked telemetry)', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-recpt-optout2-')));
-  // D1 fix: CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now.
+  // CORE_HOOKS_LOG_FILE only honors paths inside ~/.core now.
   const logFile = isolatedHooksLog();
   try {
     runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: logFile }, root);
@@ -419,9 +419,8 @@ test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked teleme
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- Strengthened production outcome caller (Hale freeze-rejection corrections) ----
-// Root-caused 2026-07-17 (the real explanation for Hale's reproduced failures
-// and the GitHub CI failures, superseding an earlier partial diagnosis): the
+// ---- Strengthened production outcome caller ----
+// The root cause of the reproduced local failures and the GitHub CI failures: the
 // hook resolves harness identity from CLAUDECODE / CLAUDE_CODE_SESSION_ID /
 // CODEX_SESSION_ID / CODEX_PLUGIN_ROOT in its process env. A test invoked via
 // `execFileSync('node', ..., { env: { ...process.env, ... } })` inherits
@@ -476,12 +475,12 @@ test('post-answer caller: next same-session invocation closes the previous retri
     assert.equal(row.session_id, 'sess-A');
     assert.ok(row.answer_turn_id && row.producer_version && row.schema_version, 'identity fields required');
     assert.equal(row.producer_sha, EXPECTED_PRODUCER_SHA, 'must echo whatever this repo\'s own manifest.source_sha currently says -- "unknown" pre-release, the real SHA once a release has stamped one');
-    assert.notEqual(row.answer_turn_id, row.retrieval_id, 'Hale audit 2026-07-17: answer_turn_id must never alias retrieval_id — they are different concepts');
+    assert.notEqual(row.answer_turn_id, row.retrieval_id, 'answer_turn_id must never alias retrieval_id — they are different concepts');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('pending marker is written only AFTER delivery is confirmed — a failed delivery leaves no marker', () => {
-  // Hale audit, 2026-07-17, hazard: "creates pending state before delivery."
+  // Hazard: "creates pending state before delivery."
   // CORE_RETRIEVAL_BYTE_CAP=0 forces the delivery-failed branch (selection
   // succeeds, byte-capped output delivers nothing) — before the fix, the
   // pending marker was written unconditionally once the retrieval row landed,
@@ -506,7 +505,7 @@ test('pending marker is written after a successful delivery (positive control fo
 });
 
 test('a hostile session id in the payload never escapes _memories/_lib as a filename', () => {
-  // Hale audit, 2026-07-17, hazard: "unsanitized session id in a filename."
+  // Hazard: "unsanitized session id in a filename."
   const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-sanitize-')));
   try {
     runHookWithSession('widget decision', root, '../../../../etc/passwd');
@@ -521,7 +520,7 @@ test('a hostile session id in the payload never escapes _memories/_lib as a file
 });
 
 test('a failed outcome write never deletes the pending marker (evidence survives to retry)', () => {
-  // Hale audit, 2026-07-17, hazard: "deletes pending evidence without
+  // Hazard: "deletes pending evidence without
   // confirmed outcome persistence." Force the outcome-log write to fail by
   // making today's session directory a file instead of a directory, so
   // logEvent cannot create outcome-log.jsonl underneath it.

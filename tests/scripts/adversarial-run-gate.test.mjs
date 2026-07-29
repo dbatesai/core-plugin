@@ -38,10 +38,10 @@ test('PASS anti-anchoring authorizes mutation', () => {
   assert.equal(d.watermark, null);
 });
 
-test('M9: identity PASS but operation-scoped mutation gate denied → ADVISORY, not AUTHORIZED', () => {
+test('identity PASS but operation-scoped mutation gate denied → ADVISORY, not AUTHORIZED', () => {
   // runPreAction can set mutation_permitted=false on a PASS row (e.g. harness_mismatch,
   // since the adversarial action declares allowed_harnesses). A decision-branching consumer
-  // (HC_555) would mutate on AUTHORIZED — the operation-scoped denial must fold into `decision`.
+  // would mutate on AUTHORIZED — the operation-scoped denial must fold into `decision`.
   const d = classifyAdversarialRun({
     rows: [{
       capability_id: 'anti-anchoring-mechanism',
@@ -56,7 +56,7 @@ test('M9: identity PASS but operation-scoped mutation gate denied → ADVISORY, 
   assert.equal(d.blocked_reason, 'harness_mismatch', 'the operation-scoped block reason is surfaced');
 });
 
-test('M9: identity PASS with mutation gate explicitly permitted stays AUTHORIZED', () => {
+test('identity PASS with mutation gate explicitly permitted stays AUTHORIZED', () => {
   const d = classifyAdversarialRun({
     rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'PASS', mutation_permitted: true }],
   });
@@ -85,7 +85,7 @@ test('NOT-YET anti-anchoring blocks authority but allows watermarked advisory', 
   assert.equal(d.watermark, ADVISORY_WATERMARK);
 });
 
-test('decision enum is machine-readable: AUTHORIZED / ADVISORY / BLOCKED (HC_555 hardening)', () => {
+test('decision enum is machine-readable: AUTHORIZED / ADVISORY / BLOCKED', () => {
   assert.equal(classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'PASS' }] }).decision, 'AUTHORIZED');
   assert.equal(classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'DEGRADED' }] }).decision, 'ADVISORY');
   assert.equal(classifyAdversarialRun({ rows: [{ capability_id: 'anti-anchoring-mechanism', identity_status: 'UNKNOWN' }] }).decision, 'ADVISORY');

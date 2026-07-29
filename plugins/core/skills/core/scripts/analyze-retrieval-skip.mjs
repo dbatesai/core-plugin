@@ -185,9 +185,8 @@ export function analyzeRetrievalSkip({ projectRoot = process.cwd(), harness = 'c
   const coreStorePresent = existsSync(join(projectRoot, '_memories')) || existsSync(join(projectRoot, 'PROJECT.md'));
   const t = readTranscript({ harness, cwd: projectRoot, home, override: transcriptPath });
   // The producer (read-transcript) emits 'implemented' (codex, tools extractable) or
-  // 'n/a' (other harnesses). The old `=== 'pending-hc-spec'` sentinel is retired, so
-  // this was dead. Re-synced as "any value that is neither known-good": abstains on a
-  // future schema drift instead of silently flooding false SKIPs.
+  // 'n/a' (other harnesses). Any value that is neither known-good abstains, so a
+  // future schema drift produces UNKNOWN instead of silently flooding false SKIPs.
   const extraction = t.meta?.codex_tool_extraction;
   const toolExtractionPending = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
   const terms = coreStorePresent ? buildProjectTerms(projectRoot) : new Set();
@@ -223,7 +222,7 @@ function isMain() {
  * Index-advancing arg parse. The first BARE token is the project root — but
  * space-form flag values (`--harness codex`) are bare tokens too, so a `.find()`
  * over non-`--` tokens grabbed `codex` as the root and reported NO-STORE on a
- * directory with no `_memories/` (M4). Advancing past known value-flags fixes it.
+ * directory with no `_memories/`. Advancing past known value-flags fixes it.
  * Returns rawRoot un-resolved (null if none) so callers/tests stay deterministic.
  */
 export function parseSkipArgs(args) {

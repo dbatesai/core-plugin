@@ -92,7 +92,7 @@ export function scanTranscript(lines, token) {
     let e; try { e = JSON.parse(line); } catch { return; }
     const content = e?.message?.content;
     if (!Array.isArray(content)) return;
-    // H2: the probe proves the AGENT echoed the canary (memory in-context AND surfaced).
+    // The probe proves the AGENT echoed the canary (memory in-context AND surfaced).
     // The injected MEMORY.md text and any user/tool-result text block also carry the token,
     // so an unfiltered text match is a false-pass — the cardinal sin for this cluster. Only
     // an assistant-role text block counts as an echo. Tool_use is assistant-authored by
@@ -111,7 +111,7 @@ export function scanTranscript(lines, token) {
 /** Pure classifier over the identity_status bar above. */
 export function classify({ token, canaryFileState = 'absent', memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW, writtenBySession = null, sessionId = null, tokenConsumption = null }) {
   if (!token) {
-    // MET-006: a missing canary is almost always "/finalize didn't run last session"
+    // A missing canary is almost always "/finalize didn't run last session"
     // (abrupt end), not "never installed". A distinct reason_code lets the user and
     // the readiness pass tell those apart instead of a generic NOT-YET.
     if (canaryFileState === 'invalid') {
@@ -119,12 +119,12 @@ export function classify({ token, canaryFileState = 'absent', memoryWritten, mem
     }
     return { identity_status: 'NOT-YET', reason_code: 'finalize-not-run', reason: 'no canary recorded — the write step runs at /finalize session close, so this means /finalize has not run for this workspace yet (a skipped finalize last session looks the same)' };
   }
-  // Blocker 1: an echo only proves injection if the canary actually landed in the
-  // injected memory window. Without that, PASS would prove transcript echo, not memory.
+  // An echo only proves injection if the canary actually landed in the injected
+  // memory window. Without that, PASS would prove transcript echo, not memory.
   if (!memoryWritten || !memoryHasToken) {
     return { identity_status: 'DEGRADED', reason: 'canary not present in the MEMORY.md injection window — an echo cannot prove injection' };
   }
-  // Blocker 1b: a line-1 canary proves visibility, not load-completeness. If the
+  // A line-1 canary proves visibility, not load-completeness. If the
   // memory file exceeds the known injection window, the tail can drop silently while
   // the canary still echoes. That is DEGRADED, never PASS. The window is enforced on
   // BOTH axes — Claude Code truncates on whichever limit it hits first, and a file can
@@ -186,7 +186,7 @@ export async function probe(opts = {}) {
     } catch { token = null; canaryFileState = 'invalid'; }
   }
 
-  // Blocker 1: verify the token is actually in the MEMORY.md injection window now.
+  // Verify the token is actually in the MEMORY.md injection window now.
   let memoryHasToken = false, memoryLineCount = null, memoryByteCount = null;
   if (token && memoryWritten && memoryPath && existsSync(memoryPath)) {
     try {

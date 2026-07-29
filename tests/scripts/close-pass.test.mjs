@@ -17,7 +17,7 @@ const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 
 // Same isolation as close-pass-hook.test.mjs: logHookEvent() reads
 // CORE_HOOKS_LOG_FILE from process.env directly, and it only honors overrides
-// inside the trusted ~/.core (D1 fix) — os.tmpdir() doesn't qualify. This file
+// inside the trusted ~/.core — os.tmpdir() doesn't qualify. This file
 // doesn't assert on log content, only that runClose/CLI paths never touch the
 // real machine-wide ~/.core/hooks-log.jsonl.
 const _isolatedLogDirs = [];
@@ -133,8 +133,8 @@ test('detectCloseState: crashed-mid-close with a store-signature mismatch re-owe
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-// Hale's falsifier (2026-07-21, close-marker-semantic-gap): a spawnFinalize that returns
-// success (or a test-stub `undefined`, treated as success per P1/P5) WITHOUT the headless
+// The close-marker semantic gap: a spawnFinalize that returns
+// success (or a test-stub `undefined`, treated as success) WITHOUT the headless
 // child ever calling `close-pass.mjs record --op <op>` for the ten judgment ops (everything
 // beyond maintenance-run) must not read back as a complete, nothing-owed close. Confirmed
 // live production markers DO carry all twelve ops when the headless child follows the
@@ -154,7 +154,7 @@ test('detectCloseState: a closed marker with every CLOSE_OPS entry actually reco
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('beginClose: a marker-write failure releases the lock it just took and rethrows (P3)', () => {
+test('beginClose: a marker-write failure releases the lock it just took and rethrows', () => {
   const store = freshStore();
   try {
     // Pre-create the marker path AS A DIRECTORY so atomicWriteFileSync's write fails.
@@ -178,7 +178,7 @@ test('CLI: the model-spawn close verb does not exist — `run` is rejected as un
 });
 
 
-// A certified close presupposes a completed op record (the AUD-104 invariant);
+// A certified close presupposes a completed op record;
 // these helpers model the real manual-close flow around certify.
 function recordCompleteClose(store, sessionId) {
   beginClose(store, { sessionId, ops: CLOSE_OPS });
@@ -254,7 +254,7 @@ test('certify: auto-resolves the session from a real project-bound transcript (t
   }
 });
 
-test('AUD-103: a corrupt receipt is reported corrupt and its bytes survive replacement', () => {
+test('a corrupt receipt is reported corrupt and its bytes survive replacement', () => {
   const store = freshStore();
   try {
     const root = join(store, '_metrics');
@@ -275,7 +275,7 @@ test('AUD-103: a corrupt receipt is reported corrupt and its bytes survive repla
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('AUD-104: a failed required op refuses certification; a complete record certifies', () => {
+test('a failed required op refuses certification; a complete record certifies', () => {
   const store = freshStore();
   try {
     const root = join(store, '_metrics');

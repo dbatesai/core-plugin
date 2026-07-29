@@ -1,7 +1,7 @@
 /**
  * render-browse-artifact — the memory-browse artifact generator.
- * Covers the disclosure-boundary guarantees the 2026-07-22 design spec makes
- * hard requirements (Hale's conditions 2/4/6/7 as enforced in code):
+ * Covers the disclosure-boundary guarantees the design spec makes
+ * hard requirements (conditions 2/4/6/7 as enforced in code):
  *   - embedded units + snapshot provenance header present in the HTML;
  *   - ZERO external references in the generated chrome (the only URLs in the
  *     whole file are inside unit body text, embedded as data);
@@ -30,7 +30,7 @@ const {
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'render-browse-artifact.mjs');
 
-// Fix 9 (Hale item 9): the shared provenance helper fails closed on a dirty
+// Fix 9: the shared provenance helper fails closed on a dirty
 // plugin tree — so real renders only produce a source_sha (and only succeed)
 // when the working tree is clean. Detect state once; render-dependent tests
 // assert the right contract either way (skip-with-reason when dirty, since the
@@ -55,7 +55,7 @@ function fixtureProject({ workspace = true } = {}) {
   const mem = join(root, '_memories');
   mkdirSync(join(mem, 'archive'), { recursive: true });
   writeFileSync(join(mem, 'dc-1-alpha.md'),
-    `---\nid: dc-1-alpha\ntype: decision\nstatus: active\ntopics: [alpha, shared]\nupdated: 2026-07-01\nedges:\n  - type: cites\n    target: obs-2-beta\n  - type: supersedes\n    target: risk-3-retired\n---\n\n# DC-1 — Alpha decision\n\nBody citing an external source at https://example.com/spec for reference.\n\n- point one\n- point two\n`);
+    `---\nid: dc-1-alpha\ntype: decision\nstatus: active\ntopics: [alpha, shared]\nupdated: 2026-07-01\nedges:\n  - type: cites\n    target: obs-2-beta\n  - type: supersedes\n    target: risk-3-retired\n---\n\n# DC-1-alpha — Alpha decision\n\nBody citing an external source at https://example.com/spec for reference.\n\n- point one\n- point two\n`);
   writeFileSync(join(mem, 'obs-2-beta.md'),
     '---\nid: obs-2-beta\ntype: observation\nstatus: active\ntopics: [beta]\nupdated: 2026-07-02\n---\n\n# OBS-2 — Beta observation\n\nPlain body.\n');
   writeFileSync(join(mem, 'topic-4-secret.md'),
@@ -99,8 +99,8 @@ rtest('embeds active units with bodies, edges, and snapshot provenance header', 
     const dc1 = json.units.find((u) => u.id === 'dc-1-alpha');
     assert.match(dc1.body, /external source at https:\/\/example\.com\/spec/, 'full body embedded');
     assert.deepEqual(dc1.edges.map((e) => e.target).sort(), ['obs-2-beta', 'risk-3-retired']);
-    assert.equal(dc1.title, 'DC-1 — Alpha decision');
-    // Provenance banner (condition 6 + Antigravity's aggressive-styling refinement)
+    assert.equal(dc1.title, 'DC-1-alpha — Alpha decision');
+    // Provenance banner (condition 6)
     assert.match(html, /POINT-IN-TIME SNAPSHOT &mdash; READ-ONLY/);
     assert.ok(html.includes(manifest.generated_at), 'generated-at timestamp in the page');
     assert.ok(html.includes(manifest.snapshot_id.slice(0, 12)), 'snapshot id in the banner');
@@ -297,7 +297,7 @@ test('CLI: rejects an unknown --scope', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---------- producer identity (Hale condition 6 — truthfulness falsifier) ----------
+// ---------- producer identity (condition 6 — truthfulness falsifier) ----------
 
 test('falsifier: in a CLEAN git checkout the emitted source SHA equals git rev-parse HEAD and never the manifest stamp; a DIRTY tree fails closed (fix 9)', async (t) => {
   let head;
@@ -372,7 +372,7 @@ test('installed tree (no .git): stamped manifest identity used; no SHA at all: f
   }
 });
 
-// ---------- post-publish receipt (Hale correction 2) ----------
+// ---------- post-publish receipt ----------
 
 rtest('--record-publish published-private: atomic linked receipt with consent + privacy evidence', async () => {
   const { root, home } = fixtureProject();
@@ -383,7 +383,7 @@ rtest('--record-publish published-private: atomic linked receipt with consent + 
       '--generation-receipt', genPath, '--status', 'published-private',
       '--artifact-url', 'https://claude.ai/code/artifact/test-0000',
       '--private-verified-evidence', 'gallery shows private; share menu never opened',
-      '--consent-by', 'David', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'];
+      '--consent-by', 'the-project-owner', '--consent-mechanism', 'explicit yes on the rendered preflight manifest'];
     const res = spawnSync(process.execPath, args, { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     const out = JSON.parse(res.stdout);
@@ -397,7 +397,7 @@ rtest('--record-publish published-private: atomic linked receipt with consent + 
     assert.equal(receipt.artifact_url, 'https://claude.ai/code/artifact/test-0000');
     assert.equal(receipt.private_verified.evidence, 'gallery shows private; share menu never opened');
     assert.ok(receipt.private_verified.at);
-    assert.equal(receipt.consent.granted_by, 'David');
+    assert.equal(receipt.consent.granted_by, 'the-project-owner');
     assert.equal(receipt.revoked_at, null);
     // Atomic write leaves no temp residue beside the receipts.
     assert.ok(!readdirSync(dirname(genPath)).some((f) => f.includes('.tmp-')), 'no temp files left behind');
@@ -464,18 +464,18 @@ test('--record-revocation stamps revoked_at and preserves a manually-authored re
       publish_status: 'published-private',
       published_at: '2026-07-22T22:47:00Z',
       artifact_url: 'https://claude.ai/code/artifact/614ae328-0cb8-4c4a-95fe-d4a798f21a00',
-      consent: { granted_by: 'David', granted_at: '2026-07-22T22:46:00Z', mechanism: 'explicit yes on the rendered preflight manifest' },
+      consent: { granted_by: 'the-project-owner', granted_at: '2026-07-22T22:46:00Z', mechanism: 'explicit yes on the rendered preflight manifest' },
       private_verified: { at: '2026-07-22T22:47:00Z', evidence: 'publish tool confirms artifacts are private unless shared' },
       known_defect_at_publish: 'stale producer sha at publish time',
       revoked_at: null,
-      note: 'manually authored by Keel',
+      note: 'manually authored by the operator',
     }, null, 2));
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     const receipt = JSON.parse(readFileSync(p, 'utf8'));
     assert.ok(receipt.revoked_at, 'revoked_at stamped');
     assert.equal(receipt.known_defect_at_publish, 'stale producer sha at publish time', 'manual extra field preserved');
-    assert.equal(receipt.note, 'manually authored by Keel');
+    assert.equal(receipt.note, 'manually authored by the operator');
     assert.equal(receipt.publish_status, 'published-private', 'original outcome untouched');
     // Double revocation is refused.
     const res2 = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });

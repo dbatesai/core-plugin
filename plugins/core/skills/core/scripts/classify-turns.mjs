@@ -14,7 +14,7 @@
  *   mechanics-failure             agent walked the ladder; it came back empty anyway
  *   capture-miss                  agent asked; term genuinely nowhere
  *
- * HONESTY GATE (spec §17.12, Anvil A4): this output is PROVISIONAL until the
+ * HONESTY GATE (spec §17.12): this output is PROVISIONAL until the
  * Phase-3 calibration set proves the heuristics at >0.7 precision. Every record
  * carries `provisional: true` and `classifier_version`; rollups must NOT render
  * state distributions as evidence-grade until calibration clears. Capture (the
@@ -58,8 +58,9 @@ export const CLASSIFIED_SCHEMA_VERSION = '1.0.0';
 // word-boundary `containsTerm` test plus the rule that PROJECT.md only counts as
 // in-context when this session's transcript shows it was actually read. Stamped on
 // every record so the calibration layer can invalidate any label set cleared
-// under a different proxy — same R-1 honesty guard the classifier_version match enforces.
-// The label-independence half stays Gate G4 (the product owner vouches); this only versions the proxy.
+// under a different proxy — the same honesty guard the classifier_version match
+// enforces. This versions the proxy only; label independence is not mechanically
+// enforced here.
 export const PROXY_VERSION = 2;
 
 // A clarifying question — the agent asking the user instead of answering.
@@ -139,7 +140,7 @@ export function classifyTurn(turn, ctx) {
   if (inContext) return { state: 'rec-fail-tier-0', evidence: { term, found: 'context', context_excerpt: contextExcerpt } };
   if (onDisk) {
     if (!ladder) return { state: 'rec-fail-tier-1-3-trigger', evidence: { term, found: 'disk', ladder_walk: false, disk_excerpt: diskExcerpt } };
-    // M6: mechanics-failure is defined as "agent walked the ladder; it came back EMPTY anyway"
+    // Mechanics-failure is defined as "agent walked the ladder; it came back EMPTY anyway"
     // — so it requires the ladder to have surfaced nothing. The dead ladderReturnedContent
     // discriminator is the test. If the ladder walked AND returned content but the agent still
     // asked, the mechanism worked — the content was effectively in context for this turn — so

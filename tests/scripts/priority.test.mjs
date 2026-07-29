@@ -13,7 +13,7 @@ import {
   score, signalS, NO_SOURCES_DEFAULT_S,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
-test('M3: a malformed --today falls back to today, never null (no TypeError at toISOString)', () => {
+test('a malformed --today falls back to today, never null (no TypeError at toISOString)', () => {
   const d = _todayFromArg('garbage');
   assert.ok(d instanceof Date, 'returns a Date, not null');
   assert.doesNotThrow(() => d.toISOString(), 'the display path can stamp it');
@@ -68,7 +68,7 @@ test('isInvalidated: true once t_invalid is at/before today, false while open', 
   assert.equal(isInvalidated(u({ created: '2026-01-01' }), today), false);
 });
 
-// ---------- CRLF tolerance (review M1) ----------
+// ---------- CRLF tolerance ----------
 
 test('parseFrontmatter parses a CRLF unit the same as an LF unit', () => {
   const lf = '---\nid: x\ntype: decision\ncreated: 2026-01-01\n---\n\nbody line';
@@ -88,7 +88,7 @@ test('normalizeNewlines collapses CRLF and lone CR to LF; passes non-strings thr
   assert.equal(normalizeNewlines(null), null);
 });
 
-// ---------- SOD-003 / MEM-011: suppression invariant + malformed-frontmatter surfacing ----------
+// ---------- suppression invariant + malformed-frontmatter surfacing ----------
 
 function rankVault() {
   const dir = mkdtempSync(join(tmpdir(), 'priority-rank-'));
@@ -108,7 +108,7 @@ function quiet(stream, fn) {
   try { return [fn(), chunks.join('')]; } finally { stream.write = orig; }
 }
 
-test('SOD-003: rankUnits excludes invalidated units by default', () => {
+test('rankUnits excludes invalidated units by default', () => {
   const { dir, mem } = rankVault();
   try {
     const ids = rankUnits(mem, { today: parseIsoDate('2026-06-09') }).map(([, u]) => u.id);
@@ -117,7 +117,7 @@ test('SOD-003: rankUnits excludes invalidated units by default', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SOD-003: includeInvalidated:true ranks cold history', () => {
+test('includeInvalidated:true ranks cold history', () => {
   const { dir, mem } = rankVault();
   try {
     const ids = rankUnits(mem, { today: parseIsoDate('2026-06-09'), includeInvalidated: true }).map(([, u]) => u.id);
@@ -125,7 +125,7 @@ test('SOD-003: includeInvalidated:true ranks cold history', () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SOD-003: the CLI ranking inherits the filter (invalidated id absent from --top output)', () => {
+test('the CLI ranking inherits the filter (invalidated id absent from --top output)', () => {
   const { dir, mem } = rankVault();
   try {
     const [, out] = quiet(process.stdout, () => priorityMain([mem, '--today', '2026-06-09', '--top', '10']));
@@ -156,7 +156,7 @@ test('iterArchivedUnits: no archive/ subdir at all returns empty, not a throw (E
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("iterArchivedUnits: malformed (frontmatter-less) archive content is excluded, not ranked (Hale's 2026-07-22 finding)", () => {
+test("iterArchivedUnits: malformed (frontmatter-less) archive content is excluded, not ranked", () => {
   const dir = mkdtempSync(join(tmpdir(), 'priority-archive-malformed-'));
   try {
     const mem = join(dir, '_memories');
@@ -171,7 +171,7 @@ test("iterArchivedUnits: malformed (frontmatter-less) archive content is exclude
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SOD-003: includeInvalidated:true reaches a unit physically relocated to archive/ (Hale\'s 2026-07-21 finding)', () => {
+test('includeInvalidated:true reaches a unit physically relocated to archive/', () => {
   const { dir, mem } = rankVault();
   try {
     mkdirSync(join(mem, 'archive'), { recursive: true });
@@ -184,7 +184,7 @@ test('SOD-003: includeInvalidated:true reaches a unit physically relocated to ar
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('MEM-011: a frontmatter-less unit is excluded from ranking and warned to stderr', () => {
+test('a frontmatter-less unit is excluded from ranking and warned to stderr', () => {
   const { dir, mem } = rankVault();
   try {
     writeFileSync(join(mem, 'broken.md'), '---\nid: broken\nNO CLOSING FENCE\n');
@@ -195,9 +195,9 @@ test('MEM-011: a frontmatter-less unit is excluded from ranking and warned to st
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ---------- D7: priority scoring calibration (MEM-005, MEM-018) ----------
+// ---------- priority scoring calibration ----------
 
-test('MEM-018: no-sources units score S=0.3 — below summary-sourced, above transcript', () => {
+test('no-sources units score S=0.3 — below summary-sourced, above transcript', () => {
   assert.equal(NO_SOURCES_DEFAULT_S, 0.3);
   assert.equal(signalS({ fm: {} }), 0.3, 'unknown provenance no longer ties with summary');
   assert.equal(signalS({ fm: { sources: ['summary-2026-06-01.md'] } }), 0.5, 'explicit summary still 0.5');
@@ -212,7 +212,7 @@ test('scalar sources string coerces to a single-element list — not the no-sour
     'an empty-string scalar still scores the no-sources default');
 });
 
-test('MEM-005: pinned:false is neutral — identical score to an unpinned unit (decided behavior)', () => {
+test('pinned:false is neutral — identical score to an unpinned unit (decided behavior)', () => {
   const today = parseIsoDate('2026-06-09');
   const base = { fm: { created: '2026-06-01', topics: ['a'] } };
   const pinnedFalse = { fm: { created: '2026-06-01', topics: ['a'], pinned: false } };

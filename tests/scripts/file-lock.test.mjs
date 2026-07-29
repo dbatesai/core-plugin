@@ -127,11 +127,11 @@ test('withFileLock throws LOCK_HELD after retry budget on a live contended lock'
   releaseFileLock(lock, got.nonce);
 });
 
-// K12 (Hale's audit, 2026-07-16): the finally block used to discard
+// The finally block used to discard
 // releaseFileLock's return value entirely, so a real release failure (another
 // process already superseded/GC'd the generation, a filesystem error) was
 // indistinguishable from success to every caller.
-test('K12: a genuine release failure is never silent when fn() succeeds — it becomes the thrown error', () => {
+test('a genuine release failure is never silent when fn() succeeds — it becomes the thrown error', () => {
   const lock = tmpLock();
   assert.throws(
     () => withFileLock(lock, () => {
@@ -148,7 +148,7 @@ test('K12: a genuine release failure is never silent when fn() succeeds — it b
   );
 });
 
-test('K12: a real fn() error still propagates (unmasked) even when release also fails, with the release failure attached', () => {
+test('a real fn() error still propagates (unmasked) even when release also fails, with the release failure attached', () => {
   const lock = tmpLock();
   assert.throws(
     () => withFileLock(lock, () => {
@@ -162,14 +162,14 @@ test('K12: a real fn() error still propagates (unmasked) even when release also 
   );
 });
 
-test('K12 control: a clean release (fn succeeds, release succeeds) still returns fn\'s value with no throw', () => {
+test('control: a clean release (fn succeeds, release succeeds) still returns fn\'s value with no throw', () => {
   const lock = tmpLock();
   const result = withFileLock(lock, () => 'clean-result');
   assert.equal(result, 'clean-result');
   assert.equal(currentLockFile(lock), null, 'lock genuinely released on the happy path');
 });
 
-// The v2 design's three-process corner (Hale, 2026-07-15) is structurally gone in
+// The v2 design's three-process corner is structurally gone in
 // v3: release only ever renames the caller's OWN generation file to a tombstone.
 // A revived owner whose lock was superseded cannot disturb the fresh owner at all.
 test('release after supersession: revived owner is a strict no-op on the fresh owner\'s lock', () => {
@@ -221,7 +221,7 @@ test('race: 5 concurrent locked read-modify-writes lose no update', async () => 
   rmSync(dir, { recursive: true, force: true });
 });
 
-// Hale's second 2026-07-15 challenge: the hard-link-unavailable fallback recreates
+// The hard-link-unavailable fallback recreates
 // the wx+write window. The young-unreadable-is-held rule is supposed to cover it —
 // this test PROVES it under force (CORE_FILELOCK_NO_LINK=1) instead of asserting it.
 test('race: 5 concurrent locked writers under FORCED wx fallback (no hard links) lose no update', async () => {
@@ -238,7 +238,7 @@ test('race: 5 concurrent locked writers under FORCED wx fallback (no hard links)
   rmSync(dir, { recursive: true, force: true });
 });
 
-// Hale's earlier advisory: hold both children at a barrier and release them at the
+// Hold both children at a barrier and release them at the
 // same instant against the same stale lock — a sequential "race" proves nothing.
 test('race: two SIMULTANEOUS stealers of one stale lock — exactly one wins', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'steal-race-'));
@@ -265,7 +265,7 @@ test('race: two SIMULTANEOUS stealers of one stale lock — exactly one wins', a
   rmSync(dir, { recursive: true, force: true });
 });
 
-// Hale's round-3 ask: a barrier-controlled A/B/C proof that C cannot enter while a
+// A barrier-controlled A/B/C proof that C cannot enter while a
 // wrong-owner (revived A) release runs against B's live lock. In v3 A's release is
 // a read-only scan (it renames only a file whose content matched), so C must be
 // refused on every attempt and B's lock must stay byte-identical throughout.
@@ -306,14 +306,14 @@ test('race A/B/C: C can never acquire during a revived owner\'s wrong-owner rele
   rmSync(dir, { recursive: true, force: true });
 });
 
-// K12 (Hale's re-audit, 2026-07-19): a delayed acquirer's maxN snapshot can go
+// A delayed acquirer's maxN snapshot can go
 // stale mid-acquisition — a full concurrent acquire+release cycle completing
 // entirely inside the snapshot-to-create window used to resurrect an already-
 // retired generation number instead of a fresh one, corrupting the numbering
 // invariant and producing later 'not-owner' release failures (1/8, 2/10 under
 // load). CORE_FILELOCK_TEST_DELAY_MS widens that window deterministically so
 // this is reproduced on demand rather than left to scheduler luck.
-test('K12: a stale maxN snapshot is caught post-win and backed off, never silently resurrected', async () => {
+test('a stale maxN snapshot is caught post-win and backed off, never silently resurrected', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'file-lock-k12-'));
   const lock = join(dir, 'stale-target.lock');
   const snapshotTaken = join(dir, 'snapshot-taken');
@@ -354,7 +354,7 @@ test('K12: a stale maxN snapshot is caught post-win and backed off, never silent
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('a live-pid lock is NEVER auto-superseded, at any age (Hale round 3)', () => {
+test('a live-pid lock is NEVER auto-superseded, at any age', () => {
   const lock = tmpLock();
   writeFileSync(lock, JSON.stringify({ pid: process.pid, nonce: 'mine', started_at: 'x' }));
   backdate(lock, 24 * 60 * 60 * 1000); // a full day old — far past every ceiling
@@ -376,7 +376,7 @@ test('inspectFileLock: absent is unheld; a YOUNG corrupt lock is held; an OLD co
   assert.equal(old.stale, true, 'aged-out corrupt lock is stealable');
 });
 
-// Hale round 4: the old release swallowed EVERY rename failure as "already gone"
+// The old release swallowed EVERY rename failure as "already gone"
 // and returned released:true over a live lock. Inject a real failure (read-only
 // parent dir → EACCES) and prove it fails closed. POSIX-only injection; the
 // ENOENT-tolerant branch (superseded + GC'd) is covered by the supersession test.
@@ -400,7 +400,7 @@ test('release fails CLOSED when the tombstone rename cannot be performed — no 
   }
 });
 
-// Hale round 5: the operator RECOVERY path lied the same way — force release
+// The operator RECOVERY path lied the same way — force release
 // swallowed removal failures and reported released:true.
 test('force release fails CLOSED when removal cannot be performed — recovery never lies', { skip: process.platform === 'win32' }, async () => {
   const { chmodSync } = await import('node:fs');

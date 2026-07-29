@@ -1,7 +1,7 @@
 /**
- * aggregate-receipt — Train A A2 acceptance tests.
+ * aggregate-receipt — acceptance tests.
  *
- * The boundary (Crest, files-repo data boundary 2026-07-12): rows stay local,
+ * The boundary: rows stay local,
  * only non-reconstructive aggregates travel. The exporter must prove BOTH belts:
  * whitelist construction (a new report field never leaks by default) and the
  * refusal scan (a smuggled local fragment refuses the whole export, loudly).
@@ -39,7 +39,7 @@ async function realReportAndSweep() {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
-test('A2: receipt from a real report contains NO unit ids, query text, or paths', async () => {
+test('receipt from a real report contains NO unit ids, query text, or paths', async () => {
   const { report, sweep } = await realReportAndSweep();
   const receipt = buildAggregateReceipt(report, sweep);
   const json = JSON.stringify(receipt).toLowerCase();
@@ -54,7 +54,7 @@ test('A2: receipt from a real report contains NO unit ids, query text, or paths'
   assert.equal(receipt.tier_sweep.counts.queries, 1);
 });
 
-test('A2: band histogram aggregates counts and drops the per-(query,gold) labels', async () => {
+test('band histogram aggregates counts and drops the per-(query,gold) labels', async () => {
   const sweepLike = {
     snapshot_id: 'a'.repeat(64), topN: 3,
     perPolicy: [{ policy: 'P0', r3: 0.5, n: 2, forbidden3: 0 }],
@@ -71,7 +71,7 @@ test('A2: band histogram aggregates counts and drops the per-(query,gold) labels
   assert.ok(!json.includes('local-q-1') && !json.includes('local-unit-a'), 'band row labels never leave');
 });
 
-test('A2 refusal: a smuggled local fragment refuses the whole export, loudly', async () => {
+test('refusal: a smuggled local fragment refuses the whole export, loudly', async () => {
   const { report } = await realReportAndSweep();
   const forbidden = collectForbiddenStrings(report);
   const poisoned = buildAggregateReceipt(report); // clean receipt first
@@ -79,7 +79,7 @@ test('A2 refusal: a smuggled local fragment refuses the whole export, loudly', a
   assert.throws(() => refusalScan(poisoned, forbidden), /REFUSED/);
 });
 
-test('A2 refusal: filesystem paths are refused even when not in the forbidden vocabulary', () => {
+test('refusal: filesystem paths are refused even when not in the forbidden vocabulary', () => {
   assert.throws(
     () => refusalScan({ note: 'evidence at /Users/someone/project/file.md' }, new Set()),
     /filesystem path/,
@@ -91,8 +91,8 @@ test('A2 refusal: filesystem paths are refused even when not in the forbidden vo
   assert.ok(refusalScan({ note: 'rates only', r3: 0.73 }, new Set()));
 });
 
-// K09 (Hale's audit, 2026-07-16): two real bypasses in the embedded-path branch.
-test('K09: a colon-preceded embedded path is refused (the boundary class was missing ":")', () => {
+// Two real bypasses in the embedded-path branch.
+test('a colon-preceded embedded path is refused (the boundary class was missing ":")', () => {
   assert.throws(
     () => refusalScan({ note: 'path:/Users/dbates/secret.md' }, new Set()),
     /filesystem path/,
@@ -104,7 +104,7 @@ test('K09: a colon-preceded embedded path is refused (the boundary class was mis
   );
 });
 
-test('K09: an embedded (non-leading) Windows drive-letter path is refused, not just a leading one', () => {
+test('an embedded (non-leading) Windows drive-letter path is refused, not just a leading one', () => {
   assert.throws(
     () => refusalScan({ note: 'see C:\\Users\\dbates\\secret' }, new Set()),
     /filesystem path/,
@@ -116,26 +116,26 @@ test('K09: an embedded (non-leading) Windows drive-letter path is refused, not j
   );
 });
 
-test('K09 control: isPathShaped still passes benign strings with colons and no path', () => {
+test('control: isPathShaped still passes benign strings with colons and no path', () => {
   assert.equal(isPathShaped('ratio: 0.73'), false);
   assert.equal(isPathShaped('time: 12:34'), false);
   assert.equal(isPathShaped('policy: P0'), false);
 });
 
-test('K09: unit_type_counts only accepts CORE\'s closed type vocabulary, not an arbitrary project-specific prefix', async () => {
+test('unit_type_counts only accepts CORE\'s closed type vocabulary, not an arbitrary project-specific prefix', async () => {
   const { report } = await realReportAndSweep();
   const poisoned = { ...report, mix: { 'bblens': 12, decision: 3 } }; // a real project-id-prefix leak shape
   assert.throws(() => buildAggregateReceipt(poisoned), /REFUSED.*unit_type_counts/s);
 });
 
-// K09 re-audit (Hale, 2026-07-19): the prior version of this test hardcoded its
+// The prior version of this test hardcoded its
 // own copy of the type list, so it passed even after the source's own copy
 // silently omitted real types (open-question, premise) -- the test proved the
 // implementation agreed with itself, not with CORE's actual vocabulary. Fixed
 // by driving the positive case from the same VALID_TYPES import the source
 // now uses, so a future canonical type can never silently become unexportable
 // again without this test catching it.
-test('K09: unit_type_counts accepts every real closed-vocabulary type (driven from VALID_TYPES itself) plus "other"', async () => {
+test('unit_type_counts accepts every real closed-vocabulary type (driven from VALID_TYPES itself) plus "other"', async () => {
   const { report } = await realReportAndSweep();
   const mix = Object.fromEntries([...VALID_TYPES, 'other'].map(t => [t, 1]));
   const clean = { ...report, mix };
@@ -144,7 +144,7 @@ test('K09: unit_type_counts accepts every real closed-vocabulary type (driven fr
   for (const t of VALID_TYPES) assert.ok(t in receipt.corpus.unit_type_counts, `${t} must be exportable`);
 });
 
-test('K09: unitTypeMix derives from the real type field, not an id-prefix guess', async () => {
+test('unitTypeMix derives from the real type field, not an id-prefix guess', async () => {
   const { unitTypeMix } = await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
   const index = { units: [
     { id: 'bblens-refresh-defect', type: 'observation' },
@@ -155,7 +155,7 @@ test('K09: unitTypeMix derives from the real type field, not an id-prefix guess'
   assert.deepEqual(mix, { observation: 1, decision: 1, other: 1 }, 'project-specific id prefixes (bblens-, watches-) must never appear as mix keys');
 });
 
-test('A2 CLI: writes a receipt from a report file; refusal is exit 2', async () => {
+test('CLI: writes a receipt from a report file; refusal is exit 2', async () => {
   const { writeFileSync, mkdtempSync, rmSync, readFileSync: rf } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const dir = mkdtempSync(join(tmpdir(), 'a2-cli-'));
@@ -181,10 +181,10 @@ test('A2 CLI: writes a receipt from a report file; refusal is exit 2', async () 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ── Blocker 1 (Hale verdict 2026-07-14 §1): hostile-path battery + closed shapes ──
-// His exact reproductions: rung '/private/tmp/secret-project' accepted and emitted;
+// ── Blocker 1: hostile-path battery + closed shapes ──
+// The exact reproductions: rung '/private/tmp/secret-project' accepted and emitted;
 // direct construction emitted '/etc/shadow' and '/var/db/private'. Every form in
-// his required battery is a negative test here.
+// the required battery is a negative test here.
 
 async function cleanReportAndSweep() {
   const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
@@ -198,7 +198,7 @@ async function cleanReportAndSweep() {
   return { report, sweep };
 }
 
-test('blocker-1: Hale\'s exact repro — a path-shaped RUNG key refuses the export', async () => {
+test('a path-shaped RUNG key refuses the export', async () => {
   const { report } = await cleanReportAndSweep();
   const poisoned = JSON.parse(JSON.stringify(report));
   for (const r of Object.values(poisoned.results)) {
@@ -207,7 +207,7 @@ test('blocker-1: Hale\'s exact repro — a path-shaped RUNG key refuses the expo
   assert.throws(() => buildAggregateReceipt(poisoned), /REFUSED/);
 });
 
-test('blocker-1: path-shaped scalar fields refuse (sha slots cannot carry /etc/shadow or /var/db/private)', async () => {
+test('path-shaped scalar fields refuse (sha slots cannot carry /etc/shadow or /var/db/private)', async () => {
   const { report } = await cleanReportAndSweep();
   for (const poison of ['/etc/shadow', '/var/db/private']) {
     const p = JSON.parse(JSON.stringify(report));
@@ -216,7 +216,7 @@ test('blocker-1: path-shaped scalar fields refuse (sha slots cannot carry /etc/s
   }
 });
 
-test('blocker-1: the full hostile-path battery is path-shaped; benign receipt strings are not', () => {
+test('the full hostile-path battery is path-shaped; benign receipt strings are not', () => {
   const hostile = [
     '/private/tmp/secret-project', '/tmp/x', '/etc/shadow', '/var/db/private',
     '/Volumes/backup/store', '\\\\server\\share\\file', 'C:\\Users\\x', '~/projects/core',
@@ -227,7 +227,7 @@ test('blocker-1: the full hostile-path battery is path-shaped; benign receipt st
   for (const b of benign) assert.ok(!isPathShaped(b), `${b} must NOT read as path-shaped`);
 });
 
-test('blocker-1: path-shaped band and mix keys refuse via shape validation', async () => {
+test('path-shaped band and mix keys refuse via shape validation', async () => {
   const { report, sweep } = await cleanReportAndSweep();
   const badMix = JSON.parse(JSON.stringify(report));
   badMix.mix['/Volumes/exfil'] = 3;
@@ -237,7 +237,7 @@ test('blocker-1: path-shaped band and mix keys refuse via shape validation', asy
   assert.throws(() => buildAggregateReceipt(report, badSweep), /REFUSED/);
 });
 
-test('blocker-1: non-shape scalars refuse (a sentence in a version, a bogus policy, an out-of-range rate)', async () => {
+test('non-shape scalars refuse (a sentence in a version, a bogus policy, an out-of-range rate)', async () => {
   const { report, sweep } = await cleanReportAndSweep();
   const badVersion = JSON.parse(JSON.stringify(report));
   badVersion.manifest.plugin_version = 'not a version at all with spaces';
@@ -251,7 +251,7 @@ test('blocker-1: non-shape scalars refuse (a sentence in a version, a bogus poli
   assert.throws(() => buildAggregateReceipt(badRate), /mrr/);
 });
 
-test('blocker-1: a clean report + sweep still exports (shape validation is not a tautology)', async () => {
+test('a clean report + sweep still exports (shape validation is not a tautology)', async () => {
   const { report, sweep } = await cleanReportAndSweep();
   const receipt = buildAggregateReceipt(report, sweep);
   assert.ok(validateReceiptShape(receipt));

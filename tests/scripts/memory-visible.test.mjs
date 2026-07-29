@@ -19,7 +19,7 @@ function tool(name, input) { return line({ type: 'assistant', message: { role: '
 
 const OK = { token: 't', memoryWritten: true, memoryHasToken: true, transcriptAvailable: true };
 
-// --- resolveTranscript path mapping (Meridian's live Windows-box repro, 2026-07-20) ---
+// --- resolveTranscript path mapping (Windows drive-colon repro) ---
 // Was a hand-rolled `.replace(/\//g, '-')` -- missed the Windows drive colon entirely
 // and any dot, producing a mapped path that never matched the real Claude Code
 // projects folder, on top of a real cwd. Must use the canonical mapProjectPathToSlug.
@@ -84,7 +84,7 @@ test('write-canary: upgrades a legacy HTML-comment canary in place (no accumulat
   assert.ok(!c.includes('<!--'), 'legacy HTML comment fully removed');
 });
 
-test('M16: prose that mentions the canary tag survives a canary write (only the managed line is replaced)', () => {
+test('prose that mentions the canary tag survives a canary write (only the managed line is replaced)', () => {
   // A documentation line that explains the mechanism contains the tag literal but is NOT
   // the managed canary line. The old bare-tag strip deleted it; the anchored regex must not.
   const prose = 'The `' + CANARY_TAG + '` mechanism proves injected memory is in-context.';
@@ -110,24 +110,24 @@ test('write-canary: records side-file with token + memory_written; return is red
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-// --- classify (HC_623-hardened) ---
+// --- classify ---
 
 test('classify PASS: injected + echoed + no non-allowlisted pre-echo tool', () => {
   const events = [{ idx: 1, kind: 'echo' }, { idx: 2, kind: 'tool', name: 'Bash' }];
   assert.equal(classify({ ...OK, events }).identity_status, 'PASS');
 });
 
-test('classify DEGRADED (blocker 1): echo but memory_written=false → not PASS', () => {
+test('classify DEGRADED: echo but memory_written=false → not PASS', () => {
   const events = [{ idx: 1, kind: 'echo' }];
   assert.equal(classify({ ...OK, memoryWritten: false, events }).identity_status, 'DEGRADED');
 });
 
-test('classify DEGRADED (blocker 1): echo but token absent from memory file → not PASS', () => {
+test('classify DEGRADED: echo but token absent from memory file → not PASS', () => {
   const events = [{ idx: 1, kind: 'echo' }];
   assert.equal(classify({ ...OK, memoryHasToken: false, events }).identity_status, 'DEGRADED');
 });
 
-test('classify DEGRADED (blocker 1b): line-count exceeds injection window → truncation-detected, never PASS', () => {
+test('classify DEGRADED: line-count exceeds injection window → truncation-detected, never PASS', () => {
   const events = [{ idx: 1, kind: 'echo' }, { idx: 2, kind: 'tool', name: 'Bash' }];
   const r = classify({ ...OK, events, memoryLineCount: 250, injectionLineWindow: 200 });
   assert.equal(r.identity_status, 'DEGRADED');
@@ -139,11 +139,11 @@ test('classify PASS: line-count within injection window does not false-degrade',
   assert.equal(classify({ ...OK, events, memoryLineCount: 150, injectionLineWindow: 200 }).identity_status, 'PASS');
 });
 
-// --- Slice A: byte-window truncation (the live class line-count alone misses) ---
-// Field evidence (session 56, 2026-05-30): MEMORY.md was 196 lines / 25,684 bytes —
+// --- byte-window truncation (the live class line-count alone misses) ---
+// Field evidence from a live corpus: MEMORY.md was 196 lines / 25,684 bytes —
 // UNDER the 200-line window but OVER the ~24,400-byte injection cap. The tail dropped
 // silently ("only part of it was loaded") while a line-only probe would falsely PASS.
-// Defense-in-depth (Hale's call): keep the line window AND add the byte window.
+// Defense-in-depth: keep the line window AND add the byte window.
 test('classify DEGRADED (byte cap): byte-count over window with line-count UNDER window → truncation-detected', () => {
   const events = [{ idx: 1, kind: 'echo' }, { idx: 2, kind: 'tool', name: 'Bash' }];
   const r = classify({ ...OK, events, memoryLineCount: 196, injectionLineWindow: 200, memoryByteCount: 25684, injectionByteWindow: 24400 });
@@ -167,7 +167,7 @@ test('classify DEGRADED: transcript unavailable', () => {
   assert.equal(classify({ ...OK, transcriptAvailable: false, events: [] }).identity_status, 'DEGRADED');
 });
 
-// --- countLines trailing-newline boundary (HC blocker #3) ---
+// --- countLines trailing-newline boundary ---
 
 test('countLines: N real lines + trailing newline counts as N, not N+1', () => {
   const content = Array.from({ length: 200 }, (_, i) => `line${i + 1}`).join('\n') + '\n';
@@ -197,17 +197,17 @@ test('classify DEGRADED: no echo', () => {
   assert.equal(classify({ ...OK, events: [{ idx: 0, kind: 'tool', name: 'Skill' }] }).identity_status, 'DEGRADED');
 });
 
-test('classify DEGRADED (blocker 2): non-allowlisted Bash before echo → DEGRADED', () => {
+test('classify DEGRADED: non-allowlisted Bash before echo → DEGRADED', () => {
   const events = [{ idx: 0, kind: 'tool', name: 'Bash' }, { idx: 1, kind: 'echo' }];
   assert.equal(classify({ ...OK, events }).identity_status, 'DEGRADED');
 });
 
-test('classify PASS (blocker 2): allowlisted Skill before echo → still PASS', () => {
+test('classify PASS: allowlisted Skill before echo → still PASS', () => {
   const events = [{ idx: 0, kind: 'tool', name: 'Skill' }, { idx: 1, kind: 'echo' }];
   assert.equal(classify({ ...OK, events }).identity_status, 'PASS');
 });
 
-test('classify DEGRADED (blocker 2): pre-echo Read of unrelated path still degrades', () => {
+test('classify DEGRADED: pre-echo Read of unrelated path still degrades', () => {
   const events = [{ idx: 0, kind: 'tool', name: 'Read' }, { idx: 1, kind: 'echo' }];
   assert.equal(classify({ ...OK, events }).identity_status, 'DEGRADED');
 });
@@ -224,7 +224,7 @@ test('scanTranscript records the echo and every tool by name', () => {
   assert.deepEqual(ev.filter((e) => e.kind === 'tool').map((e) => e.name), ['Skill', 'Bash']);
 });
 
-test('H2: a user-role text block carrying the token is NOT an echo (only the agent echoes)', () => {
+test('a user-role text block carrying the token is NOT an echo (only the agent echoes)', () => {
   const userTxt = (text) => line({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
   // The injected MEMORY.md surfaces as a user-role block; it carries the token but is not
   // an agent echo. Before the role filter this falsely satisfied the probe.
@@ -233,7 +233,7 @@ test('H2: a user-role text block carrying the token is NOT an echo (only the age
   assert.equal(ev.find((e) => e.kind === 'echo').idx, 1, 'the echo is the assistant line, not the user line');
 });
 
-test('H2: a user-only transcript with the token produces no echo at all', () => {
+test('a user-only transcript with the token produces no echo at all', () => {
   const userTxt = (text) => line({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
   const ev = scanTranscript([userTxt('tok-x in injected context')], 'tok-x');
   assert.equal(ev.filter((e) => e.kind === 'echo').length, 0);
@@ -264,7 +264,7 @@ test('probe PASS end-to-end: canary in real MEMORY.md, echoed before any non-all
   });
 });
 
-test('probe DEGRADED (blocker 1): canary recorded but never written to MEMORY.md, even with echo', async () => {
+test('probe DEGRADED: canary recorded but never written to MEMORY.md, even with echo', async () => {
   await withHome(async (home) => {
     const cwd = '/work/Proj';
     // memoryPath points at a non-existent file → memory_written=false
@@ -285,10 +285,10 @@ test('probe NOT-YET when no canary side-file', async () => {
   });
 });
 
-// --- startup echo-ordering wire-in (HC_627): the doc represents the order, and the
+// --- startup echo-ordering wire-in: the doc represents the order, and the
 //     documented order satisfies the verifier ---
 
-test('SKILL.md documents the canary echo-first startup order (HC_627)', () => {
+test('SKILL.md documents the canary echo-first startup order', () => {
   const md = readFileSync(SKILL_MD, 'utf8');
   assert.match(md, /CORE-VISIBILITY-CANARY/, 'names the canary tag');
   assert.match(md, /VISIBILITY-CANARY-ECHO/, 'names the echo line format');
@@ -319,20 +319,20 @@ test('probe PASS for the documented startup order: Skill → echo → Read start
   });
 });
 
-test('MET-006: NOT-YET carries reason_code finalize-not-run when no canary side file exists', () => {
+test('NOT-YET carries reason_code finalize-not-run when no canary side file exists', () => {
   const r = classify({ token: null, canaryFileState: 'absent', memoryWritten: false, memoryHasToken: false, transcriptAvailable: false, events: [] });
   assert.equal(r.identity_status, 'NOT-YET');
   assert.equal(r.reason_code, 'finalize-not-run');
   assert.match(r.reason, /finalize/i, 'names the /finalize dependency, not a generic not-set-up');
 });
 
-test('MET-006: NOT-YET distinguishes an unreadable/token-less side file from never-run', () => {
+test('NOT-YET distinguishes an unreadable/token-less side file from never-run', () => {
   const r = classify({ token: null, canaryFileState: 'invalid', memoryWritten: false, memoryHasToken: false, transcriptAvailable: false, events: [] });
   assert.equal(r.identity_status, 'NOT-YET');
   assert.equal(r.reason_code, 'canary-file-invalid');
 });
 
-test('MET-006: probe row surfaces the reason_code when no side file exists', async () => {
+test('probe row surfaces the reason_code when no side file exists', async () => {
   const home = mkdtempSync(join(tmpdir(), 'mv-rc-'));
   try {
     const row = await probe({ home, cwd: '/no/such/project', workspaceId: 'mv-rc-ws' });

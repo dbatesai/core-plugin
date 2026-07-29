@@ -4,8 +4,8 @@ import { parseFlatFrontmatter } from '../../plugins/core/skills/core/scripts/fro
 import { parseFrontmatter } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
 test('parses top-level key: value pairs, strips quotes, returns [fm, body]', () => {
-  const [fm, body] = parseFlatFrontmatter('---\nid: dc-99\nstatus: "accepted"\n---\n\n# Title\nbody text\n');
-  assert.equal(fm.id, 'dc-99');
+  const [fm, body] = parseFlatFrontmatter('---\nid: dc-99-example\nstatus: "accepted"\n---\n\n# Title\nbody text\n');
+  assert.equal(fm.id, 'dc-99-example');
   assert.equal(fm.status, 'accepted', 'surrounding quotes stripped');
   assert.match(body, /^# Title/);
 });
@@ -35,14 +35,14 @@ test('null/undefined input is safe', () => {
   assert.deepEqual(parseFlatFrontmatter(undefined), [{}, '']);
 });
 
-// MEM-016: priority.mjs keeps its own (nested, coercing) parser beside this
+// priority.mjs keeps its own (nested, coercing) parser beside this
 // flat one ON PURPOSE — but nothing guaranteed the two stay in agreement on
 // the fields both handle. This guard parses representative unit shapes with
 // BOTH parsers and asserts the top-level scalars agree, so a YAML-handling
 // change to one parser that silently diverges the other fails the suite.
 const REPRESENTATIVE_UNITS = [
   // plain unit with nested topics + edges (flat parser drops the nests — fine)
-  '---\nid: dc-99-thing\ntype: decision\nstatus: active\ncreated: 2026-05-30\nupdated: 2026-06-01\ntopics:\n  - a\nedges:\n  - { type: cites, target: dc-1 }\n---\n\n# T\nbody\n',
+  '---\nid: dc-99-thing\ntype: decision\nstatus: active\ncreated: 2026-05-30\nupdated: 2026-06-01\ntopics:\n  - a\nedges:\n  - { type: cites, target: dc-1-alpha }\n---\n\n# T\nbody\n',
   // CRLF + quoted value (Windows/OneDrive-authored)
   '---\r\nid: r-9\r\ntype: risk\r\nstatus: "accepted"\r\ncreated: 2026-01-02\r\nupdated: 2026-01-03\r\n---\r\nbody\r\n',
   // comment line + flow-style topics (flat keeps the raw string; scalar fields still agree)
@@ -50,7 +50,7 @@ const REPRESENTATIVE_UNITS = [
 ];
 const CONFORMANT_SCALARS = ['id', 'type', 'status', 'created', 'updated'];
 
-test('MEM-016: both parsers agree on top-level scalar fields across representative units', () => {
+test('both parsers agree on top-level scalar fields across representative units', () => {
   for (const text of REPRESENTATIVE_UNITS) {
     const [flat] = parseFlatFrontmatter(text);
     const [canon] = parseFrontmatter(text);

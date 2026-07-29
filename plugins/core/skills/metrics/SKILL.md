@@ -14,7 +14,7 @@ allowed-tools:
 
 The point: someone runs it and can **confidently say what's proven and what isn't** in ten seconds of reading. Every number was measured mechanically or carries a label saying exactly how much to trust it. Never soften a failure; never let a proxy dress up as proof.
 
-**One door, four modes (v3.14.0, the single-door ruling):** the plain `/metrics` default answers the three outcome questions from stored conclusions; `full` opens the instrument panel; `export` produces the anonymized shareable package; `self-test` runs a deliberate blind test round now. The old `/self-test` and `/metrics-package` commands are gone; their work runs as the modes here.
+**One door, four modes:** the plain `/metrics` default answers the three outcome questions from stored conclusions; `full` opens the instrument panel; `export` produces the anonymized shareable package; `self-test` runs a deliberate blind test round now. The old `/self-test` and `/metrics-package` commands are gone; their work runs as the modes here.
 
 **Script path resolution (all modes).** Take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/metrics/SKILL.md` — that prefix is the plugin root (`CORE_ROOT`). Reuse the `CORE_ROOT` startup already resolved this session if you have it. If you cannot resolve a concrete root, say so plainly and stop — never run `node` against a guessed path.
 

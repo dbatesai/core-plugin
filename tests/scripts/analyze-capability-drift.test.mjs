@@ -99,7 +99,7 @@ test('attributeDrift: no evidence change → low confidence', () => {
   assert.equal(a.confidence, 'low');
 });
 
-test('attributeDrift: always a hypothesis, never asserted fact (HC bar)', () => {
+test('attributeDrift: always a hypothesis, never asserted fact', () => {
   const a = attributeDrift({ evidence: [] }, { evidence: [{ source: 'new' }] });
   assert.ok('hypothesis' in a && 'confidence' in a, 'must carry hypothesis + confidence');
   assert.ok(['low', 'med', 'high'].includes(a.confidence));
@@ -133,7 +133,7 @@ test('detectRegression: single session → no regression possible', () => {
   assert.equal(detectRegression(history).length, 0);
 });
 
-test('M14: untagged rows do not form a pseudo-session that fabricates a regression', () => {
+test('untagged rows do not form a pseudo-session that fabricates a regression', () => {
   const history = [
     entry('a', 'PASS', '2026-01-01T00:00:00Z', 's1'),
     entry('b', 'PASS', '2026-01-01T00:00:01Z', 's1'),
@@ -146,7 +146,7 @@ test('M14: untagged rows do not form a pseudo-session that fabricates a regressi
   assert.equal(detectRegression(history).length, 0, 'untagged rows must not delimit a session');
 });
 
-test('M14: countUntaggedSessions surfaces how many rows were skipped (no silent drop)', () => {
+test('countUntaggedSessions surfaces how many rows were skipped (no silent drop)', () => {
   const history = [
     entry('a', 'PASS', '2026-01-01T00:00:00Z', 's1'),
     entry('a', 'PASS', '2026-01-02T00:00:00Z', null),
@@ -203,7 +203,7 @@ test('loadCapabilityHistory: includes project-local fallback rows', () => {
   }
 });
 
-test('M14: loadCapabilityHistory dedups the same observation present in both stores', () => {
+test('loadCapabilityHistory dedups the same observation present in both stores', () => {
   const home = mkdtempSync(join(tmpdir(), 'capdrift-home-'));
   const project = mkdtempSync(join(tmpdir(), 'capdrift-project-'));
   try {

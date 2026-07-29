@@ -4,10 +4,10 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Hale's C/D PR-hardening ask: the adapter modernization (Slices C+D) is prose, so a
+// The adapter modernization (Slices C+D) is prose, so a
 // regression here is silent. These guards assert the load-bearing mappings stay present
 // — they catch an accidental revert of the Workflow/Teams split, the ScheduleWakeup
-// dynamic-cadence answer, or the Codex schedule drop (the DC-75 parity boundary).
+// dynamic-cadence answer, or the Codex schedule drop (the cross-harness parity boundary).
 const HARNESSES = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', 'skills', 'core', 'harnesses');
 const BASE = join(HARNESSES, '..');
 const claudeMd = readFileSync(join(HARNESSES, 'claude-code.md'), 'utf8');
@@ -44,12 +44,12 @@ test('claude-code.md spawn-subagent offers worktree isolation + a subagent_type 
   assert.ok(s.includes('Explore'), 'subagent_type catalog present');
 });
 
-test('codex.md preserves the schedule DROP (DC-75 parity boundary)', () => {
+test('codex.md preserves the schedule DROP (cross-harness parity boundary)', () => {
   const s = section(codexMd, 'schedule');
   assert.ok(/DROP/i.test(s), 'Codex schedule remains a documented drop');
 });
 
-test('harness.md defines the drop-handling runtime contract (SYN-017)', () => {
+test('harness.md defines the drop-handling runtime contract', () => {
   const s = readFileSync(join(BASE, 'protocols', 'harness.md'), 'utf8');
   assert.match(s, /## Drop handling/, 'drop-handling section exists');
   assert.match(s, /once per session/i, 'once-per-session surfacing rule named');

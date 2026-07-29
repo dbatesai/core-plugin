@@ -82,7 +82,7 @@ test('hashTree records a sha256 per relative path', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('AUD-106: a pre-existing extra file in the destination fails the move; staging is retained', async () => {
+test('a pre-existing extra file in the destination fails the move; staging is retained', async () => {
   const { moveStagingToFolder } = await import('../../plugins/core/skills/core/scripts/metrics-package.mjs');
   const root = mkdtempSync(join(tmpdir(), 'move-extras-'));
   try {

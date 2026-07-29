@@ -382,13 +382,13 @@ node "${CORE_ROOT}/skills/core/scripts/check-context-integrity.mjs" \
   --project <project>/PROJECT.md --project-read-lines <lines-read> || true
 ```
 
-**Per-turn retrieval (Gate G2 resolved: default-ON, opt-out).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`, title ∪ body-BM25 over the recursive path-bearing index, one-hop edge expansion) over the incoming prompt and injects the top matches. It is **registered in the plugin manifest** (`hooks/hooks.json`, UserPromptSubmit) and ships **default-on**; opt out with `CORE_RETRIEVAL_HOOK=0` (mirrors the metrics opt-out). Known limit: lexical matching can inject a topical-but-irrelevant unit on an abstract query — bounded (byte-capped, advisory, fail-open).
+**Per-turn retrieval (default-ON, opt-out).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`, title ∪ body-BM25 over the recursive path-bearing index, one-hop edge expansion) over the incoming prompt and injects the top matches. It is **registered in the plugin manifest** (`hooks/hooks.json`, UserPromptSubmit) and ships **default-on**; opt out with `CORE_RETRIEVAL_HOOK=0` (mirrors the metrics opt-out). Known limit: lexical matching can inject a topical-but-irrelevant unit on an abstract query — bounded (byte-capped, advisory, fail-open).
 
 Read the output. When **any row is non-PASS**, narrate in plain voice:
 
 > *"Continuing with degraded capability evidence. plugin-root-resolution: DEGRADED (harness split-brain). Identity is best-effort this session."*
 
-Use **"continuing with degraded capability evidence"** verbatim per HC — not "ready," not "certified." When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
+Use the phrase **"continuing with degraded capability evidence"** verbatim — not "ready," not "certified." When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
 
 If `$CORE_ROOT` was not resolved (script unavailable), skip the capability probe silently — the probe itself is best-effort at startup, never a blocker.
 

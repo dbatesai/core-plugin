@@ -39,7 +39,7 @@ function makeProject(root) {
   mkdirSync(store, { recursive: true });
   writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'export-allowlist-ws' }));
   writeFileSync(join(project, 'PROJECT.md'), '# P\n');
-  writeFileSync(join(store, 'dc-1.md'), '---\nid: dc-1\ntype: decision\nstatus: active\ncreated: 2026-06-01\nedges:\n  - {to: risk-1, type: cites}\n---\n\nBody.\n');
+  writeFileSync(join(store, 'dc-1-alpha.md'), '---\nid: dc-1-alpha\ntype: decision\nstatus: active\ncreated: 2026-06-01\nedges:\n  - {to: risk-1, type: cites}\n---\n\nBody.\n');
   writeFileSync(join(store, 'risk-1.md'), '---\nid: risk-1\ntype: risk\nstatus: active\ncreated: 2026-06-02\n---\n\nBody.\n');
   return project;
 }
@@ -95,7 +95,7 @@ test('a nested overlay field on a captured retrieval row never reaches the expor
       kind: 'retrieval',
       retrieval_id: 'r-1',
       tier_reached: 1,
-      units_retrieved: [{ id: 'dc-1' }],
+      units_retrieved: [{ id: 'dc-1-alpha' }],
       note: { password: SECRET },
       trace: { nested: { deeper: [{ leaked: SECRET }] } },
     });

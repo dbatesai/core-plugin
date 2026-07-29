@@ -1,7 +1,7 @@
 /**
- * close-process-request.test.mjs — reachability of the automatic close (RC-01 … RC-05).
+ * close-process-request.test.mjs — reachability of the automatic close.
  *
- * Hale's HOLD (2026-07-27, finalize-refocus-slices-1-4-reachability-hold): the SessionEnd
+ * The reachability gap this closes: the SessionEnd
  * hook enqueues `close-pass.mjs process-request <store> --session <id>`, but no CLI case
  * ever existed for `process-request` — direct reproduction exits 2, "unknown subcommand".
  * Every prior RED for this redesign exercised the underlying functions directly
@@ -50,7 +50,7 @@ function runDecisionArgv(decision) {
   return spawnSync(process.execPath, decision.args, { encoding: 'utf8' });
 }
 
-test('RC-01 [oracle 1] the real hook argv, run through the real subprocess boundary, certifies a closed receipt', () => {
+test('[oracle 1] the real hook argv, run through the real subprocess boundary, certifies a closed receipt', () => {
   const store = freshStore();
   try {
     const transcriptPath = fixtureTranscript(store);
@@ -77,7 +77,7 @@ test('RC-01 [oracle 1] the real hook argv, run through the real subprocess bound
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('RC-02 [oracle 2] the identical argv run twice for the same session does not duplicate work', () => {
+test('[oracle 2] the identical argv run twice for the same session does not duplicate work', () => {
   const store = freshStore();
   try {
     const transcriptPath = fixtureTranscript(store);
@@ -94,7 +94,7 @@ test('RC-02 [oracle 2] the identical argv run twice for the same session does no
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('RC-03 [oracle 3] a distinct session is still processed after another session closed', () => {
+test('[oracle 3] a distinct session is still processed after another session closed', () => {
   const store = freshStore();
   try {
     const transcriptPath = fixtureTranscript(store);
@@ -117,7 +117,7 @@ test('RC-03 [oracle 3] a distinct session is still processed after another sessi
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('RC-04 [oracle 4] no usable transcript records partial coverage and stays owed, never falsely closed', () => {
+test('[oracle 4] no usable transcript records partial coverage and stays owed, never falsely closed', () => {
   const store = freshStore();
   try {
     // No transcript_path on the payload at all — the harness genuinely has none to offer.
@@ -135,7 +135,7 @@ test('RC-04 [oracle 4] no usable transcript records partial coverage and stays o
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-test('RC-05 process-request without --session is a CLI usage error, not a silent no-op', () => {
+test('process-request without --session is a CLI usage error, not a silent no-op', () => {
   const store = freshStore();
   try {
     const runner = join(dirname(fileURLToPath(import.meta.url)), '..', '..',

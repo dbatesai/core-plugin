@@ -2,7 +2,7 @@
  * trusted-test-tmp.mjs — shared root for hostile-env-var isolation tests.
  *
  * Once CORE_HOOKS_LOG_FILE/CORE_RETRIEVAL_STORE/CORE_CLOSE_STORE only honor
- * overrides that resolve inside the trusted ~/.core (D1 fix, mirroring
+ * overrides that resolve inside the trusted ~/.core (mirroring
  * resolveIndexPath's CORE_CLOSE_INDEX gate), test fixtures that redirect any
  * of them for isolation have to live there too — os.tmpdir() no longer
  * qualifies. Not auto-cleaned by the OS the way os.tmpdir() is, so callers
@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto';
  * Windows without Developer Mode or admin lacks SeCreateSymbolicLinkPrivilege,
  * so fs.symlinkSync throws EPERM for a normal process — symlink-fixture tests
  * then hard-fail in SETUP without exercising the product logic at all
- * (Meridian's Windows full-suite finding, 2026-07-23). Probe once per process;
+ * (a Windows full-suite finding). Probe once per process;
  * symlink-dependent tests call this and skip cleanly when it's false.
  * GitHub's windows-latest runners have the privilege, so CI still exercises
  * the real assertions everywhere they can run.

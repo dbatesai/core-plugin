@@ -101,7 +101,7 @@ export function todayUtc(now = new Date()) {
 
 // ---------- supersession classification (shared by writer + metrics) ----------
 
-// Shared terminal-status contract (SYN-005): one definition in unit-vocab.mjs.
+// Shared terminal-status contract: one definition in unit-vocab.mjs.
 export { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 
@@ -274,7 +274,7 @@ export function storageMetrics(units, today) {
   // would predate the target's own t_valid — surfaced, never stamped).
   const { loose: looseEdges, conflicts } = classifySupersessions(units);
 
-  // SYN-006 consistency signal: a unit already terminal by status but with no
+  // Consistency signal: a unit already terminal by status but with no
   // t_invalid and no incoming supersedes/supersedes-claim edge can NEVER be
   // stamped by the conservative writer — its t_invalid needs manual population
   // (or the missing supersedes edge). Surfaced, never auto-stamped.

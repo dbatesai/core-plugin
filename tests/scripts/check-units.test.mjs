@@ -45,33 +45,33 @@ function unit({
   ].filter(line => line !== '').join('\n');
 }
 
-test('DC-94a: warns on active decision with <3 edges', () => {
+test('link-density: warns on active decision with <3 edges', () => {
   const report = checkLinkDensity([{ id: 'dc-x', type: 'decision', status: 'active', edges: [{ type: 'cites', target: 'dc-y' }] }]);
   assert.ok(report.some(r => r.check === 'link-density' && r.unit_id === 'dc-x'));
 });
 
-test('DC-94a: does not warn on observations', () => {
+test('link-density: does not warn on observations', () => {
   const report = checkLinkDensity([{ id: 'obs-x', type: 'observation', status: 'active', edges: [] }]);
   assert.ok(!report.some(r => r.check === 'link-density'));
 });
 
-test('DC-94a: does not warn on a well-linked unit (>=3 edges)', () => {
+test('link-density: does not warn on a well-linked unit (>=3 edges)', () => {
   const report = checkLinkDensity([{ id: 'dc-z', type: 'decision', status: 'active', edges: [{ type: 'cites', target: 'a' }, { type: 'depends-on', target: 'b' }, { type: 'refines', target: 'c' }] }]);
   assert.ok(!report.some(r => r.check === 'link-density'));
 });
 
-test('DC-94a: does not warn on a retired under-linked unit (only active units)', () => {
+test('link-density: does not warn on a retired under-linked unit (only active units)', () => {
   const report = checkLinkDensity([{ id: 'dc-old', type: 'decision', status: 'retired', edges: [] }]);
   assert.ok(!report.some(r => r.check === 'link-density'));
 });
 
-test('DC-94a: link-density is a benign WARN (does not degrade exit code)', () => {
+test('link-density is a benign WARN (does not degrade exit code)', () => {
   assert.ok(BENIGN_WARN_CHECKS.has('link-density'));
   const report = checkLinkDensity([{ id: 'dc-x', type: 'decision', status: 'active', edges: [] }]);
   assert.equal(exitCode(report), 0, 'an under-linked unit warns but does not block');
 });
 
-test('H3: --schema and --integrity together run BOTH checks (additive, not last-wins)', () => {
+test('--schema and --integrity together run BOTH checks (additive, not last-wins)', () => {
   // The old parser set mode= on each flag, so `--schema --integrity` silently
   // resolved to integrity-only and the schema check never fired — exactly what
   // /finalize was unknowingly doing. Flags are additive now.
@@ -81,7 +81,7 @@ test('H3: --schema and --integrity together run BOTH checks (additive, not last-
   assert.equal(both.mode, 'all', 'label resolves to all');
 });
 
-test('H3: single flags and --mode still resolve as before (back-compat)', () => {
+test('single flags and --mode still resolve as before (back-compat)', () => {
   assert.deepEqual(resolveChecks(['--schema']), { schema: true, integrity: false, mode: 'schema' });
   assert.deepEqual(resolveChecks(['--integrity']), { schema: false, integrity: true, mode: 'integrity' });
   assert.deepEqual(resolveChecks(['--mode', 'schema']), { schema: true, integrity: false, mode: 'schema' });
@@ -148,7 +148,7 @@ test('checkIntegrity: edge targets resolve for ordinary real units', () => withS
 
 // --- Track A: validator fixes (Codex co-existence workstream, 2026-06-01) ---
 
-test('A1: flow-style YAML topics array does NOT trigger topics-format warning', () => withStore((memories) => {
+test('flow-style YAML topics array does NOT trigger topics-format warning', () => withStore((memories) => {
   // Inline array form — valid YAML, was being parsed as a scalar string.
   writeFileSync(join(memories, 'flow.md'), [
     '---', 'id: flow', 'type: decision', 'status: active',
@@ -164,7 +164,7 @@ test('A1: flow-style YAML topics array does NOT trigger topics-format warning', 
   assert.equal(topicsWarn.length, 0, 'flow-style array must parse as a list');
 }));
 
-test('A2: references-topic edge to vocabulary is NOT a dangling-edge', () => withStore((memories) => {
+test('references-topic edge to vocabulary is NOT a dangling-edge', () => withStore((memories) => {
   writeFileSync(join(memories, 'has-topic-edge.md'), unit({
     id: 'has-topic-edge',
     edges: 'edges:\n  - {type: references-topic, target: memory-boundary}\n  - {type: cites, target: real-target}',
@@ -216,7 +216,7 @@ test('citation- and path-shaped edge targets are external-ref, not dangling-edge
 test('isExternalRef discriminates external refs from genuine unit ids', () => {
   assert.equal(isExternalRef('feedback_state_is_current_truth'), true);
   assert.equal(isExternalRef('project_bblens_tmobile_wrapper'), true);
-  assert.equal(isExternalRef('reference_keel_handoff_channels'), true);
+  assert.equal(isExternalRef('reference_vendor_handoff_channels'), true);
   assert.equal(isExternalRef('MemoryBank (arxiv.org/abs/2305.10250)'), true);
   assert.equal(isExternalRef('core-skill/skills/core/scripts/README.md'), true);
   // genuine unit-id shapes must NOT be masked — these still dangle if missing
@@ -279,7 +279,7 @@ test('relates flags edge-unknown-type and names its normalize target', () => wit
   assert.equal(EDGE_TYPE_NORMALIZE['relates'], 'cites');
 }));
 
-test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail (2)', () => {
+test('exit-code tiers — benign warnings pass (0), degraded warn (1), fail (2)', () => {
   // Orphan/stale only → pass-with-warnings → 0 (must not block startup).
   assert.equal(exitCode([
     { level: 'WARN', check: 'orphan' },
@@ -296,7 +296,7 @@ test('A3: exit-code tiers — benign warnings pass (0), degraded warn (1), fail 
   assert.equal(exitCode([]), 0);
 });
 
-test('SYN-005: unknown confidence-level and stability-class values WARN', () => withStore((memories) => {
+test('unknown confidence-level and stability-class values WARN', () => withStore((memories) => {
   writeFileSync(join(memories, 'annotated.md'), [
     '---', 'id: annotated', 'type: observation', 'status: active',
     'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
@@ -312,7 +312,7 @@ test('SYN-005: unknown confidence-level and stability-class values WARN', () => 
   assert.ok(report.some(f => f.check === 'stability-class-value'), 'garbage must WARN');
 }));
 
-test('SYN-005: schema confidence-level and stability-class values pass clean', () => withStore((memories) => {
+test('schema confidence-level and stability-class values pass clean', () => withStore((memories) => {
   writeFileSync(join(memories, 'clean.md'), [
     '---', 'id: clean', 'type: observation', 'status: active',
     'created: 2026-05-30', 'updated: 2026-05-30', 'topics: [tests]',
@@ -328,7 +328,7 @@ test('SYN-005: schema confidence-level and stability-class values pass clean', (
   assert.equal(report.some(f => f.check === 'stability-class-value'), false);
 }));
 
-test('SYN-005 follow-up: legacy annotation WARNs are benign-class — store exits 0, not degraded', () => withStore((memories) => {
+test('legacy annotation WARNs are benign-class — store exits 0, not degraded', () => withStore((memories) => {
   // Pre-framework annotations like confidence-level: high / stability-class: stable
   // get WARN-level visibility but must NOT degrade an otherwise-healthy store.
   writeFileSync(join(memories, 'legacy.md'), [
@@ -349,7 +349,7 @@ test('SYN-005 follow-up: legacy annotation WARNs are benign-class — store exit
   assert.equal(exitCode(report), 0, 'legacy annotations alone must not degrade the store');
 }));
 
-test('SYN-007: observation-subdir units are audited only with includeObservations', () => withStore((memories) => {
+test('observation-subdir units are audited only with includeObservations', () => withStore((memories) => {
   const obsDir = join(memories, 'observations', '2026-05');
   mkdirSync(obsDir, { recursive: true });
   writeFileSync(join(obsDir, 'obs-thing-2026-05-20.md'), [
@@ -369,9 +369,9 @@ test('SYN-007: observation-subdir units are audited only with includeObservation
     'the full-store audit reaches the observation and flags its bogus status');
 }));
 
-// ---------- D7 / MEM-018: sources-missing provenance advisory ----------
+// ---------- sources-missing provenance advisory ----------
 
-test('MEM-018: an aged active non-observation unit with no sources WARNs sources-missing (benign)', () => withStore((memories) => {
+test('an aged active non-observation unit with no sources WARNs sources-missing (benign)', () => withStore((memories) => {
   writeFileSync(join(memories, 'aged.md'), [
     '---', 'id: aged', 'type: decision', 'status: active',
     'created: 2026-01-01', 'updated: 2026-01-01', 'topics: [tests]',
@@ -413,7 +413,7 @@ test('scalar sources string WARNs sources-not-list (benign)', () => withStore((m
   assert.equal(exitCode(report), 0, 'a scalar sources field alone must not degrade the store');
 }));
 
-test('MEM-018: fresh units and observations are exempt from sources-missing', () => withStore((memories) => {
+test('fresh units and observations are exempt from sources-missing', () => withStore((memories) => {
   writeFileSync(join(memories, 'fresh.md'), unit({ id: 'fresh' })); // created 2026-05-30, today below makes it 10d old
   writeFileSync(join(memories, 'obs-young.md'), unit({ id: 'obs-young', type: 'observation' }));
 
@@ -423,7 +423,7 @@ test('MEM-018: fresh units and observations are exempt from sources-missing', ()
   assert.equal(report.some(f => f.check === 'sources-missing'), false);
 }));
 
-test('archived-in-active: WARNs on canonical archived metadata (archived: true) left top-level (Hale\'s 2026-07-22 finding)', () => withStore((memories) => {
+test('archived-in-active: WARNs on canonical archived metadata (archived: true) left top-level', () => withStore((memories) => {
   writeFileSync(join(memories, 'risk-1-canonical.md'), [
     '---', 'id: risk-1-canonical', 'type: risk', 'status: active',
     'archived: true', 'archived_at: 2026-05-30',
@@ -452,7 +452,7 @@ test('archived-in-active: does NOT fire for a plain top-level status=retired uni
     'a retired-but-not-archived unit is the documented, expected shape -- must not WARN');
 }));
 
-test("archived-in-active: an unrelated ancestor directory literally named 'archive' does not suppress the warning (Hale's 2026-07-22 finding)", () => {
+test("archived-in-active: an unrelated ancestor directory literally named 'archive' does not suppress the warning", () => {
   // The project itself sits under .../archive/<project>/ -- nothing to do
   // with this store's own _memories/archive/ subdirectory. A full-path
   // segment scan would false-positive here; only the immediate parent of
@@ -477,9 +477,9 @@ test("archived-in-active: an unrelated ancestor directory literally named 'archi
   } finally { rmSync(parent, { recursive: true, force: true }); }
 });
 
-// ---------- D8 / MEM-008 + MEM-014: empty required fields FAIL, oversize WARNs ----------
+// ---------- empty required fields FAIL, oversize WARNs ----------
 
-test('MEM-008: a present-but-empty required field FAILs (type: with blank value)', () => withStore((memories) => {
+test('a present-but-empty required field FAILs (type: with blank value)', () => withStore((memories) => {
   // `type: ` parses to an empty list (the parser treats a blank value as a
   // list opener), which passed both the key-presence check and the truthiness-
   // guarded value check.
@@ -496,7 +496,7 @@ test('MEM-008: a present-but-empty required field FAILs (type: with blank value)
     'blank type must FAIL, not pass silently');
 }));
 
-test('MEM-014: an oversized unit WARNs unit-oversize (benign)', () => withStore((memories) => {
+test('an oversized unit WARNs unit-oversize (benign)', () => withStore((memories) => {
   writeFileSync(join(memories, 'big.md'), unit({ id: 'big', body: '# big\n\n' + 'x'.repeat(11_000) }));
   writeFileSync(join(memories, 'small.md'), unit({ id: 'small' }));
 

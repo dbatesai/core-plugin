@@ -72,7 +72,7 @@ test('IMPACT_VERSION is exported', () => {
   assert.equal(typeof IMPACT_VERSION, 'string');
 });
 
-test('SYN-006: refines puts the refining unit downstream of its target', () => {
+test('refines puts the refining unit downstream of its target', () => {
   const units = [
     unit('a', { edges: [{ type: 'refines', target: 'b' }] }), // a refines b
   ];
@@ -80,7 +80,7 @@ test('SYN-006: refines puts the refining unit downstream of its target', () => {
   assert.ok(affects.get('b')?.has('a'), 'a change to b affects its refinement a');
 });
 
-test('SYN-006: amends puts the amending unit downstream of its target', () => {
+test('amends puts the amending unit downstream of its target', () => {
   const units = [
     unit('a', { edges: [{ type: 'amends', target: 'b' }] }),
   ];
@@ -88,7 +88,7 @@ test('SYN-006: amends puts the amending unit downstream of its target', () => {
   assert.ok(affects.get('b')?.has('a'), 'a change to b affects its amendment a');
 });
 
-test('SYN-006: a refining dependent of an invalidated unit surfaces as a review candidate', () => {
+test('a refining dependent of an invalidated unit surfaces as a review candidate', () => {
   const today = new Date(Date.UTC(2026, 5, 9));
   const units = [
     unit('dc-old', { status: 'retired', created: '2026-01-01', t_invalid: '2026-03-01' }),

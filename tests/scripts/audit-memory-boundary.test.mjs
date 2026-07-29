@@ -87,7 +87,7 @@ test('audit: empty native surface → clean, zero candidates', () => {
   assert.equal(r.stats.nativeTotal, 0);
 });
 
-// --- mappedNativePath: canonical slug for the default MEMORY.md location (M2) ---
+// --- mappedNativePath: canonical slug for the default MEMORY.md location ---
 
 test('mappedNativePath: dotted username maps dots→dashes (matches Claude projects folder)', () => {
   // The default native surface is ~/.claude/projects/<slug>/memory/MEMORY.md.
@@ -99,7 +99,7 @@ test('mappedNativePath: dotted username maps dots→dashes (matches Claude proje
   );
 });
 
-test('MET-009: the report self-declares its current-project-only scope', () => {
+test('the report self-declares its current-project-only scope', () => {
   const report = auditMemoryBoundary({ nativeEntries: [], coreTerms: new Set(), coreText: '' });
   assert.match(report.scope, /current project only/i);
   assert.match(report.scope, /cross-project/i, 'names what it does NOT detect');

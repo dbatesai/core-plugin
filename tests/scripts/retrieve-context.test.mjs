@@ -22,7 +22,7 @@ test('lexical surfaces the literal-match want (rung 1)', () => {
     'a literal keyword overlap must surface the matching want');
 });
 
-test('lexical MISSES the value rung (documents the A5 gap reasoning closes)', () => {
+test('lexical MISSES the value rung (documents the gap reasoning closes)', () => {
   const hits = retrieveContext('zenith el primero on sale', FIXT, { topN: 5 });
   assert.ok(!hits.some(h => h.id === 'values-heritage'),
     'lexical cannot bridge heritage→El Primero — this is the gap the reasoning prototype must close');
@@ -50,14 +50,14 @@ test('deterministic — same query yields the same ordered ids', () => {
   assert.deepEqual(a, b);
 });
 
-// ---------- CLI main(): unrecognized-flag garbage query (Meridian, live Windows box, 2026-07-20) ----------
+// ---------- CLI main(): unrecognized-flag garbage query (live Windows box) ----------
 //
 // A fat-fingered `--query "..."` used to fall straight through the old arg filter
 // (which only stripped --top/--pack) into the positional slot, so the literal
 // string "--query" became the query text and the tool silently returned a
 // confident top result for garbage input -- no error, no abstention signal. Since
 // this CLI must invoke the exact same function agents/harnesses use to probe
-// delivered bytes (Train A A4), a silently-corrupted query here is a
+// delivered bytes, a silently-corrupted query here is a
 // silently-corrupted measurement anywhere the CLI is used that way.
 
 function captured(stream, fn) {

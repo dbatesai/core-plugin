@@ -48,7 +48,7 @@ function store() {
 }
 
 // Each reader: name -> function returning the set of surfaced unit ids for the store.
-// v3.11 enrollment (Hale 2026-07-11 §4): EVERY public retrieval entry point is here —
+// v3.11 enrollment: EVERY public retrieval entry point is here —
 // the standalone bm25 arm, the lexical/product ranked-id arms, and the reasoning-tier
 // shortlist all read the store and must hold the same two invariants. The stale-cache
 // variant seeds a cache while a unit is active, then mutates — the case the shared

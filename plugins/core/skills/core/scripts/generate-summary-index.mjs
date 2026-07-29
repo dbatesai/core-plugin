@@ -148,7 +148,7 @@ export function loadFreshIndex(storePath) {
   if (existsSync(indexPath)) {
     try {
       const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
-      // K04: source_sig is a pure content hash — it only changes
+      // source_sig is a pure content hash — it only changes
       // when file BYTES change, so a unit valid at generation time but past its
       // own t_invalid date now would keep serving from cache forever if nothing
       // else in the store happens to be edited. next_invalidation_at is the
@@ -295,7 +295,7 @@ function authorityTier(fm, rel) {
 export function captureStore(storePath, { retainRaw = false } = {}) {
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
-  let nextInvalidationAt = null; // K04: earliest still-future t_invalid among included candidates
+  let nextInvalidationAt = null; // earliest still-future t_invalid among included candidates
 
   // ONE read per file.
   const raws = [];
@@ -332,7 +332,7 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     // check alone would admit a `status: active` unit with a past t_invalid,
     // leaking it into per-turn retrieval (the read path this index feeds).
     if (isInvalidated({ id, fm, body }, now)) continue;
-    // K04: the cache staleness check in loadFreshIndex
+    // The cache staleness check in loadFreshIndex
     // is byte-only (source_sig, a content hash) — it never re-fires just because
     // calendar time passed, so a unit included here as valid (t_invalid in the
     // future) silently keeps serving as valid past its own t_invalid date if no
@@ -377,7 +377,7 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     count: units.length,
     generated: '',
     source_sig,
-    next_invalidation_at: nextInvalidationAt, // K04: forces a regenerate at this date even if bytes are unchanged
+    next_invalidation_at: nextInvalidationAt, // forces a regenerate at this date even if bytes are unchanged
     degraded: conflicts.length > 0,
     duplicate_conflicts: conflicts,
     units,

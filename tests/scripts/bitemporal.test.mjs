@@ -51,11 +51,11 @@ test('effectiveValidity uses explicit t_valid over created (world-time divergenc
 });
 
 // ============================================================
-// M5: the stamp-writer honors the t_valid <= t_invalid invariant
+// The stamp-writer honors the t_valid <= t_invalid invariant
 // (the validator in check-units enforces it; the writer must not create it)
 // ============================================================
 
-test('planSupersessionStamps refuses a t_invalid earlier than the target t_valid (M5)', () => {
+test('planSupersessionStamps refuses a t_invalid earlier than the target t_valid', () => {
   // Target A is terminal with an explicit world-time t_valid LATER than the
   // superseder B's t_valid. Stamping A.t_invalid = B.t_valid would make
   // A.t_invalid < A.t_valid — valid-nowhere — so the writer must refuse.
@@ -64,7 +64,7 @@ test('planSupersessionStamps refuses a t_invalid earlier than the target t_valid
   assert.deepEqual(planSupersessionStamps([a, b]), [], 'no invariant-violating stamp planned');
 });
 
-test('classifySupersessions surfaces the invariant-violating supersession as a conflict, not a silent confirm (M5)', () => {
+test('classifySupersessions surfaces the invariant-violating supersession as a conflict, not a silent confirm', () => {
   const a = unit({ id: 'dc-a', status: 'retired', created: '2026-03-01', t_valid: '2026-03-01' });
   const b = unit({ id: 'dc-b', created: '2026-01-01', edges: [{ type: 'supersedes', target: 'dc-a' }] });
   const { confirmed, conflicts } = classifySupersessions([a, b]);
@@ -185,7 +185,7 @@ test('setFrontmatterField leaves text without frontmatter untouched', () => {
   assert.equal(setFrontmatterField('no frontmatter here', 't_invalid', '2026-01-01'), 'no frontmatter here');
 });
 
-test('H2: setFrontmatterField stamps a CRLF-authored unit (Windows/OneDrive), not silently skips it', () => {
+test('setFrontmatterField stamps a CRLF-authored unit (Windows/OneDrive), not silently skips it', () => {
   // A CRLF unit opens with `---\r\n`; an LF-only fence regex returns the text
   // unchanged, the caller sees next===text, the write is skipped, and the
   // superseded unit stays "valid forever". Mirror the sibling readers' CRLF normalize.
@@ -228,16 +228,15 @@ test('asOf returns the set valid at a date', () => {
   assert.deepEqual(asOf(units, '2026-05-01'), ['b'], 'a invalidated, c not yet');
 });
 
-test('CLI-equivalent pool (iterActiveUnits + iterArchivedUnits) reconstructs history through a physically relocated unit (Hale\'s 2026-07-21 finding)', () => {
+test('CLI-equivalent pool (iterActiveUnits + iterArchivedUnits) reconstructs history through a physically relocated unit', () => {
   withStore({
     'dc-live.md': '---\nid: dc-live\ntype: decision\nstatus: active\ncreated: 2026-01-01\nupdated: 2026-01-01\ntopics: [a]\n---\n\n# live\n',
   }, (mem) => {
     mkdirSync(join(mem, 'archive'), { recursive: true });
     writeFileSync(join(mem, 'archive', 'dc-relocated.md'),
       // archived_at deliberately later than t_invalid: archiving and
-      // invalidation are independent actions on independent timelines
-      // (Hale's 2026-07-22 finding) -- a shared date could read as if one
-      // caused the other.
+      // invalidation are independent actions on independent timelines --
+      // a shared date could read as if one caused the other.
       '---\nid: dc-relocated\ntype: decision\nstatus: active\narchived: true\narchived_at: 2026-04-15\ncreated: 2026-01-01\nupdated: 2026-01-01\nt_invalid: 2026-04-01\ntopics: [a]\n---\n\n# relocated\n');
 
     // What the real CLI's --as-of branch does: merge active + archived pools.
@@ -271,7 +270,7 @@ test('storageMetrics counts invalidated, loose edges, and intervals', () => {
   assert.equal(m.closed_interval_days.count, 1);
 });
 
-test('SYN-006: storageMetrics counts terminal units the conservative writer can never stamp', () => {
+test('storageMetrics counts terminal units the conservative writer can never stamp', () => {
   const units = [
     // terminal, no t_invalid, NO incoming supersedes — unreachable by the writer
     unit({ id: 'dc-stranded', status: 'retired', created: '2026-01-01' }),
@@ -287,7 +286,7 @@ test('SYN-006: storageMetrics counts terminal units the conservative writer can 
 const BITEMPORAL_SRC = readFileSync(
   new URL('../../plugins/core/skills/core/scripts/bitemporal.mjs', import.meta.url), 'utf8');
 
-test('MEM-009: unit stamps route through atomicWriteFileSync, never a bare writeFileSync', () => {
+test('unit stamps route through atomicWriteFileSync, never a bare writeFileSync', () => {
   // An interrupted bare write truncates the unit — body and frontmatter gone.
   // Crash-safety is not behaviorally testable without fault injection
   // (fs-atomic.test.mjs covers the helper), so this is the static guard the

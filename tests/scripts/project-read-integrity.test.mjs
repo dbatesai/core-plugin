@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { checkContextIntegrity } from '../../plugins/core/skills/core/scripts/check-context-integrity.mjs';
 
-// DC-94a Task 7: the startup Tier-0 step reads PROJECT.md in full and records the
+// Task 7: the startup Tier-0 step reads PROJECT.md in full and records the
 // read-extent. These guards lock the contract that a full read is accounted for and
 // a partial read is never silent. They pass against the Task-4 check-context-integrity
 // code — that is by design: this is the regression guard for the startup-side change.
