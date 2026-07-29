@@ -171,9 +171,9 @@ test('stampFile (singular) is a thin one-entry wrapper around stampFiles', () =>
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- THE LOST-UPDATE PROOF (Hale's finding, 2026-07-22): stampFiles used to
+// ---- THE LOST-UPDATE PROOF: stampFiles used to
 // be an unlocked read-modify-write over the whole project-local cache file.
-// Hale's own 40-concurrent-process probe measured the consequence directly:
+// A 40-concurrent-process probe measured the consequence directly:
 // 29/40 entries survived, 11 lost to the race. This reproduces that same
 // shape — N genuinely concurrent OS processes (not just concurrent promises
 // in one process — spawnSync would serialize them, defeating the point),
@@ -181,7 +181,7 @@ test('stampFile (singular) is a thin one-entry wrapper around stampFiles', () =>
 // asserts every single one survives now that the read-modify-write is
 // serialized under `.state-cache.lock` (same withFileLock primitive
 // index-registry.mjs's own lost-update proof already relies on). ----
-test("race: 40 concurrent processes each stamping a distinct file all survive — no lost update (Hale's 40-process finding: 29/40 survived before the lock fix)", async () => {
+test("race: 40 concurrent processes each stamping a distinct file all survive — no lost update (29/40 survived before the lock fix)", async () => {
   const { root, project, home, cachePath } = setup();
   try {
     const N = 40;

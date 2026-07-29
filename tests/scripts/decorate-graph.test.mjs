@@ -48,7 +48,7 @@ function fixtureStore() {
   // dc-1-alpha is the only unit here that will gain an edges block, so it is
   // the only one that reaches the write guard. Stamp its creation baseline the
   // way graduation does (lifecycle-detect stampCreatedBaseline --kind unit) —
-  // a no-baseline unit now fails closed (Hale's 2026-07-22 root fix), and a
+  // a no-baseline unit fails closed, and a
   // freshly-graduated unit is decoratable precisely because its creating writer
   // stamped it at creation. The other units gain no block, short-circuit before
   // the guard, and need no baseline (so the orphan-never-stamped invariant holds).
@@ -108,7 +108,7 @@ test('decorateUnitText cleanly removes a stale block once its edges are gone', (
   assert.doesNotMatch(out, /CORE:BEGIN_EDGES/);
 });
 
-test('findExistingEdgesBlock fails closed on a malformed marker state (Hale\'s falsifier)', () => {
+test('findExistingEdgesBlock fails closed on a malformed marker state', () => {
   // One orphaned BEGIN, no END, a human-authored line after it — exactly the
   // shape that used to let a later regenerated END pair with the wrong BEGIN
   // and silently delete everything in between.
@@ -228,7 +228,7 @@ test('decorateStore --dry-run (dryRun option) reports changes without writing th
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- state-cache stamping (Hale's finding, 2026-07-22): decorate-graph must
+// ---- state-cache stamping: decorate-graph must
 // stamp the per-project state cache in the SAME operation it rewrites a unit
 // file, in code — not rely on a prose instruction telling the agent to do it
 // by hand afterward. Mirrors hot-section.mjs's precedent for PROJECT.md. ----
@@ -318,7 +318,7 @@ test('hashOutsideEdgesBlock is identical regardless of what changes INSIDE the e
   assert.equal(hashOutsideEdgesBlock(withOne), hashOutsideEdgesBlock(withOther));
 });
 
-test('decorateUnitText is CRLF-safe (Meridian\'s Windows review, 2026-07-21)', () => {
+test('decorateUnitText is CRLF-safe (Windows line endings)', () => {
   // Marker lookup is plain string indexOf on the literal marker text, not a
   // newline-spanning regex, so a file rewritten with \r\n by Obsidian or a
   // Windows editor must not break block detection, idempotence, or removal.
@@ -337,7 +337,7 @@ test('decorateUnitText is CRLF-safe (Meridian\'s Windows review, 2026-07-21)', (
   assert.match(removed, /Body with CRLF\.\r\n/, 'human-authored CRLF line endings survive block removal');
 });
 
-test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stderr, with no false-success claim on stdout (Hale's 2026-07-22 test-boundary finding)", () => {
+test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stderr, with no false-success claim on stdout", () => {
   const root = mkdtempSync(join(tmpdir(), 'decorate-graph-cli-refuse-'));
   try {
     const mem = join(root, '_memories');
@@ -352,9 +352,8 @@ test("CLI entrypoint exits 1 and names a refused (malformed-marker) file on stde
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- Authorship-laundering regression (Hale's finding, 2026-07-22: mailbox
-// "premaintenance-authorship-falsifier", "723c24a-authorship-ordering-repro",
-// "mixed-ownership-writers-launder-unreconciled-edits"). Exact reproduction:
+// ---- Authorship-laundering regression — mixed-ownership writers must not
+// launder unreconciled edits. Exact reproduction:
 // decorate a unit (establishes a baseline), the user edits the body OUTSIDE
 // the edges block, the unit's edge TARGET retires (so the edges block goes
 // stale too), decoration runs again. Before the fix: decorateStore rewrote
@@ -383,7 +382,7 @@ function authorshipFixture(root) {
   stampCreatedBaseline(root, join(mem, 'dc-alpha.md'), { kind: 'unit', home });
 }
 
-test("decorateStore refuses to rewrite/re-stamp a unit whose human-authored body already diverged from its baseline, and reports needs_reconciliation (Hale's authorship-laundering finding)", () => {
+test("decorateStore refuses to rewrite/re-stamp a unit whose human-authored body already diverged from its baseline, and reports needs_reconciliation", () => {
   const root = mkdtempSync(join(tmpdir(), 'decorate-graph-authorship-'));
   try {
     const home = testHome(root);

@@ -1,7 +1,7 @@
 /**
  * close-process-request.test.mjs — reachability of the automatic close (RC-01 … RC-05).
  *
- * Hale's HOLD (2026-07-27, finalize-refocus-slices-1-4-reachability-hold): the SessionEnd
+ * The reachability gap this closes: the SessionEnd
  * hook enqueues `close-pass.mjs process-request <store> --session <id>`, but no CLI case
  * ever existed for `process-request` — direct reproduction exits 2, "unknown subcommand".
  * Every prior RED for this redesign exercised the underlying functions directly

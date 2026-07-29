@@ -84,7 +84,7 @@ test('missing status is treated as active', () => {
   assert.ok(res.units.map(u => u.id).includes('dc-3-nostatus'));
 });
 
-// K04 (Hale's audit, 2026-07-16): anti-resurrection was not structural — the
+// K04: anti-resurrection was not structural — the
 // cache staleness check was pure content-hash (source_sig), so a unit whose
 // t_invalid date arrives with zero byte changes anywhere in the store kept
 // serving from a stale cache indefinitely. Fixed by baking next_invalidation_at
@@ -149,7 +149,7 @@ test('K04 control: an index with no next_invalidation_at (nothing time-bound) is
   assert.equal(res.units[0].summary, 'SENTINEL-FROM-CACHE', 'a cache with no time bound and a byte match must be served as-is, not regenerated');
 });
 
-test('archive/ is excluded from the active-data walk (Hale\'s anti-resurrection finding)', () => {
+test('archive/ is excluded from the active-data walk (anti-resurrection)', () => {
   const root = mkdtempSync(join(tmpdir(), 'core-idx-archive-'));
   const mem = join(root, '_memories');
   const archive = join(mem, 'archive');
@@ -180,7 +180,7 @@ test('loadUnitBodies strips the decorate-graph generated edges block from the BM
   assert.doesNotMatch(u.text, /\[\[dc-2\]\]/, 'generated wikilink must not reach the ranked body');
 });
 
-test('captureStore\'s bodies (the real product path) also strip the generated edges block (Hale\'s 2026-07-21 finding)', () => {
+test('captureStore\'s bodies (the real product path) also strip the generated edges block', () => {
   // loadSnapshot(...,{captureBodies:true}) -> captureStore() is what
   // decorate-graph.mjs and the live retriever/harness actually read.
   // loadUnitBodies (tested above) is a SEPARATE, index-only path -- fixing

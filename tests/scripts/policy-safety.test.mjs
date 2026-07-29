@@ -1,5 +1,5 @@
 /**
- * Policy-stage safety battery — Train A A6 (Crest correction #4, 2026-07-12).
+ * Policy-stage safety battery — Train A A6.
  *
  * The earlier tier-safety fixture proved LOADER anti-resurrection (a retired unit
  * never reaches ranking). This battery puts distractor classes AT the policy stage —

@@ -1,7 +1,6 @@
 /**
- * user-authorship-boundary.test.mjs — permanent regression coverage for Hale's
- * 2026-07-22 bounded user-authorship-boundary fix (the second pass, after the
- * first pass left two red cases). One test (or matrix) per point of the
+ * user-authorship-boundary.test.mjs — permanent regression coverage for the
+ * bounded user-authorship-boundary fix. One test (or matrix) per point of the
  * 8-point proposal, plus the two originally-red repros as the anchor cases.
  *
  * Anchor repros (probe-live-dirty.mjs, the must-pass set):
@@ -209,8 +208,8 @@ test('point1: detector classifies missing, malformed, and read-only', () => {
 });
 
 // ---------------------------------------------------------------------------
-// THE AUTHORSHIP RULE (Hale's 2026-07-22 root fix — session timing cannot prove
-// authorship). No cache-stamp baseline ALWAYS refuses. The old timing inference
+// THE AUTHORSHIP RULE (session timing cannot prove authorship).
+// No cache-stamp baseline ALWAYS refuses. The old timing inference
 // ("absent from session inventory => created-this-session => safe") and the
 // missing-inventory fail-open are both GONE. A creating CORE writer establishes
 // the first baseline at creation time; any writer that later meets a no-baseline
@@ -235,7 +234,7 @@ test('rule: writeGuardDecision refuses a no-baseline file (no cache stamp at all
     'no stamp → refuse, even when the domain classifier would have said the generated region is all that changed');
 });
 
-// REGRESSION (Hale's executable falsifier, probe-post-start-user-file.mjs): a
+// REGRESSION (executable falsifier, probe-post-start-user-file.mjs): a
 // file the USER creates by hand after session start has no baseline and was
 // absent from the session-start inventory — timing cannot distinguish it from a
 // CORE-created file. It must be HELD as no-baseline, byte-identical, NOT

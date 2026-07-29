@@ -134,7 +134,7 @@ test('HARNESS_OUTPUT maps harnesses to canonical filenames', () => {
   assert.equal(HARNESS_OUTPUT['codex'], 'AGENTS.md');
 });
 
-// --- Hale review fixes (generator warnings + override hash fidelity) ---
+// --- generator warnings + override hash fidelity ---
 
 test('generate: warns when target harness is not in canonical_for', async () => {
   const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex"]', 'canonical_for: ["codex"]'));
@@ -153,7 +153,7 @@ test('generate: warns when last_revised is missing (determinism dependency)', as
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// --- Hale item 2: check mode FAILS CLOSED on fatal provenance issues ---
+// --- check mode FAILS CLOSED on fatal provenance issues ---
 
 test('generate check: missing last_revised is FATAL (gate fails closed, not just warns)', async () => {
   const { dir, p } = tmpContract(FIXTURE.replace('last_revised: 2026-04-01\n', ''));
@@ -166,7 +166,7 @@ test('generate check: missing last_revised is FATAL (gate fails closed, not just
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('generate check: last_revised:"unknown" is FATAL (separate from missing — Hale)', async () => {
+test('generate check: last_revised:"unknown" is FATAL (separate from missing)', async () => {
   const { dir, p } = tmpContract(FIXTURE.replace('last_revised: 2026-04-01', 'last_revised: unknown'));
   try {
     const outPath = join(dir, 'CLAUDE.md');

@@ -1,8 +1,7 @@
 /**
  * close-session-identity.test.mjs — exact-session close receipts (ID-01 … ID-08).
  *
- * RED-first for the finalize/refocus redesign. These encode the four oracles
- * ratified three-way (Keel/Hale/Agy, 2026-07-27):
+ * RED-first for the finalize/refocus redesign. These encode four oracles:
  *
  *   1. a manual close for sess-A writes a valid terminal exact-session receipt;
  *   2. SessionEnd for the SAME sess-A creates no second request/claimant/model call;

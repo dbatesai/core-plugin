@@ -24,7 +24,7 @@ test('writes one evidence-qualified outcome for an existing retrieval', () => {
     assert.deepEqual(result.record, {
       kind: 'retrieval-outcome', schema_version: '1.2.0', retrieval_id: 'r-1', usefulness_outcome: 'partial', evidence_authority: 'user-confirmed', harness: 'claude-code', session_id: 's-test-1', answer_turn_id: 'turn-test-1', producer_version: '3.12.0-rc.1', producer_sha: 'deadbeef',
     });
-    // Outcomes live in a SEPARATE later log (Hale stop-note): the retrieval
+    // Outcomes live in a SEPARATE later log: the retrieval
     // log they judge stays untouched.
     const baseRows = readFileSync(join(project, '_sessions', '2026-07-17', 'retrieval-log.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(baseRows.length, 1, 'retrieval log untouched');
@@ -71,7 +71,7 @@ test('rejects unknown retrieval ids without writing', () => {
 });
 
 test('permits a stronger later outcome to be appended (does not throw)', () => {
-  // Hale audit, 2026-07-17, hazard: "an automatic unknown blocks stronger
+  // Hazard: "an automatic unknown blocks stronger
   // later evidence." An auto-close writing 'unknown'/'unobservable' must
   // never permanently prevent a real, stronger-authority outcome from being
   // recorded for the same retrieval afterward.

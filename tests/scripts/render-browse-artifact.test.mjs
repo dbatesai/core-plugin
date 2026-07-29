@@ -1,7 +1,7 @@
 /**
  * render-browse-artifact — the memory-browse artifact generator.
- * Covers the disclosure-boundary guarantees the 2026-07-22 design spec makes
- * hard requirements (Hale's conditions 2/4/6/7 as enforced in code):
+ * Covers the disclosure-boundary guarantees the design spec makes
+ * hard requirements (conditions 2/4/6/7 as enforced in code):
  *   - embedded units + snapshot provenance header present in the HTML;
  *   - ZERO external references in the generated chrome (the only URLs in the
  *     whole file are inside unit body text, embedded as data);
@@ -30,7 +30,7 @@ const {
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'render-browse-artifact.mjs');
 
-// Fix 9 (Hale item 9): the shared provenance helper fails closed on a dirty
+// Fix 9: the shared provenance helper fails closed on a dirty
 // plugin tree — so real renders only produce a source_sha (and only succeed)
 // when the working tree is clean. Detect state once; render-dependent tests
 // assert the right contract either way (skip-with-reason when dirty, since the
@@ -100,7 +100,7 @@ rtest('embeds active units with bodies, edges, and snapshot provenance header', 
     assert.match(dc1.body, /external source at https:\/\/example\.com\/spec/, 'full body embedded');
     assert.deepEqual(dc1.edges.map((e) => e.target).sort(), ['obs-2-beta', 'risk-3-retired']);
     assert.equal(dc1.title, 'DC-1 — Alpha decision');
-    // Provenance banner (condition 6 + Antigravity's aggressive-styling refinement)
+    // Provenance banner (condition 6)
     assert.match(html, /POINT-IN-TIME SNAPSHOT &mdash; READ-ONLY/);
     assert.ok(html.includes(manifest.generated_at), 'generated-at timestamp in the page');
     assert.ok(html.includes(manifest.snapshot_id.slice(0, 12)), 'snapshot id in the banner');
@@ -297,7 +297,7 @@ test('CLI: rejects an unknown --scope', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---------- producer identity (Hale condition 6 — truthfulness falsifier) ----------
+// ---------- producer identity (condition 6 — truthfulness falsifier) ----------
 
 test('falsifier: in a CLEAN git checkout the emitted source SHA equals git rev-parse HEAD and never the manifest stamp; a DIRTY tree fails closed (fix 9)', async (t) => {
   let head;
@@ -372,7 +372,7 @@ test('installed tree (no .git): stamped manifest identity used; no SHA at all: f
   }
 });
 
-// ---------- post-publish receipt (Hale correction 2) ----------
+// ---------- post-publish receipt ----------
 
 rtest('--record-publish published-private: atomic linked receipt with consent + privacy evidence', async () => {
   const { root, home } = fixtureProject();
@@ -468,14 +468,14 @@ test('--record-revocation stamps revoked_at and preserves a manually-authored re
       private_verified: { at: '2026-07-22T22:47:00Z', evidence: 'publish tool confirms artifacts are private unless shared' },
       known_defect_at_publish: 'stale producer sha at publish time',
       revoked_at: null,
-      note: 'manually authored by Keel',
+      note: 'manually authored by the operator',
     }, null, 2));
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     const receipt = JSON.parse(readFileSync(p, 'utf8'));
     assert.ok(receipt.revoked_at, 'revoked_at stamped');
     assert.equal(receipt.known_defect_at_publish, 'stale producer sha at publish time', 'manual extra field preserved');
-    assert.equal(receipt.note, 'manually authored by Keel');
+    assert.equal(receipt.note, 'manually authored by the operator');
     assert.equal(receipt.publish_status, 'published-private', 'original outcome untouched');
     // Double revocation is refused.
     const res2 = spawnSync(process.execPath, [CLI_PATH, '--record-revocation', p], { encoding: 'utf8' });

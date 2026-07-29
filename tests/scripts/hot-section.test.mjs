@@ -23,8 +23,8 @@ function setup() {
   writeFileSync(join(project, 'PROJECT.md'), '# Project\n\n## What & Why\n\nThe thing.\n');
   // A PROJECT.md CORE renders is stamped at creation (the render step calls the
   // creation-baseline seam — lifecycle-detect stampCreatedBaseline --kind project).
-  // Absent that stamp every writer now fails closed on no-baseline (Hale's
-  // 2026-07-22 root fix), so establish the creation baseline here the way the
+  // Absent that stamp every writer fails closed on no-baseline, so establish
+  // the creation baseline here the way the
   // real product does, exactly once, before any writer touches the file.
   recordProjectMdWrite(join(project, 'PROJECT.md'), { now: '2026-06-01T00:00:00Z', home });
   return {
@@ -77,7 +77,7 @@ test('recordProjectMdWrite tolerates a missing per-project cache file (creates i
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---------- Hale's hot-section-edit-attribution finding (2026-07-21) ----------
+// ---------- hot-section edit attribution ----------
 //
 // `last_written_by: hot-section` alone is a stale label: it proves who wrote the
 // PREVIOUSLY cached bytes, not the CURRENT ones. A user edit made after a hot-section
@@ -131,7 +131,7 @@ test('hashOutsideHotBlock: identical regardless of what changes INSIDE the marke
   assert.equal(hashOutsideHotBlock(withBlockA), hashOutsideHotBlock(withBlockB));
 });
 
-test('clearHotSection stamps recordProjectMdWrite so edit-detection state stays truthful after a clear (Hale, second finding)', () => {
+test('clearHotSection stamps recordProjectMdWrite so edit-detection state stays truthful after a clear', () => {
   const { root, project, home, projectCachePath } = setup();
   try {
     applyHotSection(project, 'Right now: shipping the thing.', { now: '2026-06-06T00:00:00Z', home });
@@ -197,7 +197,7 @@ test('apply reads stdin when neither --text nor --file is given', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- coverage additions (2026-07-20, iteration ~71): currentHotSection,
+// ---- coverage: currentHotSection,
 // clearHotSection, candidatesForSynthesis, applyHotSection's over-budget
 // throw, and the CLI subcommands were entirely untested. Real gaps, not
 // speculative — these are exported functions with no test at all before
@@ -416,8 +416,8 @@ test('CLI: clear subcommand reports success and actually removes the block', () 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- Authorship-laundering regression (Hale's finding, 2026-07-22: mailbox
-// "mixed-ownership-writers-launder-unreconciled-edits"). Exact reproduction:
+// ---- Authorship-laundering regression — mixed-ownership writers must not
+// launder unreconciled edits. Exact reproduction:
 // apply a hot section (establishes a baseline), the user hand-edits
 // PROJECT.md OUTSIDE the hot block, then a second `applyHotSection` runs.
 // Before the fix: the write landed (the user's bytes preserved) and then
@@ -429,7 +429,7 @@ test('CLI: clear subcommand reports success and actually removes the block', () 
 // re-stamp, and a later classification check must still read
 // 'outside-changed'. ----
 
-test("applyHotSection refuses (NEEDS_RECONCILIATION) and never re-stamps when PROJECT.md's body already diverged from its baseline (Hale's authorship-laundering finding)", () => {
+test("applyHotSection refuses (NEEDS_RECONCILIATION) and never re-stamps when PROJECT.md's body already diverged from its baseline", () => {
   const { root, project, home, projectCachePath } = setup();
   try {
     applyHotSection(project, 'First synthesis.', { now: '2026-07-22T00:00:00Z', home });
@@ -495,7 +495,7 @@ test('CLI: apply exits 1 and reports refusal on stderr when PROJECT.md needs rec
 });
 
 // ---------------------------------------------------------------------------
-// Stamp-failure CLI contract (2026-07-22, Hale's finding: "cli_exit: 0" when
+// Stamp-failure CLI contract — "cli_exit: 0" when
 // the content write landed but the authorship stamp failed — a hook/caller
 // reading exit code + stdout alone saw full success either way). The content
 // write must NEVER be rolled back; the machine contract (exit code + a
@@ -540,7 +540,7 @@ test('CLI apply: a stamp failure (lock held) exits NONZERO and never reports a c
     releaseFileLock(lockPath, held.nonce);
 
     const onDisk = readFileSync(join(project, 'PROJECT.md'), 'utf8');
-    assert.match(onDisk, /Generated hot text\./, 'content write happened — this is Hale\'s "do not roll back" requirement');
+    assert.match(onDisk, /Generated hot text\./, 'content write happened — the content write is never rolled back');
     assert.notEqual(res.status, 0, 'the CLI must exit NONZERO when the attribution stamp failed (the exact bug: it used to exit 0)');
     assert.match(res.stderr, /attribution unknown|recovery-required/i, 'the human-readable warning still fires');
     // The exact regression this test guards: exit 0 AND a stdout line reading as

@@ -142,7 +142,7 @@ test('storage-gap recurrence across cards trips', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('capture-failure floors (Agy, Gate A): rate needs ≥20 attempts; 3 consecutive always trips', () => {
+test('capture-failure floors (Gate A): rate needs ≥20 attempts; 3 consecutive always trips', () => {
   const root = mkdtempSync(join(tmpdir(), 'tw-capture-'));
   try {
     const project = makeProject(root);

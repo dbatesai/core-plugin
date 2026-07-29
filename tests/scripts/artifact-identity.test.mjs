@@ -1,7 +1,7 @@
 /**
- * artifact-identity — Train A blocker 3 acceptance (Hale verdict §3).
+ * artifact-identity — Train A blocker 3 acceptance.
  *
- * The bar (Hale round 6): identical identity from two CLEAN INDEPENDENT exports,
+ * The bar: identical identity from two CLEAN INDEPENDENT exports,
  * not one repeated local command. Export path A reads the git object database
  * (ls-tree + cat-file, no working tree); export path B extracts a `git archive`
  * tarball and hashes the filesystem tree. The old tar-byte hash differed run to
@@ -50,7 +50,7 @@ test('blocker-3: two independent exports agree — git object database vs extrac
     execFileSync('git', ['-C', REPO, '-c', 'core.autocrlf=false', 'archive', '-o', tarPath, `${HEAD}:plugins/core`]);
     execFileSync('tar', ['-x', '-f', 'export.tar', '-C', 'tree'], { cwd: dir });
     const fromTree = manifestFromDirectory(treeDir);
-    // On divergence, name the first differing file + counts (Hale round 8):
+    // On divergence, name the first differing file + counts:
     // two unequal hashes alone can't be root-caused from a CI log.
     const diff = diffManifests(fromGit, fromTree);
     assert.equal(fromTree.content_manifest_sha256, fromGit.content_manifest_sha256,
@@ -76,7 +76,7 @@ test('blocker-3: different subtrees yield different identities (the hash is cont
   assert.notEqual(core.content_manifest_sha256, tests.content_manifest_sha256);
 });
 
-// Hale round 7: prove the identity FLOWS end to end — artifact-identity output →
+// Prove the identity FLOWS end to end — artifact-identity output →
 // the receipt's built_artifact_sha256 — through the real CLI seam the freeze step
 // uses, with the receipt's shape validation applied to the injected value.
 test('blocker-3 end-to-end: the content-manifest identity lands in the shareable receipt intact', { skip: !HEAD }, async () => {
@@ -111,7 +111,7 @@ test('CLI two-arg form works without --subdir (c5 regression, 2026-07-17)', () =
   assert.match(out, /content_manifest_sha256/);
 });
 
-// K17 (Hale's audit, 2026-07-16): "mode-blind" — a --dir export's output carried
+// K17: "mode-blind" — a --dir export's output carried
 // no field naming which computation path produced it (git object database vs
 // filesystem tree) and no record of which directory, unlike git-mode's
 // self-describing ref/subdir/tree_oid. A saved JSON blob from one mode couldn't

@@ -72,7 +72,7 @@ test('findOrphans: a probe reached only via a .json delegate is wired (not a fal
   });
 });
 
-// Logged gap, fixed 2026-07-19 (Antigravity's catch, 2026-07-18): hook files
+// A logged gap: hook files
 // were entirely absent from the scan, so a scripts/ utility imported ONLY
 // from a hook was structurally invisible to the import closure.
 test('findOrphans: a hook registered in hooks.json wires in the scripts/ utility it ONLY imports', () => {

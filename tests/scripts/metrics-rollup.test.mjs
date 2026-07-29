@@ -25,8 +25,8 @@ function withClassified(byDate, fn) {
   const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
   mkdirSync(dir, { recursive: true });
   for (const [date, states] of Object.entries(byDate)) {
-    // Rows carry the CURRENT instrument stamps: the cohort gate (Hale
-    // 2026-07-22) aggregates only rows produced by the running
+    // Rows carry the CURRENT instrument stamps: the cohort gate
+    // aggregates only rows produced by the running
     // (schema, classifier, proxy) triple — exactly what classify-turns writes.
     const lines = states.map((state, i) => JSON.stringify({
       schema_version: CLASSIFIED_SCHEMA_VERSION, classifier_version: CLASSIFIER_VERSION,
@@ -127,7 +127,7 @@ test('rollup keeps PROVISIONAL when calibration was run against a stale proxy ve
   });
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 5 (exact-triple calibration): a calibration bound to a DIFFERENT classified-row schema cannot clear PROVISIONAL', () => {
+test('ACCEPTANCE (exact-triple calibration): a calibration bound to a DIFFERENT classified-row schema cannot clear PROVISIONAL', () => {
   // The falsifier: calibration validated only classifier/proxy, so a record
   // taken against a different classified-row schema (here 9.9.9) still cleared
   // the tag for the current 1.0.0 cohort. The distinct classified_schema_version
@@ -195,8 +195,8 @@ test('MET-013: detector output (anticipation-gap) can never reach the headline s
 });
 
 // ============================================================
-// Read-side replay dedupe (metrics-dedupe.mjs wiring, 2026-07-22 —
-// Hale's replay-identity falsifier: reprocessing the same
+// Read-side replay dedupe (metrics-dedupe.mjs wiring) — the replay-identity
+// falsifier: reprocessing the same
 // (harness, session, turn, producer version) leaves totals unchanged)
 // ============================================================
 
@@ -233,7 +233,7 @@ test('replay dedupe: a session processed twice in one day yields the same rollup
   }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 2 (rollup): a same-instrument contradiction is EXCLUDED from the numerator AND denominator, visibly counted', () => {
+test('ACCEPTANCE (rollup): a same-instrument contradiction is EXCLUDED from the numerator AND denominator, visibly counted', () => {
   const home = mkdtempSync(join(tmpdir(), 'rollup-conflict-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-conflict-proj-'));
   try {
@@ -264,14 +264,14 @@ test('ACCEPTANCE Hale-2026-07-23 item 2 (rollup): a same-instrument contradictio
 });
 
 // ============================================================
-// Instrument-cohort gate (Hale's 2026-07-22 REVISE addendum): calibration is
+// Instrument-cohort gate: calibration is
 // validated against the CURRENT (schema, classifier, proxy) triple, so the
 // aggregate may contain ONLY rows produced by that triple. An old-instrument
 // row with no newer counterpart survives dedupe — it must land in the
 // coverage gap, never in the numbers.
 // ============================================================
 
-test("Hale's mixed-instrument falsifier: calibrated-true must not aggregate a 0.2.0-era survivor", () => {
+test("mixed-instrument falsifier: calibrated-true must not aggregate a 0.2.0-era survivor", () => {
   const home = mkdtempSync(join(tmpdir(), 'rollup-cohort-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-cohort-proj-'));
   try {
@@ -321,7 +321,7 @@ test('cross-date attribution policy (immutable observation day) is explicit in t
   });
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 2 (order-independence): a same-day contradiction is excluded under BOTH input orders, conflict counted either way', () => {
+test('ACCEPTANCE (order-independence): a same-day contradiction is excluded under BOTH input orders, conflict counted either way', () => {
   // Reversing the two contradictory rows must not flip the aggregate. The
   // corrected policy invents no winner at all — the group is excluded and
   // counted as a conflict regardless of order.
@@ -349,7 +349,7 @@ test('ACCEPTANCE Hale-2026-07-23 item 2 (order-independence): a same-day contrad
   assert.equal(results[1].dedupe.conflicts, 1, 'the conflict stays visible under both orders');
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 3 (rollup): a cross-date replay attributes to the EARLIEST observation day; today counts only turns first observed today', () => {
+test('ACCEPTANCE (rollup): a cross-date replay attributes to the EARLIEST observation day; today counts only turns first observed today', () => {
   const home = mkdtempSync(join(tmpdir(), 'rollup-xdate-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-xdate-proj-'));
   try {

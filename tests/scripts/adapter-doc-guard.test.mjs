@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Hale's C/D PR-hardening ask: the adapter modernization (Slices C+D) is prose, so a
+// The adapter modernization (Slices C+D) is prose, so a
 // regression here is silent. These guards assert the load-bearing mappings stay present
 // — they catch an accidental revert of the Workflow/Teams split, the ScheduleWakeup
 // dynamic-cadence answer, or the Codex schedule drop (the DC-75 parity boundary).

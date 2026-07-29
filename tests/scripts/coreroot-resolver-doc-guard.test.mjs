@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 
 // Guards for the CORE_ROOT resolver in protocols/startup.md. The resolver is
 // prose-as-shell, so a regression is silent — and the regression that prompted
-// this (Meridian, 2026-05-31) was catastrophic on Windows Git-Bash: a backslash
+// this was catastrophic on Windows Git-Bash: a backslash
 // regex inside a double-quoted `node -e` collapsed in the shell (\\ -> \),
 // produced a compile-time SyntaxError try/catch could not catch, emptied
 // CORE_ROOT, and resolved `node "/skills/..."` against the MSYS root.
@@ -19,7 +19,7 @@ import { execFileSync } from 'node:child_process';
 //      HOME and resolves correctly (this leg would have caught the SyntaxError)
 //   C. delegation guard — the block delegates to resolve-plugin-root.mjs
 //      --print-root (SYN-002), with the env var demoted to script-locating only
-// The Windows-Git-Bash leg is Meridian's on-box smoke; it cannot run on macOS CI.
+// The Windows-Git-Bash leg is an on-box smoke; it cannot run on macOS CI.
 
 const STARTUP = join(
   dirname(fileURLToPath(import.meta.url)),

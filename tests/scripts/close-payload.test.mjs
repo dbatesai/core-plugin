@@ -3,9 +3,8 @@
  *
  * Slice 2 of the finalize/refocus redesign, RED-first.
  *
- * Contract being encoded: the AUTOMATIC close makes zero model calls. Agy's
- * challenge — "if nothing reads the prose, we are paying a model to generate
- * dead text" — was ratified three-way, with supporting evidence that
+ * Contract being encoded: the AUTOMATIC close makes zero model calls. If
+ * nothing reads the prose, generating it pays a model for dead text — and
  * `startup.md` already instructs the agent to SKIP session summaries at
  * bootstrap. So the automatic close emits a deterministic structured record
  * built from already-normalized transcript events, not generated prose.

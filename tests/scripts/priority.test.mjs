@@ -156,7 +156,7 @@ test('iterArchivedUnits: no archive/ subdir at all returns empty, not a throw (E
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("iterArchivedUnits: malformed (frontmatter-less) archive content is excluded, not ranked (Hale's 2026-07-22 finding)", () => {
+test("iterArchivedUnits: malformed (frontmatter-less) archive content is excluded, not ranked", () => {
   const dir = mkdtempSync(join(tmpdir(), 'priority-archive-malformed-'));
   try {
     const mem = join(dir, '_memories');
@@ -171,7 +171,7 @@ test("iterArchivedUnits: malformed (frontmatter-less) archive content is exclude
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('SOD-003: includeInvalidated:true reaches a unit physically relocated to archive/ (Hale\'s 2026-07-21 finding)', () => {
+test('SOD-003: includeInvalidated:true reaches a unit physically relocated to archive/', () => {
   const { dir, mem } = rankVault();
   try {
     mkdirSync(join(mem, 'archive'), { recursive: true });

@@ -1,7 +1,7 @@
 /**
  * aggregate-receipt — Train A A2 acceptance tests.
  *
- * The boundary (Crest, files-repo data boundary 2026-07-12): rows stay local,
+ * The boundary: rows stay local,
  * only non-reconstructive aggregates travel. The exporter must prove BOTH belts:
  * whitelist construction (a new report field never leaks by default) and the
  * refusal scan (a smuggled local fragment refuses the whole export, loudly).
@@ -91,7 +91,7 @@ test('A2 refusal: filesystem paths are refused even when not in the forbidden vo
   assert.ok(refusalScan({ note: 'rates only', r3: 0.73 }, new Set()));
 });
 
-// K09 (Hale's audit, 2026-07-16): two real bypasses in the embedded-path branch.
+// K09: two real bypasses in the embedded-path branch.
 test('K09: a colon-preceded embedded path is refused (the boundary class was missing ":")', () => {
   assert.throws(
     () => refusalScan({ note: 'path:/Users/dbates/secret.md' }, new Set()),
@@ -128,7 +128,7 @@ test('K09: unit_type_counts only accepts CORE\'s closed type vocabulary, not an 
   assert.throws(() => buildAggregateReceipt(poisoned), /REFUSED.*unit_type_counts/s);
 });
 
-// K09 re-audit (Hale, 2026-07-19): the prior version of this test hardcoded its
+// K09: the prior version of this test hardcoded its
 // own copy of the type list, so it passed even after the source's own copy
 // silently omitted real types (open-question, premise) -- the test proved the
 // implementation agreed with itself, not with CORE's actual vocabulary. Fixed
@@ -181,10 +181,10 @@ test('A2 CLI: writes a receipt from a report file; refusal is exit 2', async () 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ── Blocker 1 (Hale verdict 2026-07-14 §1): hostile-path battery + closed shapes ──
-// His exact reproductions: rung '/private/tmp/secret-project' accepted and emitted;
+// ── Blocker 1: hostile-path battery + closed shapes ──
+// The exact reproductions: rung '/private/tmp/secret-project' accepted and emitted;
 // direct construction emitted '/etc/shadow' and '/var/db/private'. Every form in
-// his required battery is a negative test here.
+// the required battery is a negative test here.
 
 async function cleanReportAndSweep() {
   const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
@@ -198,7 +198,7 @@ async function cleanReportAndSweep() {
   return { report, sweep };
 }
 
-test('blocker-1: Hale\'s exact repro — a path-shaped RUNG key refuses the export', async () => {
+test('blocker-1: a path-shaped RUNG key refuses the export', async () => {
   const { report } = await cleanReportAndSweep();
   const poisoned = JSON.parse(JSON.stringify(report));
   for (const r of Object.values(poisoned.results)) {

@@ -116,7 +116,7 @@ test('nothing in the store matches the prompt → storage-gap', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('store drifted between capture and judge → drift-invalidated, never a graded verdict (Agy, Gate A)', () => {
+test('store drifted between capture and judge → drift-invalidated, never a graded verdict (Gate A)', () => {
   const root = mkdtempSync(join(tmpdir(), 'hj-drift-'));
   try {
     const project = makeStore(root);

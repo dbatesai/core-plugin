@@ -13,8 +13,8 @@
  *   - CLI contract: --out required, --json-in replay path, manifest shape
  *     (content_class aggregates-only), generation receipt;
  *   - shared helpers: truthful provenance (artifact-provenance.mjs) and the
- *     generalized publish receipts (artifact-receipts.mjs) — including Hale's
- *     e0a808f revise: self-contained snapshot identity copied into the
+ *     generalized publish receipts (artifact-receipts.mjs) — with a
+ *     self-contained snapshot identity copied into the
  *     publish receipt, and published-private refusing to record without a
  *     consent record (--consent-by + --consent-mechanism), for BOTH kinds.
  */
@@ -36,7 +36,7 @@ const { truthfulProducerIdentity } = await import(pathToFileURL(join(SCRIPTS, 'a
 const { publishReceiptPathFor, artifactContentDigest } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'render-metrics-artifact.mjs');
 
-// Fix 9 (Hale item 9) makes the shared provenance helper FAIL CLOSED on a dirty
+// Fix 9 makes the shared provenance helper FAIL CLOSED on a dirty
 // plugin tree — HEAD no longer names the executing bytes. So the real-render
 // tests below only get a source_sha (and can render) when the tree is clean; on
 // a dirty working tree the renderer correctly refuses. Detect the state once so
@@ -325,7 +325,7 @@ test('memory files needing attention render counts, warn gauge, and census tiles
 
 // ---------- CLI: --json-in replay path + manifest contract ----------
 
-test('ACCEPTANCE Hale-2026-07-23 item 8 (real pipeline): render-metrics --json-in consumes the ACTUAL metrics-check --json producer output', (t) => {
+test('ACCEPTANCE (real pipeline): render-metrics --json-in consumes the ACTUAL metrics-check --json producer output', (t) => {
   if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
   const METRICS_CHECK = join(SCRIPTS, 'metrics-check.mjs');
   const { root, home } = fixtureProject();
@@ -452,7 +452,7 @@ test('truthfulProducerIdentity: in a CLEAN git checkout, the SHA is the real HEA
   }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 9 (dirty-tree provenance): pluginTreeDirty is true on a modified tracked file and false when committed, and identity fails closed while dirty', async () => {
+test('ACCEPTANCE (dirty-tree provenance): pluginTreeDirty is true on a modified tracked file and false when committed, and identity fails closed while dirty', async () => {
   const { execFileSync: exec } = await import('node:child_process');
   const { pluginTreeDirty } = await import(pathToFileURL(join(SCRIPTS, 'artifact-provenance.mjs')).href);
   // Controlled fixture: a throwaway git repo with a plugin-root-shaped subtree.
@@ -522,7 +522,7 @@ test('--record-publish on a metrics generation receipt lands kind core-metrics-a
       { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     const receiptPath = publishReceiptPathFor(genPath);
-    // Self-containment (Hale's e0a808f revise): delete the generation receipt,
+    // Self-containment: delete the generation receipt,
     // the publish receipt must still carry the snapshot identity on its own.
     unlinkSync(genPath);
     const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
@@ -615,9 +615,9 @@ test('--record-revocation stamps revoked_at on a PUBLISHED-PRIVATE receipt, then
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ---------- ACCEPTANCE: Hale 2026-07-23 item 7 — receipt hardening ----------
+// ---------- ACCEPTANCE: receipt hardening ----------
 
-test('ACCEPTANCE Hale-2026-07-23 item 7a: a forged generation receipt with no content digest is REFUSED (full schema, not just kind)', () => {
+test('ACCEPTANCE (receipt hardening): a forged generation receipt with no content digest is REFUSED (full schema, not just kind)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'receipts-forged-'));
   try {
     // A blob with a VALID kind but no content digest — the old check passed on
@@ -645,7 +645,7 @@ test('ACCEPTANCE Hale-2026-07-23 item 7a: a forged generation receipt with no co
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 7b: the artifact content digest is copied into the publish receipt', () => {
+test('ACCEPTANCE (receipt hardening): the artifact content digest is copied into the publish receipt', () => {
   const dir = mkdtempSync(join(tmpdir(), 'receipts-digest-'));
   const genPath = join(dir, 'gen.json');
   try {
@@ -661,7 +661,7 @@ test('ACCEPTANCE Hale-2026-07-23 item 7b: the artifact content digest is copied 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 7c: published-private REFUSES a null artifact_url', () => {
+test('ACCEPTANCE (receipt hardening): published-private REFUSES a null artifact_url', () => {
   const dir = mkdtempSync(join(tmpdir(), 'receipts-nourl-'));
   const genPath = join(dir, 'gen.json');
   try {
@@ -676,7 +676,7 @@ test('ACCEPTANCE Hale-2026-07-23 item 7c: published-private REFUSES a null artif
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 7d: a declined/failed receipt can NEVER be marked revoked', () => {
+test('ACCEPTANCE (receipt hardening): a declined/failed receipt can NEVER be marked revoked', () => {
   for (const status of ['declined', 'failed']) {
     const dir = mkdtempSync(join(tmpdir(), `receipts-${status}-`));
     const genPath = join(dir, 'gen.json');

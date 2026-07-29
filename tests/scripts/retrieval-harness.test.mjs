@@ -43,7 +43,7 @@ test('lexicalRankedIds: returns a ranked id list (shipped scorer, no slice)', ()
 // normalized-magnitude ranking landed; a test kept alive for dead code would
 // document a combiner the product doesn't have.)
 
-// ── A5 strict evaluator (Train A; Crest corrections 2026-07-12) ──
+// ── A5 strict evaluator (Train A) ──
 
 test('A5 validateGold: empty expected without no_answer:true is rejected — zero silent skips', () => {
   assert.throws(() => validateGold([{ id: 'q1', query: 'something', rung: 'literal' }]), /no_answer/);
@@ -55,7 +55,7 @@ test('A5 validateGold: empty expected without no_answer:true is rejected — zer
   assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'literal', expected: [''] }]), /non-empty strings/);
 });
 
-// ── Blocker 4 (Hale verdict 2026-07-14 §4): evaluator validation fails CLOSED ──
+// ── Blocker 4: evaluator validation fails CLOSED ──
 
 test('blocker-4 validateGold: unknown or missing rung is refused (closed reporting enum)', () => {
   assert.throws(() => validateGold([{ id: 'q1', query: 'x', rung: 'vibes', expected: ['u1'] }]),
@@ -80,7 +80,7 @@ test('blocker-4 validateGold: an id in both expected and forbidden is contradict
 test('A5+blocker-4 assertKnownTiers: unknown AND missing authority tiers fail closed in the evaluator', () => {
   assert.ok(assertKnownTiers({ units: [{ id: 'a', tier: 'canonical' }, { id: 'b', tier: 'observation' }] }));
   assert.throws(() => assertKnownTiers({ units: [{ id: 'x', tier: 'mystery' }] }), /fails closed/);
-  // The exact hole Hale reproduced: a unit with NO tier used to pass silently and
+  // The exact hole: a unit with NO tier used to pass silently and
   // be defaulted canonical by product code. Absence is not a tier.
   assert.throws(() => assertKnownTiers({ units: [{ id: 'c' }] }), /missing authority tier on unit c/);
   assert.throws(() => assertKnownTiers({ units: [{ id: 'd', tier: '' }] }), /missing authority tier/);
@@ -131,9 +131,8 @@ test('A5 runHarness: under-declared gold set is refused before any arm runs', as
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ── Blocker 2 (Hale verdict §2): immutable captured corpus — the two falsifiers ──
-// From the evidence answer (keel--evidence-answer-immutable-corpus), with Hale's
-// round-4 correction applied: compare a DETERMINISTIC PROJECTION (ranks per arm,
+// ── Blocker 2: immutable captured corpus — the two falsifiers ──
+// Compare a DETERMINISTIC PROJECTION (ranks per arm,
 // snapshot id), never whole receipts (latency fields legitimately vary).
 
 test('blocker-2 falsifier A: mutating unit files after capture cannot change any measured rank (capture-leak test)', async () => {
@@ -199,7 +198,7 @@ test('blocker-2 falsifier B: every arm completes against the capture with the st
   }
 });
 
-// ── Hale close path §6: byteCap binds absolutely; context3 reports at its real depth ──
+// ── close path: byteCap binds absolutely; context3 reports at its real depth ──
 
 test('close-path-6: a byteCap below the pack header delivers an EMPTY pack, never bytes > byteCap', async () => {
   const { buildFinalContextPack } = await import(pathToFileURL(join(SCRIPTS, 'retrieve-context.mjs')).href);

@@ -65,7 +65,7 @@ test('includeInvalidated:true brings cold history back into the candidate set', 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('includeInvalidated:true reaches an archived, historically-invalidated edge target (Hale\'s 2026-07-21 finding)', () => {
+test('includeInvalidated:true reaches an archived, historically-invalidated edge target', () => {
   const { dir, mem } = vault();
   try {
     const archive = join(mem, 'archive');
@@ -87,7 +87,7 @@ test('includeInvalidated:true reaches an archived, historically-invalidated edge
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a canonical archived-active unit (status:active, archived:true, no t_invalid) is absent by default and present only with includeInvalidated (Hale's 2026-07-22 finding)", () => {
+test("a canonical archived-active unit (status:active, archived:true, no t_invalid) is absent by default and present only with includeInvalidated", () => {
   const { dir, mem } = vault();
   try {
     const archive = join(mem, 'archive');

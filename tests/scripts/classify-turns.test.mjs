@@ -183,7 +183,7 @@ test('DC-94a: each classified record is stamped with proxy_version', () => {
     const classifiedFile = join(home, '.core', 'workspaces', 'ct-pv-ws', 'metrics', 'classified', '2026-06-01.jsonl');
     // Windows: chmod cannot express owner-only (only toggles read-only), so
     // mode stays 0o666 regardless -- structurally unsatisfiable there, not a
-    // regression (Meridian, 2026-07-21).
+    // regression.
     if (process.platform !== 'win32') {
       assert.equal(statSync(classifiedFile).mode & 0o777, 0o600, 'raw calibration evidence is owner-only');
     }

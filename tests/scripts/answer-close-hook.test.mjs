@@ -11,7 +11,7 @@ import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'answer-close-hook.mjs');
 
-// Hale's catch (2026-07-18): the writer derives the session date from the real
+// The writer derives the session date from the real
 // clock (log-event.mjs: `new Date().toISOString().slice(0, 10)`), so a
 // hardcoded fixture date breaks on every UTC rollover. Derive it the same way
 // the code under test does, not a fresh hardcode that just moves the same bug
@@ -120,7 +120,7 @@ test('hostile session id never escapes the intended directory (sanitized pending
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
 
-// ---- Codex Stop contract tests (Hale's fresh-audit catch, 2026-07-17: an
+// ---- Codex Stop contract tests (an
 // async-marked handler is silently SKIPPED by Codex entirely — "The async
 // option is parsed, but asynchronous command hooks aren't supported yet" —
 // and empty/plain-text stdout on exit 0 is an INVALID Stop response — "Plain

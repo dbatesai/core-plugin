@@ -1,8 +1,7 @@
 /**
  * buildFinalContextPack — Train A A4 acceptance tests.
  *
- * The contract (Crest closure program 2026-07-12 §2, keel-to-crest-and-hale
- * next-steps §1): one function owns final ordering, authority labels, warnings,
+ * The contract: one function owns final ordering, authority labels, warnings,
  * formatting, UTF-8 byte accounting, and the byte cap; hook + CLI + evaluator +
  * tests all call it; accepted identities and exact output bytes agree on
  * synthetic fixtures.
@@ -29,9 +28,9 @@ const { buildFinalContextPack, retrieveContext, storeHealth } =
 
 test('A4 equivalence: hook subprocess output === pack function output, byte-exact, on the same fixture', () => {
   const prompt = 'omega speedmaster sale';
-  // Isolate the hook test log (Hale audit, 2026-07-17) — default
+  // Isolate the hook test log — default
   // ~/.core/hooks-log.jsonl is a real machine-wide file, not a test fixture.
-  // Rooted under ~/.core (D1 fix, 2026-07-18): os.tmpdir() no longer qualifies.
+  // Rooted under ~/.core (D1): os.tmpdir() does not qualify.
   const hooksLogDir = mkdtempSync(join(trustedTestTmpRoot(), 'a4-hook-log-'));
   _createdDirs.push(hooksLogDir);
   const hooksLog = join(hooksLogDir, 'hooks-log.jsonl');

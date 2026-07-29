@@ -99,14 +99,13 @@ test('parseRecognitionSignal: empty/missing text is unavailable', () => {
 });
 
 // ---------------------------------------------------------------------------
-// computeRows — seven rows across FOUR evidence-class sections (2026-07-22,
-// Hale's slice-1 revise: mechanics / retrieval-regression / measurement-
-// readiness / user-benefit; retrieval-log coverage and tier-distribution
-// moved OUT of regression into mechanics as plain-count instrumentation;
-// recognition + calibration moved into their own readiness section).
+// computeRows — seven rows across FOUR evidence-class sections: mechanics /
+// retrieval-regression / measurement-readiness / user-benefit. Retrieval-log
+// coverage and tier-distribution belong to mechanics as plain-count
+// instrumentation; recognition + calibration belong to the readiness section.
 // ---------------------------------------------------------------------------
 
-// The canonical four-class object (2026-07-22, Hale's acceptance revise):
+// The canonical four-class object:
 // mechanics/regression/readiness/benefit at the top level, machine verdict
 // scoped at mechanics.status, identity stamped — the SAME object --json
 // emits and the renderer consumes.
@@ -227,8 +226,8 @@ test('computeRows: no store present renders "no store" and zero pct for store-de
 
 // --- Telemetry capture row (MECHANICS): replaces the old percentage-based
 // "Retrieval-log coverage" + "Live retrieval proxy" regression rows with a
-// single COUNTS-ONLY, no-gauge mechanics/instrumentation row (Hale, 2026-07-22
-// slice-1 revise: "rows÷days is an invalid denominator... show counts"). ---
+// single COUNTS-ONLY, no-gauge mechanics/instrumentation row: rows÷days is an
+// invalid denominator, so the row shows counts. ---
 
 test('computeRows: Telemetry capture is a no-gauge MECHANICS row with plain counts, no percentage claim', () => {
   const rows = computeRows(baseOut({
@@ -284,7 +283,7 @@ test('computeRows: Telemetry capture absent still renders an honest absence, no-
 
 // --- Gold-set snapshot row (REGRESSION): present-with-evidence vs honestly-
 // absent. Trust is `provisional` — a live run does not validate its own
-// reference answers (Hale, 2026-07-22 slice-1 revise, item 5). ---
+// reference answers. ---
 
 test('computeRows: gold-set snapshot absent renders NOT_EVALUATED with a plain reason, never silently omitted', () => {
   const rows = computeRows(baseOut());
@@ -397,7 +396,7 @@ test('buildNarrative: no benefit sentence remains (DC-129 — out of scope by de
 
 // ---------------------------------------------------------------------------
 // renderReport — full assembled text: MECHANICS-scoped verdict heading, four
-// labeled evidence-class sections (2026-07-22, Hale's slice-1 revise), a
+// labeled evidence-class sections, a
 // no-gauge Telemetry-capture row, and a quoted narrative.
 // ---------------------------------------------------------------------------
 
@@ -588,8 +587,8 @@ test('checkLiveRetrievalProxy: real retrieval-log rows produce a genuine tier-di
 });
 
 // ---------------------------------------------------------------------------
-// Retrieval-event schema validation surfacing (2026-07-22, evidence-lifecycle
-// slice 2, revised per Hale's "use producer schema and isolate legacy": a
+// Retrieval-event schema validation surfacing (producer schema, legacy rows
+// isolated): a
 // malformed row must be REJECTED and COUNTED with a CLOSED code, split
 // current/legacy — never silently dropped, never a raw echoed value.
 // ---------------------------------------------------------------------------
@@ -677,7 +676,7 @@ test('gatherMetrics: real end-to-end run surfaces a rejected row in the rendered
 });
 
 // ---------------------------------------------------------------------------
-// CLI --json contract (2026-07-22, Hale's acceptance revise): the machine
+// CLI --json contract: the machine
 // output must carry the SAME four-evidence-class taxonomy the rendered report
 // does — exact class placement, producer/schema identity, and the ABSENCE of
 // the old contradictory fields (top-level verdict/probe/store/calibration,
@@ -694,7 +693,7 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
     writeFileSync(join(day, 'retrieval-log.jsonl'),
       JSON.stringify({ ts: '2026-07-22T10:00:00Z', kind: 'retrieval', schema_version: '1.0.0', trigger: 'session-start', intent_topics: ['alpha'], tier_reached: 1, escalation_path: [1], units_retrieved: [{ id: 'u1', tier: 1 }] }) + '\n');
 
-    // Fix 8 (Hale item 8): --json emits EXACTLY ONE JSON document — no human
+    // Fix 8: --json emits EXACTLY ONE JSON document — no human
     // report on the same stream — so the whole stdout parses as JSON.
     const stdout = execFileSync('node', [SCRIPT, root, '--json'], { encoding: 'utf8', timeout: 120000 });
     assert.doesNotThrow(() => JSON.parse(stdout), '--json stdout must be a single valid JSON document');

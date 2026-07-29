@@ -32,7 +32,7 @@ function allScripts() {
 }
 const countMatching = (re) => allScripts().filter(p => re.test(readFileSync(p, 'utf8'))).length;
 
-// Baselines frozen 2026-07-02 (audit fixes branch). Target for each: 1.
+// Baselines frozen 2026-07-02. Target for each: 1.
 // Lower these numbers as the duplication gets consolidated — never raise them.
 
 test('ratchet: slug-encoders outside project-slug.mjs do not grow (target: 0)', () => {
@@ -71,7 +71,7 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // 52 → 53 (2026-07-16): metrics-package.mjs, the anonymized memory-metrics
   // feedback-package CLI — genuinely new (metrics-package-report.mjs is
   // import-only, no entry guard). 53 → 54 (2026-07-22): lifecycle-detect.mjs,
-  // the executable user-authorship-boundary preflight (Hale's fix) — a
+  // the executable user-authorship-boundary preflight — a
   // genuinely-new CLI tool with its own entry point (lifecycle-core.mjs is
   // import-only, no entry guard). 54 → 55 (2026-07-22): render-browse-artifact.mjs,
   // the /memory-view snapshot-page generator — a genuinely-new CLI tool with its

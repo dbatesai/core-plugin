@@ -2,9 +2,9 @@
  * close-hook-regression-parent-sha.test.mjs — the production duplicate-close defect,
  * proven bookend-style against the actual parent SHA (RC-06).
  *
- * Hale's ask (2026-07-27 HOLD, repeating an earlier objection): RED-01/RED-04's evidence
- * for the exact-session redesign is a missing-export SyntaxError, invalid under the team's
- * test contract because it never executes a real oracle. A parent-SHA-compatible falsifier
+ * RED-01/RED-04's evidence for the exact-session redesign is a missing-export
+ * SyntaxError, invalid under the test contract because it never executes a real
+ * oracle. A parent-SHA-compatible falsifier
  * has to run at e81903fc5c58529f7ab0b05421df126c3f9e4f2d (last release, before this branch
  * added any new export) without import-erroring, reach a real assertion, fail there, then
  * pass at the fixed tip.

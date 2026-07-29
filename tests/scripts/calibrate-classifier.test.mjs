@@ -287,7 +287,7 @@ test('worksheet is self-contained for labeling but keeps predictions blind', () 
     assert.ok(existsSync(r.predictions_path), 'sealed prediction companion exists for post-label import');
     // Windows: chmod cannot express owner-only (it only toggles the read-only
     // attribute), so mode stays 0o666 there regardless -- structurally
-    // unsatisfiable, not a regression (Meridian, 2026-07-21). Every other
+    // unsatisfiable, not a regression. Every other
     // 0o600 write path in this codebase already treats mode as advisory on
     // Windows with a try/catch; this assertion is the one place that still
     // hard-required the POSIX bits, so it's platform-guarded here instead.

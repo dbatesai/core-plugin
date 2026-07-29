@@ -77,7 +77,7 @@ function extractZip(zipPath, dest) {
 // silently emits a plain tar for a `.zip` destination. zipStaging()'s own
 // magic-byte check correctly refuses that as a fake zip and runPackage()
 // falls back to shipping a real, already-unpacked folder instead
-// (`shipped.kind === 'folder'`) -- exactly the behavior Meridian's fix
+// (`shipped.kind === 'folder'`) -- exactly the behavior the fallback
 // exists to guarantee. A test asserting `shipped.kind === 'zip'` unconditionally
 // was itself asserting this box's tar is trustworthy, which isn't always true
 // and isn't the product's contract. Both outcomes ship real, readable content;
@@ -87,9 +87,9 @@ function readShippedPackage(shipped, dest) {
   return extractZip(shipped.path, dest);
 }
 
-// ---------- verifyZipMagic / zipStaging: silent tar-as-zip corruption (Meridian, 2026-07-20) ----------
+// ---------- verifyZipMagic / zipStaging: silent tar-as-zip corruption ----------
 //
-// Live Windows-box finding: GNU tar (first on PATH via Git Bash/MSYS2 on her machine)
+// On a real Windows box, GNU tar (first on PATH via Git Bash/MSYS2)
 // has no ZIP support behind `-a`, so for a `.zip` filename it silently emits an
 // uncompressed TAR wearing a .zip extension, exit 0 -- and the old `tar -t` + manifest
 // listing check couldn't tell the difference, because GNU tar happily lists its own
@@ -101,7 +101,7 @@ test('verifyZipMagic: rejects a plain-tar-wearing-a-zip-extension file (GNU tar\
   const root = mkdtempSync(join(tmpdir(), 'mp-zipmagic-'));
   try {
     const fakeZip = join(root, 'fake.zip');
-    // Meridian's exact confirmed bytes for the corrupted case: a tar header starts "./".
+    // The exact confirmed bytes for the corrupted case: a tar header starts "./".
     writeFileSync(fakeZip, Buffer.from('./manifest.json\x00\x00\x00garbage-tar-bytes'));
     const result = verifyZipMagic(fakeZip);
     assert.equal(result.ok, false, 'a mislabeled tar must not be certified as a real zip');
@@ -178,7 +178,7 @@ test('share artifact projects local daily telemetry to weekly-only blocks and re
     writeFileSync(join(secondWeek, 'hygiene-log.jsonl'), `${JSON.stringify({ kind: 'maintenance-run' })}\n`);
     const classified = join(home, '.core', 'workspaces', 'fixture-ws-alpha', 'metrics', 'classified');
     mkdirSync(classified, { recursive: true });
-    // Current-instrument stamps: the cohort gate (Hale 2026-07-22) only
+    // Current-instrument stamps: the cohort gate only
     // aggregates rows produced by the running (schema, classifier, proxy).
     const stamp = { schema_version: CLASSIFIED_SCHEMA_VERSION, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION };
     writeFileSync(join(classified, '2026-07-01.jsonl'), `${JSON.stringify({ ...stamp, state: 'tier-0-win', provisional: true })}\n`);
@@ -242,7 +242,7 @@ test('per-turn hook emits the canonical retrieval event from the product path', 
   try {
     const project = makeFixtureProject(root, { plant: false });
     const hook = join(import.meta.dirname, '..', '..', 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
-    // Isolate the hook test log (Hale audit, 2026-07-17) — default
+    // Isolate the hook test log — default
     // ~/.core/hooks-log.jsonl is a real machine-wide file, not a test fixture.
     const hooksLog = join(hooksLogDir, 'hooks-log.jsonl');
     const res = spawnSync(process.execPath, [hook], {
@@ -445,7 +445,7 @@ test('workspace recognition dedupes replayed classified rows before counting, an
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("workspace recognition: Hale's mixed-instrument falsifier — an old-instrument survivor lands in the coverage gap, never the counts", () => {
+test("workspace recognition: the mixed-instrument falsifier — an old-instrument survivor lands in the coverage gap, never the counts", () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-cohort-'));
   try {
     const home = join(root, 'home');
@@ -472,7 +472,7 @@ test("workspace recognition: Hale's mixed-instrument falsifier — an old-instru
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('ACCEPTANCE Hale-2026-07-23 item 6 (package availability): an old-only store reports UNAVAILABLE-with-a-coverage-gap, never available-with-zero-turns', () => {
+test('ACCEPTANCE (package availability): an old-only store reports UNAVAILABLE-with-a-coverage-gap, never available-with-zero-turns', () => {
   const root = mkdtempSync(join(tmpdir(), 'mp-oldonly-'));
   try {
     const home = join(root, 'home');

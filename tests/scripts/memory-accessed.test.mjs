@@ -88,7 +88,7 @@ test('probe: Codex harness → DEGRADED when extraction works but no CORE access
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// --- HC blocker #2 (evt-202605291319): path false-positives must not count as access ---
+// --- path false-positives must not count as access (evt-202605291319) ---
 
 test('classifyAccess: PROJECT.md.bak does NOT count as a CORE access (extension look-alike)', () => {
   const r = classifyAccess({ harness: 'claude-code', transcriptAvailable: true, toolExtractionPending: false, events: [toolEv('cat PROJECT.md.bak')], coreStorePresent: true });
@@ -117,9 +117,9 @@ test('classifyAccess: a real absolute _memories/ path still PASSes after tighten
   assert.equal(r.core, 1, 'preceding-slash boundary still admits real path embeds');
 });
 
-// --- HC blocker #4: producer-contract row fields (env_signals + workspace_id) ---
+// --- producer-contract row fields (env_signals + workspace_id) ---
 
-test('probe row carries env_signals with the full standard key set (HC blocker #4)', async () => {
+test('probe row carries env_signals with the full standard key set', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     const tpath = join(dir, 'session.jsonl');
@@ -132,7 +132,7 @@ test('probe row carries env_signals with the full standard key set (HC blocker #
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('probe reads workspace_id from <cwd>/workspace.json (HC blocker #4)', async () => {
+test('probe reads workspace_id from <cwd>/workspace.json', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ workspace_id: 'core-framework' }));
@@ -154,7 +154,7 @@ test('probe row has workspace_id key even when no workspace.json present (null, 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// --- HC blocker #1: runStartup must wire memory-accessed AND thread the resolved harness ---
+// --- runStartup must wire memory-accessed AND thread the resolved harness ---
 
 test('runStartup wires memory-accessed (no longer orphan) + labels it claude-code', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));

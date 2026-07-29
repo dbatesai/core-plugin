@@ -17,7 +17,7 @@ function bullet(text) {
 }
 
 // Establish PROJECT.md's creation baseline the way the render step now does — a
-// no-baseline PROJECT.md fails closed (Hale's 2026-07-22 root fix), so a demote
+// no-baseline PROJECT.md fails closed, so a demote
 // writer only proceeds against a file CORE has stamped at creation.
 function stampPm(dir) {
   const home = join(dir, 'home');
@@ -275,8 +275,8 @@ test('MEM-013: crash-retry does not duplicate the archive block', () => {
 
   demoteMoves(dir, { today: TODAY });               // completes: archive + stub + baseline stamp
   writeFileSync(join(dir, 'PROJECT.md'), original); // simulate crash AFTER archive append, BEFORE PROJECT.md write
-  // The PROJECT.md write and its baseline stamp are now COUPLED under one lock
-  // (Hale's 2026-07-22 boundary fix): a crash "before the PROJECT.md write"
+  // The PROJECT.md write and its baseline stamp are COUPLED under one lock:
+  // a crash "before the PROJECT.md write"
   // means neither the write NOR the stamp landed. The reverted content is the
   // CORE-authored `original` render, so re-establish its creation baseline (as
   // the render step would) — otherwise the demoted-content stamp still on disk
@@ -354,7 +354,7 @@ test('demoteMoves: size pressure reports no escalation when the escalated floor 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("demoteMoves: Hale's catch (2026-07-21) — one old item no longer masks other over-floor items still over cap", () => {
+test("demoteMoves: one old item no longer masks other over-floor items still over cap", () => {
   // Pre-fix bug: the escalation only fired when the normal floor found ZERO
   // candidates. Here the normal floor finds the 93-day item, so escalation
   // never ran under the old gate — the 10-day item sat untouched even though

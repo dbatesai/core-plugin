@@ -31,8 +31,7 @@ function tmpLog() {
 }
 after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, force: true }); });
 
-// Isolate every hook test log by construction (Hale audit, 2026-07-17, fresh
-// re-audit of 246a77a): every current call site here happens to pass
+// Isolate every hook test log by construction: every current call site here passes
 // CORE_HOOKS_LOG_FILE explicitly, but the helpers themselves had no default —
 // one call a future test author forgets to annotate silently writes into the
 // real machine-wide ~/.core/hooks-log.jsonl. Default here, so "isolated" is
@@ -145,7 +144,7 @@ test('SessionEnd on an UNREGISTERED dir (attacker _memories/) skips — security
   rmSync(store, { recursive: true, force: true });
 });
 
-// D1 (Crest, 2026-07-16 / Keel, 2026-07-18): CORE_HOOKS_LOG_FILE was read
+// D1: CORE_HOOKS_LOG_FILE was read
 // unconditionally, an arbitrary-file-append primitive reachable via a hostile
 // project's forwarded settings.json env. Same fix shape and same test shape
 // as close-index-path-validation.test.mjs's resolveIndexPath coverage.
@@ -170,7 +169,7 @@ test('resolveHookLogPath: no env var falls back to the default', () => {
   assert.equal(resolveHookLogPath({}), join(homedir(), '.core', 'hooks-log.jsonl'));
 });
 
-// D1 second pass (Hale + Antigravity, 2026-07-18): resolveHookLogPath()'s
+// D1 second pass: resolveHookLogPath()'s
 // lexical check alone is a CWE-22-shaped gap — a symlink placed under the
 // trusted ~/.core pointing outside it passes the string check while writes
 // go through it to the real outside target. logHookEvent()'s canonical

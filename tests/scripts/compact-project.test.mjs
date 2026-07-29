@@ -38,7 +38,7 @@ function project(entry) {
     '- none', '',
   ].join('\n'));
   // Establish PROJECT.md's creation baseline the render step now does — a
-  // no-baseline PROJECT.md fails closed (Hale's 2026-07-22 root fix), so
+  // no-baseline PROJECT.md fails closed, so
   // compaction only proceeds against a file CORE stamped at creation.
   const home = join(dir, 'home');
   mkdirSync(join(home, '.core'), { recursive: true });

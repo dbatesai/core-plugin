@@ -1,7 +1,7 @@
 // Performance battery (v3.14.0 Task 7) — the FIRST timing tests in this
 // suite. Two budgets from the approved spec:
 //   1. captureTurnEvidence adds <25ms typical (median) over a no-op baseline
-//      (the hook rides every user turn — Agy's bar: zero perceptible
+//      (the hook rides every user turn — the bar is zero perceptible
 //      degradation), with a 500ms hard ceiling on the worst sample.
 //   2. a judge batch of 50 turns over a 200-unit store completes <10s
 //      (the maintenance cadence budget).

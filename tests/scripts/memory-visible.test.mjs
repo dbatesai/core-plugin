@@ -19,7 +19,7 @@ function tool(name, input) { return line({ type: 'assistant', message: { role: '
 
 const OK = { token: 't', memoryWritten: true, memoryHasToken: true, transcriptAvailable: true };
 
-// --- resolveTranscript path mapping (Meridian's live Windows-box repro, 2026-07-20) ---
+// --- resolveTranscript path mapping (Windows drive-colon repro) ---
 // Was a hand-rolled `.replace(/\//g, '-')` -- missed the Windows drive colon entirely
 // and any dot, producing a mapped path that never matched the real Claude Code
 // projects folder, on top of a real cwd. Must use the canonical mapProjectPathToSlug.
@@ -143,7 +143,7 @@ test('classify PASS: line-count within injection window does not false-degrade',
 // Field evidence (session 56, 2026-05-30): MEMORY.md was 196 lines / 25,684 bytes —
 // UNDER the 200-line window but OVER the ~24,400-byte injection cap. The tail dropped
 // silently ("only part of it was loaded") while a line-only probe would falsely PASS.
-// Defense-in-depth (Hale's call): keep the line window AND add the byte window.
+// Defense-in-depth: keep the line window AND add the byte window.
 test('classify DEGRADED (byte cap): byte-count over window with line-count UNDER window → truncation-detected', () => {
   const events = [{ idx: 1, kind: 'echo' }, { idx: 2, kind: 'tool', name: 'Bash' }];
   const r = classify({ ...OK, events, memoryLineCount: 196, injectionLineWindow: 200, memoryByteCount: 25684, injectionByteWindow: 24400 });
@@ -167,7 +167,7 @@ test('classify DEGRADED: transcript unavailable', () => {
   assert.equal(classify({ ...OK, transcriptAvailable: false, events: [] }).identity_status, 'DEGRADED');
 });
 
-// --- countLines trailing-newline boundary (HC blocker #3) ---
+// --- countLines trailing-newline boundary ---
 
 test('countLines: N real lines + trailing newline counts as N, not N+1', () => {
   const content = Array.from({ length: 200 }, (_, i) => `line${i + 1}`).join('\n') + '\n';

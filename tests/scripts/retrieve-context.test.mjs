@@ -50,7 +50,7 @@ test('deterministic — same query yields the same ordered ids', () => {
   assert.deepEqual(a, b);
 });
 
-// ---------- CLI main(): unrecognized-flag garbage query (Meridian, live Windows box, 2026-07-20) ----------
+// ---------- CLI main(): unrecognized-flag garbage query (live Windows box) ----------
 //
 // A fat-fingered `--query "..."` used to fall straight through the old arg filter
 // (which only stripped --top/--pack) into the positional slot, so the literal

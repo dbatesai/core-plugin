@@ -183,7 +183,7 @@ test('acquireLock: recovers a stale lock', () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('acquireLock: fails closed while the recorded pid is ALIVE, even past staleMs (Hale 2026-07-15)', () => {
+test('acquireLock: fails closed while the recorded pid is ALIVE, even past staleMs', () => {
   const home = tmpHome();
   try {
     const lf = join(home, 'live.lock');
@@ -197,7 +197,7 @@ test('acquireLock: fails closed while the recorded pid is ALIVE, even past stale
       /could not acquire lock/,
       'age alone must not steal from a live writer'
     );
-    // Round 3 (Hale): a LIVE pid is never auto-superseded at ANY age — even far
+    // A LIVE pid is never auto-superseded at ANY age — even far
     // past the old hard ceiling (a suspended laptop revives and must not overlap).
     assert.throws(
       () => acquireLock(lf, { timeoutMs: 80, staleMs: 60_000, now: () => Date.now() + 700_000 }),
@@ -267,14 +267,14 @@ test('MET-011: default lock timeout is bounded at 1s, not 5s', () => {
   assert.equal(LOCK_TIMEOUT_MS, 1000);
 });
 
-// --- two-writer fixture (HC's required proof: no lost history) ---
+// --- two-writer fixture (the required proof: no lost history) ---
 
 test('appendRows: sequential writes under lock lose no history (two-writer proof)', () => {
   const home = tmpHome();
   try {
     // Simulate two writers appending; lock serializes them.
     // (Node test is single-threaded, but this proves the read-modify-write
-    //  under lock preserves prior entries — the lost-update scenario HC named.)
+    //  under lock preserves prior entries — the lost-update scenario.)
     appendRows('ws1', [sampleRow({ identity_status: 'PASS' })], { session_id: 'w1' }, { home });
     appendRows('ws1', [sampleRow({ identity_status: 'DEGRADED' })], { session_id: 'w2' }, { home });
     appendRows('ws1', [sampleRow({ identity_status: 'NOT-YET' })], { session_id: 'w3' }, { home });

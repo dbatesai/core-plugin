@@ -157,7 +157,7 @@ test('rejected_top is bounded to TURN_CAPTURE_MAX_REJECTED entries', () => {
   assert.equal(row.rejected_top[0].id, 'u-0');
 });
 
-test('the cutoff candidate score (first dropped beyond the bound) is recorded for tail density (Agy, Gate A)', () => {
+test('the cutoff candidate score (first dropped beyond the bound) is recorded for tail density (Gate A)', () => {
   const many = Array.from({ length: 50 }, (_, i) => ({ id: `u-${i}`, score: 50 - i, source_stage: 'ranked' }));
   const row = normalizeTurnEvidenceRow(goodRow({ rejected_top: many }));
   assert.equal(row.rejected_cutoff_score, 50 - TURN_CAPTURE_MAX_REJECTED, 'score of the 21st candidate');
@@ -267,7 +267,7 @@ test('health counts attempts on success too', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('health tracks consecutive failures and a success resets the streak (Agy tripwire floor, Gate A)', () => {
+test('health tracks consecutive failures and a success resets the streak (tripwire floor, Gate A)', () => {
   const root = mkdtempSync(join(tmpdir(), 'tc-streak-'));
   try {
     const project = makeProject(root);

@@ -133,7 +133,7 @@ test('detectCloseState: crashed-mid-close with a store-signature mismatch re-owe
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
-// Hale's falsifier (2026-07-21, close-marker-semantic-gap): a spawnFinalize that returns
+// The close-marker semantic gap: a spawnFinalize that returns
 // success (or a test-stub `undefined`, treated as success per P1/P5) WITHOUT the headless
 // child ever calling `close-pass.mjs record --op <op>` for the ten judgment ops (everything
 // beyond maintenance-run) must not read back as a complete, nothing-owed close. Confirmed

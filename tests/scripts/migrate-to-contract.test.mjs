@@ -56,7 +56,7 @@ test('migrate: output is marked DRAFT for user review (dry-run default)', () => 
   assert.ok(/DRAFT/i.test(r.draft), 'draft contract flagged for review, not auto-adopted');
 });
 
-// --- Hale review fixes (security + input validation) ---
+// --- security + input validation ---
 
 test('migrate: YAML-injection contract_id throws (frontmatter-injection guard)', () => {
   assert.throws(
@@ -84,7 +84,7 @@ test('migrate: unknown harness key warns (ignored, not silently dropped)', () =>
   assert.ok(r.warnings.some((w) => /borg/.test(w)));
 });
 
-test('migrate: last_revised "unknown" warns weak-provenance / non-releaseable (Hale)', () => {
+test('migrate: last_revised "unknown" warns weak-provenance / non-releaseable', () => {
   const r = migrateToContract({ contractId: 'demo', lastRevised: 'unknown', files: { 'claude-code': 'x', codex: 'x' } });
   assert.ok(r.warnings.some((w) => /weak provenance|non-releaseable/i.test(w)));
 });

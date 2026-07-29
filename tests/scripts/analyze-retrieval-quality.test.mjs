@@ -126,7 +126,7 @@ test('a retrieval row missing tier_reached does not crash the tier distribution 
   assert.equal(report.tier_distribution.t1.count, 1, 'missing tier defaults to the T1 bucket');
 });
 
-test('multiple outcome rows for one retrieval resolve by authority, not first-wins (shared resolver, Hale audit 2026-07-17)', () => {
+test('multiple outcome rows for one retrieval resolve by authority, not first-wins (shared resolver)', () => {
   // An automatic low-authority 'unknown' close lands first, then a real
   // user-confirmed 'noisy' arrives later. Keeping "first" would report
   // safe:null forever; the shared resolver used here is the same one
@@ -162,8 +162,7 @@ test('MET-015: report header says calendar days and names the T1 exclusion rule'
 
 // ---------------------------------------------------------------------------
 // validateRetrievalLogRow — schema validation, slice 2 of the metrics
-// evidence-lifecycle contract (2026-07-22, Hale's synthesis, item 2, revised
-// per his early review "use producer schema and isolate legacy"): current-
+// evidence-lifecycle contract (producer schema, legacy isolated): current-
 // schema rows reuse record-retrieval-event.mjs's own normalizeRetrievalEvent()
 // as the single canonical contract; versionless rows get a narrow legacy
 // check and are tagged 'legacy', never implying full current conformance;
@@ -201,7 +200,7 @@ test('validateRetrievalLogRow: current-schema — out-of-range tier_reached is r
   assert.equal(r.code, 'invalid-tier');
 });
 
-// --- Hale's requested cross-field falsifiers (2026-07-22, slice-2 review) ---
+// --- cross-field falsifiers ---
 
 test('falsifier: tier_reached / escalation_path mismatch is rejected as invalid-escalation-path', () => {
   const r = validateRetrievalLogRow(currentRow({ tier_reached: 2, escalation_path: [1] })); // path ends at 1, not 2

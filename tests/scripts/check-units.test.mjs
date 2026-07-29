@@ -423,7 +423,7 @@ test('MEM-018: fresh units and observations are exempt from sources-missing', ()
   assert.equal(report.some(f => f.check === 'sources-missing'), false);
 }));
 
-test('archived-in-active: WARNs on canonical archived metadata (archived: true) left top-level (Hale\'s 2026-07-22 finding)', () => withStore((memories) => {
+test('archived-in-active: WARNs on canonical archived metadata (archived: true) left top-level', () => withStore((memories) => {
   writeFileSync(join(memories, 'risk-1-canonical.md'), [
     '---', 'id: risk-1-canonical', 'type: risk', 'status: active',
     'archived: true', 'archived_at: 2026-05-30',
@@ -452,7 +452,7 @@ test('archived-in-active: does NOT fire for a plain top-level status=retired uni
     'a retired-but-not-archived unit is the documented, expected shape -- must not WARN');
 }));
 
-test("archived-in-active: an unrelated ancestor directory literally named 'archive' does not suppress the warning (Hale's 2026-07-22 finding)", () => {
+test("archived-in-active: an unrelated ancestor directory literally named 'archive' does not suppress the warning", () => {
   // The project itself sits under .../archive/<project>/ -- nothing to do
   // with this store's own _memories/archive/ subdirectory. A full-path
   // segment scan would false-positive here; only the immediate parent of

@@ -18,7 +18,7 @@ import { randomUUID } from 'node:crypto';
  * Windows without Developer Mode or admin lacks SeCreateSymbolicLinkPrivilege,
  * so fs.symlinkSync throws EPERM for a normal process — symlink-fixture tests
  * then hard-fail in SETUP without exercising the product logic at all
- * (Meridian's Windows full-suite finding, 2026-07-23). Probe once per process;
+ * (a Windows full-suite finding). Probe once per process;
  * symlink-dependent tests call this and skip cleanly when it's false.
  * GitHub's windows-latest runners have the privilege, so CI still exercises
  * the real assertions everywhere they can run.

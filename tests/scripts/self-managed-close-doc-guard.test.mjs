@@ -49,7 +49,7 @@ test('hooks.json: SessionEnd registers the close hook (NOT Stop — per-turn wou
   // be wired to Stop — Stop fires every turn, not once per session, and
   // running a full close on every turn would be a correctness disaster. A
   // SEPARATE, lightweight Stop hook (answer-close-hook.mjs, the real
-  // post-answer outcome closer per Hale's 2026-07-17 HOLD audit) is fine —
+  // post-answer outcome closer) is fine —
   // this guard is specifically against close-pass ending up there, not
   // against Stop ever being used for anything.
   if (h.hooks.Stop) {
@@ -84,7 +84,7 @@ test('close hook: env suppression + kill switch + workspace trust + spawn pre-ch
 });
 
 test('close-pass-hook.mjs source wires the spawn to close-pass.mjs process-request, never raw claude -p', () => {
-  // Regression guard for the 2026-06-30 finding: a headless LLM narrated a close it never
+  // Regression guard: a headless LLM narrated a close it never
   // marked. The hook must spawn a deterministic runner, never `claude -p` directly — that
   // would put the marker back at LLM discretion.
   //
@@ -191,10 +191,9 @@ test('startup.md invokes the decoration + index refresh backstop for real (not -
     'the decoration/index calls must be guarded exactly like every other script call in this file');
 });
 
-test("startup.md orders the backstop AFTER edit-detection and before startup catch-up (Hale's authorship-ordering finding, 2026-07-22)", () => {
+test("startup.md orders the backstop AFTER edit-detection and before startup catch-up (authorship ordering)", () => {
   // Was: 'the backstop step sits right after the integrity probe and before the
-  // retrieval ladder' — that WAS the bug. Hale's repro (mailbox
-  // "723c24a-authorship-ordering-repro", 2026-07-22): running decoration before
+  // retrieval ladder' — that WAS the bug. Running decoration before
   // edit-detection ever read the pre-decoration bytes let decorate-graph
   // preserve a between-session user edit's BYTES while unconditionally
   // stamping a fresh baseline over it — so edit-detection, once it finally

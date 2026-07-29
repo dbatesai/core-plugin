@@ -165,8 +165,7 @@ test('MET-010: normalizeRetrievalEvent sanitizes unit ids and topics', () => {
 });
 
 // ---------------------------------------------------------------------------
-// schema_version stamping (2026-07-22, Hale's metrics-evidence-lifecycle
-// slice-2 review): every row this producer writes must carry the CURRENT
+// schema_version stamping: every row this producer writes must carry the CURRENT
 // schema version so a reader can tell "written under the fully-enforced
 // current contract" apart from pre-versioning history — and the producer's
 // own stamp must always win over anything a caller tries to supply.

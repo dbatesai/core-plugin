@@ -99,7 +99,7 @@ test('attributeDrift: no evidence change → low confidence', () => {
   assert.equal(a.confidence, 'low');
 });
 
-test('attributeDrift: always a hypothesis, never asserted fact (HC bar)', () => {
+test('attributeDrift: always a hypothesis, never asserted fact', () => {
   const a = attributeDrift({ evidence: [] }, { evidence: [{ source: 'new' }] });
   assert.ok('hypothesis' in a && 'confidence' in a, 'must carry hypothesis + confidence');
   assert.ok(['low', 'med', 'high'].includes(a.confidence));
