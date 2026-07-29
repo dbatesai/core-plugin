@@ -4,26 +4,19 @@
  * ENTIRE shipped tree (marketplace installs pull the whole git repo, so every
  * file ships: plugins/**, both manifests, root docs, .github/**, and tests/**).
  *
- * Why this exists: twice in one day, David-specific content nearly shipped (or
- * briefly shipped) to every installer of this public plugin — a capability probe
- * defaulting to a personal `~/files` repo, and a personal artifact-publish waiver
- * hardcoded as the consent default with a real name in SKILL.md prose. This guard
- * is the repeatable backstop: it fails CI (and the /cut-release gate) on any hit.
+ * The invariant: a marketplace install pulls the whole public repository, so no
+ * tracked file may carry personal identity tokens, personal filesystem paths,
+ * machine names, notification channels, internal agent names, or internal
+ * development-process references (issue ids, review lineage, acceptance labels).
+ * This guard fails CI (and the /cut-release gate) on any hit.
  *
- * The scan is deliberately scoped per pattern (see PATTERNS[].appliesTo) so it
- * catches the dangerous surface — shipped prose, defaults, product code, personal
- * paths — without drowning in false positives from legitimate test vectors and
- * historical changelog entries. Every legitimate occurrence is either scope-
- * excluded (with a comment) or listed in ALLOWLIST with a reason.
+ * Agent-name and internal-process checks apply to ALL tracked text — shipped
+ * prose, product code, tests, and the changelog alike. Every legitimate
+ * occurrence is listed in ALLOWLIST with a reason; the allowlist stays narrow:
+ * author/license identity fields and deliberate scanner/test fixtures only.
  *
- * What this guard does NOT cover, by design (reported as judgment-call classes,
- * not auto-blocked): design-provenance code comments in *.mjs / *.json that name
- * peer agents ("Hale's finding", "per HC critique") or cite a person's decision;
- * the pervasive BBLens / T-Mobile wrapper EXAMPLE used pedagogically throughout;
- * and CHANGELOG.md's historical entries (rewriting shipped history is its own
- * decision). Those are left for a human pass. The guard targets the surfaces the
- * two real incidents lived on: user-facing prose, shipped defaults, and personal
- * filesystem/identity tokens.
+ * Not covered, by design: the BBLens / T-Mobile wrapper EXAMPLE used
+ * pedagogically throughout is product-chosen example content, not leakage.
  *
  * Usage:
  *   node tests/scripts/dev-leakage-guard.mjs [rootDir]   # scan; exit 1 on any hit
@@ -38,8 +31,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = join(HERE, '..', '..'); // repo root: tests/scripts/ -> ../../
 
 // ---- scope helpers (relPath is always forward-slashed, repo-root-relative) ----
-const isMarkdown = (p) => p.endsWith('.md');
-const notChangelog = (p) => p !== 'CHANGELOG.md';
 const inPlugins = (p) => p.startsWith('plugins/');
 const isRootDoc = (p) =>
   ['README.md', 'USAGE.md', 'INSTALL.md', 'ARCHITECTURE.md', 'llms.txt'].includes(p);
@@ -101,8 +92,7 @@ export const PATTERNS = [
     name: 'machine-name-r11',
     klass: 'machine-name',
     re: /\bR11\b/g,
-    // Historical changelog entries name the box; rewriting history is out of scope.
-    appliesTo: (p) => notChangelog(p),
+    appliesTo: () => true,
   },
   {
     name: 'ntfy-channel',
@@ -124,27 +114,22 @@ export const PATTERNS = [
     re: /\/Users\/[A-Za-z][A-Za-z0-9._-]*/g,
     appliesTo: (p) => isProductSurface(p),
   },
-  // --- agent names hardcoded in shipped PROSE (.md) OR shipped product code
-  // (.mjs under plugins/ — the ~80 design-provenance comments, ruled 2026-07-24:
-  // the product owner mandated no internal dev-process references in anything
-  // shippable): only product names ship ---
+  // --- internal agent names, hardcoded anywhere in tracked text: only product
+  // names ship ---
   {
     name: 'agent-name-in-prose',
     klass: 'agent-name',
-    re: /\b(Keel|Hale|Antigravity|Crest|Meridian|Tideline)\b/g,
-    appliesTo: (p) => (isMarkdown(p) && notChangelog(p)) || (inPlugins(p) && p.endsWith('.mjs')),
+    re: /\b(Keel|Hale|Agy|Antigravity|Crest|Meridian|Tideline)\b/g,
+    appliesTo: () => true,
   },
-  // --- a specific person's name in shipped prose or shipped product code ---
+  // --- a specific person's name anywhere in tracked text ---
   {
     name: 'person-in-prose',
     klass: 'personal-identity',
     re: /\bDavid\b/g,
-    appliesTo: (p) => (isMarkdown(p) && notChangelog(p)) || (inPlugins(p) && p.endsWith('.mjs')),
+    appliesTo: () => true,
   },
-  // --- internal decision-ledger references (DC-XX) in anything user-shippable
-  // (same 2026-07-24 ruling: "not meaningful to people other than me, and this
-  // is a public repo"). tests/ keeps provenance traceability for now — an
-  // explicitly-flagged residual, not an oversight. ---
+  // --- internal decision-ledger references (DC-XX) anywhere in tracked text ---
   {
     name: 'dc-reference',
     klass: 'dev-process',
@@ -156,19 +141,43 @@ export const PATTERNS = [
     // internal workshop unit is mechanically indistinguishable from such an
     // example — that residual class is a hand-review item, not a guard item.
     re: /\b[Dd][Cc]-\d+[a-z]?\b(?!-)/g,
-    appliesTo: (p) => isProductSurface(p) || p === 'CHANGELOG.md',
+    appliesTo: () => true,
   },
-  // --- names in shipped JSON config/schema files (Antigravity's 868915d review
-  // gap: configs are product surface, not documentation — a name in a schema
-  // default or manifest description ships to every install). Owner/author
-  // fields in the manifests are allowlisted; nothing else earns a name.
-  // NOTE: .mjs source strings are NOT yet scanned — gated on the pending
-  // ruling over ~80 design-provenance code comments; scanning source before
-  // that ruling would bury real hits under known-benign rationale comments.
+  // --- internal development-process forms: issue ids, review-turn lineage,
+  // dead internal sentinels, named acceptance labels ---
+  {
+    name: 'internal-issue-id',
+    klass: 'dev-process',
+    // AUD-3 / HC_539 / SL-3 / MET-004 / SYN-2 / MEM-1 / SOD-4 / JC-2 /
+    // HARNESS-1 / PROTO-2 — the internal issue-prefix vocabulary. Digit
+    // required, so prose words and file names never match.
+    re: /\b(?:AUD-\d+[a-z]?|HC_\d+|(?:SL|MET|SYN|MEM|SOD|JC|HARNESS|PROTO)-\d+)\b/g,
+    appliesTo: () => true,
+  },
+  {
+    name: 'review-turn-lineage',
+    klass: 'dev-process',
+    // "RM Turn 14" / "RC Turn evt-c97d" review-session lineage, and the
+    // dead internal sentinel value.
+    re: /\b(?:RM|RC) Turn\b|pending-hc-spec/g,
+    appliesTo: () => true,
+  },
+  {
+    name: 'named-acceptance-label',
+    klass: 'dev-process',
+    // "ACCEPTANCE Hale-ea140b0 item 3"-style labels tying tests to a named
+    // reviewer's fix list.
+    re: /ACCEPTANCE\s+(?:Keel|Hale|Agy|Antigravity|Crest|Meridian)[-\s]/g,
+    appliesTo: () => true,
+  },
+  // --- names in shipped JSON config/schema files: configs are product
+  // surface — a name in a schema default or manifest description ships to
+  // every install. Owner/author fields in the manifests are allowlisted;
+  // nothing else earns a name.
   {
     name: 'name-in-json-config',
     klass: 'personal-identity',
-    re: /\b(Keel|Hale|Antigravity|Crest|Meridian|Tideline|David)\b/g,
+    re: /\b(Keel|Hale|Agy|Antigravity|Crest|Meridian|Tideline|David)\b/g,
     appliesTo: (p) => p.endsWith('.json'),
   },
 ];
@@ -182,23 +191,23 @@ export const ALLOWLIST = [
   // Repo owner / copyright fields — the plugin's genuine identity, not a leak.
   // Author name + email in the manifests are deliberate public authorship
   // metadata (npm-convention author fields), not accidental leakage.
-  { file: '.claude-plugin/marketplace.json', patterns: ['personal-name', 'name-in-json-config', 'personal-email'], reason: 'marketplace owner field — legitimate author identity (name + email are deliberate authorship metadata)' },
-  { file: 'plugins/core/.claude-plugin/plugin.json', patterns: ['personal-name', 'name-in-json-config', 'personal-email'], reason: 'plugin.json author field — legitimate author identity (name + email are deliberate authorship metadata)' },
-  { file: 'plugins/core/.codex-plugin/plugin.json', patterns: ['personal-name', 'name-in-json-config', 'personal-email'], reason: 'codex plugin.json author/developer fields — legitimate author identity (name + email are deliberate authorship metadata)' },
-  { file: 'LICENSE', patterns: ['personal-name'], reason: 'MIT copyright holder — legitimate' },
-  { file: 'plugins/core/LICENSE', patterns: ['personal-name'], reason: 'MIT copyright holder — legitimate' },
+  { file: '.claude-plugin/marketplace.json', patterns: ['personal-name', 'person-in-prose', 'name-in-json-config', 'personal-email'], reason: 'marketplace owner field — legitimate author identity (name + email are deliberate authorship metadata)' },
+  { file: 'plugins/core/.claude-plugin/plugin.json', patterns: ['personal-name', 'person-in-prose', 'name-in-json-config', 'personal-email'], reason: 'plugin.json author field — legitimate author identity (name + email are deliberate authorship metadata)' },
+  { file: 'plugins/core/.codex-plugin/plugin.json', patterns: ['personal-name', 'person-in-prose', 'name-in-json-config', 'personal-email'], reason: 'codex plugin.json author/developer fields — legitimate author identity (name + email are deliberate authorship metadata)' },
+  { file: 'LICENSE', patterns: ['personal-name', 'person-in-prose'], reason: 'MIT copyright holder — legitimate' },
+  { file: 'plugins/core/LICENSE', patterns: ['personal-name', 'person-in-prose'], reason: 'MIT copyright holder — legitimate' },
 
   // Historical changelog entry describing the dotted-username slug-encoding bug
   // (test username, technical note). Rewriting shipped history is out of scope.
-  { file: 'CHANGELOG.md', patterns: ['personal-name'], reason: 'historical changelog technical note (dotted-username bug)' },
+  { file: 'CHANGELOG.md', patterns: ['personal-name', 'person-in-prose'], reason: 'historical changelog technical note (dotted-username bug test vector)' },
 
   // Path→slug / plugin-root / transcript mapping tests: these EXIST to prove the
   // username-generalization logic. Real-looking usernames are the test vectors.
-  { file: 'tests/scripts/project-slug.test.mjs', patterns: ['personal-home-username', 'personal-name'], reason: 'path→slug encoding test vectors (dbates, David.Bates28)' },
+  { file: 'tests/scripts/project-slug.test.mjs', patterns: ['personal-home-username', 'personal-name', 'person-in-prose'], reason: 'path→slug encoding test vectors (dbates, David.Bates28)' },
   { file: 'tests/scripts/resolve-plugin-root.test.mjs', patterns: ['personal-home-username'], reason: 'plugin-root authority-classification test vectors' },
-  { file: 'tests/scripts/read-transcript.test.mjs', patterns: ['personal-home-username', 'personal-name'], reason: 'transcript-path slug test vectors' },
-  { file: 'tests/scripts/auto-memory-injection-probe.test.mjs', patterns: ['personal-home-username', 'personal-name'], reason: 'mapped-memory-path test vectors' },
-  { file: 'tests/scripts/audit-memory-boundary.test.mjs', patterns: ['personal-name'], reason: 'mapped-native-path test vector (David.Bates28)' },
+  { file: 'tests/scripts/read-transcript.test.mjs', patterns: ['personal-home-username', 'personal-name', 'person-in-prose'], reason: 'transcript-path slug test vectors' },
+  { file: 'tests/scripts/auto-memory-injection-probe.test.mjs', patterns: ['personal-home-username', 'personal-name', 'person-in-prose'], reason: 'mapped-memory-path test vectors' },
+  { file: 'tests/scripts/audit-memory-boundary.test.mjs', patterns: ['personal-name', 'person-in-prose'], reason: 'mapped-native-path test vector (David.Bates28)' },
   { file: 'tests/scripts/aggregate-receipt.test.mjs', patterns: ['personal-home-username'], reason: 'refusal-scan test inputs — asserts these paths get redacted' },
 
   // Retrieval-test persona store: "David" is the user persona in a throwaway

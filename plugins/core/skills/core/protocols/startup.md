@@ -388,7 +388,7 @@ Read the output. When **any row is non-PASS**, narrate in plain voice:
 
 > *"Continuing with degraded capability evidence. plugin-root-resolution: DEGRADED (harness split-brain). Identity is best-effort this session."*
 
-Use **"continuing with degraded capability evidence"** verbatim per HC — not "ready," not "certified." When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
+Use the phrase **"continuing with degraded capability evidence"** verbatim — not "ready," not "certified." When all rows PASS, do not surface capability state in readiness per `feedback_readiness_only_escalations`.
 
 If `$CORE_ROOT` was not resolved (script unavailable), skip the capability probe silently — the probe itself is best-effort at startup, never a blocker.
 

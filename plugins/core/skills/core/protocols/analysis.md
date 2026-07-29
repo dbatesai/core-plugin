@@ -39,7 +39,7 @@ Three starting templates ship at `templates/swarm-implement.md`, `templates/swar
 
 ## Anti-anchoring enforcement
 
-The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the sycophancy measured in the project's independent-analysis runs, where LLM critics reversed their position 84.5% of the time under social pressure (`references/architecture-doctrines.md` cites the same findings).
+The Critic frames their independent position BEFORE seeing the Generator's output. This is the single most important piece of multi-agent discipline — it's what fights the sycophancy measured in the project's independent-analysis runs, where LLM critics reversed their position 84.5% of the time under social pressure.
 
 Operational pattern:
 

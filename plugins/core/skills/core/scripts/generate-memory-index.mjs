@@ -97,7 +97,7 @@ function todayFromArg(arg) {
 
 export function renderPriorityBlock({ memoriesDir, topN, today, existingDescriptions }) {
   // rankUnits applies the bi-temporal suppression invariant + load-error
-  // filtering (SOD-003/MEM-011) — the index is a retrieval surface.
+  // filtering — the index is a retrieval surface.
   const ranked = rankUnits(memoriesDir, { today });
   const top = ranked.slice(0, topN);
 
@@ -149,7 +149,7 @@ export function spliceSection(memoryMdText, newSection) {
     ...trailingBlank,
     ...lines.slice(endIdx),
   ].join('\n');
-  // MEM-020: when the spliced section is last in the file, the join ends with
+  // When the spliced section is last in the file, the join ends with
   // no final newline — breaking POSIX convention and causing diff churn on the
   // next edit. Normalize to exactly one trailing newline.
   return out.replace(/\n*$/, '\n');

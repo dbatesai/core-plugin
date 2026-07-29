@@ -15,8 +15,7 @@
  * zero-hit has no delivered context by definition) and the hidden
  * CORE_RETRIEVAL_TRACE env stream (content in the repo tree, no reader).
  *
- * DEFAULT-ON with opt-outs (the product owner's explicit ruling over the opt-in
- * recommendation, recorded in the spec):
+ * DEFAULT-ON with opt-outs:
  *   1. `CORE_METRICS_ENABLED` off → OFF (master kill switch; capture nests
  *      inside the metrics gate).
  *   2. `CORE_TURN_CAPTURE` env false → OFF (its own hard switch).

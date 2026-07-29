@@ -145,6 +145,40 @@ test('the guard never scans its own source (which contains the deny tokens)', ()
   });
 });
 
+// ---------- planted-leak falsifiers: a named-review line under tests/ and under CHANGELOG.md must both fail ----------
+test('a named-review line planted in a test file is a finding', () => {
+  withTree(({ root, w }) => {
+    w(
+      'tests/scripts/some-feature.test.mjs',
+      "test('AUD-104 refusal path (Hale round-2 retest)', () => {});\n",
+    );
+    const hits = scanTree({ root }).filter((f) => f.file === 'tests/scripts/some-feature.test.mjs');
+    assert.ok(
+      hits.some((f) => f.pattern === 'agent-name-in-prose'),
+      'the planted reviewer name in a test title must be a finding',
+    );
+    assert.ok(
+      hits.some((f) => f.pattern === 'internal-issue-id'),
+      'the planted internal issue id in a test title must be a finding',
+    );
+  });
+});
+
+test('a named-review line planted in CHANGELOG.md is a finding', () => {
+  withTree(({ root, w }) => {
+    w('CHANGELOG.md', '## [9.9.9]\n- Fixed per Agy mailbox round 2; HC_539 closed.\n');
+    const hits = scanTree({ root }).filter((f) => f.file === 'CHANGELOG.md');
+    assert.ok(
+      hits.some((f) => f.pattern === 'agent-name-in-prose'),
+      'the planted reviewer name in the changelog must be a finding',
+    );
+    assert.ok(
+      hits.some((f) => f.pattern === 'internal-issue-id'),
+      'the planted internal issue id in the changelog must be a finding',
+    );
+  });
+});
+
 // ---------- structural sanity ----------
 test('every allowlist entry names a real pattern and carries a reason', () => {
   const names = new Set(PATTERNS.map((p) => p.name));

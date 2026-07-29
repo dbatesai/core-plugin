@@ -2,9 +2,9 @@
  * hardware-budget.mjs — cross-platform memory probe for multi-agent sizing.
  *
  * Replaces the macOS-only `sysctl -n hw.memsize` that protocols/execution.md
- * referenced (it fails on Linux and doesn't exist on Windows, silently leaving
- * the agent with no memory budget — SYN-003 merging PROTO-007 / HARNESS-009 /
- * SKILL-020). os.totalmem() is cross-platform and zero-dependency.
+ * referenced — it fails on Linux and doesn't exist on Windows, silently leaving
+ * the agent with no memory budget. os.totalmem() is cross-platform and
+ * zero-dependency.
  *
  * Prints exactly one line:  memory_gb=<n> profile=<slug> max_agents=<n>
  * Thresholds mirror the table in protocols/execution.md §"Hardware budget" —

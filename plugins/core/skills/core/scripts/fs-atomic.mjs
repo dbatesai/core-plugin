@@ -46,7 +46,7 @@ function sleepSync(ms) {
 }
 
 /**
- * renameSync with a bounded WINDOWS-ONLY retry (SYN-012 / HARNESS-011).
+ * renameSync with a bounded WINDOWS-ONLY retry.
  * On Windows, OneDrive's sync client or antivirus can hold the rename TARGET
  * open for a moment, surfacing as transient EPERM/EACCES; retry up to
  * RENAME_RETRIES attempts with a short delay. POSIX gets NO retry — rename is

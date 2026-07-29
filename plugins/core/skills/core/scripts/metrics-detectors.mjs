@@ -101,7 +101,7 @@ export function runCitationResolver(events, index) {
 export const STALE_THRESHOLD_DAYS = 30;
 
 // A unit is "stable" for stale-context purposes when its status is terminal
-// (the schema's retired/archived/superseded — shared vocab, SYN-005) or its
+// (the schema's retired/archived/superseded — see unit-vocab.mjs) or its
 // stability-class is the schema's durably-correct. Only schema values gate
 // here — an out-of-schema status must not silently exempt a unit from the
 // tripwire.

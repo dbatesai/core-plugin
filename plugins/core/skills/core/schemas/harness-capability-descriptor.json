@@ -4,12 +4,12 @@
   "surfaces": {
     "collab_files_repo": null,
     "collab_files_expected_remote": null,
-    "_doc": "Target-surface config consumed by target-surface-collab-files-probe.mjs. Unset (null) by default: this capability only applies to an install that actually uses a git-backed collab-files transport (see collab-plugin's `github:<repo>` transport), which is not every install. Per-installation config is set via the CORE_COLLAB_FILES_REPO / CORE_COLLAB_FILES_EXPECTED_REMOTE env vars, checked before these fields. These fields remain as an opt-in override for an install that wants to bake in its own default (Option A per completion plan §1.2) — they must never ship set to any one person's personal repo path or remote, since the descriptor is shared by every install of the plugin."
+    "_doc": "Target-surface config consumed by target-surface-collab-files-probe.mjs. Unset (null) by default: this capability only applies to an install that actually uses a git-backed collab-files transport (see collab-plugin's `github:<repo>` transport), which is not every install. Per-installation config is set via the CORE_COLLAB_FILES_REPO / CORE_COLLAB_FILES_EXPECTED_REMOTE env vars, checked before these fields. These fields remain as an opt-in override for an install that wants to bake in its own default — they must never ship set to any one person's personal repo path or remote, since the descriptor is shared by every install of the plugin."
   },
   "harnesses": {
     "claude-code": {
       "probe_script": "claude-code-capability-probe.mjs",
-      "_doc": "Partly empirical — anti-anchoring claim still trust-based (R-17 DEGRADED-by-mechanism per session 48). R-17 closure is not-before-v2.9.0 and requires physical anti-anchoring validation/consumer enforcement (peer-ratified 2026-05-29); native Workflow/Agent isolation:worktree is a candidate primitive.",
+      "_doc": "Partly empirical — the anti-anchoring claim is trust-based, not mechanically enforced, so it grades DEGRADED-by-mechanism. Upgrading it to PASS requires physical anti-anchoring validation or consumer enforcement; native Workflow/Agent isolation:worktree is a candidate primitive.",
       "capabilities": [
         {
           "capability_id": "plugin-root-resolution",
@@ -76,7 +76,7 @@
           "capability_id": "memory-accessed",
           "capability_kind": "observation",
           "delegate": "capability/memory-accessed-probe.mjs",
-          "_doc": "Returns UNKNOWN on Codex until tool/shell extraction lands in read-transcript (codex_tool_extraction: pending-hc-spec) — declared (not omitted) so the row is honestly labeled NOT a false negative. HC blocker #6.",
+          "_doc": "Declared (not omitted) so a harness whose transcript tool events cannot be extracted reports UNKNOWN with a labeled reason instead of a false negative.",
           "required_for_actions": []
         }
       ]
@@ -115,7 +115,7 @@
     "multi-agent-adversarial-run": {
       "requires_pass": ["anti-anchoring-mechanism"],
       "allowed_harnesses": ["claude-code", "codex"],
-      "description": "Fail-CLOSED gate for an adversarial multi-agent run whose output is the AUTHORITY for a canonical mutation (graduating a decision/risk unit, rendering PROJECT.md, approving a release gate, merging/publishing, writing canonical plan state). Requires anti-anchoring-mechanism PASS. While anti-anchoring is DEGRADED (trust-based, R-17) it blocks with identity-degraded; the consumer must obtain a PASS-grade mechanism (physical anti-anchoring validation/consumer enforcement, not-before-v2.9.0), an explicit human/owner override, or degrade to advisory-only. Advisory review-generation does NOT use this gate (fail-OPEN, watermarked DEGRADED) — see adversarial-run-gate.mjs classifyAdversarialRun and v2.7 plan §6. Per HC policy evt HC_539/HC_552."
+      "description": "Fail-CLOSED gate for an adversarial multi-agent run whose output is the AUTHORITY for a canonical mutation (graduating a decision/risk unit, rendering PROJECT.md, approving a release gate, merging/publishing, writing canonical plan state). Requires anti-anchoring-mechanism PASS. While anti-anchoring is DEGRADED (trust-based) it blocks with identity-degraded; the consumer must obtain a PASS-grade mechanism (physical anti-anchoring validation or consumer enforcement), an explicit human/owner override, or degrade to advisory-only. Advisory review-generation does NOT use this gate (fail-OPEN, watermarked DEGRADED) — see adversarial-run-gate.mjs classifyAdversarialRun."
     }
   }
 }

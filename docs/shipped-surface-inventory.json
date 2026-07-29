@@ -518,12 +518,6 @@
       "surface": "shipped"
     },
     {
-      "name": "validate-adversarial-artifacts",
-      "kind": "script",
-      "harness": "shared",
-      "surface": "shipped"
-    },
-    {
       "name": "workspace-fork-check",
       "kind": "script",
       "harness": "shared",

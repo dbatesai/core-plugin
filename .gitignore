@@ -11,3 +11,6 @@ _metrics/*.lock*
 _metrics/.judgment.lock*
 _metrics/.scorecard.lock*
 _metrics/.turn-capture.lock*
+
+# Release premise-audit evidence stays local (dev record, never shipped)
+.release-premise-audit.md

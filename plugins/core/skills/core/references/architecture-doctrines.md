@@ -1,20 +1,8 @@
 # Architecture Doctrines
 
-A thin normative index of the load-bearing architectural rules CORE has converged on. Five entries: four doctrines with live consumers, plus one candidate (Doctrine 1) held at observation status until its consumer lands. Per the doctrine-consumer coupling rule (Doctrine 5 below), **a doctrine without an active consumer is an observation, not a doctrine.** Graduation requires a named first consumer; release-review verifies the consumer still exists.
+A thin normative index of the load-bearing architectural rules CORE has converged on. Four doctrines, each with a live consumer. Per the doctrine-consumer coupling rule (Doctrine 5 below), **a doctrine without an active consumer is an observation, not a doctrine.** Graduation requires a named first consumer; release-review verifies the consumer still exists. (Doctrine numbers are stable citation anchors; retired numbers are not reused.)
 
 The doctrines live here, not in protocol prose, because they cut across protocols. When a protocol document needs to lean on a doctrine, it cites this file by anchor. Consumers cite the doctrine by name; readers come here for the rule.
-
-## Doctrine 1 — Probe before propose *(candidate — no wired consumer; observation status per Doctrine 5)*
-
-> When stakes warrant adversarial review, run an empirical probe before composing the analysis prompt.
-
-**Why.** Multi-agent analysis is expensive AND systematically over-converges (84.5% sycophancy flip rate, 9-point homogeneity gap per the independent-analysis findings). When the agents anchor on a frame that empirical reality contradicts, the convergence is on the wrong answer. A cheap probe — five minutes of grep, a script invocation, reading a known file — keeps the frame grounded.
-
-**How to apply.** Before spawning an adversarial swarm for architectural / classification / public-copy / graduation work, ask: *"What's the cheapest empirical check that would shift my frame if it returned a different answer than I expect?"* Run it. Compose the swarm prompt with the probe result in hand. The Anvil + Sextant + Pillar parallel-critique pattern that pressure-tested the metrics spec is the canonical instance (5 pre-flight probes ran empirically before the spec frame was finalized; one collapsed v1 scope from emit-everything to subscribe-and-augment).
-
-**First consumer.** None wired. `protocols/analysis.md` contains no probe-before-propose step — the v2.8.0 plan that was to add one never landed, and that stale note is removed. The metrics-spec session-47 work demonstrated the pattern empirically, but per Doctrine 5 a demonstration is not a consumer.
-
-**When this graduates from observation to doctrine.** When `protocols/analysis.md` gains a probe-before-propose step that cites this entry by anchor — an execution-logic change that goes through its own adversarial pass, not a doc edit. Until then this entry is an observation by this file's own rule: kept in place so the candidate stays visible, but it governs nothing, and release review must not count it as a consumer-backed doctrine.
 
 ## Doctrine 2 — Documentation as contract reference
 
@@ -24,9 +12,7 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 
 **How to apply.** When a producer script writes structured rows (capability rows, hygiene events, OTel spans), the schema lives in a sibling `*-schema.md` file. The producer stamps `schema_version` on every row. Consumers cite the schema by file path + anchor in their own source comments and refuse rows above their known-major version. When the schema changes major version, the consumer list at the bottom of the schema file says who needs coordinated update.
 
-**First consumer.** `skills/core/scripts/capability/row-schema.md` (v2.6.0) — the capability row schema is the load-bearing instance of this doctrine. `resolve-plugin-root.mjs` and (future) `capability-probe.mjs` both reference it; both stamp `schema_version: '1.0.0'` on emitted rows.
-
-**Secondary consumers (planned, not yet built).** Hygiene-log events are a candidate for the same sibling-schema treatment once they gain a second consumer worth coordinating; so is the metrics-spec OTel span shape once T3 augmentation lands. Neither has a schema file yet — this doctrine names the pattern they'd follow, not a claim that either file exists.
+**First consumer.** `skills/core/scripts/capability/row-schema.md` — the capability row schema is the load-bearing instance of this doctrine. `resolve-plugin-root.mjs` and `capability-probe.mjs` both reference it; both stamp `schema_version` on emitted rows.
 
 ## Doctrine 3 — Schema lives only as long as its consumer
 
@@ -37,8 +23,6 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 **How to apply.** Every schema file maintains a "Known consumers" section listing the scripts / protocols / docs that read or write the schema. When a consumer is retired, remove its entry. When the list goes empty, the schema file moves to `references/archive/` with a date-stamped note explaining why and what replaced it. Release review (`/cut-release` skill, on PR open) verifies the consumer list is non-empty for every schema file in `skills/core/scripts/*/`.
 
 **First consumer.** This doctrine document. Per the inversion: a doctrine without an active consumer is an observation, not a doctrine. The first consumer of *this very doctrine* is the maintenance discipline applied to `capability/row-schema.md` — when that schema's consumer list goes empty, the schema gets archived.
-
-**When this graduates fully.** When `/cut-release` actively enforces the consumer-list check. v2.6.0-α captures the doctrine; v2.6.x adds the enforcement.
 
 ## Doctrine 4 — Fail-open observation, fail-closed mutation
 

@@ -56,8 +56,8 @@ export function classifyAccess({ harness: _harness, transcriptAvailable, toolExt
     return { identity_status: 'UNKNOWN', reason: 'transcript unavailable — cannot observe access this session' };
   }
   if (toolExtractionPending) {
-    // Codex tool/shell extraction not yet implemented — refuse a false "not accessed".
-    return { identity_status: 'UNKNOWN', reason: 'tool extraction pending for this harness — access not mechanically observable yet' };
+    // Tool events not extractable on this harness — refuse a false "not accessed".
+    return { identity_status: 'UNKNOWN', reason: 'tool extraction unavailable for this harness — access not mechanically observable' };
   }
   const tools = events.filter((e) => e.kind === 'tool');
   let core = 0, native = 0;
@@ -105,7 +105,8 @@ export async function probe(opts = {}) {
   const observed_at = new Date().toISOString();
 
   const t = readTranscript({ harness, cwd, home, override: opts.transcriptPath });
-  const toolExtractionPending = t.meta?.codex_tool_extraction === 'pending-hc-spec';
+  const extraction = t.meta?.codex_tool_extraction;
+  const toolExtractionPending = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
   const coreStorePresent = opts.coreStorePresent != null ? opts.coreStorePresent : coreStorePresentAt(cwd);
 
   const r = classifyAccess({

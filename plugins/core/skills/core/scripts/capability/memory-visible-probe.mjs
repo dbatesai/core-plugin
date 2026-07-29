@@ -119,12 +119,12 @@ export function classify({ token, canaryFileState = 'absent', memoryWritten, mem
     }
     return { identity_status: 'NOT-YET', reason_code: 'finalize-not-run', reason: 'no canary recorded — the write step runs at /finalize session close, so this means /finalize has not run for this workspace yet (a skipped finalize last session looks the same)' };
   }
-  // Blocker 1: an echo only proves injection if the canary actually landed in the
-  // injected memory window. Without that, PASS would prove transcript echo, not memory.
+  // An echo only proves injection if the canary actually landed in the injected
+  // memory window. Without that, PASS would prove transcript echo, not memory.
   if (!memoryWritten || !memoryHasToken) {
     return { identity_status: 'DEGRADED', reason: 'canary not present in the MEMORY.md injection window — an echo cannot prove injection' };
   }
-  // Blocker 1b: a line-1 canary proves visibility, not load-completeness. If the
+  // A line-1 canary proves visibility, not load-completeness. If the
   // memory file exceeds the known injection window, the tail can drop silently while
   // the canary still echoes. That is DEGRADED, never PASS. The window is enforced on
   // BOTH axes — Claude Code truncates on whichever limit it hits first, and a file can
@@ -186,7 +186,7 @@ export async function probe(opts = {}) {
     } catch { token = null; canaryFileState = 'invalid'; }
   }
 
-  // Blocker 1: verify the token is actually in the MEMORY.md injection window now.
+  // Verify the token is actually in the MEMORY.md injection window now.
   let memoryHasToken = false, memoryLineCount = null, memoryByteCount = null;
   if (token && memoryWritten && memoryPath && existsSync(memoryPath)) {
     try {

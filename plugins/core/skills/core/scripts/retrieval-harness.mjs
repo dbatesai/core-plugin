@@ -366,11 +366,11 @@ export function assertKnownTiers(index) {
  */
 export function runTierPolicySweep(store, gold, { topN = 3, snapshot: injectedSnapshot = null } = {}) {
   validateGold(gold);
-  // A5 fail-closed: measurement refuses a store whose authority tiers it can't
+  // Fail-closed: measurement refuses a store whose authority tiers it can't
   // classify, and every sweep number is pinned to the snapshot it was computed on.
-  // Blocker 2: the snapshot is a FULL capture (index + body bytes) and every
-  // policy run below consumes it — no live reads after the id. Injectable for
-  // the round-13 whole-harness barrier proof.
+  // The snapshot is a FULL capture (index + body bytes) and every policy run below
+  // consumes it — no live reads after the id. Injectable so a caller can prove the
+  // whole harness runs off one barrier.
   const snapshot = injectedSnapshot || loadSnapshot(store, { captureBodies: true });
   assertKnownTiers(snapshot.index);
   const POLICIES = [

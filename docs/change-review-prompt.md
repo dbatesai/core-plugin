@@ -1,6 +1,6 @@
 # core-plugin change-review prompt
 
-Paste this when reviewing any change to core-plugin. It checks the change against the five failure patterns the 2026-07-01 audit found recurring. Its job is to catch the problem, not to reassure you — so it is written to look for trouble and report evidence, and to say "clean" only when it genuinely is.
+Paste this when reviewing any change to core-plugin. It checks the change against the five defect patterns this codebase is known to repeat. Its job is to catch the problem, not to reassure you — so it is written to look for trouble and report evidence, and to say "clean" only when it genuinely is.
 
 Give it: the diff (`git diff <base>..<branch>`) or the list of files touched. It should read the actual code, not trust the description.
 
@@ -32,4 +32,4 @@ Give it: the diff (`git diff <base>..<branch>`) or the list of files touched. It
 
 - Run it with a *fresh* agent, not the one that wrote the change — the point is independent eyes, and an agent reviewing its own work rubber-stamps.
 - For a memory-store change, pattern 5 is the one that bites; for a hook/spawn/path change, pattern 4; for anything touching a protocol or SKILL.md, pattern 1.
-- If it comes back all-clean too fast with thin evidence, that itself is the sycophancy signal the audit warned about — push back: "show me where you looked for pattern 2, list every duplicate you grepped for."
+- If it comes back all-clean too fast with thin evidence, that itself is a sycophancy signal — push back: "show me where you looked for pattern 2, list every duplicate you grepped for."

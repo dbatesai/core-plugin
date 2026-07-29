@@ -9,11 +9,11 @@
  * generators, compact-project, and the two demoters need that flat string view and would
  * MISBEHAVE under value coercion (a status or date silently becoming a number/boolean).
  *
- * M1: five near-identical copies of this parser collapsed to one. Returns [fm, body];
- * callers that only need the map use `const [fm] = parseFlatFrontmatter(text)`.
+ * This is the single shared flat parser. Returns [fm, body]; callers that only
+ * need the map use `const [fm] = parseFlatFrontmatter(text)`.
  *
  * WHAT THIS PARSER DROPS — read before substituting it for priority.mjs's
- * parseFrontmatter (MEM-015):
+ * parseFrontmatter:
  *   - ALL indented lines: `edges:` blocks, multi-line `topics:`/`sources:`
  *     lists, nested maps. A caller that needs edge or list data MUST use
  *     parseFrontmatter from priority.mjs — substituting this parser loses

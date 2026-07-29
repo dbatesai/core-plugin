@@ -458,7 +458,7 @@ export function iterArchivedUnits(memoriesDir) {
 }
 
 /**
- * Rank every loadable, currently-valid unit (SOD-003). The bi-temporal
+ * Rank every loadable, currently-valid unit. The bi-temporal
  * suppression invariant — default retrieval excludes invalidated units
  * (ARCHITECTURE.md, data-storage.md) — is applied HERE so every consumer
  * (the CLI, generate-memory-index, any wrapper) inherits it instead of

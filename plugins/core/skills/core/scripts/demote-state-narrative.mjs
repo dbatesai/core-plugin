@@ -6,7 +6,7 @@
  * A §State bullet is demotable when:
  *  - It has at least one `*Backed by ...*` italicized footer citation.
  *  - All cited units are present in `_memories/` and in terminal status
- *    (retired / archived / superseded — shared vocab, SYN-005).
+ *    (retired / archived / superseded — see unit-vocab.mjs).
  *  - The most-recent backing-unit `updated:` date is >60 days old.
  *
  * Conservative defaults (mirrors demote-moves.mjs):
@@ -43,7 +43,7 @@ import {
   writeGuardDecision, withProjectMdWriterLock,
 } from './lifecycle-core.mjs';
 
-// Terminal statuses come from the shared vocabulary (SYN-005): 'retired' is
+// Terminal statuses come from the shared vocabulary in unit-vocab.mjs: 'retired' is
 // terminal in BOTH demoters at once, and the out-of-schema
 // 'resolved'/'closed' do not gate. Symmetry with demote-moves is
 // structural — both import the same Set.
@@ -215,7 +215,7 @@ function ensureArchiveFile(projectDir) {
   return path;
 }
 
-// MEM-013: crash-retry idempotency — mirror of alreadyArchived in
+// Crash-retry idempotency — mirror of alreadyArchived in
 // demote-moves.mjs. Archive append happens before the PROJECT.md write; a
 // crash between the two would otherwise duplicate the block on retry.
 function alreadyArchived(archivePath, bullet) {

@@ -45,7 +45,7 @@ export function initMetrics({ projectDir, workspaceId }) {
   const detection = detectStoragePath({ projectDir, workspaceId });
   const storagePath = detection.path;
 
-  // Per SL-3: write forensic line BEFORE any other work so a partial failure
+  // Write the forensic line BEFORE any other work so a partial failure
   // still leaves a debug trail.
   const operationalMetaDir = join(homedir(), '.core', 'workspaces', workspaceId, 'metrics');
   try {
@@ -69,10 +69,9 @@ export function initMetrics({ projectDir, workspaceId }) {
     // Don't fail scaffold on log-write failure; the directories still get created.
   }
 
-  // Per RM Turn 16 cross-phase integration fix: pin the resolved storage path
-  // to a sibling file so log-event.mjs (write-time) honors what metrics-init.mjs
-  // (scaffold-time) chose. Without this, dual-write hardcodes project-local and
-  // bypasses (g.5)'s AppData redirect on Windows+OneDrive.
+  // Pin the resolved storage path to a sibling file so log-event.mjs (write-time)
+  // honors what metrics-init.mjs (scaffold-time) chose. Without this, dual-write
+  // hardcodes project-local and bypasses the AppData redirect on Windows+OneDrive.
   try {
     writeFileSync(join(operationalMetaDir, 'storage-path.txt'), storagePath);
   } catch {
@@ -103,7 +102,7 @@ export function initMetrics({ projectDir, workspaceId }) {
     }
   }
 
-  // Per SL-4: stub README when storage is redirected away from project-local
+  // Stub README when storage is redirected away from project-local
   const projectLocalPath = join(projectDir, '_metrics');
   if (storagePath !== projectLocalPath) {
     try {
@@ -143,7 +142,7 @@ export function detectStoragePath({ projectDir, workspaceId }) {
     };
   }
 
-  // Per SL-1: non-Windows always project-local
+  // Non-Windows is always project-local
   if (platform() !== 'win32') {
     return {
       path: join(projectDir, '_metrics'),
@@ -152,14 +151,14 @@ export function detectStoragePath({ projectDir, workspaceId }) {
     };
   }
 
-  // Per SL-2: Windows checks methods (a) and (c) only (method-(b) dropped per RM Turn 12)
+  // Windows checks methods (a) and (c) only; method (b) is not implemented.
   const methodA = projectPathContainsOneDriveSubstring(projectDir);
   const methodC = projectInOneDriveSyncSettings(projectDir);
 
   if (methodA || methodC) {
     return {
       path: join(homedir(), 'AppData', 'Local', 'core-metrics', workspaceId),
-      methods: { a: methodA, c: methodC, b: 'dropped-per-rm-turn-12' },
+      methods: { a: methodA, c: methodC, b: 'not-implemented' },
       reason: 'windows-onedrive-detected-redirect-appdata',
     };
   }
@@ -183,10 +182,10 @@ export function projectPathContainsOneDriveSubstring(projectDir) {
 /**
  * Method (c): scan OneDrive settings files for the OneDrive root presence.
  *
- * Per RM Turn 14 empirical findings (evt-aa12) on Windows 11 build 10.0.26200:
- *   - The settings files use `.ini` extension, NOT `.dat` (the v0 skeleton was wrong).
+ * OneDrive account metadata on Windows 11 (build 10.0.26200 and compatible):
+ *   - The settings files use the `.ini` extension, NOT `.dat`.
  *   - The hex-prefixed `<account-id>.ini` file contains the OneDrive root path
- *     (e.g., `C:\Users\david\OneDrive`) in its `libraryScope` line.
+ *     (e.g., `C:\Users\<user>\OneDrive`) in its `libraryScope` line.
  *   - File content is UTF-16LE with no BOM (Windows convention for these binary blobs);
  *     reading as UTF-8 produces null-byte-interleaved garbage and substring search fails.
  *   - OneDrive Business accounts live in sibling `Business1`, `Business2`, ... directories
@@ -201,7 +200,7 @@ export function projectInOneDriveSyncSettings(projectDir, _settingsRootOverride 
     || join(homedir(), 'AppData', 'Local', 'Microsoft', 'OneDrive', 'settings');
   if (!existsSync(oneDriveSettingsRoot)) return false;
 
-  // Scan Personal + any Business<N> account directories (RM Turn 14 Business-subdir add)
+  // Scan Personal + any Business<N> account directories
   let accountDirs = [];
   try {
     accountDirs = readdirSync(oneDriveSettingsRoot)
@@ -214,7 +213,7 @@ export function projectInOneDriveSyncSettings(projectDir, _settingsRootOverride 
   for (const accountDir of accountDirs) {
     let iniFiles = [];
     try {
-      // .ini files (NOT .dat) per RM Turn 14 empirical scan
+      // .ini files, not .dat
       iniFiles = readdirSync(accountDir).filter((f) => f.endsWith('.ini'));
     } catch {
       continue;
@@ -227,7 +226,7 @@ export function projectInOneDriveSyncSettings(projectDir, _settingsRootOverride 
       } catch {
         continue;
       }
-      // UTF-16LE (Windows convention, no BOM on these files) — RM Turn 14 finding
+      // UTF-16LE (Windows convention, no BOM on these files)
       const text16 = content.toString('utf16le');
 
       // Exact match: the .ini happens to name the project path verbatim
@@ -240,9 +239,9 @@ export function projectInOneDriveSyncSettings(projectDir, _settingsRootOverride 
       // Matches `C:\Users\<user>\OneDrive` and `C:\Users\<user>\OneDrive - <Org>`
       // (org name can contain spaces, letters, digits, hyphens).
       //
-      // Trailing terminator lookahead per RM Turn 15 robustness tightening:
-      // requires the match to end at a path separator, quote, whitespace, or
-      // end-of-string. Rejects false-positives like `OneDrive-backup-archive`.
+      // The trailing-terminator lookahead requires the match to end at a path
+      // separator, quote, whitespace, or end-of-string. Rejects false-positives
+      // like `OneDrive-backup-archive`.
       const oneDrivePathRe = /[A-Za-z]:\\Users\\[^\\"]+\\OneDrive(?: - [^\\"]+)?(?=[\\"/\s]|$)/g;
       const matches = text16.match(oneDrivePathRe) || [];
       for (const root of matches) {
@@ -256,7 +255,7 @@ export function projectInOneDriveSyncSettings(projectDir, _settingsRootOverride 
 }
 
 /**
- * Per SL-4: write README at <project>/_metrics/README.md pointing user
+ * Write a README at <project>/_metrics/README.md pointing the user
  * at the actual storage location when redirected.
  */
 export function writeStubReadme({ projectDir, actualStoragePath }) {
@@ -284,7 +283,7 @@ export function writeStubReadme({ projectDir, actualStoragePath }) {
 }
 
 /**
- * Format the scaffold.log forensic line per SL-3. One line per scaffold run.
+ * Format the scaffold.log forensic line. One line per scaffold run.
  */
 export function formatScaffoldLog({
   timestamp,
