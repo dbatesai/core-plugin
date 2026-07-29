@@ -51,7 +51,7 @@ import { fileURLToPath } from 'node:url';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
-import { listTurnCaptureFiles, computeStoreSignature } from './turn-capture.mjs';
+import { listTurnCaptureFiles, computeStoreSignature, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 import { buildRetrievalTrace } from './retrieve-context.mjs';
 
 // Bump when verdict semantics change — scorecards stamp this so a rate shift
@@ -62,7 +62,7 @@ export const JUDGE_VERSION = '1.0.0';
 export const DEFAULT_GAP_FLOOR = 0.5;
 
 export function judgmentLogPath(projectDir, { workspaceId } = {}) {
-  return join(resolveStoragePath(projectDir, { workspaceId }), 'judgment-log.jsonl');
+  return join(resolveStoragePath(projectDir, { workspaceId }), JUDGMENT_LOG_FILENAME);
 }
 
 function judgmentLockPath(projectDir, { workspaceId } = {}) {

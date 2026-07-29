@@ -78,9 +78,14 @@ export const TURN_CAPTURE_FILE_MODE = 0o600;
 // inside it: if the stream dir itself can't be created — or the stream lock
 // can't be acquired — the failure must still be recordable, or the flight
 // recorder can die silently (exactly what the Link 5 capture-health tripwire
-// watches for). Consequence, on purpose: purge removes captured content but
-// keeps the health counters — they describe the mechanism, not the content.
-const HEALTH_FILENAME = 'turn-capture-health.json';
+// watches for). Sitting outside the stream dir does not put it outside the
+// purge: it is a declared purge-scope entry (turnCapturePurgeScope).
+export const HEALTH_FILENAME = 'turn-capture-health.json';
+// Judgments derive from captured rows and are keyed by their retrieval ids, so
+// they belong to the captured material's lifecycle: the purge scope carries
+// them. hindsight-judge.mjs and scorecard.mjs read this name from here so the
+// stream has one owner for its own file names.
+export const JUDGMENT_LOG_FILENAME = 'judgment-log.jsonl';
 const DATE_FILE_RE = /^(\d{4})-(\d{2})-(\d{2})\.jsonl$/;
 const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 
@@ -390,6 +395,38 @@ function assertInsideTurnCapture(targetFile, dir) {
 }
 
 /**
+ * The declared scope of a purge — the ONE list every deletion path reads and
+ * every purge report names. `stream` is removed whole (nested dirs, interrupted
+ * partial writes, and the self-exclusion .gitignore go with it); `health` and
+ * `judgments` are the supplement and the derivative that describe the same
+ * captured material. The lock is deliberately NOT in scope: it holds no
+ * captured content and is what serializes the purge itself.
+ */
+export function turnCapturePurgeScope(projectDir, { workspaceId } = {}) {
+  const base = resolveStoragePath(projectDir, { workspaceId });
+  return [
+    { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true },
+    { id: 'health', path: join(base, HEALTH_FILENAME), tree: false },
+    { id: 'judgments', path: join(base, JUDGMENT_LOG_FILENAME), tree: false },
+  ];
+}
+
+// A destructive bound is validated before it can delete anything: an entry has
+// to be a direct child of the storage base carrying its declared name.
+function assertPurgeEntry(entry, base) {
+  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME }[entry.id];
+  if (!expected || basename(entry.path) !== expected || dirname(entry.path) !== base) {
+    throw new Error(`refusing purge: '${entry.path}' is not <storage-base>/${expected || entry.id}`);
+  }
+}
+
+// A retention window drives deletion-cutoff arithmetic, so it is validated as a
+// finite positive whole number of days before any candidate is even named.
+function validWindow(windowDays) {
+  return typeof windowDays === 'number' && Number.isInteger(windowDays) && windowDays >= 1;
+}
+
+/**
  * Retention pass: delete row files strictly older than `windowDays`.
  * Boundary-dated files are kept (end-of-day UTC interpretation).
  */
@@ -402,6 +439,9 @@ export function runTurnCaptureRetention(projectDir, {
   const wsId = workspaceId || resolveWorkspaceId(projectDir);
   const dir = turnCaptureDir(projectDir, { workspaceId: wsId });
   const base = { windowDays, candidates: [], deleted: [], kept: [], verified: true };
+  if (!validWindow(windowDays)) {
+    return { ran: false, reason: 'invalid-window', cutoff: null, ...base, verified: false };
+  }
   if (!existsSync(dir)) return { ran: false, reason: 'no-turn-capture-dir', cutoff: null, ...base };
 
   const cutoffMs = new Date(now).getTime() - windowDays * 86400000;
@@ -436,29 +476,53 @@ export function runTurnCaptureRetention(projectDir, {
 }
 
 /**
- * Purge the ENTIRE evidence stream directory (health counters included — they
- * describe the stream being removed). Same directory-name hard boundary as
- * rich-context's purge.
+ * Purge every entry in the declared scope. Each entry is bound-checked before
+ * deletion and verified after it, and the result names ALL of them — an entry
+ * that could not be removed is reported with its reason and the overall result
+ * is not `purged`. Partial success is never narrated as success.
  */
 export function purgeTurnCapture(projectDir, { apply = true, workspaceId } = {}) {
   const wsId = workspaceId || resolveWorkspaceId(projectDir);
   const dir = turnCaptureDir(projectDir, { workspaceId: wsId });
   const base = resolveStoragePath(projectDir, { workspaceId: wsId });
-  if (basename(dir) !== TURN_CAPTURE_DIRNAME || dirname(dir) !== base) {
-    return { purged: false, reason: `refusing purge: '${dir}' is not <storage-base>/${TURN_CAPTURE_DIRNAME}`, dir, existed: existsSync(dir) };
+  const entries = turnCapturePurgeScope(projectDir, { workspaceId: wsId });
+  try {
+    for (const entry of entries) assertPurgeEntry(entry, base);
+  } catch (e) {
+    return { purged: false, reason: String(e && e.message), dir, existed: existsSync(dir), scope: [] };
   }
-  const existed = existsSync(dir);
-  if (!existed) return { purged: true, dir, existed: false };
-  if (!apply) return { purged: false, reason: 'dry-run', dir, existed: true };
+
+  const scope = entries.map((entry) => ({ ...entry, existed: existsSync(entry.path), removed: false }));
+  const existed = scope.some((entry) => entry.existed);
+  if (!apply) {
+    return { purged: false, reason: 'dry-run', dir, existed, scope };
+  }
+
   try {
     withFileLock(turnCaptureLockPath(projectDir, { workspaceId: wsId }), () => {
-      rmSync(dir, { recursive: true, force: true });
+      for (const entry of scope) {
+        try {
+          rmSync(entry.path, { recursive: entry.tree, force: true });
+          if (existsSync(entry.path)) entry.reason = 'still-present-after-delete';
+          else entry.removed = true;
+        } catch (e) {
+          entry.reason = String(e && e.message).slice(0, 120);
+        }
+      }
     });
-    if (existsSync(dir)) return { purged: false, reason: 'delete-unverified', dir, existed: true };
-    return { purged: true, dir, existed: true };
   } catch (e) {
-    return { purged: false, reason: `purge-failed: ${String(e && e.message).slice(0, 120)}`, dir, existed: true };
+    return { purged: false, reason: `purge-lock-unavailable: ${String(e && e.message).slice(0, 120)}`, dir, existed, scope };
   }
+
+  const obstructed = scope.filter((entry) => !entry.removed);
+  if (obstructed.length) {
+    return {
+      purged: false,
+      reason: `purge incomplete: ${obstructed.map((entry) => `${entry.id} (${entry.reason})`).join('; ')}`,
+      dir, existed, scope,
+    };
+  }
+  return { purged: true, dir, existed, scope };
 }
 
 // ---------- CLI ----------
@@ -496,7 +560,7 @@ export function main(argv) {
     const windowDays = flags.get('window') ? Number(flags.get('window')) : TURN_CAPTURE_RETENTION_DAYS;
     const res = runTurnCaptureRetention(projectDir, { windowDays, apply: Boolean(flags.get('apply')) });
     process.stdout.write(JSON.stringify(res) + '\n');
-    return 0;
+    return res.reason === 'invalid-window' ? 2 : 0;
   }
   // default: status — enabled/effective state + volumes + health
   const files = listTurnCaptureFiles(projectDir);

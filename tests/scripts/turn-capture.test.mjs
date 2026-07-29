@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   captureTurnEvidence,
   turnCaptureEnabled,
@@ -11,6 +11,7 @@ import {
   normalizeTurnEvidenceRow,
   runTurnCaptureRetention,
   purgeTurnCapture,
+  turnCapturePurgeScope,
   readCaptureHealth,
   TURN_CAPTURE_SCHEMA_VERSION,
   TURN_CAPTURE_MAX_PROMPT_BYTES,
@@ -319,6 +320,85 @@ test('purge removes the stream dir and refuses anything else', () => {
     assert.equal(existsSync(dir), false);
     // idempotent second purge
     assert.equal(purgeTurnCapture(project, { apply: true }).purged, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('purge covers the whole declared scope — nested files, interrupted writes, derived judgments, health counters', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-purge-scope-'));
+  try {
+    const project = makeProject(root);
+    captureTurnEvidence(project, goodRow(), { env: cleanEnv() });
+    const dir = turnCaptureDir(project);
+    const base = join(project, '_metrics');
+    // Derived copies a purge must not leave behind.
+    mkdirSync(join(dir, 'nested'), { recursive: true });
+    writeFileSync(join(dir, 'nested', 'overlay.jsonl'), '{"prompt_text":"secret"}\n');
+    writeFileSync(join(dir, '2026-07-20.jsonl.tmp'), '{"interrupted":true}\n');
+    writeFileSync(join(base, 'judgment-log.jsonl'), '{"kind":"hindsight-judgment"}\n');
+    assert.equal(existsSync(join(base, 'turn-capture-health.json')), true);
+
+    const res = purgeTurnCapture(project, { apply: true });
+    assert.equal(res.purged, true);
+    for (const entry of res.scope) {
+      assert.equal(entry.removed, true, `${entry.id} removed`);
+      assert.equal(existsSync(entry.path), false, `${entry.path} gone`);
+    }
+    assert.deepEqual(res.scope.map((e) => e.id).sort(), ['health', 'judgments', 'stream']);
+    assert.equal(existsSync(join(dir, 'nested', 'overlay.jsonl')), false);
+    assert.equal(existsSync(join(dir, '2026-07-20.jsonl.tmp')), false);
+    assert.equal(existsSync(join(base, 'turn-capture-health.json')), false);
+    assert.equal(existsSync(join(base, 'judgment-log.jsonl')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('purge REPORTS a scope entry it could not remove instead of silently skipping it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-purge-obstructed-'));
+  try {
+    const project = makeProject(root);
+    captureTurnEvidence(project, goodRow(), { env: cleanEnv() });
+    const base = join(project, '_metrics');
+    // Something else occupies the health-counter path as a non-empty directory:
+    // a real "could not remove this" case for a single-file scope entry.
+    rmSync(join(base, 'turn-capture-health.json'), { force: true });
+    mkdirSync(join(base, 'turn-capture-health.json'), { recursive: true });
+    writeFileSync(join(base, 'turn-capture-health.json', 'blocker'), 'x');
+
+    const res = purgeTurnCapture(project, { apply: true });
+    assert.equal(res.purged, false, 'a partial purge is not reported as a purge');
+    const health = res.scope.find((e) => e.id === 'health');
+    assert.equal(health.removed, false);
+    assert.ok(health.reason, 'the obstruction is named');
+    assert.equal(res.scope.find((e) => e.id === 'stream').removed, true, 'the rest of the scope still runs');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('retention refuses an invalid window BEFORE any deletion runs', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-ret-window-'));
+  try {
+    const project = makeProject(root);
+    const dir = turnCaptureDir(project);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '2026-05-01.jsonl'), '{"old":true}\n');
+    for (const bad of [-1, 0, Number.NaN, Number.POSITIVE_INFINITY, 1.5, '30', null]) {
+      const res = runTurnCaptureRetention(project, { windowDays: bad, now: '2026-07-24T00:00:00Z', apply: true });
+      assert.equal(res.ran, false, `window ${String(bad)} refused`);
+      assert.equal(res.reason, 'invalid-window');
+      assert.deepEqual(res.candidates, [], `window ${String(bad)} never names a candidate`);
+      assert.equal(existsSync(join(dir, '2026-05-01.jsonl')), true, `window ${String(bad)} deleted nothing`);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('every declared purge-scope path sits directly under the storage base', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tc-purge-decl-'));
+  try {
+    const project = makeProject(root);
+    const base = join(project, '_metrics');
+    const scope = turnCapturePurgeScope(project);
+    assert.ok(scope.length >= 3);
+    for (const entry of scope) {
+      assert.equal(dirname(entry.path), base, `${entry.id} is a direct child of the storage base`);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

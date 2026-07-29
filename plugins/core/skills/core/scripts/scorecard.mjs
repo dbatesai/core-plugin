@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
-import { readCaptureHealth, listTurnCaptureFiles } from './turn-capture.mjs';
+import { readCaptureHealth, listTurnCaptureFiles, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 
 export const SCORECARD_SCHEMA_VERSION = '1.0.0';
 
@@ -68,7 +68,7 @@ function readSessionLog(projectDir, filename) {
 }
 
 function readJudgments(projectDir, { workspaceId } = {}) {
-  return readJsonl(join(resolveStoragePath(projectDir, { workspaceId }), 'judgment-log.jsonl'));
+  return readJsonl(join(resolveStoragePath(projectDir, { workspaceId }), JUDGMENT_LOG_FILENAME));
 }
 
 function newestTs(rows) {
