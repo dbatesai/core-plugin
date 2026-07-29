@@ -31,11 +31,12 @@
  * By design the script ships with the plugin. The plugin ships .mjs only.
  */
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { mapProjectPathToSlug } from '../project-slug.mjs';
+import { resolveTranscriptPath } from '../read-transcript.mjs';
+import { consumeCanary } from '../write-visibility-canary.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-visible-in-agent-context';
@@ -69,21 +70,14 @@ function resolveWorkspaceId(cwd) {
   return null;
 }
 
-export function resolveTranscript(cwd, home, override) {
+/**
+ * The proof transcript is this project's, and this session's where the session is
+ * known — the shared resolver binds both. A transcript from another project or another
+ * session cannot evidence what THIS session had in context.
+ */
+export function resolveTranscript(cwd, home, override, sessionId = null) {
   if (override) return existsSync(override) ? override : null;
-  // Was a hand-rolled `.replace(/\//g, '-')` -- missed the Windows drive colon and
-  // any dot in the path, same bug family as auto-memory-injection-probe.mjs. Use
-  // the one canonical encoder.
-  const mapped = mapProjectPathToSlug(cwd);
-  const dir = join(home, '.claude', 'projects', mapped);
-  if (!existsSync(dir)) return null;
-  const files = readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
-  let latest = null, latestM = -1;
-  for (const f of files) {
-    const p = join(dir, f);
-    try { const m = statSync(p).mtimeMs; if (m > latestM) { latestM = m; latest = p; } } catch { /* skip */ }
-  }
-  return latest;
+  return resolveTranscriptPath('claude-code', { cwd, home, sessionId, env: {} });
 }
 
 /**
@@ -115,7 +109,7 @@ export function scanTranscript(lines, token) {
 }
 
 /** Pure classifier (HC_623-hardened bar). */
-export function classify({ token, canaryFileState = 'absent', memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW }) {
+export function classify({ token, canaryFileState = 'absent', memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount = null, injectionLineWindow = DEFAULT_INJECTION_LINE_WINDOW, memoryByteCount = null, injectionByteWindow = DEFAULT_INJECTION_BYTE_WINDOW, writtenBySession = null, sessionId = null, tokenConsumption = null }) {
   if (!token) {
     // MET-006: a missing canary is almost always "/finalize didn't run last session"
     // (abrupt end), not "never installed". A distinct reason_code lets the user and
@@ -154,6 +148,19 @@ export function classify({ token, canaryFileState = 'absent', memoryWritten, mem
   if (badPreEcho) {
     return { identity_status: 'DEGRADED', reason: `pre-echo tool '${badPreEcho.name}' could have read the canary before the echo — cannot mechanically exclude the read-first cheat` };
   }
+  // The session that wrote the canary already knows the token; echoing it proves
+  // nothing about what the harness injected.
+  if (writtenBySession != null && sessionId != null && writtenBySession === sessionId) {
+    return { identity_status: 'DEGRADED', reason_code: 'canary-echoed-in-writing-session', reason: 'the echoing session is the one that wrote this canary — it knew the token without injection' };
+  }
+  // A token proves one session. Once spent, the value is readable from the transcript
+  // that echoed it, so a later echo is a replay rather than fresh evidence.
+  if (tokenConsumption && tokenConsumption.consumed !== true) {
+    if (tokenConsumption.reason === 'already-consumed') {
+      return { identity_status: 'DEGRADED', reason_code: 'canary-token-replayed', reason: `this canary token was already spent by session ${tokenConsumption.consumed_by_session ?? '(unknown)'} — a replayed token is not proof of injection` };
+    }
+    return { identity_status: 'DEGRADED', reason_code: 'canary-consumption-unrecorded', reason: 'the canary could not be marked spent, so this echo cannot be distinguished from a later replay' };
+  }
   return { identity_status: 'PASS', reason: 'canary present in MEMORY.md, echoed from injected context before any non-allowlisted tool' };
 }
 
@@ -163,8 +170,10 @@ export async function probe(opts = {}) {
   const workspaceId = opts.workspaceId || resolveWorkspaceId(cwd) || 'unknown';
   const observed_at = new Date().toISOString();
 
+  const sessionId = opts.sessionId || opts.env?.CLAUDE_CODE_SESSION_ID || process.env.CLAUDE_CODE_SESSION_ID || null;
+
   // Read expected token + injection facts from the side file (script-internal read).
-  let token = null, memoryWritten = false, memoryPath = null, canaryFileState = 'absent';
+  let token = null, memoryWritten = false, memoryPath = null, canaryFileState = 'absent', writtenBySession = null;
   const sideFile = canaryFilePath(workspaceId, home);
   if (existsSync(sideFile)) {
     try {
@@ -172,6 +181,7 @@ export async function probe(opts = {}) {
       token = s.token || null;
       memoryWritten = s.memory_written === true;
       memoryPath = s.memory_path || null;
+      writtenBySession = s.written_by_session ?? null;
       canaryFileState = token ? 'present' : 'invalid';
     } catch { token = null; canaryFileState = 'invalid'; }
   }
@@ -193,13 +203,18 @@ export async function probe(opts = {}) {
   const injectionLineWindow = opts.injectionLineWindow || DEFAULT_INJECTION_LINE_WINDOW;
   const injectionByteWindow = opts.injectionByteWindow || DEFAULT_INJECTION_BYTE_WINDOW;
 
-  const transcriptPath = resolveTranscript(cwd, home, opts.transcriptPath);
+  const transcriptPath = resolveTranscript(cwd, home, opts.transcriptPath, sessionId);
   let transcriptAvailable = false, events = [];
   if (transcriptPath && existsSync(transcriptPath)) {
     try { events = scanTranscript(readFileSync(transcriptPath, 'utf8').split('\n'), token); transcriptAvailable = true; } catch { transcriptAvailable = false; }
   }
 
-  const { identity_status, reason, reason_code } = classify({ token, canaryFileState, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow });
+  // Spend the token only once the echo is in hand — an unspent canary must survive a
+  // session that never echoed it, so the next session can still use it.
+  const echoed = events.some((e) => e.kind === 'echo');
+  const tokenConsumption = (token && echoed) ? consumeCanary(workspaceId, { home, sessionId }) : null;
+
+  const { identity_status, reason, reason_code } = classify({ token, canaryFileState, memoryWritten, memoryHasToken, transcriptAvailable, events, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, writtenBySession, sessionId, tokenConsumption });
   return buildRow({ identity_status, reason, reason_code, token, memoryWritten, memoryHasToken, memoryLineCount, injectionLineWindow, memoryByteCount, injectionByteWindow, transcriptAvailable, events, cwd, observed_at });
 }
 

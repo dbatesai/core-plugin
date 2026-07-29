@@ -3,10 +3,11 @@
  *
  * Run at /finalize (session N close): generate a fresh random token, write it as a
  * single CORE-owned tagged line at the top of MEMORY.md (inside the first-200-line
- * injection window the harness loads), and record { token, written_at } to
- * ~/.core/workspaces/<id>/visibility-canary.json. At session N+1, the agent echoes
- * the token it sees in injected context and memory-visible-probe.mjs verifies the
- * echo preceded any read of the canary surfaces.
+ * injection window the harness loads), and record the token, the session that wrote
+ * it, and its unspent state to ~/.core/workspaces/<id>/visibility-canary.json. At
+ * session N+1, the agent echoes the token it sees in injected context and
+ * memory-visible-probe.mjs verifies the echo preceded any read of the canary surfaces,
+ * then spends the token — one token proves one session.
  *
  * The canary is a VISIBLE markdown line, not an HTML comment. The harness
  * strips HTML comments when it injects MEMORY.md into
@@ -19,18 +20,19 @@
  * NOT append unbounded canary lines. The CLI output is redacted; it never
  * prints the raw token to stdout (which would land in the transcript).
  *
- * CLI: node write-visibility-canary.mjs --workspace-id <id> [--cwd <path>]
+ * CLI: node write-visibility-canary.mjs --workspace-id <id> [--cwd <path>] [--session-id <id>]
  *
  * By design the script ships with the plugin. The plugin ships .mjs only.
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, chmodSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { withFileLock } from './file-lock.mjs';
 
 export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
 // M16: match only the MANAGED canary line, not any prose that mentions the tag. The old
@@ -51,8 +53,29 @@ export function mappedMemoryPath(cwd, home) {
 export function canaryFilePath(workspaceId, home) {
   return join(home, '.core', 'workspaces', workspaceId, 'visibility-canary.json');
 }
+export function canaryLockPath(workspaceId, home) {
+  return join(home, '.core', 'workspaces', workspaceId, 'visibility-canary.lock');
+}
 export function generateToken() {
   return 'vcan-' + randomBytes(8).toString('hex');
+}
+
+// The expected token is the whole proof. Anyone who can read it can echo it without
+// ever having had memory injected, so the record is owner-only, as is the directory
+// holding it.
+const EVIDENCE_FILE_MODE = 0o600;
+const EVIDENCE_DIR_MODE = 0o700;
+
+function writeEvidenceFile(path, value) {
+  mkdirSync(dirname(path), { recursive: true, mode: EVIDENCE_DIR_MODE });
+  try { chmodSync(dirname(path), EVIDENCE_DIR_MODE); } catch { /* pre-existing dir, other owner */ }
+  atomicWriteFileSync(path, JSON.stringify(value, null, 2));
+  try { chmodSync(path, EVIDENCE_FILE_MODE); } catch { /* filesystem without POSIX modes */ }
+}
+
+function readEvidenceFile(path) {
+  if (!existsSync(path)) return null;
+  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
 }
 
 /**
@@ -67,39 +90,89 @@ export function upsertCanaryLine(content, token) {
   return line + '\n\n' + stripped;
 }
 
+/**
+ * Write a fresh canary for the next session.
+ *
+ * MEMORY.md is read, rewritten, and recorded as one transaction under the workspace's
+ * canary lock. Atomic replacement alone only prevents torn bytes: two closes racing
+ * each read the same content, and the loser's canary line replaces the winner's while
+ * the side file still names the winner's token, leaving a workspace whose recorded
+ * expectation cannot be echoed.
+ */
 export function writeCanary(opts = {}) {
   const home = opts.home || homedir();
   const cwd = opts.cwd || process.cwd();
   const workspaceId = opts.workspaceId || 'unknown';
   const token = opts.token || generateToken();
   const written_at = opts.now || new Date().toISOString();
-
+  const written_by_session = opts.sessionId || null;
   const memPath = opts.memoryPath || mappedMemoryPath(cwd, home);
-  let memory_written = false;
-  if (existsSync(memPath)) {
-    atomicWriteFileSync(memPath, upsertCanaryLine(readFileSync(memPath, 'utf8'), token));
-    memory_written = true;
-  }
-
   const side = canaryFilePath(workspaceId, home);
-  mkdirSync(dirname(side), { recursive: true });
-  writeFileSync(side, JSON.stringify({ token, written_at, cwd, memory_path: memPath, memory_written }, null, 2));
+
+  const memory_written = withFileLock(canaryLockPath(workspaceId, home), () => {
+    if (!existsSync(memPath)) return false;
+    atomicWriteFileSync(memPath, upsertCanaryLine(readFileSync(memPath, 'utf8'), token));
+    return true;
+  }, opts.lockOpts);
+
+  writeEvidenceFile(side, {
+    token, written_at, written_by_session, cwd,
+    memory_path: memPath, memory_written,
+    // A token is spent once. Recording who spent it is what makes a replay visible.
+    consumed_at: null, consumed_by_session: null,
+  });
 
   // Redacted return only — never the raw token.
   return { token_len: token.length, side_file: side, memory_written, memory_path: memPath };
 }
 
+/**
+ * Spend the recorded canary token for one session. The token proves memory injection
+ * exactly once: after it is spent, the same value echoed by any later session is a
+ * replay of a value that is now readable from the transcript, not fresh evidence.
+ * Re-entry from the SAME session is idempotent, so a probe can run twice in a session
+ * without inventing a replay.
+ *
+ * Returns { consumed, reason?, consumed_by_session? }. Never throws on a missing or
+ * unreadable record — the caller decides what an unrecorded consumption means.
+ */
+export function consumeCanary(workspaceId, opts = {}) {
+  const home = opts.home || homedir();
+  const sessionId = opts.sessionId || null;
+  const side = canaryFilePath(workspaceId, home);
+  try {
+    return withFileLock(canaryLockPath(workspaceId, home), () => {
+      const state = readEvidenceFile(side);
+      if (!state || !state.token) return { consumed: false, reason: 'no-canary-recorded' };
+      if (state.consumed_by_session != null) {
+        return state.consumed_by_session === sessionId
+          ? { consumed: true, consumed_by_session: sessionId }
+          : { consumed: false, reason: 'already-consumed', consumed_by_session: state.consumed_by_session };
+      }
+      writeEvidenceFile(side, {
+        ...state,
+        consumed_at: opts.now || new Date().toISOString(),
+        consumed_by_session: sessionId,
+      });
+      return { consumed: true, consumed_by_session: sessionId };
+    }, opts.lockOpts);
+  } catch {
+    return { consumed: false, reason: 'consumption-unrecordable' };
+  }
+}
+
 export async function main(argv) {
-  let workspaceId = null, cwd = null;
+  let workspaceId = null, cwd = null, sessionId = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--workspace-id') workspaceId = argv[++i];
     else if (argv[i] === '--cwd') cwd = argv[++i];
+    else if (argv[i] === '--session-id') sessionId = argv[++i];
   }
   if (!workspaceId) {
-    process.stderr.write('usage: write-visibility-canary.mjs --workspace-id <id> [--cwd <path>]\n');
+    process.stderr.write('usage: write-visibility-canary.mjs --workspace-id <id> [--cwd <path>] [--session-id <id>]\n');
     return 2;
   }
-  const r = writeCanary({ workspaceId, cwd });
+  const r = writeCanary({ workspaceId, cwd, sessionId });
   // Redacted — do NOT print the token.
   console.log(JSON.stringify({ ok: true, memory_written: r.memory_written, side_file: r.side_file }));
   return 0;

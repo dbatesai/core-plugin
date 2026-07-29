@@ -78,8 +78,10 @@ Record op `session-summary`.
 On Claude Code: run `node ${CORE_ROOT}/skills/core/scripts/generate-memory-index.mjs <project>/_memories --memory-md ~/.claude/projects/<mapped-cwd>/memory/MEMORY.md --top 15`, add this session's one-line entry to "Recent activity", drop pointers to anything retired, keep MEMORY.md under 200 lines. Then write the visibility canary:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/write-visibility-canary.mjs" --workspace-id <id> 2>/dev/null || true
+node "${CORE_ROOT}/skills/core/scripts/write-visibility-canary.mjs" --workspace-id <id> --session-id "${CLAUDE_CODE_SESSION_ID:-}" 2>/dev/null || true
 ```
+
+Passing this session's id is what lets next session's probe tell a real echo from this session re-reading a token it wrote itself.
 
 On Codex: no harness-memory writes (explicit-save only) — confirm the facts are in `_memories/` and the summary from Step 4, and say so in one line.
 

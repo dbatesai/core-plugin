@@ -350,3 +350,50 @@ test('H1: write-visibility-canary writes MEMORY.md atomically, not with a bare w
   assert.match(canarySrc, /atomicWriteFileSync\(memPath/, 'writes MEMORY.md atomically');
   assert.doesNotMatch(canarySrc, /\bwriteFileSync\(memPath\b/, 'no bare writeFileSync on the irreplaceable MEMORY.md surface');
 });
+
+// --- A spent token is not proof twice ---
+
+test('classify: a token already spent by another session cannot be credited again', () => {
+  const r = classify({ ...OK, events: [{ idx: 0, kind: 'echo' }], tokenConsumption: { consumed: false, reason: 'already-consumed', consumed_by_session: 's-earlier' } });
+  assert.equal(r.identity_status, 'DEGRADED');
+  assert.equal(r.reason_code, 'canary-token-replayed');
+});
+
+test('classify: a consumption that could not be recorded is not a PASS', () => {
+  const r = classify({ ...OK, events: [{ idx: 0, kind: 'echo' }], tokenConsumption: { consumed: false, reason: 'consumption-unrecordable' } });
+  assert.equal(r.identity_status, 'DEGRADED');
+  assert.equal(r.reason_code, 'canary-consumption-unrecorded');
+});
+
+test('classify: a session cannot prove injection with a canary it wrote itself', () => {
+  const r = classify({ ...OK, events: [{ idx: 0, kind: 'echo' }], writtenBySession: 's-1', sessionId: 's-1', tokenConsumption: { consumed: true } });
+  assert.equal(r.identity_status, 'DEGRADED');
+  assert.equal(r.reason_code, 'canary-echoed-in-writing-session');
+});
+
+test('classify: a fresh token spent by the reading session still passes', () => {
+  const r = classify({ ...OK, events: [{ idx: 0, kind: 'echo' }], writtenBySession: 's-1', sessionId: 's-2', tokenConsumption: { consumed: true } });
+  assert.equal(r.identity_status, 'PASS');
+});
+
+test('probe: the second run in a NEW session sees a replayed token, not a second proof', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'mv-replay-'));
+  try {
+    const cwd = join(home, 'proj');
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(join(cwd, 'workspace.json'), JSON.stringify({ workspace_id: 'w1' }));
+    const memPath = join(home, 'MEMORY.md');
+    writeFileSync(memPath, '## Memory\n\n- a line\n');
+    writeCanary({ home, cwd, workspaceId: 'w1', memoryPath: memPath, sessionId: 's-writer' });
+    const token = JSON.parse(readFileSync(writeSideFilePath('w1', home), 'utf8')).token;
+
+    const transcript = join(home, 't.jsonl');
+    writeFileSync(transcript, `${txt(`VISIBILITY-CANARY-ECHO: ${token}`)}\n`);
+
+    const first = await probe({ home, cwd, workspaceId: 'w1', transcriptPath: transcript, sessionId: 's-reader' });
+    assert.equal(first.identity_status, 'PASS');
+    const replay = await probe({ home, cwd, workspaceId: 'w1', transcriptPath: transcript, sessionId: 's-other' });
+    assert.equal(replay.identity_status, 'DEGRADED');
+    assert.equal(replay.reason_code, 'canary-token-replayed');
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
