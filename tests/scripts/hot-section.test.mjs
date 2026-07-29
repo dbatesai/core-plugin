@@ -573,3 +573,29 @@ test('CLI clear: a stamp failure (lock held) exits NONZERO, still removes the bl
     assert.equal(contradictorySuccess, false, 'never both exit 0 AND an unqualified "hot section cleared" success line');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+// Validity-suppression is a store-wide invariant, not a per-caller courtesy: a
+// unit whose t_invalid has passed is a fact that stopped being true. Hot
+// synthesis owns its own candidate selector, and it filtered on status alone —
+// so an invalidated unit could be composed straight back into PROJECT.md's most
+// prominent section, which is exactly the resurrection the rule forbids.
+test('candidatesForSynthesis suppresses invalidated units', async () => {
+  const { root, project } = setup();
+  try {
+    const mem = join(project, '_memories');
+    mkdirSync(mem, { recursive: true });
+    const unit = (id, extra = '') => [
+      '---', `id: ${id}`, 'type: decision', 'status: active',
+      'created: 2026-07-01', 'updated: 2026-07-01', 'sources: [PROJECT.md]', extra,
+      '---', '', `# ${id}`, 'body',
+    ].filter(Boolean).join('\n');
+    writeFileSync(join(mem, 'still-true.md'), unit('still-true'));
+    writeFileSync(join(mem, 'stopped-being-true.md'), unit('stopped-being-true', 't_invalid: 2026-07-10'));
+
+    const { candidatesForSynthesis } = await import('../../plugins/core/skills/core/scripts/hot-section.mjs');
+    const ids = candidatesForSynthesis(project, { today: new Date(Date.UTC(2026, 6, 28)) }).map((c) => c.id);
+    assert.ok(ids.includes('still-true'), 'a currently-valid unit is still a candidate');
+    assert.equal(ids.includes('stopped-being-true'), false,
+      'an invalidated unit must not be composed back into the hot section');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

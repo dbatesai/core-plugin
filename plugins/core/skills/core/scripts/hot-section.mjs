@@ -28,7 +28,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { resolve, join, basename, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { iterUnits, score } from './priority.mjs';
+import { iterUnits, score, isInvalidated } from './priority.mjs';
 import { logEvent } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { hashText, stampFile, readProjectCache } from './state-cache.mjs';
@@ -407,10 +407,18 @@ export function candidatesForSynthesis(projectDir, { top = DEFAULT_CANDIDATE_COU
   try { units = iterUnits(memoriesDir); } catch { return []; }
   if (!Array.isArray(units) || units.length === 0) return [];
 
+  // Validity-suppression uses the same shared predicate every other reader
+  // does: a unit whose t_invalid has passed stopped being true, so it is
+  // excluded here for the same reason a terminal-status unit is. Filtering on
+  // status alone would compose a superseded fact back into the most prominent
+  // section of PROJECT.md.
+  const day = today || new Date(Date.UTC(
+    new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
   const scored = units
     .filter(u => {
       const status = String(u.fm.status || '').toLowerCase();
-      return !status || status === 'active';
+      if (status && status !== 'active') return false;
+      return !isInvalidated(u, day);
     })
     .map(u => {
       const s = score(u, sessionTopics, today);
