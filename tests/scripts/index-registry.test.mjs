@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -17,7 +17,7 @@ function spawnAsync(args) {
   });
 }
 import {
-  addWorkspace, updateWorkspace, removeWorkspace, touchWorkspace, readLastActive, defaultCoreDir,
+  addWorkspace, updateWorkspace, removeWorkspace, touchWorkspace, readLastActive, defaultCoreDir, recordBootstrap,
 } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import { checkFork } from '../../plugins/core/skills/core/scripts/workspace-fork-check.mjs';
 
@@ -174,4 +174,39 @@ test('defaultCoreDir fails closed when the trusted OS-account home is unavailabl
   assert.throws(() => defaultCoreDir({ resolve: () => null }),
     (e) => e.code === 'NO_TRUSTED_HOME',
     'the registry must not fall back to an environment-controlled home');
+});
+
+test('the bootstrap record is an atomic, owner-only, id-validated write', () => {
+  const coreDir = setup();
+  const r = recordBootstrap(coreDir, 'w', {
+    sessionStartedAt: '2026-07-28T09:00:00Z',
+    completedAt: '2026-07-28T09:00:12Z',
+  });
+  const p = join(coreDir, 'workspaces', 'w', 'last-bootstrap.json');
+  assert.equal(r.path, p);
+  assert.deepEqual(JSON.parse(readFileSync(p, 'utf8')), {
+    session_started_at: '2026-07-28T09:00:00Z',
+    bootstrap_completed_at: '2026-07-28T09:00:12Z',
+  });
+  // Temp-file + rename, not a truncating write: no sibling temp survives.
+  const litter = readdirSync(join(coreDir, 'workspaces', 'w')).filter((n) => n.startsWith('.'));
+  assert.deepEqual(litter, [], `atomic write left temp litter: ${litter.join(', ')}`);
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(p).mode & 0o777, 0o600, 'the bootstrap record is owner-only');
+  }
+  assert.throws(() => recordBootstrap(coreDir, '../../../etc', { sessionStartedAt: 'x', completedAt: 'y' }),
+    (e) => e.code === 'UNSAFE_WORKSPACE_ID');
+  rmSync(coreDir, { recursive: true, force: true });
+});
+
+test('CLI: bootstrap records the session-start marker', () => {
+  const coreDir = setup();
+  const r = spawnSync(process.execPath,
+    [REGISTRY_CLI, 'bootstrap', 'w', '--session-started', '2026-07-28T09:00:00Z', '--core-dir', coreDir],
+    { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  const rec = JSON.parse(readFileSync(join(coreDir, 'workspaces', 'w', 'last-bootstrap.json'), 'utf8'));
+  assert.equal(rec.session_started_at, '2026-07-28T09:00:00Z');
+  assert.match(rec.bootstrap_completed_at, /^\d{4}-\d{2}-\d{2}T/);
+  rmSync(coreDir, { recursive: true, force: true });
 });
