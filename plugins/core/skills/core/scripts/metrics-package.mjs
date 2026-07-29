@@ -40,7 +40,7 @@ import {
 } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { loadUnit } from './priority.mjs';
@@ -1226,6 +1226,85 @@ export function verifyZipMagic(path) {
   return { ok: true };
 }
 
+// ---------- recoverable movement ----------
+//
+// The staged tree is the only copy of a package's bytes until it lands
+// somewhere. Nothing here deletes it on the strength of an operation having
+// been ISSUED — the source goes only after a hash receipt proves the
+// destination holds the same bytes.
+
+/** sha256 per slash-joined relative path under `dir`. */
+export function hashTree(dir) {
+  const out = new Map();
+  const walk = (d, rel) => {
+    for (const name of readdirSync(d).sort()) {
+      const p = join(d, name);
+      const r = rel ? `${rel}/${name}` : name;
+      if (statSync(p).isDirectory()) walk(p, r);
+      else out.set(r, createHash('sha256').update(readFileSync(p)).digest('hex'));
+    }
+  };
+  walk(dir, '');
+  return out;
+}
+
+/** Does `dest` hold every byte of `src`? Names what is missing or changed. */
+export function verifyCopiedTree(src, dest) {
+  let source;
+  try { source = hashTree(src); } catch (e) { return { ok: false, reason: `source unreadable: ${e.code || 'error'}`, missing: [], mismatched: [] }; }
+  let copy;
+  try { copy = hashTree(dest); } catch (e) { return { ok: false, reason: `destination unreadable: ${e.code || 'error'}`, missing: [...source.keys()], mismatched: [] }; }
+  const missing = [];
+  const mismatched = [];
+  for (const [rel, sha] of source) {
+    if (!copy.has(rel)) missing.push(rel);
+    else if (copy.get(rel) !== sha) mismatched.push(rel);
+  }
+  return { ok: !missing.length && !mismatched.length, missing, mismatched };
+}
+
+/**
+ * Copy the staged tree to `folder`, prove it arrived, and only then retire the
+ * source. An incomplete or altered copy leaves the staging dir untouched and
+ * says so in `source_retained`.
+ */
+export function moveStagingToFolder(staging, folder) {
+  try {
+    cpSync(staging, folder, { recursive: true });
+  } catch (e) {
+    return { ok: false, reason: `copy failed: ${String(e && e.message).slice(0, 120)}`, source_retained: staging };
+  }
+  const verified = verifyCopiedTree(staging, folder);
+  if (!verified.ok) {
+    return {
+      ok: false,
+      reason: verified.reason || `copy unverified (${verified.missing.length} missing, ${verified.mismatched.length} changed)`,
+      source_retained: staging,
+    };
+  }
+  rmSync(staging, { recursive: true, force: true });
+  return { ok: true, path: folder };
+}
+
+/**
+ * Byte receipt for an archive: extract it and hash-compare against the staged
+ * tree. `tar -t` proves names were listed; this proves the contents match.
+ */
+export function verifyArchiveRoundTrip(zipPath, stagingDir) {
+  const scratch = mkdtempSync(join(tmpdir(), 'core-metrics-verify-'));
+  try {
+    const res = spawnSync('tar', ['-x', '-f', basename(zipPath), '-C', scratch], { cwd: dirname(zipPath), encoding: 'utf8', timeout: 120_000 });
+    if (res.error || res.status !== 0) return { ok: false, reason: `archive did not extract (tar exit ${res.status})` };
+    const verified = verifyCopiedTree(stagingDir, scratch);
+    if (!verified.ok) {
+      return { ok: false, reason: verified.reason || `archive contents differ (${verified.missing.length} missing, ${verified.mismatched.length} changed)` };
+    }
+    return { ok: true };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
 export function zipStaging(stagingDir, destZip) {
   const destDir = dirname(destZip);
   const destBase = basename(destZip);
@@ -1394,16 +1473,20 @@ export function runPackage(argv, { homeOverride } = {}) {
   let suffix = 2;
   while (existsSync(zipPath)) { zipPath = join(outDir, `core-metrics-package-${stamp}-${suffix}.zip`); suffix += 1; }
   const zip = zipStaging(staging, zipPath);
+  const receipt = zip.ok ? verifyArchiveRoundTrip(zipPath, staging) : zip;
   let shipped;
-  if (zip.ok) {
+  if (receipt.ok) {
     rmSync(staging, { recursive: true, force: true });
     shipped = { kind: 'zip', path: zipPath };
   } else {
+    // An archive that cannot be proven to hold the staged bytes does not ship.
+    rmSync(zipPath, { force: true });
     // self-healing fallback: leave a folder instead of failing the run
     const folder = zipPath.replace(/\.zip$/, '');
-    cpSync(staging, folder, { recursive: true });
-    rmSync(staging, { recursive: true, force: true });
-    shipped = { kind: 'folder', path: folder, reason: zip.reason };
+    const moved = moveStagingToFolder(staging, folder);
+    shipped = moved.ok
+      ? { kind: 'folder', path: folder, reason: receipt.reason }
+      : { kind: 'staging', path: staging, reason: `${receipt.reason}; ${moved.reason}` };
   }
   // Ship succeeded — NOW the delta baseline may advance (never on abort).
   for (const proj of projects) {
