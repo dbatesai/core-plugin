@@ -10,7 +10,7 @@
  * HONESTY GATE: classify-turns output is PROVISIONAL until Phase-3 calibration
  * proves >0.7 precision. This rollup therefore tags every surface `[PROVISIONAL]`
  * and the startup readiness signal says so out loud. No state distribution renders as
- * evidence-grade until calibration clears (spec §17.12, Anvil A4; R-1 self-measuring
+ * evidence-grade until calibration clears (spec §17.12; self-measuring
  * guard — CORE measuring itself must not launder its own confidence).
  *
  * Ships with the plugin as prescriptive code; .mjs only. Fail-open: never throws.
@@ -44,7 +44,7 @@ const DAY_ATTRIBUTION_NOTE = 'replayed sessions keep their earliest/original obs
  * TRIPLE — classifier version, proxy version, AND the classified-row schema
  * version. Calibrate at one instrument, then change any leg of the triple, and
  * the old precision number no longer describes what's running. Any mismatch ⇒
- * treat as uncalibrated (the R-1 honesty spine: never launder stale confidence).
+ * treat as uncalibrated (the honesty spine: never launder stale confidence).
  *
  * The distinct `classified_schema_version` field is the schema of the CLASSIFIED
  * ROWS the calibration was measured against (written by calibrate-classifier.mjs).

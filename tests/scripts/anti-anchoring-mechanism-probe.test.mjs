@@ -7,7 +7,7 @@ import {
 const VALID_WEIGHTS = new Set(['primary', 'corroborating', 'conflicting']);
 const VALID_KINDS = new Set(['identity', 'runtime', 'mutation', 'observation']);
 
-test('probe: honestly demotes to DEGRADED with mechanism trust-based (R-17)', async () => {
+test('probe: honestly demotes to DEGRADED with mechanism trust-based', async () => {
   const row = await probe({ cwd: '/work/Any' });
   assert.equal(row.identity_status, 'DEGRADED');
   assert.equal(row.mechanism, 'trust-based');
@@ -27,7 +27,7 @@ test('probe: DEGRADED carries a conflicting evidence entry; all weights schema-v
   for (const e of row.evidence) assert.ok(VALID_WEIGHTS.has(e.weight), `bad weight: ${e.weight}`);
 });
 
-test('probe: evidence points at the R-17 risk unit', async () => {
+test('probe: evidence points at the tracked risk unit', async () => {
   const row = await probe();
   const ptr = row.evidence.find(e => e.source === 'risk-unit-pointer');
   assert.ok(ptr, 'must carry a risk-unit-pointer');

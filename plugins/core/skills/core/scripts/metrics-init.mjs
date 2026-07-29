@@ -4,7 +4,7 @@
  * What it does:
  *   - Default storage: `<project>/_metrics/` on Mac, Linux, Windows-no-OneDrive.
  *   - Windows-with-OneDrive: redirect to `~/AppData/Local/core-metrics/<workspace-id>/`.
- *   - Detection: methods (a) path-substring + (c) OneDrive .dat-settings-parse.
+ *   - Detection: methods (a) path-substring + (c) OneDrive .ini-settings-parse.
  *   - Per-scaffold forensic log line written to operational meta.
  *   - Stub README left at project location when storage is redirected.
  *   - Idempotent: re-runs leave existing content alone, just ensure structure.

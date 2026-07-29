@@ -13,7 +13,7 @@
  *     (graduating a unit, rendering PROJECT.md, approving a release gate,
  *     merging/publishing, writing canonical plan state). Authority requires a
  *     PASS-grade anti-anchoring mechanism — which on Claude Code is DEGRADED
- *     (trust-based, R-17) until physical isolation staging ships.
+ *     (trust-based) until physical isolation staging ships.
  *
  * Boundary: this is consumer ENFORCEMENT only. It does not provide the
  * staged/physical isolation proof or any memory-visibility proof.
@@ -27,7 +27,7 @@ import { runPreAction } from './capability-probe.mjs';
 
 export const ADVERSARIAL_ACTION = 'multi-agent-adversarial-run';
 export const ADVISORY_WATERMARK =
-  'DEGRADED/trust-based (R-17): advisory only — independent agent/human acceptance required before any canonical mutation';
+  'DEGRADED/trust-based: advisory only — independent agent/human acceptance required before any canonical mutation';
 
 // Machine-readable decision enum: a consumer branches on the
 // single `decision` string instead of re-deriving intent from the booleans +
