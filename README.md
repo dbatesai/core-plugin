@@ -40,17 +40,18 @@ claude plugins marketplace add dbatesai/core-plugin
 claude plugins install core@core
 ```
 
-Either path installs the main skill and ten companion skills, and leaves your `~/.claude/settings.json` exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session, installing on Codex, optional hooks, and troubleshooting.
+Either path installs the main skill, eight companion skills, and three deprecation shims, and leaves your `~/.claude/settings.json` exactly as you left it. See [INSTALL.md](INSTALL.md) for running a local copy, loading it for a single session, installing on Codex, optional hooks, and troubleshooting.
 
 ## Commands
 
-Type `/core` to start — it loads your project and orients before anything else. Ten companions handle the rest: **`/finalize`** (close a session), **`/refocus`** (recenter mid-session on what matters most now, given what you've learned since you started — read-only unless you accept a change), **`/process-memory`** (clean up memory on demand), **`/register-sources`** (point CORE at outside data that should feed the project), **`/configure-project`** (set up and health-check a project), **`/vibecheck`** (capture how the session felt), **`/metrics`** (the one door to memory health — three plain-language answers by default, sourced from pinned grading history; `full` for the complete instrument readout with a live round-trip proof, `export` for the anonymized stats zip, `self-test` for a blind test round now), and **`/memory-view`** (browse what CORE knows as a read-only page — published as a private artifact with a narrated summary of exactly what's in it). **`/metrics-package`** and **`/self-test`** remain as deprecation shims for one release — they moved behind the `/metrics` door. Two optional hooks pair well with CORE — a guard before a write touches installed skill files, and a per-turn nudge to keep the voice plain. They live in your own `~/.claude/settings.json`; [INSTALL.md](INSTALL.md) shows how to add them.
+Type `/core` to start — it loads your project and orients before anything else. Eight companions handle the rest: **`/finalize`** (close a session), **`/refocus`** (recenter mid-session on what matters most now, given what you've learned since you started — read-only unless you accept a change), **`/process-memory`** (clean up memory on demand), **`/register-sources`** (point CORE at outside data that should feed the project), **`/configure-project`** (set up and health-check a project), **`/vibecheck`** (capture how the session felt), **`/metrics`** (the one door to memory health — three plain-language answers by default, sourced from pinned grading history; `full` for the complete instrument readout with a live round-trip proof, `export` for the anonymized stats zip, `self-test` for a blind test round now), and **`/memory-view`** (browse what CORE knows as a read-only page — published as a private artifact with a narrated summary of exactly what's in it). Three deprecation shims are still registered and do no work of their own: **`/metrics-package`** and **`/self-test`** moved behind the `/metrics` door, and **`/orient`** folded into `/core`. Two optional hooks pair well with CORE — a guard before a write touches installed skill files, and a per-turn nudge to keep the voice plain. They live in your own `~/.claude/settings.json`; [INSTALL.md](INSTALL.md) shows how to add them.
 
-[USAGE.md](USAGE.md) is the full reference — every command, protocol, and script, and what each one does.
+[USAGE.md](USAGE.md) is the reference — every command, every protocol, and the scripts worth knowing about, with what each one does.
 
 ## Learn more
 
 - [USAGE.md](USAGE.md) — what each command, protocol, and script does.
+- [docs/door-inventory.json](docs/door-inventory.json) — the generated list of every shipped skill, hook, and script.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the design behind it: the memory store, how retrieval works, memory hygiene, when the swarm fires, validation, and the optional hooks.
 - [llms.txt](llms.txt) — a structured map of this repo for AI agents: what CORE is, how to install it, and how to use it, with pointers into the docs.
 

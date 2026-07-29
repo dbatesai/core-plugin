@@ -37,6 +37,7 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/memory-view` | Browse what CORE knows as one read-only page — graph, unit bodies, backlinks, health section. Published as a private artifact only after you confirm the preflight manifest; never automatic. |
 | `/metrics-package` | Deprecated shim (removal v3.15.0) — now `/metrics export`. |
 | `/self-test` | Deprecated shim (removal v3.15.0) — now `/metrics self-test`. |
+| `/orient` | Deprecated shim (removal 2026-08-15) — session bootstrap folded into `/core`. |
 
 ### Shipped hooks (installed with the plugin)
 

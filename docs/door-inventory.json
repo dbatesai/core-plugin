@@ -1,0 +1,719 @@
+{
+  "schema_version": "1.0.0",
+  "doors": [
+    {
+      "name": "SessionEnd:close-pass-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "SessionStart:session-start-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "Stop:answer-close-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "UserPromptSubmit:retrieve-context-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "Stop:answer-close-hook-codex.mjs",
+      "kind": "hook",
+      "harness": "codex",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "UserPromptSubmit:retrieve-context-hook-codex.mjs",
+      "kind": "hook",
+      "harness": "codex",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "adversarial-run-gate",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "aggregate-receipt",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "analyze-capability-drift",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "analyze-retrieval-quality",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "analyze-retrieval-skip",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "artifact-identity",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "artifact-provenance",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "artifact-receipts",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "audit-memory-boundary",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "backfill-memory",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "bitemporal",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "bm25",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "calibrate-classifier",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "capability-history",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "capability-probe",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "check-context-integrity",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "check-inbox",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "check-units",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "classify-turns",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "close-pass",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "close-payload",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "compact-project",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "configure-project",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "contract-format",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "decorate-graph",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "demote-moves",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "demote-state-narrative",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "enrichment-sidecar",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "file-lock",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "frontmatter-flat",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "fs-atomic",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "generate-agents-md",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "generate-claude-md",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "generate-decisions-index",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "generate-door-inventory",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "generate-memory-index",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "generate-risks-index",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "generate-summary-index",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "graph-walk",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "hardware-budget",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "hindsight-judge",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "hot-section",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "impact-trace",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "index-registry",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "lifecycle-core",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "lifecycle-detect",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "log-event",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "maintenance-run",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-check",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-dedupe",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-detectors",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-disclosure",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-init",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-package",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-package-report",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-rollup",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "metrics-tripwires",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "migrate-to-contract",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "orphan-detector",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "priority",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "producer-identity",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "project-slug",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "read-transcript",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "record-capability-snapshot",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "record-retrieval-event",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "record-retrieval-outcome",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "render-browse-artifact",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "render-metrics-artifact",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "resolve-plugin-root",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "retrieval-harness",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "retrieve-context",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "scorecard",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "select-relevant-units",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "self-test-round",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "state-cache",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "text-truncate",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "trusted-home",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "turn-capture",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "unit-vocab",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "validate",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "validate-adversarial-artifacts",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "verify-release-identity",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "workspace-fork-check",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "write-visibility-canary",
+      "kind": "script",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
+      "name": "configure-project",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "core",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "finalize",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "memory-view",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "metrics",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "metrics-package",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "deprecated",
+      "invocation": "user"
+    },
+    {
+      "name": "orient",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "deprecated",
+      "invocation": "user"
+    },
+    {
+      "name": "process-memory",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "refocus",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "register-sources",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    },
+    {
+      "name": "self-test",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "deprecated",
+      "invocation": "user"
+    },
+    {
+      "name": "vibecheck",
+      "kind": "skill",
+      "harness": "shared",
+      "status": "active",
+      "invocation": "user"
+    }
+  ]
+}

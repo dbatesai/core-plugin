@@ -1,6 +1,6 @@
 # Usage
 
-A reference for what each part of CORE does. Commands come first — those are what you type. Protocols and scripts follow as supporting detail; you rarely touch them directly, but they're what the commands run on.
+A reference for what each part of CORE does. Commands come first — those are what you type, and every one of them is listed. Protocols and scripts follow as supporting detail; you rarely touch them directly, but they're what the commands run on. The script section groups the ones worth reading or running by hand rather than naming all of them — `docs/door-inventory.json` is the generated list of every shipped skill, hook, and script.
 
 For the design reasoning behind any of this, see [ARCHITECTURE.md](ARCHITECTURE.md). For install, see [INSTALL.md](INSTALL.md).
 
@@ -8,7 +8,7 @@ For the design reasoning behind any of this, see [ARCHITECTURE.md](ARCHITECTURE.
 
 ## Commands
 
-Eleven slash commands ship with the plugin: `/core` and ten companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
+Twelve slash commands ship with the plugin: `/core`, eight companions, and three deprecation shims. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own; the shims forward to where their behavior moved.
 
 ### `/core`
 
@@ -93,6 +93,10 @@ Browse what CORE knows — the unit graph, full unit bodies, edges and backlinks
 ### `/self-test` *(deprecated shim — now `/metrics self-test`)*
 
 Kept for one release so existing habits don't break; it redirects to `/metrics self-test` with a one-line notice. Removal scheduled for v3.15.0. Same machinery and blindness discipline underneath: the corpus is frozen per round, a separate blind agent authors questions from the stored facts alone (including deliberately-unanswerable and false-premise ones), the set is mechanically verified and frozen before scoring, and the real retrieval path is measured with a per-kind breakdown, trap-leak rate, and an old-vs-new-round overfitting delta. Rounds live append-only under `<project>/_tests/self-test/round-<N>/`.
+
+### `/orient` *(deprecated shim — folded into `/core`)*
+
+Session bootstrap is part of CORE's startup protocol now, so `/orient` does no work of its own: it prints a notice pointing at `/core` and stops. Kept only so an existing habit doesn't hit an unrecognized command. Removal scheduled for 2026-08-15.
 
 ---
 
