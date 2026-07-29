@@ -390,20 +390,82 @@ function verdictBlock(mech) {
 // the browse page's explicitly-consented disclosure, not this one).
 // ============================================================
 
-// The embed ships only the sections the page itself renders — an allowlist,
-// so a field this renderer has never heard of cannot ride into a published
-// page. Dropped keys are disclosed by count.
-const EMBED_SECTIONS = ['schema_version', 'generated_at', 'producer', 'mechanics', 'readiness', 'regression', 'caveats'];
+// The embed ships only what the page renders, enforced recursively: this
+// schema tree names every allowed key at every depth. `true` keeps a scalar
+// or opaque-but-known value; a nested object keeps only its named children;
+// SCALAR_MAP keeps a one-level map of scalar values (count histograms).
+// Anything not named is dropped and disclosed by count — a field this
+// renderer has never heard of cannot ride into a published page.
+const SCALAR_MAP = Symbol('scalar-map');
+const EMBED_SCHEMA = {
+  schema_version: true,
+  generated_at: true,
+  producer: { script: true, plugin: true, plugin_version: true, source_sha: true, source_sha_from: true },
+  mechanics: {
+    status: true,
+    probe: {
+      validate: { pass: true, exit: true },
+      retrieve: { pass: true, evidence: true },
+      suppress_retired: { pass: true, evidence: true },
+      round_trip: true,
+    },
+    store: {
+      present: true,
+      schema: { exit: true, pass: true, warn: true, fail: true },
+      integrity: { exit: true, pass: true, warn: true, fail: true },
+      warning_triage: { informational: true, routine_upkeep: true, attention: true, attention_items: true, attention_items_omitted: true },
+      census: { active: true, retired: true, archived: true, superseded: true, other: true, total: true },
+      retrieval_log: { files: true, rows: true },
+    },
+    telemetry: {
+      available: true, days: true, retrievalEvents: true,
+      rejected: {
+        current: { count: true, by_code: SCALAR_MAP },
+        legacy: { count: true, by_code: SCALAR_MAP },
+        other: { count: true, by_code: SCALAR_MAP },
+        total: true,
+      },
+      t1Pct: true, t2Pct: true, t3Pct: true,
+      topEscalationTopic: true, topEscalationRate: true,
+    },
+    capture: SCALAR_MAP,
+  },
+  regression: {
+    gold: { available: true, n: true, storeUnits: true, context3_r3: true, ranking_r10: true, bm25_r10: true },
+    self_test: SCALAR_MAP,
+  },
+  readiness: {
+    recognition_signal: { text: true, age_hours: true },
+    calibration: { available: true, labeled_count: true, min_needed: true, is_calibrated: true, overall_precision: true, notes: true },
+  },
+  caveats: true,
+};
+
+function projectBySchema(value, schema, drops) {
+  if (schema === true) return value;
+  if (schema === SCALAR_MAP) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[k] = v;
+      else drops.count++;
+    }
+    return out;
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (Object.prototype.hasOwnProperty.call(schema, k)) out[k] = projectBySchema(v, schema[k], drops);
+    else drops.count++;
+  }
+  return out;
+}
 
 export function sanitizeForEmbed(metrics) {
   const source = JSON.parse(JSON.stringify(metrics));
-  const clone = {};
-  let dropped = 0;
-  for (const [k, v] of Object.entries(source)) {
-    if (EMBED_SECTIONS.includes(k)) clone[k] = v;
-    else dropped++;
-  }
-  if (dropped > 0) clone.embed_fields_omitted = dropped;
+  const drops = { count: 0 };
+  const clone = projectBySchema(source, EMBED_SCHEMA, drops);
+  if (drops.count > 0) clone.embed_fields_omitted = drops.count;
   const triage = clone.mechanics?.store?.warning_triage;
   if (triage && Array.isArray(triage.attention_items)) {
     triage.attention_items_omitted = triage.attention_items.length;

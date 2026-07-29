@@ -81,3 +81,21 @@ test('hashTree records a sha256 per relative path', () => {
     assert.equal(tree.size, 3);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('AUD-106: a pre-existing extra file in the destination fails the move; staging is retained', async () => {
+  const { moveStagingToFolder } = await import('../../plugins/core/skills/core/scripts/metrics-package.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'move-extras-'));
+  try {
+    const staging = join(root, 'staging');
+    const dest = join(root, 'dest');
+    mkdirSync(staging, { recursive: true });
+    mkdirSync(dest, { recursive: true });
+    writeFileSync(join(staging, 'report.md'), 'the package');
+    writeFileSync(join(dest, 'secret.txt'), 'PreexistingPlant5519');
+
+    const r = moveStagingToFolder(staging, dest);
+    assert.equal(r.ok, false, 'a destination with extra content is not the staged tree');
+    assert.ok(/extra/.test(r.reason), 'the reason names the extra path class: ' + r.reason);
+    assert.ok(existsSync(join(staging, 'report.md')), 'staging is retained on refusal');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

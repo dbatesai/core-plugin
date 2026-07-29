@@ -720,3 +720,14 @@ test('sanitizeForEmbed: an unknown top-level field never reaches the embed, and 
   assert.ok(!bytes.includes('PlantedSecret4471'), 'unknown fields are dropped, not embedded');
   assert.equal(out.embed_fields_omitted, 1, 'the drop count is disclosed');
 });
+
+test('AUD-105: a nested planted secret inside a known section never reaches the embed', async () => {
+  const { sanitizeForEmbed } = await import('../../plugins/core/skills/core/scripts/render-metrics-artifact.mjs');
+  const out = sanitizeForEmbed({
+    schema_version: '1.0.0', generated_at: 't', producer: {},
+    mechanics: { status: 'WORKING', smuggled_note: { password: 'NestedPlant7731' } },
+  });
+  const bytes = JSON.stringify(out);
+  assert.ok(!bytes.includes('NestedPlant7731'), 'nested unknown keys inside known sections are dropped');
+  assert.ok(bytes.includes('WORKING'), 'known nested keys survive');
+});

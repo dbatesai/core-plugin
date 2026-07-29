@@ -1248,19 +1248,31 @@ export function hashTree(dir) {
   return out;
 }
 
-/** Does `dest` hold every byte of `src`? Names what is missing or changed. */
+/**
+ * Is `dest` EXACTLY the tree at `src`? Symmetric: names what is missing,
+ * changed, or extra. One-directional verification let a pre-existing file in
+ * the destination survive a "verified" move and ride along as package content.
+ */
 export function verifyCopiedTree(src, dest) {
   let source;
-  try { source = hashTree(src); } catch (e) { return { ok: false, reason: `source unreadable: ${e.code || 'error'}`, missing: [], mismatched: [] }; }
+  try { source = hashTree(src); } catch (e) { return { ok: false, reason: `source unreadable: ${e.code || 'error'}`, missing: [], mismatched: [], extra: [] }; }
   let copy;
-  try { copy = hashTree(dest); } catch (e) { return { ok: false, reason: `destination unreadable: ${e.code || 'error'}`, missing: [...source.keys()], mismatched: [] }; }
+  try { copy = hashTree(dest); } catch (e) { return { ok: false, reason: `destination unreadable: ${e.code || 'error'}`, missing: [...source.keys()], mismatched: [], extra: [] }; }
   const missing = [];
   const mismatched = [];
+  const extra = [];
   for (const [rel, sha] of source) {
     if (!copy.has(rel)) missing.push(rel);
     else if (copy.get(rel) !== sha) mismatched.push(rel);
   }
-  return { ok: !missing.length && !mismatched.length, missing, mismatched };
+  for (const rel of copy.keys()) {
+    if (!source.has(rel)) extra.push(rel);
+  }
+  const ok = !missing.length && !mismatched.length && !extra.length;
+  return {
+    ok, missing, mismatched, extra,
+    reason: ok ? null : `tree mismatch (${missing.length} missing, ${mismatched.length} changed, ${extra.length} extra)`,
+  };
 }
 
 /**
