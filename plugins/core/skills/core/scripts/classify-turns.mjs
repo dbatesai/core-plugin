@@ -14,7 +14,7 @@
  *   mechanics-failure             agent walked the ladder; it came back empty anyway
  *   capture-miss                  agent asked; term genuinely nowhere
  *
- * HONESTY GATE (spec §17.12, Anvil A4): this output is PROVISIONAL until the
+ * HONESTY GATE (spec §17.12): this output is PROVISIONAL until the
  * Phase-3 calibration set proves the heuristics at >0.7 precision. Every record
  * carries `provisional: true` and `classifier_version`; rollups must NOT render
  * state distributions as evidence-grade until calibration clears. Capture (the

@@ -88,7 +88,7 @@ test('probe: Codex harness → DEGRADED when extraction works but no CORE access
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// --- path false-positives must not count as access (evt-202605291319) ---
+// --- path false-positives must not count as access ---
 
 test('classifyAccess: PROJECT.md.bak does NOT count as a CORE access (extension look-alike)', () => {
   const r = classifyAccess({ harness: 'claude-code', transcriptAvailable: true, toolExtractionPending: false, events: [toolEv('cat PROJECT.md.bak')], coreStorePresent: true });

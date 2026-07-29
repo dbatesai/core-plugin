@@ -140,7 +140,7 @@ test('classify PASS: line-count within injection window does not false-degrade',
 });
 
 // --- Slice A: byte-window truncation (the live class line-count alone misses) ---
-// Field evidence (session 56, 2026-05-30): MEMORY.md was 196 lines / 25,684 bytes —
+// Field evidence from a live corpus: MEMORY.md was 196 lines / 25,684 bytes —
 // UNDER the 200-line window but OVER the ~24,400-byte injection cap. The tail dropped
 // silently ("only part of it was loaded") while a line-only probe would falsely PASS.
 // Defense-in-depth: keep the line window AND add the byte window.

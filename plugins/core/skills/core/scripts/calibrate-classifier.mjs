@@ -2,7 +2,7 @@
  * calibrate-classifier.mjs — Phase 3 calibration harness for classify-turns.mjs.
  *
  * The heuristic classifier is PROVISIONAL until precision clears 0.7 on a
- * 100–200 hand-labeled turn set (spec §17.12, Anvil A4; R-1 self-measuring guard).
+ * 100–200 hand-labeled turn set (spec §17.12: the self-measurement honesty guard).
  * This script provides the three-command pipeline:
  *
  *   --check              Print current calibration state. Exit 0 if calibrated, 1 if not.
