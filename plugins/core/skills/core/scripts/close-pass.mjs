@@ -31,7 +31,7 @@
  *   node close-pass.mjs --self-test
  */
 
-import { readFileSync, openSync, writeSync, closeSync, rmSync, mkdtempSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
+import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
@@ -423,119 +423,6 @@ export const CLOSE_OPS = [
   'metrics', 'session-summary', 'memory-refresh',
 ];
 
-/**
- * Build the env for the spawned `claude -p /finalize`. Strips API-key auth by default so an
- * unattended close uses the subscription login (an automated close billing the user's API key
- * is a surprise cost; a dead key also shadows the claude.ai login and kills the close). Opt
- * back in with CORE_CLOSE_USE_API_KEY=1. CORE_CLOSE_ENVELOPE=1 tells /finalize the runner owns
- * the begin/finish marker + mechanical maintenance (so the LLM does only the judgment work).
- */
-export function buildChildEnv(env = process.env) {
-  const childEnv = { ...env, CORE_CLOSE_PASS_ACTIVE: '1', CORE_CLOSE_HEADLESS: '1', CORE_CLOSE_ENVELOPE: '1' };
-  if (env.CORE_CLOSE_USE_API_KEY !== '1') { delete childEnv.ANTHROPIC_API_KEY; delete childEnv.ANTHROPIC_AUTH_TOKEN; }
-  return childEnv;
-}
-
-/**
- * The deterministic close envelope: the marker lifecycle and mechanical maintenance are
- * plumbing, NOT left to the LLM's discretion (a headless agent can narrate "indexes
- * regenerated" and "session closed" while writing neither the maintenance
- * ledger nor the marker). Sequence: begin (lock + in-progress marker) → runMaintenance (mechanical,
- * signature-gated) → `claude -p /finalize` (the intelligent reflection/render/summary) → finish
- * (closed marker, lock released). Even if the LLM inside does nothing structural, the store ends
- * in a correct `closed` state and startup catch-up won't needlessly re-run.
- *
- * @param {(store: object) => any} [spawnFinalize] injectable claude spawn (for tests)
- */
-export function runClose(store, { now = new Date().toISOString(), spawnFinalize = defaultSpawnFinalize } = {}) {
-  const sessionId = 'auto-' + now.slice(0, 19).replace(/[:T]/g, '-');
-
-  // beginClose acquires the lock AND writes the marker. If either throws (disk full,
-  // read-only store), make sure we never strand a lock we took, and never crash silently.
-  let begun;
-  try {
-    begun = beginClose(store, { sessionId, ops: CLOSE_OPS, now });
-  } catch (e) {
-    releaseLock(store, { sessionId }); // in case the lock was taken but the marker write threw
-    logHookEvent({ hook: 'close-run', action: 'error', reason: 'begin-failed: ' + String(e && e.message || e).slice(0, 120), cwd: store });
-    return { ok: false, reason: 'begin-failed' };
-  }
-  if (!begun.ok) return { ok: false, reason: begun.reason }; // another close holds the lock
-
-  let finalizeOk = true;
-  try {
-    try {
-      const m = runMaintenance(store, {});
-      recordOp(store, { op: 'maintenance-run', note: (m.narration || '').slice(0, 120) });
-    } catch (e) {
-      recordOp(store, { op: 'maintenance-run', status: 'failed', note: String(e && e.message || e).slice(0, 200) });
-    }
-    // Capture the finalize outcome. A no-op test stub returns undefined → treat as ok.
-    const fin = spawnFinalize(store);
-    finalizeOk = fin == null ? true : fin.ok !== false;
-    let incompleteOps = [];
-    if (finalizeOk) {
-      // A clean process exit is not proof the child actually
-      // followed the finalize protocol. detectCloseState() catching this on a LATER read is
-      // defense-in-depth, not disposition -- the function that DOES the certifying (this one)
-      // must not stamp 'closed' / log 'close-complete' on a close that skipped its required
-      // ops. Verify before trusting the exit code, not after.
-      const marker = readJson(markerPath(store)) || { ops: {} };
-      const done = new Set(Object.entries(marker.ops || {}).filter(([, v]) => v && v.status === 'done').map(([k]) => k));
-      incompleteOps = CLOSE_OPS.filter(op => !done.has(op));
-      if (incompleteOps.length) finalizeOk = false;
-    }
-    recordOp(store, {
-      op: 'finalize',
-      status: finalizeOk ? 'done' : 'failed',
-      note: finalizeOk ? null
-        : incompleteOps.length ? `required ops never recorded: ${incompleteOps.join(', ')}`
-        : `exit=${fin.status} signal=${fin.signal || ''} ${fin.error || ''}`.slice(0, 200),
-    });
-  } catch (e) {
-    finalizeOk = false;
-    recordOp(store, { op: 'finalize', status: 'failed', note: String(e && e.message || e).slice(0, 200) });
-  } finally {
-    // Only stamp `closed` when finalize actually succeeded; otherwise `failed` → the next
-    // startup re-owes and retries, instead of the marker lying that the close completed.
-    finishClose(store, { sessionId, status: finalizeOk ? 'closed' : 'failed' });
-    // Log the OUTCOME (not just the launch) so `cat hooks-log.jsonl` reflects reality.
-    logHookEvent({ hook: 'close-run', action: finalizeOk ? 'close-complete' : 'close-failed', cwd: store });
-  }
-  return { ok: finalizeOk };
-}
-
-// On Windows the `claude` CLI is a claude.cmd shim; current Node (post
-// CVE-2024-27980) throws EINVAL if spawnSync runs a .cmd without shell:true.
-// So the self-managed close needs shell on win32 — and only there (POSIX spawns
-// the real binary directly). Args stay a fixed literal array, no user input, so
-// shell mode carries no injection risk here. Pure + exported so it's unit-testable.
-export function claudeSpawnShell(platform = process.platform) {
-  return platform === 'win32';
-}
-
-function defaultSpawnFinalize(store) {
-  // Append (never truncate) so a fast-failing spawn can't erase the last good log, and
-  // 0600 so project content the close echoes isn't world-readable on a shared host.
-  const logPath = join(homedir(), '.core', 'close-pass-last.log');
-  let stdio = 'ignore';
-  let logFd = null;
-  try {
-    logFd = openSync(logPath, 'a');
-    try { chmodSync(logPath, 0o600); } catch { /* best-effort perms */ }
-    writeSync(logFd, `\n=== close ${new Date().toISOString()} store=${store} ===\n`);
-    stdio = ['ignore', logFd, logFd];
-  } catch { /* fall back to ignored stdio */ }
-  const r = spawnSync('claude', ['-p', '/finalize'], { cwd: resolve(store), env: buildChildEnv(process.env), stdio, shell: claudeSpawnShell() });
-  // Surface the spawn result — spawnSync does NOT throw on ENOENT / non-zero / signal.
-  const result = { ok: !r.error && r.status === 0, status: r.status, signal: r.signal, error: r.error && String(r.error.message || r.error) };
-  if (logFd != null) {
-    try { writeSync(logFd, `=== result ok=${result.ok} exit=${result.status} signal=${result.signal || ''} ${result.error || ''} ===\n`); } catch { /* ignore */ }
-    try { closeSync(logFd); } catch { /* ignore */ }
-  }
-  return result;
-}
-
 // ── CLI ──────────────────────────────────────────────────────────────────────
 
 function parseFlags(argv) {
@@ -563,12 +450,6 @@ function main(argv) {
   const ops = typeof f.ops === 'string' ? f.ops.split(',').map(s => s.trim()).filter(Boolean) : [];
 
   switch (sub) {
-    case 'run': {
-      // The deterministic close envelope: begin -> maintenance -> claude -p /finalize -> finish.
-      const r = runClose(store, {});
-      process.stdout.write(json ? JSON.stringify(r) + '\n' : (r.ok ? 'close complete\n' : `close skipped: ${r.reason}\n`));
-      return r.ok ? 0 : 1;
-    }
     case 'detect': {
       const det = detectCloseState(store, { allOps: ops });
       process.stdout.write(json ? JSON.stringify(det) + '\n' : `${det.state}${det.owed?.length ? ' owed=' + det.owed.join(',') : ''}\n`);

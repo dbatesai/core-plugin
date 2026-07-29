@@ -7,8 +7,7 @@ import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 import {
-  detectCloseState, beginClose, recordOp, releaseLock, runClose,
-  claudeSpawnShell, CLOSE_OPS,
+  detectCloseState, beginClose, recordOp, releaseLock, finishClose, CLOSE_OPS,
 } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 import { writeFileSync, readFileSync } from 'node:fs';
 
@@ -158,76 +157,16 @@ test('detectCloseState: crashed-mid-close with a store-signature mismatch re-owe
 // finalize protocol correctly (`_close-marker.json` on a real close shows every op recorded)
 // — so this isn't "the mechanism never works," it's "the parent trusts the child's exit code
 // as a proxy for protocol compliance, with nothing checking that compliance actually happened."
-test('runClose: a spawnFinalize that "succeeds" while recording zero judgment ops is NOT certified closed (Hale\'s root-cause catch)', () => {
-  const store = freshStore();
-  try {
-    // Simulate the pathological case directly: a spawnFinalize that "succeeds" but never
-    // shells out to record anything beyond what runClose itself records (maintenance-run).
-    // Root-fix version (2026-07-21): runClose() itself must not certify this as closed --
-    // catching it only on a LATER detectCloseState read means the certifying function lied
-    // at the moment it mattered (r.ok, the marker status, and the close-complete log line).
-    const r = runClose(store, { spawnFinalize: () => undefined });
-    assert.equal(r.ok, false, 'runClose must NOT report success when required judgment ops were never recorded');
-
-    const marker = JSON.parse(readFileSync(join(store, '_memories', '_close-marker.json'), 'utf8'));
-    assert.equal(marker.status, 'failed', 'the marker itself must not claim closed on an incomplete close');
-
-    const det = detectCloseState(store, { allOps: CLOSE_OPS });
-    assert.notEqual(det.state, 'closed', 'a closed marker missing judgment-op records must not read as a complete close');
-    for (const op of CLOSE_OPS) {
-      if (op === 'maintenance-run') continue; // this one IS mechanically recorded by runClose itself
-      assert.ok(det.owed.includes(op), `${op} was never recorded and must surface as owed, not silently trusted`);
-    }
-  } finally { rmSync(store, { recursive: true, force: true }); }
-});
-
 test('detectCloseState: a closed marker with every CLOSE_OPS entry actually recorded reads as complete (the healthy-path counterpart)', () => {
   const store = freshStore();
   try {
-    const r = runClose(store, {
-      spawnFinalize: (s) => {
-        // Simulate the real headless child: after maintenance-run (already recorded by
-        // runClose itself before this callback fires), shell out to record every remaining
-        // judgment op, exactly as finalize/SKILL.md instructs at each step.
-        for (const op of CLOSE_OPS) {
-          if (op === 'maintenance-run') continue;
-          recordOp(s, { op, status: 'done' });
-        }
-        return { ok: true };
-      },
-    });
-    assert.ok(r.ok);
+    const b = beginClose(store, { sessionId: 's-healthy', ops: CLOSE_OPS });
+    assert.ok(b.ok);
+    for (const op of CLOSE_OPS) recordOp(store, { op, status: 'done' });
+    finishClose(store, { sessionId: 's-healthy' });
     const det = detectCloseState(store, { allOps: CLOSE_OPS });
-    assert.equal(det.state, 'closed', 'a genuinely complete close must not be penalized by the new check');
+    assert.equal(det.state, 'closed', 'a genuinely complete close must not be penalized by the completeness check');
     assert.deepEqual(det.owed, []);
-  } finally { rmSync(store, { recursive: true, force: true }); }
-});
-
-test('runClose: a spawnFinalize that THROWS (not just returns ok:false) is still caught and marks the close failed', () => {
-  const store = freshStore();
-  try {
-    const r = runClose(store, { spawnFinalize: () => { throw new Error('finalize exploded'); } });
-    assert.equal(r.ok, false, 'a thrown spawnFinalize must not crash runClose or report success');
-    const det = detectCloseState(store, { allOps: [] });
-    assert.equal(det.state, 'owed', 'a failed close is re-owed, not silently treated as closed');
-  } finally { rmSync(store, { recursive: true, force: true }); }
-});
-
-test('claudeSpawnShell: true only on win32 (the .cmd-shim EINVAL workaround), false elsewhere', () => {
-  assert.equal(claudeSpawnShell('win32'), true);
-  assert.equal(claudeSpawnShell('darwin'), false);
-  assert.equal(claudeSpawnShell('linux'), false);
-});
-
-test('runClose: beginClose throwing (e.g. _memories path blocked) is caught, lock is released, close reports begin-failed', () => {
-  const store = mkdtempSync(join(tmpdir(), 'close-pass-cli-'));
-  try {
-    // No _memories dir created — instead a FILE sits where _memories/ needs to be a
-    // directory, so acquireLock's mkdirSync(..., {recursive:true}) throws ENOTDIR.
-    writeFileSync(store + '/_memories', 'not a directory');
-    const r = runClose(store);
-    assert.equal(r.ok, false);
-    assert.equal(r.reason, 'begin-failed');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
@@ -242,5 +181,14 @@ test('beginClose: a marker-write failure releases the lock it just took and reth
     rmSync(join(store, '_memories', '_close-marker.json'), { recursive: true, force: true });
     const r = beginClose(store, { sessionId: 's2', ops: ['a'] });
     assert.ok(r.ok, 'lock was released on the failed attempt, so a fresh begin can acquire it');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('CLI: the model-spawn close verb does not exist — `run` is rejected as unknown', () => {
+  const store = freshStore();
+  try {
+    const r = spawnSync(process.execPath, [SCRIPT, 'run', store], { encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'the `run` subcommand must not be a valid close entry');
+    assert.ok(!/close complete/.test(r.stdout || ''), 'no close envelope may execute via `run`');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
