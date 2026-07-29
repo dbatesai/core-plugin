@@ -47,7 +47,7 @@ Tier 2 edge traversal for CORE retrieval, per retrieval.md. Given a seed unit, w
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.mjs <project>/_memories/dc-67-no-mcp.md \
-    --hops 2 --intent memory-architecture --format text
+    --hops 2 --format text
 ```
 
 Used by the Tier 2 retrieval protocol: call this to get edge-reachable candidates, then Read the top results.

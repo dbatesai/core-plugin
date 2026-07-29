@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { walk } from '../../plugins/core/skills/core/scripts/graph-walk.mjs';
+import { walk, main as graphWalkMain } from '../../plugins/core/skills/core/scripts/graph-walk.mjs';
 
 // Build a tiny vault: seed -> a (valid) and seed -> b (invalidated). Recent dates
 // so R·S never prunes them — the only reason b drops out is validity-suppression.
@@ -279,4 +279,30 @@ test('the walk day is the UTC calendar day, not the local one', () => {
     if (savedTz === undefined) delete process.env.TZ; else process.env.TZ = savedTz;
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- No option promises intent-conditioned traversal ---
+//
+// `--intent` was parsed, split, and passed into walk(), which immediately renamed it
+// as intentionally unused. Nothing in scoring, pruning, or ordering ever read it, so
+// the option promised a conditioned traversal the walk does not perform.
+
+function capturedStderr(fn) {
+  const orig = process.stderr.write;
+  const chunks = [];
+  process.stderr.write = (c) => { chunks.push(String(c)); return true; };
+  try { return [fn(), chunks.join('')]; } finally { process.stderr.write = orig; }
+}
+
+test('the CLI does not advertise an intent option, and rejects one rather than reading it as the seed', () => {
+  const [code, err] = capturedStderr(() => graphWalkMain(['--intent', 'memory-architecture', '/nope/seed.md']));
+  assert.equal(code, 2);
+  assert.match(err, /unrecognized/i);
+  assert.doesNotMatch(err, /seed unit not found/, 'the flag value must never slide into the seed slot');
+});
+
+test('walk() takes no sessionTopics option', () => {
+  const src = readFileSync(new URL('../../plugins/core/skills/core/scripts/graph-walk.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /sessionTopics/, 'no vestigial intent parameter remains');
+  assert.doesNotMatch(src, /--intent/, 'no vestigial intent flag remains');
 });

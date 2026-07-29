@@ -10,8 +10,7 @@
  * Library usage:
  *   import { walk } from './graph-walk.mjs';
  *   const candidates = walk('_memories/dc-67-no-mcp.md',
- *                           { memoriesDir: '_memories', hops: 2,
- *                             sessionTopics: ['memory-architecture'] });
+ *                           { memoriesDir: '_memories', hops: 2 });
  *
  * Validity-suppression: invalidated units (t_invalid in the past) are excluded
  * from the candidate set the same way retired units are, and the branch stops
@@ -19,7 +18,7 @@
  *
  * CLI:
  *   node graph-walk.mjs <seed-unit-path> [--memories <dir>] [--hops 2]
- *                       [--budget 15] [--intent t1,t2] [--prune 0.3]
+ *                       [--budget 15] [--prune 0.3]
  *                       [--include-invalid] [--include-observations]
  *                       [--format json|text]
  */
@@ -127,7 +126,6 @@ export function walk(seedPath, {
   memoriesDir = '_memories',
   hops = 2,
   budget = 15,
-  sessionTopics: _sessionTopics = [],
   pruneThreshold = SCORE_PRUNE_THRESHOLD,
   today = null,
   includeInvalidated = false,
@@ -229,7 +227,6 @@ export function main(argv) {
   let memoriesArg = null;
   let hops = 2;
   let budget = 15;
-  let intentStr = '';
   let prune = SCORE_PRUNE_THRESHOLD;
   let todayArg = null;
   let format = 'json';
@@ -241,13 +238,15 @@ export function main(argv) {
     if (a === '--memories') { memoriesArg = argv[++i]; }
     else if (a === '--hops') { hops = parseInt(argv[++i], 10); }
     else if (a === '--budget') { budget = parseInt(argv[++i], 10); }
-    else if (a === '--intent') { intentStr = argv[++i]; }
     else if (a === '--prune') { prune = parseFloat(argv[++i]); }
     else if (a === '--today') { todayArg = argv[++i]; }
     else if (a === '--format') { format = argv[++i]; }
     else if (a === '--include-invalid') { includeInvalidated = true; }
     else if (a === '--include-observations') { includeObservations = true; }
-    else if (!a.startsWith('--')) { seedArg = a; }
+    // An unrecognized flag must not fall through to the seed slot, where its VALUE
+    // would silently become the unit being walked.
+    else if (a.startsWith('--')) { process.stderr.write(`error: unrecognized flag ${a}\n`); return 2; }
+    else { seedArg = a; }
   }
 
   if (!seedArg) { process.stderr.write('usage: node graph-walk.mjs <seed-unit-path> [options]\n'); return 2; }
@@ -257,10 +256,9 @@ export function main(argv) {
 
   const memoriesDir = memoriesArg ? resolve(memoriesArg) : dirname(seedPath);
   const today = todayArg ? (parseIsoDate(todayArg) || new Date()) : null;
-  const sessionTopics = intentStr ? intentStr.split(',').map(s => s.trim()).filter(Boolean) : [];
 
   const stats = {};
-  const candidates = walk(seedPath, { memoriesDir, hops, budget, sessionTopics, pruneThreshold: prune, today, includeInvalidated, includeObservations, stats });
+  const candidates = walk(seedPath, { memoriesDir, hops, budget, pruneThreshold: prune, today, includeInvalidated, includeObservations, stats });
 
   if (format === 'json') {
     const out = candidates.map(c => ({

@@ -35,7 +35,7 @@ At session start, `<project>/PROJECT.md` and `~/.core/agent-profile.md` are read
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/graph-walk.mjs <seed-unit-path> \
-    --intent topic1,topic2 --format json
+    --format json
 ```
 
 This returns a scored, hop-ordered candidate list. Read the top results. Fall back to manual traversal only if the script isn't reachable in the current harness context.
