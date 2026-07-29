@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -229,4 +229,93 @@ test('low: parseCodex extracts text from a structured-content (array) event_msg 
   assert.equal(ev[0].text, 'plain string');
   assert.equal(ev[1].text, 'block one\nblock two');
   assert.equal(ev[1].role, 'assistant');
+});
+
+// --- Project binding: a transcript belongs to a project, never to "whatever is newest" ---
+
+function codexRollout(dir, name, { id, cwd, mtime }) {
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, name);
+  const head = cwd === undefined
+    ? JSON.stringify({ timestamp: '2026-07-28T00:00:00.000Z', type: 'event_msg', payload: { type: 'task_started' } })
+    : JSON.stringify({ timestamp: '2026-07-28T00:00:00.000Z', type: 'session_meta', payload: { id, cwd } });
+  const body = JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: id } });
+  writeFileSync(p, `${head}\n${body}\n`);
+  if (mtime) utimesSync(p, mtime, mtime);
+  return p;
+}
+
+test('codex transcript selection is bound to the requesting project, not global mtime', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-bind-'));
+  try {
+    const projA = join(home, 'work', 'proj-a');
+    const projB = join(home, 'work', 'proj-b');
+    mkdirSync(projA, { recursive: true });
+    mkdirSync(projB, { recursive: true });
+    const sess = join(home, '.codex', 'sessions', '2026', '07', '28');
+    const mine = codexRollout(sess, 'rollout-a.jsonl', { id: 'sess-a', cwd: projA, mtime: 1000 });
+    codexRollout(sess, 'rollout-b.jsonl', { id: 'sess-b', cwd: projB, mtime: 9000 }); // newer, other project
+    const r = resolveTranscript('codex', { cwd: projA, home, env: {} });
+    assert.equal(r.path, mine, "project A must never be handed project B's newer transcript");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('codex: only another project has a transcript → UNKNOWN with a reason, never a wrong-project file', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-bind-none-'));
+  try {
+    const projA = join(home, 'work', 'proj-a');
+    const projB = join(home, 'work', 'proj-b');
+    mkdirSync(projA, { recursive: true });
+    mkdirSync(projB, { recursive: true });
+    codexRollout(join(home, '.codex', 'sessions', '2026', '07', '28'), 'rollout-b.jsonl', { id: 'sess-b', cwd: projB });
+    const r = resolveTranscript('codex', { cwd: projA, home, env: {} });
+    assert.equal(r.path, null);
+    assert.equal(r.reason, 'no-project-transcript');
+    const t = readTranscript({ harness: 'codex', cwd: projA, home, env: {} });
+    assert.equal(t.available, false);
+    assert.equal(t.reason, 'no-project-transcript');
+    assert.deepEqual(t.events, []);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('codex: a transcript with no establishable identity is UNKNOWN, not the answer', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-bind-anon-'));
+  try {
+    const projA = join(home, 'work', 'proj-a');
+    mkdirSync(projA, { recursive: true });
+    codexRollout(join(home, '.codex', 'sessions', '2026', '07', '28'), 'rollout-anon.jsonl', { id: 'sess-x', cwd: undefined });
+    const r = resolveTranscript('codex', { cwd: projA, home, env: {} });
+    assert.equal(r.path, null);
+    assert.equal(r.resolution, null);
+    assert.equal(r.reason, 'no-project-transcript');
+    assert.equal(readTranscript({ harness: 'codex', cwd: projA, home, env: {} }).available, false);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('codex: thread id selects the exact rollout within the project', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-bind-sid-'));
+  try {
+    const projA = join(home, 'work', 'proj-a');
+    mkdirSync(projA, { recursive: true });
+    const sess = join(home, '.codex', 'sessions', '2026', '07', '28');
+    const mine = codexRollout(sess, 'rollout-1.jsonl', { id: 'sess-mine', cwd: projA, mtime: 1000 });
+    codexRollout(sess, 'rollout-2.jsonl', { id: 'sess-newer', cwd: projA, mtime: 9000 });
+    const r = resolveTranscript('codex', { cwd: projA, home, sessionId: 'sess-mine', env: {} });
+    assert.equal(r.path, mine, 'exact thread id must beat mtime');
+    assert.equal(r.resolution, 'session-id');
+    const viaEnv = resolveTranscript('codex', { cwd: projA, home, env: { CODEX_THREAD_ID: 'sess-mine' } });
+    assert.equal(viaEnv.path, mine);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('claude-code: another project\'s transcript is never returned for this project', () => {
+  const home = mkdtempSync(join(tmpdir(), 'rt-bind-cc-'));
+  try {
+    const dirB = join(home, '.claude', 'projects', '-work-proj-b');
+    mkdirSync(dirB, { recursive: true });
+    writeFileSync(join(dirB, 'sess-b.jsonl'), '{}\n');
+    const r = resolveTranscript('claude-code', { cwd: '/work/proj-a', home, env: {} });
+    assert.equal(r.path, null);
+    assert.equal(r.reason, 'no-project-transcript');
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
