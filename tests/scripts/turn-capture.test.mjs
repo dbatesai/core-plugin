@@ -25,7 +25,7 @@ const IS_WIN = platform() === 'win32';
 const WS_ID = 'tc-fixture';
 
 /** Project fixture. The opt-out flag lives in the PROJECT-ROOT workspace.json
- * (DC-129: an opt-OUT travelling with a copied project is privacy-safe — the
+ * (an opt-OUT travelling with a copied project is privacy-safe — the
  * inverse of rich-context's machine-local opt-in reasoning). */
 function makeProject(root, { turnCaptureFlag } = {}) {
   const project = join(root, 'proj');
@@ -42,7 +42,7 @@ const goodRow = (extra = {}) => ({
   harness: 'claude-code',
   prompt_text: 'how does the hindsight judge grade retrieval quality',
   delivered: [
-    { id: 'dc-128-metrics', score: 12.4, source_stage: 'ranked', pack_text: 'DC-128: holistic metrics redesign …' },
+    { id: 'dc-128-metrics', score: 12.4, source_stage: 'ranked', pack_text: 'dc-128-metrics: holistic metrics redesign …' },
     { id: 'obs-nonblocking', score: 9.1, source_stage: 'one-hop-expansion', pack_text: 'inventory of mechanics …' },
   ],
   rejected_top: [
@@ -125,7 +125,7 @@ test('writes one parseable JSONL row carrying all required fields', () => {
     assert.equal(row.prompt_text, goodRow().prompt_text);
     assert.equal(row.delivered.length, 2);
     assert.equal(row.delivered[0].id, 'dc-128-metrics');
-    assert.equal(row.delivered[0].pack_text.includes('DC-128'), true);
+    assert.equal(row.delivered[0].pack_text.includes('dc-128-metrics'), true);
     assert.equal(row.rejected_top.length, 2);
     assert.equal(row.truncation.byte_cap_applied, true);
     assert.equal(row.store_signature, 'u531-abcdef12');

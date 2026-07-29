@@ -11,7 +11,7 @@ test('adoption refuses a corrupt or unreadable baseline; absent and clean-partia
   try {
     const lib = join(dir, '_memories', '_lib');
     mkdirSync(lib, { recursive: true });
-    writeFileSync(join(dir, '_memories', 'dc-1.md'), '---\nid: dc-1\n---\nbody\n');
+    writeFileSync(join(dir, '_memories', 'dc-1-alpha.md'), '---\nid: dc-1-alpha\n---\nbody\n');
     writeFileSync(join(lib, 'state-cache.json'), '{corrupt not json');
     const r = adoptExistingStore(dir, { apply: true });
     assert.equal(r.applied, false, 'a corrupt baseline must stop adoption');

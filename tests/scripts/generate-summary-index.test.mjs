@@ -11,9 +11,9 @@ function fixtureStore() {
   const mem = join(root, '_memories');
   mkdirSync(mem, { recursive: true });
   writeFileSync(join(mem, 'dc-1-alpha.md'),
-    '---\nid: dc-1-alpha\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1 — Alpha decision\n\nBody prose here.');
+    '---\nid: dc-1-alpha\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1-alpha — Alpha decision\n\nBody prose here.');
   writeFileSync(join(mem, 'dc-2-retired.md'),
-    '---\nid: dc-2-retired\ntype: decision\nstatus: retired\ntopics:\n  - retrieval\n---\n\n# DC-2 — Retired\n\nShould be excluded.');
+    '---\nid: dc-2-retired\ntype: decision\nstatus: retired\ntopics:\n  - retrieval\n---\n\n# DC-2-beta — Retired\n\nShould be excluded.');
   return root;
 }
 
@@ -79,7 +79,7 @@ test('missing status is treated as active', () => {
   const mem = join(root, '_memories');
   mkdirSync(mem, { recursive: true });
   writeFileSync(join(mem, 'dc-3-nostatus.md'),
-    '---\nid: dc-3-nostatus\ntype: decision\ntopics:\n  - retrieval\n---\n\n# DC-3 — No status\n\nBody.');
+    '---\nid: dc-3-nostatus\ntype: decision\ntopics:\n  - retrieval\n---\n\n# DC-3-gamma — No status\n\nBody.');
   const res = generateSummaryIndex(root);
   assert.ok(res.units.map(u => u.id).includes('dc-3-nostatus'));
 });
@@ -98,9 +98,9 @@ test('K04: stale cache past its own next_invalidation_at regenerates and exclude
   // A unit whose fact expired yesterday, but whose record status is still
   // 'active' (the two dimensions are independent — this is a real, valid shape).
   writeFileSync(join(mem, 'dc-4-expired.md'),
-    '---\nid: dc-4-expired\ntype: decision\nstatus: active\nt_invalid: 2000-01-01\ntopics:\n  - retrieval\n---\n\n# DC-4 — Expired fact\n\nMust not resurrect.');
+    '---\nid: dc-4-expired\ntype: decision\nstatus: active\nt_invalid: 2000-01-01\ntopics:\n  - retrieval\n---\n\n# DC-4-delta — Expired fact\n\nMust not resurrect.');
   writeFileSync(join(mem, 'dc-5-alive.md'),
-    '---\nid: dc-5-alive\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-5 — Still valid\n\nBody.');
+    '---\nid: dc-5-alive\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-5-epsilon — Still valid\n\nBody.');
 
   // Hand-write a stale cache simulating one written BEFORE 2000-01-01 arrived:
   // source_sig genuinely matches the current on-disk bytes (a content-hash
@@ -134,7 +134,7 @@ test('K04 control: an index with no next_invalidation_at (nothing time-bound) is
   const lib = join(mem, '_lib');
   mkdirSync(lib, { recursive: true });
   writeFileSync(join(mem, 'dc-6-plain.md'),
-    '---\nid: dc-6-plain\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-6 — Plain\n\nBody.');
+    '---\nid: dc-6-plain\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-6-zeta — Plain\n\nBody.');
   const cached = {
     count: 1,
     generated: '',
@@ -155,9 +155,9 @@ test('archive/ is excluded from the active-data walk (anti-resurrection)', () =>
   const archive = join(mem, 'archive');
   mkdirSync(archive, { recursive: true });
   writeFileSync(join(mem, 'dc-1-active.md'),
-    '---\nid: dc-1-active\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1\n\nBody.');
+    '---\nid: dc-1-active\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1-alpha\n\nBody.');
   writeFileSync(join(archive, 'dc-2-archived.md'),
-    '---\nid: dc-2-archived\ntype: decision\nstatus: archived\ntopics:\n  - retrieval\n---\n\n# DC-2\n\nMust never appear.');
+    '---\nid: dc-2-archived\ntype: decision\nstatus: archived\ntopics:\n  - retrieval\n---\n\n# DC-2-beta\n\nMust never appear.');
 
   const cap = loadSnapshot(root, { captureBodies: true, retainRaw: true });
   const paths = cap.index.units.map(u => u.path);
@@ -169,15 +169,15 @@ test('loadUnitBodies strips the decorate-graph generated edges block from the BM
   const root = mkdtempSync(join(tmpdir(), 'core-idx-edges-strip-'));
   const mem = join(root, '_memories');
   mkdirSync(mem, { recursive: true });
-  writeFileSync(join(mem, 'dc-1.md'),
-    `---\nid: dc-1\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1\n\nReal body content that should rank.\n\n${EDGES_BEGIN}\n## Related\n- cites: [[dc-2]]\n${EDGES_END}\n`);
+  writeFileSync(join(mem, 'dc-1-alpha.md'),
+    `---\nid: dc-1-alpha\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1-alpha\n\nReal body content that should rank.\n\n${EDGES_BEGIN}\n## Related\n- cites: [[dc-2-beta]]\n${EDGES_END}\n`);
 
   const res = generateSummaryIndex(root);
   const bodies = loadUnitBodies(root, res);
-  const u = bodies.find(b => b.id === 'dc-1');
+  const u = bodies.find(b => b.id === 'dc-1-alpha');
   assert.match(u.text, /Real body content that should rank/);
   assert.doesNotMatch(u.text, /CORE:BEGIN_EDGES/, 'generated marker must not reach the ranked body');
-  assert.doesNotMatch(u.text, /\[\[dc-2\]\]/, 'generated wikilink must not reach the ranked body');
+  assert.doesNotMatch(u.text, /\[\[dc-2-beta\]\]/, 'generated wikilink must not reach the ranked body');
 });
 
 test('captureStore\'s bodies (the real product path) also strip the generated edges block', () => {
@@ -188,13 +188,13 @@ test('captureStore\'s bodies (the real product path) also strip the generated ed
   const root = mkdtempSync(join(tmpdir(), 'core-idx-capture-edges-strip-'));
   const mem = join(root, '_memories');
   mkdirSync(mem, { recursive: true });
-  writeFileSync(join(mem, 'dc-1.md'),
-    `---\nid: dc-1\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1\n\nReal body content that should rank.\n\n${EDGES_BEGIN}\n## Related\n- cites: [[dc-2]]\n${EDGES_END}\n`);
+  writeFileSync(join(mem, 'dc-1-alpha.md'),
+    `---\nid: dc-1-alpha\ntype: decision\nstatus: active\ntopics:\n  - retrieval\n---\n\n# DC-1-alpha\n\nReal body content that should rank.\n\n${EDGES_BEGIN}\n## Related\n- cites: [[dc-2-beta]]\n${EDGES_END}\n`);
 
   const cap = loadSnapshot(root, { captureBodies: true });
-  const u = cap.bodies.find(b => b.id === 'dc-1');
-  assert.ok(u, 'dc-1 must appear in the capture');
+  const u = cap.bodies.find(b => b.id === 'dc-1-alpha');
+  assert.ok(u, 'dc-1-alpha must appear in the capture');
   assert.match(u.text, /Real body content that should rank/);
   assert.doesNotMatch(u.text, /CORE:BEGIN_EDGES/, 'generated marker must not reach the capture body either');
-  assert.doesNotMatch(u.text, /\[\[dc-2\]\]/, 'generated wikilink must not reach the capture body either');
+  assert.doesNotMatch(u.text, /\[\[dc-2-beta\]\]/, 'generated wikilink must not reach the capture body either');
 });

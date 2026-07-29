@@ -79,7 +79,7 @@ test('completed item with an old bullet-text date demotes regardless of backing 
 
 test('completed item demotes even when its cited unit is STILL ACTIVE (the citation-discipline gap fix)', () => {
   const dir = scratchProject({ 'dc-94-thing': { status: 'active', updated: '2026-06-01' } });
-  const b = bullet('- [x] **DC-94 external critique shipped 2026-04-10** — see `dc-94-thing`.');
+  const b = bullet('- [x] **External critique shipped 2026-04-10** — see `dc-94-thing`.');
   const r = classifyBullet(b, dir, { today: TODAY });
   // Old strict gate kept this as 'cited-unit-still-active'; loosened gate demotes on the text date.
   assert.equal(r.decision, 'demote');
@@ -192,8 +192,8 @@ test('a demotion stub is never re-demoted (already-stubbed) — fixes the HIGH i
 });
 
 test('extractMostRecentDate ignores citation, backtick, and future dates', () => {
-  // (DC-106, date) is this project's citation style — the date is the unit's, not the work's.
-  assert.equal(extractMostRecentDate('Closed the loop (DC-106, 2026-06-01)', TODAY), null);
+  // (dc-106-closed-loop, date) is this project's citation style — the date is the unit's, not the work's.
+  assert.equal(extractMostRecentDate('Closed the loop (dc-106-closed-loop, 2026-06-01)', TODAY), null);
   assert.equal(extractMostRecentDate('bumped `cfg-2026-09-01`', TODAY), null);          // backtick span
   assert.equal(extractMostRecentDate('target ship 2099-01-01', TODAY), null);            // future
   assert.equal(extractMostRecentDate('done 2026-03-01, target 2099-01-01', TODAY), '2026-03-01'); // past wins over future
@@ -201,7 +201,7 @@ test('extractMostRecentDate ignores citation, backtick, and future dates', () =>
 
 test('classifyBullet keeps an item whose only date is a leaked citation (no-age-signal)', () => {
   const dir = scratchProject();
-  const r = classifyBullet(bullet('- [x] **Did a thing** — see (DC-106, 2026-01-01)'), dir, { today: TODAY });
+  const r = classifyBullet(bullet('- [x] **Did a thing** — see (dc-106-closed-loop, 2026-01-01)'), dir, { today: TODAY });
   assert.equal(r.decision, 'keep');
   assert.equal(r.reason, 'no-age-signal');
 });
@@ -249,9 +249,9 @@ test('multi-bullet demotion preserves an adjacent kept bullet (rewriteMovesWithS
 });
 
 test('--strict end-to-end keeps a cited-active item that the loosened default demotes', () => {
-  const dir = scratchProject({ 'dc-99': { status: 'active', updated: '2026-03-01' } });
+  const dir = scratchProject({ 'dc-99-ghost': { status: 'active', updated: '2026-03-01' } });
   writeFileSync(join(dir, 'PROJECT.md'),
-    ['# P', '', '## Moves', '', '- [x] **Item 2026-03-01** — see `dc-99`.', '', '## Notes', ''].join('\n'));
+    ['# P', '', '## Moves', '', '- [x] **Item 2026-03-01** — see `dc-99-ghost`.', '', '## Notes', ''].join('\n'));
   try {
     assert.equal(demoteMoves(dir, { today: TODAY, strict: true }).demoted, 0, 'strict keeps it (cited unit active)');
     assert.equal(demoteMoves(dir, { today: TODAY }).demoted, 1, 'loosened default demotes it');

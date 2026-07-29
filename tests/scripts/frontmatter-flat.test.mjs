@@ -4,8 +4,8 @@ import { parseFlatFrontmatter } from '../../plugins/core/skills/core/scripts/fro
 import { parseFrontmatter } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
 test('parses top-level key: value pairs, strips quotes, returns [fm, body]', () => {
-  const [fm, body] = parseFlatFrontmatter('---\nid: dc-99\nstatus: "accepted"\n---\n\n# Title\nbody text\n');
-  assert.equal(fm.id, 'dc-99');
+  const [fm, body] = parseFlatFrontmatter('---\nid: dc-99-example\nstatus: "accepted"\n---\n\n# Title\nbody text\n');
+  assert.equal(fm.id, 'dc-99-example');
   assert.equal(fm.status, 'accepted', 'surrounding quotes stripped');
   assert.match(body, /^# Title/);
 });
@@ -42,7 +42,7 @@ test('null/undefined input is safe', () => {
 // change to one parser that silently diverges the other fails the suite.
 const REPRESENTATIVE_UNITS = [
   // plain unit with nested topics + edges (flat parser drops the nests — fine)
-  '---\nid: dc-99-thing\ntype: decision\nstatus: active\ncreated: 2026-05-30\nupdated: 2026-06-01\ntopics:\n  - a\nedges:\n  - { type: cites, target: dc-1 }\n---\n\n# T\nbody\n',
+  '---\nid: dc-99-thing\ntype: decision\nstatus: active\ncreated: 2026-05-30\nupdated: 2026-06-01\ntopics:\n  - a\nedges:\n  - { type: cites, target: dc-1-alpha }\n---\n\n# T\nbody\n',
   // CRLF + quoted value (Windows/OneDrive-authored)
   '---\r\nid: r-9\r\ntype: risk\r\nstatus: "accepted"\r\ncreated: 2026-01-02\r\nupdated: 2026-01-03\r\n---\r\nbody\r\n',
   // comment line + flow-style topics (flat keeps the raw string; scalar fields still agree)

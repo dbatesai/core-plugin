@@ -55,7 +55,7 @@ function fixtureProject({ workspace = true } = {}) {
   const mem = join(root, '_memories');
   mkdirSync(join(mem, 'archive'), { recursive: true });
   writeFileSync(join(mem, 'dc-1-alpha.md'),
-    `---\nid: dc-1-alpha\ntype: decision\nstatus: active\ntopics: [alpha, shared]\nupdated: 2026-07-01\nedges:\n  - type: cites\n    target: obs-2-beta\n  - type: supersedes\n    target: risk-3-retired\n---\n\n# DC-1 — Alpha decision\n\nBody citing an external source at https://example.com/spec for reference.\n\n- point one\n- point two\n`);
+    `---\nid: dc-1-alpha\ntype: decision\nstatus: active\ntopics: [alpha, shared]\nupdated: 2026-07-01\nedges:\n  - type: cites\n    target: obs-2-beta\n  - type: supersedes\n    target: risk-3-retired\n---\n\n# DC-1-alpha — Alpha decision\n\nBody citing an external source at https://example.com/spec for reference.\n\n- point one\n- point two\n`);
   writeFileSync(join(mem, 'obs-2-beta.md'),
     '---\nid: obs-2-beta\ntype: observation\nstatus: active\ntopics: [beta]\nupdated: 2026-07-02\n---\n\n# OBS-2 — Beta observation\n\nPlain body.\n');
   writeFileSync(join(mem, 'topic-4-secret.md'),
@@ -99,7 +99,7 @@ rtest('embeds active units with bodies, edges, and snapshot provenance header', 
     const dc1 = json.units.find((u) => u.id === 'dc-1-alpha');
     assert.match(dc1.body, /external source at https:\/\/example\.com\/spec/, 'full body embedded');
     assert.deepEqual(dc1.edges.map((e) => e.target).sort(), ['obs-2-beta', 'risk-3-retired']);
-    assert.equal(dc1.title, 'DC-1 — Alpha decision');
+    assert.equal(dc1.title, 'DC-1-alpha — Alpha decision');
     // Provenance banner (condition 6)
     assert.match(html, /POINT-IN-TIME SNAPSHOT &mdash; READ-ONLY/);
     assert.ok(html.includes(manifest.generated_at), 'generated-at timestamp in the page');

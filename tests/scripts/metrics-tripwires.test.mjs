@@ -335,7 +335,7 @@ test('assessRoundStaleness: too many sessions since registration → due', () =>
   assert.match(res.reason, /session/);
 });
 
-test('assessRoundStaleness: weekly hard cap suppresses even a due trigger (DC-129)', () => {
+test('assessRoundStaleness: weekly hard cap suppresses even a due trigger', () => {
   const res = assessRoundStaleness({
     registeredAt: '2026-06-01T00:00:00Z', hasResult: true, sessionDatesAfter: 11,
     currentUnits: 130, frozenUnits: 100,

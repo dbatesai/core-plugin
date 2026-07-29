@@ -37,7 +37,7 @@ test('mappedMemoryPath handles a Windows drive-colon path', () => {
   assert.equal(slug, 'C--Users-david-Documents-Projects-core-windows');
 });
 
-test('mappedMemoryPath handles a dotted username (the original DC-104 bug this shares a root cause with)', () => {
+test('mappedMemoryPath handles a dotted username (the original dotted-username bug this shares a root cause with)', () => {
   const p = mappedMemoryPath('/Users/David.Bates28/Documents/Projects/CORE', '/home');
   assert.equal(p, '/home/.claude/projects/-Users-David-Bates28-Documents-Projects-CORE/memory/MEMORY.md');
 });

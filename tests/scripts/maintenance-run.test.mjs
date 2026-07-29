@@ -25,7 +25,7 @@ function testHome(root) {
   return home;
 }
 
-// DC-110 M1: mechanical maintenance is signature-gated (regen only when units changed),
+// M1: mechanical maintenance is signature-gated (regen only when units changed),
 // narrated (never silent), and ledger-recorded (the cadence data for the M2 observe step).
 
 function makeProject() {

@@ -143,9 +143,9 @@ test('ACCEPTANCE (exact-triple calibration): a calibration bound to a DIFFERENT 
   });
 });
 
-// ---- Capture gate (spec §18, DC-107): default-on; opt-out per workspace/env ----
+// ---- Capture gate (spec §18): default-on; opt-out per workspace/env ----
 
-test('metricsEnabled is ON by default (DC-107: instrument by default, capture stays local)', () => {
+test('metricsEnabled is ON by default (instrument by default, capture stays local)', () => {
   assert.equal(metricsEnabled({ project: '/no/such/project', env: {} }), true);
 });
 
@@ -168,7 +168,7 @@ test('metricsEnabled opt-in via workspace.json metrics_enabled flag', () => {
 
 test('a disabled workspace produces no rollup artifacts', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    // DC-107: default is now ON, so opt out explicitly to exercise the disabled path.
+    // The default is ON, so opt out explicitly to exercise the disabled path.
     const env = { CORE_METRICS_ENABLED: '0' };
     const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env }));
     assert.equal(r.disabled, true);

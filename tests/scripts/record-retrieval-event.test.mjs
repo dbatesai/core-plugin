@@ -158,7 +158,7 @@ test('normalizeRetrievalEvent sanitizes unit ids and topics', () => {
     intent_topics: ['memory\u0000-arch'],
     tier_reached: 1,
     escalation_path: [1],
-    units_retrieved: [{ id: 'dc-1\u001b-evil', tier: 1 }],
+    units_retrieved: [{ id: 'dc-1-e\u001bvil', tier: 1 }],
   });
   assert.equal(r.intent_topics[0], 'memory-arch');
   assert.equal(r.units_retrieved[0].id, 'dc-1-evil');

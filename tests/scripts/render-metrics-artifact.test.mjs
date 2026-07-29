@@ -140,7 +140,7 @@ test('page carries the four plain-question sections, legend, banner, verdict, an
   assert.match(html, /1 &middot; Does the machinery work\?/);
   assert.match(html, /2 &middot; How good is the memory search\?/);
   assert.match(html, /3 &middot; Can we trust CORE's self-measurements\?/);
-  assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section removed per DC-129');
+  assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section removed by decision');
   assert.match(html, /How to read the colored tags on each line/);
   assert.match(html, /SNAPSHOT &mdash; DOES NOT UPDATE ITSELF/);
   assert.match(html, /Ask the agent to republish for fresh numbers\./);
@@ -426,7 +426,7 @@ test('CLI live path: real gatherMetrics run produces a truthful manifest and pag
     assert.ok(manifest.data_generated_at, 'data timestamp from the live gather');
     const html = readFileSync(out, 'utf8');
     assert.match(html, /Passed, demonstrated just now\./, 'live round-trip proof rendered');
-    assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section stays gone on a live run (DC-129)');
+    assert.doesNotMatch(html, /Does any of this actually help you\?/, 'benefit section stays gone on a live run');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

@@ -45,12 +45,12 @@ function scratchMemories(units) {
 
 test('M12: a decision H1 containing a pipe renders one well-formed, escaped table row', () => {
   const mem = scratchMemories({
-    'dc-99-piped.md': '---\nid: dc-99\nstatus: accepted\ndate: 2026-06-02\n---\n\n# DC-99: choose A | B over C\n',
+    'dc-99-piped.md': '---\nid: dc-99-ghost\nstatus: accepted\ndate: 2026-06-02\n---\n\n# DC-99-ghost: choose A | B over C\n',
   });
   try {
     const md = buildIndex(mem);
-    const row = md.split('\n').find((l) => l.includes('dc-99'));
-    assert.ok(row, 'the dc-99 row is present');
+    const row = md.split('\n').find((l) => l.includes('dc-99-ghost'));
+    assert.ok(row, 'the dc-99-ghost row is present');
     // The pipe in the title must be escaped, not a raw cell separator. A correct row has
     // exactly the 4 data cells + 2 border pipes = 5 unescaped `|`; the title pipe is `\|`.
     assert.match(row, /choose A \\\| B over C/, 'the title pipe is escaped');

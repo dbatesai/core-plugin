@@ -59,7 +59,7 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // is the fix.
   const n = countMatching(/import\.meta\.url/);
   // Baseline 46 → 48 (2026-07-07): two genuinely-new CLI tools, not copy-paste twins.
-  // (2026-07-11: embed-index.mjs deleted per DC-114; bm25.mjs replaced it one-for-one,
+  // (2026-07-11: embed-index.mjs deleted; bm25.mjs replaced it one-for-one,
   // so the 48 ceiling stood re-evaluated, not by accident.) 48 → 49 (2026-07-12):
   // mailbox.mjs, a genuinely-new CLI tool with its own entry point. 49 → 50
   // (2026-07-14): aggregate-receipt.mjs, the Train A A2 privacy exporter — a

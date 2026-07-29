@@ -17,7 +17,7 @@ function scratch(workspaceJson) {
   return dir;
 }
 
-// ---------- 1. Capture gate: DEFAULT-ON, opt-out (DC-107) ----------
+// ---------- 1. Capture gate: DEFAULT-ON, opt-out ----------
 // Default-on rather than default-off: the instrumented-
 // memory thesis needs the corpus, and the calibration gate was starving under opt-in.
 // Opt out via env CORE_METRICS_ENABLED=0 or per-workspace metrics_enabled:false.

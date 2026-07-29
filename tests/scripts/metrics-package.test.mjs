@@ -268,7 +268,7 @@ test('missing sources emit available:false blocks, run stays exit 1 not a crash'
     const home = makeFixtureHome(root);
     const project = join(root, 'bare');
     mkdirSync(join(project, '_memories'), { recursive: true });
-    writeFileSync(join(project, '_memories', 'dc-1.md'), '---\nid: dc-1\ntype: decision\nstatus: active\n---\nBody.\n');
+    writeFileSync(join(project, '_memories', 'dc-1-alpha.md'), '---\nid: dc-1-alpha\ntype: decision\nstatus: active\n---\nBody.\n');
     const result = runPackage([project, '--home', home, '--out', join(root, 'out')]);
     assert.ok(!result.error);
     assert.equal(result.exit, 1, 'partial coverage exits 1');

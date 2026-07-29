@@ -23,11 +23,11 @@ function makeProject(root) {
   mkdirSync(store, { recursive: true });
   writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'tc-canary-ws' }));
   writeFileSync(join(project, 'PROJECT.md'), '# P\n');
-  writeFileSync(join(store, 'dc-1.md'), '---\nid: dc-1\ntype: decision\nstatus: active\ncreated: 2026-06-01\n---\n\nBody.\n');
+  writeFileSync(join(store, 'dc-1-alpha.md'), '---\nid: dc-1-alpha\ntype: decision\nstatus: active\ncreated: 2026-06-01\n---\n\nBody.\n');
   const sessions = join(project, '_sessions', '2026-07-01');
   mkdirSync(sessions, { recursive: true });
   writeFileSync(join(sessions, 'retrieval-log.jsonl'),
-    JSON.stringify({ kind: 'retrieval', ts: '2026-07-01T10:00:00Z', intent_topics: ['a'], tier_reached: 1, units_retrieved: [{ id: 'dc-1', tier: 1 }] }) + '\n');
+    JSON.stringify({ kind: 'retrieval', ts: '2026-07-01T10:00:00Z', intent_topics: ['a'], tier_reached: 1, units_retrieved: [{ id: 'dc-1-alpha', tier: 1 }] }) + '\n');
   return project;
 }
 
@@ -74,7 +74,7 @@ test('exporter never emits turn-capture evidence content (planted canary tripwir
       harness: 'claude-code',
       prompt_text: `debug this: ${CANARY}`,
       pack_text: `context with ${CANARY} inside`,
-      delivered: [{ id: 'dc-1', score: 1, source_stage: 'ranked', pack_text: `unit text ${CANARY}` }],
+      delivered: [{ id: 'dc-1-alpha', score: 1, source_stage: 'ranked', pack_text: `unit text ${CANARY}` }],
       rejected_top: [],
       truncation: { byte_cap_applied: false, prompt_tokens_used: 3 },
       store_signature: 'sig',

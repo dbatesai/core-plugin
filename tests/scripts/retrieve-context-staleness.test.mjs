@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { retrieveContext } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
-// R1 (DC-94b): the summary index must regenerate when the source units change.
+// R1: the summary index must regenerate when the source units change.
 // Before this fix, retrieveContext reused a present-and-parseable index forever —
 // so a retired or deleted unit lingered in the retrieval surface (an anti-resurrection
 // hole at the retrieval layer). These tests drive the staleness detection.

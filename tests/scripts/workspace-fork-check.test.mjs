@@ -232,7 +232,7 @@ test('canonicalPath collapses a symlink to its real target; falls back to resolv
   }
 });
 
-// ---------- B7 / DC-104 #3: identity is path-based; harness is irrelevant ----------
+// ---------- B7: identity is path-based; harness is irrelevant ----------
 // A folder registered by one harness (Claude Code) opened by another (Codex) is a
 // RETURNING workspace, not a fork. checkFork takes no harness input by design —
 // this test pins that property so a future "harness-aware" change can't silently

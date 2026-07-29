@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 // hygiene-strategies.md is the deeper-hygiene reference an agent executes. It drifted
 // out of line with the canonical protocols/hygiene.md model (archive/retire/cold-store +
-// file-cap), describing retired DC-46 MIGRATE machinery and a destructive `delete` verb.
+// file-cap), describing retired auto-MIGRATE machinery and a destructive `delete` verb.
 // These guards keep the reconciliation from creeping back (audit M14/M15).
 const SRC = readFileSync(
   fileURLToPath(new URL('../../plugins/core/skills/core/references/hygiene-strategies.md', import.meta.url)),
@@ -20,9 +20,9 @@ test('M15: the Phase-2 verb list uses retire (body-preserving), not a destructiv
     'the old destructive "delete a unit" verb must be gone');
 });
 
-test('M14: §3c describes v2 file-cap reconciliation, not retired DC-46 auto-MIGRATE machinery', () => {
-  assert.doesNotMatch(SRC, /Auto-MIGRATE runs autonomously per DC-46/,
-    'the retired DC-46 auto-MIGRATE framing must be gone');
+test('M14: §3c describes v2 file-cap reconciliation, not retired auto-MIGRATE machinery', () => {
+  assert.doesNotMatch(SRC, /Auto-MIGRATE runs autonomously/,
+    'the retired auto-MIGRATE framing must be gone');
   assert.doesNotMatch(SRC, /Count MIGRATE entries/, 'no MIGRATE-count re-decision prompt');
   assert.match(SRC, /file-cap monitoring and proactive compaction/i,
     'points at the canonical hygiene.md file-cap mechanism');

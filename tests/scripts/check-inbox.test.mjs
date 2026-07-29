@@ -44,7 +44,7 @@ source-instance: PROJ-991
 extracted-at: 2026-06-09T11:00:00Z
 confidence-level: reconstructed
 mode: C
-judgment-needed: contradicts dc-42 on the BGL date — confirm which is authoritative
+judgment-needed: contradicts dc-42-bgl-date on the BGL date — confirm which is authoritative
 ---
 Reconstructed from three comments: the BGL date moved to Aug 1.
 `;
@@ -54,7 +54,7 @@ test('parseInboxBlocks extracts frontmatter and body', () => {
   assert.equal(blocks.length, 2);
   assert.equal(blocks[0].fm.mode, 'B');
   assert.match(blocks[0].body, /Budget owner shifted/);
-  assert.equal(blocks[1].fm['judgment-needed'].startsWith('contradicts dc-42'), true);
+  assert.equal(blocks[1].fm['judgment-needed'].startsWith('contradicts dc-42-bgl-date'), true);
 });
 
 test('valid Mode B + Mode C blocks pass with no FAIL/WARN', () => {

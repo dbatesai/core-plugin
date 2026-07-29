@@ -43,7 +43,7 @@ test('M6: containsTerm matches on a word boundary, not a bare substring', () => 
   assert.equal(containsTerm('see dc-1040 for the rationale', 'DC-104'), false, 'dc-104 must not match inside dc-1040');
 });
 
-test('DC-94a: isInContext proxy does not over-fire on a substring inside a large blob', () => {
+test('isInContext proxy does not over-fire on a substring inside a large blob', () => {
   // The plan's exact scenario: "master" must NOT count as in-context just because
   // "speedmaster" appears somewhere in a 180KB blob. (Already fixed;
   // this locks the specific large-PROJECT.md case as a regression guard.)
@@ -52,7 +52,7 @@ test('DC-94a: isInContext proxy does not over-fire on a substring inside a large
   assert.equal(containsTerm('we discussed the speedmaster today', 'speedmaster'), true, 'whole-token hit still fires');
 });
 
-test('DC-94a: PROXY_VERSION is 2 (word-boundary + read-gated, supersedes the v1 .includes proxy)', () => {
+test('PROXY_VERSION is 2 (word-boundary + read-gated, supersedes the v1 .includes proxy)', () => {
   assert.equal(PROXY_VERSION, 2);
 });
 
@@ -162,7 +162,7 @@ test('runClassification classifies the session passed in, not the newest transcr
   }
 });
 
-test('DC-94a: each classified record is stamped with proxy_version', () => {
+test('each classified record is stamped with proxy_version', () => {
   const home = mkdtempSync(join(tmpdir(), 'ct-pv-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-pvp-'));
   try {

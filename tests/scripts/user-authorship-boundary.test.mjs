@@ -481,11 +481,11 @@ test('adoptExistingStore: --apply stamps every no-baseline file as of its curren
     writeFileSync(join(project, '_memories', 'dc-1-widget.md'), '# DC-1\n\nPre-existing decision.\n');
     const alreadyStamped = join(project, '_memories', 'dc-2-gadget.md');
     writeFileSync(alreadyStamped, '# DC-2\n\nAlready-stamped decision.\n');
-    // dc-2 already went through the normal creation path — must be untouched by adoption.
+    // dc-2-gadget already went through the normal creation path — must be untouched by adoption.
     stampCreatedBaseline(project, alreadyStamped, { kind: 'unit', now: NOW, home });
 
     const before = adoptExistingStore(project, { apply: false });
-    assert.equal(before.candidate_count, 2, 'PROJECT.md + dc-1 only; dc-2 already has a baseline');
+    assert.equal(before.candidate_count, 2, 'PROJECT.md + dc-1-widget only; dc-2-gadget already has a baseline');
 
     const report = adoptExistingStore(project, { apply: true, now: NOW, home });
     assert.equal(report.applied, true);
@@ -497,7 +497,7 @@ test('adoptExistingStore: --apply stamps every no-baseline file as of its curren
     const stillNoBaseline = after.files.filter(f => f.classification === 'no-baseline');
     assert.equal(stillNoBaseline.length, 0, 'every previously-no-baseline file now has a baseline');
     const clean = after.files.filter(f => f.classification === 'clean');
-    assert.equal(clean.length, 3, 'PROJECT.md + dc-1 (just adopted) + dc-2 (already stamped) all read clean');
+    assert.equal(clean.length, 3, 'PROJECT.md + dc-1-widget (just adopted) + dc-2-gadget (already stamped) all read clean');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

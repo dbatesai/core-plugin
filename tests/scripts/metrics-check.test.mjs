@@ -139,7 +139,7 @@ function baseOut(overrides = {}) {
 
 test('computeRows: returns seven rows across mechanics/regression/readiness sections', () => {
   // Seven as of v3.14.0: the turn-capture state line ALWAYS renders (+1), and
-  // the benefit row is REMOVED per DC-129 (-1, the question left scope by
+  // the benefit row is REMOVED (-1, the question left scope by
   // decision, not by gap).
   const rows = computeRows(baseOut());
   assert.equal(rows.length, 7);
@@ -319,10 +319,10 @@ test('computeRows: gold-set harness failure surfaces its reason as NOT_EVALUATED
   assert.match(gold.value, /harness run failed/);
 });
 
-// --- Benefit row REMOVED (DC-129, 2026-07-24): user-benefit measurement left
+// --- Benefit row REMOVED: user-benefit measurement left
 // scope by decision. The row must be GONE, not renamed or softened. ---
 
-test('computeRows: no benefit/matched-comparison row exists anymore (DC-129)', () => {
+test('computeRows: no benefit/matched-comparison row exists anymore', () => {
   const rows = computeRows(baseOut());
   assert.ok(!rows.some((r) => r.label === 'Matched comparison'), 'the benefit row is removed, not renamed');
   assert.ok(!rows.some((r) => r.section === 'benefit'), 'no row in a benefit section');
@@ -389,7 +389,7 @@ test('buildNarrative: mentions the telemetry-capture and gold-set-snapshot numbe
   assert.match(n, /not a passing gate/);
 });
 
-test('buildNarrative: no benefit sentence remains (DC-129 — out of scope by decision)', () => {
+test('buildNarrative: no benefit sentence remains (out of scope by decision)', () => {
   const n = buildNarrative(baseOut());
   assert.doesNotMatch(n, /memory-on\/off|hasn't been measured/);
 });
@@ -407,7 +407,7 @@ test('renderReport: verdict heading is scoped to MECHANICS and reads HEALTHY, no
   assert.equal(lines[2], 'CORE Memory Health — demo-project');
 });
 
-test('renderReport: renders five gauged rows across three labeled sections (benefit gone per DC-129)', () => {
+test('renderReport: renders five gauged rows across three labeled sections (benefit row gone by decision)', () => {
   const text = renderReport(baseOut(), { workspaceName: 'demo-project' });
   const rowLines = text.split('\n').filter((l) => l.includes('[') && l.includes(']'));
   assert.equal(rowLines.length, 5, 'seven total rows minus the two no-gauge rows (Telemetry capture, Turn capture)');
@@ -740,7 +740,7 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
     // ---- readiness: recognition + calibration, together, as their own class.
     assert.deepEqual(Object.keys(out.readiness).sort(), ['calibration', 'recognition_signal']);
 
-    // ---- benefit: GONE per DC-129 — the key must not exist at all.
+    // ---- benefit: GONE by decision — the key must not exist at all.
     assert.ok(!('benefit' in out), 'the benefit class is removed from the canonical object');
 
     // ---- single source of truth: the report string in the JSON is exactly
@@ -755,8 +755,8 @@ test('CLI --json contract: exact four-class placement, identity stamp, old contr
 });
 
 // ---------------------------------------------------------------------------
-// Turn-capture evidence — the ALWAYS-VISIBLE state line (v3.14.0, default-ON
-// per DC-129). Because the stream is on unless the user acted, BOTH states
+// Turn-capture evidence — the ALWAYS-VISIBLE state line (v3.14.0,
+// default-ON). Because the stream is on unless the user acted, BOTH states
 // render: ON carries the disclosure + off-switches; OFF confirms the opt-out.
 // ---------------------------------------------------------------------------
 
