@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "doors": [
+  "surfaces": [
     {
       "name": "SessionEnd:close-pass-hook.mjs",
       "kind": "hook",

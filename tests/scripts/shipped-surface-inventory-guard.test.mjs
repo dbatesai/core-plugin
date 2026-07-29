@@ -75,7 +75,7 @@ test('every deprecation-shim count claim matches the deprecated skill count', ()
 });
 
 test('every slash-command count claim matches the shipped skill count', () => {
-  const expected = inventory.doors.filter((d) => d.kind === 'skill').length;
+  const expected = inventory.surfaces.filter((d) => d.kind === 'skill').length;
   for (const surface of SURFACES) {
     for (const claimed of claims(read(surface), 'slash commands ship\\b')) {
       assert.equal(claimed, expected, `${surface} claims ${claimed} slash commands; the tree ships ${expected}`);
@@ -85,8 +85,8 @@ test('every slash-command count claim matches the shipped skill count', () => {
 
 test('INSTALL.md hook counts match the registered hooks per harness', () => {
   const install = read('INSTALL.md');
-  const claude = inventory.doors.filter((d) => d.kind === 'hook' && d.harness === 'claude-code').length;
-  const codex = inventory.doors.filter((d) => d.kind === 'hook' && d.harness === 'codex').length;
+  const claude = inventory.surfaces.filter((d) => d.kind === 'hook' && d.harness === 'claude-code').length;
+  const codex = inventory.surfaces.filter((d) => d.kind === 'hook' && d.harness === 'codex').length;
 
   const registers = new RegExp(`registers (${NUM}) hooks`, 'i').exec(install);
   assert.ok(registers, 'INSTALL.md no longer states how many hooks installing CORE registers');
@@ -101,14 +101,14 @@ test('INSTALL.md hook counts match the registered hooks per harness', () => {
 test('every active user-invocable skill is named in INSTALL.md and USAGE.md', () => {
   const install = read('INSTALL.md');
   const usage = read('USAGE.md');
-  for (const door of inventory.doors.filter((d) => d.kind === 'skill' && d.invocation === 'user')) {
+  for (const door of inventory.surfaces.filter((d) => d.kind === 'skill' && d.invocation === 'user')) {
     assert.ok(install.includes(`/${door.name}`), `INSTALL.md never names the shipped door /${door.name}`);
     assert.ok(usage.includes(`/${door.name}`), `USAGE.md never names the shipped door /${door.name}`);
   }
 });
 
 test('every script USAGE.md names exists in the shipped tree', () => {
-  const shipped = new Set(inventory.doors.filter((d) => d.kind === 'script').map((d) => d.name));
+  const shipped = new Set(inventory.surfaces.filter((d) => d.kind === 'script').map((d) => d.name));
   const named = new Set([...read('USAGE.md').matchAll(/`([\w-]+)\.mjs`/g)].map((m) => m[1]));
   const missing = [...named].filter((n) => !shipped.has(n));
   assert.deepEqual(missing, [], `USAGE.md names scripts that do not ship: ${missing.join(', ')}`);
@@ -159,4 +159,15 @@ test('shipped prose cites only paths that exist inside the shipped tree', () => 
     }
   }
   assert.deepEqual(offenders, [], `shipped prose cites paths that do not ship:\n  ${offenders.join('\n  ')}`);
+});
+
+test('every relative link in the root documentation surfaces resolves', () => {
+  for (const doc of ['README.md', 'USAGE.md', 'INSTALL.md', 'ARCHITECTURE.md']) {
+    const src = readFileSync(join(ROOT, doc), 'utf8');
+    for (const m of src.matchAll(/\]\((?!https?:|#|mailto:)([^)\s]+)\)/g)) {
+      const target = m[1].split('#')[0];
+      if (!target) continue;
+      assert.ok(existsSync(join(ROOT, target)), `${doc} links ${m[1]}, which does not exist`);
+    }
+  }
 });

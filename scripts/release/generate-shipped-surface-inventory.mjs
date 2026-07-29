@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * generate-shipped-surface-inventory.mjs — the shipped tree's own answer to "what doors exist?"
+ * generate-shipped-surface-inventory.mjs — the shipped tree's own answer to "what ships?"
  *
  * A door is anything a user or a harness can enter the plugin through: a skill
  * (typed as a slash command), a hook (fired by a harness event), or a script
  * (invoked by a skill or protocol). This walks the shipped tree and emits one
- * deterministic JSON record per door.
+ * deterministic JSON record per shipped surface: skills and hook doors carry
+ * registration; script files carry presence only.
  *
  * Every surface that claims a complete inventory — README, USAGE, llms.txt,
  * INSTALL, the marketplace description — is checked against this output rather
@@ -18,7 +19,8 @@
  * With no --out the JSON goes to stdout. Exit codes: 0 = emitted, 3 = the
  * plugin root could not be resolved or does not hold a shipped tree.
  *
- * Ships with the plugin as prescriptive code; .mjs only.
+ * Repo tooling — lives outside the shipped plugin payload; consumed by the
+ * inventory guard test and the release flow.
  */
 
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
@@ -73,13 +75,13 @@ export function skillStatus(description) {
 function collectSkills(root) {
   const dir = join(root, 'skills');
   if (!existsSync(dir)) return [];
-  const doors = [];
+  const surfaces = [];
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     if (!e.isDirectory()) continue;
     const skillMd = join(dir, e.name, 'SKILL.md');
     if (!existsSync(skillMd)) continue;
     const fm = readSkillFrontmatter(readFileSync(skillMd, 'utf8'));
-    doors.push({
+    surfaces.push({
       name: fm.name || e.name,
       kind: 'skill',
       harness: 'shared',
@@ -87,11 +89,11 @@ function collectSkills(root) {
       invocation: 'user',
     });
   }
-  return doors;
+  return surfaces;
 }
 
 function collectHooks(root) {
-  const doors = [];
+  const surfaces = [];
   for (const { file, harness } of HOOK_MANIFESTS) {
     const path = join(root, 'hooks', file);
     if (!existsSync(path)) continue;
@@ -101,7 +103,7 @@ function collectHooks(root) {
       for (const group of groups || []) {
         for (const hook of group.hooks || []) {
           const script = /([\w.-]+\.mjs)/.exec(String(hook.command || ''));
-          doors.push({
+          surfaces.push({
             name: `${event}:${script ? script[1] : String(hook.type || 'command')}`,
             kind: 'hook',
             harness,
@@ -112,7 +114,7 @@ function collectHooks(root) {
       }
     }
   }
-  return doors;
+  return surfaces;
 }
 
 function collectScripts(root) {
@@ -132,7 +134,7 @@ function collectScripts(root) {
     }));
 }
 
-/** Total order over doors, so the snapshot is a byte-stable diff target. */
+/** Total order over surfaces, so the snapshot is a byte-stable diff target. */
 function byDoor(a, b) {
   return a.kind.localeCompare(b.kind)
     || a.harness.localeCompare(b.harness)
@@ -141,22 +143,22 @@ function byDoor(a, b) {
 
 /**
  * @param {string} root plugin root (the directory holding skills/ and hooks/)
- * @returns {{schema_version: string, doors: Array<object>}}
+ * @returns {{schema_version: string, surfaces: Array<object>}}
  */
 export function buildInventory(root = DEFAULT_ROOT) {
-  const doors = [...collectSkills(root), ...collectHooks(root), ...collectScripts(root)].sort(byDoor);
-  return { schema_version: SCHEMA_VERSION, doors };
+  const surfaces = [...collectSkills(root), ...collectHooks(root), ...collectScripts(root)].sort(byDoor);
+  return { schema_version: SCHEMA_VERSION, surfaces };
 }
 
-/** The doors a user types, minus the agent itself and minus retired shims. */
+/** The commands a user types, minus the agent itself and minus retired shims. */
 export function activeCompanions(inventory) {
-  return inventory.doors.filter(
+  return inventory.surfaces.filter(
     (d) => d.kind === 'skill' && d.status === 'active' && d.invocation === 'user' && d.name !== 'core',
   );
 }
 
 export function deprecatedSkills(inventory) {
-  return inventory.doors.filter((d) => d.kind === 'skill' && d.status === 'deprecated');
+  return inventory.surfaces.filter((d) => d.kind === 'skill' && d.status === 'deprecated');
 }
 
 export function serialize(inventory) {

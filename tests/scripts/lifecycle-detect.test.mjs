@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 
-test('AUD-102: adoption refuses when the baseline is corrupt or unreadable — only true absence adopts', async () => {
+test('AUD-102: adoption refuses a corrupt or unreadable baseline; absent and clean-partial baselines adopt their unstamped remainder', async () => {
   const { adoptExistingStore } = await import('../../plugins/core/skills/core/scripts/lifecycle-detect.mjs');
   const dir = mkdtempSync(join(tmpdir(), 'adopt-corrupt-'));
   try {

@@ -390,73 +390,90 @@ function verdictBlock(mech) {
 // the browse page's explicitly-consented disclosure, not this one).
 // ============================================================
 
-// The embed ships only what the page renders, enforced recursively: this
-// schema tree names every allowed key at every depth. `true` keeps a scalar
-// or opaque-but-known value; a nested object keeps only its named children;
-// SCALAR_MAP keeps a one-level map of scalar values (count histograms).
-// Anything not named is dropped and disclosed by count — a field this
-// renderer has never heard of cannot ride into a published page.
+// The embed ships only what the page renders, enforced recursively AND by
+// type: every leaf is typed — SCALAR keeps null/string/number/boolean and
+// drops anything composite, STRING_ARRAY keeps an array's string elements
+// only, SCALAR_MAP keeps a one-level map of scalar values. A known key is
+// never enough on its own: an object arriving where a scalar belongs is
+// dropped and disclosed by count, so nothing rides into a published page by
+// squatting on a known name.
+const SCALAR = Symbol('scalar');
+const STRING_ARRAY = Symbol('string-array');
 const SCALAR_MAP = Symbol('scalar-map');
+const isScalar = (v) => v === null || ['string', 'number', 'boolean'].includes(typeof v);
 const EMBED_SCHEMA = {
-  schema_version: true,
-  generated_at: true,
-  producer: { script: true, plugin: true, plugin_version: true, source_sha: true, source_sha_from: true },
+  schema_version: SCALAR,
+  generated_at: SCALAR,
+  producer: { script: SCALAR, plugin: SCALAR, plugin_version: SCALAR, source_sha: SCALAR, source_sha_from: SCALAR },
   mechanics: {
-    status: true,
+    status: SCALAR,
     probe: {
-      validate: { pass: true, exit: true },
-      retrieve: { pass: true, evidence: true },
-      suppress_retired: { pass: true, evidence: true },
-      round_trip: true,
+      validate: { pass: SCALAR, exit: SCALAR },
+      retrieve: { pass: SCALAR, evidence: SCALAR },
+      suppress_retired: { pass: SCALAR, evidence: SCALAR },
+      round_trip: SCALAR,
     },
     store: {
-      present: true,
-      schema: { exit: true, pass: true, warn: true, fail: true },
-      integrity: { exit: true, pass: true, warn: true, fail: true },
-      warning_triage: { informational: true, routine_upkeep: true, attention: true, attention_items: true, attention_items_omitted: true },
-      census: { active: true, retired: true, archived: true, superseded: true, other: true, total: true },
-      retrieval_log: { files: true, rows: true },
+      present: SCALAR,
+      schema: { exit: SCALAR, pass: SCALAR, warn: SCALAR, fail: SCALAR },
+      integrity: { exit: SCALAR, pass: SCALAR, warn: SCALAR, fail: SCALAR },
+      warning_triage: { informational: SCALAR, routine_upkeep: SCALAR, attention: SCALAR, attention_items: STRING_ARRAY, attention_items_omitted: SCALAR },
+      census: { active: SCALAR, retired: SCALAR, archived: SCALAR, superseded: SCALAR, other: SCALAR, total: SCALAR },
+      retrieval_log: { files: SCALAR, rows: SCALAR },
     },
     telemetry: {
-      available: true, days: true, retrievalEvents: true,
+      available: SCALAR, days: SCALAR, retrievalEvents: SCALAR,
       rejected: {
-        current: { count: true, by_code: SCALAR_MAP },
-        legacy: { count: true, by_code: SCALAR_MAP },
-        other: { count: true, by_code: SCALAR_MAP },
-        total: true,
+        current: { count: SCALAR, by_code: SCALAR_MAP },
+        legacy: { count: SCALAR, by_code: SCALAR_MAP },
+        other: { count: SCALAR, by_code: SCALAR_MAP },
+        total: SCALAR,
       },
-      t1Pct: true, t2Pct: true, t3Pct: true,
-      topEscalationTopic: true, topEscalationRate: true,
+      t1Pct: SCALAR, t2Pct: SCALAR, t3Pct: SCALAR,
+      topEscalationTopic: SCALAR, topEscalationRate: SCALAR,
     },
     capture: SCALAR_MAP,
   },
   regression: {
-    gold: { available: true, n: true, storeUnits: true, context3_r3: true, ranking_r10: true, bm25_r10: true },
+    gold: { available: SCALAR, n: SCALAR, storeUnits: SCALAR, context3_r3: SCALAR, ranking_r10: SCALAR, bm25_r10: SCALAR },
     self_test: SCALAR_MAP,
   },
   readiness: {
-    recognition_signal: { text: true, age_hours: true },
-    calibration: { available: true, labeled_count: true, min_needed: true, is_calibrated: true, overall_precision: true, notes: true },
+    recognition_signal: { text: SCALAR, age_hours: SCALAR },
+    calibration: { available: SCALAR, labeled_count: SCALAR, min_needed: SCALAR, is_calibrated: SCALAR, overall_precision: SCALAR, notes: SCALAR },
   },
-  caveats: true,
+  caveats: STRING_ARRAY,
 };
 
+const DROP = Symbol('drop');
+
 function projectBySchema(value, schema, drops) {
-  if (schema === true) return value;
+  if (schema === SCALAR) {
+    if (isScalar(value)) return value;
+    drops.count++;
+    return DROP;
+  }
+  if (schema === STRING_ARRAY) {
+    if (!Array.isArray(value)) { drops.count++; return DROP; }
+    const out = value.filter((v) => typeof v === 'string');
+    drops.count += value.length - out.length;
+    return out;
+  }
   if (schema === SCALAR_MAP) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) { drops.count++; return DROP; }
     const out = {};
     for (const [k, v] of Object.entries(value)) {
-      if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) out[k] = v;
+      if (isScalar(v)) out[k] = v;
       else drops.count++;
     }
     return out;
   }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) { drops.count++; return DROP; }
   const out = {};
   for (const [k, v] of Object.entries(value)) {
-    if (Object.prototype.hasOwnProperty.call(schema, k)) out[k] = projectBySchema(v, schema[k], drops);
-    else drops.count++;
+    if (!Object.prototype.hasOwnProperty.call(schema, k)) { drops.count++; continue; }
+    const projected = projectBySchema(v, schema[k], drops);
+    if (projected !== DROP) out[k] = projected;
   }
   return out;
 }

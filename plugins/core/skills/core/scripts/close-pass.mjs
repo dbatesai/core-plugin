@@ -33,7 +33,7 @@
  *   node close-pass.mjs --self-test
  */
 
-import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, renameSync } from 'node:fs';
+import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, renameSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -173,7 +173,7 @@ export function detectCloseState(store, { allOps = [], storeSignature = null, no
   if (!marker) return { state: 'owed', owed: [...allOps], reason: 'no-marker' };
 
   const done = new Set(Object.entries(marker.ops || {})
-    .filter(([, v]) => v && v.status === 'done').map(([k]) => k));
+    .filter(([op, v]) => isOpSatisfied(op, v)).map(([k]) => k));
   const notDone = allOps.filter(op => !done.has(op));
 
   // Store changed since the marker → store-derived ops are owed again even if previously done.
@@ -206,6 +206,18 @@ export function detectCloseState(store, { allOps = [], storeSignature = null, no
 const STORE_DERIVED = new Set([
   'render-project-md',
 ]);
+
+// The ONE satisfaction predicate certification and detection share. 'done'
+// satisfies any op; 'skipped' satisfies only the ops whose protocol permits a
+// recorded skip (the render skips when nothing material changed). Divergent
+// predicates let a session read closed to certification and owed to detection
+// at the same time.
+const SKIP_PERMITTED = new Set(['render-project-md']);
+export function isOpSatisfied(op, record) {
+  if (!record) return false;
+  if (record.status === 'done') return true;
+  return record.status === 'skipped' && SKIP_PERMITTED.has(op);
+}
 export function isStoreDerived(op) { return STORE_DERIVED.has(op); }
 
 
@@ -289,15 +301,31 @@ export function writeCloseReceipt(store, receipt, opts = {}) {
   const sessionId = receipt.session_id;
   const p = receiptPath(store, sessionId, opts);
   mkdirSync(receiptDir(store, opts), { recursive: true });
-  // A corrupt prior receipt is evidence of a torn write or interference —
-  // preserve its bytes beside the fresh receipt instead of overwriting them.
+  // Prior-receipt evidence rules: an UNREADABLE prior receipt refuses the
+  // write outright — the bytes may be intact evidence we could not read, and
+  // no preservation is possible without reading. A CORRUPT prior receipt may
+  // be replaced only AFTER its bytes are successfully quarantined; a
+  // quarantine failure (including a name collision) refuses rather than
+  // overwriting.
   const prior = readCloseReceiptState(store, sessionId, opts);
+  if (prior.status === 'unreadable') {
+    return { written: false, reason: 'prior-receipt-unreadable', error: prior.error, path: p };
+  }
   if (prior.status === 'corrupt') {
-    try { renameSync(p, `${p}.corrupt-${Date.now()}`); } catch { /* best-effort preservation */ }
+    let quarantined = null;
+    for (let attempt = 0; attempt < 5 && !quarantined; attempt++) {
+      const target = `${p}.corrupt-${Date.now()}-${attempt}-${Math.floor(Math.random() * 1e6)}`;
+      try {
+        if (!existsSync(target)) { renameSync(p, target); quarantined = target; }
+      } catch { /* try the next unique name */ }
+    }
+    if (!quarantined) {
+      return { written: false, reason: 'quarantine-failed', path: p };
+    }
   }
   atomicWriteFileSync(p, `${JSON.stringify(receipt, null, 2)}\n`);
   chmodSync(p, 0o600);
-  return p;
+  return { written: true, path: p };
 }
 
 /**
@@ -358,7 +386,10 @@ export function runDeterministicClose(store, {
     model_calls: 0,
     record,
   };
-  writeCloseReceipt(store, receipt, opts);
+  const wrote = writeCloseReceipt(store, receipt, opts);
+  if (!wrote.written) {
+    return { ...receipt, status: 'failed', write_refused: wrote.reason };
+  }
   return receipt;
 }
 
@@ -475,10 +506,7 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
   // failed or missing required op refuses; the session stays owed.
   const marker = readJson(markerPath(store)) || { ops: {} };
   const ops = marker.ops || {};
-  const incomplete = CLOSE_OPS.filter((op) => {
-    const rec = ops[op];
-    return !rec || (rec.status !== 'done' && rec.status !== 'skipped');
-  });
+  const incomplete = CLOSE_OPS.filter((op) => !isOpSatisfied(op, ops[op]));
   if (incomplete.length) {
     return { ok: false, reason: 'required-ops-incomplete', incomplete, session_id: sid };
   }
@@ -491,7 +519,10 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
     summary_path: summaryPath || null,
     transcript_path: transcriptPath,
   };
-  writeCloseReceipt(store, receipt, opts);
+  const wrote = writeCloseReceipt(store, receipt, opts);
+  if (!wrote.written) {
+    return { ok: false, reason: wrote.reason, session_id: sid };
+  }
   return { ok: true, session_id: sid };
 }
 
@@ -578,7 +609,16 @@ function main(argv) {
         sessionId: typeof f.session === 'string' ? f.session : null,
         summaryPath: typeof f.summary === 'string' ? f.summary : null,
       });
-      if (!r.ok) { process.stdout.write('UNRESOLVED: no session identity could be established; pass --session <id>\n'); return 1; }
+      if (!r.ok) {
+        if (r.reason === 'required-ops-incomplete') {
+          process.stdout.write(`REQUIRED-OPS-INCOMPLETE: ${(r.incomplete || []).join(', ')} — record or legitimately skip them, then certify\n`);
+        } else if (r.reason === 'unresolved') {
+          process.stdout.write('UNRESOLVED: no session identity could be established; pass --session <id>\n');
+        } else {
+          process.stdout.write(`REFUSED: ${r.reason}\n`);
+        }
+        return 1;
+      }
       process.stdout.write(json ? JSON.stringify(r) + '\n' : (r.already ? 'already certified\n' : `certified ${r.session_id}\n`));
       return 0;
     }

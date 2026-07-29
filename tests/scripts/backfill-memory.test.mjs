@@ -69,7 +69,7 @@ test('markBackfilled: stamps memory_processed_at on the exact receipt and preser
   const store = freshStore();
   try {
     const opts = { storageRoot: storageRoot(store) };
-    const p = writeCloseReceipt(store, receipt('s-auto', 'recorded', { tool_calls: 7 }), opts);
+    const p = writeCloseReceipt(store, receipt('s-auto', 'recorded', { tool_calls: 7 }), opts).path;
     const r = markBackfilled(store, 's-auto', opts);
     assert.ok(r.ok);
     const after = JSON.parse(readFileSync(p, 'utf8'));

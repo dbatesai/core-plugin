@@ -78,7 +78,8 @@ export function markBackfilled(store, sessionId, opts = {}) {
   const receipt = readCloseReceipt(store, sessionId, opts);
   if (!receipt) return { ok: false, reason: 'missing' };
   receipt.memory_processed_at = (opts.now || new Date().toISOString());
-  writeCloseReceipt(store, receipt, opts);
+  const wrote = writeCloseReceipt(store, receipt, opts);
+  if (!wrote.written) return { ok: false, reason: wrote.reason };
   return { ok: true };
 }
 

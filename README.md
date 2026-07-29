@@ -51,7 +51,7 @@ Type `/core` to start — it loads your project and orients before anything else
 ## Learn more
 
 - [USAGE.md](USAGE.md) — what each command, protocol, and script does.
-- [docs/door-inventory.json](docs/door-inventory.json) — the generated list of every shipped skill, hook, and script.
+- [docs/shipped-surface-inventory.json](docs/shipped-surface-inventory.json) — the generated list of every shipped skill, hook door, and script file.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the design behind it: the memory store, how retrieval works, memory hygiene, when the swarm fires, validation, and the optional hooks.
 - [llms.txt](llms.txt) — a structured map of this repo for AI agents: what CORE is, how to install it, and how to use it, with pointers into the docs.
 
