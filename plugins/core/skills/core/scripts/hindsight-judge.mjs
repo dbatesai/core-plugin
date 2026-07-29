@@ -25,9 +25,9 @@
  *                      text: topical-but-irrelevant injection.
  *   hit-right        — delivered set matches the full-text expectation.
  *   drift-invalidated — the store changed between capture and judgment
- *                      (store_signature mismatch). Per the design-review
- *                      ruling: flag and drop the sample — we measure causality
- *                      at the time of the event, never guess across drift.
+ *                      (store_signature mismatch): flag and drop the sample —
+ *                      a turn is judged only against the store state at the
+ *                      time of the event, never guessed across drift.
  *                      Scorecards exclude these from grade counts.
  *
  * GAP FLOOR: deliberately conservative — a LOW bar, so a turn is called

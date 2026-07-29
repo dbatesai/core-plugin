@@ -19,7 +19,7 @@ const numOr = (x, d = '—') => (x == null ? d : String(x));
 
 export function buildReportMd({ manifest, projects }) {
   const lines = [];
-  lines.push('# CORE memory-efficacy package');
+  lines.push('# CORE memory-metrics package');
   lines.push('');
   lines.push(`Generated ${manifest.generated_at} · mode: ${manifest.mode} · generator ${manifest.generator ? manifest.generator.ran_from + (manifest.generator.source_sha ? ' @ ' + manifest.generator.source_sha : '') : 'unknown'} (manifest claims ${manifest.plugin ? 'v' + manifest.plugin.manifest_version : 'unknown'}) · schema ${manifest.schema_version}`);
   lines.push('');
@@ -234,10 +234,10 @@ export function buildReportHtml({ manifest, projects }) {
   return `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CORE memory-efficacy package</title>
+<title>CORE memory-metrics package</title>
 <style>${CSS}</style>
 <body><div class="viz-root">
-<h1>CORE memory-efficacy package</h1>
+<h1>CORE memory-metrics package</h1>
 <div class="sub">Generated ${esc(manifest.generated_at)} · ${esc(manifest.mode)} · generator ${manifest.generator ? esc(manifest.generator.ran_from) : 'unknown'} (manifest v${manifest.plugin ? esc(manifest.plugin.manifest_version) : '?'}) · anonymized: pseudonyms + aggregates only</div>
 ${sections}
 <div class="note">Every value is a number, date, fixed CORE vocabulary, or salted pseudonym; free text is dropped at generation. Residual risk minimized, not zero — see manifest.json. Trust labels (committed vocabulary): direct = event log / store walk; proxy = behavior-dependent corpus; provisional = classifier not yet calibrated (read trends, not levels). Machine-readable blocks: projects/&lt;pseudonym&gt;/*.json.</div>

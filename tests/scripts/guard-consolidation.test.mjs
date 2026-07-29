@@ -67,7 +67,7 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // a genuinely-new CLI tool (file-lock.mjs is import-only, no entry guard).
   // 51 → 52 (2026-07-14, Train A blocker 3): artifact-identity.mjs, the
   // deterministic release-artifact identity CLI — genuinely new, not a copy.
-  // 52 → 53 (2026-07-16): metrics-package.mjs, the anonymized memory-efficacy
+  // 52 → 53 (2026-07-16): metrics-package.mjs, the anonymized memory-metrics
   // feedback-package CLI — genuinely new (metrics-package-report.mjs is
   // import-only, no entry guard). 53 → 54 (2026-07-22): lifecycle-detect.mjs,
   // the executable user-authorship-boundary preflight (Hale's fix) — a

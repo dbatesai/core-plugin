@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * metrics-package.mjs — the anonymized memory-efficacy feedback package.
+ * metrics-package.mjs — the anonymized memory-metrics feedback package.
  *
  * ONE PURPOSE: feedback data for refining CORE itself. The package must be safe
  * to hand across strict data boundaries (the standing data-boundary rule: de-identified

@@ -67,7 +67,7 @@ Why scratch cache: the user's control over project knowledge runs through PROJEC
 2. Make concrete self-improvement recommendations. "Try X next session" beats "do better at Y."
 3. Write the improvement summary to the screen for the user at session close.
 
-## Analysis-protocol efficacy narrative
+## Analysis-protocol effectiveness narrative
 
 After running a multi-agent analysis via `protocols/analysis.md`, append to the workspace narrative at `~/.core/workspaces/<id>/swarm-narrative.md`. Not a mechanical record — a reflective account written for your own future swarm runs in this workspace.
 
