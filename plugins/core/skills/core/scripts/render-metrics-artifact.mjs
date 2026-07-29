@@ -57,13 +57,16 @@
  * _memories/, unreadable/malformed --json-in, bad record-mode input);
  * 1 fatal failure (including fail-closed producer identity).
  */
-import { readFileSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
-import { join, resolve, dirname, basename, sep } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { join, resolve, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { gatherMetrics, parseRecognitionSignal } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
-import { generationReceiptLocation, runRecordCli, artifactContentDigest } from './artifact-receipts.mjs';
+import {
+  generationReceiptLocation, runRecordCli, artifactContentDigest,
+  publishArtifactWithReceipt, resolveArtifactDestination,
+} from './artifact-receipts.mjs';
 
 export const METRICS_ARTIFACT_MANIFEST_SCHEMA_VERSION = '1.0.0';
 export const METRICS_ARTIFACT_CONTENT_CLASS = 'aggregates-only';
@@ -594,14 +597,16 @@ export async function renderMetricsArtifact(projectDir, {
   now = () => new Date(),
   // Injectable for tests: defaults to the real canonical gatherer.
   metricsProvider = (dir) => gatherMetrics(dir),
+  // Injection point for the mutation window between the artifact write and the
+  // post-write verification.
+  onArtifactWritten = null,
 } = {}) {
   const root = resolve(projectDir);
   if (!outPath) throw Object.assign(new Error('--out <path> is required — there is no default output location'), { code: 'OUT_REQUIRED' });
-  const outAbs = resolve(outPath);
   const memoriesRoot = join(root, '_memories');
-  if (outAbs === memoriesRoot || outAbs.startsWith(memoriesRoot + sep)) {
-    throw Object.assign(new Error(`refusing --out inside the memory store (${memoriesRoot}) — the store is read-only to this script`), { code: 'OUT_IN_STORE' });
-  }
+  // Canonical containment: a linked --out is rejected on its real target, not
+  // on its spelling.
+  const outAbs = resolveArtifactDestination(outPath, { forbiddenRoot: memoriesRoot });
 
   // Fail closed on producer identity BEFORE gathering or writing anything: a
   // page whose provenance cannot be established must never be rendered for
@@ -633,9 +638,6 @@ export async function renderMetricsArtifact(projectDir, {
   const generatedAt = now().toISOString();
   const html = buildMetricsArtifactHtml(metrics, { projectName: basename(root), producer });
 
-  mkdirSync(dirname(outAbs), { recursive: true });
-  writeFileSync(outAbs, html);
-
   const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({ home, projectDir: root, generatedAt });
 
   const manifest = {
@@ -660,19 +662,15 @@ export async function renderMetricsArtifact(projectDir, {
     receipt_fallback: workspaceId === null,
   };
 
-  let receiptWritten = true;
-  try {
-    mkdirSync(receiptDir, { recursive: true });
-    writeFileSync(receiptPath, JSON.stringify(manifest, null, 2) + '\n');
-  } catch (e) {
-    // Truthful surfacing over silent success: the receipt is the audit trail —
-    // if it didn't land, the manifest must say so.
-    receiptWritten = false;
-    manifest.receipt_path = null;
-    manifest.receipt_error = String(e && e.message || e).slice(0, 200);
-  }
+  // One transaction: the bytes are placed, read back, and proven to be the
+  // rendered bytes before the receipt that describes them is written; a receipt
+  // that cannot land takes the artifact with it.
+  publishArtifactWithReceipt({
+    outPath: outAbs, html, receiptDir, receiptPath, manifest,
+    forbiddenRoot: memoriesRoot, afterWrite: onArtifactWritten,
+  });
 
-  return { manifest, html, receiptWritten };
+  return { manifest, html, receiptWritten: true };
 }
 
 // ---------- CLI ----------
