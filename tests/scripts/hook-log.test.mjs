@@ -199,3 +199,48 @@ test('logHookEvent: a symlink under ~/.core pointing outside it is refused, not 
     rmSync(outsideDir, { recursive: true, force: true });
   }
 });
+
+// --- sandbox permission fallback: a read-only primary target must not lose the receipt ---
+// A sandboxed harness (Codex workspace sandbox) leaves ~/.core readable but not
+// writable; the append gets EPERM/EACCES and, before the fallback existed, the
+// hook leaked a hook-log-write-failed diagnostic to the user after every answer.
+// The line must land at the FIXED tmpdir fallback (already a trusted root) with
+// { written: true, fallback: true }.
+test('logHookEvent falls back to the fixed tmpdir log when the primary target is permission-denied', { skip: process.platform === 'win32' && 'chmod-based read-only dirs are unreliable on Windows' }, () => {
+  const roDir = mkdtempSync(join(trustedTestTmpRoot(), 'hook-log-ro-'));
+  const prior = process.env.CORE_HOOKS_LOG_FILE;
+  const marker = `sandbox-fallback-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const fallbackFile = join(tmpdir(), '.core', 'hooks-log.jsonl');
+  try {
+    process.env.CORE_HOOKS_LOG_FILE = join(roDir, 'hooks-log.jsonl');
+    execFileSync('chmod', ['a-w', roDir]);
+    const res = logHookEvent({ hook: marker, action: 'skip' });
+    assert.equal(res.written, true, 'the receipt must still be written');
+    assert.equal(res.fallback, true, 'the result must disclose the relocation');
+    const landed = readLog(fallbackFile).some((e) => e.hook === marker && e.action === 'skip' && e.ts);
+    assert.ok(landed, 'the exact line must land in the fixed tmpdir fallback log');
+  } finally {
+    if (prior === undefined) delete process.env.CORE_HOOKS_LOG_FILE;
+    else process.env.CORE_HOOKS_LOG_FILE = prior;
+    try { execFileSync('chmod', ['u+w', roDir]); } catch { /* best effort */ }
+    rmSync(roDir, { recursive: true, force: true });
+  }
+});
+
+test('logHookEvent non-permission errors keep the closed failure result (no fallback)', () => {
+  const prior = process.env.CORE_HOOKS_LOG_FILE;
+  const f = tmpLog();
+  writeFileSync(f, 'x');
+  try {
+    // parent is a FILE → ENOTDIR-shaped failure, not a permission error: must
+    // NOT reroute to the fallback, must return the closed failure.
+    process.env.CORE_HOOKS_LOG_FILE = join(f, 'cannot', 'log.jsonl');
+    const res = logHookEvent({ hook: 'x', action: 'y' });
+    assert.equal(res.written, false, 'non-permission failures stay failures');
+    assert.equal(res.fallback, undefined, 'no silent relocation on non-permission errors');
+    assert.ok(res.error_code, 'the closed error code crosses the boundary');
+  } finally {
+    if (prior === undefined) delete process.env.CORE_HOOKS_LOG_FILE;
+    else process.env.CORE_HOOKS_LOG_FILE = prior;
+  }
+});

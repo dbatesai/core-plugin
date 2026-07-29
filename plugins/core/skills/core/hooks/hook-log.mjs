@@ -65,8 +65,10 @@ export function hookLogPath() {
  * @param {{hook: string, action: string, reason?: string, cwd?: string}} entry
  */
 export function logHookEvent(entry) {
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n';
+  let file = null;
   try {
-    const file = hookLogPath();
+    file = hookLogPath();
     if (file !== '/dev/null') {
       const dir = dirname(file);
       try { mkdirSync(dir, { recursive: true }); } catch { /* dir exists or unwritable */ }
@@ -81,12 +83,30 @@ export function logHookEvent(entry) {
       const canonicalOk = realDir !== null && trustedRoots.some(root => realDir === root || realDir.startsWith(root + sep));
       if (!canonicalOk) return { written: false, error_code: 'hook-log-untrusted-target' };
     }
-    appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n');
+    appendFileSync(file, line);
     return { written: true };
   } catch (error) {
+    const code = typeof error?.code === 'string' ? error.code : 'hook-log-write-failed';
+    // A sandboxed harness (e.g. the Codex workspace sandbox) can leave ~/.core
+    // readable but not writable — the hook must still land its receipt, and a
+    // leaked diagnostic after every answer is worse than a relocated log line.
+    // The tmpdir path is safe as a fallback precisely because it is FIXED and
+    // already in the trusted-roots set above; nothing attacker-controlled
+    // selects it. Only permission-shaped errors reroute; everything else keeps
+    // the closed failure result.
+    if ((code === 'EACCES' || code === 'EPERM' || code === 'EROFS') && file && file !== '/dev/null') {
+      const fallback = join(tmpdir(), '.core', 'hooks-log.jsonl');
+      if (fallback !== file) {
+        try {
+          mkdirSync(dirname(fallback), { recursive: true });
+          appendFileSync(fallback, line);
+          return { written: true, fallback: true };
+        } catch { /* fall through to the closed failure */ }
+      }
+    }
     // Fail-open for the hook, but never lie that the authoritative receipt
     // exists. Only a closed error code crosses this boundary; messages can
     // contain local paths.
-    return { written: false, error_code: typeof error?.code === 'string' ? error.code : 'hook-log-write-failed' };
+    return { written: false, error_code: code };
   }
 }
