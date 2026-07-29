@@ -65,7 +65,7 @@ test('planted agent name is caught in shipped prose AND in shipped code comments
   });
 });
 
-test('planted DC-reference is caught on the product surface and CHANGELOG, not in tests/', () => {
+test('planted DC-reference is caught everywhere: product surface, CHANGELOG, and tests/', () => {
   withTree(({ root, w }) => {
     w('plugins/core/skills/core/protocols/planted.md', 'Graduation links per DC-94a.\n');
     w('CHANGELOG.md', '- Fixed per DC-114.\n');
@@ -80,8 +80,8 @@ test('planted DC-reference is caught on the product surface and CHANGELOG, not i
       'DC-ref in CHANGELOG not caught',
     );
     assert.ok(
-      !findings.some((f) => f.pattern === 'dc-reference' && f.file.startsWith('tests/')),
-      'tests/ DC-refs are a flagged residual, not auto-blocked',
+      findings.some((f) => f.pattern === 'dc-reference' && f.file.startsWith('tests/')),
+      'DC-ref in a test file not caught — internal-process checks apply to all tracked text',
     );
   });
 });
