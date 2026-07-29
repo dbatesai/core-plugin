@@ -88,7 +88,7 @@ import { readFileSync, readdirSync, existsSync, mkdirSync, realpathSync } from '
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { readProjectCache, hashText, stampFile, CACHE_CORRUPT } from './state-cache.mjs';
+import { readProjectCache, hashText, stampFile, CACHE_CORRUPT, CACHE_UNREADABLE } from './state-cache.mjs';
 import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBlock } from './hot-section.mjs';
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
 
@@ -261,7 +261,7 @@ export function detectStore(projectDir, { sessionInventory } = {}) {
     // a brand-new store. The status travels with the report so the caller states
     // UNKNOWN instead of that plausible-but-wrong story.
     baseline_status: cache.status,
-    baseline_trustworthy: cache.status !== CACHE_CORRUPT,
+    baseline_trustworthy: cache.status !== CACHE_CORRUPT && cache.status !== CACHE_UNREADABLE,
     counts: Object.fromEntries(Object.entries(byClass).map(([k, v]) => [k, v.length])),
     needs_attention: needsAttention,
     files,
@@ -287,6 +287,20 @@ export function detectStore(projectDir, { sessionInventory } = {}) {
 export function adoptExistingStore(projectDir, { apply = false, now, home } = {}) {
   const root = resolve(projectDir);
   const detected = detectStore(root);
+  // Adoption stamps over what the baseline DOESN'T cover. That is safe when
+  // the baseline is absent (the seam predates this store) or clean (a partial
+  // store adopting its unstamped remainder). It is NEVER safe when the
+  // baseline is corrupt or unreadable — that is attribution which exists and
+  // cannot be trusted or read, and stamping would replace evidence. Refuse.
+  if (detected.baseline_status === 'corrupt' || detected.baseline_status === 'unreadable') {
+    return {
+      project: root,
+      applied: false,
+      refused_reason: 'baseline-not-absent',
+      baseline_status: detected.baseline_status,
+      candidate_count: 0,
+    };
+  }
   const candidates = detected.files.filter(f => f.classification === 'no-baseline');
   const pmPath = resolve(join(root, 'PROJECT.md'));
 

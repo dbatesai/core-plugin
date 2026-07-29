@@ -33,7 +33,7 @@
  *   node close-pass.mjs --self-test
  */
 
-import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
+import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, existsSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -253,16 +253,32 @@ export function receiptPath(store, sessionId, opts = {}) {
   return join(receiptDir(store, opts), `${sessionKey(sessionId)}.json`);
 }
 
-/** Read a session's receipt. Returns null when absent or unreadable — never throws on a bad file. */
-export function readCloseReceipt(store, sessionId, opts = {}) {
+/**
+ * Read a session's receipt as an explicit tri-state: absent / valid / corrupt /
+ * unreadable. Absent is ONLY a missing file; torn or non-object JSON is
+ * corrupt; any other read failure is unreadable — collapsing those into
+ * absence let an exact-session corrupt receipt be silently overwritten.
+ */
+export function readCloseReceiptState(store, sessionId, opts = {}) {
   const p = receiptPath(store, sessionId, opts);
-  if (!existsSync(p)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(p, 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
+  let raw;
+  try { raw = readFileSync(p, 'utf8'); }
+  catch (e) {
+    if (e && e.code === 'ENOENT') return { status: 'absent', receipt: null };
+    return { status: 'unreadable', receipt: null, error: String(e && e.message || e).slice(0, 160) };
   }
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return { status: 'valid', receipt: parsed };
+    return { status: 'corrupt', receipt: null };
+  } catch {
+    return { status: 'corrupt', receipt: null };
+  }
+}
+
+/** Convenience read: the valid receipt or null. State-sensitive callers use readCloseReceiptState. */
+export function readCloseReceipt(store, sessionId, opts = {}) {
+  return readCloseReceiptState(store, sessionId, opts).receipt;
 }
 
 /** Write a session's receipt atomically, owner-only. */
@@ -273,6 +289,12 @@ export function writeCloseReceipt(store, receipt, opts = {}) {
   const sessionId = receipt.session_id;
   const p = receiptPath(store, sessionId, opts);
   mkdirSync(receiptDir(store, opts), { recursive: true });
+  // A corrupt prior receipt is evidence of a torn write or interference —
+  // preserve its bytes beside the fresh receipt instead of overwriting them.
+  const prior = readCloseReceiptState(store, sessionId, opts);
+  if (prior.status === 'corrupt') {
+    try { renameSync(p, `${p}.corrupt-${Date.now()}`); } catch { /* best-effort preservation */ }
+  }
   atomicWriteFileSync(p, `${JSON.stringify(receipt, null, 2)}\n`);
   chmodSync(p, 0o600);
   return p;
@@ -446,6 +468,20 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
 
   const existing = readCloseReceipt(store, sid, opts);
   if (existing && existing.status === 'closed') return { ok: true, already: true, session_id: sid };
+
+  // Certification is DERIVED from the op record, never asserted by the caller:
+  // every required op must be recorded 'done' — or 'skipped', which is itself
+  // an explicitly recorded judgment — before a closed receipt can exist. A
+  // failed or missing required op refuses; the session stays owed.
+  const marker = readJson(markerPath(store)) || { ops: {} };
+  const ops = marker.ops || {};
+  const incomplete = CLOSE_OPS.filter((op) => {
+    const rec = ops[op];
+    return !rec || (rec.status !== 'done' && rec.status !== 'skipped');
+  });
+  if (incomplete.length) {
+    return { ok: false, reason: 'required-ops-incomplete', incomplete, session_id: sid };
+  }
 
   const receipt = {
     session_id: sid,

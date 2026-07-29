@@ -72,6 +72,7 @@ export function projectCachePath(projectDir) {
 export const CACHE_CLEAN = 'clean';
 export const CACHE_ABSENT = 'absent';
 export const CACHE_CORRUPT = 'corrupt';
+export const CACHE_UNREADABLE = 'unreadable';
 
 /**
  * Read the project-local cache. The returned `status` separates a store that has
@@ -84,7 +85,18 @@ export function readProjectCache(projectDir) {
   const path = projectCachePath(projectDir);
   let raw;
   try { raw = readFileSync(path, 'utf8'); }
-  catch { return { files: {}, status: CACHE_ABSENT }; }
+  catch (e) {
+    // Absence is ONLY a missing file. Permission, directory-in-the-way, and
+    // every other read failure is unreadable UNKNOWN with the evidence kept —
+    // mapping those to absent would let a rebuild replace attribution that
+    // still exists on disk but couldn't be read this run.
+    if (e && e.code === 'ENOENT') return { files: {}, status: CACHE_ABSENT };
+    return {
+      files: {}, status: CACHE_UNREADABLE,
+      error: `${e && e.code ? e.code + ': ' : ''}${String(e && e.message || e).slice(0, 160)}`,
+      baseline_trustworthy_hint: false,
+    };
+  }
   try {
     const cache = JSON.parse(raw);
     if (cache && typeof cache === 'object' && cache.files
@@ -168,6 +180,16 @@ export function stampFiles(projectDir, entries, { now, home = null } = {}) {
           recovery: 'recovery-required',
           reason: 'corrupt-cache-quarantined',
           quarantined,
+        };
+      } else if (cache.status === CACHE_UNREADABLE) {
+        // The bytes may be intact — the read failed (permissions, a directory
+        // in the way). Writing a rebuilt cache over them would destroy
+        // attribution we never even saw. Refuse the stamp entirely.
+        return {
+          stamped: false,
+          outcome: 'refused',
+          recovery: 'recovery-required',
+          reason: `cache-unreadable: ${cache.error || 'unknown read failure'}`,
         };
       }
       for (const e of entries) {

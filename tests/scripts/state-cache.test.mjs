@@ -204,3 +204,18 @@ test("race: 40 concurrent processes each stamping a distinct file all survive �
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('AUD-101: an unreadable cache is not absent — only ENOENT is absence', async () => {
+  const { readProjectCache, CACHE_ABSENT } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'cache-unreadable-'));
+  try {
+    // A DIRECTORY at the cache path yields EISDIR on read — unreadable, not missing.
+    const lib = join(dir, '_memories', '_lib');
+    mkdirSync(join(lib, 'state-cache.json'), { recursive: true });
+    const r = readProjectCache(dir);
+    assert.notEqual(r.status, CACHE_ABSENT, 'EISDIR must not report absence');
+    assert.equal(r.status, 'unreadable', 'a read failure that is not ENOENT reports unreadable');
+    assert.ok(r.error, 'the original evidence is preserved');
+    assert.equal(r.baseline_trustworthy_hint, false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
