@@ -214,6 +214,22 @@ export const ALLOWLIST = [
   // watch-buying fixture store. Not shipped behavioral prose. (Judgment call —
   // flagged for a human on whether to rename the persona.)
   { dirPrefix: 'tests/fixtures/obligation3-store/', patterns: ['person-in-prose'], reason: 'retrieval-test user persona in fixture unit bodies' },
+
+  // DC-<n> is load-bearing PRODUCT GRAMMAR: metrics-detectors' CITATION_RE,
+  // classify-turns' structured-id extraction, analyze-retrieval-skip's
+  // high-signal-token check, and compact-project's `**DC-<n>: Label**`
+  // PROJECT.md decision-entry format all match it literally. The six files
+  // below carry bare DC tokens ONLY as fixture vectors that exercise that
+  // grammar (fictional ids, term-matching inputs, entry-format fixtures,
+  // prefix-collision falsifiers) — renaming them would weaken or silently
+  // bypass the branches under test. Provenance-style DC refs everywhere in
+  // tests/ were rewritten; each entry covers vectors only.
+  { file: 'tests/scripts/classify-turns.test.mjs', patterns: ['dc-reference'], reason: 'structured-id extraction and prefix-collision vectors (extractAskedTerm/containsTerm)' },
+  { file: 'tests/scripts/analyze-retrieval-skip.test.mjs', patterns: ['dc-reference'], reason: 'retrieval-term vectors in transcript fixtures' },
+  { file: 'tests/scripts/audit-memory-boundary.test.mjs', patterns: ['dc-reference'], reason: 'retrieval-term vectors in memory-boundary fixtures' },
+  { file: 'tests/scripts/metrics-detectors.test.mjs', patterns: ['dc-reference'], reason: 'CITATION_RE extraction vectors' },
+  { file: 'tests/scripts/compact-project.test.mjs', patterns: ['dc-reference'], reason: 'the compactor parses **DC-<n>: Label** entries; fixtures must carry that shape' },
+  { file: 'tests/scripts/user-authorship-boundary.test.mjs', patterns: ['dc-reference'], reason: 'PROJECT.md decision-entry format fixtures' },
 ];
 
 function isAllowed(relPath, patternName) {
