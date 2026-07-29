@@ -75,7 +75,7 @@ test('the recorded canary names the session that wrote it and starts unconsumed'
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('the canary side file is owner-only', () => {
+test('the canary side file is owner-only', { skip: process.platform === 'win32' ? 'POSIX mode bits are not enforceable on Windows' : false }, () => {
   const { home, cwd, memPath } = ws();
   try {
     const r = writeCanary({ home, cwd, workspaceId: 'w1', memoryPath: memPath });

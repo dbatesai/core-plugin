@@ -79,6 +79,21 @@ function gitRun(args, cwd) {
  * @param {string} [opts.filesRepo]   override files repo path (for testing)
  * @param {string} [opts.expectedRemote] override expected remote URL (for testing)
  */
+
+/**
+ * Compare a declared remote with the one git reports. URL-shaped remotes
+ * (scheme:// or scp-like user@host:) compare exactly. Filesystem-path remotes
+ * compare with separators normalized (git stores Windows paths forward-slashed)
+ * and the drive letter case-folded.
+ */
+function remoteMatchesExpected(actual, expected) {
+  if (actual === expected) return true;
+  const urlish = (v) => /^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^[^/\\]+@[^/\\]+:/.test(v);
+  if (urlish(actual) || urlish(expected)) return false;
+  const norm = (v) => String(v).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => d.toLowerCase() + ':').replace(/\/+$/, '');
+  return norm(actual) === norm(expected);
+}
+
 export async function probe(opts = {}) {
   const observed_at = new Date().toISOString();
   const evidence = [];
@@ -187,7 +202,7 @@ export async function probe(opts = {}) {
   } else {
     const actualRemote = remoteResult.stdout;
     if (expectedRemote) {
-      const remoteMatches = actualRemote === expectedRemote;
+      const remoteMatches = remoteMatchesExpected(actualRemote, expectedRemote);
       evidence.push({
         source: 'git-remote',
         value: { actual: actualRemote, expected: expectedRemote, matches: remoteMatches },

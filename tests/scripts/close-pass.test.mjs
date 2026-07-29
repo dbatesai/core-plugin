@@ -10,7 +10,7 @@ import {
   detectCloseState, beginClose, recordOp, releaseLock, finishClose, CLOSE_OPS,
   certifyManualClose, readCloseReceipt, shouldEnqueueClose,
 } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'close-pass.mjs');

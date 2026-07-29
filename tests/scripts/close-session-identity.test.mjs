@@ -107,7 +107,7 @@ test('ID-03 [oracle 1] a manual close writes a terminal receipt that reads back'
   assert.equal(got.summary_sha256, 'a'.repeat(64));
 });
 
-test('ID-04 receipts are owner-only on disk', () => {
+test('ID-04 receipts are owner-only on disk', { skip: process.platform === 'win32' ? 'POSIX mode bits are not enforceable on Windows' : false }, () => {
   const store = freshStore();
   const o = opts(store);
   writeCloseReceipt(store, terminalReceipt(SESSION_A), o);
@@ -123,7 +123,7 @@ test('ID-05 [oracle 2] a closed session is never enqueued again', () => {
   const o = opts(store);
 
   assert.equal(
-    shouldEnqueueClose(store, { sessionId: SESSION_A, harness: 'claude-code' }, o),
+    shouldEnqueueClose(store, { sessionId: SESSION_A }, o),
     true,
     'first SessionEnd for an unclosed session must enqueue',
   );
@@ -131,7 +131,7 @@ test('ID-05 [oracle 2] a closed session is never enqueued again', () => {
   writeCloseReceipt(store, terminalReceipt(SESSION_A), o);
 
   assert.equal(
-    shouldEnqueueClose(store, { sessionId: SESSION_A, harness: 'claude-code' }, o),
+    shouldEnqueueClose(store, { sessionId: SESSION_A }, o),
     false,
     'THE BUG: a second SessionEnd for an already-closed session must NOT enqueue',
   );
@@ -184,7 +184,7 @@ test('ID-08 [oracle 4] a failed or partial close remains owed', () => {
     writeCloseReceipt(store, terminalReceipt(SESSION_A, status), o);
 
     assert.equal(
-      shouldEnqueueClose(store, { sessionId: SESSION_A, harness: 'claude-code' }, o),
+      shouldEnqueueClose(store, { sessionId: SESSION_A }, o),
       true,
       `a '${status}' close must remain owed and recoverable, never certified closed`,
     );
@@ -220,7 +220,7 @@ test('ID-09 runDeterministicClose writes receipt + summary and makes zero model 
 
   // and it must now dedup, end to end
   assert.equal(
-    shouldEnqueueClose(store, { sessionId: SESSION_A, harness: 'claude-code' }, o),
+    shouldEnqueueClose(store, { sessionId: SESSION_A }, o),
     false,
     'after a real deterministic close, the same session must not re-enqueue',
   );
@@ -239,7 +239,7 @@ test('ID-10 a partial-coverage deterministic close stays owed', () => {
 
   assert.equal(receipt.status, 'partial', 'partial coverage never certifies closed');
   assert.equal(
-    shouldEnqueueClose(store, { sessionId: SESSION_A, harness: 'claude-code' }, o),
+    shouldEnqueueClose(store, { sessionId: SESSION_A }, o),
     true,
     'a partial close must remain owed and recoverable',
   );

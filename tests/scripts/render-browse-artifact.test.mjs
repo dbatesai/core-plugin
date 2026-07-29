@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, cpSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname, basename, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { symlinkSync, realpathSync } from 'node:fs';
 
@@ -540,7 +540,7 @@ test('a project-controlled workspace id cannot redirect the receipt out of the o
   assert.equal(loc.workspaceId, null, 'a traversal id is not a workspace id');
   assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),
     'it falls back to the flagged location, never to a project-chosen path');
-  assert.ok(loc.receiptPath.startsWith(join(home, '.core') + '/'), 'and the receipt stays under the operational root');
+  assert.ok(loc.receiptPath.startsWith(join(home, '.core') + sep), 'and the receipt stays under the operational root');
 
   writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'legit-id' }));
   const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z' });

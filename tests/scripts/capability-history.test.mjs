@@ -286,7 +286,7 @@ test('appendRows: sequential writes under lock lose no history (two-writer proof
 
 // --- The history store is owner-only, and malformed rows are counted ---
 
-test('history file and directory are owner-only', () => {
+test('history file and directory are owner-only', { skip: process.platform === 'win32' ? 'POSIX mode bits are not enforceable on Windows' : false }, () => {
   const home = mkdtempSync(join(tmpdir(), 'ch-mode-'));
   try {
     const r = appendRows('w-mode', [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });

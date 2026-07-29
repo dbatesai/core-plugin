@@ -36,7 +36,7 @@
 import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve, sep } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { buildCloseRecord, renderCloseSummary } from './close-payload.mjs';
 import { trustedHome } from './trusted-home.mjs';
@@ -285,7 +285,7 @@ export function writeCloseReceipt(store, receipt, opts = {}) {
  * not consulted: it cannot name a session, so reading it here would silently
  * degrade the dedup back to per-project and reintroduce the duplicate close.
  */
-export function shouldEnqueueClose(store, { sessionId, harness = null } = {}, opts = {}) {
+export function shouldEnqueueClose(store, { sessionId } = {}, opts = {}) {
   const receipt = readCloseReceipt(store, sessionId, opts);
   if (!receipt) return true;
   return !CERTIFIED_STATUSES.has(receipt.status);

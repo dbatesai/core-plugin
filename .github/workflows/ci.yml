@@ -282,6 +282,10 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The parent-SHA regression falsifier materializes a historical
+          # release tree via git archive; a shallow clone cannot reach it.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
