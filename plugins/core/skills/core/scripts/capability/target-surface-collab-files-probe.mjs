@@ -91,6 +91,12 @@ function remoteMatchesExpected(actual, expected) {
   const urlish = (v) => /^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^[^/\\]+@[^/\\]+:/.test(v);
   if (urlish(actual) || urlish(expected)) return false;
   const norm = (v) => String(v).replace(/\\/g, '/').replace(/^([A-Za-z]):/, (m, d) => d.toLowerCase() + ':').replace(/\/+$/, '');
+  // A locally-resolvable path remote canonicalizes first — Windows 8.3 short
+  // names (RUNNER~1) and symlinked temp roots otherwise never compare equal.
+  const canon = (v) => { try { return realpathSync.native(String(v)); } catch { return null; } };
+  const ca = canon(actual);
+  const ce = canon(expected);
+  if (ca && ce) return norm(ca) === norm(ce);
   return norm(actual) === norm(expected);
 }
 

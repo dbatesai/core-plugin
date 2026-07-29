@@ -109,8 +109,11 @@ test('RC-06 [parent-SHA falsifier] a second SessionEnd for an already-closed ses
     assert.equal(spawnedClose(currentLog), false,
       'FIXED: the same repeat SessionEnd for an already-closed exact session must not re-spawn at the current tip');
   } finally {
-    rmSync(parentTree, { recursive: true, force: true });
-    rmSync(store, { recursive: true, force: true });
-    rmSync(idxDir, { recursive: true, force: true });
+    // Retried: the detached child can still hold the tree briefly on Windows
+    // (EBUSY on an in-use directory), and force alone does not wait it out.
+    const rm = (p) => rmSync(p, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    rm(parentTree);
+    rm(store);
+    rm(idxDir);
   }
 });
