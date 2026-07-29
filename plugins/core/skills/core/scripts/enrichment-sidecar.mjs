@@ -17,12 +17,21 @@ import {
 import { createHash } from 'node:crypto';
 import { basename, join, resolve } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { withFileLock } from './file-lock.mjs';
 import { parseFrontmatter } from './priority.mjs';
 
 export const ENRICHMENT_SCHEMA = 'core-enrichment-sidecar/1';
 
 export function enrichmentSidecarPath(store) {
   return join(resolve(store), '_memories', '_lib', 'enrichment-sidecar.json');
+}
+
+// The sidecar is one shared file every writer reads whole, mutates, and
+// replaces. Atomic replacement keeps the bytes intact but excludes nothing, so
+// the lock has to span the READ as well as the write or two writers each add a
+// record to their own stale snapshot and one of them disappears.
+export function enrichmentSidecarLockPath(store) {
+  return join(resolve(store), '_memories', '_lib', '.enrichment-sidecar.lock');
 }
 
 function sha256(bytes) {
@@ -85,12 +94,6 @@ export function writeEnrichment(store, {
   const [frontmatter] = parseFrontmatter(source.toString('utf8'));
   const unitId = String(frontmatter?.id || rel.split('/').pop().slice(0, -3));
   const sourceHash = sha256(source);
-  const sidecar = loadRawSidecar(root);
-  // An edited unit gets one current record. Old hash-keyed records for this unit
-  // are removed atomically; retrieval would ignore them either way.
-  for (const [key, record] of Object.entries(sidecar.records)) {
-    if (record?.unit_id === unitId || record?.source_path === rel) delete sidecar.records[key];
-  }
   const record = {
     unit_id: unitId,
     source_path: rel,
@@ -102,11 +105,22 @@ export function writeEnrichment(store, {
     paraphrases: paraphraseList,
     likely_questions: questionList,
   };
-  sidecar.records[sourceHash] = record;
+
   const path = enrichmentSidecarPath(root);
   mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
-  atomicWriteFileSync(path, `${JSON.stringify(sidecar, null, 2)}\n`);
-  try { chmodSync(path, 0o600); } catch { /* Windows/filesystem may not expose POSIX mode */ }
+  // Load, mutate, and replace under one lock — the read is inside it, because a
+  // snapshot taken outside the lock is already stale by the time it is written.
+  withFileLock(enrichmentSidecarLockPath(root), () => {
+    const sidecar = loadRawSidecar(root);
+    // An edited unit gets one current record. Old hash-keyed records for this unit
+    // are removed atomically; retrieval would ignore them either way.
+    for (const [key, prior] of Object.entries(sidecar.records)) {
+      if (prior?.unit_id === unitId || prior?.source_path === rel) delete sidecar.records[key];
+    }
+    sidecar.records[sourceHash] = record;
+    atomicWriteFileSync(path, `${JSON.stringify(sidecar, null, 2)}\n`);
+    try { chmodSync(path, 0o600); } catch { /* Windows/filesystem may not expose POSIX mode */ }
+  }, { retries: 80, retryDelayMs: 50 });
   return record;
 }
 
