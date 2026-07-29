@@ -36,7 +36,7 @@ function opts() {
   return { storageRoot: mkdtempSync(join(tmpdir(), 'close-hook-storage-')) };
 }
 
-test('HOOK-01 an unclosed session with real identity is enqueued', () => {
+test('HOOK-01 decideCloseAction returns enqueue for an unclosed session with real identity', () => {
   const store = freshStore();
   const d = decideCloseAction({ session_id: SESSION_A, reason: 'other', cwd: store }, { store }, opts());
 
@@ -44,7 +44,7 @@ test('HOOK-01 an unclosed session with real identity is enqueued', () => {
   assert.equal(d.sessionId, SESSION_A);
 });
 
-test('HOOK-02 [the bug] a session with a closed receipt is skipped', () => {
+test('HOOK-02 [the bug] decideCloseAction returns skip for a session with a closed receipt', () => {
   const store = freshStore();
   const o = opts();
   writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed' }, o);
@@ -56,7 +56,7 @@ test('HOOK-02 [the bug] a session with a closed receipt is skipped', () => {
     'the skip reason must name exact-session closure, not generic "nothing owed"');
 });
 
-test('HOOK-03 a distinct session still enqueues after another closed', () => {
+test('HOOK-03 decideCloseAction still returns enqueue for a distinct session after another closed', () => {
   const store = freshStore();
   const o = opts();
   writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed' }, o);
@@ -65,7 +65,7 @@ test('HOOK-03 a distinct session still enqueues after another closed', () => {
   assert.equal(d.action, 'enqueue');
 });
 
-test('HOOK-04 a failed prior close re-enqueues', () => {
+test('HOOK-04 decideCloseAction returns enqueue again after a failed prior close', () => {
   const store = freshStore();
   const o = opts();
   writeCloseReceipt(store, { session_id: SESSION_A, status: 'failed' }, o);
@@ -74,7 +74,7 @@ test('HOOK-04 a failed prior close re-enqueues', () => {
   assert.equal(d.action, 'enqueue', 'a failed close must remain recoverable');
 });
 
-test('HOOK-05 a missing session id degrades honestly, never synthesizes one', () => {
+test('HOOK-05 decideCloseAction degrades honestly on a missing session id, never synthesizes one', () => {
   const store = freshStore();
   for (const payload of [{ reason: 'other', cwd: store }, { session_id: '', reason: 'other', cwd: store }]) {
     const d = decideCloseAction(payload, { store }, opts());
@@ -84,7 +84,7 @@ test('HOOK-05 a missing session id degrades honestly, never synthesizes one', ()
   }
 });
 
-test('HOOK-06 transcript existence is not treated as evidence of work', () => {
+test('HOOK-06 decideCloseAction does not treat transcript existence as evidence of work', () => {
   const store = freshStore();
   const o = opts();
   writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed' }, o);
@@ -98,14 +98,14 @@ test('HOOK-06 transcript existence is not treated as evidence of work', () => {
   assert.equal(d.action, 'skip', 'a real transcript must not override a closed receipt');
 });
 
-test('HOOK-07 skip reasons are honored before any receipt work', () => {
+test('HOOK-07 decideCloseAction honors skip reasons before any receipt work', () => {
   const store = freshStore();
   const d = decideCloseAction({ session_id: SESSION_A, reason: 'resume', cwd: store }, { store }, opts());
   assert.equal(d.action, 'skip');
   assert.match(d.reason, /session-reason/);
 });
 
-test('HOOK-08 the enqueue decision carries the session through to argv', () => {
+test('HOOK-08 the decideCloseAction enqueue decision carries the session through to argv', () => {
   const store = freshStore();
   const d = decideCloseAction({ session_id: SESSION_A, reason: 'other', cwd: store }, { store }, opts());
 

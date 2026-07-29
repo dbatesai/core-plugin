@@ -11,7 +11,7 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const ROOT = join(REPO_ROOT, 'plugins', 'core');
 const read = (...p) => readFileSync(join(ROOT, ...p), 'utf8');
 
-test('startup: catch-up runs AFTER the edit-detection block (edit-detection-first crux)', () => {
+test('startup.md orders catch-up AFTER the edit-detection block (edit-detection-first crux)', () => {
   const s = read('skills', 'core', 'protocols', 'startup.md');
   const editDetect = s.indexOf('Run edit-detection on the files you read');
   const catchUp = s.indexOf('## Startup catch-up');
@@ -23,7 +23,7 @@ test('startup: catch-up runs AFTER the edit-detection block (edit-detection-firs
     'catch-up must explicitly state edit-detection-first');
 });
 
-test('finalize: every PROJECT.md write is edit-gated', () => {
+test('finalize SKILL.md states every PROJECT.md write is edit-gated, and names the kill switch', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
   assert.match(f, /every PROJECT\.md write is edit-gated/i, 'the control-surface rule must be stated');
   assert.match(f, /CORE_AUTO_CLOSE=0/, 'finalize must name the kill switch');
@@ -31,7 +31,7 @@ test('finalize: every PROJECT.md write is edit-gated', () => {
     'the spawned-agent close modes are gone — finalize must not document their env vars');
 });
 
-test('finalize: material capture is the close; the perspective critique lives in /refocus', () => {
+test('finalize and refocus SKILL.md split material capture from the perspective critique', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
   assert.match(f, /material capture/i, 'the close must name its capture step');
   assert.ok(!/Reflection Task/i.test(f), 'the old reflection-task machinery must be gone from the close');
@@ -64,7 +64,7 @@ test('hooks.json: SessionStart auto-invokes /core (the front half of self-runnin
     'SessionStart must point at session-start-hook.mjs');
 });
 
-test('session-start hook: injects the /core directive, honors the opt-out', () => {
+test('session-start-hook.mjs source carries the /core directive and the CORE_AUTOSTART opt-out', () => {
   const hook = read('skills', 'core', 'hooks', 'session-start-hook.mjs');
   assert.match(hook, /\/core/, 'must direct the agent to invoke /core');
   assert.match(hook, /CORE_AUTOSTART/, 'must carry the opt-out env var');
@@ -83,7 +83,7 @@ test('close hook: env suppression + kill switch + workspace trust + spawn pre-ch
   assert.match(hook, /detached: true/, 'child must be detached to survive session exit');
 });
 
-test('close hook spawns the DETERMINISTIC per-session close, NOT raw claude -p', () => {
+test('close-pass-hook.mjs source wires the spawn to close-pass.mjs process-request, never raw claude -p', () => {
   // Regression guard for the 2026-06-30 finding: a headless LLM narrated a close it never
   // marked. The hook must spawn a deterministic runner, never `claude -p` directly — that
   // would put the marker back at LLM discretion.
@@ -98,7 +98,7 @@ test('close hook spawns the DETERMINISTIC per-session close, NOT raw claude -p',
   assert.ok(!/spawn\(\s*['"]claude['"]/.test(hook), 'hook must NOT spawn claude directly — the runner owns that');
 });
 
-test('finalize: the automatic close is deterministic and zero-model; no envelope machinery remains', () => {
+test('finalize SKILL.md states the automatic close is deterministic and zero-model, with no envelope machinery left', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
   assert.match(f, /deterministic and zero-model/i, 'finalize must state what the automatic close is');
   assert.ok(!f.includes('CORE_CLOSE_ENVELOPE'), 'the envelope signal is gone');
@@ -106,14 +106,14 @@ test('finalize: the automatic close is deterministic and zero-model; no envelope
     'auto-close receipts must be framed as recovery evidence');
 });
 
-test('finalize: bounded resume summary, never sourced from prior summaries', () => {
+test('finalize SKILL.md states the summary bound and the never-from-prior-summaries rule', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
   assert.match(f, /400 words/, 'the summary bound must be stated');
   assert.match(f, /never from prior summaries/i, 'summaries must not be composed from prior summaries');
   assert.match(f, /Record op `session-summary`/, 'the summary op must be recorded under its real name');
 });
 
-test('finalize: certifies the exact session and records every op it runs', () => {
+test('finalize SKILL.md spells out the certify call and a record line for every op', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
   assert.match(f, /close-pass\.mjs certify/, 'the manual close must certify its exact session receipt');
   assert.match(f, /Record op `material-capture`/, 'per-op trail: material capture');
@@ -148,7 +148,7 @@ test('the close op list is the bounded four — maintenance ops must not creep b
   }
 });
 
-test('finalize does not run maintenance or analytics scripts', () => {
+test('finalize SKILL.md invokes no maintenance or analytics script, and points at where that work moved', () => {
   const f = read('skills', 'finalize', 'SKILL.md');
   for (const script of ['decorate-graph.mjs', 'maintenance-run.mjs', 'demote-moves.mjs', 'compact-project.mjs', 'classify-turns.mjs', 'metrics-rollup.mjs', 'bitemporal.mjs', 'orphan-detector.mjs']) {
     assert.ok(!f.includes(script), `finalize must not invoke ${script} — that work moved out of the close`);
@@ -175,7 +175,7 @@ test('export-obsidian: fully retired — no shipped skill, no lingering command 
 // data is indexed and processed, not just infer it from close-pass bookkeeping). These guard
 // the same "op is really wired, not a phantom string" invariant as the decorate-graph tests
 // above, applied to the new unconditional startup step rather than the close-time wiring.
-test('startup: decoration + index refresh backstop runs for real (not --dry-run/--check), guarded like every script call', () => {
+test('startup.md invokes the decoration + index refresh backstop for real (not --dry-run/--check), guarded like every script call', () => {
   const s = read('skills', 'core', 'protocols', 'startup.md');
   assert.match(s, /node "\$\{CORE_ROOT\}\/skills\/core\/scripts\/decorate-graph\.mjs" <project> \\/,
     'startup must invoke decorate-graph.mjs directly, not just describe it');
@@ -191,7 +191,7 @@ test('startup: decoration + index refresh backstop runs for real (not --dry-run/
     'the decoration/index calls must be guarded exactly like every other script call in this file');
 });
 
-test("startup: the backstop step runs AFTER edit-detection and before startup catch-up (Hale's authorship-ordering finding, 2026-07-22)", () => {
+test("startup.md orders the backstop AFTER edit-detection and before startup catch-up (Hale's authorship-ordering finding, 2026-07-22)", () => {
   // Was: 'the backstop step sits right after the integrity probe and before the
   // retrieval ladder' — that WAS the bug. Hale's repro (mailbox
   // "723c24a-authorship-ordering-repro", 2026-07-22): running decoration before
