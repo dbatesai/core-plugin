@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review-batch labels, issue ids, and decision-lineage references from shipped comments,
   tests, and the CHANGELOG. The dev-leakage guard's allowlist mechanism now scopes exemptions
   to exact literal tokens instead of a whole file+pattern, so legitimate short product
-  vocabulary (the P0-P3 retrieval-policy enum) can be allowlisted without hiding an unrelated
+  vocabulary (the retrieval-policy tier enum) can be allowlisted without hiding an unrelated
   internal label sharing the same file.
 
 ## [3.15.0] — 2026-07-29
