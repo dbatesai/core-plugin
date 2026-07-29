@@ -94,13 +94,13 @@ test('tool extraction pending (Codex) → UNKNOWN, never a false skip', () => {
   assert.equal(r.skips.length, 0);
 });
 
-test('multiple turns: one skip then a load, later term-turn is clean', () => {
+test('multiple turns: each turn is judged on its own interval', () => {
   const events = [
-    userT(1, 'what is IGM?'),          // skip — no access yet
+    userT(1, 'what is IGM?'),          // skip — answered with nothing read in between
     asstT(2, 'igm answer'),
-    tool(3, 'Grep', '_memories/ DC-64'),
-    userT(4, 'and DC-64?'),
-    asstT(5, 'dc-64 answer'),          // clean — store reached at idx 3
+    userT(3, 'and DC-64?'),
+    tool(4, 'Grep', '_memories/ DC-64'),
+    asstT(5, 'dc-64 answer'),          // clean — store reached inside this interval
   ];
   const r = classifyRetrievalSkips({ events, terms: TERMS });
   assert.equal(r.skips.length, 1);
@@ -166,4 +166,47 @@ test('formatReport: human-readable, names the candidates and the honesty caveat'
   const s = formatReport(report);
   assert.match(s, /IGM/);
   assert.match(s, /candidate/i); // honest framing — candidates, not verdicts
+});
+
+// --- The judgment interval is the question→answer window, not the whole session ---
+
+test('a store access BEFORE the question does not clear a later turn', () => {
+  const terms = new Set(['DC-64']);
+  const r = classifyRetrievalSkips({
+    events: [
+      tool(0, 'Grep', 'grep -r x _memories/'), // an earlier, unrelated lookup
+      userT(1, 'what did we decide in DC-64?'),
+      asstT(2, 'DC-64 answer'),                // answered cold — nothing read in between
+    ],
+    terms,
+  });
+  assert.equal(r.status, 'SKIPS-FOUND', 'an access that preceded the question is not evidence for it');
+  assert.equal(r.skips.length, 1);
+  assert.equal(r.skips[0].userIdx, 1);
+});
+
+test('a store access inside the question→answer interval clears the turn', () => {
+  const terms = new Set(['DC-64']);
+  const r = classifyRetrievalSkips({
+    events: [
+      userT(0, 'what did we decide in DC-64?'),
+      tool(1, 'Grep', 'grep -r DC-64 _memories/'),
+      asstT(2, 'DC-64 answer'),
+    ],
+    terms,
+  });
+  assert.equal(r.status, 'CLEAN');
+});
+
+test('an access after the answer does not clear the turn it followed', () => {
+  const terms = new Set(['DC-64']);
+  const r = classifyRetrievalSkips({
+    events: [
+      userT(0, 'what did we decide in DC-64?'),
+      asstT(1, 'DC-64 answer'),
+      tool(2, 'Grep', 'grep -r DC-64 _memories/'), // checked only afterwards
+    ],
+    terms,
+  });
+  assert.equal(r.status, 'SKIPS-FOUND');
 });

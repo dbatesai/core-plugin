@@ -170,9 +170,13 @@ export function validateRetrievalLogRow(ev) {
 
 // ---------- Date helpers ----------
 
-function _todayUTC() {
-  const n = new Date();
-  return new Date(Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()));
+/**
+ * Midnight of a moment's UTC calendar day. Session directory names are UTC-labeled, so
+ * the bound they are compared against must be read with UTC getters — local getters
+ * shift the whole window by a day for anyone not running on UTC.
+ */
+export function utcDayStart(at = new Date()) {
+  return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
 }
 
 function _parseSessionDate(name) {
@@ -188,7 +192,7 @@ export function loadEvents(projectRoot, { sinceDays = DEFAULT_SINCE_DAYS, allTim
   let entries;
   try { entries = readdirSync(sessionsDir); } catch { return Object.assign([], { rejected: [] }); }
 
-  const t = today || _todayUTC();
+  const t = today || utcDayStart();
   // A non-finite sinceDays (e.g. `--since-days abc` → NaN) would make the cutoff
   // NaN and silently include ALL events. Fall back to the default window instead.
   const days = Number.isFinite(sinceDays) ? sinceDays : DEFAULT_SINCE_DAYS;
@@ -530,7 +534,7 @@ export function main(argv) {
 
   const today = todayArg
     ? new Date(`${todayArg}T00:00:00Z`)
-    : _todayUTC();
+    : utcDayStart();
   const events = loadEvents(root, { sinceDays, allTime, today });
   const report = buildReport(events);
 

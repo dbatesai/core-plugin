@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  buildReport, formatReport, loadEvents, validateRetrievalLogRow,
+  buildReport, formatReport, loadEvents, validateRetrievalLogRow, utcDayStart,
 } from '../../plugins/core/skills/core/scripts/analyze-retrieval-quality.mjs';
 
 test('telemetry-only rows do not count as retrieval proof', () => {
@@ -434,3 +434,15 @@ test('formatReport: an all-rejected corpus (zero valid events) still names the r
   assert.match(text, /Rejected malformed rows: 1/);
   assert.match(text, /NOT zero valid events/);
 }));
+
+// --- UTC-labeled day bounds are computed with UTC getters ---
+
+test('the UTC day bound is the UTC calendar day, not the local one', () => {
+  // A machine east of UTC late in its local day is already on the NEXT UTC day; a
+  // machine west of UTC early in its local day is still on the PREVIOUS one. Feeding
+  // local getters into Date.UTC labels either as "UTC" and shifts the whole window.
+  const at = new Date('2026-07-28T23:30:00.000Z');
+  assert.equal(utcDayStart(at).toISOString(), '2026-07-28T00:00:00.000Z');
+  const early = new Date('2026-07-28T00:30:00.000Z');
+  assert.equal(utcDayStart(early).toISOString(), '2026-07-28T00:00:00.000Z');
+});

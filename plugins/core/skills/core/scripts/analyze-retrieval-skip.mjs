@@ -17,7 +17,8 @@
  *  - It abstains (UNKNOWN) when it cannot see tool calls (Codex tool extraction pending)
  *    — it never claims "not reached" when it simply cannot observe access.
  *  - A skip means: between the question and its answer, NO tool touched a CORE surface.
- *    A store access anywhere up to and including the answer clears the turn.
+ *    Only an access INSIDE that interval clears the turn — an earlier lookup answered a
+ *    different question, and a later one came after the answer was already given.
  *
  * Consumes the read-transcript adapter verb (harness paths/schemas stay there).
  * Wired into /finalize + /process-memory as a session-closeout signal (review: the
@@ -168,8 +169,10 @@ export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = 
     // find the next assistant text turn (the answer)
     const answer = ordered.slice(i + 1).find((e) => e.kind === 'text' && e.role === 'assistant');
     if (!answer) continue; // unanswered — nothing to judge
-    const storeReachedBeforeAnswer = coreAccessIdxs.some((idx) => idx <= answer.idx);
-    if (!storeReachedBeforeAnswer) {
+    // The interval of judgment is this question to its answer. An access outside it is
+    // evidence for some other turn, so it cannot clear this one.
+    const storeReachedInInterval = coreAccessIdxs.some((idx) => idx > ev.idx && idx <= answer.idx);
+    if (!storeReachedInInterval) {
       skips.push({ term: hits[0], terms: hits, userIdx: ev.idx, answerIdx: answer.idx, snippet: String(ev.text).slice(0, 100) });
     }
   }
