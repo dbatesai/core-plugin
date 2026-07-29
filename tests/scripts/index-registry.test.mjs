@@ -17,7 +17,7 @@ function spawnAsync(args) {
   });
 }
 import {
-  addWorkspace, updateWorkspace, removeWorkspace, touchWorkspace, readLastActive,
+  addWorkspace, updateWorkspace, removeWorkspace, touchWorkspace, readLastActive, defaultCoreDir,
 } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import { checkFork } from '../../plugins/core/skills/core/scripts/workspace-fork-check.mjs';
 
@@ -154,4 +154,24 @@ test('checkFork registry entry carries no last_active field (moved to the per-wo
   assert.ok(!('last_active' in entry), 'no last_active field written to the shared registry');
   assert.equal(readLastActive(coreDir, r.new_id).length > 0, true, 'per-workspace last-active readable');
   rmSync(root, { recursive: true, force: true });
+});
+
+test('a project-controlled workspace id cannot build a path outside the operational root', () => {
+  const coreDir = setup();
+  const traversal = join('..', '..', '..', 'etc');
+  assert.throws(() => addWorkspace(coreDir, { workspace_id: traversal, name: 'X', path: '/p' }),
+    (e) => e.code === 'UNSAFE_WORKSPACE_ID', 'a traversal id must never reach the registry');
+  assert.throws(() => touchWorkspace(coreDir, traversal, '2026-07-14T00:00:00Z'),
+    (e) => e.code === 'UNSAFE_WORKSPACE_ID', 'a traversal id must never reach a per-workspace path join');
+  assert.equal(readLastActive(coreDir, traversal), null, 'and the reader resolves nothing for it');
+  // No write landed anywhere outside coreDir/workspaces.
+  assert.equal(existsSync(join(coreDir, 'workspaces')), false);
+  assert.deepEqual(readIdx(coreDir), []);
+  rmSync(coreDir, { recursive: true, force: true });
+});
+
+test('defaultCoreDir fails closed when the trusted OS-account home is unavailable', () => {
+  assert.throws(() => defaultCoreDir({ resolve: () => null }),
+    (e) => e.code === 'NO_TRUSTED_HOME',
+    'the registry must not fall back to an environment-controlled home');
 });

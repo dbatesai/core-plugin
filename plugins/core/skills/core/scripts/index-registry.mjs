@@ -28,15 +28,19 @@
 
 import { readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
-import { trustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, assertSafeWorkspaceId, isSafeWorkspaceId } from './trusted-home.mjs';
 
-export function defaultCoreDir() {
-  return join(trustedHome() || homedir(), '.core');
+/**
+ * The operational root, anchored to the OS-account home. An unresolvable
+ * trusted home throws: the registry is a trust decision, and homedir() is the
+ * environment-controlled value that anchor exists to avoid.
+ */
+export function defaultCoreDir(opts) {
+  return join(requireTrustedHome(opts), '.core');
 }
 
 const lockPath = (coreDir) => join(coreDir, 'index.lock');
@@ -75,6 +79,7 @@ export function mutateIndex(coreDir, mutator) {
 
 export function addWorkspace(coreDir, entry) {
   if (!entry || !entry.workspace_id) throw new Error('addWorkspace: entry.workspace_id required');
+  assertSafeWorkspaceId(entry.workspace_id);
   return mutateIndex(coreDir, (entries) => {
     if (entries.some(e => e.workspace_id === entry.workspace_id)) {
       throw new Error(`addWorkspace: id already registered: ${entry.workspace_id}`);
@@ -103,12 +108,15 @@ export function removeWorkspace(coreDir, workspaceId) {
 
 // ---------- last_active (per-workspace single-owner file; no lock needed) ----------
 
-const lastActivePath = (coreDir, id) => join(coreDir, 'workspaces', id, 'last-active');
+// The id arrives from project-controlled workspace.json, so it is validated as a
+// single directory segment BEFORE it can contribute to a path under ~/.core.
+const workspaceDir = (coreDir, id) => join(coreDir, 'workspaces', assertSafeWorkspaceId(id));
+const lastActivePath = (coreDir, id) => join(workspaceDir(coreDir, id), 'last-active');
 
 /** Stamp the workspace's last-active time. Full overwrite of a single-owner file. */
 export function touchWorkspace(coreDir, workspaceId, when = new Date().toISOString()) {
   const dir = coreDir || defaultCoreDir();
-  mkdirSync(join(dir, 'workspaces', workspaceId), { recursive: true });
+  mkdirSync(workspaceDir(dir, workspaceId), { recursive: true });
   atomicWriteFileSync(lastActivePath(dir, workspaceId), when + '\n');
   return { workspace_id: workspaceId, last_active: when };
 }
@@ -116,6 +124,7 @@ export function touchWorkspace(coreDir, workspaceId, when = new Date().toISOStri
 /** Read last-active: per-workspace file first, index.json field as the one-release tolerant fallback. */
 export function readLastActive(coreDir, workspaceId) {
   const dir = coreDir || defaultCoreDir();
+  if (!isSafeWorkspaceId(workspaceId)) return null;
   try { return readFileSync(lastActivePath(dir, workspaceId), 'utf8').trim() || null; } catch { /* fall back */ }
   try {
     const entry = readIndex(dir).find(e => e.workspace_id === workspaceId);

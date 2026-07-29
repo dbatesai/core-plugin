@@ -526,3 +526,26 @@ rtest('CLI: stdout is exactly one JSON manifest with the stable shape', () => {
     assert.ok(existsSync(manifest.receipt_path), 'receipt written by the CLI run');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+const { generationReceiptLocation } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
+
+test('a project-controlled workspace id cannot redirect the receipt out of the operational root', () => {
+  const home = mkdtempSync(join(tmpdir(), 'receipt-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'receipt-project-'));
+  const attempt = ['..', '..', '..', 'tmp', 'stolen'].join('/');
+  writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: attempt }));
+
+  const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z' });
+  assert.equal(loc.workspaceId, null, 'a traversal id is not a workspace id');
+  assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),
+    'it falls back to the flagged location, never to a project-chosen path');
+  assert.ok(loc.receiptPath.startsWith(join(home, '.core') + '/'), 'and the receipt stays under the operational root');
+
+  writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'legit-id' }));
+  const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z' });
+  assert.equal(ok.workspaceId, 'legit-id');
+  assert.equal(ok.receiptDir, join(home, '.core', 'workspaces', 'legit-id', 'artifact-receipts'));
+
+  rmSync(home, { recursive: true, force: true });
+  rmSync(project, { recursive: true, force: true });
+});

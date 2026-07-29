@@ -28,6 +28,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { isSafeWorkspaceId } from './trusted-home.mjs';
 
 export const PUBLISH_RECEIPT_SCHEMA_VERSION = '1.0.0';
 export const PUBLISH_STATUSES = ['declined', 'failed', 'published-private'];
@@ -77,10 +78,16 @@ export function validateGenerationReceipt(gen, genPath) {
 
 // ---------- generation-receipt location ----------
 
+/**
+ * The workspace id from the project's own workspace.json. It is
+ * project-controlled, so an id that does not name a single directory segment is
+ * treated as absent — the receipt lands in the flagged fallback rather than at a
+ * path the project chose.
+ */
 export function readWorkspaceId(projectDir) {
   try {
     const ws = JSON.parse(readFileSync(join(resolve(projectDir), 'workspace.json'), 'utf8'));
-    return typeof ws.workspace_id === 'string' && ws.workspace_id.trim() ? ws.workspace_id : null;
+    return isSafeWorkspaceId(ws.workspace_id) ? ws.workspace_id : null;
   } catch { return null; }
 }
 
