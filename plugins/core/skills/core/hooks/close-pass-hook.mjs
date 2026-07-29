@@ -3,26 +3,29 @@
  * close-pass-hook.mjs — SessionEnd hook entry for self-managed session close.
  *
  * Fires once at session end (NOT per-turn — that's why it's SessionEnd, not Stop: Stop fires
- * after every agent response). When the session did real work or owes maintenance, it spawns a
- * detached `claude -p "/finalize"` close agent that discharges the owed work in the background,
- * so the user exits instantly and the close happens itself. If SessionEnd never fires (hard
+ * after every agent response). When the exact session still owes a close, it spawns the
+ * deterministic runner — `node scripts/close-pass.mjs process-request <store> --session <id>`
+ * — detached, so the user exits instantly and the close discharges in the background. No
+ * model runs: the child is a Node process with a fixed argument list, not an agent, so its
+ * cost and its effects are both bounded by that runner. If SessionEnd never fires (hard
  * terminal kill), the startup catch-up (startup.md, close-pass.mjs detectCloseState) is the
  * backstop — the marker shows incomplete and next startup discharges the remainder.
  *
- * Four guards:
- *   1. Recursion guard — the spawned `claude -p` fires its OWN SessionEnd when it finishes.
- *      We export CORE_CLOSE_PASS_ACTIVE=1 into its env; this hook sees that and no-ops, so the
- *      close agent never spawns a close agent.
+ * Five guards, in the order they run:
+ *   1. Environment suppression — CORE_CLOSE_PASS_ACTIVE=1 no-ops the hook, so a close running
+ *      inside a session cannot trigger another one.
  *   2. Kill switch — CORE_AUTO_CLOSE=0 halts the auto-discharge entirely. Covers the
  *      one writer that touches PROJECT.md every close.
- *   3. Spawn pre-check — shouldSpawn() gates the agent: a trivial read-only session
- *      that owes nothing never pays for a close agent.
- *   4. Fail-open — a session-close hook must never block or error the user's exit. Any failure
+ *   3. Workspace trust — the cwd is canonicalized and must resolve to a workspace registered
+ *      in ~/.core; a bare `_memories/` directory authorizes nothing.
+ *   4. Exact-session receipt — decideCloseAction() skips a session that has no usable identity
+ *      or already holds a close receipt, so one session is closed at most once.
+ *   5. Fail-open — a session-close hook must never block or error the user's exit. Any failure
  *      swallows to exit 0; the startup catch-up covers a missed close.
  *
  * Detachment, not the hook's async flag, is what keeps the child alive: spawn detached +
- * unref() so `claude -p` survives this session's exit (the nohup equivalent). We don't run the
- * close synchronously — that would make the user wait to exit.
+ * unref() so the runner survives this session's exit (the nohup equivalent). The close does
+ * not run synchronously — that would make the user wait to exit.
  *
  * Ships with the plugin as prescriptive code; .mjs only. Claude Code only — Codex has no exit
  * hook (harnesses/codex.md §close-pass drop); there, discharge is startup-catch-up-only.
@@ -43,8 +46,7 @@ const SKIP_REASONS = new Set(['resume']);
 
 
 function main() {
-  // Guard 1 — recursion: we're inside the spawned close agent's own SessionEnd. No-op.
-  // (Logging this is useful — it proves the child's SessionEnd fired AND was suppressed.)
+  // Guard 1 — environment suppression: a close already owns this environment. No-op.
   if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
     logHookEvent({ hook: 'session-end', action: 'skip', reason: 'recursion-guard' });
     return 0;
@@ -76,7 +78,7 @@ function main() {
     return 0;
   }
 
-  // Guard 3 — the exact-session decision (pure; see decideCloseAction below).
+  // Guard 4 — the exact-session decision (pure; see decideCloseAction below).
   const decision = decideCloseAction(payload, { store });
   if (decision.action === 'skip') {
     logHookEvent({ hook: 'session-end', action: 'skip', reason: decision.reason, cwd: store });
@@ -105,18 +107,15 @@ function main() {
  * registry read, no logging — so the decision is testable without a real
  * workspace or a child process.
  *
- * Two things changed from the behavior this replaces:
+ * The decision is keyed on the session id from the payload, and the authority
+ * is the exact-session close receipt: a session that already holds one is
+ * skipped, so a manual finalize is never followed by a second close moments
+ * later. The presence of a transcript file is not evidence that work is owed —
+ * every real session produces one.
  *
- * 1. The session id is USED. It arrives on every SessionEnd payload and was
- *    previously discarded, which is why a manual finalize could be followed by
- *    a second reasoning close for the same session moments later.
- * 2. "A transcript file exists" is no longer evidence that work is owed. Every
- *    real session produces a transcript, so that gate was always true; the
- *    exact-session receipt is the authoritative answer instead.
- *
- * A payload with no usable identity SKIPS rather than synthesizing one. A close
- * that cannot be deduplicated is the failure being removed, so running it
- * anyway would preserve the defect. Startup catch-up recovers those sessions.
+ * A payload with no usable identity SKIPS rather than synthesizing one: a close
+ * that cannot be deduplicated is the failure this gate exists to prevent.
+ * Startup catch-up recovers those sessions.
  */
 export function decideCloseAction(payload = {}, { store } = {}, opts = {}) {
   const reason = String(payload.reason || '');
@@ -143,7 +142,7 @@ export function decideCloseAction(payload = {}, { store } = {}, opts = {}) {
   return { action: 'enqueue', reason: 'owed', sessionId, args };
 }
 
-// Only run as the hook entry — importing this module (e.g. for buildChildEnv in tests) must
+// Only run as the hook entry — importing this module (tests import decideCloseAction) must
 // NOT execute main() / process.exit().
 const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
 if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
