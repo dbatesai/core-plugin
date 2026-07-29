@@ -508,7 +508,7 @@ This release folds in the v2.7 work that was never tagged — capability history
 ## [2.5.0] — 2026-05-27
 
 ### Added
-- `skills/core/scripts/metrics-init.mjs` (266 lines) — T1 storage scaffold for metrics & observability v1. Idempotent per-workspace setup; library + CLI entry. Behavior per the converged design from collab `design-and-pressuretest-t3-stop-hook-with` (closed 2026-05-26).
+- `skills/core/scripts/metrics-init.mjs` (266 lines) — T1 storage scaffold for metrics & observability v1. Idempotent per-workspace setup; library + CLI entry.
   - Non-Windows: default storage at `<project>/_metrics/{traces,payloads,queue}/`.
   - Windows-with-OneDrive: detection via path-substring + `.ini`-scan (UTF-16LE; Personal + Business<N> account dirs); redirects to `~/AppData/Local/core-metrics/<workspace-id>/`. Method (a) catches the common Documents-redirection case; method (c) catches non-default sync setups.
   - Detection-method results logged to `~/.core/workspaces/<id>/metrics/scaffold.log` for forensic trail. Resolved storage path pinned to sibling `storage-path.txt` for write-time consumers.

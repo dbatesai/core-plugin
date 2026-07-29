@@ -100,7 +100,7 @@ export const PATTERNS = [
     re: /brine-wren-cedar-axiom-inlet-grove/g,
     appliesTo: () => true,
   },
-  // --- personal email, any form, whole tree (Antigravity's 868915d review gap) ---
+  // --- personal email, any form, whole tree ---
   {
     name: 'personal-email',
     klass: 'personal-identity',

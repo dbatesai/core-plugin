@@ -216,7 +216,7 @@ test('citation- and path-shaped edge targets are external-ref, not dangling-edge
 test('isExternalRef discriminates external refs from genuine unit ids', () => {
   assert.equal(isExternalRef('feedback_state_is_current_truth'), true);
   assert.equal(isExternalRef('project_bblens_tmobile_wrapper'), true);
-  assert.equal(isExternalRef('reference_keel_handoff_channels'), true);
+  assert.equal(isExternalRef('reference_vendor_handoff_channels'), true);
   assert.equal(isExternalRef('MemoryBank (arxiv.org/abs/2305.10250)'), true);
   assert.equal(isExternalRef('core-skill/skills/core/scripts/README.md'), true);
   // genuine unit-id shapes must NOT be masked — these still dangle if missing

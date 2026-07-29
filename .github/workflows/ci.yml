@@ -52,11 +52,9 @@ jobs:
         run: |
           node -e '
             const fs = require("fs");
-            // Both harness hook manifests: Claude Codes hooks/hooks.json AND
-            // Codex hooks/hooks-codex.json (added 2026-07-17, loop iteration
-            // 11 — this check previously hardcoded only the Claude file, so
-            // the new Codex manifest had zero CI schema coverage. Caught by
-            // self-audit before it shipped).
+            // Both harness hook manifests: Claude Code's hooks/hooks.json AND
+            // Codex hooks/hooks-codex.json — hardcoding a single file would
+            // leave the other harness's manifest with zero CI schema coverage.
             const FILES = ["plugins/core/hooks/hooks.json", "plugins/core/hooks/hooks-codex.json"];
             const KNOWN = ["UserPromptSubmit","PreToolUse","PostToolUse","SessionStart","SessionEnd",
                            "PostCompact","PreCompact","Stop","SubagentStop","Notification"];

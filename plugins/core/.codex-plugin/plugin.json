@@ -23,7 +23,7 @@
   "interface": {
     "displayName": "CORE",
     "shortDescription": "Project intelligence with a critic baked in",
-    "longDescription": "CORE is a single agent that knows your project across sessions. It maintains a unit-based memory architecture in your project folder, renders a six-section project synthesis (state, people, moves, decisions and risks), surfaces decisions and risks proactively, and challenges overconfidence. When stakes warrant, it reaches for multi-agent adversarial analysis with explicit anti-convergence discipline. Ships with nine companion utilities (/finalize, /process-memory, /register-sources, /vibecheck, /configure-project, /metrics, /metrics-package, /memory-view, /self-test) that CORE invokes internally and that you can also call directly.",
+    "longDescription": "CORE is a single agent that knows your project across sessions. It maintains a unit-based memory architecture in your project folder, renders a six-section project synthesis (state, people, moves, decisions and risks), surfaces decisions and risks proactively, and challenges overconfidence. When stakes warrant, it reaches for multi-agent adversarial analysis with explicit anti-convergence discipline. Ships with eight companion utilities (/finalize, /refocus, /process-memory, /register-sources, /vibecheck, /configure-project, /metrics, /memory-view) that CORE invokes internally and that you can also call directly, plus one deprecation shim: /orient.",
     "developerName": "David Bates",
     "category": "Productivity",
     "capabilities": [

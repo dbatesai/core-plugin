@@ -73,7 +73,7 @@ What Codex has instead, and its exact bound: the user runs `/finalize` explicitl
 
 ## hook-register
 
-**DROPPED for pre-execution blocking** on Codex pending empirical validation.
+**DROPPED for pre-execution blocking** on Codex — pre-execution blocking semantics are not documented for this harness and have not been validated on a live install.
 
 Codex's public docs detail thread-lifecycle and turn-lifecycle contributor hooks but do not detail pre-execution blocking semantics. The skill-edit PWD guard (and any other hook expected to block a tool call before execution) becomes agent-self-discipline on Codex — the agent reads the PWD requirement from `protocols/data-storage.md` and complies; no harness-level enforcement.
 

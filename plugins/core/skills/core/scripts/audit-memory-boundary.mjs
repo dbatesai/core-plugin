@@ -101,7 +101,7 @@ export function auditMemoryBoundary({ nativeEntries = [], coreTerms = new Set(),
     scope: 'current project only — audits this project\'s native memory against this project\'s CORE store; cross-project contamination (Project A facts in Project B\'s MEMORY.md) is out of scope and needs a separate all-projects scan',
     nativeOnly,
     stats: { nativeTotal: nativeEntries.length, sampled: sample.length, withTerms: sample.filter((e) => e.terms && e.terms.length).length, nativeOnly: nativeOnly.length },
-    conflict_detection: 'deferred — see design Q3 (too noisy without a stronger matcher)',
+    conflict_detection: 'not performed — too noisy without a stronger matcher',
   };
 }
 
@@ -126,7 +126,7 @@ function loadCoreTerms(projectRoot) {
 export function formatReport(report) {
   const lines = [`memory-boundary: ${report.nativeOnly.length} native-only candidate(s) / ${report.stats.sampled} sampled of ${report.stats.nativeTotal} native entries`];
   for (const c of report.nativeOnly) lines.push(`  - [${c.terms.join(', ')}] ${c.text}\n      ${c.note}`);
-  lines.push('  (read-only; native-only ≠ missing unit — could be a deleted fact. conflict detection deferred. review before any graduation.)');
+  lines.push('  (read-only; native-only ≠ missing unit — could be a deleted fact. conflict detection not performed. review before any graduation.)');
   return lines.join('\n');
 }
 
