@@ -37,7 +37,7 @@
  * build on.
  */
 
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
@@ -59,13 +59,42 @@ export function projectCachePath(projectDir) {
   return join(resolve(projectDir), '_memories', '_lib', 'state-cache.json');
 }
 
+/** Three distinct answers, because rebuilding damage as absence destroys evidence. */
+export const CACHE_CLEAN = 'clean';
+export const CACHE_ABSENT = 'absent';
+export const CACHE_CORRUPT = 'corrupt';
+
+/**
+ * Read the project-local cache. The returned `status` separates a store that has
+ * never been stamped (`absent`) from one whose baseline is unreadable
+ * (`corrupt`) — both yield an empty `files` map, but only the first means "no
+ * prior attribution existed". A caller that cannot tell them apart converts
+ * damage into a plausible fresh start and overwrites the evidence.
+ */
 export function readProjectCache(projectDir) {
   const path = projectCachePath(projectDir);
+  let raw;
+  try { raw = readFileSync(path, 'utf8'); }
+  catch { return { files: {}, status: CACHE_ABSENT }; }
   try {
-    const cache = JSON.parse(readFileSync(path, 'utf8'));
-    if (cache && typeof cache === 'object' && cache.files && typeof cache.files === 'object') return cache;
-  } catch { /* absent or unparseable — start fresh */ }
-  return { files: {} };
+    const cache = JSON.parse(raw);
+    if (cache && typeof cache === 'object' && cache.files
+      && typeof cache.files === 'object' && !Array.isArray(cache.files)) {
+      return { ...cache, status: CACHE_CLEAN };
+    }
+  } catch { /* unparseable — corrupt, handled below */ }
+  return { files: {}, status: CACHE_CORRUPT };
+}
+
+/**
+ * Move a damaged cache aside, bytes intact, so the rebuild cannot destroy it.
+ * Returns the quarantine path, or null when nothing could be preserved.
+ */
+export function quarantineCache(path, now = nowIso()) {
+  if (!existsSync(path)) return null;
+  const stamp = String(now).replace(/[:.]/g, '-');
+  const dest = `${path}.corrupt-${stamp}`;
+  try { renameSync(path, dest); return dest; } catch { return null; }
 }
 
 /**
@@ -117,6 +146,21 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
     mkdirSync(dirname(cachePath), { recursive: true });
     withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
       const cache = readProjectCache(projectDir);
+      // A damaged baseline is preserved, never overwritten: the rebuild below
+      // would otherwise turn unreadable prior attribution into a plausible
+      // partial cache, and every file it used to describe would silently
+      // reclassify. The new stamp still lands; what the old bytes said is
+      // reported as unknown, with the file kept for recovery.
+      if (cache.status === CACHE_CORRUPT) {
+        const quarantined = quarantineCache(cachePath, ts);
+        stampOutcome = {
+          stamped: true,
+          outcome: 'prior-attribution-unknown',
+          recovery: 'recovery-required',
+          reason: 'corrupt-cache-quarantined',
+          quarantined,
+        };
+      }
       for (const e of entries) {
         cache.files[e.path] = {
           last_hash: e.hash,
@@ -146,7 +190,12 @@ export function stampFiles(projectDir, entries, { now, home = homedir() } = {}) 
   try {
     withFileLock(join(home, '.core', 'state-cache.lock'), () => {
       let gcache;
-      try { gcache = JSON.parse(readFileSync(globalCachePath, 'utf8')); } catch { gcache = null; }
+      let readable = true;
+      try { gcache = JSON.parse(readFileSync(globalCachePath, 'utf8')); }
+      catch { gcache = null; readable = !existsSync(globalCachePath); }
+      // A damaged global cache is moved aside rather than left in place to
+      // shadow the fresher per-project stamps it can no longer be pruned from.
+      if (!readable) quarantineCache(globalCachePath, ts);
       if (!gcache?.files) return;
       let changed = false;
       for (const e of entries) {

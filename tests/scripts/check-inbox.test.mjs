@@ -228,3 +228,28 @@ test('the canonical draft status passes clean', () => {
   assert.equal(report.some((r) => r.check === 'status-value'), false);
   rmSync(dir, { recursive: true, force: true });
 });
+
+// A truncated extractor write is the most basic malformed shape there is: the
+// opening fence lands, the closing one never does. Parsing silently stopped
+// there and the empty report was summarized as clean — the exact "malformed
+// evidence read as success" the mechanical boundary exists to prevent.
+test('an unterminated frontmatter fence is a FAIL naming the opening line', () => {
+  const truncated = VALID_B_BLOCK + '\n---\nid: obs-cut-off\ntype: observation\nmode: B\n';
+  const dir = makeProject({ inbox: truncated });
+  const report = checkInbox(dir);
+  const fails = report.filter((r) => r.level === 'FAIL');
+  assert.equal(fails.length, 1, 'the truncation must be reported, not skipped');
+  assert.equal(fails[0].check, 'unterminated-frontmatter');
+  assert.match(fails[0].detail, /line 14/, 'and it must name the opening fence line');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('CLI exits 2 on a truncated inbox rather than reporting it clean', () => {
+  const dir = makeProject({ inbox: '---\nid: obs-cut-off\ntype: observation\nmode: B\n' });
+  let status = 0, stdout = '';
+  try { stdout = execFileSync(process.execPath, [SCRIPT, dir], { encoding: 'utf8' }); }
+  catch (e) { status = e.status; stdout = String(e.stdout || ''); }
+  assert.equal(status, 2, `expected a failing exit, got ${status}: ${stdout}`);
+  assert.match(stdout, /unterminated-frontmatter/);
+  rmSync(dir, { recursive: true, force: true });
+});

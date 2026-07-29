@@ -67,17 +67,22 @@ export function hasSourceAnchor(body) {
   return SOURCE_ANCHOR_PATTERNS.some((re) => re.test(text));
 }
 
-/** Parse inbox.md into { fm, body, line } blocks. Flat key: value frontmatter only. */
-export function parseInboxBlocks(content) {
+/**
+ * Scan inbox.md into blocks plus the line of any unterminated frontmatter fence.
+ * A truncated extractor write opens a fence and never closes it; that is a
+ * reportable structural failure, not the absence of work.
+ */
+function scanInbox(content) {
   const lines = String(content).split(/\r?\n/);
   const blocks = [];
+  let unterminatedAt = null;
   let i = 0;
   while (i < lines.length) {
     if (lines[i].trim() !== '---') { i++; continue; }
     const fmStart = i + 1;
     let j = fmStart;
     while (j < lines.length && lines[j].trim() !== '---') j++;
-    if (j >= lines.length) break; // unterminated fence — not a block
+    if (j >= lines.length) { unterminatedAt = i + 1; break; }
     const fmLines = lines.slice(fmStart, j);
     if (!fmLines.some((l) => /^[A-Za-z0-9_-]+\s*:/.test(l))) { i = j + 1; continue; }
     const fm = {};
@@ -91,7 +96,12 @@ export function parseInboxBlocks(content) {
     blocks.push({ fm, body: body.join('\n').trim(), line: fmStart });
     i = k;
   }
-  return blocks;
+  return { blocks, unterminatedAt };
+}
+
+/** Parse inbox.md into { fm, body, line } blocks. Flat key: value frontmatter only. */
+export function parseInboxBlocks(content) {
+  return scanInbox(content).blocks;
 }
 
 /** Collect unit-id stems already in the project store (top level + observations/). */
@@ -122,7 +132,13 @@ export function checkInbox(projectDir) {
   const content = readFileSync(inboxPath, 'utf8');
   if (!content.trim()) return report;
 
-  const blocks = parseInboxBlocks(content);
+  const { blocks, unterminatedAt } = scanInbox(content);
+  if (unterminatedAt !== null) {
+    report.push({
+      level: 'FAIL', check: 'unterminated-frontmatter', block_id: `line-${unterminatedAt}`,
+      detail: `Frontmatter fence opened at line ${unterminatedAt} is never closed — the file is truncated; everything from that line on is unparsed`,
+    });
+  }
   const storeIds = existingUnitIds(projectDir);
   const seenIds = new Map();
 

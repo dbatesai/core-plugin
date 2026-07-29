@@ -88,7 +88,7 @@ import { readFileSync, readdirSync, existsSync, mkdirSync, realpathSync } from '
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { readProjectCache, hashText, stampFile } from './state-cache.mjs';
+import { readProjectCache, hashText, stampFile, CACHE_CORRUPT } from './state-cache.mjs';
 import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBlock } from './hot-section.mjs';
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
 
@@ -257,6 +257,11 @@ export function detectStore(projectDir, { sessionInventory } = {}) {
   return {
     project: root,
     has_session_inventory: !!inv,
+    // A corrupt baseline classifies every file as no-baseline, which reads like
+    // a brand-new store. The status travels with the report so the caller states
+    // UNKNOWN instead of that plausible-but-wrong story.
+    baseline_status: cache.status,
+    baseline_trustworthy: cache.status !== CACHE_CORRUPT,
     counts: Object.fromEntries(Object.entries(byClass).map(([k, v]) => [k, v.length])),
     needs_attention: needsAttention,
     files,
