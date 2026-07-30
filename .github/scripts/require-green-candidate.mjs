@@ -4,9 +4,17 @@
  *
  * Reads a GitHub workflow-runs payload
  * (/repos/{owner}/{repo}/actions/workflows/{file}/runs) from --runs-file or
- * stdin, keeps only runs for the exact candidate SHA and the named workflow,
- * and lets the newest attempt decide. A re-run is the current answer in both
- * directions: a green re-run clears a candidate, a red one revokes it.
+ * stdin and keeps only runs for the exact candidate SHA and the named workflow.
+ *
+ * One commit can carry several runs of the same workflow: a re-run repeats a
+ * run_number at a higher run_attempt, while a second trigger (the same SHA
+ * pushed to another branch) opens a new run_number entirely. Those are
+ * different questions. Within a run_number the newest attempt is the current
+ * answer, in both directions — a green re-run clears a candidate, a red one
+ * revokes it. Across run_numbers the gate reads every run's current answer and
+ * fails closed: any completed non-success refuses, and only then does a
+ * completed success clear the candidate. A run still going is not a verdict, so
+ * it neither clears nor blocks a commit another run already finished on.
  *
  * Exit codes:
  *   0 — the required workflow concluded success for this exact commit
@@ -84,17 +92,29 @@ function main(argv) {
     return NO_RUN;
   }
 
-  const decisive = candidates.reduce(newest);
-  if (decisive.status !== 'completed') {
-    out(`refusing: ${workflow} run ${decisive.run_number}.${decisive.run_attempt} for ${sha} is ${decisive.status}, not completed`);
-    return NOT_GREEN;
+  // One current answer per run_number — the newest attempt of each.
+  const current = new Map();
+  for (const run of candidates) {
+    const key = Number(run.run_number) || 0;
+    const held = current.get(key);
+    current.set(key, held ? newest(held, run) : run);
   }
-  if (decisive.conclusion !== 'success') {
-    out(`refusing: ${workflow} run ${decisive.run_number}.${decisive.run_attempt} for ${sha} concluded ${decisive.conclusion}`);
+  const answers = [...current.values()];
+
+  const red = answers.find((r) => r.status === 'completed' && r.conclusion !== 'success');
+  if (red) {
+    out(`refusing: ${workflow} run ${red.run_number}.${red.run_attempt} for ${sha} concluded ${red.conclusion}`);
     return NOT_GREEN;
   }
 
-  out(`green: ${workflow} run ${decisive.run_number}.${decisive.run_attempt} succeeded for candidate ${sha}`);
+  const green = answers.find((r) => r.status === 'completed' && r.conclusion === 'success');
+  if (!green) {
+    const pending = answers.reduce(newest);
+    out(`refusing: ${workflow} run ${pending.run_number}.${pending.run_attempt} for ${sha} is ${pending.status}, not completed`);
+    return NOT_GREEN;
+  }
+
+  out(`green: ${workflow} run ${green.run_number}.${green.run_attempt} succeeded for candidate ${sha}`);
   return GREEN;
 }
 
