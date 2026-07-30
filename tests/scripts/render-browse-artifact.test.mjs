@@ -710,3 +710,53 @@ rtest('focus mode never fully removes the rest of the store from view — non-ne
     assert.match(chrome, /node dim/, 'a dim class exists for out-of-focus nodes');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+rtest('responsive chrome keeps the mobile browse loop reachable and edge swatches compact', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const { html } = await generate(root, home);
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    assert.match(chrome, /\.edge-legend svg\s*\{[^}]*min-height:\s*0/s,
+      'edge legend SVGs must override the graph SVG minimum height');
+    assert.match(chrome, /@media \(max-width: 860px\)[\s\S]*?\.sidebar\s*\{[^}]*max-height:\s*52vh !important/,
+      'the mobile unit list stays bounded instead of expanding every unit before the graph');
+    assert.match(chrome, /footer\s*\{[^}]*overflow-wrap:\s*anywhere/s,
+      'the snapshot id cannot force horizontal overflow');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+rtest('graph filters hide filtered nodes and edges and expose their pressed state', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const { html } = await generate(root, home);
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    assert.match(chrome, /aria-pressed="true"/, 'filter chips expose their initial state');
+    assert.match(chrome, /setAttribute\('aria-pressed', String\(/,
+      'filter chips expose state changes');
+    assert.match(chrome, /function isFiltered\(u\)/, 'one filter predicate governs every graph path');
+    assert.match(chrome, /if \(isFiltered\(byId\[l\.s\]\) \|\| isFiltered\(byId\[l\.t\]\)\) return;/,
+      'edges incident to filtered nodes are omitted');
+    assert.match(chrome, /if \(isFiltered\(u\)\) return;/, 'focused/global nodes are omitted');
+    assert.match(chrome, /if \(nbIds\[u\.id\] \|\| isFiltered\(u\)\) return;/,
+      'ghost-context nodes also honor filters');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+rtest('graph re-render preserves keyboard focus on the replacement node', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const { html } = await generate(root, home);
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    assert.match(chrome, /var focusedUnit = document\.activeElement/,
+      'render captures the focused graph unit before replacing SVG markup');
+    assert.match(chrome, /circleByid\[focusedUnit\]\.focus\(\)/,
+      'render restores focus to the replacement graph node');
+    assert.match(chrome, /data-mode="global" class="on" aria-pressed="true"/,
+      'graph mode exposes its initial pressed state');
+    assert.match(chrome, /setAttribute\('aria-pressed', String\(b\.getAttribute\('data-mode'\) === mode\)\)/,
+      'graph mode exposes state changes');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

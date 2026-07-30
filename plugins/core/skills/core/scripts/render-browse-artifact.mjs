@@ -315,7 +315,7 @@ export function buildArtifactHtml({ units, meta }) {
 
   /* ---- shell: sidebar + main column, Obsidian-style ---- */
   .shell { display: grid; grid-template-columns: 280px 1fr; gap: 1.1rem; align-items: start; }
-  @media (max-width: 860px) { .shell { grid-template-columns: 1fr; } .sidebar { position: static !important; max-height: none !important; } }
+  @media (max-width: 860px) { .shell { grid-template-columns: 1fr; } .sidebar { position: static !important; max-height: 52vh !important; } }
   .sidebar { position: sticky; top: 4.2rem; background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; box-shadow: var(--shadow); max-height: calc(100vh - 5.5rem); display: flex; flex-direction: column; overflow: hidden; }
   .sidebar input { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink);
@@ -357,7 +357,7 @@ export function buildArtifactHtml({ units, meta }) {
   .legend-row { display: flex; flex-wrap: wrap; gap: 0.5rem 1.1rem; padding: 0.6rem 0.8rem; border-top: 1px solid var(--line); font-size: 0.78rem; }
   .legend-group b { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-right: 0.5rem; }
   .edge-legend { display: inline-flex; align-items: center; gap: 0.3rem; margin-right: 0.9rem; color: var(--muted); }
-  .edge-legend svg { width: 26px; height: 8px; overflow: visible; }
+  .edge-legend svg { width: 26px; height: 8px; min-height: 0; overflow: visible; cursor: default; touch-action: auto; }
   .node.dim, .link.dim { opacity: var(--node-dim); }
 
   /* ---- reader ---- */
@@ -391,7 +391,7 @@ export function buildArtifactHtml({ units, meta }) {
   .metrics-report { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem;
     overflow-x: auto; font-size: 0.8rem; line-height: 1.45; font-family: ui-monospace, Menlo, Consolas, monospace; }
   .metrics-note { color: var(--muted); font-size: 0.85rem; }
-  footer { color: var(--muted); font-size: 0.8rem; margin: 2.5rem 0 1rem; text-align: center; }
+  footer { color: var(--muted); font-size: 0.8rem; margin: 2.5rem 0 1rem; text-align: center; overflow-wrap: anywhere; }
 </style>
 <div class="snapshot-banner">
   <div class="headline">POINT-IN-TIME SNAPSHOT &mdash; READ-ONLY</div>
@@ -411,8 +411,8 @@ export function buildArtifactHtml({ units, meta }) {
       <div class="graph-wrap">
         <div class="graph-toolbar">
           <div class="mode-toggle" id="modeToggle" role="group" aria-label="Graph mode">
-            <button type="button" data-mode="global" class="on">Global</button>
-            <button type="button" data-mode="focus" disabled>Focus</button>
+            <button type="button" data-mode="global" class="on" aria-pressed="true">Global</button>
+            <button type="button" data-mode="focus" aria-pressed="false" disabled>Focus</button>
           </div>
           <div class="chipset" id="typeFilters" aria-label="Filter by type"></div>
         </div>
@@ -672,7 +672,7 @@ export function buildArtifactHtml({ units, meta }) {
   var globalIterations = units.length > 250 ? 120 : 220;
   var globalPos = layoutForce(units, globalEdges, W / 2, H / 2, Math.min(W, H) * 0.35, globalIterations);
 
-  // ---- interactive filters (type + status): toggling dims nodes, never re-layouts ----
+  // ---- interactive filters (type + status): toggling hides nodes, never re-layouts ----
   var activeTypes = {}; types.forEach(function (t) { activeTypes[t] = true; });
   var statuses = [];
   units.forEach(function (u) { var s = u.status || 'active'; if (statuses.indexOf(s) === -1) statuses.push(s); });
@@ -681,7 +681,7 @@ export function buildArtifactHtml({ units, meta }) {
 
   var typeFiltersEl = document.getElementById('typeFilters');
   typeFiltersEl.innerHTML = types.map(function (t) {
-    return '<button type="button" class="chip" data-type="' + esc(t) + '" style="--dot:' + colorFor(t) + '">' + esc(t) + '</button>';
+    return '<button type="button" class="chip" aria-pressed="true" data-type="' + esc(t) + '" style="--dot:' + colorFor(t) + '">' + esc(t) + '</button>';
   }).join('');
   typeFiltersEl.addEventListener('click', function (e) {
     var b = e.target.closest('button[data-type]');
@@ -689,12 +689,13 @@ export function buildArtifactHtml({ units, meta }) {
     var t = b.getAttribute('data-type');
     activeTypes[t] = !activeTypes[t];
     b.classList.toggle('off', !activeTypes[t]);
+    b.setAttribute('aria-pressed', String(activeTypes[t]));
     renderGraph();
   });
 
   var statusFiltersEl = document.getElementById('statusFilters');
   statusFiltersEl.innerHTML += statuses.map(function (s) {
-    return '<button type="button" class="chip" data-status="' + esc(s) + '" style="--dot:var(--muted)">' + esc(s) + '</button>';
+    return '<button type="button" class="chip" aria-pressed="true" data-status="' + esc(s) + '" style="--dot:var(--muted)">' + esc(s) + '</button>';
   }).join('');
   statusFiltersEl.addEventListener('click', function (e) {
     var b = e.target.closest('button[data-status]');
@@ -702,6 +703,7 @@ export function buildArtifactHtml({ units, meta }) {
     var s = b.getAttribute('data-status');
     activeStatuses[s] = !activeStatuses[s];
     b.classList.toggle('off', !activeStatuses[s]);
+    b.setAttribute('aria-pressed', String(activeStatuses[s]));
     renderGraph();
   });
 
@@ -739,6 +741,7 @@ export function buildArtifactHtml({ units, meta }) {
     mode = next;
     document.querySelectorAll('.mode-toggle button').forEach(function (b) {
       b.classList.toggle('on', b.getAttribute('data-mode') === mode);
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-mode') === mode));
     });
     if (mode === 'focus') computeFocus(selected);
     renderGraph();
@@ -757,8 +760,13 @@ export function buildArtifactHtml({ units, meta }) {
   var g, circleByid = {};
   var view = { x: 0, y: 0, k: 1 };
   function applyView() { g.setAttribute('transform', 'translate(' + view.x + ',' + view.y + ') scale(' + view.k + ')'); }
+  function isFiltered(u) {
+    return !activeTypes[u.type || 'untyped'] || !activeStatuses[u.status || 'active'];
+  }
 
   function renderGraph() {
+    var focusedUnit = document.activeElement && document.activeElement.getAttribute &&
+      document.activeElement.getAttribute('data-unit');
     var nbIds = null;
     if (mode === 'focus' && focusPos) { nbIds = {}; Object.keys(focusPos).forEach(function (id) { nbIds[id] = true; }); }
     var parts = ['<g id="gv">'];
@@ -766,10 +774,9 @@ export function buildArtifactHtml({ units, meta }) {
       var a = (nbIds && focusPos[l.s]) || globalPos[l.s], b = (nbIds && focusPos[l.t]) || globalPos[l.t];
       if (!a || !b) return;
       var inFocus = !nbIds || (nbIds[l.s] && nbIds[l.t]);
-      var typeHidden = !activeTypes[byId[l.s].type || 'untyped'] || !activeTypes[byId[l.t].type || 'untyped'];
-      var statusHidden = !activeStatuses[byId[l.s].status || 'active'] || !activeStatuses[byId[l.t].status || 'active'];
+      if (isFiltered(byId[l.s]) || isFiltered(byId[l.t])) return;
       var st = edgeStyle(l.type);
-      var cls = 'link' + ((!inFocus || typeHidden || statusHidden) ? ' dim' : '');
+      var cls = 'link' + (!inFocus ? ' dim' : '');
       parts.push('<line class="' + cls + '" x1="' + r1(a.x) + '" y1="' + r1(a.y) +
         '" x2="' + r1(b.x) + '" y2="' + r1(b.y) + '" stroke="' + st.stroke + '" stroke-width="' + st.width +
         '" stroke-dasharray="' + esc(st.dash) + '" stroke-opacity="' + (inFocus ? st.op : st.op * 0.5) + '"></line>');
@@ -777,12 +784,10 @@ export function buildArtifactHtml({ units, meta }) {
     var drawIds = nbIds ? Object.keys(nbIds) : units.map(function (u) { return u.id; });
     drawIds.forEach(function (id) {
       var u = byId[id]; if (!u) return;
+      if (isFiltered(u)) return;
       var p = (nbIds && focusPos[id]) || globalPos[id];
-      var typeHidden = !activeTypes[u.type || 'untyped'];
-      var statusHidden = !activeStatuses[u.status || 'active'];
-      var cls = 'node' + ((typeHidden || statusHidden) ? ' dim' : '');
       var rad = nbIds ? Math.min(6 + (deg[id] || 0) * 1.4, 18) : Math.min(4 + (deg[id] || 0) * 1.2, 14);
-      parts.push('<circle class="' + cls + '" tabindex="0" role="button" aria-label="' + esc(id) + '" data-unit="' + esc(id) + '" cx="' + r1(p.x) + '" cy="' + r1(p.y) +
+      parts.push('<circle class="node" tabindex="0" role="button" aria-label="' + esc(id) + '" data-unit="' + esc(id) + '" cx="' + r1(p.x) + '" cy="' + r1(p.y) +
         '" r="' + r1(rad) + '" fill="' + colorFor(u.type) +
         '" style="cursor:pointer"><title>' + esc(id) + '</title></circle>');
     });
@@ -791,7 +796,7 @@ export function buildArtifactHtml({ units, meta }) {
     // never loses their bearings in the whole store.
     if (nbIds) {
       units.forEach(function (u) {
-        if (nbIds[u.id]) return;
+        if (nbIds[u.id] || isFiltered(u)) return;
         var p = globalPos[u.id];
         parts.push('<circle class="node dim" data-unit="' + esc(u.id) + '" cx="' + r1(p.x) + '" cy="' + r1(p.y) +
           '" r="' + r1(Math.min(3 + (deg[u.id] || 0), 8)) + '" fill="' + colorFor(u.type) + '" style="cursor:pointer"><title>' + esc(u.id) + '</title></circle>');
@@ -804,6 +809,7 @@ export function buildArtifactHtml({ units, meta }) {
     svg.querySelectorAll('circle[data-unit]').forEach(function (c) { circleByid[c.getAttribute('data-unit')] = c; });
     applyView();
     if (selected) highlightNode(selected);
+    if (focusedUnit && circleByid[focusedUnit]) circleByid[focusedUnit].focus();
   }
 
   var lastHighlight = null;
