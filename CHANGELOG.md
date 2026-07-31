@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.16.1] — 2026-07-31
+
+### Added
+- `/memory-view`: a read-only browse snapshot of the project memory store, published as a
+  private artifact — interactive unit graph with focus mode, per-type and per-status filters,
+  a properties pane, full unit bodies with edges and backlinks, and the memory-health section.
+  A live republish loop keeps the page current, guarded by a validated loop-state record:
+  an explicit consent basis is required before the loop can arm, the record fails closed when
+  missing or corrupt, and the snapshot identity accounts for topic exclusions so an edit to an
+  excluded unit never triggers a republish.
+
+### Changed
+- Every CLI entry guard converges on one shared helper that fails loudly. A refusal can no
+  longer exit 0 and read as success, and a regression test keeps new scripts on the shared path.
+- A dirty plugin tree now refuses to run gated tests instead of silently skipping them, so a
+  green run always means the tests actually executed.
+- Documentation states what ships: removed an unsupported lifecycle-hook claim, single-sourced
+  the artifact-consent invariant, and closed the remaining startup-prose contradictions.
+
+### Fixed
+- Release tagging: a second CI run on the same commit no longer blocks the tag.
+- memory-view: whole-token integer validation on every CLI flag (rejects partially-parsed
+  values), fail-closed loop-state validation at both read and write, a required consent basis,
+  and exclusion-aware snapshot identity.
+
+### Removed
+- Subsystems that were documented but had no producer: the outcome pipeline that could only
+  record unknown values, an experiment-only control branch in shipped retrieval, and related
+  scaffolding.
+
 ## [3.15.1] — 2026-07-29
 
 ### Fixed

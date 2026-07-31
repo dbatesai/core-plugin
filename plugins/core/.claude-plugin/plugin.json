@@ -1,8 +1,8 @@
 {
   "name": "core",
-  "version": "3.15.1",
-  "build": "20260729.2",
-  "description": "CORE — a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis; reaches for multi-agent adversarial analysis when stakes warrant. `/core` itself resumes a project across sessions. Ships with eight companion utilities — `/finalize` (session close), `/refocus` (recenter mid-session on what matters most now, read-only by default), `/process-memory` (user-invoked memory hygiene pass), `/register-sources` (external source registration), `/vibecheck` (session vibe), `/configure-project` (project bootstrap + health check), `/metrics` (the one door to memory health: plain-language answers by default, with full/export/self-test modes), `/memory-view` (user-confirmed read-only memory-snapshot page for private artifact publish) — that CORE invokes internally and that you can also call directly. One deprecation shim, `/orient`, still forwards to `/core`.",
+  "version": "3.16.1",
+  "build": "20260731.1",
+  "description": "CORE \u2014 a project intelligence agent that knows your project across sessions, surfaces decisions and risks proactively, and challenges overconfidence. Type `/core` to start. Single agent with a unit-based memory architecture, retrieval ladder, and rendered project synthesis; reaches for multi-agent adversarial analysis when stakes warrant. `/core` itself resumes a project across sessions. Ships with eight companion utilities \u2014 `/finalize` (session close), `/refocus` (recenter mid-session on what matters most now, read-only by default), `/process-memory` (user-invoked memory hygiene pass), `/register-sources` (external source registration), `/vibecheck` (session vibe), `/configure-project` (project bootstrap + health check), `/metrics` (the one door to memory health: plain-language answers by default, with full/export/self-test modes), `/memory-view` (user-confirmed read-only memory-snapshot page for private artifact publish) \u2014 that CORE invokes internally and that you can also call directly. One deprecation shim, `/orient`, still forwards to `/core`.",
   "author": {
     "name": "David Bates",
     "email": "david_bates@mac.com"
@@ -17,5 +17,5 @@
     "adversarial-review",
     "claude-code"
   ],
-  "source_sha": "774721ba6d11d702656d1115bca74cbe39460ea1"
+  "source_sha": "cb790a5d37bab65cfc2aac728cd2ad10e22c6cb2"
 }
