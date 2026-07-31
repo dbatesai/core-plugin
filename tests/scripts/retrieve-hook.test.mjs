@@ -452,4 +452,3 @@ test('absence: no outcome-pipeline residue in the hook source, and the recorder 
     'plugins', 'core', 'skills', 'core', 'scripts', 'record-retrieval-outcome.mjs');
   assert.ok(!ex(recorder), 'record-retrieval-outcome.mjs is gone from the shipped tree');
 });
-

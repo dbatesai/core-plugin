@@ -77,7 +77,7 @@ Narrate the printed manifest (content class `aggregates-only`, byte count, produ
 
 ## `self-test` mode — a deliberate blind round now (was `/self-test`)
 
-The scheduled path authors rounds automatically when the current one goes stale (capped once a week); this mode is for a user who wants one **now**. The discipline is identical — the machinery is `self-test-round.mjs`, and the one thing a script can't do is spawn a genuinely blind author:
+The scheduled maintenance pass never authors a round itself — when the current one goes stale it stamps a trigger (capped once a week) and requests a fresh blind round, authored at the next user-invoked `/metrics` pass; this mode is for a user who wants one **now**. The discipline is identical — the machinery is `self-test-round.mjs`, and the one thing a script can't do is spawn a genuinely blind author:
 
 1. **`new-round`** — freezes the corpus identity, creates the append-only round dir, prints the blind-authoring brief:
    ```bash

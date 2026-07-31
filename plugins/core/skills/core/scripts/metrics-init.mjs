@@ -21,8 +21,8 @@
  * non-fatal — metrics capture degrades, the session continues.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { isCliEntry } from './cli-entry.mjs';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -368,18 +368,7 @@ export function formatScaffoldLog({
   return `${timestamp} metrics-init workspace=${workspace_id} project=${project_dir} methods: ${methodSummary} → ${chosen_storage} (${chosen_reason})`;
 }
 
-// CLI entry guard — works under both `node metrics-init.mjs ...` invocation
-// and `import('./metrics-init.mjs')` as a library. Canonicalize BOTH sides with
-// realpathSync: Node resolves import.meta.url to the real file, but argv[1] keeps
-// whatever symlinked/virtualized path the caller used, so comparing them raw makes
-// the script silently no-op on a symlinked install (it pins storage-path.txt, and
-// startup invokes it with output+exit discarded, so that no-op would be invisible).
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-const isCliEntry = process.argv[1]
-  ? _canon(process.argv[1]) === _canon(fileURLToPath(import.meta.url))
-  : false;
-
-if (isCliEntry) {
+if (isCliEntry(import.meta.url)) {
   const [projectDir, workspaceId] = process.argv.slice(2);
   if (!projectDir || !workspaceId) {
     console.error('usage: node metrics-init.mjs <project-dir> <workspace-id>');

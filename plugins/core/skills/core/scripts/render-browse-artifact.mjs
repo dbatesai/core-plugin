@@ -89,10 +89,10 @@
  * --metrics-cache, bad record-mode input);
  * 1 fatal failure (including fail-closed producer identity).
  */
-import { readFileSync, readdirSync, realpathSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { isCliEntry } from './cli-entry.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
@@ -1548,18 +1548,6 @@ async function main(argv) {
   }
 }
 
-// Entry check compares REAL paths on both sides: Node realpaths the main
-// module (import.meta.url is /private/var/... on macOS) while argv[1] may be
-// the symlinked spelling (/var/folders/...). A naive string compare silently
-// skips main() and exits 0 having done nothing — a lying instrument.
-const _cliEntry = (() => {
-  try {
-    const self = fileURLToPath(import.meta.url);
-    const invoked = resolve(process.argv[1] || '');
-    if (self === invoked) return true;
-    try { return self === realpathSync(invoked); } catch { return false; }
-  } catch { return false; }
-})();
-if (_cliEntry) {
+if (isCliEntry(import.meta.url)) {
   process.exit(await main(process.argv.slice(2)));
 }

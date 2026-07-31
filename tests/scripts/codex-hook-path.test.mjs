@@ -71,6 +71,21 @@ test('hooks-codex.json: registers UserPromptSubmit pointing at the Codex wrapper
     'the per-turn retrieval door is the only Codex hook registration');
 });
 
+test('codex.md hook prose names exactly the events hooks-codex.json registers (manifest-to-prose)', () => {
+  // The adapter doc's registration sentence must be derived from the manifest,
+  // not remembered: parse hooks-codex.json, then require the prose sentence
+  // "`hooks/hooks-codex.json` registers ... only" to name exactly the
+  // registered event set — no extra event, no missing event.
+  const manifest = JSON.parse(readFileSync(join(HOOKS_DIR, '..', '..', '..', 'hooks', 'hooks-codex.json'), 'utf8'));
+  const registered = Object.keys(manifest.hooks || {}).sort();
+  const adapter = readFileSync(join(HOOKS_DIR, '..', 'harnesses', 'codex.md'), 'utf8');
+  const sentence = adapter.match(/`hooks\/hooks-codex\.json` registers ((?:`\w+`(?:,\s*| and )?)+) only/);
+  assert.ok(sentence, 'codex.md must state what hooks-codex.json registers');
+  const claimed = [...sentence[1].matchAll(/`(\w+)`/g)].map((m) => m[1]).sort();
+  assert.deepEqual(claimed, registered,
+    `codex.md claims [${claimed}] but hooks-codex.json registers [${registered}]`);
+});
+
 test('.codex-plugin/plugin.json registers hooks-codex.json explicitly (not relying on the automatic-discovery default)', () => {
   const manifest = JSON.parse(readFileSync(join(HOOKS_DIR, '..', '..', '..', '.codex-plugin', 'plugin.json'), 'utf8'));
   assert.equal(manifest.hooks, './hooks/hooks-codex.json');

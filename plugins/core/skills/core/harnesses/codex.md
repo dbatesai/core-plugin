@@ -61,7 +61,7 @@ Call `update_plan` with the same plan, mutating one entry to status `"completed"
 
 ## automatic session start
 
-**DROPPED** on Codex. `hooks/hooks-codex.json` registers `UserPromptSubmit` and `Stop` only — there is no `SessionStart`-equivalent door, so nothing invokes `startup.md` on its own. Everything `startup.md` performs (the returning-workspace load, the decoration + index-refresh backstop, the startup catch-up below, the readiness summary) happens **only when the user explicitly types `/core`**. `/configure-project` is a health check on the install and the store; it does not run startup and does not discharge owed close work.
+**DROPPED** on Codex. `hooks/hooks-codex.json` registers `UserPromptSubmit` only — there is no `SessionStart`-equivalent door, so nothing invokes `startup.md` on its own. Everything `startup.md` performs (the returning-workspace load, the decoration + index-refresh backstop, the startup catch-up below, the readiness summary) happens **only when the user explicitly types `/core`**. `/configure-project` is a health check on the install and the store; it does not run startup and does not discharge owed close work.
 
 Read every "runs unconditionally, every session" line in `startup.md` as "runs unconditionally, every session that starts with `/core`" when the harness is Codex. Re-open this drop if a live Codex install validates a session-start-equivalent event, or if a once-per-session guard is wired into the `UserPromptSubmit` door.
 

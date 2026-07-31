@@ -34,7 +34,7 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
 | `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
 | `/metrics` | The one door to memory health. Default: three plain-language answers (storing the right memories? loading them when needed? passing its own blind test?) from pinned history. Modes: `/metrics full` (complete instrument readout), `/metrics export` (anonymized stats zip), `/metrics self-test` (a blind test round now). |
-| `/memory-view` | Browse what CORE knows as one read-only page — graph, unit bodies, backlinks, health section. Published as a private artifact only after you confirm the preflight manifest; never automatic. |
+| `/memory-view` | Browse what CORE knows as one read-only page — graph, unit bodies, backlinks, health section. Published as a private artifact under one consent contract: by default each publish waits for your explicit yes to the preflight manifest; a standing authorization you grant prospectively (your own recorded, revocable decision, scoped to your own data on your own account) lets publishes narrate and proceed while it remains valid. Runs only when you ask — never at startup, close, or on a schedule. |
 | `/orient` | Deprecated shim (removal 2026-08-15) — session bootstrap folded into `/core`. |
 
 ### Shipped hooks (installed with the plugin)

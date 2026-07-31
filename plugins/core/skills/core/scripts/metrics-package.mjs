@@ -36,7 +36,7 @@
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync,
-  mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync, 
+  mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync,
 } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';

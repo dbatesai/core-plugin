@@ -27,8 +27,8 @@
  *   prints the marker (CONTEXT-COMPLETE or CONTEXT-PARTIAL: ...), exit 0 always.
  */
 
-import { statSync, readFileSync, realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { statSync, readFileSync } from 'node:fs';
+import { isCliEntry } from './cli-entry.mjs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { detectHarness } from './configure-project.mjs';
@@ -148,7 +148,6 @@ function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

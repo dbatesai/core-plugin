@@ -234,12 +234,13 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
     }
   }
 
-  // 3.8 Self-test staleness trigger (v3.14.0 Link 4b): when the newest round
-  // is stale (corpus growth / session age / no round yet), emit ONE narrated
-  // note that fresh-round authoring is due — the authoring itself stays a real
-  // blind subagent step the protocol schedules, never run from here. The
-  // weekly hard cap lives inside the assessment and is stamped when
-  // the trigger fires, so a repeat pass inside the cap stays silent.
+  // 3.8 Self-test staleness trigger: when the newest round is stale (corpus
+  // growth / session age / no round yet), emit ONE narrated note requesting a
+  // fresh round. This zero-model pass only stamps the trigger and asks —
+  // authoring is a blind model step that runs at the next user-invoked
+  // /metrics pass. The weekly hard cap lives inside the assessment and is
+  // stamped when the trigger fires, so a repeat pass inside the cap stays
+  // silent.
   if (apply) {
     try {
       const staleness = shouldAuthorFreshRound(root, { now });

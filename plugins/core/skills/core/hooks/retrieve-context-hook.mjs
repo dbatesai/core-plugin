@@ -32,10 +32,10 @@
  * Ships with the plugin by design; the plugin ships .mjs only.
  */
 
-import { readFileSync, existsSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { isCliEntry } from '../scripts/cli-entry.mjs';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { metricsEnabled } from '../scripts/log-event.mjs';
@@ -324,7 +324,6 @@ export async function main() {
   });
 }
 
-const _canon = (path) => { try { return realpathSync(path); } catch { return path; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   main().then((code) => process.exit(code || 0)).catch(() => process.exit(0));
 }
