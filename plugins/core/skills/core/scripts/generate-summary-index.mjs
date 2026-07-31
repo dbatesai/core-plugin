@@ -175,13 +175,15 @@ export function loadFreshIndex(storePath) {
  * the same bytes report the same id and any store mutation changes it. Traces and
  * evidence receipts carry this id — a retrieval number without it is not reproducible.
  */
-export function loadSnapshot(storePath, { captureBodies = false, retainRaw = false } = {}) {
+export function loadSnapshot(storePath, { captureBodies = false, retainRaw = false, refreshCache = true } = {}) {
   // captureBodies → the ATOMIC capture: id, index, and bodies all derived from
   // one read per file (captureStore). A two-walk version (index walk first,
   // body walk second) is a TOCTOU: a concurrent write between the walks lets
   // snapshot_id identify OLD bytes while the evaluator measures NEW ones.
   // Never introduce a second walk here.
-  if (captureBodies) return captureStore(storePath, { retainRaw });
+  // refreshCache:false → the capture never writes the derived index cache
+  // (memory-view-watch.mjs's read-only contract over the store).
+  if (captureBodies) return captureStore(storePath, { retainRaw, refreshCache });
   // Index-only consumers (no body reads downstream) keep the cache-validated path.
   const index = loadFreshIndex(storePath);
   return {
@@ -291,8 +293,13 @@ function authorityTier(fm, rel) {
  *
  * retainRaw keeps the raw buffers + per-file sha1s on the result so tests can
  * assert the id↔bytes coherence directly under a concurrent-writer barrier.
+ *
+ * refreshCache (default true) controls the best-effort unit-summaries.json
+ * refresh below. memory-view-watch.mjs passes false: the watcher is a pure
+ * change DETECTOR whose contract is that it never writes into the store —
+ * not even the derived cache — so its reads must be side-effect free.
  */
-export function captureStore(storePath, { retainRaw = false } = {}) {
+export function captureStore(storePath, { retainRaw = false, refreshCache = true } = {}) {
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
   let nextInvalidationAt = null; // earliest still-future t_invalid among included candidates
@@ -423,15 +430,19 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
   // rewrites (retrieval stays cheap), and written FROM the captured bytes —
   // a write after the single read adds no TOCTOU; the file describes exactly
   // this capture. Best-effort: a read-only store still returns a valid capture.
-  try {
-    const libPath = join(memoriesDir, '_lib', 'unit-summaries.json');
-    let cached = null;
-    try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
-    if (!cached || cached.source_sig !== source_sig) {
-      mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
-      atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
-    }
-  } catch { /* cache refresh is a convenience; the capture itself is complete */ }
+  // Skipped entirely for refreshCache:false callers (the memory-view watcher),
+  // whose contract is zero writes into the store.
+  if (refreshCache) {
+    try {
+      const libPath = join(memoriesDir, '_lib', 'unit-summaries.json');
+      let cached = null;
+      try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
+      if (!cached || cached.source_sig !== source_sig) {
+        mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
+        atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
+      }
+    } catch { /* cache refresh is a convenience; the capture itself is complete */ }
+  }
 
   return capture;
 }

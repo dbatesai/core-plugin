@@ -73,6 +73,39 @@ node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" --record-publ
 
 Then tell the user the deletion path, honestly: they can delete the artifact from their artifact gallery at claude.ai (or ask you to overwrite it with an empty page first), **and** deleting a hosted artifact may not scrub hosted copies or caches instantly — say that plainly rather than implying deletion is instant and total. The **publish receipt** — not the generation manifest — stays on their machine as the record of what actually went up.
 
+## Live mode — `/memory-view live`
+
+Keeps the published page current while the session runs: the platform already updates a republished artifact in place for anyone who has it open, so "live" is exactly **watch → rebuild → republish the same URL** — no in-page freshness machinery exists or is needed. Live mode is user-triggered like everything else here; it never starts at startup, at session close, or on a schedule.
+
+**Consent basis for the loop's republishes:** the per-republish consent basis is the standing-authorization mechanism this skill already documents in Step 2 — live mode is only available in standing-authorization mode, because an unattended loop cannot stop and ask. If this user has no standing authorization on record, say so and offer the normal one-shot flow instead; do not start the loop. All of Step 2's language still binds every republish: narrated in the conversation where it happens, always-ask when another party's data or user-flagged sensitive content is involved, stop-and-record-declined if the user objects.
+
+**Start.** Run the existing Steps 1–4 once (generate → manifest/consent → publish private → `--record-publish`). Persist the **artifact URL** and the **snapshot id** from that publish receipt — the URL is what keeps every republish landing on the same page, and the snapshot id is the watcher's baseline.
+
+**Loop.** Start the watcher as a background process (session-scoped — it dies with the session, no daemon, nothing survives):
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" <project-dir> \
+  --baseline-snapshot <snapshot_id from the last publish receipt>
+```
+
+The watcher is a **detector, not a publisher**: it never renders, never publishes, never writes into the store (not even the derived index cache). It watches `_memories/` (one recursive directory watch plus a periodic mtime sweep that recovers from silently dropped file-system events), and when the store's content signature no longer matches the baseline it prints one JSON line — `{"event":"store-changed","snapshot_id":…,"units_seen":…,"trigger":…,"observed_at":…}` — and **exits 0**. The exit is the wake-up. On each wake:
+
+1. Re-render with `--no-metrics --metrics-cache <workspace metrics cache path>` (the health section carries forward from the last full run with its own "metrics as of" stamp; the 2s metrics round-trip stays out of the hot path).
+2. Republish to the **same URL** (pass the persisted URL to the Artifact tool), re-verifying privacy per Step 3.
+3. `--record-publish` per Step 4 — a fresh generation receipt per rebuild, citing the standing authorization as the consent mechanism.
+4. Narrate one line: what changed (unit count, new snapshot id), where it went.
+5. Restart the watcher with `--baseline-snapshot` set to the **new** snapshot id.
+
+**Publish budget: 12 republishes per rolling hour** (default). When a wake would exceed it, do not publish: narrate that the budget is hit and coalesce — keep (or restart) the watcher and fold further changes into one republish when the window opens. Changes are never lost (the next render reads the whole store); only the republish is deferred.
+
+**Failure honesty.** A failed render or publish leaves the last published version standing — the platform keeps serving it. Narrate the failure, record `--status failed`, and re-arm the watcher; the next change or sweep retries. Never claim the page is current when a republish failed.
+
+**Stop doors.**
+- `/memory-view live stop` — kill the watcher process (you started it; you have its PID) and confirm the loop is stopped in one line. The page stays up at its last published state.
+- **Session end** — the watcher is a child of this session and dies with it. There is no LaunchAgent, no daemon; nothing keeps running after the session.
+- **Idle timeout** — after 4 hours with no store change the watcher exits 2 with `{"event":"idle-timeout"}`; narrate one line that live mode ended idle and do not restart unless asked.
+- A watcher exit 3 means it was deliberately signalled; any other exit means it died — narrate and either re-arm or stop, don't ignore it.
+
 ## Boundary that never moves
 
 **Unit content never routes into the anonymized `/metrics export` package** (condition 5). Structurally it can't — the exporter builds from a disjoint numeric/pseudonym allowlist and never exports or routes unit bodies (its census does read whole unit files; no body content survives into package bytes — the planted-body tripwire test proves it) — and behaviorally you must never "borrow" this page's embedded content for any export, summary package, or shared aggregate. This page is the one deliberate, per-publish, user-confirmed disclosure of real unit bodies; nothing else inherits it.

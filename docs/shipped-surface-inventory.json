@@ -326,6 +326,12 @@
       "surface": "shipped"
     },
     {
+      "name": "memory-view-watch",
+      "kind": "script",
+      "harness": "shared",
+      "surface": "shipped"
+    },
+    {
       "name": "metrics-check",
       "kind": "script",
       "harness": "shared",
