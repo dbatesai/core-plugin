@@ -37,11 +37,11 @@
  *                                       [--today YYYY-MM-DD] [--json]
  */
 
-import { readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { resolveOutcomeAuthority } from './record-retrieval-outcome.mjs';
+import { resolveOutcomeAuthority } from './outcome-vocab.mjs';
 import { normalizeRetrievalEvent, RETRIEVAL_EVENT_SCHEMA_VERSION } from './record-retrieval-event.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const DEFAULT_SINCE_DAYS = 30;
 export const TOP_DIP_BACK = 10;
@@ -562,14 +562,6 @@ export function main(argv) {
   return 0;
 }
 
-// CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
-// silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
-const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY) {
-  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
-}
-if (_cliEntryArgv1 === _cliEntrySelf) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

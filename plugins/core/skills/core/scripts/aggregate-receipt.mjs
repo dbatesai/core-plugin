@@ -25,11 +25,11 @@
  *      (report.json = runHarness --json output; sweep.json = runTierPolicySweep output)
  */
 
-import { readFileSync, realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { VALID_TYPES } from './unit-vocab.mjs';
 import { DEFAULT_QUOTA } from './self-test-round.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 /**
  * collectForbiddenStrings — the reconstruction vocabulary of a local report:
@@ -297,7 +297,6 @@ function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

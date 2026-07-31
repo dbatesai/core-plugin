@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import {
   resolveCoreRoot, detectHarness, checkManifests, validateStore, detectIdentity,
-  readConfiguredMcp, readConnectorMap, planAgentsMd, configureProject, formatReceipt, main,
+  readConfiguredMcp, readConnectorMap, planAgentsMd, configureProject, formatReceipt,
 } from '../../plugins/core/skills/core/scripts/configure-project.mjs';
 
 const NOW = new Date('2026-06-01T00:00:00Z');
@@ -252,6 +253,27 @@ test('planAgentsMd: CONTRACT.md present + apply -> actually generates AGENTS.md'
   });
 });
 
+test('planAgentsMd: apply REFUSES to overwrite a hand-authored AGENTS.md (no generator marker)', async () => {
+  await withFixture({ contract: true }, async ({ projectPath }) => {
+    const original = '# Hand-authored rules\n\nKeep this instruction.\n';
+    writeFileSync(join(projectPath, 'AGENTS.md'), original);
+    const a = await planAgentsMd(projectPath, { apply: true });
+    assert.equal(a.status, 'refused-hand-authored', 'named refusal, not a silent overwrite');
+    assert.equal(readFileSync(join(projectPath, 'AGENTS.md'), 'utf8'), original,
+      'hand-authored content must survive --apply byte-for-byte');
+  });
+});
+
+test('planAgentsMd: apply DOES regenerate a generator-stamped AGENTS.md', async () => {
+  await withFixture({ contract: true }, async ({ projectPath }) => {
+    const first = await planAgentsMd(projectPath, { apply: true });
+    assert.equal(first.status, 'generated');
+    assert.match(readFileSync(join(projectPath, 'AGENTS.md'), 'utf8'), /GENERATED FROM CONTRACT/);
+    const again = await planAgentsMd(projectPath, { apply: true });
+    assert.equal(again.status, 'generated', 'a file carrying the generator marker is ours to refresh');
+  });
+});
+
 // ---------- configureProject: full structured report ----------
 
 test('configureProject: assembles the two-tier report; report-only writes nothing', async () => {
@@ -290,38 +312,41 @@ test('configureProject: idempotent from run 2 (detect-only identity, no drift)',
   });
 });
 
-// ---------- main(): exit codes ----------
+// ---------- CLI: exit codes ----------
 
-// These two exercise the full CLI (`main` → real capability probe via dynamic import +
-// runStartup). On Windows+Node20 the probe path leaves a post-test async that makes the
-// test FILE exit 1 even though every assertion passes — a node:test/runtime artifact, not
-// a logic failure (the probe has its own dedicated tests; configure-project's logic is
-// covered by the 20 unit tests above). Skipped on win32 with this tracked note.
-const WIN_PROBE_SKIP = process.platform === 'win32'
-  ? 'win32: probe-invoking CLI integration leaves a post-test async (node:test exit-1 artifact); covered on POSIX + by capability-probe tests'
-  : false;
-test('main: clean store + report-only -> exit 0, prints a receipt', { skip: WIN_PROBE_SKIP }, async () => {
-  await withFixture({}, async ({ projectPath, coreRoot }) => {
-    const logs = [];
-    const orig = process.stdout.write;
-    process.stdout.write = (s) => { logs.push(s); return true; };
-    let code;
-    try { code = await main(['--project', projectPath, '--core-root', coreRoot, '--harness', 'claude-code']); }
-    finally { process.stdout.write = orig; }
-    assert.equal(code, 0);
-    assert.match(logs.join(''), /configure-project/);
+// These two exercise the full CLI through a REAL subprocess (the script's own
+// CLI entry guard → main → real capability probe), capturing stdout from the
+// child instead of replacing the parent's global process.stdout.write. The
+// old in-process capture swallowed the runner's own TAP records under Node
+// 20's child-process test runner — 20 earlier tests vanished from the totals
+// while everything looked green. A subprocess leaves the runner's stdout
+// untouched on every supported Node line, and also removes the win32
+// post-test-async skip the in-process probe run needed.
+const CLI_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
+  'plugins', 'core', 'skills', 'core', 'scripts', 'configure-project.mjs');
+
+function runCli(args, { home }) {
+  return spawnSync(process.execPath, [CLI_SCRIPT, ...args], {
+    encoding: 'utf8',
+    // Point the child at the fixture home on every platform (homedir() reads
+    // USERPROFILE on Windows, HOME elsewhere).
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+  });
+}
+
+test('CLI: clean store + report-only -> exit 0, prints a receipt', async () => {
+  await withFixture({}, async ({ projectPath, coreRoot, home }) => {
+    const child = runCli(['--project', projectPath, '--core-root', coreRoot, '--harness', 'claude-code'], { home });
+    assert.equal(child.status, 0, `stderr: ${child.stderr}`);
+    assert.match(child.stdout, /configure-project/);
   });
 });
 
-test('main: a hard-fail store -> exit 2', { skip: WIN_PROBE_SKIP }, async () => {
-  await withFixture({ units: [] }, async ({ projectPath, coreRoot }) => {
+test('CLI: a hard-fail store -> exit 2', async () => {
+  await withFixture({ units: [] }, async ({ projectPath, coreRoot, home }) => {
     writeFileSync(join(projectPath, '_memories', 'bad.md'),
       '---\nid: bad\ntype: not-a-real-type\nstatus: active\ncreated: 2026-06-01\nupdated: 2026-06-01\n---\n# bad\n');
-    const orig = process.stdout.write;
-    process.stdout.write = () => true;
-    let code;
-    try { code = await main(['--project', projectPath, '--core-root', coreRoot, '--harness', 'claude-code']); }
-    finally { process.stdout.write = orig; }
-    assert.equal(code, 2);
+    const child = runCli(['--project', projectPath, '--core-root', coreRoot, '--harness', 'claude-code'], { home });
+    assert.equal(child.status, 2, `stdout: ${child.stdout}\nstderr: ${child.stderr}`);
   });
 });

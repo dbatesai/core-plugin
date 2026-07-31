@@ -29,10 +29,27 @@
  * Ships with the plugin by design; .mjs only.
  */
 
-import { appendFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { trustedHome } from '../scripts/trusted-home.mjs';
+
+// Packaged producer identity, read ONCE from the plugin manifest — the same
+// seam retrieve-context-hook.mjs uses for its evidence rows — and stamped on
+// EVERY receipt this logger writes, so any hook-log row can be bound to the
+// exact shipped build that produced it. 'unknown' is honest when the manifest
+// is unreadable (packaged layouts vary) or predates the source_sha field
+// (a --scope local dev install). source_sha names the commit this release
+// PACKAGES (the version-bump commit's own parent), not the tagged release
+// commit's own SHA — two different identities; the field name says which.
+const PRODUCER_MANIFEST = (() => {
+  try {
+    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
+  } catch { return {}; }
+})();
+export const PRODUCER_VERSION = String(PRODUCER_MANIFEST.version || 'unknown');
+export const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 
 /** Pure + exported for unit testing, same shape as close-pass.mjs's resolveIndexPath(). */
 export function resolveHookLogPath(env = process.env) {
@@ -65,7 +82,10 @@ export function hookLogPath() {
  * @param {{hook: string, action: string, reason?: string, cwd?: string}} entry
  */
 export function logHookEvent(entry) {
-  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n';
+  // The producer stamp rides AFTER the entry spread: the packaged identity is
+  // not caller-overridable — a receipt claiming a different producer than the
+  // build that wrote it would be a fabricated provenance row.
+  const line = JSON.stringify({ ts: new Date().toISOString(), ...entry, producer_version: PRODUCER_VERSION, producer_sha: PRODUCER_SHA }) + '\n';
   let file = null;
   try {
     file = hookLogPath();

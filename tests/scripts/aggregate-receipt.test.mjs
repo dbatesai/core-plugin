@@ -11,10 +11,19 @@ import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, cpSync, rmSync } from 'node:fs';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+const FIXT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// The committed fixture is NEVER touched by tests — even "read" paths write the
+// cached index (_lib/unit-summaries.json) as a side effect, which polluted the
+// committed tree (retrieval-premise.test.mjs owns this pattern; the
+// fixture-cold-clean guard test enforces it). All reads run against a clone.
+const FIXT = mkdtempSync(join(tmpdir(), 'obligation3-store-'));
+cpSync(FIXT_SRC, FIXT, { recursive: true });
+process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 
 const { buildAggregateReceipt, refusalScan, collectForbiddenStrings, validateReceiptShape, isPathShaped } =
   await import(pathToFileURL(join(SCRIPTS, 'aggregate-receipt.mjs')).href);

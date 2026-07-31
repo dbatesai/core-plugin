@@ -29,11 +29,10 @@
 
 import { readFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { requireTrustedHome, assertSafeWorkspaceId, isSafeWorkspaceId } from './trusted-home.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 /**
  * The operational root, anchored to the OS-account home. An unresolvable
@@ -214,9 +213,4 @@ export function main(argv = process.argv.slice(2)) {
   }
 }
 
-// CLI entry guard (same pattern as sibling scripts — realpath both sides).
-try {
-  const self = realpathSync(fileURLToPath(import.meta.url));
-  const invoked = process.argv[1] ? realpathSync(process.argv[1]) : '';
-  if (self === invoked) process.exit(main());
-} catch { /* imported as a module — no CLI */ }
+if (isCliEntry(import.meta.url)) process.exit(main());

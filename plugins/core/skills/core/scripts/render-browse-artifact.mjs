@@ -161,11 +161,17 @@ function displayBody(rawText) {
 // Recursive walk of _memories/ INCLUDING archive/ (used only for
 // --scope all-including-archive). Same file filter as the canonical walk
 // (*.md, not `_`-prefixed, not INDEX*); dirs starting with `_` are skipped.
-function walkAllUnitFiles(memoriesDir) {
+function walkAllUnitFiles(memoriesDir, onIoError = null) {
   const out = [];
   const walkDir = (dir, relPrefix) => {
     let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch (e) {
+      // ENOENT = vanished mid-walk (normal); anything else is an I/O failure
+      // the identity consumer must see (an unreadable tree is not an empty one).
+      if (onIoError && e?.code !== 'ENOENT') onIoError(relPrefix || '.', e);
+      return;
+    }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const e of entries) {
       if (e.isDirectory()) {
@@ -195,12 +201,15 @@ function walkAllUnitFiles(memoriesDir) {
  * activeSnapshotId always carries the plain store id for callers that must
  * match an unlabeled baseline against both scoped ids (the watcher).
  *
- * Topic exclusions deliberately do NOT narrow the identity: freshness here
- * is source freshness of the SCOPED store population, not artifact-byte
- * freshness — an excluded-topic edit changes the id (and may trigger a
- * republish whose page bytes come out identical; the publish budget bounds
- * that cost). Narrowing the id by exclusions would make it incomparable
- * across exclusion-list edits.
+ * Topic exclusions PARTICIPATE in the identity: with exclusions the id is
+ * derived from the kept source population (rel:sha1 of every kept unit's
+ * bytes) plus the normalized exclusion list, so it covers exactly the bytes
+ * the page would embed — an edit wholly inside an excluded topic does not
+ * change the id (no wake, no spent budget for an identical page), and two
+ * populations that differ by an exclusion never share one id. With no
+ * exclusions the legacy scoped id is preserved verbatim, so existing
+ * receipts stay comparable. Ids are only comparable under the same
+ * scope + exclusion list — the live loop re-applies both from its record.
  *
  * Read-only, unconditionally: the snapshot load never refreshes the
  * derived `_lib/` cache (refreshCache:false, not an option) — the skill
@@ -244,13 +253,24 @@ export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] 
   // page (same shape captureStore's source_sig uses; one read per file, so
   // the scoped id always identifies the bytes actually embedded).
   const supplementalSig = [];
+  // per-file sha1 of every included unit's source bytes — the exclusion-aware
+  // identity below derives from exactly these.
+  const sha1ByPath = { ...(cap.file_sha1s || {}) };
+  // I/O failures during the read (surfaced by the capture, plus any hit while
+  // walking supplements). ENOENT rename races excluded — see captureStore.
+  const readErrors = [...(cap.readErrors || [])];
   if (scope === 'all-including-archive') {
-    for (const f of walkAllUnitFiles(join(root, '_memories'))) {
+    for (const f of walkAllUnitFiles(join(root, '_memories'), (rel, e) => readErrors.push({ path: rel, code: String((e && e.code) || e) }))) {
       if (activePaths.has(f.rel)) continue;
       let buf;
       try { buf = readFileSync(f.full); }
-      catch (e) { unreadable.push({ path: f.rel, reason: String(e && e.code || e).slice(0, 120) }); continue; }
-      supplementalSig.push(`${f.rel}:${createHash('sha1').update(buf).digest('hex')}`);
+      catch (e) {
+        unreadable.push({ path: f.rel, reason: String(e && e.code || e).slice(0, 120) });
+        if (e?.code !== 'ENOENT') readErrors.push({ path: f.rel, code: String((e && e.code) || e) });
+        continue;
+      }
+      sha1ByPath[f.rel] = createHash('sha1').update(buf).digest('hex');
+      supplementalSig.push(`${f.rel}:${sha1ByPath[f.rel]}`);
       const parsed = displayBody(buf.toString('utf8'));
       if (parsed.unreadable) { unreadable.push({ path: f.rel, reason: parsed.unreadable }); continue; }
       const { fm, body } = parsed;
@@ -280,12 +300,23 @@ export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] 
   });
   kept.sort((a, b) => a.id.localeCompare(b.id));
 
-  // Scoped identity: active → the store snapshot id verbatim;
+  // Scoped identity (no exclusions): active → the store snapshot id verbatim;
   // all-including-archive → sha256 over that id plus the sorted supplemental
   // signature, extending the identity to every included source byte.
-  const snapshotId = scope === 'all-including-archive'
+  let snapshotId = scope === 'all-including-archive'
     ? createHash('sha256').update(`${cap.snapshotId}|scope:all-including-archive|${supplementalSig.sort().join('|')}`).digest('hex')
     : cap.snapshotId;
+  // Exclusion-aware identity: with exclusions the id covers exactly the KEPT
+  // population (rel:sha1 per kept unit) plus the normalized exclusion list —
+  // an excluded unit's edit cannot change it, and adding/removing an
+  // exclusion always does (see the doc comment above).
+  const exclusionsNorm = [...excluded].sort();
+  if (exclusionsNorm.length > 0) {
+    const keptSig = kept.map((u) => `${u.path}:${sha1ByPath[u.path] || ''}`).sort().join('|');
+    snapshotId = createHash('sha256')
+      .update(`scope:${scope}|exclude:${exclusionsNorm.join(',')}|${keptSig}`)
+      .digest('hex');
+  }
 
   return {
     units: kept,
@@ -295,6 +326,7 @@ export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] 
     supplementalCount: supplementalCount === 0 ? 0 : kept.filter((u) => u.population !== 'active').length,
     excludedByTopic,
     unreadable,
+    readErrors,
   };
 }
 

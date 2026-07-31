@@ -2,9 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, cpSync, rmSync } from 'node:fs';
 import { retrieveContext } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+const FIXT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// The committed fixture is NEVER touched by tests — even "read" paths write the
+// cached index (_lib/unit-summaries.json) as a side effect, which polluted the
+// committed tree (retrieval-premise.test.mjs owns this pattern; the
+// fixture-cold-clean guard test enforces it). All reads run against a clone.
+const FIXT = mkdtempSync(join(tmpdir(), 'obligation3-store-'));
+cpSync(FIXT_SRC, FIXT, { recursive: true });
+process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 
 // A small labeled query set over the fixture store (does the lexical
 // hook inject relevant units, or noise?). Each query lists the unit ids a human would

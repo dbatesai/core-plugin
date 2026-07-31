@@ -31,10 +31,9 @@
  *      node bm25.mjs --test
  */
 
-import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { loadFreshIndex, loadUnitBodies } from './generate-summary-index.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // Small, conventional English stopword set — enough to stop "the/on/of" from
 // dominating overlap counts. Deliberately not exhaustive (no dependency, by design).
@@ -142,7 +141,6 @@ function main(argv) {
   return 2;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

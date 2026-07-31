@@ -26,7 +26,7 @@ import { readFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mutateIndex, touchWorkspace, defaultCoreDir } from './index-registry.mjs';
 import { resolve, join, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 
 export function slugify(name) {
   return name
@@ -213,12 +213,6 @@ export function main(argv) {
   return 0;
 }
 
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
-const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY) {
-  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
-}
-if (_cliEntryArgv1 === _cliEntrySelf) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

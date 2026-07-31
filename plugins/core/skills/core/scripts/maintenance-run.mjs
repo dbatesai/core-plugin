@@ -20,8 +20,6 @@
 
 import { readFileSync, existsSync, statSync, readdirSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { realpathSync } from 'node:fs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { buildIndex as buildDecisionsIndex } from './generate-decisions-index.mjs';
 import { buildIndex as buildRisksIndex } from './generate-risks-index.mjs';
@@ -36,6 +34,7 @@ import { judgeUnjudgedTurns } from './hindsight-judge.mjs';
 import { TRIPWIRE_THRESHOLDS } from './metrics-tripwires.mjs';
 import { shouldAuthorFreshRound, markAutoAuthorTriggered } from './self-test-round.mjs';
 import { regradeNewestRound } from './self-test-round.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
 export const PROJECT_SOFT_CAP_BYTES = 70000;
@@ -309,6 +308,12 @@ async function main(argv) {
   const dryRun = argv.includes('--dry-run');
   const projectPath = argv.find(a => !a.startsWith('--'));
   if (!projectPath) { process.stderr.write('usage: maintenance-run.mjs <projectPath> [--json] [--dry-run] [--purge-turn-capture]\n'); return 2; }
+  // CLI trust boundary: the path comes from an untrusted command line. Validate
+  // it is a real directory BEFORE any filesystem work, so a hostile or mistyped
+  // argument is one named diagnostic and a nonzero exit — never a Node fs stack.
+  let isDir = false;
+  try { isDir = statSync(projectPath).isDirectory(); } catch { /* not a real path */ }
+  if (!isDir) { process.stderr.write(`maintenance-run: project path is not a directory: ${projectPath.slice(0, 120)}\n`); return 2; }
 
   // --purge-turn-capture: destructive, explicit, and standalone (never part of
   // a routine run). The confirmation contract is prose-level — the
@@ -332,7 +337,11 @@ async function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
-  main(process.argv.slice(2)).then((code) => process.exit(code));
+if (isCliEntry(import.meta.url)) {
+  // The CLI boundary turns an unexpected failure into one bounded line, never
+  // an unhandled-rejection stack; library callers still see the raw throw.
+  main(process.argv.slice(2)).then(
+    (code) => process.exit(code),
+    (err) => { process.stderr.write(`maintenance-run: ${String(err && err.message || err).slice(0, 200)}\n`); process.exit(1); },
+  );
 }

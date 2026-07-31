@@ -22,12 +22,12 @@
  * --dry-run: compute what would change but write nothing.
  */
 
-import { readFileSync, realpathSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { rankUnits } from './priority.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 const SECTION_HEADER_RE = /^## Top project units/;
 const EXISTING_LINE_RE = /^- \[([^\]]+)\]\(([^)]+)\) — (.+)$/;
@@ -270,12 +270,6 @@ export function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-const _argv1 = _canon(process.argv[1]);
-const _self = _canon(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY) {
-  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_argv1)} self=${JSON.stringify(_self)} match=${_argv1 === _self}\n`);
-}
-if (_argv1 === _self) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

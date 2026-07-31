@@ -23,15 +23,15 @@
  *                       [--format json|text]
  */
 
-import { existsSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   loadUnit, scoreProxyRS, extractEdges, parseIsoDate, isInvalidated,
   SCORE_PRUNE_THRESHOLD,
 } from './priority.mjs';
 import { isActiveStatus } from './unit-vocab.mjs';
 import { regularFileWithin } from './trusted-home.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 /**
  * Every hop target is project-authored frontmatter, so a candidate counts only
@@ -286,14 +286,6 @@ export function main(argv) {
   return 0;
 }
 
-// CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
-// silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
-const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY) {
-  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
-}
-if (_cliEntryArgv1 === _cliEntrySelf) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

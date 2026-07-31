@@ -1,6 +1,6 @@
 /**
- * select-relevant-units.mjs — the recall-oriented candidate shortlist for the
- * abstract-relevance prototype.
+ * select-relevant-units.mjs — the recall-oriented candidate shortlist behind
+ * Tier-3 reasoning escalation.
  *
  * The design seam behind obligation-3: lexical retrieval (retrieve-context.mjs) is
  * cheap but can't bridge a value→instance leap ("heritage"→El Primero). The fix isn't
@@ -24,11 +24,10 @@
  * CLI: node select-relevant-units.mjs <storePath> "<query>" [--shard N] [--shard-size N]
  */
 
-import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { loadFreshIndex } from './generate-summary-index.mjs';
 import { productRankedScores } from './retrieve-context.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // loadFreshIndex validates the recursive source signature on every call. This
 // module's old local loader accepted any parseable cache, which could serve a
@@ -111,7 +110,6 @@ function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

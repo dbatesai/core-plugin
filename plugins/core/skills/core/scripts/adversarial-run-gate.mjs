@@ -21,9 +21,8 @@
  * The script ships with the plugin by convention. The plugin ships .mjs (Node.js) only.
  */
 
-import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { runPreAction } from './capability-probe.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const ADVERSARIAL_ACTION = 'multi-agent-adversarial-run';
 export const ADVISORY_WATERMARK =
@@ -160,7 +159,6 @@ export async function main(argv) {
   return decision.decision === 'BLOCKED' ? 1 : 0;
 }
 
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_cliEntryCanonical(process.argv[1]) === _cliEntryCanonical(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   main(process.argv.slice(2)).then((code) => process.exit(code));
 }

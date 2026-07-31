@@ -109,7 +109,6 @@ Protocols are internal documents `/core` reads when it needs them — they aren'
 | `execution.md` | Execution discipline, solo and swarm. |
 | `analysis.md` | The multi-agent machinery — phase structure, the anti-convergence discipline, the monitor pattern — invoked when stakes warrant a single pass isn't enough. |
 | `validation.md` | Retrieval-health checks: substrate, convergence, ranking quality. |
-| `debug-mode.md` | The structured logger for diagnosing retrieval, writes, renders, and hygiene. |
 | `self-evolution.md` | Session-end learning and hygiene-triggered skill evolution. |
 
 Supporting references live alongside them: `retrieval.md` (the four-tier ladder in depth), `model-assignments.md` (which model tier per pipeline stage), `hygiene-strategies.md`, `confidence-assignment-guide.md`, `memory-extension-contracts.md`, `architecture-doctrines.md`.

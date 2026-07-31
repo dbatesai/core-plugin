@@ -109,3 +109,22 @@ test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
   // entry points, not copies. Still target one shared isCliEntry() helper.
   assert.ok(n <= 65, `CLI-entry-guard occurrences grew past baseline 65 (target: one shared helper): ${n}`);
 });
+
+test('ratchet: LOCAL CLI-entry guard implementations do not grow (target: 0 — isCliEntry only)', () => {
+  // The shared helper landed: cli-entry.mjs owns the one symlink-hardened
+  // entry-point comparison, and every consolidated script calls
+  // isCliEntry(import.meta.url) instead of carrying a local copy. A "local
+  // implementation" is any remaining line that compares process.argv[1]
+  // against the module's own path. Two kinds of files are still counted here:
+  // resolve-plugin-root.mjs (LOCAL BY DESIGN — the identity gate executes as a
+  // lone copied file before siblings exist, so it cannot import cli-entry.mjs;
+  // see the comment at its guard) and the files whose repair lands in their
+  // own lanes (memory-view / graceful-failure). Floor is therefore 1, not 0;
+  // lower the ceiling as the lane files convert — never raise it.
+  const LOCAL_GUARD = /process\.argv\[1\][^\n]*(?:===|realpathSync|pathToFileURL|basename\()|(?:realpathSync|resolve|_canon)\([^\n]*process\.argv\[1\]/;
+  const files = allScripts().filter(p =>
+    !p.endsWith('cli-entry.mjs') && // the single sanctioned owner
+    LOCAL_GUARD.test(readFileSync(p, 'utf8')));
+  assert.ok(files.length <= 11,
+    `a LOCAL CLI-entry guard implementation appeared — call isCliEntry(import.meta.url) from cli-entry.mjs instead: ${files.map(f => basename(f)).join(', ')}`);
+});

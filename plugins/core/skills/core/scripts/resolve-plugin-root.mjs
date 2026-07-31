@@ -483,6 +483,11 @@ export function main(argv) {
   return 2;
 }
 
+// LOCAL entry guard BY DESIGN — do not converge onto cli-entry.mjs. This is
+// the identity gate: it runs as a lone file before any sibling module is
+// known to exist (the SKILL bootstrap block and its fixtures execute a bare
+// copy of just this script), so it must not import anything relative. Every
+// other script uses the shared isCliEntry(import.meta.url).
 const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
 const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
 const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));

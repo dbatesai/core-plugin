@@ -10,7 +10,7 @@ The doctrines live here, not in protocol prose, because they cut across protocol
 
 **Why.** Schemas that exist only inside code drift. Multiple consumers reading the same shape without a shared anchor diverge in interpretation. A markdown contract that names every field's semantics — and is checked into the repo alongside the code that emits and reads it — keeps everyone on the same page.
 
-**How to apply.** When a producer script writes structured rows (capability rows, hygiene events, OTel spans), the schema lives in a sibling `*-schema.md` file. The producer stamps `schema_version` on every row. Consumers cite the schema by file path + anchor in their own source comments and refuse rows above their known-major version. When the schema changes major version, the consumer list at the bottom of the schema file says who needs coordinated update.
+**How to apply.** When a producer script writes structured rows (capability rows, hygiene events, retrieval events), the schema lives in a sibling `*-schema.md` file. The producer stamps `schema_version` on every row. Consumers cite the schema by file path + anchor in their own source comments and refuse rows above their known-major version. When the schema changes major version, the consumer list at the bottom of the schema file says who needs coordinated update.
 
 **First consumer.** `skills/core/scripts/capability/row-schema.md` — the capability row schema is the load-bearing instance of this doctrine. `resolve-plugin-root.mjs` and `capability-probe.mjs` both reference it; both stamp `schema_version` on emitted rows.
 

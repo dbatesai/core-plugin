@@ -29,10 +29,10 @@
  * Exit codes: 0 = all pass, 1 = non-benign warnings, 2 = failures, 3 = setup error.
  */
 
-import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve, join, basename, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { loadUnit, extractEdges, scoreProxyRS, parseIsoDate } from './priority.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // ---------- Schema constants ----------
 
@@ -557,14 +557,6 @@ export function main(argv) {
   return exitCode(report);
 }
 
-// CLI entry guard. Set CORE_DEBUG_CLI_ENTRY=1 to log both strings if invocation
-// silently no-ops (path-normalization, symlinks, OneDrive virtualization, etc.).
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
-const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY) {
-  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
-}
-if (_cliEntryArgv1 === _cliEntrySelf) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

@@ -46,13 +46,12 @@
 
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
 import { listTurnCaptureFiles, computeStoreSignature, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 import { buildRetrievalTrace } from './retrieve-context.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // Bump when verdict semantics change — scorecards stamp this so a rate shift
 // is attributable to judge-change vs store-change from the record alone.
@@ -197,7 +196,6 @@ export function main(argv) {
   return res.error ? 2 : 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

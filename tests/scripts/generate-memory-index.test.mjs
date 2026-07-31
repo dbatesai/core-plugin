@@ -23,7 +23,9 @@ function quietStderr(fn) {
 // %-encoded), which never equals `process.argv[1]` (`C:\...`), so the guard
 // fails and the contamination-guarded MEMORY.md refresh silently no-ops.
 test('generate-memory-index CLI guard uses fileURLToPath (H1 — Windows-safe)', () => {
-  assert.ok(SRC.includes('fileURLToPath'), 'must import/use fileURLToPath for the CLI entry self-path');
+  // The guard is the shared helper now; cli-entry.mjs owns the fileURLToPath
+  // conversion of import.meta.url, so the Windows-safe self-path lives there.
+  assert.ok(SRC.includes('isCliEntry(import.meta.url)'), 'must guard the CLI entry through cli-entry.mjs');
 });
 
 test('generate-memory-index CLI guard does NOT use new URL().pathname (H1 regression)', () => {

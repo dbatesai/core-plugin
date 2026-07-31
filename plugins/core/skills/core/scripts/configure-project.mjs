@@ -32,7 +32,7 @@
  * verified-reachable. The script never asserts a capability it cannot check.
  */
 
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { checkFork } from './workspace-fork-check.mjs';
 import { iterActiveUnits, checkSchema, checkIntegrity, exitCode } from './check-units.mjs';
 import { generate as generateAgentsMd } from './generate-agents-md.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // ── CORE_ROOT (the plugin root) ──────────────────────────────────────────────
 // This script lives at <CORE_ROOT>/skills/core/scripts/configure-project.mjs, so
@@ -177,6 +178,17 @@ export function readConnectorMap(projectPath) {
 // ── AGENTS.md (guarded on CONTRACT.md) ───────────────────────────────────────
 // The common case for a Codex project today is NO CONTRACT.md → skip cleanly.
 // Generate only under --apply AND when CONTRACT.md exists. Reports, never crashes.
+
+// The provenance banner every generated AGENTS.md carries (withProvenance in
+// contract-format.mjs). A file WITHOUT it is hand-authored user instruction
+// text; --apply must never overwrite it.
+export const GENERATOR_MARKER = 'GENERATED FROM CONTRACT — DO NOT EDIT BY HAND';
+
+function agentsMdIsGeneratorStamped(agentsPath) {
+  try { return readFileSync(agentsPath, 'utf8').includes(GENERATOR_MARKER); }
+  catch { return false; } // unreadable ⇒ treat as hand-authored (refuse, never clobber)
+}
+
 export async function planAgentsMd(projectPath, { apply = false } = {}) {
   const contractPath = join(projectPath, 'CONTRACT.md');
   const agentsPath = join(projectPath, 'AGENTS.md');
@@ -185,6 +197,11 @@ export async function planAgentsMd(projectPath, { apply = false } = {}) {
   }
   if (!apply) {
     return { status: existsSync(agentsPath) ? 'present-would-refresh' : 'would-generate', contractPath, agentsPath };
+  }
+  // Refuse to overwrite a hand-authored AGENTS.md: only a file carrying the
+  // generator marker is ours to regenerate. Named reason; the CLI exits nonzero.
+  if (existsSync(agentsPath) && !agentsMdIsGeneratorStamped(agentsPath)) {
+    return { status: 'refused-hand-authored', contractPath, agentsPath };
   }
   const r = await generateAgentsMd({ contractPath, outputPath: agentsPath, mode: 'write' });
   // The existsSync above already proved the contract present, so r.skipped can only
@@ -272,6 +289,7 @@ function describeAgents(a) {
     case 'skipped-no-contract': return `skipped — no CONTRACT.md (common case)${a.present ? '; existing AGENTS.md left as-is' : ''}`;
     case 'would-generate': return 'CONTRACT.md present, AGENTS.md absent — would generate (pass --apply)';
     case 'present-would-refresh': return 'CONTRACT.md + AGENTS.md present — would refresh (pass --apply)';
+    case 'refused-hand-authored': return `REFUSED — existing AGENTS.md at ${a.agentsPath} is hand-authored (no generator marker); reconcile it into CONTRACT.md or remove it before --apply`;
     case 'generated': return `generated ${a.written}`;
     default: return a.status;
   }
@@ -309,12 +327,14 @@ export async function main(argv) {
 
   // Exit code mirrors the store tier but never hard-fails on a degraded store at
   // setup time (a fresh/migrating store with orphans must not block). 2 only on a
-  // schema/enum/broken-edge hard fail.
+  // schema/enum/broken-edge hard fail. An --apply that refused to overwrite a
+  // hand-authored AGENTS.md is a nonzero outcome too — the requested write did
+  // not happen, and the caller must see that.
+  if (report.scriptVisible.agentsMd.status === 'refused-hand-authored') return 3;
   const tier = report.scriptVisible.store.exitTier;
   return tier === 2 ? 2 : 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1]) === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   main(process.argv.slice(2)).then((c) => process.exit(c));
 }

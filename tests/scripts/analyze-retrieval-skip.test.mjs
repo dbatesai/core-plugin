@@ -86,10 +86,10 @@ test('transcript unavailable → UNKNOWN (cannot judge)', () => {
   assert.equal(r.status, 'UNKNOWN');
 });
 
-test('tool extraction pending (Codex) → UNKNOWN, never a false skip', () => {
+test('tool visibility unknown (unrecognized extraction marker) → UNKNOWN, never a false skip', () => {
   // Without tool visibility we cannot prove the store was NOT reached → must abstain.
   const events = [userT(1, 'about IGM'), asstT(2, 'x')];
-  const r = classifyRetrievalSkips({ events, terms: TERMS, toolExtractionPending: true });
+  const r = classifyRetrievalSkips({ events, terms: TERMS, toolVisibilityUnknown: true });
   assert.equal(r.status, 'UNKNOWN');
   assert.equal(r.skips.length, 0);
 });

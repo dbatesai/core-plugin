@@ -15,10 +15,10 @@
  *        [--override <CLAUDE.md.override>] [--mode write|check|dry-run]
  */
 
-import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { generateForHarness, HARNESS_OUTPUT } from './contract-format.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const HARNESS = 'claude-code';
 
@@ -27,14 +27,18 @@ export async function generate({ contractPath, outputPath, overridePath = null, 
   return generateForHarness({ harness: HARNESS, contractPath, outputPath: out, overridePath, mode });
 }
 
-function isMain() {
-  try { return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; }
-}
-
-if (isMain()) {
+if (isCliEntry(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (name) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : null; };
   const contractPath = opt('contract') || 'CONTRACT.md';
+  // CLI trust boundary: validate the contract file exists BEFORE any read, so an
+  // empty, --help, or hostile invocation gets one named diagnostic and a nonzero
+  // exit — never an uncaught ENOENT stack. Library callers still see the raw
+  // throw on a bad path; only the CLI pre-checks.
+  if (!existsSync(contractPath)) {
+    process.stderr.write(`generate-claude-md: contract file not found: ${String(contractPath).slice(0, 120)} (pass --contract <CONTRACT.md>)\n`);
+    process.exit(2);
+  }
   const outputPath = opt('out');
   const overridePath = opt('override');
   const mode = opt('mode') || 'dry-run';

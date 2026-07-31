@@ -47,9 +47,11 @@ test('initMetrics scaffolds the metrics storage observably on disk', () => {
       assert.equal(result.ok, true);
       assert.equal(result.storagePath, join(projectDir, '_metrics'));
 
-      // Storage hierarchy exists on disk
+      // Storage root exists on disk; the retired OTel/push subdirectories
+      // (no shipped producer or consumer) are NOT scaffolded.
+      assert.ok(existsSync(result.storagePath), 'storage root scaffolded');
       for (const sub of ['traces', 'payloads', 'queue']) {
-        assert.ok(existsSync(join(result.storagePath, sub)), `${sub}/ scaffolded`);
+        assert.equal(existsSync(join(result.storagePath, sub)), false, `${sub}/ not scaffolded (retired)`);
       }
 
       // Operational meta landed under the redirected HOME, never the real one

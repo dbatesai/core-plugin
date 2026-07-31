@@ -46,7 +46,7 @@ Score-gated termination at every transition — the agent decides whether the ca
 
 Default retrieval excludes observations. Only graduated units surface unless the user explicitly queries observations.
 
-Auto-memory at `~/.claude/projects/*/memory/` is queried alongside `_memories/` at every tier. Complementary, not competing.
+Auto-memory at `~/.claude/projects/*/memory/` is read once at startup as harness-local warm-start hinting — scratch cache, never authoritative. The automatic per-turn retrieval path reads only `_memories/`; harness memory is not queried per tier.
 
 ### Priority function
 
@@ -144,7 +144,7 @@ The validation regime tests three things:
 
 Test corpus at `<project>/_memories/_validation/tests/test-*.yaml`. Runner at `${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.mjs` (invoke via `node`). Thresholds: P,R ≥ 0.8 PASS, ≥ 0.5 INVESTIGATE, < 0.5 FAIL.
 
-Cadence: weekly automatic (via memory hygiene's first /process-memory pass of the week), on-demand, auto-on during retrieval-tuning sessions.
+Cadence: on-demand — user request, or agent self-trigger when retrieval feels off; run before and after retrieval-tuning changes to measure the delta.
 
 The validation report includes a final qualitative field: *"Did retrieval feel right in real use?"* Quantitative thresholds aren't the whole story.
 
@@ -157,14 +157,6 @@ Capture runs by default and writes only to local disk under `<project>/_metrics/
 The classifier is **PROVISIONAL**. It isn't calibrated, so the readiness summary only flags an *upward* recognition-failure trend — never an absolute level — and every surface that shows the signal says PROVISIONAL. Calibration clears once a human-labeled set reaches a 0.7-precision gate, and that precision is computed only from the labels, never from the classifier's own output.
 
 `/metrics` is the user-facing surface for all of this: a live health check that builds a throwaway scratch store, proves the write→validate→index→retrieve→suppress round trip fresh on every run, then reads this project's real validator counts, unit census, retrieval-log coverage, recognition signal, and calibration-pool progress — each rendered as a bar gauge with an honest trust label (proven-live / direct / provisional), never a bare number pretending to be more certain than it is.
-
-## Debug mode
-
-Toggle-able logger at `~/.core/debug/<session-id>.jsonl`. Logs every retrieval, unit write, render, hygiene operation, graduation decision, multi-agent invocation in structured form. Flags anomalies inline (unit written but retrieval misses; missing inverse edge; retired fact re-appearing in render; priority function out-of-range; Tier 3 fired when Tier 1 should have caught it; hygiene operation reversed in same session).
-
-Triggers: user says "debug on," agent self-flips during self-unblock, validation runs auto-on.
-
-Lifecycle: per-session, 30-day archive, 90-day cold-store.
 
 ## What ships vs. what lives where
 

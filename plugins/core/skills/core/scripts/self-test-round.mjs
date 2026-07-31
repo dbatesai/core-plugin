@@ -49,7 +49,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, chmodSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 import { loadSnapshot } from './generate-summary-index.mjs';
 import { runHarness, validateGold } from './retrieval-harness.mjs';
 import { logEvent } from './log-event.mjs';
@@ -899,6 +899,9 @@ async function main(argv) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+// Shared spelling-robust entry guard (cli-entry.mjs). Async main keeps
+// process.exit: its probe children may leave handles that would otherwise
+// hold a natural exit open indefinitely.
+if (isCliEntry(import.meta.url)) {
   main(process.argv.slice(2)).then(c => process.exit(c));
 }

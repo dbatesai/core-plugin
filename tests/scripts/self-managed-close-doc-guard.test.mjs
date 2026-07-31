@@ -47,11 +47,9 @@ test('hooks.json: SessionEnd registers the close hook (NOT Stop — per-turn wou
   assert.match(cmd, /close-pass-hook\.mjs/, 'SessionEnd must point at close-pass-hook.mjs');
   // The heavy self-managed close (close-pass-hook.mjs -> /finalize) must never
   // be wired to Stop — Stop fires every turn, not once per session, and
-  // running a full close on every turn would be a correctness disaster. A
-  // SEPARATE, lightweight Stop hook (answer-close-hook.mjs, the real
-  // post-answer outcome closer) is fine —
-  // this guard is specifically against close-pass ending up there, not
-  // against Stop ever being used for anything.
+  // running a full close on every turn would be a correctness disaster. This
+  // guard is specifically against close-pass ending up there, not against
+  // Stop ever being used for anything.
   if (h.hooks.Stop) {
     assert.doesNotMatch(JSON.stringify(h.hooks.Stop), /close-pass-hook\.mjs/, 'close-pass-hook.mjs must never be registered on Stop');
   }

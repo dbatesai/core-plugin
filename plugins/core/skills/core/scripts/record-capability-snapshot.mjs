@@ -16,12 +16,12 @@
  * The script ships with the plugin by design. The plugin ships .mjs only, zero dependencies.
  */
 
-import { existsSync, realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { runStartup, SCHEMA_VERSION } from './capability-probe.mjs';
 import { appendRows } from './capability-history.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 /**
  * Resolve a NON-NULL session id so per-session history buckets never collapse
@@ -129,7 +129,6 @@ export async function main(argv) {
   }
 }
 
-const _c = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_c(process.argv[1] || '') === _c(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   main(process.argv.slice(2)).then((code) => process.exit(code ?? 0));
 }

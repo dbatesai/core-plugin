@@ -6,7 +6,7 @@ Plain person voice — same standard as SKILL.md §Voice.
 
 ---
 
-Read this when you're about to run the validation regime — weekly automatic via memory hygiene, or on-demand when retrieval feels off.
+Read this when you're about to run the validation regime — on-demand, when retrieval feels off or the user asks for a health check.
 
 The regime tests three things: that the substrate is healthy (units findable, frontmatter parsing, edges resolving), that retrieval converges on the right candidates, and that the priority function ranks them right. Failure surfaces as either a quality signal (precision/recall thresholds) or a structural signal (parse errors, missing files).
 
@@ -84,9 +84,8 @@ Aggregate pass rate is reported alongside individual results.
 
 ## Cadence
 
-- **Weekly automatic** — fires from memory hygiene's comprehensive pass at the first `/process-memory` of each calendar week.
-- **On-demand** — user can request a run any time, or the agent can self-trigger when retrieval starts feeling off.
-- **Auto-on for retrieval-tuning sessions** — when you're adjusting priority weights or edge structure, validation runs before and after to measure the delta.
+- **On-demand** — user can request a run any time, or the agent can self-trigger when retrieval starts feeling off. Nothing runs this automatically; `/process-memory`'s standing store check is `check-units.mjs`, not this runner.
+- **Retrieval-tuning sessions** — when you're adjusting priority weights or edge structure, run validation before and after to measure the delta.
 
 ## Failure handling
 

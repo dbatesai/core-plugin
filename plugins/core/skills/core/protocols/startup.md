@@ -346,12 +346,17 @@ Narrate the refresh in one sentence as part of readiness — *"Refreshed the hot
 
 ## Compose the readiness summary
 
-**Before composing — run capability probe (fail-open).** If `$CORE_ROOT` was resolved, run:
+**First — view memory.** Before any other compose-time action, re-check the auto-memory loaded in Identity load (the harness injects this into context, typically as `MEMORY.md`), especially the cross-project feedback memories. Recognition-failure looks like having memory loaded but not reaching for it; an explicit re-check at the top of composition closes the gap. Mirrors Anthropic's memory-tool system prompt — *always view your memory directory before doing anything else.*
+
+**Run capability probe (fail-open, failure visible).** If `$CORE_ROOT` was resolved, run:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/capability-probe.mjs" --startup --json 2>/dev/null \
-  > ~/.core/workspaces/<id>/capability-state.json || true
+node "${CORE_ROOT}/skills/core/scripts/capability-probe.mjs" --startup --json \
+  > ~/.core/workspaces/<id>/capability-state.json \
+  || echo "CORE-CAPABILITY-PROBE-FAILED: startup probe did not complete; capability evidence is stale this session"
 ```
+
+Fail-open but never silent: don't add `2>/dev/null` — the probe's stderr and the `CORE-CAPABILITY-PROBE-FAILED` marker are the visibility the readiness receipt depends on. If the marker prints, carry it into the readiness summary.
 
 Then append this session's snapshot to the capability history — the per-session record that drift and regression analysis read at `/process-memory` and `/metrics`: Fail-open but not silent: if both the home store and the project fallback fail, the script prints a one-line error to stderr — leave that visible rather than discarding it, so a dead snapshot path surfaces instead of failing invisibly for months.
 
@@ -359,12 +364,15 @@ Then append this session's snapshot to the capability history — the per-sessio
 node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --workspace-id <id> || true
 ```
 
-**Scaffold the metrics store (fail-open).** Once the workspace id is resolved, scaffold `_metrics/` so the observability substrate has somewhere to write — the capture streams resolve their storage path from the pin file this writes, and on Windows+OneDrive this is what redirects payloads off the synced path. Idempotent and never fatal; a scaffold failure degrades metrics capture but never blocks the session.
+**Scaffold the metrics store (never fatal, failure VISIBLE).** Once the workspace id is resolved, scaffold `_metrics/` so the observability substrate has somewhere to write — the capture streams resolve their storage path from the pin file this writes, and on Windows+OneDrive this is what redirects payloads off the synced path. Idempotent and never fatal — but a scaffold failure is never discarded: when the storage pin can't be written, the script fails CLOSED (capture disabled, typed `capture-disabled.json` marker, loud `CORE-METRICS-PIN-FAILED` stderr line) rather than silently putting capture back into the synced project folder.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/metrics-init.mjs" <project> <workspace-id> >/dev/null 2>&1 || true
+node "${CORE_ROOT}/skills/core/scripts/metrics-init.mjs" <project> <workspace-id> >/dev/null \
+  || echo "CORE-METRICS-INIT-FAILED: metrics scaffold did not complete — capture is degraded or disabled this session (details on stderr above)"
 ```
+
+Only stdout (the JSON result) is discarded — stderr stays visible by contract. If the `CORE-METRICS-INIT-FAILED` marker (or a `CORE-METRICS-PIN-FAILED` stderr line) appears, put one plain-voice line in the readiness summary saying metrics capture is off and why; never report a healthy capture state over a failed scaffold.
 
 **Metrics tripwires (v3.14.0 Link 5 — proactive degradation surfacing).** A cheap check over the PINNED scorecards and capture health — never a live recomputation. Run it right after the scaffold; echo each stdout line **verbatim** into the readiness summary (the lines are already written in plain language with the likely locus). No output → say nothing, per the readiness-only-escalations rule.
 
@@ -373,12 +381,12 @@ node "${CORE_ROOT}/skills/core/scripts/metrics-init.mjs" <project> <workspace-id
 node "${CORE_ROOT}/skills/core/scripts/metrics-tripwires.mjs" <project> 2>/dev/null || true
 ```
 
-**Before composing — check context integrity.** You can answer from partial context without noticing it: MEMORY.md gets truncated at the injection cap, and a large PROJECT.md can exceed a single read. Run `check-context-integrity.mjs` with the lines you actually read from PROJECT.md this bootstrap (the returning-workspace Tier-1 load reads it in full or paged — pass that read-extent). If the marker comes back `CONTEXT-PARTIAL`, say what's missing in plain voice **before** your first substantive answer — *"Heads up: MEMORY.md is over the injection cap, so I'm missing roughly 12 of its entries this session, and I only loaded 80 of PROJECT.md's 2200 lines. I'll read the rest before I lean on anything from there."* A `CONTEXT-COMPLETE` marker needs no narration.
+**Before composing — check context integrity.** You can answer from partial context without noticing it: MEMORY.md gets truncated at the injection cap, and a large PROJECT.md can exceed a single read. Run `check-context-integrity.mjs` with the lines you actually read from PROJECT.md this bootstrap (the returning-workspace Tier-1 load reads it in full or paged — pass that read-extent). The script resolves the auto-memory surface for the running harness itself: on Claude Code it derives `~/.claude/projects/<slug>/memory/MEMORY.md` from the cwd; on a harness with no auto-memory file surface (Codex) the memory check is explicitly skipped and the marker says so — it is never a false check against the Claude-only path. Pass `--memory <path>` only to override, `--harness <name>` only if detection needs forcing. If the marker comes back `CONTEXT-PARTIAL`, say what's missing in plain voice **before** your first substantive answer — *"Heads up: MEMORY.md is over the injection cap, so I'm missing roughly 12 of its entries this session, and I only loaded 80 of PROJECT.md's 2200 lines. I'll read the rest before I lean on anything from there."* A bare `CONTEXT-COMPLETE` marker needs no narration; a `CONTEXT-COMPLETE (MEMORY.md check skipped …)` marker means the memory side was not measured — mention it once if the user asks about memory state.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
 node "${CORE_ROOT}/skills/core/scripts/check-context-integrity.mjs" \
-  --memory ~/.claude/projects/<cwd-mapped>/memory/MEMORY.md \
+  --cwd <project> \
   --project <project>/PROJECT.md --project-read-lines <lines-read> || true
 ```
 
@@ -393,8 +401,6 @@ Use the phrase **"continuing with degraded capability evidence"** verbatim — n
 If `$CORE_ROOT` was not resolved (script unavailable), skip the capability probe silently — the probe itself is best-effort at startup, never a blocker.
 
 **But surface the unresolved root itself — loudly, once.** An unresolved `CORE_ROOT` is not a silent best-effort skip: it means the fork-check and all six Step-8 readiness commands were skipped this session, so the workspace was loaded without index regeneration, priority ranking, or the compaction check. Include a visible line in the readiness receipt — *"Heads up: I couldn't resolve the CORE plugin root this session, so the startup scripts (fork-check, index regen, priority, compaction check) were skipped. Run `claude plugins update core@core` and I'll have them next session."* This turns the wrong-drive silent failure into a visible degraded state the user can act on.
-
-**Before composing — view memory.** Re-check the auto-memory loaded in Identity load (the harness injects this into context, typically as `MEMORY.md`), especially the cross-project feedback memories. Recognition-failure looks like having memory loaded but not reaching for it; an explicit re-check at this point closes the gap. Mirrors Anthropic's memory-tool system prompt — *always view your memory directory before doing anything else.*
 
 Make workspace identity obvious. Talk like a person.
 
@@ -417,13 +423,13 @@ Target voice:
 
 What to skip: session summary content (not part of the bootstrap read); auto-memory cited as authoritative (it's scratch cache); session log recaps (per-session artifacts, not state); a full section-by-section recital (the user sees PROJECT.md when they want the full view).
 
-**Record the bootstrap.** After readiness lands, run `node <CORE_ROOT>/scripts/index-registry.mjs bootstrap <id> --session-started <ISO>`, where the ISO value is the timestamp of the first user message this session — the one session-start marker you can actually observe (see §"Bootstrap dedup"). It writes `~/.core/workspaces/<id>/last-bootstrap.json` atomically and owner-only, carrying that value plus `bootstrap_completed_at`. Don't hand-write the file: a torn record reads as "bootstrap never ran". This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
+**Record the bootstrap.** After readiness lands, run `node <CORE_ROOT>/skills/core/scripts/index-registry.mjs bootstrap <id> --session-started <ISO>`, where the ISO value is the timestamp of the first user message this session — the one session-start marker you can actually observe (see §"Bootstrap dedup"). It writes `~/.core/workspaces/<id>/last-bootstrap.json` atomically and owner-only, carrying that value plus `bootstrap_completed_at`. Don't hand-write the file: a torn record reads as "bootstrap never ran". This is the durable signal `skills/core/SKILL.md §"Before the task — startup"` reads to decide whether bootstrap already ran this session.
 
 After readiness lands, only ask what you still don't know — genuine gaps that no durable artifact resolved, with a hypothesis when you have one. Don't ask "what were we working on?" (you just read it), "what would you like to do today?" (the agenda tells you), or "can you catch me up?" (that's exactly what bootstrap prevents). Do ask deferred-decision questions ("PROJECT.md flags the X decision as deferred pending your call — have you decided?"), agenda-fork questions ("continue the v2 build or pivot to the stale R-5 risk first?"), and missing-unit questions ("the session-intent topic 'auto-creation rules' didn't surface a unit at Tier 1 or 2 — written yet, or still pending?"). Then wait for the user's next move; the agenda topics get resolved or explicitly deferred before implementation work begins.
 
 ## Bootstrap dedup
 
-This is the authoritative definition of the already-bootstrapped check that `SKILL.md §"Before the task — startup"` summarizes.
+This is the ONLY definition of the already-bootstrapped check — `SKILL.md §"Before the task — startup"` points here without restating it.
 
 The marker is the first-user-message timestamp. `last-bootstrap.json`'s `session_started_at` holds the timestamp of the first user message of the session in which bootstrap ran — that's what "Record the bootstrap" above writes. It's a proxy: you have no access to the harness's session clock, but you can usually see when the conversation started.
 

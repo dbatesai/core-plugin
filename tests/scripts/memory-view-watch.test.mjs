@@ -25,7 +25,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync,
-  watch as fsWatchReal, openSync, closeSync, readFileSync, readdirSync,
+  watch as fsWatchReal, openSync, closeSync, readFileSync, readdirSync, chmodSync, symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -94,12 +94,12 @@ function stdoutLines(out) {
   return out.split('\n').filter((l) => l.trim() !== '');
 }
 
-// TERMINAL protocol lines only: "degraded" is a documented non-terminal
-// STATUS line (the process keeps running on its sweep after emitting it);
+// TERMINAL protocol lines only: "degraded" and "check-failed" are documented
+// non-terminal STATUS lines (the process keeps running after emitting them);
 // consumers dispatch on `event`, never on line position — so must the suite.
 function protocolLines(out) {
   return stdoutLines(out).filter((l) => {
-    try { return JSON.parse(l).event !== 'degraded'; } catch { return true; }
+    try { return !['degraded', 'check-failed'].includes(JSON.parse(l).event); } catch { return true; }
   });
 }
 
@@ -881,7 +881,17 @@ test('writeLiveState/readLiveState: whole-record replace, schema validated, corr
     assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'everything', baselineSnapshot: 'b' }), /--scope/);
     assert.throws(() => writeLiveState(p, { scope: 'active', baselineSnapshot: 'b' }), /--artifact-url/);
     assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'active' }), /--baseline-snapshot/);
-    assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'active', baselineSnapshot: 'b', retryAt: 'soonish' }), /ISO/);
+    assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'active', baselineSnapshot: 'b', grantBasis: 'g', retryAt: 'soonish' }), /ISO/);
+    // The writer boundary refuses a record without its prospective grant, and
+    // validates the budget count as a whole-token non-negative integer.
+    assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'active', baselineSnapshot: 'b' }), /--grant-basis/);
+    assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'active', baselineSnapshot: 'b', grantBasis: '  ' }), /--grant-basis/);
+    for (const bad of [-1, 1.5, Number.NaN]) {
+      assert.throws(
+        () => writeLiveState(p, { artifactUrl: 'u', scope: 'active', baselineSnapshot: 'b', grantBasis: 'g', publishCount: bad }),
+        /non-negative integer/,
+      );
+    }
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
@@ -900,6 +910,7 @@ test('CLI: --write-live-state composes the record and --live-state arms from it 
     const wrote = spawnSync(process.execPath, [WATCH, '--write-live-state', statePath,
       '--artifact-url', 'https://claude.ai/artifacts/x', '--scope', 'all-including-archive',
       '--exclude-topic', 'secret-topic', '--baseline-snapshot', staleArchiveId,
+      '--grant-basis', 'standing authorization, granted 2026-07-01, recorded in harness memory',
     ], { encoding: 'utf8' });
     assert.equal(wrote.status, 0, wrote.stderr);
     assert.equal(JSON.parse(wrote.stdout).kind, LIVE_STATE_KIND);
@@ -909,9 +920,12 @@ test('CLI: --write-live-state composes the record and --live-state arms from it 
     assert.equal(code, 0, `stderr: ${w.getErr()}`);
     const ev = JSON.parse(protocolLines(w.getOut())[0]);
     assert.equal(ev.event, 'store-changed');
-    const current = computeCurrentSnapshot(proj, { scope: 'all-including-archive' });
+    // The compared identity honors the record's scope AND its exclusions —
+    // an active-scope or exclusion-blind default would report the wrong id.
+    const current = computeCurrentSnapshot(proj,
+      { scope: 'all-including-archive', excludeTopics: ['secret-topic'] });
     assert.equal(ev.snapshot_id, current.snapshotId,
-      'the emitted id is the record-scoped id — an active-scope default would report the wrong identity');
+      'the emitted id is the record-scoped, record-excluded id');
     assert.notEqual(ev.snapshot_id, current.activeSnapshotId);
   } finally {
     rmSync(base, { recursive: true, force: true });
@@ -1003,4 +1017,92 @@ test('parseArgs/parseWriteLiveStateArgs: the new flags validate closed', () => {
   assert.throws(() => parseWriteLiveStateArgs(['--write-live-state', '/p', '--bogus']), /unknown flag/);
   assert.equal(parseWriteLiveStateArgs(['--write-live-state', '/p', '--publish-count', '4']).publishCount, 4);
   assert.throws(() => parseWriteLiveStateArgs(['--write-live-state', '/p', '--publish-count', '-1']), /non-negative/);
+  // Whole-token validation on EVERY integer flag, both parser modes: parseInt
+  // would silently truncate '1ms' and '1.5' to 1.
+  for (const bad of ['1ms', '1.5']) {
+    assert.throws(() => parseArgs(['/p', '--debounce-ms', bad]), /positive integer/);
+    assert.throws(() => parseWriteLiveStateArgs(['--write-live-state', '/p', '--publish-count', bad]), /non-negative integer/);
+  }
+});
+
+posixTest('the CLI entry runs under a symlinked path spelling — a refusal never vanishes into a silent exit 0', () => {
+  // Node realpaths the ESM entry (--preserve-symlinks-main off), so a naive
+  // as-spelled isMain comparison goes false through any symlinked component
+  // and the CLI silently no-ops: exit 0, empty stdout, empty stderr — a
+  // supervisor reads a vanished refusal as success. The entry guard must
+  // match both spellings.
+  const { base, proj } = makeStore(1);
+  try {
+    const linkDir = join(base, 'scripts-link');
+    symlinkSync(SCRIPTS, linkDir);
+    const run = spawnSync(process.execPath,
+      [join(linkDir, 'memory-view-watch.mjs'), proj, '--live-state', join(base, 'missing.json'),
+        '--timeout-ms', '25', '--sweep-interval-ms', '25'],
+      { encoding: 'utf8', timeout: 5000 });
+    assert.equal(run.status, 1,
+      `a symlinked spelling of the watcher must still run main and refuse: status=${run.status} stderr=${JSON.stringify(run.stderr)}`);
+    assert.match(run.stderr, /refusing to arm/, 'the refusal diagnostic must land on the pipe');
+    assert.equal(run.stdout, '');
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('an explicit --live-state record the watcher cannot honor refuses to arm (exit 1, named reason, no protocol line)', () => {
+  const { base, proj } = makeStore(1);
+  try {
+    const missing = join(base, 'missing.json');
+    const corrupt = join(base, 'corrupt.json');
+    writeFileSync(corrupt, '{');
+    const wrongSchema = join(base, 'wrong.json');
+    writeFileSync(wrongSchema, JSON.stringify({
+      kind: 'some-other-record', scope: 'active', baseline_snapshot: 'bogus', retry_at: 'not-a-date',
+    }));
+    for (const statePath of [missing, corrupt, wrongSchema]) {
+      const run = spawnSync(process.execPath,
+        [WATCH, proj, '--live-state', statePath, '--timeout-ms', '25', '--sweep-interval-ms', '25'],
+        { encoding: 'utf8', timeout: 5000 });
+      assert.equal(run.status, 1, `an unusable explicit record is a config error, never a silent default: ${run.stderr}`);
+      assert.equal(run.stdout, '', 'no lifecycle event may be emitted');
+      assert.match(run.stderr, /refusing to arm/);
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+posixTest('an unreadable store during a check emits check-failed and holds the baseline — never a store-changed wake', async () => {
+  const { base, proj, memories } = makeStore(2);
+  const events = []; const statuses = []; const codes = [];
+  let handle = null;
+  try {
+    handle = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000,
+      baselineSnapshot: computeCurrentSnapshot(proj).snapshotId,
+      emit: (e) => events.push(e), status: (s) => statuses.push(s),
+      exit: (c) => codes.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await handle.armed;
+    chmodSync(memories, 0o000); // total traversal failure — reads collapse
+    try {
+      await handle.sweepTick();
+    } finally {
+      chmodSync(memories, 0o755);
+    }
+    assert.deepEqual(events, [], 'an incomplete capture must not fabricate a change (or an empty store)');
+    assert.deepEqual(codes, [], 'the loop must stay armed for a later complete sweep');
+    assert.equal(statuses.length, 1, 'exactly one typed diagnostic per failed check');
+    assert.equal(statuses[0].event, 'check-failed');
+    assert.equal(statuses[0].reason, 'store-read-incomplete');
+    assert.ok(statuses[0].read_errors > 0);
+
+    // The store is readable again: a REAL change must still be detected.
+    writeFileSync(join(memories, 'unit-1.md'), unitContent('unit-1', 'Changed after recovery.'));
+    await handle.sweepTick();
+    await waitFor(() => events.length > 0, 5000, 'post-recovery detection');
+    assert.equal(events[0].event, 'store-changed');
+    assert.deepEqual(codes, [0]);
+  } finally {
+    try { chmodSync(memories, 0o755); } catch { /* already restored */ }
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
 });

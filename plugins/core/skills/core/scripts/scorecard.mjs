@@ -27,12 +27,11 @@
 
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
 import { readCaptureHealth, listTurnCaptureFiles, turnCaptureEnabled, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const SCORECARD_SCHEMA_VERSION = '1.0.0';
 
@@ -219,7 +218,6 @@ export function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

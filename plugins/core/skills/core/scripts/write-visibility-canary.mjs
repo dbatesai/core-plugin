@@ -25,14 +25,14 @@
  * By design the script ships with the plugin. The plugin ships .mjs only.
  */
 
-import { existsSync, readFileSync, mkdirSync, chmodSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
 // Match only the MANAGED canary line, not any prose that mentions the tag. The old
@@ -178,7 +178,6 @@ export async function main(argv) {
   return 0;
 }
 
-const _c = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_c(process.argv[1]) === _c(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   main(process.argv.slice(2)).then((code) => process.exit(code ?? 0));
 }

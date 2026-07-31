@@ -44,9 +44,15 @@ function pluginTreeIsClean() {
   } catch { return false; }
 }
 const TREE_CLEAN = pluginTreeIsClean();
-// A render-dependent test: runs only when the tree is clean (renderer needs a
-// real SHA), otherwise skips with the fail-closed reason.
-const rtest = (name, fn) => test(name, TREE_CLEAN ? {} : { skip: 'plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree' }, fn);
+// A render-dependent test: needs a clean plugin tree (the renderer fails closed
+// without a real SHA). On a dirty tree it HARD-FAILS with a named reason — the
+// failing run IS the refusal. A skip here reads as green while asserting
+// nothing, which is exactly how dirty-tree regressions ship.
+const DIRTY_TREE_REFUSAL =
+  'REFUSED: plugin tree is dirty, so this behavior assertion cannot execute '
+  + '(fix 9 fail-closed provenance). Commit or stash the plugin tree and re-run '
+  + '— a skipped-green result here proves nothing.';
+const rtest = (name, fn) => test(name, TREE_CLEAN ? fn : () => { assert.fail(DIRTY_TREE_REFUSAL); });
 
 // Stub metrics provider: tests never run the live subprocess probe suite —
 // the metrics object only needs the fields the page consumes.
@@ -319,6 +325,34 @@ test('scoped identity: an archive-only edit changes the all-including-archive id
       'active scope must not see archive-only changes');
     assert.notEqual(collectUnits(root, { scope: 'all-including-archive' }).snapshotId, archiveBefore.snapshotId,
       'the published identity must cover every included source byte');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('exclusion-aware identity: the id covers exactly the kept population — excluded edits never change it, kept edits always do', () => {
+  const { root, mem } = fixtureProject();
+  try {
+    const whole = collectUnits(root);
+    const excludedBefore = collectUnits(root, { excludeTopics: ['confidential-client'] });
+    assert.notEqual(excludedBefore.snapshotId, whole.snapshotId,
+      'different rendered populations must not share one snapshot id');
+
+    // Direction 1: an edit wholly inside the excluded topic must NOT move the
+    // excluded view's identity (no wake, no republish of an identical page).
+    writeFileSync(join(mem, 'topic-4-secret.md'),
+      '---\nid: topic-4-secret\ntype: topic\nstatus: active\ntopics: [confidential-client]\n---\n\n# Secret topic unit\n\nSensitive v2.\n');
+    const excludedAfterSecretEdit = collectUnits(root, { excludeTopics: ['confidential-client'] });
+    assert.equal(excludedAfterSecretEdit.snapshotId, excludedBefore.snapshotId,
+      'an edit wholly outside the rendered population must not force a republish');
+
+    // Direction 2: an edit to a KEPT unit must move it.
+    writeFileSync(join(mem, 'obs-2-beta.md'),
+      '---\nid: obs-2-beta\ntype: observation\nstatus: active\ntopics: [beta]\nupdated: 2026-07-02\n---\n\n# OBS-2 — Beta observation\n\nKept body CHANGED.\n');
+    assert.notEqual(collectUnits(root, { excludeTopics: ['confidential-client'] }).snapshotId,
+      excludedBefore.snapshotId,
+      'a kept unit\'s edit is exactly what the identity must track');
+
+    // No exclusions → the legacy id, verbatim: existing receipts stay comparable.
+    assert.equal(collectUnits(root).activeSnapshotId, collectUnits(root).snapshotId);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

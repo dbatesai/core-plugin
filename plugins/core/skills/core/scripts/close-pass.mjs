@@ -40,13 +40,13 @@ import { tmpdir } from 'node:os';
 import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
 import { buildCloseRecord, renderCloseSummary } from './close-payload.mjs';
 import { trustedHome } from './trusted-home.mjs';
-import { fileURLToPath } from 'node:url';
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
 import { readTranscript, resolveTranscript } from './read-transcript.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // A lock older than this with no live owner is stale and supersedable. Generous
 // enough for a manual close that renders and summarizes before finishing.
@@ -700,7 +700,6 @@ function selfTest() {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

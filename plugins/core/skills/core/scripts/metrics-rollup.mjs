@@ -18,13 +18,13 @@
  * CLI:  node metrics-rollup.mjs <project> [--json] [--today YYYY-MM-DD]
  */
 
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from './metrics-dedupe.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 const HEADLINE = 'rec-fail-tier-0';
 
@@ -218,8 +218,7 @@ export function readOrientSignal(project, { home = homedir(), workspaceId } = {}
   try { return readFileSync(f, 'utf8').trim(); } catch { return null; }
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();

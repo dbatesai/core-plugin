@@ -40,6 +40,7 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { logHookEvent } from './hook-log.mjs';
 import { trustedHome } from '../scripts/trusted-home.mjs';
+import { isCliEntry } from '../scripts/cli-entry.mjs';
 
 // trustedHome() (shared anchor in scripts/trusted-home.mjs): the OS-account home,
 // unspoofable by $HOME/$USERPROFILE. Unresolvable → null → nothing is authorized.
@@ -106,7 +107,6 @@ function main() {
 }
 
 // Only run as the hook entry — importing this module must not execute main() / process.exit().
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   try { process.exit(main() || 0); } catch { process.exit(0); }
 }

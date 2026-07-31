@@ -2,11 +2,20 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, cpSync, rmSync } from 'node:fs';
 import { retrieveContext, buildRetrievalTrace, tokenize, main as retrieveContextMain } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
 // The obligation-3 fixture store lives in-repo under tests/fixtures/ so CI (which checks
 // out only core-plugin) can reach it. The generated _lib/ cache is gitignored + regenerated.
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+const FIXT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// The committed fixture is NEVER touched by tests — even "read" paths write the
+// cached index (_lib/unit-summaries.json) as a side effect, which polluted the
+// committed tree (retrieval-premise.test.mjs owns this pattern; the
+// fixture-cold-clean guard test enforces it). All reads run against a clone.
+const FIXT = mkdtempSync(join(tmpdir(), 'obligation3-store-'));
+cpSync(FIXT_SRC, FIXT, { recursive: true });
+process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 
 test('tokenize lowercases, splits on non-word, drops stopwords', () => {
   const toks = tokenize('The Omega Speedmaster, on sale!');

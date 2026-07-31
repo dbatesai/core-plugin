@@ -31,17 +31,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/core/hooks/answer-close-hook.mjs\"",
-            "timeout": 10
-          }
-        ]
-      }
     ]
   }
 }

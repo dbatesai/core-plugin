@@ -39,13 +39,12 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 
 ### Shipped hooks (installed with the plugin)
 
-Installing CORE registers four hooks via `plugins/core/hooks/hooks.json` — they are what make CORE self-running, and each has an opt-out:
+Installing CORE registers three hooks via `plugins/core/hooks/hooks.json` — they are what make CORE self-running, and each has an opt-out:
 
 | Hook | What it does | Opt out |
 |---|---|---|
 | SessionStart | Injects the directive to run `/core` first, so you never type it. A wrapper entry point (`CORE_AUTOSTART_SKILL`) is honored only when registered in your own user-level `~/.claude/settings.json`, resolved from the OS account database (`os.userInfo()`), so neither a project's settings nor a hostile `HOME`/`USERPROFILE` can redirect it. | `CORE_AUTOSTART=0` |
 | UserPromptSubmit | Per-turn retrieval: injects the top matching memory units for each prompt (deterministic, byte-capped, fail-open). | `CORE_RETRIEVAL_HOOK=0` |
-| Stop | Closes out each answered turn: records locally whether the memory delivered that turn was used, so retrieval quality can be graded later. Nothing leaves your machine. | `CORE_METRICS_ENABLED=0` |
 | SessionEnd | Records a deterministic lifecycle receipt for the exact session that ended — zero model calls; `/process-memory` back-fills the memory processing later. | `CORE_AUTO_CLOSE=0` |
 
 ### Optional hooks (manual)
@@ -122,7 +121,7 @@ Codex finds the bundled skills (`core`, `finalize`, `refocus`, `process-memory`,
 
 Two differences from Claude Code worth knowing.
 
-**Codex gets two of the four hooks.** `plugins/core/hooks/hooks-codex.json` registers `UserPromptSubmit` (per-turn retrieval) and `Stop` (per-turn outcome close). Codex has no session-start or session-end event, so there is nothing to register there. Concretely: nothing runs `/core` for you, and no close fires when you quit. Type `/core` to start a session — that is what loads your project and discharges any close the last session left owed — and `/finalize` to close one. Plugin hooks also stay skipped until you explicitly trust their definition.
+**Codex gets one of the three hooks.** `plugins/core/hooks/hooks-codex.json` registers `UserPromptSubmit` (per-turn retrieval). Codex has no session-start or session-end event, so there is nothing to register there. Concretely: nothing runs `/core` for you, and no close fires when you quit. Type `/core` to start a session — that is what loads your project and discharges any close the last session left owed — and `/finalize` to close one. Plugin hooks also stay skipped until you explicitly trust their definition.
 
 **Pre-execution guards don't exist on Codex.** Claude Code can block a tool call before it runs; Codex's hook surface can't, so write-safety on Codex rests on the agent's own discipline. `harnesses/codex.md §hook-register` has the detail and the conditions for reopening this.
 

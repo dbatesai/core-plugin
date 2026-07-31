@@ -36,7 +36,7 @@
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync,
-  mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync, realpathSync,
+  mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync, 
 } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
@@ -47,10 +47,11 @@ import { loadUnit } from './priority.mjs';
 import { trustedHome } from './trusted-home.mjs';
 import { VALID_TYPES, VALID_STATUSES, VALID_EDGE_TYPES, isActiveStatus } from './unit-vocab.mjs';
 import { buildReportMd, buildReportHtml } from './metrics-package-report.mjs';
-import { resolveOutcomeAuthority, USEFULNESS_OUTCOMES } from './record-retrieval-outcome.mjs';
+import { resolveOutcomeAuthority, USEFULNESS_OUTCOMES } from './outcome-vocab.mjs';
 import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'metrics-package-salt';
@@ -1533,12 +1534,7 @@ export function runPackage(argv, { homeOverride } = {}) {
 
 // ---------- CLI entry ----------
 
-const isCliEntry = (() => {
-  try { return process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); }
-  catch { return false; }
-})();
-
-if (isCliEntry) {
+if (isCliEntry(import.meta.url)) {
   const result = runPackage(process.argv.slice(2));
   if (result.error) {
     process.stderr.write(`error: ${result.error}\n`);
