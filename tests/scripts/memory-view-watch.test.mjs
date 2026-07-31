@@ -25,10 +25,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync,
+  watch as fsWatchReal, openSync, closeSync, readFileSync, readdirSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
@@ -37,7 +38,8 @@ const WATCH = join(SCRIPTS, 'memory-view-watch.mjs');
 
 const {
   startWatcher, createCoalescer, sweepStatSet, shouldIgnoreRel,
-  computeCurrentSnapshot, parseArgs,
+  computeCurrentSnapshot, parseArgs, parseWriteLiveStateArgs,
+  readLiveState, writeLiveState, LIVE_STATE_KIND,
 } = await import(pathToFileURL(WATCH).href);
 const { atomicWriteFileSync } = await import(pathToFileURL(join(SCRIPTS, 'fs-atomic.mjs')).href);
 
@@ -92,6 +94,41 @@ function stdoutLines(out) {
   return out.split('\n').filter((l) => l.trim() !== '');
 }
 
+// TERMINAL protocol lines only: "degraded" is a documented non-terminal
+// STATUS line (the process keeps running on its sweep after emitting it);
+// consumers dispatch on `event`, never on line position — so must the suite.
+function protocolLines(out) {
+  return stdoutLines(out).filter((l) => {
+    try { return JSON.parse(l).event !== 'degraded'; } catch { return true; }
+  });
+}
+
+// Environment capability probe. Under a low FD ceiling (the reviewer's real
+// 256-fd GUI-launch environment) REAL fs.watch can fail with EMFILE — the
+// watcher's contract there is DEGRADED sweep-only mode, not death. Where
+// fs.watch works, this suite asserts the full watch-path contract (trigger
+// "watch", trailing-debounce final-state id, sweep timers parked at 10 min);
+// where it does not, the same tests assert the degraded contract (detection
+// still happens, via sweep, exit 0). Both branches are exact assertions —
+// neither run weakens the other's guarantees, and the forced-EMFILE tests
+// further down exercise degraded mode deterministically on EVERY machine.
+const WATCH_HEALTHY = await (async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mvw-probe-'));
+  try {
+    const w = fsWatchReal(dir, { recursive: true }, () => {});
+    const healthy = await new Promise((res) => {
+      w.on('error', () => res(false));
+      setTimeout(() => res(true), 300);
+    });
+    try { w.close(); } catch { /* closed */ }
+    return healthy;
+  } catch {
+    return false;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
+
 function assertIso(s) {
   assert.equal(new Date(s).toISOString(), s, `observed_at must be a round-trippable ISO stamp, got ${s}`);
 }
@@ -105,7 +142,10 @@ test('burst of 20 rapid writes coalesces to exactly one store-changed for the fi
   const { base, proj } = makeStore(3);
   try {
     const baseline = computeCurrentSnapshot(proj).snapshotId;
-    const w = spawnWatcher(proj, ['--debounce-ms', '250', '--sweep-interval-ms', '600000', '--timeout-ms', '30000', '--baseline-snapshot', baseline]);
+    // Healthy fs.watch: sweep parked far away so only the event path can
+    // detect. Degraded environment: the sweep IS the detection path, so it
+    // runs fast enough to catch the burst within the timeout.
+    const w = spawnWatcher(proj, ['--debounce-ms', '250', '--sweep-interval-ms', WATCH_HEALTHY ? '600000' : '500', '--timeout-ms', '30000', '--baseline-snapshot', baseline]);
     await w.armed;
 
     for (let i = 0; i < 20; i++) {
@@ -117,13 +157,21 @@ test('burst of 20 rapid writes coalesces to exactly one store-changed for the fi
 
     const { code } = await w.exited;
     assert.equal(code, 0, `expected change-detected exit 0, stderr: ${w.getErr()}`);
-    const lines = stdoutLines(w.getOut());
-    assert.equal(lines.length, 1, `exactly one stdout line, got: ${JSON.stringify(lines)}`);
+    const lines = protocolLines(w.getOut());
+    assert.equal(lines.length, 1, `exactly one terminal protocol line, got: ${JSON.stringify(lines)}`);
     const ev = JSON.parse(lines[0]);
     assert.equal(ev.event, 'store-changed');
-    assert.equal(ev.trigger, 'watch');
-    assert.equal(ev.snapshot_id, expected.snapshotId, 'must report the post-burst FINAL snapshot id — trailing debounce');
-    assert.equal(ev.units_seen, expected.unitsSeen);
+    if (WATCH_HEALTHY) {
+      assert.equal(ev.trigger, 'watch');
+      assert.equal(ev.snapshot_id, expected.snapshotId, 'must report the post-burst FINAL snapshot id — trailing debounce');
+      assert.equal(ev.units_seen, expected.unitsSeen);
+    } else {
+      // Degraded (sweep-only) mode makes no coalescing promise — a sweep may
+      // legitimately catch a mid-burst state; the contract is that a change
+      // IS detected and reported with a real (non-baseline) id.
+      assert.equal(ev.trigger, 'sweep', 'no event path exists in a degraded environment');
+      assert.notEqual(ev.snapshot_id, baseline, 'the reported id must reflect a real change');
+    }
     assertIso(ev.observed_at);
     // The detector never writes into the store — not even the derived cache.
     assert.ok(!existsSync(join(proj, '_memories', '_lib', 'unit-summaries.json')),
@@ -141,7 +189,7 @@ test('atomic tmp+rename write (the store writer shape) detected once; tmp name n
   const { base, proj } = makeStore(2);
   try {
     const baseline = computeCurrentSnapshot(proj).snapshotId;
-    const w = spawnWatcher(proj, ['--debounce-ms', '150', '--sweep-interval-ms', '600000', '--timeout-ms', '30000', '--baseline-snapshot', baseline]);
+    const w = spawnWatcher(proj, ['--debounce-ms', '150', '--sweep-interval-ms', WATCH_HEALTHY ? '600000' : '400', '--timeout-ms', '30000', '--baseline-snapshot', baseline]);
     await w.armed;
 
     atomicWriteFileSync(join(proj, '_memories', 'unit-new.md'), unitContent('unit-new', 'Atomically written unit.'));
@@ -149,8 +197,8 @@ test('atomic tmp+rename write (the store writer shape) detected once; tmp name n
 
     const { code } = await w.exited;
     assert.equal(code, 0, `stderr: ${w.getErr()}`);
-    const lines = stdoutLines(w.getOut());
-    assert.equal(lines.length, 1, `exactly one stdout line, got: ${JSON.stringify(lines)}`);
+    const lines = protocolLines(w.getOut());
+    assert.equal(lines.length, 1, `exactly one terminal protocol line, got: ${JSON.stringify(lines)}`);
     const ev = JSON.parse(lines[0]);
     assert.equal(ev.event, 'store-changed');
     assert.equal(ev.snapshot_id, expected.snapshotId);
@@ -172,7 +220,7 @@ test('unchanged store emits nothing across many sweep ticks', async () => {
     const w = spawnWatcher(proj, ['--debounce-ms', '100', '--sweep-interval-ms', '200', '--timeout-ms', '30000', '--baseline-snapshot', baseline]);
     await w.armed;
     await delay(1200); // ~5-6 sweep ticks, each recomputing the full signature
-    assert.equal(w.getOut(), '', 'no event may be emitted for an unchanged store');
+    assert.deepEqual(protocolLines(w.getOut()), [], 'no event may be emitted for an unchanged store');
     assert.equal(w.child.exitCode, null, 'watcher must still be running');
     assert.ok(!existsSync(join(proj, '_memories', '_lib', 'unit-summaries.json')),
       'sweep checks must not write the derived cache');
@@ -258,7 +306,7 @@ test('idle timeout exits 2 with the idle-timeout event', async () => {
     const w = spawnWatcher(proj, ['--debounce-ms', '100', '--sweep-interval-ms', '600000', '--timeout-ms', '600', '--baseline-snapshot', baseline]);
     const { code } = await w.exited;
     assert.equal(code, 2, `stderr: ${w.getErr()}`);
-    const lines = stdoutLines(w.getOut());
+    const lines = protocolLines(w.getOut());
     assert.equal(lines.length, 1);
     const ev = JSON.parse(lines[0]);
     assert.equal(ev.event, 'idle-timeout');
@@ -279,7 +327,7 @@ posixTest('SIGTERM exits 3 cleanly with a stopped event', async () => {
     w.child.kill('SIGTERM');
     const { code } = await w.exited;
     assert.equal(code, 3, `stderr: ${w.getErr()}`);
-    const lines = stdoutLines(w.getOut());
+    const lines = protocolLines(w.getOut());
     assert.equal(lines.length, 1);
     const ev = JSON.parse(lines[0]);
     assert.equal(ev.event, 'stopped');
@@ -297,7 +345,7 @@ posixTest('SIGINT exits 3 cleanly', async () => {
     w.child.kill('SIGINT');
     const { code } = await w.exited;
     assert.equal(code, 3, `stderr: ${w.getErr()}`);
-    assert.equal(JSON.parse(stdoutLines(w.getOut())[0]).signal, 'SIGINT');
+    assert.equal(JSON.parse(protocolLines(w.getOut())[0]).signal, 'SIGINT');
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
@@ -322,7 +370,7 @@ test('_lib/, dotfile, tmp and backup writes do not trigger the watch path', asyn
     writeFileSync(join(proj, '_memories', 'backup.md~'), 'editor backup');
     await delay(800); // several debounce windows past the writes
 
-    assert.equal(w.getOut(), '', 'filtered writes must not produce any event');
+    assert.deepEqual(protocolLines(w.getOut()), [], 'filtered writes must not produce any event');
     assert.equal(w.child.exitCode, null, 'watcher must still be running');
     w.child.kill(IS_WIN ? undefined : 'SIGTERM');
     await w.exited;
@@ -389,7 +437,7 @@ test('baseline mismatch at startup is reported immediately', async () => {
     const w = spawnWatcher(proj, ['--sweep-interval-ms', '600000', '--timeout-ms', '30000', '--baseline-snapshot', staleBaseline]);
     const { code } = await w.exited;
     assert.equal(code, 0, `stderr: ${w.getErr()}`);
-    const lines = stdoutLines(w.getOut());
+    const lines = protocolLines(w.getOut());
     assert.equal(lines.length, 1);
     const ev = JSON.parse(lines[0]);
     assert.equal(ev.event, 'store-changed');
@@ -420,6 +468,13 @@ test('parseArgs: defaults, overrides, and rejection of malformed invocations', (
   assert.throws(() => parseArgs(['/p', '--bogus']), /unknown flag/);
   assert.throws(() => parseArgs(['/p', '--debounce-ms', 'soon']), /positive integer/);
   assert.throws(() => parseArgs(['/p', 'extra']), /unexpected argument/);
+  // Whole-token integer validation — parseInt would take '1ms' and '1.5' as 1.
+  for (const partial of ['1ms', '1.5', '2e3x', ' ']) {
+    assert.throws(() => parseArgs(['/p', '--debounce-ms', partial]), /positive integer/,
+      `${JSON.stringify(partial)} must be rejected, not partially parsed`);
+    assert.throws(() => parseArgs(['/p', '--sweep-interval-ms', partial]), /positive integer/);
+    assert.throws(() => parseArgs(['/p', '--timeout-ms', partial]), /positive integer/);
+  }
 });
 
 test('a project without a _memories store exits 1 and emits no protocol line', async () => {
@@ -433,4 +488,519 @@ test('a project without a _memories store exits 1 and emits no protocol line', a
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
+});
+
+// ===========================================================================
+// Degraded sweep-only mode — resource exhaustion must never kill live mode.
+// ===========================================================================
+
+const deafWatch = () => ({ on() {}, close() {} });
+
+function makeStoreWithArchive(n = 2) {
+  const s = makeStore(n);
+  mkdirSync(join(s.memories, 'archive'), { recursive: true });
+  writeFileSync(join(s.memories, 'archive', 'old.md'),
+    `---\nid: old\ntype: observation\nstatus: archived\n---\n\nArchived body.\n`);
+  return s;
+}
+
+// REAL EMFILE, no injection: exhaust this process's fd table, arm with the
+// real fs.watch, watch fs.watch fail for real, and prove the watcher lives
+// on in sweep-only mode. Deterministic wherever the fd table is exhaustible;
+// skips honestly (with the reason stated) where the platform will not
+// cooperate — the injected variants below run everywhere regardless.
+test('REAL fd exhaustion: fs.watch EMFILE at arm degrades to sweep-only and detection survives', async (t) => {
+  const { base, proj } = makeStore(3);
+  const held = [];
+  const statuses = [];
+  const events = [];
+  const codes = [];
+  let handle = null;
+  try {
+    const baseline = computeCurrentSnapshot(proj).snapshotId;
+    try {
+      for (let i = 0; i < 300000; i++) held.push(openSync(join(proj, '_memories', 'unit-1.md'), 'r'));
+    } catch (e) {
+      if (e.code !== 'EMFILE' && e.code !== 'ENFILE') throw e;
+    }
+    if (held.length === 300000) { t.skip('could not exhaust the fd table on this machine'); return; }
+    handle = startWatcher({
+      projectDir: proj,
+      debounceMs: 50,
+      sweepIntervalMs: 600000,
+      timeoutMs: 60000,
+      baselineSnapshot: baseline,
+      emit: (e) => events.push(e),
+      status: (s) => statuses.push(s),
+      exit: (c) => codes.push(c),
+      diag: () => {},
+      // no watchFn injection: the REAL fs.watch meets the real EMFILE
+    });
+    // Release the table SYNCHRONOUSLY: the initial check reads the store
+    // after a setImmediate yield, so it must find free descriptors again.
+    for (const f of held) { try { closeSync(f); } catch { /* closed */ } }
+    held.length = 0;
+    if (statuses.length === 0) {
+      if (handle) handle._stopQuiet();
+      t.skip('fs.watch survived a full fd table on this platform — real EMFILE not forcible here');
+      return;
+    }
+    assert.equal(statuses[0].event, 'degraded');
+    assert.equal(statuses[0].reason, 'emfile');
+    assert.equal(statuses[0].mode, 'sweep-only');
+    assert.ok(handle, 'startWatcher must return a live handle, not die');
+    assert.deepEqual(codes, [], 'arm-time exhaustion is degradation, never an exit');
+    await handle.armed;
+    assert.deepEqual(events, [], 'unchanged store emits nothing while degraded');
+
+    writeFileSync(join(proj, '_memories', 'unit-2.md'), unitContent('unit-2', 'Changed while degraded, for real.'));
+    const expected = computeCurrentSnapshot(proj);
+    await handle.sweepTick();
+    await waitFor(() => events.length > 0, 5000, 'sweep detection in degraded mode');
+    assert.equal(events[0].event, 'store-changed');
+    assert.equal(events[0].trigger, 'sweep');
+    assert.equal(events[0].snapshot_id, expected.snapshotId);
+    assert.deepEqual(codes, [0]);
+  } finally {
+    for (const f of held) { try { closeSync(f); } catch { /* closed */ } }
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('injected SYNC EMFILE at arm: one degraded status line, no exit 1, sweep still detects', async () => {
+  const { base, proj } = makeStore(2);
+  const statuses = [];
+  const events = [];
+  const codes = [];
+  let handle = null;
+  try {
+    const baseline = computeCurrentSnapshot(proj).snapshotId;
+    handle = startWatcher({
+      projectDir: proj,
+      debounceMs: 50,
+      sweepIntervalMs: 600000,
+      timeoutMs: 60000,
+      baselineSnapshot: baseline,
+      emit: (e) => events.push(e),
+      status: (s) => statuses.push(s),
+      exit: (c) => codes.push(c),
+      diag: () => {},
+      watchFn: () => { throw Object.assign(new Error('EMFILE: too many open files, watch'), { code: 'EMFILE' }); },
+    });
+    assert.ok(handle, 'a live handle despite the sync throw');
+    assert.deepEqual(codes, [], 'no exit — the old behavior here was exit 1');
+    assert.equal(statuses.length, 1, 'exactly one degraded status line');
+    assert.equal(statuses[0].event, 'degraded');
+    assert.equal(statuses[0].reason, 'emfile');
+    assert.equal(statuses[0].mode, 'sweep-only');
+    assert.equal(statuses[0].sweep_interval_ms, 600000, 'the degraded SLO is stated in the line itself');
+    assertIso(statuses[0].observed_at);
+    await handle.armed;
+
+    writeFileSync(join(proj, '_memories', 'unit-1.md'), unitContent('unit-1', 'Post-EMFILE mutation.'));
+    const expected = computeCurrentSnapshot(proj);
+    await handle.sweepTick();
+    await waitFor(() => events.length > 0, 5000, 'sweep-only detection');
+    assert.equal(events[0].event, 'store-changed');
+    assert.equal(events[0].trigger, 'sweep');
+    assert.equal(events[0].snapshot_id, expected.snapshotId);
+    assert.deepEqual(codes, [0]);
+  } finally {
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('injected ASYNC EMFILE after arm: degraded status line once, watcher keeps sweeping', async () => {
+  const { base, proj } = makeStore(2);
+  const statuses = [];
+  const events = [];
+  const codes = [];
+  let errorCb = null;
+  let handle = null;
+  try {
+    const baseline = computeCurrentSnapshot(proj).snapshotId;
+    handle = startWatcher({
+      projectDir: proj,
+      debounceMs: 50,
+      sweepIntervalMs: 600000,
+      timeoutMs: 60000,
+      baselineSnapshot: baseline,
+      emit: (e) => events.push(e),
+      status: (s) => statuses.push(s),
+      exit: (c) => codes.push(c),
+      diag: () => {},
+      watchFn: () => ({ on(ev, cb) { if (ev === 'error') errorCb = cb; }, close() {} }),
+    });
+    await handle.armed;
+    const emfile = Object.assign(new Error('EMFILE: too many open files, watch'), { code: 'EMFILE' });
+    errorCb(emfile);
+    errorCb(emfile); // a second error must not produce a second status line
+    assert.deepEqual(codes, [], 'async resource exhaustion is degradation, never exit 1');
+    assert.equal(statuses.length, 1, 'degraded is emitted exactly once');
+    assert.equal(statuses[0].reason, 'emfile');
+
+    await handle.sweepTick();
+    await delay(50);
+    assert.deepEqual(events, [], 'no change yet — degraded mode must not fabricate one');
+
+    writeFileSync(join(proj, '_memories', 'unit-2.md'), unitContent('unit-2', 'Changed after async EMFILE.'));
+    const expected = computeCurrentSnapshot(proj);
+    await handle.sweepTick();
+    await waitFor(() => events.length > 0, 5000, 'sweep detection after degrade');
+    assert.equal(events[0].trigger, 'sweep');
+    assert.equal(events[0].snapshot_id, expected.snapshotId);
+    assert.deepEqual(codes, [0]);
+  } finally {
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a NON-resource watcher error still exits 1 — degradation is for exhaustion only', async () => {
+  const { base, proj } = makeStore(2);
+  const statuses = [];
+  const events = [];
+  const codes = [];
+  let errorCb = null;
+  let handle = null;
+  try {
+    handle = startWatcher({
+      projectDir: proj,
+      sweepIntervalMs: 600000,
+      timeoutMs: 60000,
+      baselineSnapshot: computeCurrentSnapshot(proj).snapshotId,
+      emit: (e) => events.push(e),
+      status: (s) => statuses.push(s),
+      exit: (c) => codes.push(c),
+      diag: () => {},
+      watchFn: () => ({ on(ev, cb) { if (ev === 'error') errorCb = cb; }, close() {} }),
+    });
+    await handle.armed;
+    errorCb(Object.assign(new Error('watch handle torn down'), { code: 'EACCES' }));
+    assert.deepEqual(codes, [1], 'non-resource death must surface as exit 1 for a healthy restart');
+    assert.deepEqual(statuses, [], 'no degraded line for a non-resource error');
+    assert.deepEqual(events, [], 'no protocol line either');
+  } finally {
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// Scoped identity — the watcher compares the same-scoped id the renderer
+// receipts; archive edits wake archive views and never active ones.
+// ===========================================================================
+
+test('scope threading: an archive-only edit never wakes an active-scoped watcher, and wakes an archive-scoped one', async () => {
+  const { base, proj } = makeStoreWithArchive(2);
+  try {
+    const activeBaseline = computeCurrentSnapshot(proj, { scope: 'active' }).snapshotId;
+    const archiveBaseline = computeCurrentSnapshot(proj, { scope: 'all-including-archive' }).snapshotId;
+    assert.notEqual(activeBaseline, archiveBaseline, 'the two scopes must have distinct identities');
+    assert.equal(computeCurrentSnapshot(proj, { scope: 'all-including-archive' }).activeSnapshotId,
+      activeBaseline, 'activeSnapshotId rides along for baseline matching');
+
+    writeFileSync(join(proj, '_memories', 'archive', 'old.md'),
+      `---\nid: old\ntype: observation\nstatus: archived\n---\n\nArchive bytes changed.\n`);
+
+    // Active scope: the archive edit is invisible — no wake, ever.
+    const eventsA = []; const codesA = [];
+    const hA = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000,
+      baselineSnapshot: activeBaseline, scope: 'active',
+      emit: (e) => eventsA.push(e), exit: (c) => codesA.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await hA.armed;
+    await hA.sweepTick();
+    await delay(50);
+    assert.deepEqual(eventsA, [], 'active scope ignores archive-only changes');
+    assert.deepEqual(codesA, []);
+    hA._stopQuiet();
+
+    // Archive scope, armed on the PRE-edit id: the immediate arm-time
+    // comparison catches it — the same-scoped id, not a raw signature.
+    const eventsB = []; const codesB = [];
+    const hB = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000,
+      baselineSnapshot: archiveBaseline, scope: 'all-including-archive',
+      emit: (e) => eventsB.push(e), exit: (c) => codesB.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await hB.armed;
+    await delay(50);
+    assert.equal(eventsB.length, 1, 'archive scope must wake on the archive edit');
+    assert.equal(eventsB[0].trigger, 'sweep');
+    assert.equal(eventsB[0].snapshot_id,
+      computeCurrentSnapshot(proj, { scope: 'all-including-archive' }).snapshotId,
+      'the emitted id is the same-scoped id the renderer would receipt');
+    assert.deepEqual(codesB, [0]);
+    hB._stopQuiet();
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('an unlabeled archive-scoped baseline arms WITHOUT a false wake and locks its scope from the baseline', async () => {
+  const { base, proj } = makeStoreWithArchive(2);
+  const events = []; const codes = [];
+  let handle = null;
+  try {
+    const archiveBaseline = computeCurrentSnapshot(proj, { scope: 'all-including-archive' }).snapshotId;
+    handle = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000,
+      baselineSnapshot: archiveBaseline, // NO scope given — must be inferred, not misread
+      emit: (e) => events.push(e), exit: (c) => codes.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await handle.armed;
+    await handle.sweepTick();
+    await delay(50);
+    // The incomparable-identity defect: comparing this baseline to the
+    // active-scoped id (or to a raw signature) reports "changed" here.
+    assert.deepEqual(events, [], 'an unchanged store must never wake, whatever scope the baseline came from');
+
+    writeFileSync(join(proj, '_memories', 'archive', 'old.md'),
+      `---\nid: old\ntype: observation\nstatus: archived\n---\n\nLive archive change.\n`);
+    await handle.sweepTick();
+    await waitFor(() => events.length > 0, 5000, 'archive change detection under the locked scope');
+    assert.equal(events[0].snapshot_id,
+      computeCurrentSnapshot(proj, { scope: 'all-including-archive' }).snapshotId);
+    assert.deepEqual(codes, [0]);
+  } finally {
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// The exit window and the deferral door.
+// ===========================================================================
+
+test('a write landing between detection and exit is caught by the NEXT arm\'s immediate check', async () => {
+  const { base, proj } = makeStore(3);
+  try {
+    const b0 = computeCurrentSnapshot(proj).snapshotId;
+    const events1 = []; const codes1 = [];
+    const w1 = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000, baselineSnapshot: b0,
+      emit: (e) => events1.push(e), exit: (c) => codes1.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await w1.armed;
+    writeFileSync(join(proj, '_memories', 'unit-1.md'), unitContent('unit-1', 'First change.'));
+    await w1.sweepTick();
+    await waitFor(() => events1.length > 0, 5000, 'first detection');
+    const x1 = events1[0].snapshot_id;
+    assert.deepEqual(codes1, [0]); // watcher 1 has "exited"
+
+    // The mid-exit write: lands after watcher 1 reported, before any new arm.
+    writeFileSync(join(proj, '_memories', 'unit-2.md'), unitContent('unit-2', 'Landed mid-exit.'));
+    const expected = computeCurrentSnapshot(proj);
+    assert.notEqual(expected.snapshotId, x1);
+
+    // Re-arm on the id watcher 1 reported (what the supervisor would baseline
+    // if its render raced the write): the arm-time comparison catches the
+    // mid-exit write IMMEDIATELY — no new event, no five-minute sweep needed.
+    const events2 = []; const codes2 = [];
+    const w2 = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000, baselineSnapshot: x1,
+      emit: (e) => events2.push(e), exit: (c) => codes2.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await w2.armed;
+    await delay(50);
+    assert.equal(events2.length, 1, 'the next arm must catch the mid-exit write at once');
+    assert.equal(events2[0].trigger, 'sweep');
+    assert.equal(events2[0].snapshot_id, expected.snapshotId);
+    assert.deepEqual(codes2, [0]);
+    w2._stopQuiet();
+    w1._stopQuiet();
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('retry_at holds a deliberately-stale baseline without busy-looping, then compares exactly once', async () => {
+  const { base, proj } = makeStore(2);
+  const events = []; const codes = [];
+  let handle = null;
+  try {
+    const stale = computeCurrentSnapshot(proj).snapshotId;
+    writeFileSync(join(proj, '_memories', 'unit-1.md'), unitContent('unit-1', 'Deferred by budget.'));
+    handle = startWatcher({
+      projectDir: proj, sweepIntervalMs: 100, timeoutMs: 60000,
+      baselineSnapshot: stale, retryAtMs: Date.now() + 500,
+      emit: (e) => events.push(e), exit: (c) => codes.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await handle.armed;
+    assert.deepEqual(events, [], 'the arm-time check must hold before retry_at');
+    await delay(200); // several sweep intervals INSIDE the hold window
+    await handle.sweepTick();
+    assert.deepEqual(events, [], 'sweeps must hold too — no busy-loop against the stale baseline');
+    await waitFor(() => events.length > 0, 5000, 'the deferred comparison after retry_at');
+    assert.equal(events.length, 1, 'exactly one wake when the window reopens');
+    assert.equal(events[0].event, 'store-changed');
+    assert.deepEqual(codes, [0]);
+  } finally {
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// The persisted loop-state record.
+// ===========================================================================
+
+test('writeLiveState/readLiveState: whole-record replace, schema validated, corrupt reads fail soft', () => {
+  const base = mkdtempSync(join(tmpdir(), 'mvw-state-'));
+  const p = join(base, 'ws', 'memory-view-live.json');
+  try {
+    const rec = writeLiveState(p, {
+      artifactUrl: 'https://claude.ai/artifacts/x', scope: 'all-including-archive',
+      excludeTopics: ['secret-topic'], baselineSnapshot: 'abc123',
+      publishCount: 3, windowStart: '2026-07-30T23:00:00Z', retryAt: '2026-07-31T00:00:00Z',
+      grantBasis: 'standing authorization, granted 2026-07-01, recorded in harness memory',
+    });
+    assert.equal(rec.kind, LIVE_STATE_KIND);
+    const onDisk = JSON.parse(readFileSync(p, 'utf8'));
+    assert.deepEqual(onDisk, rec, 'returned record == bytes on disk');
+    assert.deepEqual(onDisk.excluded_topics, ['secret-topic']);
+    assert.equal(onDisk.grant_basis, 'standing authorization, granted 2026-07-01, recorded in harness memory',
+      'the grant rides in the record, bound to the scope/exclusions beside it');
+    assert.equal(onDisk.scope, 'all-including-archive');
+    assert.equal(onDisk.baseline_snapshot, 'abc123');
+    assert.equal(onDisk.publish_budget.count, 3);
+    assert.equal(onDisk.publish_budget.window_start, '2026-07-30T23:00:00.000Z');
+    assert.equal(onDisk.retry_at, '2026-07-31T00:00:00.000Z');
+    assert.deepEqual(readdirSync(join(base, 'ws')), ['memory-view-live.json'],
+      'atomic replace leaves no tmp siblings behind');
+    assert.equal(readLiveState(p).baseline_snapshot, 'abc123');
+
+    assert.equal(readLiveState(join(base, 'absent.json')), null, 'absent record reads null');
+    writeFileSync(p, '{corrupt');
+    assert.equal(readLiveState(p), null, 'corrupt record reads null, never throws');
+
+    assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'everything', baselineSnapshot: 'b' }), /--scope/);
+    assert.throws(() => writeLiveState(p, { scope: 'active', baselineSnapshot: 'b' }), /--artifact-url/);
+    assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'active' }), /--baseline-snapshot/);
+    assert.throws(() => writeLiveState(p, { artifactUrl: 'u', scope: 'active', baselineSnapshot: 'b', retryAt: 'soonish' }), /ISO/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('CLI: --write-live-state composes the record and --live-state arms from it (scope comes from the record, not a default)', async () => {
+  const { base, proj } = makeStoreWithArchive(2);
+  try {
+    const staleArchiveId = computeCurrentSnapshot(proj, { scope: 'all-including-archive' }).snapshotId;
+    // The archive-only edit leaves the ACTIVE id untouched: only a watcher
+    // honoring the record's scope can see this change at all.
+    writeFileSync(join(proj, '_memories', 'archive', 'old.md'),
+      `---\nid: old\ntype: observation\nstatus: archived\n---\n\nRecord-scoped change.\n`);
+    const statePath = join(base, 'memory-view-live.json');
+
+    const wrote = spawnSync(process.execPath, [WATCH, '--write-live-state', statePath,
+      '--artifact-url', 'https://claude.ai/artifacts/x', '--scope', 'all-including-archive',
+      '--exclude-topic', 'secret-topic', '--baseline-snapshot', staleArchiveId,
+    ], { encoding: 'utf8' });
+    assert.equal(wrote.status, 0, wrote.stderr);
+    assert.equal(JSON.parse(wrote.stdout).kind, LIVE_STATE_KIND);
+
+    const w = spawnWatcher(proj, ['--live-state', statePath, '--sweep-interval-ms', '600000', '--timeout-ms', '30000']);
+    const { code } = await w.exited;
+    assert.equal(code, 0, `stderr: ${w.getErr()}`);
+    const ev = JSON.parse(protocolLines(w.getOut())[0]);
+    assert.equal(ev.event, 'store-changed');
+    const current = computeCurrentSnapshot(proj, { scope: 'all-including-archive' });
+    assert.equal(ev.snapshot_id, current.snapshotId,
+      'the emitted id is the record-scoped id — an active-scope default would report the wrong identity');
+    assert.notEqual(ev.snapshot_id, current.activeSnapshotId);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// Lifecycle and I/O honesty.
+// ===========================================================================
+
+test('orphan self-check: a watcher whose owner is gone emits "orphaned" and exits 4 on its own', async () => {
+  const { base, proj } = makeStore(2);
+  const events = []; const codes = [];
+  let handle = null;
+  try {
+    // A real process that is already dead — its pid is the "owner".
+    const deadOwner = spawnSync(process.execPath, ['-e', '']);
+    const deadPid = deadOwner.pid;
+    handle = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000,
+      baselineSnapshot: computeCurrentSnapshot(proj).snapshotId,
+      parentPid: deadPid,
+      emit: (e) => events.push(e), exit: (c) => codes.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await waitFor(() => codes.length > 0, 3000, 'orphan self-detection');
+    assert.deepEqual(codes, [4], 'an orphan stops itself with the dedicated exit code');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].event, 'orphaned');
+    assert.equal(events[0].parent_pid, deadPid);
+    assertIso(events[0].observed_at);
+  } finally {
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('orphan self-check stays quiet while the owner is alive', async () => {
+  const { base, proj } = makeStore(2);
+  const events = []; const codes = [];
+  let handle = null;
+  try {
+    handle = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000,
+      baselineSnapshot: computeCurrentSnapshot(proj).snapshotId,
+      parentPid: process.pid, // this test process — very much alive
+      emit: (e) => events.push(e), exit: (c) => codes.push(c), diag: () => {}, watchFn: deafWatch,
+    });
+    await handle.armed;
+    await delay(200); // several orphan-check intervals
+    assert.deepEqual(events, [], 'a living owner must never trigger the orphan door');
+    assert.deepEqual(codes, []);
+  } finally {
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a failed terminal emit (EPIPE) exits 1 with a diagnostic — exit 0 always means the wake line landed', async () => {
+  const { base, proj } = makeStore(2);
+  const codes = []; const diags = [];
+  let handle = null;
+  try {
+    const baseline = computeCurrentSnapshot(proj).snapshotId;
+    handle = startWatcher({
+      projectDir: proj, sweepIntervalMs: 600000, timeoutMs: 60000, baselineSnapshot: baseline,
+      emit: () => { throw Object.assign(new Error('broken pipe'), { code: 'EPIPE' }); },
+      exit: (c) => codes.push(c), diag: (m) => diags.push(m), watchFn: deafWatch,
+    });
+    await handle.armed;
+    writeFileSync(join(proj, '_memories', 'unit-1.md'), unitContent('unit-1', 'Change nobody will hear.'));
+    await handle.sweepTick();
+    await waitFor(() => codes.length > 0, 3000, 'emit-failure exit');
+    assert.deepEqual(codes, [1], 'a swallowed wake line must never exit 0');
+    assert.match(diags.join('\n'), /emit failed/i);
+  } finally {
+    if (handle) handle._stopQuiet();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('parseArgs/parseWriteLiveStateArgs: the new flags validate closed', () => {
+  assert.throws(() => parseArgs(['/p', '--scope', 'everything']), /--scope must be one of/);
+  const s = parseArgs(['/p', '--scope', 'all-including-archive', '--live-state', '/tmp/x.json']);
+  assert.equal(s.scope, 'all-including-archive');
+  assert.equal(s.liveStatePath, '/tmp/x.json');
+  assert.equal(parseArgs(['/p']).scope, null, 'scope defaults to null → locked from the baseline');
+
+  assert.throws(() => parseWriteLiveStateArgs(['--write-live-state']), /requires a value/);
+  assert.throws(() => parseWriteLiveStateArgs(['--write-live-state', '/p', '--bogus']), /unknown flag/);
+  assert.equal(parseWriteLiveStateArgs(['--write-live-state', '/p', '--publish-count', '4']).publishCount, 4);
+  assert.throws(() => parseWriteLiveStateArgs(['--write-live-state', '/p', '--publish-count', '-1']), /non-negative/);
 });

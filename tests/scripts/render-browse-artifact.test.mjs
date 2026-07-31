@@ -26,7 +26,7 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const {
   renderBrowseArtifact, SENSITIVITY_WARNING, collectUnits,
   BROWSE_MANIFEST_SCHEMA_VERSION, producerIdentity, publishReceiptPathFor,
-  buildArtifactHtml, computeGraph, layoutForceGrid, computeDefaultFocus,
+  buildArtifactHtml, computeGraph, computeDefaultFocus,
   resolveMetricsForRender,
 } = await import(pathToFileURL(join(SCRIPTS, 'render-browse-artifact.mjs')).href);
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
@@ -250,12 +250,12 @@ function snapshotBytes(dir) {
   return out;
 }
 
-rtest('generation never writes to _memories/ — store byte-identical before and after', async () => {
+rtest('generation never writes to _memories/ — store byte-identical before and after, from COLD', async () => {
   const { root, mem, home } = fixtureProject();
   try {
-    // Warm the loader's derived cache first (its documented behavior on every
-    // read path), so the comparison below covers EVERY byte including _lib.
-    loadSnapshot(root, { captureBodies: true });
+    // Deliberately COLD: no cache warm-up. A warmed cache here would hide a
+    // first-render `_lib/` write — the exact violation the read-only promise
+    // forbids — so the comparison starts from the store's pristine state.
     const before = snapshotBytes(mem);
     await generate(root, home, { scope: 'all-including-archive' });
     await generate(root, home); // second run, default scope
@@ -286,6 +286,103 @@ test('CLI: --out is required — errors without it, writes nothing', () => {
     assert.match(res.stderr, /--out/);
     assert.ok(!existsSync(join(root, 'out')), 'no output written');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- cold-store read-only + scoped identity ----------
+
+test('cold store: collectUnits never materializes the derived _lib cache (read-only includes the FIRST read)', () => {
+  const { root, mem } = fixtureProject();
+  try {
+    assert.equal(existsSync(join(mem, '_lib')), false, 'fixture starts cold');
+    collectUnits(root);
+    assert.equal(existsSync(join(mem, '_lib')), false,
+      'the skill promises the whole flow never writes the store — a cold first render included');
+    collectUnits(root, { scope: 'all-including-archive' });
+    assert.equal(existsSync(join(mem, '_lib')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('scoped identity: an archive-only edit changes the all-including-archive id and never the active id', () => {
+  const { root, mem } = fixtureProject();
+  try {
+    const activeBefore = collectUnits(root).snapshotId;
+    const archiveBefore = collectUnits(root, { scope: 'all-including-archive' });
+    assert.notEqual(archiveBefore.snapshotId, activeBefore,
+      'the archive-including view has its own identity over its own population');
+    assert.equal(archiveBefore.activeSnapshotId, activeBefore,
+      'activeSnapshotId carries the plain store id for baseline matching');
+
+    writeFileSync(join(mem, 'archive', 'old-note.md'),
+      '---\nid: old-note\ntype: observation\nstatus: archived\ntopics: [beta]\n---\n\n# Archived note\n\nArchive bytes CHANGED.\n');
+
+    assert.equal(collectUnits(root).snapshotId, activeBefore,
+      'active scope must not see archive-only changes');
+    assert.notEqual(collectUnits(root, { scope: 'all-including-archive' }).snapshotId, archiveBefore.snapshotId,
+      'the published identity must cover every included source byte');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- CLI flag contract ----------
+
+test('CLI: --no-metrics together with --metrics-cache is refused loudly (exit 2), nothing rendered', () => {
+  const { root, home } = fixtureProject();
+  try {
+    const res = spawnSync(process.execPath,
+      [CLI_PATH, root, '--out', join(root, 'out', 'v.html'), '--no-metrics', '--metrics-cache', join(root, 'cache.json'), '--home', home],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 2, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /contradicts/);
+    assert.ok(!existsSync(join(root, 'out')), 'no output written on the refused contradiction');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+rtest('CLI: a COLD-store render leaves the store byte-identical, including _lib absence — no flag needed, no mode exists', async () => {
+  const { root, mem, home } = fixtureProject();
+  try {
+    assert.equal(existsSync(join(mem, '_lib')), false, 'fixture starts cold — no derived cache');
+    const before = snapshotBytes(mem);
+    const res = spawnSync(process.execPath,
+      [CLI_PATH, root, '--out', join(root, 'out', 'v.html'), '--no-metrics', '--home', home],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.equal(existsSync(join(mem, '_lib')), false,
+      'a cold first render must not materialize _memories/_lib');
+    const after = snapshotBytes(mem);
+    assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort());
+    for (const [rel, buf] of before) assert.ok(after.get(rel).equals(buf), `byte-identical: ${rel}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- the live-mode prose contract the recipes must keep ----------
+
+const MEMORY_VIEW_SKILL = join(SCRIPTS, '..', '..', 'memory-view', 'SKILL.md');
+
+test('live recipe: never pairs --no-metrics with --metrics-cache (the CLI refuses the pair; the recipe must not teach it)', () => {
+  const live = readFileSync(MEMORY_VIEW_SKILL, 'utf8');
+  const section = live.slice(live.indexOf('## Live mode'));
+  assert.ok(section.length > 0, 'Live mode section exists');
+  assert.doesNotMatch(section, /--no-metrics[\s\S]{0,120}--metrics-cache/,
+    'the documented refresh command must carry the cache flag alone');
+  assert.match(section, /--metrics-cache/, 'the cached health block is still part of the recipe');
+});
+
+test('live recipe: persists scope and exclusions in the loop-state record and re-applies them each refresh', () => {
+  const live = readFileSync(MEMORY_VIEW_SKILL, 'utf8');
+  const section = live.slice(live.indexOf('## Live mode'));
+  assert.match(section, /persist[^.\n]*(scope|excluded)|same[^.\n]*scope/i);
+  assert.match(section, /--scope|excluded_topics/);
+  assert.match(section, /memory-view-live\.json/, 'the record has one named home under the workspace');
+  assert.match(section, /--write-live-state/, 'the record is written through the atomic CLI door');
+  assert.match(section, /--live-state/, 'the watcher arms from the record');
+  assert.match(section, /retry_at|--retry-at/, 'budget deferral persists its retry moment');
+  assert.match(section, /run_in_background|background task/, 'the wake door is the harness background-task exit');
+  assert.match(section, /can outlive a dead session/,
+    'teardown honesty: the orphan possibility is stated, not papered over with an unproven guarantee');
+  assert.match(section, /"event":"orphaned"|orphaned/, 'the orphan self-check door is documented');
+  assert.match(section, /grant_basis|--grant-basis/, 'the standing grant is persisted in the record');
+  assert.match(section, /future republishes/i, 'the grant is prospective and bounded');
+  assert.match(section, /stop live mode before sensitive or third-party content/i,
+    'the stop-before-the-boundary rule is stated');
 });
 
 test('CLI: rejects an unknown --scope', () => {

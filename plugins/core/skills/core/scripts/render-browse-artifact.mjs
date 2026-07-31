@@ -37,11 +37,23 @@
  *     unit bodies themselves happen to contain (embedded as data, and
  *     rendered as plain text, never as chrome-generated hrefs).
  *
- * Read-only guarantee: the store is read through loadSnapshot (the exact
- * read path decorate-graph.mjs uses). No unit file is ever written. (The
- * canonical loader may refresh its own derived cache at
- * `_memories/_lib/unit-summaries.json` when absent/stale — that is the
- * loader's documented behavior on EVERY read path, not a content write.)
+ * Read-only guarantee — UNCONDITIONAL: the store is read through
+ * loadSnapshot (the exact read path decorate-graph.mjs uses) with the
+ * derived-cache refresh disabled, so no byte under `_memories/` is ever
+ * written — no unit file, and not `_lib/unit-summaries.json` either, even
+ * on a cold store where the cache does not exist yet. The skill promises
+ * the whole flow never writes the store; a first-render cache write would
+ * break that promise exactly once, on the coldest run. One invariant, no
+ * mode, no flag — there is deliberately no way to turn cache writes on
+ * from this generator.
+ *
+ * Snapshot identity is SCOPED to the rendered population: active scope
+ * reports the store snapshot id unchanged (existing receipts stay
+ * comparable); all-including-archive extends that id over the supplemental
+ * (archive/ + terminal-status) bytes the page embeds, so an archive-only
+ * edit changes the identity of the view that actually shows it — and only
+ * that view. The watcher compares the same producer's id for the same
+ * scope (see memory-view-watch.mjs).
  *
  * CLI:
  *   node render-browse-artifact.mjs <project-dir> --out <path>
@@ -53,9 +65,12 @@
  *   embedded verbatim, labeled with the cache's own "metrics as of" stamp;
  *   when it does not exist the live gatherMetrics() runs as usual and its
  *   block + timestamp are written to the cache path for the next run. Without
- *   the flag, behavior is exactly the pre-cache default. --no-metrics wins
- *   over --metrics-cache. The cache path must not live inside _memories/
- *   (the store stays read-only to this generator).
+ *   the flag, behavior is exactly the pre-cache default. Passing
+ *   --metrics-cache together with --no-metrics is refused (exit 2): the two
+ *   contradict — one promises a carried-forward health block, the other
+ *   drops it — and a silent winner already misled a documented recipe once.
+ *   The cache path must not live inside _memories/ (the store stays
+ *   read-only to this generator).
  *
  *   node render-browse-artifact.mjs --record-publish
  *        --generation-receipt <path> --status declined|failed|published-private
@@ -70,12 +85,14 @@
  *   touches the developer's ~/.core.
  *
  * Exit codes: 0 success (manifest/receipt printed); 2 usage error (missing
- * --out, bad --scope, --out inside _memories/, bad record-mode input);
+ * --out, bad --scope, --out inside _memories/, --no-metrics together with
+ * --metrics-cache, bad record-mode input);
  * 1 fatal failure (including fail-closed producer identity).
  */
 import { readFileSync, readdirSync, realpathSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generate-summary-index.mjs';
 import { parseFrontmatter, extractEdges } from './priority.mjs';
@@ -165,16 +182,34 @@ function walkAllUnitFiles(memoriesDir) {
 }
 
 /**
- * collectUnits — the embed population. Default scope is EXACTLY the
- * loadSnapshot active population (archived excluded by path, retired/
- * superseded excluded by status, invalidated excluded by t_invalid — same
- * filtering decoration uses). `all-including-archive` adds every other unit
- * file (archive/ + terminal-status units) as clearly-marked supplements
- * without changing the active population or the snapshot id.
+ * collectUnits — the embed population AND the published identity. Default
+ * scope is EXACTLY the loadSnapshot active population (archived excluded by
+ * path, retired/superseded excluded by status, invalidated excluded by
+ * t_invalid — same filtering decoration uses). `all-including-archive` adds
+ * every other unit file (archive/ + terminal-status units) as clearly-marked
+ * supplements — and the returned snapshotId then covers the RENDERED
+ * population: the active store id extended over the exact supplemental bytes
+ * read for the page, so an archive-only edit changes the identity of an
+ * archive-including view and never an active one. Active scope returns the
+ * plain store snapshot id, so existing receipts stay comparable.
+ * activeSnapshotId always carries the plain store id for callers that must
+ * match an unlabeled baseline against both scoped ids (the watcher).
+ *
+ * Topic exclusions deliberately do NOT narrow the identity: freshness here
+ * is source freshness of the SCOPED store population, not artifact-byte
+ * freshness — an excluded-topic edit changes the id (and may trigger a
+ * republish whose page bytes come out identical; the publish budget bounds
+ * that cost). Narrowing the id by exclusions would make it incomparable
+ * across exclusion-list edits.
+ *
+ * Read-only, unconditionally: the snapshot load never refreshes the
+ * derived `_lib/` cache (refreshCache:false, not an option) — the skill
+ * promises the WHOLE flow never writes the store, including a cold first
+ * render.
  */
 export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] } = {}) {
   const root = resolve(projectDir);
-  const cap = loadSnapshot(root, { captureBodies: true, retainRaw: true });
+  const cap = loadSnapshot(root, { captureBodies: true, retainRaw: true, refreshCache: false });
   const excluded = new Set(excludeTopics.map((t) => String(t).toLowerCase()));
 
   const units = [];
@@ -205,13 +240,18 @@ export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] 
   }
 
   let supplementalCount = 0;
+  // Supplemental identity input: rel:sha1 over the exact bytes read for the
+  // page (same shape captureStore's source_sig uses; one read per file, so
+  // the scoped id always identifies the bytes actually embedded).
+  const supplementalSig = [];
   if (scope === 'all-including-archive') {
     for (const f of walkAllUnitFiles(join(root, '_memories'))) {
       if (activePaths.has(f.rel)) continue;
-      let text;
-      try { text = readFileSync(f.full, 'utf8'); }
+      let buf;
+      try { buf = readFileSync(f.full); }
       catch (e) { unreadable.push({ path: f.rel, reason: String(e && e.code || e).slice(0, 120) }); continue; }
-      const parsed = displayBody(text);
+      supplementalSig.push(`${f.rel}:${createHash('sha1').update(buf).digest('hex')}`);
+      const parsed = displayBody(buf.toString('utf8'));
       if (parsed.unreadable) { unreadable.push({ path: f.rel, reason: parsed.unreadable }); continue; }
       const { fm, body } = parsed;
       let id = fm.id !== undefined ? String(fm.id) : basename(f.rel, '.md');
@@ -240,9 +280,17 @@ export function collectUnits(projectDir, { scope = 'active', excludeTopics = [] 
   });
   kept.sort((a, b) => a.id.localeCompare(b.id));
 
+  // Scoped identity: active → the store snapshot id verbatim;
+  // all-including-archive → sha256 over that id plus the sorted supplemental
+  // signature, extending the identity to every included source byte.
+  const snapshotId = scope === 'all-including-archive'
+    ? createHash('sha256').update(`${cap.snapshotId}|scope:all-including-archive|${supplementalSig.sort().join('|')}`).digest('hex')
+    : cap.snapshotId;
+
   return {
     units: kept,
-    snapshotId: cap.snapshotId,
+    snapshotId,
+    activeSnapshotId: cap.snapshotId,
     activeCount: kept.filter((u) => u.population === 'active').length,
     supplementalCount: supplementalCount === 0 ? 0 : kept.filter((u) => u.population !== 'active').length,
     excludedByTopic,
@@ -1417,6 +1465,15 @@ function parseArgs(argv) {
     else positionals.push(a);
   }
   opts.projectDir = positionals[0] || process.cwd();
+  if (opts.noMetrics && opts.metricsCache) {
+    // Refuse the contradiction loudly instead of letting one flag silently
+    // win: --metrics-cache promises a carried-forward health block and
+    // --no-metrics drops the health block entirely. A documented recipe
+    // carried both for a while and every refresh silently lost its cached
+    // health section.
+    throw Object.assign(new Error(
+      '--metrics-cache contradicts --no-metrics (one carries the cached health block forward, the other drops the health section) — pass exactly one'), { code: 'METRICS_FLAG_CONFLICT' });
+  }
   return opts;
 }
 
