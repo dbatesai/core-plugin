@@ -78,6 +78,16 @@ test('non-transient Windows errors throw immediately (no pointless retry)', () =
   assert.equal(calls, 1);
 });
 
+test('EXDEV is never retried and always propagates — a cross-device rename means the temp was not a sibling', () => {
+  // The sibling-temp contract makes EXDEV unreachable in normal operation; if
+  // it ever fires, it is a real misconfiguration that must be loud on both
+  // platforms, never spun in the transient-retry loop.
+  let calls = 0;
+  const dead = () => { calls++; const e = new Error('EXDEV: cross-device link not permitted'); e.code = 'EXDEV'; throw e; };
+  assert.throws(() => renameWithRetrySync('a', 'b', { isWindows: true, delayMs: 1, renameFn: dead }), /EXDEV/);
+  assert.equal(calls, 1, 'EXDEV is not in the transient set even on Windows');
+});
+
 test('the folder-rename protocol carries the cloud-sync caveat (doc guard)', () => {
   const proto = readFileSync(new URL('../../plugins/core/skills/core/protocols/startup-conditional-loads.md', import.meta.url), 'utf8');
   const section = proto.slice(proto.indexOf('## Load — folder rename only'));

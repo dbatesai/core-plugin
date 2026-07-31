@@ -46,15 +46,17 @@ test('HARNESS export is claude-code', () => {
   assert.equal(HARNESS, 'claude-code');
 });
 
-// Characterization: unlike generate-agents-md (which guards the absent-contract case
-// with a clean SKIP), this generator lets parseContract's ENOENT throw — the process
-// exits non-zero with the error on stderr and writes nothing.
-test('no contract present → non-zero exit, no file written', () => {
+// The CLI validates the contract path at its trust boundary: a missing contract
+// is one named diagnostic line on stderr and exit 2 — no stack trace, nothing
+// written. (generate-agents-md instead SKIPs cleanly: for that harness an
+// absent contract is the normal case, not an error.)
+test('no contract present → non-zero exit, one bounded diagnostic, no file written', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gen-claude-missing-'));
   try {
     const r = spawnSync(process.execPath, [SCRIPT, '--contract', join(dir, 'CONTRACT.md'), '--mode', 'write'], { encoding: 'utf8' });
-    assert.notEqual(r.status, 0, 'missing contract fails loudly');
-    assert.match(r.stderr, /ENOENT/);
+    assert.equal(r.status, 2, 'missing contract fails loudly');
+    assert.match(r.stderr, /contract file not found/);
+    assert.doesNotMatch(r.stderr, /\n\s+at /, 'no stack trace at the CLI boundary');
     assert.ok(!existsSync(join(dir, 'CLAUDE.md')), 'nothing written');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

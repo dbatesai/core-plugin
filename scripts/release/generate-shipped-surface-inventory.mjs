@@ -26,6 +26,7 @@
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isCliEntry } from '../../plugins/core/skills/core/scripts/cli-entry.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 
@@ -120,18 +121,31 @@ function collectHooks(root) {
 function collectScripts(root) {
   const dir = join(root, 'skills', 'core', 'scripts');
   if (!existsSync(dir)) return [];
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isFile() && e.name.endsWith('.mjs'))
-    .map((e) => ({
-      name: basename(e.name, '.mjs'),
-      kind: 'script',
-      harness: 'shared',
-      // Presence in the shipped tree is all this walk can prove. Registration,
-      // callers, and invocation class are NOT claimed here — the orphan
-      // detector carries static reachability, and door claims require
-      // registered-door evidence this generator does not gather.
-      surface: 'shipped',
-    }));
+  // Recursive: "what ships" must include nested scripts (capability/ probes
+  // and any future subdirectory), not just the top level — a non-recursive
+  // walk silently under-reports the shipped surface.
+  const files = [];
+  const walk = (d, rel) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const childRel = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(join(d, e.name), childRel);
+      else if (e.isFile() && e.name.endsWith('.mjs')) files.push(childRel);
+    }
+  };
+  walk(dir, '');
+  return files.map((rel) => ({
+    name: basename(rel, '.mjs'),
+    kind: 'script',
+    harness: 'shared',
+    // Path relative to the plugin root, forward slashes — the byte-level
+    // identity of the shipped file this row claims.
+    path: `skills/core/scripts/${rel}`,
+    // Presence in the shipped tree is all this walk can prove. Registration,
+    // callers, and invocation class are NOT claimed here — the orphan
+    // detector carries static reachability, and door claims require
+    // registered-door evidence this generator does not gather.
+    surface: 'shipped',
+  }));
 }
 
 /** Total order over surfaces, so the snapshot is a byte-stable diff target. */
@@ -182,6 +196,6 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

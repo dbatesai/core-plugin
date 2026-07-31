@@ -42,13 +42,14 @@
  * CLI: node retrieval-harness.mjs <store> [--gold <path>] [--json <outpath>]
  */
 
-import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadSnapshot } from './generate-summary-index.mjs';
 import { lexicalRankedIds, productRankedIds, retrieveContext, buildFinalContextPack } from './retrieve-context.mjs';
 import { bm25Rank } from './bm25.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 const KS = [5, 10, 30, 100];
 const FORBIDDEN_K = 10; // depth at which a surfaced forbidden id counts as contamination
@@ -456,7 +457,6 @@ async function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   main(process.argv.slice(2)).then(c => process.exit(c));
 }

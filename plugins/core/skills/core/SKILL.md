@@ -31,7 +31,7 @@ Three steps, in order:
 2. Execute the workspace-resolution and architecture-state routing it defines. If routing lands on cold-start migration or folder-rename, complete that work before continuing.
 3. Compose the readiness summary per the protocol's §"Compose the readiness summary" specification, and write or refresh `~/.core/workspaces/<id>/last-bootstrap.json` with the session-start timestamp.
 
-Exception — already bootstrapped this session. On a genuinely new workspace — no `workspace.json` in the current directory and no matching entry in `~/.core/index.json` — skip this check entirely and run the protocol: startup is what creates those files, so there's nothing to dedup against yet. When you can resolve the workspace id, check `~/.core/workspaces/<id>/last-bootstrap.json`. The authoritative dedup rule lives in `protocols/startup.md` §"Bootstrap dedup"; the short form: if the file's `session_started_at` matches the timestamp of this session's first user message, bootstrap already ran — skip the protocol read. If you can't determine that timestamp with confidence (loaded mid-session, no message timestamps visible), treat bootstrap as not-yet-run and run the protocol — a double bootstrap costs a little time; a wrongly skipped one costs routing and edit-detection. On a bare re-orient ask — `/core` with no task, "where are we" — re-compose a fresh readiness summary per `protocols/startup.md` §"Compose the readiness summary"; resolve `CORE_ROOT` first if you want the capability and recognition-signal lines, since without it they fail open and the summary is prose-only. Otherwise pick up where the conversation left off. If the file is absent, stale, or the workspace won't resolve, run the protocol.
+Exception — already bootstrapped this session. The dedup rule lives in ONE place: `protocols/startup.md` §"Bootstrap dedup" — read and apply it from there; this file deliberately does not restate its steps, so the two can't drift. What stays here is the two SKILL-level behaviors around it: on a bare re-orient ask — `/core` with no task, "where are we" — re-compose a fresh readiness summary per `protocols/startup.md` §"Compose the readiness summary" (resolve `CORE_ROOT` first if you want the capability and recognition-signal lines, since without it they fail open and the summary is prose-only), otherwise pick up where the conversation left off; and when the dedup check can't run cleanly (file absent, stale, workspace won't resolve), run the protocol.
 
 If the user's task explicitly says "skip startup" or "don't bootstrap" — they have a reason, honor it, but flag the skip in your first reply so they see it.
 
@@ -95,8 +95,7 @@ Paths in this index resolve relative to the skill base directory (the one contai
 | Memory hygiene | `protocols/hygiene.md` | At `/finalize`, after meaningful change, on-demand |
 | Execution | `protocols/execution.md` | Before any non-trivial task |
 | Multi-agent analysis | `protocols/analysis.md` | When you decide a single pass isn't enough |
-| Validation | `protocols/validation.md` | Weekly auto + on-demand retrieval health checks |
-| Debug mode | `protocols/debug-mode.md` | "debug on" or self-unblock |
+| Validation | `protocols/validation.md` | On-demand retrieval health checks |
 | Self-evolution | `protocols/self-evolution.md` | Session end, hygiene-triggered learning |
 
 ### Harness adapter — read once at session start

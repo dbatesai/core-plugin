@@ -6,7 +6,7 @@ Plain person voice — same standard as SKILL.md §Voice. Specific note for this
 
 ---
 
-Memory hygiene is the single mechanism that keeps the memory architecture healthy over time: archive, retire, cold-store, graduate observations into units, reconcile contradictions, regenerate indexes, monitor file caps, and self-evaluate retrieval quality.
+Memory hygiene is the single mechanism that keeps the memory architecture healthy over time: archive, retire, cold-store, graduate observations into units, regenerate indexes, monitor file caps, and self-evaluate retrieval quality.
 
 It replaces the dream cycle. Every dream-cycle phase folded into one of the operations below.
 
@@ -54,12 +54,11 @@ Hygiene is the canonical mechanism for all of these. If you find yourself buildi
 
 - Archive / retire / cold-store with priority-aware triggers.
 - Graduation (observations → units → canonical flag).
-- Memory contradiction detection and reconciliation (was dream-cycle Phase 3a).
+- Contradiction reconciliation when incompatible claims surface — agent judgment via `conflicts-with` edges and supersession. No automated contradiction detector ships; nothing scans the store for conflicts on its own.
 - Wikilink promotion — durable `[[unit-id]]` body links become typed `cites` edges (see §"Wikilink promotion").
 - Index regeneration — `_memories/INDEX-decisions.md`, `_memories/INDEX-risks.md`, others (was dream-cycle Phase 3d).
 - File-cap monitoring and proactive compaction when synthesis files grow over the Read tool cap (replaces the equivalent machinery from v1).
 - Auto-memory ↔ unit-store reconciliation.
-- Session-log cleanup (was dream-cycle Phase 3e).
 - Continuous self-evaluation: storage and retrieval quality monitoring with structural adjustment.
 
 ---
@@ -99,12 +98,12 @@ Render-vs-hygiene collision on the same section is the seam where this matters; 
 
 ## Audit trail
 
-Every hygiene operation gets logged twice:
+Agent-performed hygiene operations (archive, retire, cold-store, graduation, wikilink promotion) get logged twice:
 
 - Human-readable narrative in `<project>/autonomous-run-log.md`: `[2026-05-17 14:32] HYGIENE archive — dc-XX-<slug>: priority 0.04, last_accessed 90d, source weight 0.5 — moved to _memories/archive/`
 - Machine-readable record in `<project>/_sessions/<date>/hygiene-log.jsonl`: `{"ts": "...", "verb": "archive", "unit_id": "dc-XX-<slug>", "reason": "priority_below_threshold", "trigger": "process-memory", ...}`
 
-The dual log is intentional. The run log is what the user reads during the session; the JSONL is what subsequent hygiene passes consult to detect patterns (over-archive, under-graduate, etc.).
+The dual log is intentional. The run log is what the user reads during the session; the JSONL is what subsequent hygiene passes consult to detect patterns (over-archive, under-graduate, etc.). Mechanical maintenance ops record differently: `maintenance-run.mjs` writes its per-op ledger (`_memories/_maintenance-state.json`) and narrates its one-line summary; the scripted demote/compact paths append their own hygiene-log rows.
 
 ---
 
@@ -216,7 +215,7 @@ These observations feed the structural adjustment options below — add an edge,
 - **Under-recall** — you asked a query, the relevant unit didn't surface. Why? Wrong tier? Topics mis-tagged? Edge missing?
 - **Over-recall** — Tier 1 returned 14 units when 3 was the right scope. Is the priority function under-weighting alignment? Is the query under-specified?
 - **Stale-surfacing** — units that should have archived keep coming back. Anti-resurrection failure or priority function under-weighting recency?
-- **Contradiction not flagged** — two units make incompatible claims, neither got `conflicts-with` edges. Reconciliation pass needs to run.
+- **Contradiction not flagged** — two units make incompatible claims, neither got `conflicts-with` edges. Nothing automated flags these; when you notice one, add the edges and reconcile (supersede or correct) yourself.
 - **Drift in topic vocabulary** — same concept tagged inconsistently across units. Vocabulary needs reconciliation.
 
 ### Structural adjustment options (in order of cost)
@@ -235,11 +234,11 @@ Former dream cycle phases mapped to v2 hygiene:
 
 | Former dream-cycle phase | Now lives in |
 |---|---|
-| Phase 3a: contradiction detection | Continuous self-evaluation — runs against `conflicts-with` edges + topic-vocabulary drift |
+| Phase 3a: contradiction detection | Retired without an automated replacement — contradictions are reconciled by agent judgment when they surface (see §"What to watch"); no detector scans for them |
 | Phase 3b: archive reconciliation | Archive / retire / cold-store verbs — verbs are the operational primitives |
 | Phase 3c: volume audit | File-cap monitoring — synthesis files (PROJECT.md, IMPROVEMENT_LOG.md) checked against Read tool cap; over-threshold → compact |
 | Phase 3d: edge integrity sweep | Index regeneration + edge-reconciliation pass — `INDEX-*.md` regenerates, broken edges flagged |
-| Phase 3e: session-log auto-prune | Sessions cleanup — `<project>/_sessions/<date>/` directories older than 90 days, with no unit cite and no summary reference, get archived |
+| Phase 3e: session-log auto-prune | Retired without replacement — no automated session-log cleanup ships; `_sessions/` grows until the user prunes it |
 | Phase 4: pattern synthesis | Graduation reasoning — same operation, named for what it actually is |
 | Phase 5: agent roster refresh | Lives in `protocols/self-evolution.md` (effectiveness-tracking-driven) |
 

@@ -214,6 +214,41 @@ test('planSupersessionStamps + applySupersessionStamps writes t_invalid to disk'
   });
 });
 
+test('applySupersessionStamps surfaces every failed unit by id and throws — never a clean partial count', () => {
+  withStore({
+    'dc-good.md': unitFile({ id: 'dc-good', status: 'retired', created: '2026-01-01' }),
+  }, (mem) => {
+    const stamps = [
+      { target: 'dc-good', t_invalid: '2026-02-01', path: join(mem, 'dc-good.md') },
+      { target: 'dc-vanished', t_invalid: '2026-02-01', path: join(mem, 'dc-vanished.md') }, // no such file
+    ];
+    let thrown = null;
+    try { applySupersessionStamps(stamps); } catch (e) { thrown = e; }
+    assert.ok(thrown, 'a batch with a failed unit must throw, not return a clean count');
+    assert.equal(thrown.written, 1, 'the successes are still reported');
+    assert.equal(thrown.failed.length, 1);
+    assert.equal(thrown.failed[0].unit, 'dc-vanished', 'the failed unit is named by id');
+    assert.match(thrown.message, /1 of 2 supersession stamp\(s\) FAILED/);
+    assert.match(thrown.message, /dc-vanished/);
+    // The good unit's write still landed on disk.
+    const reloaded = loadUnit(join(mem, 'dc-good.md'));
+    assert.equal(String(reloaded.fm.t_invalid).trim(), '2026-02-01');
+  });
+});
+
+test('applySupersessionStamps treats a unit without frontmatter as a failed stamp, not a silent no-op', () => {
+  withStore({
+    'dc-bare.md': '# no frontmatter here\n\nbody\n',
+  }, (mem) => {
+    const stamps = [{ target: 'dc-bare', t_invalid: '2026-02-01', path: join(mem, 'dc-bare.md') }];
+    let thrown = null;
+    try { applySupersessionStamps(stamps); } catch (e) { thrown = e; }
+    assert.ok(thrown, 'a dropped stamp is a failure');
+    assert.equal(thrown.failed[0].unit, 'dc-bare');
+    assert.match(thrown.failed[0].reason, /no-frontmatter/);
+  });
+});
+
 // ============================================================
 // asOf — point-in-time reconstruction
 // ============================================================

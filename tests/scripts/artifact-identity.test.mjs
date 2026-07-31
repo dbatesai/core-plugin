@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -82,7 +82,14 @@ test('different subtrees yield different identities (the hash is content, not ri
 test('end-to-end: the content-manifest identity lands in the shareable receipt intact', { skip: !HEAD }, async () => {
   const { writeFileSync, readFileSync, rmSync: rm } = await import('node:fs');
   const { runHarness } = await import(pathToFileURL(join(SCRIPTS, 'retrieval-harness.mjs')).href);
-  const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+  const FIXT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// The committed fixture is NEVER touched by tests — even "read" paths write the
+// cached index (_lib/unit-summaries.json) as a side effect, which polluted the
+// committed tree (retrieval-premise.test.mjs owns this pattern; the
+// fixture-cold-clean guard test enforces it). All reads run against a clone.
+const FIXT = mkdtempSync(join(tmpdir(), 'obligation3-store-'));
+cpSync(FIXT_SRC, FIXT, { recursive: true });
+process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
   const dir = mkdtempSync(join(tmpdir(), 'id-e2e-'));
   try {
     const identity = artifactIdentity(REPO, HEAD, 'plugins/core');

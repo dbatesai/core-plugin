@@ -14,8 +14,9 @@
  *    (a DC-/R- id, an acronym, a product/CamelCase name, or a multi-word topic phrase).
  *    Term presence != certain dependence, so output is CANDIDATES for review, not a
  *    hard FAIL. The term set is deliberately conservative to avoid false-positive floods.
- *  - It abstains (UNKNOWN) when it cannot see tool calls (Codex tool extraction pending)
- *    — it never claims "not reached" when it simply cannot observe access.
+ *  - It abstains (UNKNOWN) when it cannot see tool calls — a transcript whose
+ *    format the read-transcript adapter cannot extract tool records from —
+ *    and never claims "not reached" when it simply cannot observe access.
  *  - A skip means: between the question and its answer, NO tool touched a CORE surface.
  *    Only an access INSIDE that interval clears the turn — an earlier lookup answered a
  *    different question, and a later one came after the answer was already given.
@@ -32,12 +33,12 @@
  *   import { analyzeRetrievalSkip, buildProjectTerms, classifyRetrievalSkips, formatReport } from './analyze-retrieval-skip.mjs';
  */
 
-import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readTranscript } from './read-transcript.mjs';
 import { CORE_SURFACE_RE } from './capability/memory-accessed-probe.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 
@@ -149,10 +150,10 @@ function turnTerms(text, terms) {
  * Walk normalized transcript events; flag memory-dependent user turns whose answer was
  * not preceded by any CORE-store tool access. Pure over its inputs.
  */
-export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = true, transcriptAvailable = true, toolExtractionPending = false }) {
+export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = true, transcriptAvailable = true, toolVisibilityUnknown = false }) {
   if (!coreStorePresent) return { status: 'NO-STORE', reason: 'no CORE store (_memories/ or PROJECT.md) — nothing to skip', skips: [], memoryDependentTurns: [], firstCoreAccessIdx: null };
   if (!transcriptAvailable) return { status: 'UNKNOWN', reason: 'transcript unavailable — cannot judge retrieval ordering', skips: [], memoryDependentTurns: [], firstCoreAccessIdx: null };
-  if (toolExtractionPending) return { status: 'UNKNOWN', reason: 'tool extraction pending for this harness — cannot observe store access, so cannot prove a skip', skips: [], memoryDependentTurns: [], firstCoreAccessIdx: null };
+  if (toolVisibilityUnknown) return { status: 'UNKNOWN', reason: 'tool records unreadable for this transcript (unrecognized extraction marker) — cannot observe store access, so cannot prove a skip', skips: [], memoryDependentTurns: [], firstCoreAccessIdx: null };
 
   const ordered = [...events].sort((a, b) => a.idx - b.idx);
   const coreAccessIdxs = ordered.filter((e) => e.kind === 'tool' && CORE_SURFACE_RE.test(String(e.text || ''))).map((e) => e.idx);
@@ -188,10 +189,10 @@ export function analyzeRetrievalSkip({ projectRoot = process.cwd(), harness = 'c
   // 'n/a' (other harnesses). Any value that is neither known-good abstains, so a
   // future schema drift produces UNKNOWN instead of silently flooding false SKIPs.
   const extraction = t.meta?.codex_tool_extraction;
-  const toolExtractionPending = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
+  const toolVisibilityUnknown = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
   const terms = coreStorePresent ? buildProjectTerms(projectRoot) : new Set();
   const r = classifyRetrievalSkips({
-    events: t.events, terms, coreStorePresent, transcriptAvailable: t.available, toolExtractionPending,
+    events: t.events, terms, coreStorePresent, transcriptAvailable: t.available, toolVisibilityUnknown,
   });
   return { schema_version: SCHEMA_VERSION, harness, coreStorePresent, transcriptAvailable: t.available, termsTracked: terms.size, ...r };
 }
@@ -214,9 +215,7 @@ export function formatReport(report) {
 
 // ---------- CLI ----------
 
-function isMain() {
-  try { return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; }
-}
+
 
 /**
  * Index-advancing arg parse. The first BARE token is the project root — but
@@ -238,7 +237,7 @@ export function parseSkipArgs(args) {
   return { rawRoot, harness, transcriptPath, json };
 }
 
-if (isMain()) {
+if (isCliEntry(import.meta.url)) {
   const { rawRoot, harness, transcriptPath, json } = parseSkipArgs(process.argv.slice(2));
   const projectRoot = resolve(rawRoot || process.cwd());
   const report = analyzeRetrievalSkip({ projectRoot, harness, transcriptPath });

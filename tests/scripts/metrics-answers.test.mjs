@@ -3,7 +3,7 @@
 // state only — presentation, no fresh computation. Honest degradation states.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -68,6 +68,33 @@ test('capture opted out → storing/loading lines say so instead of pretending',
     writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'ans-off', turn_capture: false }));
     const view = renderAnswerView(gatherAnswers(project));
     assert.match(view, /turn capture is off/i);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a corrupt pinned scorecard log escalates as UNREADABLE — never the nothing-needs-attention line', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ans-corrupt-'));
+  try {
+    const project = makeProject(root);
+    mkdirSync(join(project, '_metrics'), { recursive: true });
+    writeFileSync(join(project, '_metrics', 'scorecard-log.jsonl'), '{not-json}\n');
+    const view = renderAnswerView(gatherAnswers(project));
+    assert.match(view, /Needs your attention: health evidence is UNREADABLE/);
+    assert.match(view, /UNKNOWN, not all-clear/);
+    assert.doesNotMatch(view, /Nothing needs your attention right now\./,
+      'unreadable evidence must never render earned quiet');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a partially corrupt log (good rows + a bad row) still escalates, alongside the readable answers', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ans-partial-'));
+  try {
+    const project = makeProject(root);
+    appendScorecard(project, card('2026-07-21T00:00:00Z'));
+    const log = join(project, '_metrics', 'scorecard-log.jsonl');
+    writeFileSync(log, '{corrupt-row}\n' + readFileSync(log, 'utf8'));
+    const view = renderAnswerView(gatherAnswers(project));
+    assert.match(view, /1 of 2 row\(s\) in the pinned scorecard log are unreadable/);
+    assert.doesNotMatch(view, /Nothing needs your attention right now\./);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

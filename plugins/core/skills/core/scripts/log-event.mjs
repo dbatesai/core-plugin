@@ -24,6 +24,24 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
+
+/**
+ * Fail-closed capture gate. metrics-init.mjs writes a typed
+ * `capture-disabled.json` marker when the storage pin cannot be written —
+ * the state where write-time consumers could otherwise fall back silently
+ * into the synced project folder the OneDrive redirect exists to avoid.
+ * Returns the marker path when capture is disabled, null otherwise.
+ */
+export function captureDisabledMarkerPath(projectDir, { workspaceId, home = homedir() } = {}) {
+  if (!projectDir) return null;
+  const ws = workspaceId || resolveWorkspaceId(projectDir);
+  const operationalMetaDir = join(home, '.core', 'workspaces', ws, 'metrics');
+  for (const candidate of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
+    try { if (existsSync(candidate)) return candidate; } catch { /* unreadable location — keep checking */ }
+  }
+  return null;
+}
 
 /**
  * Resolve where the metrics storage lives — honors what `metrics-init.mjs`
@@ -35,6 +53,11 @@ import { homedir } from 'node:os';
  *
  * Without this, writers would hardcode a project-local path and bypass
  * (g.5)'s AppData redirect on Windows+OneDrive.
+ *
+ * Fail-closed contract: when metrics-init could not WRITE the pin, it leaves
+ * the typed capture-disabled marker and `metricsEnabled` returns false — so
+ * capture producers never reach this fallback in that state. The fallback here
+ * serves the legitimate pre-scaffold default and read-side path resolution.
  */
 export function resolveStoragePath(projectDir, { workspaceId } = {}) {
   if (workspaceId) {
@@ -90,14 +113,20 @@ export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
  *
  * Precedence (first match wins):
  *   1. `CORE_METRICS_ENABLED` env false (0/false/no/off) → OFF — hard opt-out, beats everything.
- *   2. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
- *   3. `<project>/workspace.json` `"metrics_enabled": false` → OFF — per-workspace opt-out.
- *   4. `<project>/workspace.json` `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
- *   5. default → ON.
+ *   2. Fail-closed capture-disabled marker present → OFF. metrics-init could
+ *      not pin the storage path, so capture cannot guarantee it stays out of a
+ *      synced project folder. Privacy fail-closed beats even an explicit env
+ *      opt-in — re-enabling is fixing the pin (re-run metrics-init), not
+ *      overriding the marker.
+ *   3. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
+ *   4. `<project>/workspace.json` `"metrics_enabled": false` → OFF — per-workspace opt-out.
+ *   5. `<project>/workspace.json` `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
+ *   6. default → ON.
  */
 export function metricsEnabled({ project, env = process.env } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
+  if (project && captureDisabledMarkerPath(project)) return false; // fail-closed pin failure beats opt-in
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
     try {

@@ -27,15 +27,15 @@
 
 import {
   existsSync, readFileSync, writeFileSync, mkdirSync,
-  readdirSync, realpathSync, chmodSync,
+  readdirSync, chmodSync,
 } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { todayUTC, resolveWorkspaceId, operationalMetricsDir } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const CALIBRATION_VERSION = '1.0.0';
 export const PRECISION_THRESHOLD = 0.7;
@@ -540,8 +540,7 @@ function safeRead(p) { try { return readFileSync(p, 'utf8'); } catch { return ''
 // CLI
 // ============================================================
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const has = (f) => argv.includes(`--${f}`);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };

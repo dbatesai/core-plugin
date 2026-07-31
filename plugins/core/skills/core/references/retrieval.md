@@ -98,33 +98,17 @@ The LLM reasoning inside the subagent IS the semantic layer. No precomputed embe
 
 ---
 
-## After retrieval — update scoring slots
-
-Every successful retrieval (Tier 1, 2, or 3) updates the retrieved unit's frontmatter:
-
-- `last_accessed: <today>` — set to current date
-- `access_count: <int + 1>` — increment
-
-`last_accessed` feeds the priority function's recency (R) signal. **`access_count` is written
-but not yet read** — `priority.mjs` currently derives its frequency (F) signal from surface
-diversity in `sources:`, not from this counter. Keep writing it: the corpus is cheap and
-retroactively useful, and the named future consumer is `priority.mjs` absorbing it into F. If
-that wiring is still absent at the next doc-honesty audit, drop the write instruction rather
-than carrying a dead slot. The update is a cheap mid-session write to the unit file.
-
----
-
 ## Logging — always on
 
-Every Tier 1+ retrieval event writes one JSONL record to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`. The log is operational telemetry, not diagnostic scaffolding — debug mode augments these entries with verbose diagnostic fields but does not replace the base log. The corpus is what makes retrieval-quality analysis possible across sessions.
+Every Tier 1+ retrieval event writes one JSONL record to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`. The log is operational telemetry — the corpus is what makes retrieval-quality analysis possible across sessions.
 
-The writer is the agent inline through the producer helper. There is no harness hook that intercepts retrieval and writes the log; when you run a retrieval, you write the entry:
+Two writers share the producer helper. The per-turn hook (`hooks/retrieve-context-hook.mjs`, registered on UserPromptSubmit) is the canonical product emitter — it writes one `per-turn-hook` event per prompt automatically. Retrievals you run yourself beyond the hook (an explicit graph walk, a Tier-3 escalation) get their entry from you, through the same helper:
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/record-retrieval-event.mjs <project> --event-json '<json>'
 ```
 
-Substitute the harness-resolved plugin root (`CORE_ROOT` or `CODEX_PLUGIN_ROOT`) when `CLAUDE_PLUGIN_ROOT` is not the active install root. The helper validates the row before write and reuses `log-event.mjs`, so the same call writes both the legacy JSONL row and the OTel `core.retrieval` span. Per-event schema:
+Substitute the harness-resolved plugin root (`CORE_ROOT` or `CODEX_PLUGIN_ROOT`) when `CLAUDE_PLUGIN_ROOT` is not the active install root. The helper validates the row, then writes it through `log-event.mjs` to the `_sessions` JSONL — the sole event substrate. Per-event schema:
 
 ```jsonl
 {
@@ -157,19 +141,19 @@ Substitute the harness-resolved plugin root (`CORE_ROOT` or `CODEX_PLUGIN_ROOT`)
 - `context_pack_token_estimate`: estimated payload size after selection and suppression.
 - `retrieval_id`: immutable correlation id. It lets a later, evidence-qualified answer outcome join to exactly one retrieval without rewriting the original event.
 
-After the answer, record an outcome only when evidence exists:
+There is no automatic outcome writer. The pipeline that closed every turn with
+`usefulness: "unknown"` rows was removed — an unknown-only corpus answers
+nothing, and certifying that an answer happened is not evidence that a memory
+helped. The hindsight relevance grade (the maintenance-run path over captured
+turns) is the mechanical grader.
 
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/record-retrieval-outcome.mjs <project> \
-  --retrieval-id <id> --outcome useful \
-  --evidence-kind user-confirmed
-```
-
-The closed outcome vocabulary is `useful`, `partial`, `noisy`, or `miss`.
-Evidence strength is explicit: `user-confirmed` is strongest, `answer-citation`
-is next, and `agent-judgment` is provisional. With no evidence, leave the
-outcome unknown; never coerce missing evidence to `useful`. The writer rejects
-unknown, ambiguous, duplicate, and relabeled retrieval ids.
+Historical outcome rows remain readable: the closed vocabulary (`useful`,
+`partial`, `noisy`, `miss`, `unknown`) and the evidence-authority ladder
+(`user-confirmed` strongest, then `objective-task-success`,
+`corrective-retry`, `agent-attribution`, `unobservable`) live in
+`outcome-vocab.mjs` for the analyzers that fold existing rows. A writer for
+genuinely observable evidence (a user confirming a memory helped; an objective
+task result) gets built when a live caller for it exists — not before.
 
 For Tier 2 walks, log the seed unit and the result set together as one event (one JSONL line). For Tier 3 misses (Explore returned no relevant answer), set `units_retrieved: []`, `tier_reached: 3`, and add `"result": "miss"`. The infrastructure trip-wire — repeated Tier 3 misses on similar queries — now runs per-project against this log via `scripts/analyze-retrieval-quality.mjs`.
 

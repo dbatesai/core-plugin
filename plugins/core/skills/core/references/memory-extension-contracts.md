@@ -136,8 +136,7 @@ blast-radius policy (MAJOR/MINOR on the plugin version) and called out in `CHANG
 - **Unknown-frontmatter preservation** — CORE tooling never strips fields it doesn't know.
 
 What is internal and may change without notice: script internals and exports not named above,
-analyzer output formats, `state-cache.json` shape, the OTel trace span fields while the trace
-layer is a collection stub.
+analyzer output formats, `state-cache.json` shape.
 
 Co-installation rule: a wrapper writes only under its own `~/.core/<wrapper>/` sub-namespace
 and never the shared registry files — see `protocols/data-storage.md §Single-writer assumption`.

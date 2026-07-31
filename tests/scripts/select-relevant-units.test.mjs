@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { rmSync, cpSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import * as selector from '../../plugins/core/skills/core/scripts/select-relevant-units.mjs';
@@ -10,7 +10,14 @@ import * as selector from '../../plugins/core/skills/core/scripts/select-relevan
 const selectAll = (query, store, opts = {}) => selector.selectCandidateShards(query, store, opts)
   .flatMap((shard) => shard.candidates);
 
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+const FIXT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// The committed fixture is NEVER touched by tests — even "read" paths write the
+// cached index (_lib/unit-summaries.json) as a side effect, which polluted the
+// committed tree (retrieval-premise.test.mjs owns this pattern; the
+// fixture-cold-clean guard test enforces it). All reads run against a clone.
+const FIXT = mkdtempSync(join(tmpdir(), 'obligation3-store-'));
+cpSync(FIXT_SRC, FIXT, { recursive: true });
+process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 
 test('candidate shortlist includes the value unit for an abstract query', () => {
   // The key design seam: the shortlist is RECALL-oriented, so the value-rung unit

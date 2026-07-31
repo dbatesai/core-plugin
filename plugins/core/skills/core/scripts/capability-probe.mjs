@@ -23,10 +23,11 @@
  * The plugin ships Node.js (.mjs) only, zero dependencies.
  */
 
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolvePluginRoot, detectConsumingHarnessSignal } from './resolve-plugin-root.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const DESCRIPTOR_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'schemas', 'harness-capability-descriptor.json');
@@ -436,18 +437,7 @@ export async function main(argv) {
   return 0;
 }
 
-// CLI entry guard
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
-const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY) {
-  process.stderr.write(
-    `[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n` +
-    `[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n` +
-    `[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`
-  );
-}
-if (_cliEntryArgv1 === _cliEntrySelf) {
+if (isCliEntry(import.meta.url)) {
   const exit = await main(process.argv.slice(2));
   process.exit(exit);
 }

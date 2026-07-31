@@ -65,9 +65,8 @@ test('recordRetrievalEvent writes retrieval proof visible to the analyzer', () =
       { unit_id: 'dc-retrieval-path', retrievals: 1, dipback_observed: 1, rate: 1 },
     ]);
 
-    // OTel dual-write retired 2026-07-24 (docs/specs/2026-07-23-metrics-holistic-redesign.md
-    // §3a) — the JSONL log above is the sole substrate now, so no _metrics/traces/ file
-    // gets written at all.
+    // The _sessions JSONL log above is the sole event substrate — no
+    // _metrics/traces/ file gets written at all.
     assert.equal(existsSync(join(root, '_metrics', 'traces')), false, 'no trace dir is written');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

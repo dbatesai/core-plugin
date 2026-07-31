@@ -46,9 +46,8 @@
  *   node bitemporal.mjs <project> --metrics            storage-health rollup
  */
 
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import {
   extractEdges, parseIsoDate,
@@ -104,6 +103,7 @@ export function todayUtc(now = new Date()) {
 // Shared terminal-status contract: one definition in unit-vocab.mjs.
 export { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 /**
  * Walk every supersedes edge B→A and classify it. A supersedes edge alone does
@@ -220,15 +220,41 @@ export function setFrontmatterField(text, key, value) {
   return normalized.replace(m[0], `${open}${lines.join('\n')}${close}`);
 }
 
-/** Apply the planned stamps to disk. Returns count written. */
+/**
+ * Apply the planned stamps to disk. Returns count written when every stamp
+ * lands. A per-unit failure is NEVER swallowed into a clean partial count:
+ * every failed unit is collected by id and the batch throws, with `written`
+ * and `failed` on the error so the caller can still report what succeeded.
+ */
 export function applySupersessionStamps(stamps) {
   let written = 0;
+  const failed = [];
   for (const s of stamps) {
+    const id = s.target || basename(s.path || '', '.md') || String(s.path);
     try {
       const text = readFileSync(s.path, 'utf8');
       const next = setFrontmatterField(text, 't_invalid', s.t_invalid);
-      if (next !== text) { atomicWriteFileSync(s.path, next); written += 1; }
-    } catch { /* best-effort per-unit */ }
+      if (next === text) {
+        // setFrontmatterField leaves the original untouched when the unit has
+        // no frontmatter fence — that stamp was dropped, which is a failure,
+        // not a no-op.
+        failed.push({ unit: id, path: s.path, reason: 'no-frontmatter — stamp not written' });
+        continue;
+      }
+      atomicWriteFileSync(s.path, next);
+      written += 1;
+    } catch (e) {
+      failed.push({ unit: id, path: s.path, reason: String(e && e.message).slice(0, 160) });
+    }
+  }
+  if (failed.length) {
+    const err = new Error(
+      `bitemporal: ${failed.length} of ${stamps.length} supersession stamp(s) FAILED `
+      + `(${written} written): ${failed.map((f) => `${f.unit} (${f.reason})`).join('; ')}`,
+    );
+    err.written = written;
+    err.failed = failed;
+    throw err;
   }
   return written;
 }
@@ -322,8 +348,7 @@ export function storageMetrics(units, today) {
 
 // ---------- CLI ----------
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();
@@ -347,7 +372,18 @@ if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
     if (!stamps.length) { process.stdout.write('bitemporal: no supersession stamps needed (no superseding units, or all already stamped)\n'); process.exit(0); }
     process.stdout.write(`bitemporal: ${stamps.length} supersession stamp(s)${apply ? ' — APPLYING' : ' — DRY RUN (pass --apply to write)'}:\n`);
     for (const s of stamps) process.stdout.write(`  ${s.target}.t_invalid = ${s.t_invalid}  (superseded by ${s.superseded_by})\n`);
-    if (apply) { const n = applySupersessionStamps(stamps); process.stdout.write(`bitemporal: wrote ${n} unit(s)\n`); }
+    if (apply) {
+      try {
+        const n = applySupersessionStamps(stamps);
+        process.stdout.write(`bitemporal: wrote ${n} unit(s)\n`);
+      } catch (e) {
+        // Partial batches report BOTH sides: what landed and, per unit id, what
+        // did not. Never a clean count over a swallowed failure.
+        process.stdout.write(`bitemporal: wrote ${e.written ?? 0} unit(s)\n`);
+        process.stderr.write(`${e.message}\n`);
+        process.exit(1);
+      }
+    }
     process.exit(0);
   }
 

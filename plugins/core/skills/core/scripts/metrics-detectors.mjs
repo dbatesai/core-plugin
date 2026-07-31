@@ -23,13 +23,13 @@
  * CLI:  node metrics-detectors.mjs <project> [--harness claude-code|codex] [--json]
  */
 
-import { readdirSync, readFileSync, appendFileSync, mkdirSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const DETECTOR_VERSION = '0.2.0';
 
@@ -457,8 +457,7 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
   };
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();

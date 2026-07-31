@@ -57,12 +57,12 @@
  * _memories/, unreadable/malformed --json-in, bad record-mode input);
  * 1 fatal failure (including fail-closed producer identity).
  */
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { gatherMetrics, parseRecognitionSignal } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 import {
   generationReceiptLocation, runRecordCli, artifactContentDigest,
   publishArtifactWithReceipt, resolveArtifactDestination,
@@ -115,8 +115,8 @@ const valMore = (inner) => `<div class="val" style="margin-top:4px">${inner}</di
 
 // ============================================================
 // Plain-language row builders — one per report row, each handling every state
-// metrics-check.mjs can put that row in. The prototype's copy is the
-// template: numbers are parameterized, the explanatory sentences stay.
+// metrics-check.mjs can put that row in. Numbers are parameterized; the
+// explanatory sentences are fixed copy.
 // ============================================================
 
 // ---- Section 1, row 1: the live round-trip probe ----
@@ -496,7 +496,7 @@ export function sanitizeForEmbed(metrics) {
 
 // ============================================================
 // The page — static HTML + inline CSS, no JavaScript, zero external
-// references. Visual system taken from the approved prototype verbatim.
+// references.
 // ============================================================
 
 export function buildMetricsArtifactHtml(metrics, { projectName, producer }) {
@@ -820,14 +820,6 @@ async function main(argv) {
 // Entry check compares REAL paths on both sides (same rationale as the browse
 // generator: a naive string compare can silently skip main() behind symlinked
 // temp paths — a lying instrument).
-const _cliEntry = (() => {
-  try {
-    const self = fileURLToPath(import.meta.url);
-    const invoked = resolve(process.argv[1] || '');
-    if (self === invoked) return true;
-    try { return self === realpathSync(invoked); } catch { return false; }
-  } catch { return false; }
-})();
-if (_cliEntry) {
+if (isCliEntry(import.meta.url)) {
   process.exit(await main(process.argv.slice(2)));
 }

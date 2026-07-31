@@ -62,7 +62,7 @@
  * CLI: node metrics-check.mjs [project-dir] [--json]
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, statSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, basename, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -71,8 +71,9 @@ import { runHarness } from './retrieval-harness.mjs';
 import { newestRegisteredRound, measureRound } from './self-test-round.mjs';
 import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQualityReport } from './analyze-retrieval-quality.mjs';
 import { turnCaptureStats } from './turn-capture.mjs';
-import { latestScorecards } from './scorecard.mjs';
+import { latestScorecards, scorecardLogPath } from './scorecard.mjs';
 import { evaluateTripwires } from './metrics-tripwires.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 
@@ -862,6 +863,38 @@ ${body}
 // user-facing view reads stored conclusions). The full instrument panel stays
 // behind `/metrics full`.
 
+/**
+ * The pinned evidence files the answer view depends on. A file that exists
+ * but cannot be parsed is CORRUPT EVIDENCE — the reader-side row skippers
+ * would silently launder it into "no cards yet", and the view would render
+ * earned quiet over an unreadable instrument. Detected here so the render can
+ * escalate instead.
+ */
+export function checkAnswerEvidence(projectDir) {
+  const problems = [];
+  const logPath = scorecardLogPath(projectDir);
+  try {
+    if (existsSync(logPath)) {
+      let malformed = 0;
+      let total = 0;
+      for (const line of readFileSync(logPath, 'utf8').split('\n')) {
+        if (!line.trim()) continue;
+        total += 1;
+        try { JSON.parse(line); } catch { malformed += 1; }
+      }
+      if (malformed > 0) {
+        problems.push({
+          file: logPath,
+          detail: `${malformed} of ${total} row(s) in the pinned scorecard log are unreadable`,
+        });
+      }
+    }
+  } catch (e) {
+    problems.push({ file: logPath, detail: `scorecard log unreadable: ${String(e && e.message).slice(0, 120)}` });
+  }
+  return { corrupt: problems.length > 0, problems };
+}
+
 /** Everything the answer view reads, gathered from stored surfaces only. */
 export function gatherAnswers(projectDir) {
   let cards = [];
@@ -870,13 +903,14 @@ export function gatherAnswers(projectDir) {
   try { tripwires = evaluateTripwires(projectDir); } catch { /* silence is honest here */ }
   let capture = { enabled: true };
   try { capture = turnCaptureStats(projectDir); } catch { /* default shape above */ }
-  return { project: projectDir, cards, tripwires, capture };
+  const evidence = checkAnswerEvidence(projectDir);
+  return { project: projectDir, cards, tripwires, capture, evidence };
 }
 
 function pct(x) { return `${Math.round(x * 100)}%`; }
 
 /** Render the three-question view. Pure; takes gatherAnswers() output. */
-export function renderAnswerView({ project, cards, tripwires, capture }) {
+export function renderAnswerView({ project, cards, tripwires, capture, evidence }) {
   const newest = cards[0] || null;
   const prev = cards[1] || null;
   const name = String(project || '').split(/[\\/]/).filter(Boolean).pop() || 'this project';
@@ -955,10 +989,17 @@ export function renderAnswerView({ project, cards, tripwires, capture }) {
   }
   L.push('');
 
-  // The attention surface: tripwires, or earned quiet.
+  // The attention surface: corrupt evidence first (an unreadable instrument
+  // can never render earned quiet), then tripwires, then earned quiet.
+  const corrupt = evidence && evidence.corrupt;
+  if (corrupt) {
+    for (const p of evidence.problems) {
+      L.push(`Needs your attention: health evidence is UNREADABLE — ${p.detail} (${p.file}). The answers above are UNKNOWN, not all-clear, until the file is repaired or removed.`);
+    }
+  }
   if (tripwires && tripwires.tripped && tripwires.tripped.length) {
     for (const t of tripwires.tripped) L.push(`Needs your attention: ${t.message}`);
-  } else {
+  } else if (!corrupt) {
     L.push('Nothing needs your attention right now.');
   }
   return L.join('\n');
@@ -968,12 +1009,7 @@ export function renderAnswerView({ project, cards, tripwires, capture }) {
 // CLI entry
 // ============================================================
 
-const isCliEntry = (() => {
-  try { return process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); }
-  catch { return false; }
-})();
-
-if (isCliEntry) {
+if (isCliEntry(import.meta.url)) {
   const args = process.argv.slice(2);
   const wantsJson = args.includes('--json');
   const positional = args.find((a) => !a.startsWith('--'));

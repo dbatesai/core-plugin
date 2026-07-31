@@ -19,9 +19,9 @@
  *        [--last-revised YYYY-MM-DD] [--write CONTRACT.md]
  */
 
-import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { HARNESS_OUTPUT, KNOWN_HARNESSES } from './contract-format.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 const HARNESS_ONLY = { 'claude-code': 'claude-code-only', codex: 'codex-only' };
 
@@ -100,11 +100,9 @@ export function migrateToContract({ files = {}, contractId, lastRevised }) {
   };
 }
 
-function isMain() {
-  try { return realpathSync(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; }
-}
 
-if (isMain()) {
+
+if (isCliEntry(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : null; };
   const files = {};

@@ -54,58 +54,35 @@ test('ban: hand-rolled frontmatter fence-parsers do not come back', () => {
 });
 
 test('ratchet: CLI-entry guards do not grow (target: shared helper)', () => {
-  // ~16 hand-copied `import.meta.url === argv[1]` guards in 4 variants, 2 with real
-  // bugs (one-sided canonicalization). Freeze the count; a shared isCliEntry() helper
-  // is the fix.
+  // Every occurrence of import.meta.url in scripts/ is either a CLI entry
+  // point calling the shared isCliEntry() helper or a module-relative path
+  // resolution. The ceiling counts files, one per legitimate use; a new file
+  // must justify its own entry point to raise it — never a copy-paste twin.
   const n = countMatching(/import\.meta\.url/);
-  // Baseline 46 → 48 (2026-07-07): two genuinely-new CLI tools, not copy-paste twins.
-  // (2026-07-11: embed-index.mjs deleted; bm25.mjs replaced it one-for-one,
-  // so the 48 ceiling stood re-evaluated, not by accident.) 48 → 49 (2026-07-12):
-  // mailbox.mjs, a genuinely-new CLI tool with its own entry point. 49 → 50
-  // (2026-07-14): aggregate-receipt.mjs, the privacy exporter — a
-  // genuinely-new CLI tool, not a copy. 50 → 51 (2026-07-14, shared-write
-  // concurrency): index-registry.mjs, the sole scripted writer of index.json —
-  // a genuinely-new CLI tool (file-lock.mjs is import-only, no entry guard).
-  // 51 → 52 (2026-07-14): artifact-identity.mjs, the
-  // deterministic release-artifact identity CLI — genuinely new, not a copy.
-  // 52 → 53 (2026-07-16): metrics-package.mjs, the anonymized memory-metrics
-  // feedback-package CLI — genuinely new (metrics-package-report.mjs is
-  // import-only, no entry guard). 53 → 54 (2026-07-22): lifecycle-detect.mjs,
-  // the executable user-authorship-boundary preflight — a
-  // genuinely-new CLI tool with its own entry point (lifecycle-core.mjs is
-  // import-only, no entry guard). 54 → 55 (2026-07-22): render-browse-artifact.mjs,
-  // the /memory-view snapshot-page generator — a genuinely-new CLI tool with its
-  // own entry point, not a copy. 55 → 57 (2026-07-22, metrics artifact):
-  // render-metrics-artifact.mjs, the /metrics artifact-page generator — a
-  // genuinely-new CLI tool with its own entry point; and
-  // artifact-provenance.mjs, which uses import.meta.url for realpath-from-
-  // module resolution (not an entry guard) — it is itself a CONSOLIDATION,
-  // extracting the duplicated truthful-producer-identity logic into one owner
-  // (artifact-receipts.mjs, the receipts consolidation, needs no
-  // import.meta.url at all). Still target one shared isCliEntry() helper.
-  // 57 -> 58 (2026-07-23): rich-context-capture.mjs, the opt-in rich-context
-  // capture stream's single writer + retention/purge CLI — a genuinely-new CLI
-  // tool with its own entry point, not a copy.
-  // 58 -> 59 (2026-07-23): self-test-round.mjs, the /self-test round manager
-  // (new-round/register/run/status) — a genuinely-new CLI tool with its own
-  // entry point, not a copy.
-  // 59 -> 60 (2026-07-24, v3.14.0): turn-capture.mjs REPLACES the deleted
-  // rich-context-capture.mjs one-for-one (net zero); the +1 is
-  // producer-identity.mjs, which uses import.meta.url only for module-relative
-  // manifest resolution (not an entry guard) and is itself a CONSOLIDATION —
-  // one owner for the previously-triplicated producer-identity manifest read.
-  // 60 -> 61 (2026-07-24, v3.14.0 Link 3): scorecard.mjs, the pinned-
-  // conclusions log (--pin for the maintenance cadence, --latest for readers)
-  // — a genuinely-new CLI tool with its own entry point, not a copy.
-  // 61 -> 62 (2026-07-24, v3.14.0 Link 2): hindsight-judge.mjs, the
-  // mechanical-grade judge (--limit batch CLI for the maintenance cadence) —
-  // a genuinely-new CLI tool with its own entry point, not a copy.
-  // 62 -> 63 (2026-07-24, v3.14.0 Link 5): metrics-tripwires.mjs, the
-  // session-start degradation check (startup protocol consumes its stdout) —
-  // a genuinely-new CLI tool with its own entry point, not a copy.
-  // 63 -> 65 (2026-07-28): backfill-memory.mjs (memory back-fill discovery for
-  // zero-model closes) and generate-door-inventory.mjs (the source-derived
-  // completeness inventory) — both genuinely-new CLI tools with their own
-  // entry points, not copies. Still target one shared isCliEntry() helper.
   assert.ok(n <= 65, `CLI-entry-guard occurrences grew past baseline 65 (target: one shared helper): ${n}`);
+});
+
+test('LOCAL CLI-entry guard implementations: exactly the bootstrap resolver, everything else imports isCliEntry', () => {
+  // cli-entry.mjs owns the one symlink-hardened entry-point comparison. Every
+  // other script and hook calls isCliEntry(import.meta.url). The single
+  // sanctioned local implementation is resolve-plugin-root.mjs: the identity
+  // gate executes as a lone copied file before siblings exist, so it cannot
+  // import cli-entry.mjs (see the comment at its guard). A "local
+  // implementation" is any line that compares process.argv[1] against the
+  // module's own path — in any spelling, including a named canonicalizer
+  // wrapper. Scans hooks/ too: a hook entry point is as guard-bearing as a
+  // script.
+  const HOOKS = join(SCRIPTS, '..', 'hooks');
+  const files = [];
+  for (const dir of [SCRIPTS, HOOKS]) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isFile() || !e.name.endsWith('.mjs') || e.name === 'cli-entry.mjs') continue;
+      const text = readFileSync(join(dir, e.name), 'utf8');
+      const hasLocalGuard = /process\.argv\[1\][^\n]*(?:===|realpathSync|pathToFileURL|basename\()/.test(text)
+        || /(?:realpathSync|resolve|_canon|\w*[Cc]anonical\w*)\([^\n]*process\.argv\[1\]/.test(text);
+      if (hasLocalGuard && !/import \{ isCliEntry \}/.test(text)) files.push(e.name);
+    }
+  }
+  assert.deepEqual(new Set(files), new Set(['resolve-plugin-root.mjs']),
+    `unexpected LOCAL CLI-entry guard — call isCliEntry(import.meta.url) from cli-entry.mjs instead: ${files.join(', ')}`);
 });

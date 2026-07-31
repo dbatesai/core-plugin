@@ -14,9 +14,10 @@
  *     which already respects anti-resurrection)
  *   - read-only — no mutation, no release gate.
  *
- * v1 reports native-only candidates (sampled, anti-resurrection-labeled) + boundary
- * stats. Content-CONFLICT detection is DEFERRED — it's the noisiest signal and needs a
- * reviewed matcher decision; shipping a noisy conflict flag would create resurrection pressure.
+ * The audit reports native-only candidates (sampled, anti-resurrection-labeled)
+ * + boundary stats — that is the whole product. Content-conflict detection is
+ * deliberately OUT OF SCOPE: it is the noisiest signal, and a noisy conflict
+ * flag would create resurrection pressure.
  * Match function is deterministic high-signal-term overlap, so paraphrases can
  * read as "absent" — which is exactly why output is candidates, not a verdict.
  *
@@ -35,11 +36,11 @@
  * CLI: node audit-memory-boundary.mjs <project-root> [--native <MEMORY.md>] [--sample N] [--json]
  */
 
-import { readFileSync, readdirSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { mapProjectPathToSlug } from './project-slug.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const DEFAULT_SAMPLE = 25;
@@ -133,9 +134,9 @@ export function formatReport(report) {
 // Canonicalize BOTH sides so a symlinked/virtualized install doesn't make the
 // CLI silently no-op (read-only audit, so low-stakes, but kept consistent with
 // its sibling gates).
-function isMain() { try { const canon = (p) => realpathSync(p); return canon(process.argv[1]) === canon(fileURLToPath(import.meta.url)); } catch { return false; } }
 
-if (isMain()) {
+
+if (isCliEntry(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const i = args.indexOf(`--${n}`); return i >= 0 ? args[i + 1] : null; };
   const projectRoot = resolve(args.find((a) => !a.startsWith('--')) || process.cwd());

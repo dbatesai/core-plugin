@@ -65,8 +65,6 @@ Implicit — agents poll their inbox via `SendMessage` listings each turn. The V
 
 Edit `~/.claude/settings.json` (global) or `<project>/.claude/settings.json` (project). Add an entry to the `hooks.<event>` array referencing a script path. PreToolUse hooks can block; PostToolUse hooks observe; SessionStart/SessionEnd run at lifecycle boundaries. The plugin ships hooks at `hooks/hooks.json` under `${CLAUDE_PLUGIN_ROOT}`.
 
-**Post-answer outcome close.** `Stop` fires once, right after Claude's response completes — a genuine post-answer event, distinct from `SessionEnd` (once per session) and from inferring closure off the next `UserPromptSubmit` (sequencing, not observation). `hooks/answer-close-hook.mjs` is registered on `Stop` and closes the per-turn retrieval hook's pending outcome using the harness's own `prompt_id` (Claude Code v2.1.196+ — the common-fields `prompt_id` uniquely identifies the turn) as the real `answer_turn_id`, never an alias of `retrieval_id`. Falls back to a freshly-generated id, still never aliased, on older builds without `prompt_id`. See `harnesses/codex.md §hook-register` for why this stays Claude-Code-only for now.
-
 ## read-auto-memory
 
 Read `~/.claude/projects/<encoded-cwd>/memory/MEMORY.md` (first 200 lines auto-injected at session start; rest available on-demand). Cross-project index at `~/.claude/memory/memory.md`.

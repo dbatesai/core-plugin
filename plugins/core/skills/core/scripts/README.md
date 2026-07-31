@@ -8,7 +8,9 @@ When a surface earns its way into "the agent relies on this being right every ti
 
 By convention, all scripts ship as `.mjs` (Node.js ESM). Node is the only runtime Claude Code guarantees on every supported platform (Mac, Windows, Linux). Invoke via `node "${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/<name>.mjs"`.
 
-## What ships in this directory
+## Key scripts
+
+This README explains the handful of scripts the protocols lean on hardest; it is a guide, not an inventory. The complete, generated list of every shipped surface — every script in this directory and its subdirectories, every hook, every skill — lives at `docs/shipped-surface-inventory.json` in the source repository, regenerated and guard-tested on every change.
 
 ### `priority.mjs`
 
@@ -39,7 +41,7 @@ The CORE retrieval validation runner. Reads `<project>/_memories/_validation/tes
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/validate.mjs <project-path>
 ```
 
-Used by the validation protocol (weekly auto + on-demand health checks).
+Used by the validation protocol (on-demand health checks; the runner simulates a Tier-1-only retrieval and is not the product retrieval path — see `protocols/validation.md` for its honest scope).
 
 ### `graph-walk.mjs`
 
@@ -54,7 +56,7 @@ Used by the Tier 2 retrieval protocol: call this to get edge-reachable candidate
 
 ### `record-retrieval-event.mjs`
 
-Validated producer for retrieval-quality evidence. Writes a `kind: "retrieval"` event to `<project>/_sessions/<date>/retrieval-log.jsonl` and, through `log-event.mjs`, dual-writes an OTel `core.retrieval` span under `<project>/_metrics/traces/<session-id>.jsonl`.
+Validated producer for retrieval-quality evidence. Writes a `kind: "retrieval"` event through `log-event.mjs` to `<project>/_sessions/<date>/retrieval-log.jsonl` — the sole event substrate.
 
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/record-retrieval-event.mjs <project> --event-json '{"trigger":"session-start","intent_topics":["memory"],"tier_reached":1,"escalation_path":[1],"units_retrieved":[{"id":"dc-memory","tier":1}],"dip_back_count":0}'
@@ -78,35 +80,6 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/check-units.mjs <project> --json
 Exit codes: 0 = all pass, 1 = warnings, 2 = failures. Run at `/process-memory` to surface hygiene work. Run `--mode schema` after writing a new unit to catch structural errors immediately.
 
 ## What lives elsewhere
-
-Some prescriptive code belongs at the harness level rather than the skill level — the harness fires it, not CORE.
-
-### `post-compact-inject.sh` — harness hook
-
-A `PostCompact` hook that re-injects critical workspace context into a fresh context window after compaction. Without it, the agent loses workspace identity, active agenda, and synthesis state after compaction and must start cold.
-
-**Lives at:** `~/.claude/hooks/post-compact-inject.sh` (or equivalent hooks directory for your harness).
-
-**Trigger:** `PostCompact` hook event configured in harness settings.
-
-**Output format:** JSON to stdout:
-```json
-{
-  "hookSpecificOutput": {
-    "hookEventName": "PostCompact",
-    "additionalContext": "<string injected into the new context window>"
-  }
-}
-```
-
-**Behavior:**
-1. Look for `workspace.json` in the current working directory. If not found, output a minimal JSON message saying no workspace is available and exit 0 — never fail in a way that blocks the session.
-2. Read `workspace_id`, `name`, and `data_path` from the pointer.
-3. Read `PROJECT.md` at the project root. Extract: §State (one or two current-status sentences), §Moves (top ~5 unchecked priorities), §Decisions & Risks (open-risk count, flag any high-impact or stale-`last-reviewed` items).
-4. Identify the most recently modified file in `<project>/_summaries/` (falling back to legacy `<project>/_handoffs/` if present) and include its filename only — don't read the body. Session summaries are narrative, not authoritative state.
-5. Assemble the `additionalContext` string. Output the JSON. Exit 0.
-
-If `workspace.json` is absent, exit 0 with a graceful message.
 
 ### Swarm log visualization
 
@@ -132,6 +105,6 @@ If both are yes, write the script here as `.mjs`. If "deterministic across sessi
 
 ## Proportionality note — the metrics layer at single-user scale
 
-The metrics stack here (six-state classifier → daily rollup → orient-signal, the silent-failure detectors, the calibration pipeline, OTel dual-write) is sized for a feedback loop that needs more corpus than a single-user install generates — the calibration pool sat at 57/100 labeled turns after months of real use. That is a deliberate forward-looking tradeoff: the architecture is being validated at small scale before it can earn its keep at larger scale, and capture is cheap while interpretation is replayable.
+The metrics stack here (six-state classifier → daily rollup → orient-signal, the silent-failure detectors, the calibration pipeline) is sized for a feedback loop that needs more corpus than a single-user install generates — the calibration pool sat at 57/100 labeled turns after months of real use. That is a deliberate forward-looking tradeoff: the architecture is being validated at small scale before it can earn its keep at larger scale, and capture is cheap while interpretation is replayable.
 
 The investment discipline until then: keep the one headline path robust — `classify-turns` → `metrics-rollup` → `orient-signal` (the rec-fail-tier-0 self-audit) — and don't grow the rest. The next investment in this layer is justified when any of these turns true: the calibration pool clears its gate, a second active user or workspace starts generating parallel corpora, or a second consumer starts reading the capture streams beyond the maintenance pass. Absent those, prefer hardening the headline path over adding subsystems.

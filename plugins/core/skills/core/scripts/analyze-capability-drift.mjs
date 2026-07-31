@@ -321,6 +321,6 @@ export function main(argv) {
 }
 
 import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 const _c = p => { try { return realpathSync(p); } catch { return p; } };
-if (_c(process.argv[1]) === _c(fileURLToPath(import.meta.url))) process.exit(main(process.argv.slice(2)));
+if (isCliEntry(import.meta.url)) process.exit(main(process.argv.slice(2)));

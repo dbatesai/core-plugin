@@ -21,10 +21,54 @@
  * non-fatal — metrics capture degrades, the session continues.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { isCliEntry } from './cli-entry.mjs';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
+
+// Typed fail-closed marker. When the storage pin cannot be written, capture is
+// DISABLED for this workspace — never silently redirected back into the synced
+// project folder the redirect exists to avoid. The marker is what write-time
+// consumers (log-event.mjs `metricsEnabled` → turn-capture) read to stay closed.
+export const CAPTURE_DISABLED_MARKER = 'capture-disabled.json';
+
+/**
+ * Candidate locations for the fail-closed marker, in read/write order:
+ * the operational meta dir first (the pin's own home), then the project-local
+ * `_metrics/` dir — the common pin failure IS the meta dir being unwritable,
+ * so a second, independent location keeps the marker landable. The marker is a
+ * few bytes of metadata, not captured payload, so project-local is acceptable.
+ */
+export function captureDisabledMarkerCandidates({ projectDir, operationalMetaDir }) {
+  return [
+    join(operationalMetaDir, CAPTURE_DISABLED_MARKER),
+    join(projectDir, '_metrics', CAPTURE_DISABLED_MARKER),
+  ];
+}
+
+function writeCaptureDisabledMarker({ projectDir, operationalMetaDir, reason, err }) {
+  const body = JSON.stringify({
+    marker: 'core-capture-disabled',
+    reason,
+    error: String(err || ''),
+    ts: new Date().toISOString(),
+  }) + '\n';
+  for (const path of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
+    try {
+      mkdirSync(join(path, '..'), { recursive: true });
+      atomicWriteFileSync(path, body);
+      return path;
+    } catch { /* try the next location */ }
+  }
+  return null;
+}
+
+function clearCaptureDisabledMarkers({ projectDir, operationalMetaDir }) {
+  for (const path of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
+    try { rmSync(path, { force: true }); } catch { /* best-effort; a stale marker only keeps capture off */ }
+  }
+}
 
 /**
  * Run the scaffold for a workspace. Idempotent.
@@ -70,27 +114,52 @@ export function initMetrics({ projectDir, workspaceId }) {
   }
 
   // Pin the resolved storage path to a sibling file so log-event.mjs (write-time)
-  // honors what metrics-init.mjs (scaffold-time) chose. Without this, dual-write
-  // hardcodes project-local and bypasses the AppData redirect on Windows+OneDrive.
+  // honors what metrics-init.mjs (scaffold-time) chose. Without this, writers
+  // would hardcode project-local and bypass the AppData redirect on Windows+OneDrive.
+  //
+  // The pin write is ATOMIC (sibling temp + rename) and its failure FAILS
+  // CLOSED: a workspace whose pin can't be written gets capture DISABLED — one
+  // loud stderr line plus a typed marker file that `metricsEnabled` reads —
+  // never a silent fall-through that puts turn capture back into the synced
+  // project folder the redirect exists to avoid.
   try {
-    writeFileSync(join(operationalMetaDir, 'storage-path.txt'), storagePath);
-  } catch {
-    // Best-effort; log-event falls back to project-local if absent.
+    atomicWriteFileSync(join(operationalMetaDir, 'storage-path.txt'), storagePath);
+    // A successful pin supersedes any stale fail-closed marker from an earlier
+    // failed scaffold — clear it so capture re-enables on recovery.
+    clearCaptureDisabledMarkers({ projectDir, operationalMetaDir });
+  } catch (err) {
+    const markerPath = writeCaptureDisabledMarker({
+      projectDir,
+      operationalMetaDir,
+      reason: 'storage-pin-write-failed',
+      err: err && (err.code || err.message),
+    });
+    process.stderr.write(
+      `CORE-METRICS-PIN-FAILED: cannot pin metrics storage to ${storagePath} `
+      + `(${err && (err.code || err.message)}); metrics capture is DISABLED for workspace ${workspaceId} `
+      + `(marker: ${markerPath || 'unwritable — both marker locations failed'}). `
+      + 'Capture never falls back silently into the synced project folder. '
+      + 'Fix the permissions on the workspace metrics dir and re-run metrics-init to re-enable.\n',
+    );
+    return {
+      ok: false,
+      reason: 'storage-pin-write-failed',
+      err: err && err.message,
+      storagePath,
+      captureDisabled: true,
+      captureDisabledMarker: markerPath,
+      scaffold_log_line: scaffoldLogLine,
+    };
   }
 
-  // Create the storage hierarchy per matrix
-  // - traces/  per-session OTel trace JSONL (PM-1, PM-2 immutable + content-addressed)
-  //            — written by log-event.mjs; no reader yet (collection stub)
-  // - payloads/ content-addressed body files (PM-3 flat <digest-32>.json)
-  //            — RESERVED: scaffolded for the spec'd payload store; no writer ships yet
-  // - queue/    receiver-down events buffer (RL-2)
-  //            — RESERVED: scaffolded for the spec'd push path; no writer ships yet
-  for (const sub of ['traces', 'payloads', 'queue']) {
-    try {
-      mkdirSync(join(storagePath, sub), { recursive: true });
-    } catch (err) {
-      return { ok: false, reason: `cannot-create-${sub}-dir`, err: err.message, scaffoldLogLine };
-    }
+  // Create the storage root. Writers (scorecard-log.jsonl, capture files)
+  // land directly under it; the retired OTel/push subdirectories (traces/,
+  // payloads/, queue/) had no shipped producer or consumer and are no longer
+  // scaffolded.
+  try {
+    mkdirSync(storagePath, { recursive: true });
+  } catch (err) {
+    return { ok: false, reason: 'cannot-create-storage-dir', err: err.message, scaffoldLogLine };
   }
 
   // Also create the operational-meta subdirs that hooks will write to.
@@ -299,18 +368,7 @@ export function formatScaffoldLog({
   return `${timestamp} metrics-init workspace=${workspace_id} project=${project_dir} methods: ${methodSummary} → ${chosen_storage} (${chosen_reason})`;
 }
 
-// CLI entry guard — works under both `node metrics-init.mjs ...` invocation
-// and `import('./metrics-init.mjs')` as a library. Canonicalize BOTH sides with
-// realpathSync: Node resolves import.meta.url to the real file, but argv[1] keeps
-// whatever symlinked/virtualized path the caller used, so comparing them raw makes
-// the script silently no-op on a symlinked install (it pins storage-path.txt, and
-// startup invokes it with output+exit discarded, so that no-op would be invisible).
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-const isCliEntry = process.argv[1]
-  ? _canon(process.argv[1]) === _canon(fileURLToPath(import.meta.url))
-  : false;
-
-if (isCliEntry) {
+if (isCliEntry(import.meta.url)) {
   const [projectDir, workspaceId] = process.argv.slice(2);
   if (!projectDir || !workspaceId) {
     console.error('usage: node metrics-init.mjs <project-dir> <workspace-id>');

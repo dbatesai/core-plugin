@@ -126,7 +126,6 @@ edges:
   - {type: supersedes, target: dc-04-routing-hotfix, note: "subsumes the hotfix path"}
 canonical: true
 last_accessed: 2026-04-02T18:45:00Z
-access_count: 1
 ---
 The routing rewrite locks 4 phases for the migration to the new
 auth boundary. ...
@@ -301,7 +300,7 @@ Detail in `references/retrieval.md`.
 
 ### Logging is always on
 
-Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`. This is base operational telemetry — not debug-mode-gated. The writer is the agent inline at the retrieval site via `scripts/record-retrieval-event.mjs`; there is no hook. Schema and reading patterns in `references/retrieval.md`.
+Every Tier 1+ retrieval event writes one JSONL line to `<project>/_sessions/<YYYY-MM-DD>/retrieval-log.jsonl`. This is base operational telemetry, always on. Two writers: the per-turn hook (`hooks/retrieve-context-hook.mjs`) emits the canonical product event each prompt, and the agent writes its own events for retrievals it runs beyond the hook, via `scripts/record-retrieval-event.mjs`. Schema and reading patterns in `references/retrieval.md`.
 
 **PROJECT.md management events.** PROJECT.md is agent-managed; effectiveness is measured via structured event emission, not user review. Two logs carry the signal — both written by `scripts/log-event.mjs` (shared helper):
 
@@ -525,7 +524,6 @@ sources:
   - <observation-id-that-triggered-creation>
 canonical: false
 last_accessed: <ISO timestamp>
-access_count: 1
 ---
 Stub unit — created Mode A from <observation-id>. Body fills in as more observations reference this entity.
 ```

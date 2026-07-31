@@ -32,7 +32,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -101,29 +101,26 @@ export function checkMetricsDisclosure({ workspaceId }) {
   return { ok: true, shown: true, alreadyShown: false, noticeText: NOTICE_TEXT };
 }
 
-// CLI entry guard — mirrors metrics-init.mjs's realpath-canonicalized check so a
-// symlinked/virtualized invocation path doesn't cause a silent no-op.
-const _canon = (p) => { try { return fileURLToPath(pathToFileURL(p).href); } catch { return p; } };
-const isCliEntry = process.argv[1]
-  ? _canon(process.argv[1]) === _canon(fileURLToPath(import.meta.url))
-  : false;
-
-if (isCliEntry) {
+// Shared spelling-robust entry guard (cli-entry.mjs) — the previous local
+// canonicalizer never resolved symlinks, so a symlinked invocation was a
+// silent no-op. exitCode + natural exit so piped output always flushes.
+if (isCliEntry(import.meta.url)) {
   const [subcommand, workspaceId] = process.argv.slice(2);
   if (subcommand !== 'check' || !workspaceId) {
     console.error('usage: node metrics-disclosure.mjs check <workspace-id>');
-    process.exit(1);
-  }
-  const result = checkMetricsDisclosure({ workspaceId });
-  if (result.alreadyShown) {
-    console.log('ALREADY-SHOWN');
-  } else if (result.noticeText) {
-    console.log(result.noticeText);
-    if (!result.ok) {
-      console.error(`metrics-disclosure: notice shown but flag not persisted (${result.reason}) — may repeat next session`);
-    }
+    process.exitCode = 1;
   } else {
-    console.error('metrics-disclosure failed:', result.reason || 'unknown');
-    process.exit(2);
+    const result = checkMetricsDisclosure({ workspaceId });
+    if (result.alreadyShown) {
+      console.log('ALREADY-SHOWN');
+    } else if (result.noticeText) {
+      console.log(result.noticeText);
+      if (!result.ok) {
+        console.error(`metrics-disclosure: notice shown but flag not persisted (${result.reason}) — may repeat next session`);
+      }
+    } else {
+      console.error('metrics-disclosure failed:', result.reason || 'unknown');
+      process.exitCode = 2;
+    }
   }
 }

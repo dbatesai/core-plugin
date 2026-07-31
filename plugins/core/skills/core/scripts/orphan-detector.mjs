@@ -31,9 +31,10 @@
  *   exit 1 — new orphan(s) found (wire it or allowlist it with a reason)
  */
 
-import { readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 
 // Scripts built ahead of their consumer on purpose. Each entry carries the
 // reason, the date it was allowlisted, and a reviewBy date — when reviewBy
@@ -44,13 +45,6 @@ export const ALLOWLIST = Object.freeze({
     reason: 'The reachability gate itself — driven by its test and the release flow, not by any skill at runtime; the session close deliberately runs no development checks.',
     allowlistDate: '2026-07-28',
     reviewBy: '2026-10-28',
-  },
-
-
-  'retrieval-harness.mjs': {
-    reason: 'Offline Recall@K gold harness (Tier-A; arms trimmed to model-free per the no-local-models rule) — the measurement instrument, not a runtime-wired retrieval path. Consumed by its test and by the pre-registered measurement ceremony. Wire into the forthcoming stats/validation surface when that lands; until then it is a measurement utility, not a runtime dependency.',
-    allowlistDate: '2026-07-07',
-    reviewBy: '2026-10-07',
   },
 });
 
@@ -208,8 +202,7 @@ export function formatReport(r) {
   return L.join('\n');
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const coreRoot = resolveCoreRoot({ coreRootArg: opt('core-root') });

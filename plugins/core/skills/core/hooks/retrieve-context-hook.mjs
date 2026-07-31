@@ -32,18 +32,17 @@
  * Ships with the plugin by design; the plugin ships .mjs only.
  */
 
-import { readFileSync, existsSync, realpathSync, statSync, mkdirSync, writeFileSync, renameSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { isCliEntry } from '../scripts/cli-entry.mjs';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
-import { recordRetrievalOutcome, pendingOutcomePath } from '../scripts/record-retrieval-outcome.mjs';
 import { metricsEnabled } from '../scripts/log-event.mjs';
 import { captureTurnEvidence, turnCaptureEnabled, computeStoreSignature } from '../scripts/turn-capture.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
-import { logHookEvent } from './hook-log.mjs';
+import { logHookEvent, PRODUCER_VERSION, PRODUCER_SHA } from './hook-log.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
@@ -65,23 +64,9 @@ export function truncateUtf8(str, maxBytes) {
   return buf.subarray(0, end).toString('utf8');
 }
 
-// Producer identity for outcome rows — read from the plugin manifest so the
-// version can never fork from the shipped identity; 'unknown' is honest when
-// the manifest is unreadable (packaged layouts vary).
-const PRODUCER_MANIFEST = (() => {
-  try {
-    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.claude-plugin', 'plugin.json'), 'utf8'));
-  } catch { return {}; }
-})();
-const PRODUCER_VERSION = String(PRODUCER_MANIFEST.version || 'unknown');
-// producer_sha: producer_version alone can't distinguish which
-// exact commit produced a row -- 'unknown' is honest for every build that
-// isn't release-stamped (a --scope local dev install, or a manifest predating
-// this field). Reads manifest.source_sha -- named 'source', not 'git':
-// it names the commit this release PACKAGES (the version-bump
-// commit's own parent), not the tagged release commit's own SHA -- those are
-// two different identities and the field name says which one this is.
-const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
+// Producer identity (PRODUCER_VERSION / PRODUCER_SHA) is imported from
+// hook-log.mjs — ONE manifest read shared by every hook, so evidence rows and
+// hook-log receipts can never disagree about which build produced them.
 
 // Typed operational receipt: ONE terminal
 // hook-log row per eligible invocation — early exits included — on the SHARED
@@ -90,24 +75,6 @@ const PRODUCER_SHA = String(PRODUCER_MANIFEST.source_sha || 'unknown');
 // rather than emitted (tests assert every path lands in-vocabulary).
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
 export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed'];
-
-// CORE_REASONING_ARM: a test-only control for the preregistered
-// three-arm efficacy pilot. 'automatic'
-// is the shipped default -- the directive fires only on a true Tier 1
-// zero-hit. 'deterministic-only' and 'always-on'
-// exist ONLY so the pilot can force a real, distinguishable behavioral
-// difference per arm; no real user should ever set this. An explicit but
-// unrecognized value throws rather than silently falling back to 'automatic' --
-// a test harness that thinks it requested one arm and silently got another
-// would invalidate the pilot, so wrong input must be loud, not swallowed.
-export const REASONING_ARMS = ['automatic', 'deterministic-only', 'always-on'];
-export function resolveReasoningArm(rawValue) {
-  if (rawValue === undefined || rawValue === '') return 'automatic';
-  if (!REASONING_ARMS.includes(rawValue)) {
-    throw new Error(`CORE_REASONING_ARM must be one of ${REASONING_ARMS.join('/')}, got ${JSON.stringify(rawValue)}`);
-  }
-  return rawValue;
-}
 
 export function receipt(action, reason, extra = {}) {
   const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
@@ -158,7 +125,6 @@ export async function main() {
   // and emits the canonical per-turn retrieval event from the same run, so the
   // telemetry corpus is product-emitted, not agent-behavior-dependent.
   let trace = null;
-  let requestedArm = 'automatic';
   const configuredCap = Number(process.env.CORE_RETRIEVAL_BYTE_CAP);
   const byteCap = Number.isFinite(configuredCap) && configuredCap >= 0
     ? Math.min(configuredCap, OUTPUT_BYTE_CAP) : OUTPUT_BYTE_CAP;
@@ -168,26 +134,16 @@ export async function main() {
     // Same pattern as CORE_FILELOCK_NO_LINK: an explicit,
     // self-documenting test seam, never read in normal operation.
     if (process.env.CORE_TEST_FORCE_PIPELINE_ERROR) throw new Error('CORE_TEST_FORCE_PIPELINE_ERROR');
-    // Resolved INSIDE this try so a throw lands in this catch and writes the
-    // typed pipeline-error receipt; outside it, the throw would escape to the
-    // outer main().catch(() => process.exit(0)) with no receipt() call at all
-    // -- exit 0 is correct (never block the turn) but the promised typed
-    // pipeline-error row would silently never get written.
-    requestedArm = resolveReasoningArm(process.env.CORE_REASONING_ARM);
     trace = buildRetrievalTrace(prompt, store, { topN: TOP_N, byteCap });
   } catch { return receipt('failed', 'pipeline-error', { cwd: store }); }
   if (!trace || trace.storeless || !trace.stages) return receipt('skip', 'store-unavailable', { cwd: store });
 
   const final = Array.isArray(trace.stages.final) ? trace.stages.final : [];
   const zeroHit = final.length === 0;
-  const shouldEmitDirective = requestedArm === 'always-on' ? true
-    : requestedArm === 'deterministic-only' ? false
-    : zeroHit; // 'automatic' — unchanged shipped default
   // Telemetry outcome for the single terminal receipt (priority: pipeline
   // failure > event-write > trace-write > opt-out > ok).
   let telemetryReason = 'ok';
   let retrievalId = null;
-  let outcomeNote = null; // bounded note when the post-answer outcome close failed
   let turnCaptureStatus = null; // closed status code for the terminal receipt (captured/disabled/capture-failed)
   let reasoningDirective = '';
   // Built unconditionally, BEFORE the metrics-gated block below and BEFORE the
@@ -197,30 +153,15 @@ export async function main() {
   // keeps it ahead of the event record (which lives inside the metrics branch
   // and reads this value) so directive_fired reflects the real constructed
   // outcome, not intent.
-  if (shouldEmitDirective) {
+  if (zeroHit) {
     try {
       const shards = selectCandidates(prompt, store, { shardSize: 80 });
       if (shards.length) {
         const unitsTotal = shards[0].units_total;
-        // Keep internal mechanism out of model-facing text: an env-var name
-        // in the directive ("CORE_REASONING_ARM=always-on forces...") reads
-        // as a fabricated/self-referential instruction to a fresh model with
-        // no established trust in this session -- a likely prompt injection.
-        // Describe the forced case in the same
-        // plain, non-mechanism-revealing register as the honest zero-hit
-        // case; the requestedArm value itself has no legitimate reason to
-        // appear in what the model reads.
-        const why = zeroHit
-          ? 'Tier 1 found no lexical context.'
-          : 'An explicit escalation request forces escalation regardless of Tier 1 result.';
-        reasoningDirective = `CORE reasoning escalation required: ${why} Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
+        reasoningDirective = `CORE reasoning escalation required: Tier 1 found no lexical context. Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
       }
     } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
   }
-  // Deferred-write inputs for the pending marker. The marker must only be
-  // persisted once this turn's context is actually confirmed delivered to the
-  // user — captured here, written after the stdout.write below.
-  let pendingWrite = null;
 
   // Canonical per-turn product event — always on when metrics capture is on
   // (metrics capture is default-ON, opt-out). Fail-open: a telemetry failure must never
@@ -251,20 +192,9 @@ export async function main() {
       const topIds = new Set((Array.isArray(trace.stages.top) ? trace.stages.top : []).map((h) => String(h.id)));
       retrievalId = randomUUID();
 
-      // FALLBACK inferred-closure path. On both harnesses a
-      // real Stop hook (answer-close-hook.mjs / answer-close-hook-codex.mjs)
-      // fires on a genuine post-answer event with the harness's own turn
-      // identity and normally clears the pending marker first, so this block
-      // finds nothing to close; this path only ever infers closure from the
-      // NEXT prompt arriving, which is sequencing, not post-answer
-      // observation. Kept as
-      // defense-in-depth for a session where the Stop hook didn't fire
-      // (missed trust review, older harness build, hook crash upstream).
-      // Invariants: harness detected from runtime, pending state
-      // keyed by harness + resolved NON-NULL session (no aliasing; no session
-      // -> no pending, no outcome), overlap is a provisional SIGNAL only — the
-      // outcome stays 'unknown' until calibrated — and the pending record is
-      // persisted only after the retrieval row write is proven below.
+      // Session + harness identity ride the evidence capture below — resolved
+      // here, never fabricated: no session id in the payload means null, not
+      // an alias.
       const sessionId = typeof payload.session_id === 'string' && payload.session_id.trim() ? payload.session_id.trim() : null;
       // Harness resolution: CORE_HOOK_HARNESS
       // is the EXPLICIT, authoritative signal — set by the harness-specific
@@ -277,49 +207,6 @@ export async function main() {
         : process.env.CORE_HOOK_HARNESS === 'claude-code' ? 'claude-code'
         : process.env.CLAUDE_CODE_SESSION_ID || process.env.CLAUDECODE ? 'claude-code'
         : (process.env.CODEX_SESSION_ID || process.env.CODEX_PLUGIN_ROOT ? 'codex' : null);
-      const queryTermsEarly = tokenize(prompt).slice(0, 8);
-      const pendingFile = pendingOutcomePath(store, harness, sessionId);
-      if (pendingFile) {
-        try {
-          let prev = null;
-          try { prev = JSON.parse(readFileSync(pendingFile, 'utf8')); } catch { prev = null; }
-          if (prev && prev.retrieval_id && prev.session_id === sessionId && prev.harness === harness) {
-            const prevTerms = new Set(prev.query_terms || []);
-            const overlap = queryTermsEarly.length ? queryTermsEarly.filter((t) => prevTerms.has(t)).length / queryTermsEarly.length : 0;
-            const retryShaped = overlap >= 0.6 && queryTermsEarly.length >= 3;
-            // Reusing retrieval_id AS the answer_turn_id would
-            // fabricate identity — the two are different concepts (which
-            // retrieval ran vs. which answer turn closed it). This inferred
-            // path still has no real per-turn id to offer, so it generates a
-            // fresh one rather than aliasing — honest about being synthetic,
-            // never a copy dressed up as an observation.
-            const closeResult = recordRetrievalOutcome(store, {
-              retrieval_id: prev.retrieval_id,
-              usefulness_outcome: 'unknown', // provisional signals never become harmful outcomes before calibration
-              evidence_authority: retryShaped ? 'corrective-retry' : 'unobservable',
-              signal_overlap: overlap,
-              harness,
-              session_id: sessionId,
-              answer_turn_id: randomUUID(),
-              producer_version: PRODUCER_VERSION,
-              producer_sha: PRODUCER_SHA,
-            }, { sessionId });
-            // Delete only once the outcome row is CONFIRMED written
-            // — a failed/fail-open write must
-            // never destroy the only record that this retrieval is still
-            // open, or the evidence is lost for good.
-            if (closeResult.written) {
-              try { rmSync(pendingFile, { force: true }); } catch { /* consumed */ }
-            } else {
-              outcomeNote = 'outcome-close-not-persisted';
-            }
-          }
-        } catch (err) {
-          // Never a second operational row (one terminal row per invocation);
-          // the failure rides the terminal receipt as a bounded note.
-          outcomeNote = String(err && err.message).slice(0, 80);
-        }
-      }
       const units = final.map((h) => ({ id: String(h.id), tier: 1, source_stage: topIds.has(String(h.id)) ? 'ranked' : 'one-hop-expansion' }));
       const queryTerms = tokenize(prompt).slice(0, 8);
       const out = recordRetrievalEvent(store, {
@@ -334,14 +221,6 @@ export async function main() {
         candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
         selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
-        // Gated on the env var being EXPLICITLY set,
-        // not on the resolved arm differing from 'automatic'. An ordinary
-        // user who never touches CORE_REASONING_ARM gets zero new
-        // fields. But the pilot's "escalation-only" arm legitimately
-        // requests 'automatic' explicitly and still needs an observable
-        // receipt -- the runner's fail-closed contract checks requested_arm
-        // on every trial.
-        ...(process.env.CORE_REASONING_ARM !== undefined ? { requested_arm: requestedArm, directive_fired: Boolean(reasoningDirective) } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
 
@@ -392,67 +271,24 @@ export async function main() {
           turnCaptureStatus = 'disabled';
         }
       } catch { turnCaptureStatus = 'error'; /* fail-open, but observable on the receipt */ }
-      // Stage the pending-marker write for AFTER delivery is confirmed below
-      // — writing it here, before this turn's context has even
-      // reached stdout, would let a crash between here and the stdout.write
-      // leave a marker for a retrieval the user never actually saw. Still
-      // gated on the retrieval row write being PROVEN (an
-      // unproven retrieval must never become the base of a future outcome
-      // row) and keyed per harness+session so concurrent sessions never alias.
-      if (out.written && pendingFile) {
-        pendingWrite = {
-          path: pendingFile,
-          content: JSON.stringify({
-            retrieval_id: retrievalId,
-            session_id: sessionId,
-            harness,
-            prompt_id: typeof payload.prompt_id === 'string' && payload.prompt_id.trim() ? payload.prompt_id.trim() : null,
-            query_terms: queryTermsEarly,
-            had_hits: final.length > 0,
-          }),
-        };
-      }
     }
   } catch {
     telemetryReason = 'pipeline-error'; // fail-open by contract — surfaced in the terminal receipt below
   }
 
   const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
-  // Both can be true at once (always-on can force the directive even when
-  // Tier 1 also found hits).
-  // Deliver both, directive appended after the pack, still under the same cap.
-  //
-  // buildFinalContextPack already budgets
-  // packText in real UTF-8 bytes (Buffer.byteLength), and this final combine
-  // step must hold the same contract — String.slice
-  // counts UTF-16 code units, not bytes, so slicing here could both exceed
-  // the byte budget on non-ASCII
-  // content AND split a multi-byte character (or a surrogate pair) mid-
-  // sequence, corrupting the delivered payload. truncateUtf8 trims on a real
-  // byte offset, backs off
-  // to the nearest complete UTF-8 sequence boundary instead of cutting blind,
-  // and honors the effective `byteCap` (which can be smaller than the 2048
+  // Pack and directive are mutually exclusive: the directive only exists on a
+  // true Tier 1 zero-hit, and a zero-hit pack has no text. buildFinalContextPack
+  // already budgets packText in real UTF-8 bytes (Buffer.byteLength);
+  // truncateUtf8 holds the same contract for the directive — a real byte
+  // offset, backed off to the nearest complete UTF-8 sequence boundary,
+  // honoring the effective `byteCap` (which can be smaller than the 2048
   // constant via CORE_RETRIEVAL_BYTE_CAP).
   const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
-  if (packText && reasoningDirective) {
-    process.stdout.write(truncateUtf8(packText + reasoningDirective, byteCap));
-  } else if (packText) {
+  if (packText) {
     process.stdout.write(packText);
   } else if (reasoningDirective) {
     process.stdout.write(truncateUtf8(reasoningDirective, byteCap));
-  }
-
-  // NOW persist the pending marker — after delivery, never before.
-  // Only when something was actually injected: a marker
-  // for a retrieval whose context never reached the user has no honest
-  // "delivered" state to close later. Atomic temp+rename.
-  if (injected && pendingWrite) {
-    try {
-      mkdirSync(dirname(pendingWrite.path), { recursive: true });
-      const tmp = `${pendingWrite.path}.tmp`;
-      writeFileSync(tmp, pendingWrite.content);
-      renameSync(tmp, pendingWrite.path);
-    } catch { /* pending is best-effort; a missed close is an unknown, never a fabrication */ }
   }
 
   // The single terminal operational row for this invocation: what happened to
@@ -461,11 +297,10 @@ export async function main() {
   let reason;
   if (reasoningDirective) {
     action = 'delivered';
-    // 'no-hit' is only honest for the true zero-hit case. always-on can
-    // force the directive
-    // even when Tier 1 found real hits -- reporting 'no-hit' there would be
-    // a fabrication, so fall back to the actual telemetry outcome instead.
-    reason = zeroHit ? 'no-hit' : telemetryReason;
+    // The directive only fires on a true Tier 1 zero-hit, so 'no-hit' is the
+    // honest reason; a telemetry failure still rides the receipt as the
+    // telemetry_reason field below.
+    reason = 'no-hit';
   } else if (injected) {
     action = 'delivered';
     reason = telemetryReason;
@@ -482,7 +317,6 @@ export async function main() {
     cwd: store,
     ...(reason !== telemetryReason ? { telemetry_reason: telemetryReason } : {}),
     ...(retrievalId ? { retrieval_id: retrievalId } : {}),
-    ...(outcomeNote ? { outcome_close_note: outcomeNote } : {}),
     // Evidence-capture outcome: a closed status code — never raw prompt/pack
     // content — so a capture (or a silent capture failure) is observable on
     // the receipt in addition to the stream's own health counter.
@@ -490,7 +324,6 @@ export async function main() {
   });
 }
 
-const _canon = (path) => { try { return realpathSync(path); } catch { return path; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   main().then((code) => process.exit(code || 0)).catch(() => process.exit(0));
 }

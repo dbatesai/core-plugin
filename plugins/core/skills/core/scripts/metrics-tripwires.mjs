@@ -29,10 +29,9 @@
  * Ships with the plugin by design; .mjs only.
  */
 
-import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { latestScorecards } from './scorecard.mjs';
 import { readCaptureHealth, turnCaptureEnabled } from './turn-capture.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // The single source of truth for every threshold. Stamped into scorecards.
 export const TRIPWIRE_THRESHOLDS = Object.freeze({
@@ -218,7 +217,6 @@ export function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

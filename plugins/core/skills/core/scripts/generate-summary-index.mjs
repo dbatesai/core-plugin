@@ -13,7 +13,7 @@
  * tiers is a ceremony question, decided on measurement, not hardcoded here.
  *
  * The shared compact index behind per-turn retrieval (retrieve-context.mjs) and the
- * abstract-relevance prototype (select-relevant-units.mjs). One responsibility:
+ * Tier-3 reasoning shortlist (select-relevant-units.mjs). One responsibility:
  * render the index. No scoring, no retrieval — those read this file. loadFreshIndex()
  * below is the ONE validating loader every consumer uses (freshness on every call —
  * a stale index resurrecting a retired unit is an anti-resurrection breach).
@@ -30,15 +30,15 @@
  *   node generate-summary-index.mjs --store <storePath>
  */
 
-import { readdirSync, statSync, mkdirSync, realpathSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, statSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { isInvalidated, parseFrontmatter, extractEdges } from './priority.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { loadValidEnrichments } from './enrichment-sidecar.mjs';
 import { truncate as sharedTruncate } from './text-truncate.mjs';
 import { EDGES_BEGIN, EDGES_END } from './unit-vocab.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const SUMMARY_MAX = 240;
 
@@ -68,11 +68,19 @@ function isCandidateDir(name) {
  * `path` field and the signature both use it, so the two stay in lockstep).
  * Deterministic order (sorted per directory level).
  */
-function walkCandidateFiles(memoriesDir) {
+function walkCandidateFiles(memoriesDir, onIoError = null) {
   const out = [];
   const walkDir = (dir, relPrefix) => {
     let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch (e) {
+      // ENOENT = the directory vanished (atomic relocate), a normal race.
+      // Anything else (EMFILE/EACCES/EIO) is an I/O failure the caller may
+      // need to distinguish from "empty": a traversal that silently collapses
+      // makes an unreadable store indistinguishable from an empty one.
+      if (onIoError && e?.code !== 'ENOENT') onIoError(relPrefix || '.', e);
+      return;
+    }
     entries.sort((a, b) => a.name.localeCompare(b.name));
     for (const e of entries) {
       if (e.isDirectory()) {
@@ -82,7 +90,11 @@ function walkCandidateFiles(memoriesDir) {
       if (!e.isFile() || !isCandidateName(e.name)) continue;
       const full = join(dir, e.name);
       let st;
-      try { st = statSync(full); } catch { continue; }
+      try { st = statSync(full); }
+      catch (err) {
+        if (onIoError && err?.code !== 'ENOENT') onIoError(relPrefix + e.name, err);
+        continue;
+      }
       out.push({ rel: relPrefix + e.name, full, mtimeMs: st.mtimeMs });
     }
   };
@@ -175,13 +187,15 @@ export function loadFreshIndex(storePath) {
  * the same bytes report the same id and any store mutation changes it. Traces and
  * evidence receipts carry this id — a retrieval number without it is not reproducible.
  */
-export function loadSnapshot(storePath, { captureBodies = false, retainRaw = false } = {}) {
+export function loadSnapshot(storePath, { captureBodies = false, retainRaw = false, refreshCache = true } = {}) {
   // captureBodies → the ATOMIC capture: id, index, and bodies all derived from
   // one read per file (captureStore). A two-walk version (index walk first,
   // body walk second) is a TOCTOU: a concurrent write between the walks lets
   // snapshot_id identify OLD bytes while the evaluator measures NEW ones.
   // Never introduce a second walk here.
-  if (captureBodies) return captureStore(storePath, { retainRaw });
+  // refreshCache:false → the capture never writes the derived index cache
+  // (memory-view-watch.mjs's read-only contract over the store).
+  if (captureBodies) return captureStore(storePath, { retainRaw, refreshCache });
   // Index-only consumers (no body reads downstream) keep the cache-validated path.
   const index = loadFreshIndex(storePath);
   return {
@@ -291,16 +305,27 @@ function authorityTier(fm, rel) {
  *
  * retainRaw keeps the raw buffers + per-file sha1s on the result so tests can
  * assert the id↔bytes coherence directly under a concurrent-writer barrier.
+ *
+ * refreshCache (default true) controls the best-effort unit-summaries.json
+ * refresh below. memory-view-watch.mjs passes false: the watcher is a pure
+ * change DETECTOR whose contract is that it never writes into the store —
+ * not even the derived cache — so its reads must be side-effect free.
  */
-export function captureStore(storePath, { retainRaw = false } = {}) {
+export function captureStore(storePath, { retainRaw = false, refreshCache = true } = {}) {
   const memoriesDir = join(resolve(storePath), '_memories');
   const now = new Date();
   let nextInvalidationAt = null; // earliest still-future t_invalid among included candidates
 
-  // ONE read per file.
+  // ONE read per file. I/O failures (EMFILE/EACCES/EIO — anything but a
+  // benign ENOENT rename race) are RECORDED, never swallowed: a capture whose
+  // traversal collapsed must be distinguishable from a genuinely empty store,
+  // or resource exhaustion fabricates an empty-store identity downstream.
+  const readErrors = [];
+  const noteReadError = (rel, e) => readErrors.push({ path: rel, code: String((e && e.code) || e) });
   const raws = [];
-  for (const f of walkCandidateFiles(memoriesDir)) {
-    try { raws.push({ rel: f.rel, buf: readFileSync(f.full) }); } catch { /* vanished mid-walk */ }
+  for (const f of walkCandidateFiles(memoriesDir, noteReadError)) {
+    try { raws.push({ rel: f.rel, buf: readFileSync(f.full) }); }
+    catch (e) { if (e?.code !== 'ENOENT') noteReadError(f.rel, e); /* ENOENT: vanished mid-walk */ }
   }
 
   // Identity from these exact buffers (same shape computeSourceSignature produces).
@@ -411,6 +436,10 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
     enrichments,
     source_sha256_by_path: sourceSha256ByPath,
     snapshotId: createHash('sha256').update(`${source_sig}|enrichment:${enrichments.digest}`).digest('hex'),
+    // Traversal honesty: consumers comparing snapshot identities (the
+    // memory-view watcher) must treat a capture with readErrors as
+    // INCOMPLETE, never as a changed store.
+    readErrors,
   };
   if (retainRaw) {
     capture.raw = Object.fromEntries(raws.map(r => [r.rel, r.buf]));
@@ -423,15 +452,19 @@ export function captureStore(storePath, { retainRaw = false } = {}) {
   // rewrites (retrieval stays cheap), and written FROM the captured bytes —
   // a write after the single read adds no TOCTOU; the file describes exactly
   // this capture. Best-effort: a read-only store still returns a valid capture.
-  try {
-    const libPath = join(memoriesDir, '_lib', 'unit-summaries.json');
-    let cached = null;
-    try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
-    if (!cached || cached.source_sig !== source_sig) {
-      mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
-      atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
-    }
-  } catch { /* cache refresh is a convenience; the capture itself is complete */ }
+  // Skipped entirely for refreshCache:false callers (the memory-view watcher),
+  // whose contract is zero writes into the store.
+  if (refreshCache) {
+    try {
+      const libPath = join(memoriesDir, '_lib', 'unit-summaries.json');
+      let cached = null;
+      try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
+      if (!cached || cached.source_sig !== source_sig) {
+        mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
+        atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
+      }
+    } catch { /* cache refresh is a convenience; the capture itself is complete */ }
+  }
 
   return capture;
 }
@@ -460,14 +493,6 @@ function main(argv) {
   return res.degraded ? 1 : 0; // duplicate identity fails loudly, never silently
 }
 
-// CLI entry guard (matches generate-decisions-index.mjs). CORE_DEBUG_CLI_ENTRY=1 logs both
-// resolved paths if the invocation silently no-ops (symlink/OneDrive path-normalization).
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
-const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
-if (process.env.CORE_DEBUG_CLI_ENTRY) {
-  process.stderr.write(`[cli-entry] argv[1]=${JSON.stringify(_cliEntryArgv1)}\n[cli-entry] self  =${JSON.stringify(_cliEntrySelf)}\n[cli-entry] match=${_cliEntryArgv1 === _cliEntrySelf}\n`);
-}
-if (_cliEntryArgv1 === _cliEntrySelf) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

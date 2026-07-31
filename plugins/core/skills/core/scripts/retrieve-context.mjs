@@ -24,12 +24,13 @@
  * CLI: node retrieve-context.mjs <storePath> "<query>" [--top N]
  */
 
-import { existsSync, realpathSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { loadFreshIndex, loadSnapshot } from './generate-summary-index.mjs';
 import { bm25DocumentScores, bm25Scores, tokenize, STOPWORDS } from './bm25.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const ENRICHMENT_WEIGHT = 0.6;
 
@@ -480,7 +481,6 @@ export function main(argv) {
   return 0;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

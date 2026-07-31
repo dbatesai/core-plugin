@@ -7,9 +7,9 @@
  * supersession of X surfaces its blast radius instead of leaving it implicit.
  *
  * Rides the committed edge set only. The walk reads depends-on/depended-on-by
- * plus refines/amends — all committed edge types — in the affects-direction. A
- * dedicated `affects` edge type defers to a future decision per the
- * committed-set rule.
+ * plus refines/amends — all committed edge types — in the affects-direction.
+ * There is no dedicated `affects` edge type; the affects-direction is derived
+ * from those committed edges.
  *
  * Pairs with bitemporal.mjs: traceSupersededImpact() reports, for every unit whose
  * t_invalid is now in the past, what still depends on it — the review candidates a
@@ -22,11 +22,10 @@
  *   node impact-trace.mjs <project> --superseded-impact   review candidates from invalidated units
  */
 
-import { realpathSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { extractEdges, isInvalidated } from './priority.mjs';
 import { iterActiveUnits } from './check-units.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const IMPACT_VERSION = '1.0.0';
 
@@ -87,8 +86,7 @@ export function traceSupersededImpact(units, today) {
   return out;
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();

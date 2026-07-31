@@ -35,7 +35,7 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 import { INBOX_DRAFT_STATUS, VALID_CONFIDENCE_LEVELS } from './unit-vocab.mjs';
 
 export { INBOX_DRAFT_STATUS };
@@ -229,5 +229,6 @@ function main(argv) {
   return fails ? 2 : warns ? 1 : 0;
 }
 
-const isDirectRun = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isDirectRun) process.exit(main(process.argv.slice(2)));
+// Shared spelling-robust entry guard (cli-entry.mjs); exitCode + natural exit
+// so main's piped output always flushes before the process dies.
+if (isCliEntry(import.meta.url)) process.exitCode = main(process.argv.slice(2));

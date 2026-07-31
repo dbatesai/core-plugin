@@ -33,11 +33,10 @@
 
 import { readFileSync, readdirSync, appendFileSync, mkdirSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
 import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // Version stamp for classification BEHAVIOR. Any behavior-affecting change
 // (predicates, matching rules, discriminators — anything that shifts the state
@@ -338,8 +337,7 @@ export function runClassifiedRetention(projectDir, { workspaceId, home, windowDa
   return { ran: true, deleted, kept, cutoff: cutoffDay, windowDays };
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   const argv = process.argv.slice(2);
   const opt = (n) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : null; };
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();

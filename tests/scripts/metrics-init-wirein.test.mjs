@@ -36,9 +36,11 @@ test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pi
     const pinned = readFileSync(pinFile, 'utf8').trim();
     assert.match(pinned, /core-metrics/, 'pinned to the forced appdata path, not project-local');
 
-    // Storage hierarchy created at the pinned location.
+    // Storage root created at the pinned location; retired OTel/push
+    // subdirectories are not scaffolded (no shipped producer or consumer).
+    assert.ok(existsSync(pinned), 'storage root scaffolded at the pinned location');
     for (const sub of ['traces', 'payloads', 'queue']) {
-      assert.ok(existsSync(join(pinned, sub)), `${sub}/ scaffolded`);
+      assert.equal(existsSync(join(pinned, sub)), false, `${sub}/ not scaffolded (retired)`);
     }
 
     // The actual consume path: log-event's resolveStoragePath reads the pin.

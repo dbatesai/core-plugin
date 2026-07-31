@@ -84,13 +84,13 @@
  * Ships with the plugin as prescriptive code; .mjs only.
  */
 
-import { readFileSync, readdirSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { readProjectCache, hashText, stampFile, CACHE_CORRUPT, CACHE_UNREADABLE } from './state-cache.mjs';
 import { findExistingBlock as hotScan, classifyProjectMdChange, hashOutsideHotBlock } from './hot-section.mjs';
 import { findExistingEdgesBlock as edgesScan, classifyUnitChange, hashOutsideEdgesBlock } from './decorate-graph.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // ---------- session-start inventory (diagnostic only, non-authoritative) ----------
 
@@ -420,7 +420,6 @@ function main(argv) {
   return result.needs_attention.length > 0 ? 1 : 0;
 }
 
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_cliEntryCanonical(process.argv[1] || '') === _cliEntryCanonical(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

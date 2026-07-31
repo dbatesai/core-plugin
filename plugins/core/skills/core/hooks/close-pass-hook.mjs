@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { isRegisteredWorkspace, shouldEnqueueClose } from '../scripts/close-pass.mjs';
 import { logHookEvent } from './hook-log.mjs';
+import { isCliEntry } from '../scripts/cli-entry.mjs';
 
 // SessionEnd reasons that are NOT real ends — skip them. `resume` suspends for later
 // resumption; closing then is premature (startup catch-up re-detects on resume).
@@ -144,7 +145,6 @@ export function decideCloseAction(payload = {}, { store } = {}, opts = {}) {
 
 // Only run as the hook entry — importing this module (tests import decideCloseAction) must
 // NOT execute main() / process.exit().
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   try { process.exit(main() || 0); } catch { process.exit(0); }
 }

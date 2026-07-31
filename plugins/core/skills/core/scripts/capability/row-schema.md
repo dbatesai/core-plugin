@@ -95,7 +95,7 @@ capability_kind:        # identity | runtime | mutation | observation
 | `identity` | Reports what the system IS. | plugin-root-resolution, harness-detection, session-id-source |
 | `runtime` | Reports what the system CAN do mechanically. | git-write-access, node-version-compatible, env-vars-loadable |
 | `mutation` | Reports whether a specific mutation surface is gate-passable. | collab-event-write, project-md-write, _memories-write |
-| `observation` | Reports whether a specific observation surface is reachable. | otel-span-emission, hygiene-log-readable |
+| `observation` | Reports whether a specific observation surface is reachable. | auto-memory-injection, memory-visible, hygiene-log-readable |
 
 ## Stability + refresh policy
 

@@ -49,6 +49,14 @@ function pluginTreeIsClean() {
   } catch { return false; } // not a git checkout ⇒ no source_sha anyway
 }
 const TREE_CLEAN = pluginTreeIsClean();
+// Render-dependent behavior assertions need a clean plugin tree (fix 9
+// fail-closed provenance). On a dirty tree they HARD-FAIL with this named
+// reason — the failing run IS the refusal. A skip would read as green while
+// asserting nothing.
+const DIRTY_TREE_REFUSAL =
+  'REFUSED: plugin tree is dirty, so this behavior assertion cannot execute '
+  + '(fix 9 fail-closed provenance). Commit or stash the plugin tree and re-run '
+  + '— a skipped-green result here proves nothing.';
 
 // A valid hand-built generation receipt (full schema: kind, schema_version,
 // generated_at, artifact_sha256) so receipt tests are independent of the
@@ -325,8 +333,8 @@ test('memory files needing attention render counts, warn gauge, and census tiles
 
 // ---------- CLI: --json-in replay path + manifest contract ----------
 
-test('ACCEPTANCE (real pipeline): render-metrics --json-in consumes the ACTUAL metrics-check --json producer output', (t) => {
-  if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
+test('ACCEPTANCE (real pipeline): render-metrics --json-in consumes the ACTUAL metrics-check --json producer output', () => {
+  if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const METRICS_CHECK = join(SCRIPTS, 'metrics-check.mjs');
   const { root, home } = fixtureProject();
   try {
@@ -347,8 +355,8 @@ test('ACCEPTANCE (real pipeline): render-metrics --json-in consumes the ACTUAL m
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('CLI --json-in: renders from a pre-captured canonical object; manifest is aggregates-only and receipted', (t) => {
-  if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
+test('CLI --json-in: renders from a pre-captured canonical object; manifest is aggregates-only and receipted', () => {
+  if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const { root, home } = fixtureProject();
   try {
     const dataPath = join(root, 'metrics.json');
@@ -381,8 +389,8 @@ test('CLI --json-in: renders from a pre-captured canonical object; manifest is a
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('CLI usage errors: missing --out, malformed --json-in, --out inside the store', (t) => {
-  if (!TREE_CLEAN) { t.skip('plugin tree dirty — malformed --json-in check runs after the fail-closed provenance gate (fix 9); exercised on a clean tree'); return; }
+test('CLI usage errors: missing --out, malformed --json-in, --out inside the store', () => {
+  if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const { root, home } = fixtureProject();
   try {
     mkdirSync(join(root, '_memories'), { recursive: true });
@@ -409,8 +417,8 @@ test('CLI usage errors: missing --out, malformed --json-in, --out inside the sto
 
 // ---------- live path (real gatherMetrics against a tiny store) ----------
 
-test('CLI live path: real gatherMetrics run produces a truthful manifest and page', (t) => {
-  if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
+test('CLI live path: real gatherMetrics run produces a truthful manifest and page', () => {
+  if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const { root, home } = fixtureProject();
   try {
     const mem = join(root, '_memories');
@@ -486,7 +494,7 @@ test('renderer producer in the page footer names the generating script and the l
   try {
     execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
   } catch { t.skip('not running from a git checkout'); return; }
-  if (!TREE_CLEAN) { t.skip('plugin tree is dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
+  if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const head = execFileSync('git', ['-C', SCRIPTS, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const { root, home } = fixtureProject();
   try {
@@ -510,8 +518,8 @@ async function generateMetricsReceipt() {
   return { root, home, genPath: manifest.receipt_path };
 }
 
-test('--record-publish on a metrics generation receipt lands kind core-metrics-artifact-publish, self-contained', async (t) => {
-  if (!TREE_CLEAN) { t.skip('plugin tree dirty — real render is fail-closed by design (fix 9); receipt behavior also covered tree-independently by the item-7 acceptance tests'); return; }
+test('--record-publish on a metrics generation receipt lands kind core-metrics-artifact-publish, self-contained', async () => {
+  if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const { root, genPath } = await generateMetricsReceipt();
   try {
     const res = spawnSync(process.execPath, [CLI_PATH, '--record-publish',
@@ -696,8 +704,8 @@ test('ACCEPTANCE (receipt hardening): a declined/failed receipt can NEVER be mar
 
 // ---------- no-workspace fallback ----------
 
-test('no workspace.json: receipt lands in the flagged fallback location', async (t) => {
-  if (!TREE_CLEAN) { t.skip('plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree'); return; }
+test('no workspace.json: receipt lands in the flagged fallback location', async () => {
+  if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const { root, home } = fixtureProject({ workspace: false });
   try {
     const dataPath = join(root, 'metrics.json');

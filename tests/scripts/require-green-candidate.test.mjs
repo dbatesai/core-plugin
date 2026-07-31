@@ -104,6 +104,45 @@ test('the latest attempt decides: a red re-run revokes an earlier green', () => 
   assert.equal(code, 1, `the newest attempt should decide:\n${out}`);
 });
 
+// The same SHA lands on main and then on next when the back-merge fast-forwards,
+// so push-triggered CI opens two run_numbers for one commit. auto-tag fires the
+// moment the first finishes, while the second is still going. Both v3.15.0 and
+// v3.15.1 went untagged on exactly this shape.
+test('a finished green run clears the candidate while a second trigger is still running', () => {
+  const { code, out } = gate([
+    makeRun({ runNumber: 375, conclusion: 'success' }),
+    makeRun({ runNumber: 376, status: 'in_progress', conclusion: null }),
+  ]);
+  assert.equal(code, 0, `a completed green run answers for this commit, got exit ${code}:\n${out}`);
+  assert.match(out, /375/, `the verdict should name the run that decided it:\n${out}`);
+});
+
+test('a second trigger that failed refuses even though the first one passed', () => {
+  const { code, out } = gate([
+    makeRun({ runNumber: 375, conclusion: 'success' }),
+    makeRun({ runNumber: 376, conclusion: 'failure' }),
+  ]);
+  assert.equal(code, 1, `any completed failure for the commit must refuse, got exit ${code}:\n${out}`);
+  assert.match(out, /376/);
+});
+
+test('two triggers both still running is not a pass', () => {
+  const { code } = gate([
+    makeRun({ runNumber: 375, status: 'in_progress', conclusion: null }),
+    makeRun({ runNumber: 376, status: 'queued', conclusion: null }),
+  ]);
+  assert.equal(code, 1);
+});
+
+test('a red re-run still revokes when a second trigger passed', () => {
+  const { code, out } = gate([
+    makeRun({ runNumber: 375, attempt: 1, conclusion: 'success' }),
+    makeRun({ runNumber: 375, attempt: 2, conclusion: 'failure' }),
+    makeRun({ runNumber: 376, conclusion: 'success' }),
+  ]);
+  assert.equal(code, 1, `the newest attempt of run 375 is red and must revoke:\n${out}`);
+});
+
 test('runs from a different workflow are not counted as the required one', () => {
   const foreign = { ...makeRun(), name: 'lint', path: '.github/workflows/lint.yml' };
   const { code } = gate([foreign]);

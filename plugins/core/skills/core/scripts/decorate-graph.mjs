@@ -26,9 +26,9 @@
 // CLI:
 //   node decorate-graph.mjs <project-dir> [--check] [--dry-run]
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 import { loadSnapshot } from './generate-summary-index.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
@@ -317,7 +317,19 @@ export function decorateStoreLocked(projectDir, opts = {}) {
 
 function main(argv) {
   const positionals = argv.filter(a => !a.startsWith('--'));
-  const projectDir = resolve(positionals[0] || process.cwd());
+  // The project is EXPLICIT: this tool writes into a store, and a bare
+  // invocation silently decorating whatever directory it happens to run in
+  // is a hazard, not a convenience. Every documented caller passes it.
+  if (!positionals[0]) {
+    process.stderr.write('usage: node decorate-graph.mjs <project-dir> [--check] [--dry-run]\n');
+    return 2;
+  }
+  const projectDir = resolve(positionals[0]);
+  // Bounded diagnostic instead of a raw fs stack when the target isn't a store.
+  if (!existsSync(join(projectDir, '_memories'))) {
+    process.stderr.write(`decorate-graph: not a project store (no _memories/): ${projectDir}\n`);
+    return 2;
+  }
   const check = argv.includes('--check');
   const dryRun = check || argv.includes('--dry-run');
 
@@ -369,7 +381,8 @@ function main(argv) {
   return (result.refused.length > 0 || result.needs_reconciliation.length > 0 || attributionFailed) ? 1 : 0;
 }
 
-const _cliEntry = (() => { try { return fileURLToPath(import.meta.url) === resolve(process.argv[1]); } catch { return false; } })();
-if (_cliEntry) {
-  process.exit(main(process.argv.slice(2)));
+// Shared spelling-robust entry guard (cli-entry.mjs); exitCode + natural exit
+// so main's piped output always flushes before the process dies.
+if (isCliEntry(import.meta.url)) {
+  process.exitCode = main(process.argv.slice(2));
 }

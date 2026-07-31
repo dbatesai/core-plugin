@@ -6,10 +6,10 @@
  * CLI: node generate-agents-md.mjs --contract <CONTRACT.md> [--out <AGENTS.md>] [--override <f>] [--mode write|check|dry-run]
  */
 
-import { realpathSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { generateForHarness, HARNESS_OUTPUT } from './contract-format.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const HARNESS = 'codex';
 
@@ -27,14 +27,7 @@ export async function generate({ contractPath, outputPath, overridePath = null, 
   return generateForHarness({ harness: HARNESS, contractPath, outputPath: out, overridePath, mode });
 }
 
-function isMain() {
-  // Canonicalize BOTH sides: argv[1] AND import.meta.url, so a symlinked or
-  // case/separator-variant install path can't spuriously match or mismatch on Windows.
-  const canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-  try { return canon(process.argv[1]) === canon(fileURLToPath(import.meta.url)); } catch { return false; }
-}
-
-if (isMain()) {
+if (isCliEntry(import.meta.url)) {
   // Async IIFE — NOT a top-level await. A module with top-level await is an async ESM
   // module; one of those in an import chain perturbs node:test's per-file evaluation on
   // Windows+Node20 (configure-project.test.mjs exited 1 with every assertion passing).

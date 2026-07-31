@@ -10,21 +10,29 @@ import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
-// Same manifest path + fallback the hook itself reads (retrieve-context-hook.mjs
+// Same manifest the shared receipt producer reads (hook-log.mjs PRODUCER_VERSION /
 // PRODUCER_SHA) -- read dynamically rather than hardcode 'unknown', since a real
 // release cut legitimately stamps a real source_sha into this repo's own manifest.
-const EXPECTED_PRODUCER_SHA = (() => {
+const EXPECTED_MANIFEST = (() => {
   try {
-    const m = JSON.parse(rf(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', '.claude-plugin', 'plugin.json'), 'utf8'));
-    return String(m.source_sha || 'unknown');
-  } catch { return 'unknown'; }
+    return JSON.parse(rf(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'plugins', 'core', '.claude-plugin', 'plugin.json'), 'utf8'));
+  } catch { return {}; }
 })();
+const EXPECTED_PRODUCER_VERSION = String(EXPECTED_MANIFEST.version || 'unknown');
+const EXPECTED_PRODUCER_SHA = String(EXPECTED_MANIFEST.source_sha || 'unknown');
 // CORE_RETRIEVAL_STORE is absent from the product hooks entirely — no
 // legitimate production use, and its trust check was lexical-only
 // (symlink-bypassable). Tests pass
 // the store via `cwd` in the JSON payload, the same trusted channel the real
 // harness always used — no env var, no symlink workaround needed anymore.
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+const FIXT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// The committed fixture is NEVER touched by tests — even "read" paths write the
+// cached index (_lib/unit-summaries.json) as a side effect, which polluted the
+// committed tree (retrieval-premise.test.mjs owns this pattern; the
+// fixture-cold-clean guard test enforces it). All reads run against a clone.
+const FIXT = mkdtempSync(join(tmpdir(), 'obligation3-store-'));
+cpSync(FIXT_SRC, FIXT, { recursive: true });
+process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 
 // Isolate every hook test log: a subprocess hook run
 // that doesn't override CORE_HOOKS_LOG_FILE defaults to the real machine-wide
@@ -121,7 +129,7 @@ test('hook output carries the authority tier for observation hits (the label mus
 // Every field must be an OBSERVED value: ladder tier from the producing stage
 // (never the unit authority tier), no fabricated escalation on empty results,
 // observed query terms, correlation id, and an OBSERVABLE write outcome.
-import { mkdtempSync, rmSync, writeFileSync as wf, readFileSync as rf, readdirSync as rd, existsSync as ex, mkdirSync as mkd } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, writeFileSync as wf, readFileSync as rf, readdirSync as rd, existsSync as ex, mkdirSync as mkd } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 function makeStore(root) {
@@ -180,54 +188,62 @@ test('empty result is an honest no-hit at the tier actually run — never a fabr
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// CORE_REASONING_ARM (2026-07-19): the preregistered three-arm efficacy pilot
-// control. 'automatic' must be provably byte-identical to today's behavior
-// (every test above this block already proves that — none of them set the
-// var). These tests exercise the two new arms and the fail-closed contract.
+// ABSENCE contract (2026-07-31): the preregistered three-arm efficacy pilot's
+// env-var control (CORE_REASONING_ARM, with its deterministic-only / always-on
+// behavioral arms) was DELETED from shipped retrieval — the pilot's frozen
+// branch preserves it. Setting the var must now be indistinguishable from any
+// other unknown env var: no arm resolution, no directive suppression or
+// forcing, no explicit-set receipt fields, no crash.
 
-test('CORE_REASONING_ARM=deterministic-only suppresses the directive even on a true zero-hit', () => {
+test('absence: CORE_REASONING_ARM no longer suppresses the zero-hit directive (former deterministic-only arm is gone)', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-det-')));
   try {
     const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'deterministic-only' }, root);
-    assert.doesNotMatch(out, /CORE reasoning escalation required/, 'deterministic-only must never emit the Tier 3 directive');
+    assert.match(out, /CORE reasoning escalation required/, 'the true zero-hit directive fires regardless of the deleted control');
     const [evt] = readEventRows(root);
-    assert.equal(evt.requested_arm, 'deterministic-only');
-    assert.equal(evt.directive_fired, false);
+    assert.equal(evt.result, 'no-hit');
+    assert.equal(evt.requested_arm, undefined, 'no pilot receipt fields survive the deletion');
+    assert.equal(evt.directive_fired, undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('CORE_REASONING_ARM=always-on forces the directive even when Tier 1 found real hits', () => {
+test('absence: CORE_REASONING_ARM no longer forces the directive on a real hit (former always-on arm is gone)', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-always-')));
   try {
     const out = runHook('widget decision', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'always-on' }, root);
-    assert.match(out, /widget/i, 'the real hit content must still be delivered, not silently dropped');
-    assert.match(out, /CORE reasoning escalation required/, 'always-on must force the directive even with hits present');
-    assert.match(out, /forces escalation regardless of Tier 1 result/, 'the forced case must not claim a fabricated zero-hit reason');
+    assert.match(out, /widget/i, 'the real hit content is delivered as usual');
+    assert.doesNotMatch(out, /CORE reasoning escalation required/, 'no forced escalation — the directive only ever fires on a true zero-hit now');
     const [evt] = readEventRows(root);
-    assert.equal(evt.requested_arm, 'always-on');
-    assert.equal(evt.directive_fired, true);
+    assert.equal(evt.requested_arm, undefined);
+    assert.equal(evt.directive_fired, undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('CORE_REASONING_ARM=always-on with no hits: directive fires, reason stays honestly no-hit', () => {
-  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-always-nohit-')));
+test('absence: an arbitrary CORE_REASONING_ARM value never crashes the hook — it is an ordinary unknown env var now', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-garbage-')));
+  const logFile = isolatedHooksLog();
   try {
-    runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'always-on' }, root);
-    const [evt] = readEventRows(root);
-    assert.equal(evt.requested_arm, 'always-on');
-    assert.equal(evt.directive_fired, true);
-    assert.equal(evt.result, 'no-hit', 'zero-hit is still honestly reported at the event-log level regardless of arm');
+    const child = runHookProcess('widget decision', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'not-a-real-arm', CORE_HOOKS_LOG_FILE: logFile }, root);
+    assert.equal(child.status, 0);
+    assert.match(child.stdout, /widget/i, 'delivery is unaffected — the fail-closed arm validation is gone with the arms');
+    const rows = rf(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.hook === 'retrieve-context');
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].action, 'delivered', 'a garbage value in the deleted control no longer produces a pipeline-error receipt');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// UTF-8 byte cap: the final pack+directive
-// combine step used to re-truncate with String.slice(0, 2048) — UTF-16 code
-// units, not bytes — which can both exceed the preregistered 2048-byte budget
-// on non-ASCII content and split a multi-byte character (or a surrogate pair)
-// mid-sequence. A dense-emoji unit body forces the packText close to the cap
-// on its own, so appending the forced reasoning directive (always-on) pushes
-// the combine step over budget and exercises the exact truncation boundary.
-test('K-series UTF-8 fix: dense multi-byte content + forced directive stays within the real byte budget with no corrupted (replacement-char) truncation', () => {
+test('absence: shipped retrieval source carries no pilot-arm mechanism at all', () => {
+  const src = rf(HOOK, 'utf8');
+  assert.doesNotMatch(src, /CORE_REASONING_ARM|deterministic-only|always-on/, 'the env-var arms live only on the pilot\'s frozen branch, never in shipped retrieval');
+});
+
+// UTF-8 byte cap: buildFinalContextPack budgets the pack in real UTF-8 bytes
+// (Buffer.byteLength) and the hook's directive path truncates with
+// truncateUtf8 — a real byte offset backed off to a complete-sequence
+// boundary. A dense-emoji unit body pushes the pack right up against the cap,
+// so a byte-unaware truncation anywhere on the delivery path would either
+// exceed the budget or split a surrogate pair mid-sequence.
+test('K-series UTF-8 fix: dense multi-byte content stays within the real byte budget with no corrupted (replacement-char) truncation', () => {
   const root = mkdtempSync(join(trustedTestTmpRoot(), 'rh-utf8-'));
   const store = join(root, '_memories');
   mkd(store, { recursive: true });
@@ -239,37 +255,10 @@ test('K-series UTF-8 fix: dense multi-byte content + forced directive stays with
   wf(join(store, 'dc-1-widget.md'),
     `---\nid: dc-1-widget\ntype: decision\nstatus: active\ncreated: 2026-07-01\ntopics:\n  - widget\n---\n\nWidget decision body. ${emojiFiller}\n`);
   try {
-    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_REASONING_ARM: 'always-on' }, root);
+    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '0' }, root);
+    assert.match(out, /dc-1-widget/, 'the dense unit is still delivered, not silently dropped by the budget');
     assert.ok(Buffer.byteLength(out, 'utf8') <= 2048, `delivered payload must respect the real UTF-8 byte budget (got ${Buffer.byteLength(out, 'utf8')} bytes)`);
     assert.ok(!out.includes('�'), 'no replacement-character corruption from a mid-sequence split');
-    assert.match(out, /CORE reasoning escalation required/, 'the forced directive must still be present, not silently dropped by the fix');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('CORE_REASONING_ARM unset behaves identically to "automatic" (no requested_arm/directive_fired fields at all)', () => {
-  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-unset-')));
-  try {
-    runHook('widget decision', { CORE_METRICS_ENABLED: '1' }, root);
-    const [evt] = readEventRows(root);
-    assert.equal(evt.requested_arm, undefined, 'ordinary retrieval-log rows must stay byte-identical to before this control existed');
-    assert.equal(evt.directive_fired, undefined);
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-// The preregistration's
-// "escalation-only" arm IS today's shipped default behavior -- the pilot
-// legitimately requests it by explicitly setting CORE_REASONING_ARM=automatic
-// (not by leaving the var unset, which is what a real user does). The prior
-// gate (`requestedArm !== 'automatic'`) gave that explicit request no
-// observable receipt at all, so the runner's own fail-closed contract would
-// have spoiled every escalation-only trial with nothing to check against.
-test('CORE_REASONING_ARM=automatic (explicit) DOES get an observable receipt, unlike leaving it unset', () => {
-  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-explicit-automatic-')));
-  try {
-    runHook('widget decision', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'automatic' }, root);
-    const [evt] = readEventRows(root);
-    assert.equal(evt.requested_arm, 'automatic', 'an explicit pilot request for the escalation-only arm must be auditable, not indistinguishable from an ordinary user who never set the var');
-    assert.equal(evt.directive_fired, false, 'a real hit exists, so automatic does not escalate -- same behavior as unset, but now observable');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -295,16 +284,6 @@ test('metrics-off automatic zero-hit still escalates (telemetry opt-out must not
   try {
     const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '0' }, root);
     assert.match(out, /CORE reasoning escalation required/, 'the directive must still fire with metrics off');
-    assert.equal(readEventRows(root).length, 0, 'no telemetry row, but the delivered content is unaffected');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('metrics-off CORE_REASONING_ARM=always-on still forces the directive', () => {
-  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-alwayson-')));
-  try {
-    const out = runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_REASONING_ARM: 'always-on' }, root);
-    assert.match(out, /widget/i, 'real hit content still delivered');
-    assert.match(out, /CORE reasoning escalation required/, 'always-on must still force the directive with metrics off');
     assert.equal(readEventRows(root).length, 0, 'no telemetry row, but the delivered content is unaffected');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -340,14 +319,6 @@ test('every hook branch emits exactly one in-vocabulary {action, reason} receipt
     // via the explicit CORE_TEST_FORCE_PIPELINE_ERROR seam and runs the real
     // subprocess end to end — fail-open proven, not assumed.
     { name: 'pipeline-error-genuine-crash', env: { CORE_TEST_FORCE_PIPELINE_ERROR: '1' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
-    // resolveReasoningArm's throw originally landed
-    // OUTSIDE every try/catch in main(), so it escaped to the outer
-    // main().catch(() => process.exit(0)) with no receipt() call at all —
-    // exit 0 was right (never block the turn) but the promised typed
-    // pipeline-error row silently never got written. The standalone garbage-
-    // value test only checked exit/stdout, which is exactly why it missed
-    // this; this table-driven branch checks the actual hook-log receipt.
-    { name: 'reasoning-arm-invalid-genuine-crash', env: { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'not-a-real-arm' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'pipeline-error' } },
     { name: 'store-unavailable', env: {}, prompt: 'widget', expect: { action: 'skip', reason: 'store-unavailable' }, needStore: false, setup: (root) => { wf(join(root, '_memories'), 'not a directory'); } },
     { name: 'no-hit', env: { CORE_METRICS_ENABLED: '1' }, prompt: 'zzqx unmatchable quark', expect: { action: 'delivered', reason: 'no-hit' } },
     { name: 'delivery-failed', env: { CORE_RETRIEVAL_BYTE_CAP: '0' }, prompt: 'widget decision', expect: { action: 'failed', reason: 'delivery-failed' } },
@@ -419,147 +390,65 @@ test('metrics-opt-out receipt coexists with ZERO retrieval rows (no faked teleme
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// ---- Strengthened production outcome caller ----
-// The root cause of the reproduced local failures and the GitHub CI failures: the
-// hook resolves harness identity from CLAUDECODE / CLAUDE_CODE_SESSION_ID /
-// CODEX_SESSION_ID / CODEX_PLUGIN_ROOT in its process env. A test invoked via
-// `execFileSync('node', ..., { env: { ...process.env, ... } })` inherits
-// whatever the AMBIENT shell running `node --test` happens to have set —
-// which is 'claude-code' on a developer's machine running inside Claude
-// Code (false-positive pass), null on a clean CI runner (harness never
-// resolves, pendingOutcomePath returns null, the whole mechanism silently
-// no-ops — 0 rows where 1 expected), and 'codex' inside a Codex sandbox
-// (mismatches the test's hardcoded 'claude-code' assertion). Strip the four
-// ambient signal vars and set the harness this test suite actually means to
-// exercise explicitly, so results are identical everywhere `node --test`
-// runs — never a function of who/where invoked it.
-function runHookWithSession(prompt, root, sessionId, env = {}) {
-  return execFileSync('node', [HOOK], {
-    input: JSON.stringify({ prompt, cwd: root, ...(sessionId ? { session_id: sessionId } : {}) }),
-    env: {
-      ...process.env,
-      // Strip ambient harness signals the invoking shell may carry, then set
-      // the ONE this suite means to exercise — CLAUDE_CODE_SESSION_ID stays
-      // unset since the hook only checks CLAUDECODE for Claude Code identity.
-      CLAUDE_CODE_SESSION_ID: undefined, CODEX_SESSION_ID: undefined, CODEX_PLUGIN_ROOT: undefined,
-      CLAUDECODE: '1',
-      CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
-      ...env,
-    },
-    encoding: 'utf8',
-  });
-}
-
-function readOutcomeRows(root) {
-  const sess = join(root, '_sessions');
-  if (!ex(sess)) return [];
-  const rows = [];
-  for (const d of rd(sess)) {
-    const f = join(sess, d, 'outcome-log.jsonl'); // outcomes live in their own later log
-    if (ex(f)) for (const l of rf(f, 'utf8').trim().split('\n')) rows.push(JSON.parse(l));
-  }
-  return rows.filter(r => r.kind === 'retrieval-outcome');
-}
-
-test('post-answer caller: next same-session invocation closes the previous retrieval as UNKNOWN with full identity', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-oc1-')));
+// ---- Packaged producer identity on every receipt ----
+// The shared receipt producer (hook-log.mjs) reads the plugin manifest ONCE
+// and stamps producer_version + producer_sha on EVERY hook-log row, so any
+// receipt can be bound to the exact shipped build that wrote it. Proven
+// through the real subprocess path here, not just the library call.
+test('every terminal receipt carries the packaged producer identity from the plugin manifest', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-producer-')));
+  const logFile = isolatedHooksLog();
   try {
-    runHookWithSession('widget decision', root, 'sess-A');
-    runHookWithSession('entirely different topic now', root, 'sess-A');
-    const rows = readOutcomeRows(root);
-    assert.equal(rows.length, 1, 'exactly one outcome row for the closed retrieval');
-    const row = rows[0];
-    assert.equal(row.usefulness_outcome, 'unknown', 'overlap is a provisional signal — never a harmful outcome before calibration');
-    assert.ok(['corrective-retry', 'unobservable'].includes(row.evidence_authority));
-    assert.equal(row.harness, 'claude-code');
-    assert.equal(row.session_id, 'sess-A');
-    assert.ok(row.answer_turn_id && row.producer_version && row.schema_version, 'identity fields required');
-    assert.equal(row.producer_sha, EXPECTED_PRODUCER_SHA, 'must echo whatever this repo\'s own manifest.source_sha currently says -- "unknown" pre-release, the real SHA once a release has stamped one');
-    assert.notEqual(row.answer_turn_id, row.retrieval_id, 'answer_turn_id must never alias retrieval_id — they are different concepts');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('pending marker is written only AFTER delivery is confirmed — a failed delivery leaves no marker', () => {
-  // Hazard: "creates pending state before delivery."
-  // CORE_RETRIEVAL_BYTE_CAP=0 forces the delivery-failed branch (selection
-  // succeeds, byte-capped output delivers nothing) — before the fix, the
-  // pending marker was written unconditionally once the retrieval row landed,
-  // regardless of whether anything actually reached the user.
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-deferred-')));
-  try {
-    runHookWithSession('widget decision', root, 'sess-defer', { CORE_RETRIEVAL_BYTE_CAP: '0' });
-    const lib = join(root, '_memories', '_lib');
-    const pendings = ex(lib) ? rd(lib).filter(f => f.startsWith('pending-retrieval-')) : [];
-    assert.equal(pendings.length, 0, 'no pending marker for content that never reached the user');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('pending marker is written after a successful delivery (positive control for the deferred-write test above)', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-deferred-ok-')));
-  try {
-    runHookWithSession('widget decision', root, 'sess-defer-ok');
-    const lib = join(root, '_memories', '_lib');
-    const pendings = ex(lib) ? rd(lib).filter(f => f.startsWith('pending-retrieval-')) : [];
-    assert.equal(pendings.length, 1, 'a genuinely delivered turn does leave a pending marker for the next close');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('a hostile session id in the payload never escapes _memories/_lib as a filename', () => {
-  // Hazard: "unsanitized session id in a filename."
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-sanitize-')));
-  try {
-    runHookWithSession('widget decision', root, '../../../../etc/passwd');
-    const lib = join(root, '_memories', '_lib');
-    assert.ok(ex(lib), 'the pending marker landed inside _lib, not escaped elsewhere');
-    const entries = rd(lib).filter(f => f.startsWith('pending-retrieval-'));
-    assert.equal(entries.length, 1);
-    assert.doesNotMatch(entries[0], /\.\./, 'no traversal sequence in the actual filename on disk');
-    // Nothing was written outside the project root by the traversal attempt.
-    assert.ok(!ex(join(root, '..', '..', '..', '..', 'etc', 'passwd-pending-retrieval-claude-code.json')));
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('a failed outcome write never deletes the pending marker (evidence survives to retry)', () => {
-  // Hazard: "deletes pending evidence without
-  // confirmed outcome persistence." Force the outcome-log write to fail by
-  // making today's session directory a file instead of a directory, so
-  // logEvent cannot create outcome-log.jsonl underneath it.
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-nodelete-')));
-  try {
-    runHookWithSession('widget decision', root, 'sess-nodelete');
-    const lib = join(root, '_memories', '_lib');
-    const before = rd(lib).filter(f => f.startsWith('pending-retrieval-'));
-    assert.equal(before.length, 1, 'precondition: a pending marker exists to close');
-    const today = new Date().toISOString().slice(0, 10);
-    rmSync(join(root, '_sessions', today), { recursive: true, force: true });
-    wf(join(root, '_sessions', today), 'not a directory'); // outcome-log write will fail
-    runHookWithSession('entirely different topic now', root, 'sess-nodelete');
-    const after = rd(lib).filter(f => f.startsWith('pending-retrieval-'));
-    assert.equal(after.length, 1, 'the pending marker survives an unconfirmed/failed outcome write — evidence is never destroyed on a guess');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('post-answer caller: no session identity means NO pending state and NO outcome row (no aliasing)', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-oc2-')));
-  try {
-    runHookWithSession('widget decision', root, null);
-    runHookWithSession('widget decision again', root, null);
-    assert.equal(readOutcomeRows(root).length, 0, 'null session never aliases into an outcome');
-    const lib = join(root, '_memories', '_lib');
-    const pendings = ex(lib) ? rd(lib).filter(f => f.startsWith('pending-retrieval-')) : [];
-    assert.equal(pendings.length, 0, 'no pending marker without a resolved session');
-  } finally { rmSync(root, { recursive: true, force: true }); }
-});
-
-test('post-answer caller: different sessions never close each other (keyed pending state)', () => {
-  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-oc3-')));
-  try {
-    runHookWithSession('widget decision', root, 'sess-A');
-    runHookWithSession('widget decision', root, 'sess-B');
-    assert.equal(readOutcomeRows(root).length, 0, 'sess-B must not close sess-A\'s retrieval');
-    runHookWithSession('another topic', root, 'sess-A');
-    const rows = readOutcomeRows(root);
+    runHook('widget decision', { CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: logFile }, root);
+    const rows = rf(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.hook === 'retrieve-context');
     assert.equal(rows.length, 1);
-    assert.equal(rows[0].session_id, 'sess-A');
+    assert.equal(rows[0].producer_version, EXPECTED_PRODUCER_VERSION, 'receipt version comes from the manifest, never a fork');
+    assert.equal(rows[0].producer_sha, EXPECTED_PRODUCER_SHA, 'receipt sha echoes manifest.source_sha (or the honest unknown)');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---- Outcome-pipeline residue absence ----
+// The per-turn pending-marker + inferred outcome close was DELETED along with
+// record-retrieval-outcome.mjs (no importer remains); retrieval injection is
+// unchanged. Two same-session runs must leave no pending marker and no
+// outcome row anywhere in the store.
+test('absence: no pending marker and no outcome row — the outcome pipeline is gone, injection is intact', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-residue-')));
+  try {
+    const runWithSession = (prompt) => execFileSync('node', [HOOK], {
+      input: JSON.stringify({ prompt, cwd: root, session_id: 'sess-residue' }),
+      env: {
+        ...process.env,
+        // Strip ambient harness signals, declare claude-code explicitly, so
+        // the result is identical anywhere `node --test` runs.
+        CLAUDE_CODE_SESSION_ID: undefined, CODEX_SESSION_ID: undefined, CODEX_PLUGIN_ROOT: undefined,
+        CLAUDECODE: '1', CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
+      },
+      encoding: 'utf8',
+    });
+    const first = runWithSession('widget decision');
+    assert.match(first, /dc-1-widget/, 'injection itself is fully intact');
+    runWithSession('entirely different topic now');
+    const lib = join(root, '_memories', '_lib');
+    const pendings = ex(lib) ? rd(lib).filter((f) => f.startsWith('pending-retrieval-')) : [];
+    assert.deepEqual(pendings, [], 'no per-turn pending marker is ever written');
+    const sess = join(root, '_sessions');
+    const outcomeRows = [];
+    if (ex(sess)) {
+      for (const d of rd(sess)) {
+        const f = join(sess, d, 'outcome-log.jsonl');
+        if (ex(f)) for (const l of rf(f, 'utf8').trim().split('\n')) outcomeRows.push(JSON.parse(l));
+      }
+    }
+    assert.deepEqual(outcomeRows, [], 'no retrieval-outcome rows are ever produced by the hook');
+    assert.equal(readEventRows(root).length, 2, 'the canonical per-turn retrieval events still land');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('absence: no outcome-pipeline residue in the hook source, and the recorder module is deleted', () => {
+  const src = rf(HOOK, 'utf8');
+  assert.doesNotMatch(src, /recordRetrievalOutcome|pendingOutcomePath|pending-retrieval-/, 'no import or mechanism reference survives');
+  const recorder = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
+    'plugins', 'core', 'skills', 'core', 'scripts', 'record-retrieval-outcome.mjs');
+  assert.ok(!ex(recorder), 'record-retrieval-outcome.mjs is gone from the shipped tree');
 });

@@ -37,9 +37,9 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isCliEntry } from '../../plugins/core/skills/core/scripts/cli-entry.mjs';
 
 const PACKAGED_SUBDIR = 'plugins/core';
 const CLAUDE_REL = `${PACKAGED_SUBDIR}/.claude-plugin/plugin.json`;
@@ -245,7 +245,6 @@ function main(argv) {
   return verifySource(source, ref, log);
 }
 
-const _canon = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_canon(process.argv[1] || '') === _canon(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

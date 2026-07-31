@@ -26,6 +26,8 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 const {
   renderBrowseArtifact, SENSITIVITY_WARNING, collectUnits,
   BROWSE_MANIFEST_SCHEMA_VERSION, producerIdentity, publishReceiptPathFor,
+  buildArtifactHtml, computeGraph, computeDefaultFocus,
+  resolveMetricsForRender,
 } = await import(pathToFileURL(join(SCRIPTS, 'render-browse-artifact.mjs')).href);
 const { loadSnapshot } = await import(pathToFileURL(join(SCRIPTS, 'generate-summary-index.mjs')).href);
 const CLI_PATH = join(SCRIPTS, 'render-browse-artifact.mjs');
@@ -42,9 +44,15 @@ function pluginTreeIsClean() {
   } catch { return false; }
 }
 const TREE_CLEAN = pluginTreeIsClean();
-// A render-dependent test: runs only when the tree is clean (renderer needs a
-// real SHA), otherwise skips with the fail-closed reason.
-const rtest = (name, fn) => test(name, TREE_CLEAN ? {} : { skip: 'plugin tree dirty — renderer fails closed by design (fix 9); exercised on a clean tree' }, fn);
+// A render-dependent test: needs a clean plugin tree (the renderer fails closed
+// without a real SHA). On a dirty tree it HARD-FAILS with a named reason — the
+// failing run IS the refusal. A skip here reads as green while asserting
+// nothing, which is exactly how dirty-tree regressions ship.
+const DIRTY_TREE_REFUSAL =
+  'REFUSED: plugin tree is dirty, so this behavior assertion cannot execute '
+  + '(fix 9 fail-closed provenance). Commit or stash the plugin tree and re-run '
+  + '— a skipped-green result here proves nothing.';
+const rtest = (name, fn) => test(name, TREE_CLEAN ? fn : () => { assert.fail(DIRTY_TREE_REFUSAL); });
 
 // Stub metrics provider: tests never run the live subprocess probe suite —
 // the metrics object only needs the fields the page consumes.
@@ -248,12 +256,12 @@ function snapshotBytes(dir) {
   return out;
 }
 
-rtest('generation never writes to _memories/ — store byte-identical before and after', async () => {
+rtest('generation never writes to _memories/ — store byte-identical before and after, from COLD', async () => {
   const { root, mem, home } = fixtureProject();
   try {
-    // Warm the loader's derived cache first (its documented behavior on every
-    // read path), so the comparison below covers EVERY byte including _lib.
-    loadSnapshot(root, { captureBodies: true });
+    // Deliberately COLD: no cache warm-up. A warmed cache here would hide a
+    // first-render `_lib/` write — the exact violation the read-only promise
+    // forbids — so the comparison starts from the store's pristine state.
     const before = snapshotBytes(mem);
     await generate(root, home, { scope: 'all-including-archive' });
     await generate(root, home); // second run, default scope
@@ -284,6 +292,131 @@ test('CLI: --out is required — errors without it, writes nothing', () => {
     assert.match(res.stderr, /--out/);
     assert.ok(!existsSync(join(root, 'out')), 'no output written');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- cold-store read-only + scoped identity ----------
+
+test('cold store: collectUnits never materializes the derived _lib cache (read-only includes the FIRST read)', () => {
+  const { root, mem } = fixtureProject();
+  try {
+    assert.equal(existsSync(join(mem, '_lib')), false, 'fixture starts cold');
+    collectUnits(root);
+    assert.equal(existsSync(join(mem, '_lib')), false,
+      'the skill promises the whole flow never writes the store — a cold first render included');
+    collectUnits(root, { scope: 'all-including-archive' });
+    assert.equal(existsSync(join(mem, '_lib')), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('scoped identity: an archive-only edit changes the all-including-archive id and never the active id', () => {
+  const { root, mem } = fixtureProject();
+  try {
+    const activeBefore = collectUnits(root).snapshotId;
+    const archiveBefore = collectUnits(root, { scope: 'all-including-archive' });
+    assert.notEqual(archiveBefore.snapshotId, activeBefore,
+      'the archive-including view has its own identity over its own population');
+    assert.equal(archiveBefore.activeSnapshotId, activeBefore,
+      'activeSnapshotId carries the plain store id for baseline matching');
+
+    writeFileSync(join(mem, 'archive', 'old-note.md'),
+      '---\nid: old-note\ntype: observation\nstatus: archived\ntopics: [beta]\n---\n\n# Archived note\n\nArchive bytes CHANGED.\n');
+
+    assert.equal(collectUnits(root).snapshotId, activeBefore,
+      'active scope must not see archive-only changes');
+    assert.notEqual(collectUnits(root, { scope: 'all-including-archive' }).snapshotId, archiveBefore.snapshotId,
+      'the published identity must cover every included source byte');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('exclusion-aware identity: the id covers exactly the kept population — excluded edits never change it, kept edits always do', () => {
+  const { root, mem } = fixtureProject();
+  try {
+    const whole = collectUnits(root);
+    const excludedBefore = collectUnits(root, { excludeTopics: ['confidential-client'] });
+    assert.notEqual(excludedBefore.snapshotId, whole.snapshotId,
+      'different rendered populations must not share one snapshot id');
+
+    // Direction 1: an edit wholly inside the excluded topic must NOT move the
+    // excluded view's identity (no wake, no republish of an identical page).
+    writeFileSync(join(mem, 'topic-4-secret.md'),
+      '---\nid: topic-4-secret\ntype: topic\nstatus: active\ntopics: [confidential-client]\n---\n\n# Secret topic unit\n\nSensitive v2.\n');
+    const excludedAfterSecretEdit = collectUnits(root, { excludeTopics: ['confidential-client'] });
+    assert.equal(excludedAfterSecretEdit.snapshotId, excludedBefore.snapshotId,
+      'an edit wholly outside the rendered population must not force a republish');
+
+    // Direction 2: an edit to a KEPT unit must move it.
+    writeFileSync(join(mem, 'obs-2-beta.md'),
+      '---\nid: obs-2-beta\ntype: observation\nstatus: active\ntopics: [beta]\nupdated: 2026-07-02\n---\n\n# OBS-2 — Beta observation\n\nKept body CHANGED.\n');
+    assert.notEqual(collectUnits(root, { excludeTopics: ['confidential-client'] }).snapshotId,
+      excludedBefore.snapshotId,
+      'a kept unit\'s edit is exactly what the identity must track');
+
+    // No exclusions → the legacy id, verbatim: existing receipts stay comparable.
+    assert.equal(collectUnits(root).activeSnapshotId, collectUnits(root).snapshotId);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- CLI flag contract ----------
+
+test('CLI: --no-metrics together with --metrics-cache is refused loudly (exit 2), nothing rendered', () => {
+  const { root, home } = fixtureProject();
+  try {
+    const res = spawnSync(process.execPath,
+      [CLI_PATH, root, '--out', join(root, 'out', 'v.html'), '--no-metrics', '--metrics-cache', join(root, 'cache.json'), '--home', home],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 2, `stderr: ${res.stderr}`);
+    assert.match(res.stderr, /contradicts/);
+    assert.ok(!existsSync(join(root, 'out')), 'no output written on the refused contradiction');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+rtest('CLI: a COLD-store render leaves the store byte-identical, including _lib absence — no flag needed, no mode exists', async () => {
+  const { root, mem, home } = fixtureProject();
+  try {
+    assert.equal(existsSync(join(mem, '_lib')), false, 'fixture starts cold — no derived cache');
+    const before = snapshotBytes(mem);
+    const res = spawnSync(process.execPath,
+      [CLI_PATH, root, '--out', join(root, 'out', 'v.html'), '--no-metrics', '--home', home],
+      { encoding: 'utf8' });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    assert.equal(existsSync(join(mem, '_lib')), false,
+      'a cold first render must not materialize _memories/_lib');
+    const after = snapshotBytes(mem);
+    assert.deepEqual([...after.keys()].sort(), [...before.keys()].sort());
+    for (const [rel, buf] of before) assert.ok(after.get(rel).equals(buf), `byte-identical: ${rel}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- the live-mode prose contract the recipes must keep ----------
+
+const MEMORY_VIEW_SKILL = join(SCRIPTS, '..', '..', 'memory-view', 'SKILL.md');
+
+test('live recipe: never pairs --no-metrics with --metrics-cache (the CLI refuses the pair; the recipe must not teach it)', () => {
+  const live = readFileSync(MEMORY_VIEW_SKILL, 'utf8');
+  const section = live.slice(live.indexOf('## Live mode'));
+  assert.ok(section.length > 0, 'Live mode section exists');
+  assert.doesNotMatch(section, /--no-metrics[\s\S]{0,120}--metrics-cache/,
+    'the documented refresh command must carry the cache flag alone');
+  assert.match(section, /--metrics-cache/, 'the cached health block is still part of the recipe');
+});
+
+test('live recipe: persists scope and exclusions in the loop-state record and re-applies them each refresh', () => {
+  const live = readFileSync(MEMORY_VIEW_SKILL, 'utf8');
+  const section = live.slice(live.indexOf('## Live mode'));
+  assert.match(section, /persist[^.\n]*(scope|excluded)|same[^.\n]*scope/i);
+  assert.match(section, /--scope|excluded_topics/);
+  assert.match(section, /memory-view-live\.json/, 'the record has one named home under the workspace');
+  assert.match(section, /--write-live-state/, 'the record is written through the atomic CLI door');
+  assert.match(section, /--live-state/, 'the watcher arms from the record');
+  assert.match(section, /retry_at|--retry-at/, 'budget deferral persists its retry moment');
+  assert.match(section, /run_in_background|background task/, 'the wake door is the harness background-task exit');
+  assert.match(section, /can outlive a dead session/,
+    'teardown honesty: the orphan possibility is stated, not papered over with an unproven guarantee');
+  assert.match(section, /"event":"orphaned"|orphaned/, 'the orphan self-check door is documented');
+  assert.match(section, /grant_basis|--grant-basis/, 'the standing grant is persisted in the record');
+  assert.match(section, /future republishes/i, 'the grant is prospective and bounded');
+  assert.match(section, /stop live mode before sensitive or third-party content/i,
+    'the stop-before-the-boundary rule is stated');
 });
 
 test('CLI: rejects an unknown --scope', () => {
@@ -649,4 +782,306 @@ test('a truncated unit is named as unreadable, never embedded as a blank one', (
   assert.equal(collected.units.some((u) => u.id === 'truncated'), false,
     'and it is not embedded as an apparently valid empty unit');
   rmSync(dir, { recursive: true, force: true });
+});
+
+// ============================================================
+// Obsidian-grade browse experience — local/focus graph, properties panel,
+// interactive filters, edge-type styling. Chrome-safety (zero external refs)
+// and the pointer-capture selection contract are already covered above;
+// these assert the new behavior actually shipped, not just that nothing broke.
+// ============================================================
+
+test('collectUnits carries every frontmatter field as properties — not just the curated badge subset', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'properties-'));
+  const mem = join(dir, '_memories');
+  mkdirSync(mem, { recursive: true });
+  writeFileSync(join(mem, 'dc-1-props.md'),
+    '---\nid: dc-1-props\ntype: decision\nstatus: active\nupdated: 2026-07-01\ncustom_field: a value only in frontmatter\n---\n\nBody.\n');
+  const collected = collectUnits(dir);
+  const u = collected.units.find((x) => x.id === 'dc-1-props');
+  assert.ok(u.properties, 'properties field present');
+  assert.equal(u.properties.custom_field, 'a value only in frontmatter',
+    'a field with no dedicated badge/column still reaches the page via properties');
+  assert.equal(u.properties.id, 'dc-1-props');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// The v2 front-end tests below assert against the generated page's actual
+// structure and data (the data island, the baked markup, the generated rule
+// set) — not implementation spelling. They build the page through the
+// exported buildArtifactHtml with a fixed meta, so they run on any tree
+// (producer identity is not involved) and stay red-capable under mutation.
+
+function buildFixturePage(root, metaOverrides = {}, collectOpts = {}) {
+  const collected = collectUnits(root, collectOpts);
+  const html = buildArtifactHtml({
+    units: collected.units,
+    meta: {
+      projectName: 'fixture',
+      generatedAt: '2026-07-30T12:00:00.000Z',
+      producer: { plugin: 'core', plugin_version: '0.0.0', source_sha: 'f'.repeat(40) },
+      snapshotId: collected.snapshotId,
+      scopeDesc: 'scope: active',
+      unitCount: collected.units.length,
+      metrics: { available: false, reason: 'stubbed for this UI test' },
+      ...metaOverrides,
+    },
+  });
+  return { html, collected };
+}
+
+// ---------- precomputed layout (v2: build-time, deterministic) ----------
+
+test('layout determinism: two separate render processes produce byte-identical coordinate blocks, one 0.1px-rounded pair per unit', () => {
+  const { root } = fixtureProject();
+  try {
+    const script = [
+      `const m = await import(${JSON.stringify(pathToFileURL(CLI_PATH).href)});`,
+      `const c = m.collectUnits(${JSON.stringify(root)});`,
+      'const g = m.computeGraph(c.units);',
+      'process.stdout.write(JSON.stringify(m.layoutForceGrid(c.units, g.edges, g.deg)));',
+    ].join('\n');
+    const run = () => spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+    const a = run(), b = run();
+    assert.equal(a.status, 0, a.stderr);
+    assert.equal(b.status, 0, b.stderr);
+    assert.ok(a.stdout.length > 2, 'coordinate block is non-empty');
+    assert.equal(a.stdout, b.stdout, 'two renders of the same store: byte-identical coordinates');
+    const layout = JSON.parse(a.stdout);
+    const ids = collectUnits(root).units.map((u) => u.id).sort();
+    assert.deepEqual(Object.keys(layout).sort(), ids, 'every unit has coordinates');
+    for (const [id, xy] of Object.entries(layout)) {
+      assert.equal(xy.length, 2, `${id}: [x, y]`);
+      for (const v of xy) {
+        assert.equal(Math.round(v * 10), v * 10, `${id}: coordinate ${v} rounded to 0.1px`);
+      }
+    }
+    // …and the shipped page embeds exactly these coordinates in its island.
+    const { html } = buildFixturePage(root);
+    const { json } = extractDataBlock(html);
+    assert.deepEqual(json.layout, layout, 'page data island carries the same precomputed layout');
+    assert.ok(!html.includes('function layoutForce('), 'no in-page force simulation shipped');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- local subgraph default (DOI-ranked, capped, global reachable) ----------
+
+test('the shipped default view is the DOI local subgraph of the most-recently-updated unit, capped at 40, with global one visible click away', () => {
+  const { root } = fixtureProject();
+  try {
+    const { html } = buildFixturePage(root);
+    const { json } = extractDataBlock(html);
+    // obs-2-beta carries the latest `updated` in the fixture.
+    assert.ok(json.defaultFocus, 'default focus shipped in the data island');
+    assert.equal(json.defaultFocus.id, 'obs-2-beta', 'centered on the most-recently-updated unit');
+    assert.ok(json.defaultFocus.ids.includes('obs-2-beta'), 'center is in its own neighborhood');
+    assert.ok(json.defaultFocus.ids.length <= 40, 'neighborhood capped at 40');
+    const unitIds = new Set(json.units.map((u) => u.id));
+    for (const id of json.defaultFocus.ids) assert.ok(unitIds.has(id), `neighborhood id ${id} is a real unit`);
+    // The static markup opens in focus mode; Global stays one click away.
+    assert.match(html, /data-mode="focus" class="on" aria-pressed="true"/, 'focus is the shipped default mode');
+    assert.doesNotMatch(html, /<button type="button" data-mode="focus"[^>]*disabled/, 'focus control is live at open');
+    assert.match(html, /data-mode="global" aria-pressed="false"/, 'global mode present, one click away');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('DOI ranking caps a hub neighborhood at exactly 40 where a plain 1-hop ball would exceed it', () => {
+  const units = [{ id: 'hub', type: 'topic', status: 'active', updated: '2026-07-09', edges: [], topics: [] }];
+  for (let i = 0; i < 60; i++) {
+    units.push({
+      id: `leaf-${String(i).padStart(2, '0')}`, type: 'observation', status: 'active', updated: '',
+      edges: [{ type: 'cites', target: 'hub' }], topics: [],
+    });
+  }
+  const { edges, deg } = computeGraph(units);
+  const focus = computeDefaultFocus(units, edges, deg);
+  assert.equal(focus.id, 'hub', 'most-recently-updated unit is the center');
+  assert.equal(focus.ids.length, 40, 'a 60-neighbor hub is ranked down to the 40 cap');
+  assert.equal(focus.ids[0], 'hub', 'the center ranks first (hop 0)');
+});
+
+// ---------- ghost context: fade, never hide ----------
+
+test('focus dims the rest of the store as ghost context — opacity fade at global positions, never removal', () => {
+  const { root } = fixtureProject();
+  try {
+    const { html } = buildFixturePage(root);
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    const dimRule = chrome.match(/\.node\.dim[^{]*\{([^}]*)\}/);
+    assert.ok(dimRule, 'a dim rule exists for out-of-neighborhood nodes');
+    assert.match(dimRule[1], /opacity/, 'ghost context fades via opacity (GPU path)');
+    assert.doesNotMatch(dimRule[1], /display\s*:\s*none/, 'ghost context is never display:none — fade, not hide');
+    assert.match(chrome, /classList\.toggle\('dim'/, 'dimming is a class toggle, not a rebuild');
+    // Ghost nodes keep their global positions: there is exactly ONE position
+    // source in the client — the precomputed layout from the data island.
+    assert.match(chrome, /DATA\.layout/, 'the island layout is the position source');
+    assert.ok(!chrome.includes('function layoutForce('), 'no second layout to move ghosts elsewhere');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- class-toggle filters (fixed rule set, no rebuild) ----------
+
+test('filter chips are baked with pressed state and hide through a small fixed class rule set — one rule per type + one per status', () => {
+  const { root } = fixtureProject();
+  try {
+    const { html, collected } = buildFixturePage(root);
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    const types = [...new Set(collected.units.map((u) => u.type || 'untyped'))].sort();
+    const statuses = [...new Set(collected.units.map((u) => u.status || 'active'))].sort();
+    for (const t of types) {
+      assert.match(chrome, new RegExp(`<button type="button" class="chip" aria-pressed="true" data-type="${t}"`),
+        `a baked chip exists for type ${t}`);
+    }
+    for (const s of statuses) {
+      assert.match(chrome, new RegExp(`data-status="${s}"`), `a baked chip exists for status ${s}`);
+    }
+    // The rule set is CLASSES on the container — exactly one hide rule per
+    // type + one per status, nothing per-node, no attribute selectors, no :has().
+    const hideRules = chrome.match(/#graph\.hide-\S+ \.\S+ \{ display: none; \}/g) || [];
+    assert.equal(hideRules.length, types.length + statuses.length,
+      'the hide rule set is exactly one class rule per type + one per status');
+    assert.doesNotMatch(chrome, /#graph[^{]*\[data-/, 'no attribute-selector hide rules');
+    assert.doesNotMatch(chrome, /#graph[^{}]*:has\(/, 'no :has() selector anchored on the container');
+    assert.match(chrome, /svg\.classList\.toggle\('hide-' \+/, 'chips toggle one container class');
+    assert.match(chrome, /setAttribute\('aria-pressed', String\(/, 'chips expose pressed-state changes');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the graph and list DOM are built exactly once — filters and mode changes toggle classes, markup is never rebuilt', () => {
+  const { root } = fixtureProject();
+  try {
+    const { html } = buildFixturePage(root);
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    assert.equal((chrome.match(/svg\.innerHTML/g) || []).length, 1,
+      'exactly one svg.innerHTML assignment: the one-time build');
+    assert.equal((chrome.match(/listEl\.innerHTML/g) || []).length, 1,
+      'exactly one listEl.innerHTML assignment: the one-time build');
+    assert.equal((chrome.match(/buildGraph\(\);/g) || []).length, 1,
+      'the graph build runs once, at init — never from a filter or mode handler');
+    // The list filter debounces keystrokes and toggles a hidden class per row.
+    assert.match(chrome, /setTimeout\(function \(\) \{ applyListFilter\(filterEl\.value\); \}, 100\)/,
+      'list filter debounced at 100ms');
+    assert.match(chrome, /r\.el\.classList\.toggle\('hidden'/, 'rows hide via class, not re-serialization');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- responsive + long-list rendering ----------
+
+test('responsive chrome keeps the mobile browse loop reachable; long lists render lazily via content-visibility', () => {
+  const { root } = fixtureProject();
+  try {
+    const { html } = buildFixturePage(root);
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    assert.match(chrome, /\.edge-legend svg\s*\{[^}]*min-height:\s*0/s,
+      'edge legend SVGs must override the graph SVG minimum height');
+    assert.match(chrome, /@media \(max-width: 860px\)[\s\S]*?\.sidebar\s*\{[^}]*max-height:\s*52vh !important/,
+      'the mobile unit list stays bounded instead of expanding every unit before the graph');
+    assert.match(chrome, /footer\s*\{[^}]*overflow-wrap:\s*anywhere/s,
+      'the snapshot id cannot force horizontal overflow');
+    const rowRule = chrome.match(/\.sidebar li\.row \{[^}]*\}/s);
+    assert.ok(rowRule, 'row rule present');
+    assert.match(rowRule[0], /content-visibility:\s*auto/, 'off-screen rows skip rendering');
+    assert.match(rowRule[0], /contain-intrinsic-size:/, 'skipped rows keep an intrinsic size (honest scrollbar)');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- age badge (staleness honesty: age, never staleness) ----------
+
+test('age badge: ISO datetime baked at build, relative age via Intl on visibilitychange, negative clamp, lastModified banned', () => {
+  const { root } = fixtureProject();
+  try {
+    const { html } = buildFixturePage(root);
+    assert.ok(html.includes('<time id="gen-time" datetime="2026-07-30T12:00:00.000Z">'),
+      'the time element carries the exact build stamp as machine-readable datetime');
+    const { raw } = extractDataBlock(html);
+    const chrome = html.replace(raw, '');
+    assert.match(chrome, /Intl\.RelativeTimeFormat/, 'relative age renders viewer-local with zero dependencies');
+    assert.match(chrome, /visibilitychange/, 'age recomputes when a backgrounded tab refocuses');
+    assert.match(chrome, /reload for the latest/, 'graduated copy past 24h names the action');
+    assert.match(chrome, /generated just now/, 'negative clock-skew deltas clamp to "just now"');
+    // The eternally-fresh trap: the spec makes the document's lastModified
+    // return the CURRENT time when unknown. It must be named (banned in a
+    // comment) and never read.
+    assert.match(chrome, /lastModified/, 'the ban on lastModified is written down where the age code lives');
+    assert.doesNotMatch(chrome, /document\.lastModified/, 'lastModified is never actually read');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---------- metrics decoupling (--metrics-cache) ----------
+
+test('metrics cache: a live run writes the cache; a present cache is embedded verbatim with its own stamp and the provider never runs', async () => {
+  const { root } = fixtureProject();
+  try {
+    const cachePath = join(root, 'ops', 'metrics-cache.json');
+    const live = async () => ({ report: 'LIVE REPORT ALPHA — planted by the test', mechanics: { status: 'WORKING' } });
+    const first = await resolveMetricsForRender(root, {
+      metricsProvider: live, metricsCachePath: cachePath, generatedAt: '2026-07-30T10:00:00.000Z',
+    });
+    assert.equal(first.available, true);
+    assert.equal(first.cached, false, 'no cache yet: the live provider ran');
+    const written = JSON.parse(readFileSync(cachePath, 'utf8'));
+    assert.equal(written.report, 'LIVE REPORT ALPHA — planted by the test', 'live block written to the cache');
+    assert.equal(written.generated_at, '2026-07-30T10:00:00.000Z', 'cache carries its own timestamp');
+    // Second run: cache present ⇒ embedded verbatim, provider must not run.
+    const second = await resolveMetricsForRender(root, {
+      metricsProvider: async () => { throw new Error('live metrics must not run when the cache exists'); },
+      metricsCachePath: cachePath, generatedAt: '2026-07-30T11:00:00.000Z',
+    });
+    assert.equal(second.available, true);
+    assert.equal(second.cached, true);
+    assert.equal(second.report, 'LIVE REPORT ALPHA — planted by the test', 'cached block verbatim');
+    assert.equal(second.as_of, '2026-07-30T10:00:00.000Z', 'labeled with the CACHE timestamp, not this run');
+    // The page labels a carried-forward block with the cache's own stamp.
+    const { html } = buildFixturePage(root, { metrics: second });
+    assert.ok(html.includes('LIVE REPORT ALPHA'), 'cached report embedded');
+    assert.match(html, /Metrics as of 2026-07-30T10:00:00\.000Z/, 'the "metrics as of" label carries the cache stamp');
+    // --no-metrics wins over the cache.
+    const skipped = await resolveMetricsForRender(root, { metricsProvider: null, metricsCachePath: cachePath });
+    assert.equal(skipped.available, false);
+    assert.match(skipped.reason, /--no-metrics/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a --metrics-cache path inside _memories/ is refused — the store stays read-only', async () => {
+  const { root, mem, home } = fixtureProject();
+  try {
+    await assert.rejects(
+      () => renderBrowseArtifact(root, {
+        outPath: join(root, 'out', 'view.html'), home, metricsProvider: stubMetrics,
+        metricsCachePath: join(mem, 'cache.json'),
+      }),
+      (e) => e.code === 'CACHE_IN_STORE');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+rtest('CLI: --metrics-cache with a pre-seeded cache embeds it, reports metrics_source cache, and never runs live metrics', () => {
+  const { root, home } = fixtureProject();
+  try {
+    const cachePath = join(root, 'ops', 'metrics-cache.json');
+    mkdirSync(dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, JSON.stringify({
+      kind: 'core-memory-metrics-cache',
+      generated_at: '2026-07-29T00:00:00.000Z',
+      report: 'CACHED REPORT BRAVO — seeded by the test',
+      mechanics_status: 'WORKING',
+    }, null, 2));
+    const out = join(root, 'out', 'v.html');
+    // No --no-metrics here: with the cache present, the live 2s proof must
+    // not run — the fast completion IS the decoupling working.
+    const res = spawnSync(process.execPath,
+      [CLI_PATH, root, '--out', out, '--home', home, '--metrics-cache', cachePath],
+      { encoding: 'utf8', timeout: 30000 });
+    assert.equal(res.status, 0, res.stderr);
+    const manifest = JSON.parse(res.stdout);
+    assert.equal(manifest.metrics_included, true);
+    assert.equal(manifest.metrics_source, 'cache');
+    assert.equal(manifest.metrics_as_of, '2026-07-29T00:00:00.000Z');
+    const html = readFileSync(out, 'utf8');
+    assert.ok(html.includes('CACHED REPORT BRAVO'), 'cached block embedded by the CLI path');
+    assert.match(html, /Metrics as of 2026-07-29T00:00:00\.000Z/, 'labeled with the cache stamp');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

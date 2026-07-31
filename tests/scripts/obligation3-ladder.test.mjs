@@ -2,9 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, cpSync, rmSync } from 'node:fs';
 import { retrieveContext } from '../../plugins/core/skills/core/scripts/retrieve-context.mjs';
 
-const FIXT = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+const FIXT_SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'obligation3-store');
+// The committed fixture is NEVER touched by tests — even "read" paths write the
+// cached index (_lib/unit-summaries.json) as a side effect, which polluted the
+// committed tree (retrieval-premise.test.mjs owns this pattern; the
+// fixture-cold-clean guard test enforces it). All reads run against a clone.
+const FIXT = mkdtempSync(join(tmpdir(), 'obligation3-store-'));
+cpSync(FIXT_SRC, FIXT, { recursive: true });
+process.on('exit', () => { try { rmSync(FIXT, { recursive: true, force: true }); } catch { /* tmpdir */ } });
 const RUNGS = [
   { rung: 'literal', hook: 'omega speedmaster sale email', expectId: 'want-omega-speedmaster-on-sale-wait' },
   { rung: 'category', hook: 'omega speedmaster professional listing', expectId: 'want-iconic-chronograph' },
@@ -21,9 +30,9 @@ test('ladder has four rungs with expected ids', () => {
   }
 });
 
-test('LEXICAL-TIER BASELINE: rung 1 hits, the abstract rungs miss (the gap Task 10 must close)', () => {
+test('LEXICAL-TIER BASELINE: rung 1 hits, the abstract rungs miss (the gap the Tier-3 reasoning shortlist closes)', () => {
   // Run the real deterministic retriever over each rung's present-day hook and score it.
-  // This is the measured baseline the abstract-relevance prototype (Task 10) improves on:
+  // This is the measured baseline the Tier-3 reasoning shortlist (select-relevant-units.mjs) improves on:
   // lexical clears the literal rung and is expected to miss the category/value rungs that
   // have no shared keyword. Cross-domain may or may not surface lexically.
   const retrievedByRung = {};

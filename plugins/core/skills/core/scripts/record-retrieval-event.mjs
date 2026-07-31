@@ -2,16 +2,16 @@
 /**
  * record-retrieval-event.mjs — producer helper for v3 retrieval evidence.
  *
- * This is the narrow write path for retrieval-shaped evidence. It reuses the
- * shared `logEvent()` substrate so one producer call writes both the legacy
- * `_sessions/<date>/retrieval-log.jsonl` row and the OTel trace span.
+ * This is the narrow write path for retrieval-shaped evidence. It validates
+ * the row, then writes it through the shared `logEvent()` substrate to
+ * `_sessions/<date>/retrieval-log.jsonl` — the sole event substrate.
  */
 
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { logEvent, sanitizeAttributeValue } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 // Stamped on every row this producer writes: a reader validating retrieval
 // rows needs to tell "written under the current, fully-enforced producer
@@ -149,11 +149,11 @@ export function normalizeRetrievalEvent(event) {
 }
 
 // Returns { record, written, write_outcome } — `written` is the authoritative
-// legacy-row delivery; callers that need delivery evidence must check it
+// JSONL-row delivery; callers that need delivery evidence must check it
 // rather than trusting the normalized record's existence.
 export function recordRetrievalEvent(projectDir, event, opts = {}) {
   const record = normalizeRetrievalEvent(event);
-  const outcome = logEvent(projectDir, 'retrieval-log.jsonl', record, opts) || { legacy: false, otel: false, reason: 'no-outcome' };
+  const outcome = logEvent(projectDir, 'retrieval-log.jsonl', record, opts) || { legacy: false, reason: 'no-outcome' };
   return { record, written: outcome.legacy === true, write_outcome: outcome };
 }
 
@@ -209,9 +209,6 @@ export function main(argv) {
   return out.written ? 0 : 1;
 }
 
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-const _cliEntryArgv1 = _cliEntryCanonical(process.argv[1]);
-const _cliEntrySelf = _cliEntryCanonical(fileURLToPath(import.meta.url));
-if (_cliEntryArgv1 === _cliEntrySelf) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main(process.argv.slice(2)));
 }

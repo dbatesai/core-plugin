@@ -16,23 +16,9 @@
       "invocation": "automatic"
     },
     {
-      "name": "Stop:answer-close-hook.mjs",
-      "kind": "hook",
-      "harness": "claude-code",
-      "status": "active",
-      "invocation": "automatic"
-    },
-    {
       "name": "UserPromptSubmit:retrieve-context-hook.mjs",
       "kind": "hook",
       "harness": "claude-code",
-      "status": "active",
-      "invocation": "automatic"
-    },
-    {
-      "name": "Stop:answer-close-hook-codex.mjs",
-      "kind": "hook",
-      "harness": "codex",
       "status": "active",
       "invocation": "automatic"
     },
@@ -47,486 +33,623 @@
       "name": "adversarial-run-gate",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/adversarial-run-gate.mjs",
       "surface": "shipped"
     },
     {
       "name": "aggregate-receipt",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/aggregate-receipt.mjs",
       "surface": "shipped"
     },
     {
       "name": "analyze-capability-drift",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/analyze-capability-drift.mjs",
       "surface": "shipped"
     },
     {
       "name": "analyze-retrieval-quality",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/analyze-retrieval-quality.mjs",
       "surface": "shipped"
     },
     {
       "name": "analyze-retrieval-skip",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/analyze-retrieval-skip.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "anti-anchoring-mechanism-probe",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/capability/anti-anchoring-mechanism-probe.mjs",
       "surface": "shipped"
     },
     {
       "name": "artifact-identity",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/artifact-identity.mjs",
       "surface": "shipped"
     },
     {
       "name": "artifact-provenance",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/artifact-provenance.mjs",
       "surface": "shipped"
     },
     {
       "name": "artifact-receipts",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/artifact-receipts.mjs",
       "surface": "shipped"
     },
     {
       "name": "audit-memory-boundary",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/audit-memory-boundary.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "auto-memory-injection-probe",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/capability/auto-memory-injection-probe.mjs",
       "surface": "shipped"
     },
     {
       "name": "backfill-memory",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/backfill-memory.mjs",
       "surface": "shipped"
     },
     {
       "name": "bitemporal",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/bitemporal.mjs",
       "surface": "shipped"
     },
     {
       "name": "bm25",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/bm25.mjs",
       "surface": "shipped"
     },
     {
       "name": "calibrate-classifier",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/calibrate-classifier.mjs",
       "surface": "shipped"
     },
     {
       "name": "capability-history",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/capability-history.mjs",
       "surface": "shipped"
     },
     {
       "name": "capability-probe",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/capability-probe.mjs",
       "surface": "shipped"
     },
     {
       "name": "check-context-integrity",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/check-context-integrity.mjs",
       "surface": "shipped"
     },
     {
       "name": "check-inbox",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/check-inbox.mjs",
       "surface": "shipped"
     },
     {
       "name": "check-units",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/check-units.mjs",
       "surface": "shipped"
     },
     {
       "name": "classify-turns",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/classify-turns.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "cli-entry",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/cli-entry.mjs",
       "surface": "shipped"
     },
     {
       "name": "close-pass",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/close-pass.mjs",
       "surface": "shipped"
     },
     {
       "name": "close-payload",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/close-payload.mjs",
       "surface": "shipped"
     },
     {
       "name": "compact-project",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/compact-project.mjs",
       "surface": "shipped"
     },
     {
       "name": "configure-project",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/configure-project.mjs",
       "surface": "shipped"
     },
     {
       "name": "contract-format",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/contract-format.mjs",
       "surface": "shipped"
     },
     {
       "name": "decorate-graph",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/decorate-graph.mjs",
       "surface": "shipped"
     },
     {
       "name": "demote-moves",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/demote-moves.mjs",
       "surface": "shipped"
     },
     {
       "name": "demote-state-narrative",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/demote-state-narrative.mjs",
       "surface": "shipped"
     },
     {
       "name": "enrichment-sidecar",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/enrichment-sidecar.mjs",
       "surface": "shipped"
     },
     {
       "name": "file-lock",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/file-lock.mjs",
       "surface": "shipped"
     },
     {
       "name": "frontmatter-flat",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/frontmatter-flat.mjs",
       "surface": "shipped"
     },
     {
       "name": "fs-atomic",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/fs-atomic.mjs",
       "surface": "shipped"
     },
     {
       "name": "generate-agents-md",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/generate-agents-md.mjs",
       "surface": "shipped"
     },
     {
       "name": "generate-claude-md",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/generate-claude-md.mjs",
       "surface": "shipped"
     },
     {
       "name": "generate-decisions-index",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/generate-decisions-index.mjs",
       "surface": "shipped"
     },
     {
       "name": "generate-memory-index",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/generate-memory-index.mjs",
       "surface": "shipped"
     },
     {
       "name": "generate-risks-index",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/generate-risks-index.mjs",
       "surface": "shipped"
     },
     {
       "name": "generate-summary-index",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/generate-summary-index.mjs",
       "surface": "shipped"
     },
     {
       "name": "graph-walk",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/graph-walk.mjs",
       "surface": "shipped"
     },
     {
       "name": "hardware-budget",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/hardware-budget.mjs",
       "surface": "shipped"
     },
     {
       "name": "hindsight-judge",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/hindsight-judge.mjs",
       "surface": "shipped"
     },
     {
       "name": "hot-section",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/hot-section.mjs",
       "surface": "shipped"
     },
     {
       "name": "impact-trace",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/impact-trace.mjs",
       "surface": "shipped"
     },
     {
       "name": "index-registry",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/index-registry.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "instruction-surface-resolution-probe",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/capability/instruction-surface-resolution-probe.mjs",
       "surface": "shipped"
     },
     {
       "name": "lifecycle-core",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/lifecycle-core.mjs",
       "surface": "shipped"
     },
     {
       "name": "lifecycle-detect",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/lifecycle-detect.mjs",
       "surface": "shipped"
     },
     {
       "name": "log-event",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/log-event.mjs",
       "surface": "shipped"
     },
     {
       "name": "maintenance-run",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/maintenance-run.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "memory-accessed-probe",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/capability/memory-accessed-probe.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "memory-view-watch",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/memory-view-watch.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "memory-visible-probe",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/capability/memory-visible-probe.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-check",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-check.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-dedupe",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-dedupe.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-detectors",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-detectors.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-disclosure",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-disclosure.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-init",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-init.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-package",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-package.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-package-report",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-package-report.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-rollup",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-rollup.mjs",
       "surface": "shipped"
     },
     {
       "name": "metrics-tripwires",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/metrics-tripwires.mjs",
       "surface": "shipped"
     },
     {
       "name": "migrate-to-contract",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/migrate-to-contract.mjs",
       "surface": "shipped"
     },
     {
       "name": "orphan-detector",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/orphan-detector.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "outcome-vocab",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/outcome-vocab.mjs",
       "surface": "shipped"
     },
     {
       "name": "priority",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/priority.mjs",
       "surface": "shipped"
     },
     {
       "name": "producer-identity",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/producer-identity.mjs",
       "surface": "shipped"
     },
     {
       "name": "project-slug",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/project-slug.mjs",
       "surface": "shipped"
     },
     {
       "name": "read-transcript",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/read-transcript.mjs",
       "surface": "shipped"
     },
     {
       "name": "record-capability-snapshot",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/record-capability-snapshot.mjs",
       "surface": "shipped"
     },
     {
       "name": "record-retrieval-event",
       "kind": "script",
       "harness": "shared",
-      "surface": "shipped"
-    },
-    {
-      "name": "record-retrieval-outcome",
-      "kind": "script",
-      "harness": "shared",
+      "path": "skills/core/scripts/record-retrieval-event.mjs",
       "surface": "shipped"
     },
     {
       "name": "render-browse-artifact",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/render-browse-artifact.mjs",
       "surface": "shipped"
     },
     {
       "name": "render-metrics-artifact",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/render-metrics-artifact.mjs",
       "surface": "shipped"
     },
     {
       "name": "resolve-plugin-root",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/resolve-plugin-root.mjs",
       "surface": "shipped"
     },
     {
       "name": "retrieval-harness",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/retrieval-harness.mjs",
       "surface": "shipped"
     },
     {
       "name": "retrieve-context",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/retrieve-context.mjs",
       "surface": "shipped"
     },
     {
       "name": "scorecard",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/scorecard.mjs",
       "surface": "shipped"
     },
     {
       "name": "select-relevant-units",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/select-relevant-units.mjs",
       "surface": "shipped"
     },
     {
       "name": "self-test-round",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/self-test-round.mjs",
       "surface": "shipped"
     },
     {
       "name": "state-cache",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/state-cache.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "target-surface-collab-files-probe",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/capability/target-surface-collab-files-probe.mjs",
       "surface": "shipped"
     },
     {
       "name": "text-truncate",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/text-truncate.mjs",
       "surface": "shipped"
     },
     {
       "name": "trusted-home",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/trusted-home.mjs",
       "surface": "shipped"
     },
     {
       "name": "turn-capture",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/turn-capture.mjs",
       "surface": "shipped"
     },
     {
       "name": "unit-vocab",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/unit-vocab.mjs",
       "surface": "shipped"
     },
     {
       "name": "validate",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/validate.mjs",
       "surface": "shipped"
     },
     {
       "name": "workspace-fork-check",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/workspace-fork-check.mjs",
       "surface": "shipped"
     },
     {
       "name": "write-visibility-canary",
       "kind": "script",
       "harness": "shared",
+      "path": "skills/core/scripts/write-visibility-canary.mjs",
       "surface": "shipped"
     },
     {

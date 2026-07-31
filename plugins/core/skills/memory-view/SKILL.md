@@ -27,7 +27,7 @@ node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" <project-dir>
   --out <scratch-path>/core-memory-browse.html [--scope ...] [--exclude-topic ...]
 ```
 
-`--out` goes to a scratch/temp location — **never inside the project, never inside `_memories/`** (the script refuses the latter itself). The store is read-only to this whole flow. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2.
+`--out` goes to a scratch/temp location — **never inside the project, never inside `_memories/`** (the script refuses the latter itself). The store is read-only to this whole flow, unconditionally — generation never writes a byte under `_memories/`, not even the derived `_lib/` index cache on a cold store. One invariant, no mode, no flag. Passing `--metrics-cache` together with `--no-metrics` is refused loudly (exit 2) — the two flags contradict, and the script no longer picks a silent winner. Stdout is the **preflight manifest** (JSON): unit count, byte count, scope, store snapshot id, receipt path, and a fixed sensitivity warning. Capture it — it is the input to Step 2. The snapshot id covers exactly the scoped population the page embeds: an `all-including-archive` render's id also covers the archive bytes it shows; an active render's id is the plain store snapshot id.
 
 ## Step 2 — the manifest, and consent per the user's mode (EVERY publish)
 
@@ -72,6 +72,57 @@ node "${CORE_ROOT}/skills/core/scripts/render-browse-artifact.mjs" --record-publ
 - If the user later deletes the artifact (or asks you to revoke it): `node ... --record-revocation <publish-receipt-path>` stamps `revoked_at` on the same receipt.
 
 Then tell the user the deletion path, honestly: they can delete the artifact from their artifact gallery at claude.ai (or ask you to overwrite it with an empty page first), **and** deleting a hosted artifact may not scrub hosted copies or caches instantly — say that plainly rather than implying deletion is instant and total. The **publish receipt** — not the generation manifest — stays on their machine as the record of what actually went up.
+
+## Live mode — `/memory-view live`
+
+Keeps the published page current while the session runs: the platform already updates a republished artifact in place for anyone who has it open, so "live" is exactly **watch → rebuild → republish the same URL** — no in-page freshness machinery exists or is needed. Live mode is user-triggered like everything else here; it never starts at startup, at session close, or on a schedule.
+
+**Consent basis for the loop's republishes:** the per-republish consent basis is the standing-authorization mechanism this skill already documents in Step 2 — live mode is only available in standing-authorization mode, because an unattended loop cannot stop and ask. If this user has no standing authorization on record, say so and offer the normal one-shot flow instead; do not start the loop. The grant is **prospective and bounded**: it authorizes future republishes of this loop **only within the scope and exclusions recorded at start** (persisted in the loop-state record below, with the grant's basis in its `grant_basis` field) — it is never a blanket license for whatever the store comes to contain. **The boundary rule:** the user must stop live mode before sensitive or third-party content enters the store; and at every refresh, YOU re-check the same boundary — if you know another party's data or user-flagged sensitive content has entered the rendered scope, stop the loop and fall back to ask-first rather than republishing under the old grant. (This is your judgment at render time — the watcher never inspects content, and no classifier exists or should.) All of Step 2's language still binds every republish: narrated in the conversation where it happens, always-ask when another party's data or user-flagged sensitive content is involved, stop-and-record-declined if the user objects.
+
+**Start.** Run the existing Steps 1–4 once (generate → manifest/consent → publish private → `--record-publish`). Then write the **loop-state record** — one small JSON file that is the loop's single source of truth across every hop:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" --write-live-state \
+  ~/.core/workspaces/<workspace-id>/memory-view-live.json \
+  --artifact-url <hosted URL from the publish receipt> \
+  --scope <active|all-including-archive> [--exclude-topic <t>]... \
+  --baseline-snapshot <snapshot_id from the publish receipt> \
+  --grant-basis "<the standing grant this loop runs under: who granted, when, recorded where>"
+```
+
+The record carries `artifact_url`, `scope`, `excluded_topics`, `grant_basis`, `baseline_snapshot`, `publish_budget` (`window_start`, `count`), and `retry_at`, and every write replaces it atomically. The loop persists the scope and excluded topics here precisely so a later refresh can never silently widen the published content or narrow an archive view: **every refresh render re-applies the record's `--scope` and every `--exclude-topic` entry, read back from the record — never from conversation memory.**
+
+**Arm.** Start the watcher as a **harness background task** (Bash with `run_in_background` on Claude Code — not a shell `&`):
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" <project-dir> \
+  --live-state ~/.core/workspaces/<workspace-id>/memory-view-live.json
+```
+
+The watcher reads `baseline_snapshot`, `scope`, `excluded_topics`, and `retry_at` from the record and compares the **same-scoped, same-exclusions** snapshot id the renderer receipts — an `all-including-archive` view is compared over active + archive bytes, an active view over active bytes only, so an archive-only edit wakes an archive-including view and never an active one. Topic exclusions participate in that identity: it covers exactly the population the page embeds, so an edit wholly inside an excluded topic does **not** wake the loop (the page's bytes could not change), while any edit to a kept unit does. A record the watcher cannot honor — missing, corrupt, or wrong-schema at an explicitly passed `--live-state` path — is a configuration error: the watcher refuses to arm (exit 1, named reason on stderr) rather than silently arming with defaults that could reset scope or lose a deferred publish.
+
+**Wake mechanism — what actually happens.** The watcher is a **detector, not a publisher**: it never renders, never publishes, never writes into the store (not even the derived index cache), and it never writes the loop-state record. On detection it prints one JSON line — `{"event":"store-changed","snapshot_id":…,"units_seen":…,"trigger":…,"observed_at":…}` — and **exits 0**. The harness notifies the agent when a background task **exits**; that exit notification is the wake, and reading the task's captured stdout at wake yields the store-changed line. A background process streaming stdout does **not** wake an agent mid-run — never describe or rely on stdout streaming as a wake path. A watcher started as a plain shell-backgrounded child (`&`) wakes nobody and **can outlive a dead session**; always start it as a harness background task. A missed wake is recoverable by design: **every arm begins with an immediate same-scoped baseline comparison**, so anything that changed while no watcher was listening — including a write landing in the window between a previous watcher's detection and its exit — is caught the moment the next watcher arms, not at the next store edit or sweep.
+
+On each wake:
+
+1. Read the loop-state record. Re-check the grant boundary (above) against what you know entered the store; then re-render with the record's `--scope`, every entry of its `excluded_topics` as `--exclude-topic`, plus `--metrics-cache <workspace metrics cache path>` (the health section carries forward from the last full run with its own "metrics as of" stamp; the ~2s metrics round-trip stays out of the hot path — and note the cache flag rides **alone**, per Step 1's flag-conflict rule).
+2. Republish to the record's `artifact_url` (same page, same link), re-verifying privacy per Step 3.
+3. `--record-publish` per Step 4 — a fresh generation receipt per rebuild, citing the standing authorization as the consent mechanism.
+4. Update the record with `--write-live-state` again: the new `--baseline-snapshot` from the fresh publish receipt, the **same** scope and exclusions, and `--publish-count`/`--window-start` advanced per the budget below.
+5. Narrate one line: what changed (unit count, new snapshot id), where it went.
+6. Re-arm the watcher with `--live-state` (harness background task again).
+
+**Detection SLO, honestly labeled.** Ordinary event-path latency is about a second (250ms debounce plus one signature read). Two situations degrade detection latency to the **sweep interval** (default 5 minutes): silently dropped file-system events (the periodic sweep is the designed recovery), and **degraded sweep-only mode** — when `fs.watch` cannot arm, or later dies, with a resource-exhaustion error (`EMFILE`/`ENFILE`/`ENOSPC`, e.g. a 256-fd environment), the watcher does **not** exit: it prints one status line — `{"event":"degraded","reason":"emfile","mode":"sweep-only",…}` — closes the dead watch handle, and keeps running on its independent sweep. In degraded mode **the sweep interval is the freshness SLO**; narrate the degradation once and keep the loop going — never treat the status line as an exit, and never restart-loop a watcher that is alive and sweeping. A second non-terminal status line exists for the same family of trouble: when a check's store read comes back **incomplete** (descriptor exhaustion, permissions — the traversal itself failed), the watcher prints `{"event":"check-failed","reason":"store-read-incomplete",…}`, keeps its baseline, and retries at the next sweep — an unreadable store is never reported as a changed (or empty) one.
+
+**Publish budget: 12 republishes per rolling hour** (default; tracked in the record's `publish_budget`). When a wake would exceed it, do not publish: narrate the deferral, write the record with `--write-live-state --retry-at <ISO of when the window reopens>` **keeping the old baseline**, and re-arm with `--live-state`. The watcher holds all comparisons until `retry_at` passes, then compares once and wakes only if the store still differs — deferral never busy-loops against the deliberately-stale baseline and never loses a change (the next render reads the whole store).
+
+**Failure honesty.** A failed render or publish leaves the last published version standing — the platform keeps serving it. Narrate the failure, record `--status failed`, keep the record's baseline unchanged, and re-arm; the next detection retries the still-changed store. Never claim the page is current when a republish failed.
+
+**Stop doors.**
+- `/memory-view live stop` — kill the watcher process (you started it; you have its PID) and confirm the loop is stopped in one line. The page stays up at its last published state.
+- **Session end** — stated at exactly the strength the evidence supports: no platform here *guarantees* a background child dies with its session, so a shell-orphaned watcher **can** outlive a dead session — briefly. The watcher owns its own lifecycle instead of trusting teardown: it checks its parent process every half-second and, the moment the parent is gone, prints `{"event":"orphaned"}` and **exits 4** — an orphan shuts itself down within about a second, and it was only ever a detector (it cannot render, publish, or write anything). Recovery never depends on teardown either way: the next live start's arm-time baseline check covers everything that changed while nothing was listening. If you somehow find a stale watcher still running at live start, kill it, then arm fresh.
+- **Idle timeout** — after 4 hours with no store change the watcher exits 2 with `{"event":"idle-timeout"}`; narrate one line that live mode ended idle and do not restart unless asked.
+- A watcher exit 3 means it was deliberately signalled; exit 4 means it detected its owner was gone and stopped itself; exit 1 with an "emit failed" diagnostic means its wake line could not land (exit 0 always means the store-changed line did land). Any other nonzero exit means it died — narrate and either re-arm or stop, don't ignore it.
 
 ## Boundary that never moves
 

@@ -15,10 +15,11 @@ import {
   readFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { parseFrontmatter } from './priority.mjs';
+import { isCliEntry } from './cli-entry.mjs';
 
 export const ENRICHMENT_SCHEMA = 'core-enrichment-sidecar/1';
 
@@ -175,7 +176,7 @@ function main(argv) {
   return 0;
 }
 
-if (basename(process.argv[1] || '') === 'enrichment-sidecar.mjs') {
+if (isCliEntry(import.meta.url)) {
   try { process.exit(main(process.argv.slice(2))); }
   catch (error) { process.stderr.write(`${error.message}\n`); process.exit(1); }
 }

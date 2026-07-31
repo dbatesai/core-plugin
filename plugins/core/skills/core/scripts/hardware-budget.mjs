@@ -14,8 +14,7 @@
  */
 
 import { totalmem } from 'node:os';
-import { realpathSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { isCliEntry } from './cli-entry.mjs';
 
 export function classifyHardware(totalBytes) {
   const gb = Math.round(totalBytes / (1024 ** 3));
@@ -31,7 +30,6 @@ export function main() {
   return 0;
 }
 
-const _cliEntryCanonical = (p) => { try { return realpathSync(p); } catch { return p; } };
-if (_cliEntryCanonical(process.argv[1]) === _cliEntryCanonical(fileURLToPath(import.meta.url))) {
+if (isCliEntry(import.meta.url)) {
   process.exit(main());
 }
