@@ -13,10 +13,11 @@
  * metrics opt-out). Rationale: a default-off, manually-wired hook is invisible machinery no real
  * user would enable — the north-star ("never fail to retrieve") is only served if it's
  * actually live, and only then can the metrics layer measure whether injection helps.
- * A zero-hit lexical result injects a bounded Tier 3 directive that tells the active model
- * to inspect every exhaustive reasoning shard. Known limit: when lexical matching
- * returns topical-but-irrelevant context, only the active model can judge insufficiency and
- * follow the same Tier 3 protocol; the model-free hook cannot decide semantic relevance.
+ * When the keyword result is thin (a question whose ranking has no clear winner) or
+ * empty, the hook also injects the first two candidate shards — up to 160 units as
+ * `id — summary`, ordered by the enrichment arm then the substrate — so the active model
+ * reasons over them in the same turn. CORE_ESCALATION=0 restores the text-only directive
+ * on a zero-hit; the shard pack is capped separately (CORE_ESCALATION_BYTE_CAP, lower only).
  * To opt out:
  *
  *   // ~/.claude/settings.json  (or set the env var)
@@ -42,6 +43,7 @@ import { metricsEnabled } from '../scripts/log-event.mjs';
 import { captureTurnEvidence, turnCaptureEnabled, computeStoreSignature } from '../scripts/turn-capture.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
+import { thinSignal, shouldEscalate, buildReasoningShards, renderEscalationPack, escalationByteCap } from '../scripts/reasoning-shortlist.mjs';
 import { logHookEvent, PRODUCER_VERSION, PRODUCER_SHA } from './hook-log.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
@@ -146,6 +148,28 @@ export async function main() {
   let retrievalId = null;
   let turnCaptureStatus = null; // closed status code for the terminal receipt (captured/disabled/capture-failed)
   let reasoningDirective = '';
+  // Reasoning escalation: on a thin or empty keyword result, inject the first two
+  // candidate shards so the active model reasons over them this turn. Built here,
+  // unconditionally and before the telemetry block, for the same reason as the
+  // directive below: it is delivered content, and the event must record what was
+  // actually constructed. Fail-open: any failure falls back to the directive path.
+  let escalation = 'none';
+  let escalationPack = '';
+  let shardRows = 0;
+  const escalationEnabled = process.env.CORE_ESCALATION !== '0';
+  if (escalationEnabled) {
+    let thin = zeroHit;
+    if (!thin) {
+      try { thin = shouldEscalate(thinSignal(prompt, store, { snapshot: trace.stages?.snapshot || null })); } catch { thin = false; }
+    }
+    if (thin) {
+      try {
+        const shards = buildReasoningShards(prompt, store, { shards: 2, shardSize: 80, snapshot: trace.stages?.snapshot || null });
+        const pack = renderEscalationPack(shards, { byteCap: escalationByteCap() });
+        if (pack.rows > 0) { escalationPack = pack.text; shardRows = pack.rows; escalation = 'shards'; }
+      } catch { /* fall through: the zero-hit directive below still fires */ }
+    }
+  }
   // Built unconditionally, BEFORE the metrics-gated block below and BEFORE the
   // event record inside it: this is delivered content, not telemetry --
   // opting out of telemetry (CORE_METRICS_ENABLED=0) must never change what
@@ -153,12 +177,13 @@ export async function main() {
   // keeps it ahead of the event record (which lives inside the metrics branch
   // and reads this value) so directive_fired reflects the real constructed
   // outcome, not intent.
-  if (zeroHit) {
+  if (zeroHit && !escalationPack) {
     try {
       const shards = selectCandidates(prompt, store, { shardSize: 80 });
       if (shards.length) {
         const unitsTotal = shards[0].units_total;
         reasoningDirective = `CORE reasoning escalation required: Tier 1 found no lexical context. Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
+        escalation = 'directive';
       }
     } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
   }
@@ -221,6 +246,8 @@ export async function main() {
         candidate_count: Array.isArray(trace.stages.substrate) ? trace.stages.substrate.length : units.length,
         selected_count: trace.pack && Array.isArray(trace.pack.accepted) ? trace.pack.accepted.length : units.length,
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
+        escalation,
+        ...(shardRows ? { shard_rows: shardRows } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
 
@@ -276,7 +303,7 @@ export async function main() {
     telemetryReason = 'pipeline-error'; // fail-open by contract — surfaced in the terminal receipt below
   }
 
-  const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective);
+  const injected = Boolean((trace.pack && trace.pack.text) || reasoningDirective || escalationPack);
   // Pack and directive are mutually exclusive: the directive only exists on a
   // true Tier 1 zero-hit, and a zero-hit pack has no text. buildFinalContextPack
   // already budgets packText in real UTF-8 bytes (Buffer.byteLength);
@@ -287,7 +314,12 @@ export async function main() {
   const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
   if (packText) {
     process.stdout.write(packText);
-  } else if (reasoningDirective) {
+  }
+  if (escalationPack) {
+    // The shard pack has its own budget (already enforced at a whole-row boundary);
+    // it never competes with the ordinary pack's cap.
+    process.stdout.write(escalationPack);
+  } else if (!packText && reasoningDirective) {
     process.stdout.write(truncateUtf8(reasoningDirective, byteCap));
   }
 
@@ -295,7 +327,10 @@ export async function main() {
   // the user-facing injection (action) and what happened to telemetry (reason).
   let action;
   let reason;
-  if (reasoningDirective) {
+  if (escalationPack && !packText) {
+    action = 'delivered';
+    reason = 'no-hit'; // the substrate found nothing; the shard pack is the escalation, not a hit
+  } else if (reasoningDirective) {
     action = 'delivered';
     // The directive only fires on a true Tier 1 zero-hit, so 'no-hit' is the
     // honest reason; a telemetry failure still rides the receipt as the
@@ -321,6 +356,7 @@ export async function main() {
     // content — so a capture (or a silent capture failure) is observable on
     // the receipt in addition to the stream's own health counter.
     ...(turnCaptureStatus ? { turn_capture: turnCaptureStatus } : {}),
+    escalation,
   });
 }
 

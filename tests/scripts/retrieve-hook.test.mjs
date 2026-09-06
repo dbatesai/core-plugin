@@ -173,7 +173,9 @@ test('hit event: ladder tier from producing stage, observed terms, correlation p
 test('empty result is an honest no-hit at the tier actually run — never a fabricated Tier-3 miss', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-nohit-')));
   try {
-    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1' }, root);
+    // CORE_ESCALATION=0 keeps the text-only directive path under test; with
+    // escalation on (the default) a zero-hit injects the shard pack instead.
+    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_ESCALATION: '0' }, root);
     assert.match(out, /CORE reasoning escalation required/);
     assert.match(out, /inspect all 1 shard\(s\) covering 2 active units/);
     assert.ok(Buffer.byteLength(out, 'utf8') <= 2048, 'reasoning directive stays inside the hook cap');
@@ -198,7 +200,7 @@ test('empty result is an honest no-hit at the tier actually run — never a fabr
 test('absence: CORE_REASONING_ARM no longer suppresses the zero-hit directive (former deterministic-only arm is gone)', () => {
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-arm-det-')));
   try {
-    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'deterministic-only' }, root);
+    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_REASONING_ARM: 'deterministic-only', CORE_ESCALATION: '0' }, root);
     assert.match(out, /CORE reasoning escalation required/, 'the true zero-hit directive fires regardless of the deleted control');
     const [evt] = readEventRows(root);
     assert.equal(evt.result, 'no-hit');
@@ -283,7 +285,7 @@ test('metrics-off automatic zero-hit still escalates (telemetry opt-out must not
   const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-optout-zerohit-')));
   try {
     const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '0' }, root);
-    assert.match(out, /CORE reasoning escalation required/, 'the directive must still fire with metrics off');
+    assert.match(out, /CORE memory escalation:/, 'the escalation pack must still fire with metrics off');
     assert.equal(readEventRows(root).length, 0, 'no telemetry row, but the delivered content is unaffected');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -451,4 +453,47 @@ test('absence: no outcome-pipeline residue in the hook source, and the recorder 
   const recorder = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
     'plugins', 'core', 'skills', 'core', 'scripts', 'record-retrieval-outcome.mjs');
   assert.ok(!ex(recorder), 'record-retrieval-outcome.mjs is gone from the shipped tree');
+});
+
+// Reasoning escalation (S2): on a thin or empty keyword result the hook injects the
+// first two candidate shards (id — summary) so the active model reasons over them.
+
+test('escalation: a zero-hit injects the shard pack; CORE_ESCALATION=0 restores the text directive', () => {
+  const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1' });
+  assert.match(out, /^CORE memory escalation:/m, 'pack header present');
+  assert.match(out, /^values-heritage — /m, 'a fixture unit appears as an id — summary row');
+  assert.doesNotMatch(out, /CORE reasoning escalation required/, 'the pack replaces the directive');
+  assert.ok(Buffer.byteLength(out, 'utf8') <= 32768, 'pack inside its own cap');
+  const rows = readEventRows(FIXT).slice(-1);
+  assert.equal(rows[0].result, 'no-hit', 'the substrate still reports an honest no-hit');
+  assert.equal(rows[0].escalation, 'shards');
+  assert.ok(Number.isInteger(rows[0].shard_rows) && rows[0].shard_rows > 0);
+
+  const off = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_ESCALATION: '0' });
+  assert.match(off, /CORE reasoning escalation required/);
+  assert.doesNotMatch(off, /CORE memory escalation:/);
+  const offRows = readEventRows(FIXT).slice(-1);
+  assert.equal(offRows[0].escalation, 'directive');
+  assert.equal(offRows[0].shard_rows, undefined);
+});
+
+test('escalation: a literal prompt gets the ordinary pack only, event escalation none', () => {
+  const out = runHook('speedmaster', { CORE_METRICS_ENABLED: '1' });
+  assert.match(out, /speedmaster/i, 'ordinary pack delivered');
+  assert.doesNotMatch(out, /CORE memory escalation:/);
+  const evt = readEventRows(FIXT).at(-1);
+  assert.equal(evt.escalation, 'none');
+  assert.equal(evt.shard_rows, undefined);
+});
+
+test('escalation: an abstract question with a flat ranking gets ordinary pack + shard pack', () => {
+  // Terms that each touch several fixture units with no clear winner.
+  const q = 'should I keep waiting on the watch purchase decision or move on?';
+  const out = runHook(q, { CORE_METRICS_ENABLED: '1' });
+  const evt = readEventRows(FIXT).at(-1);
+  if (evt.result === 'no-hit') return; // ranking-dependent; the zero-hit test covers this branch
+  assert.match(out, /CORE memory escalation:/, 'pack follows the ordinary pack on a thin result');
+  assert.ok(out.indexOf('CORE memory escalation:') > 0, 'ordinary pack comes first');
+  assert.equal(evt.escalation, 'shards');
+  assert.ok(Number.isInteger(evt.shard_rows) && evt.shard_rows > 0);
 });
