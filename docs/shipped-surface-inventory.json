@@ -520,6 +520,13 @@
       "surface": "shipped"
     },
     {
+      "name": "reasoning-shortlist",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/reasoning-shortlist.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "record-capability-snapshot",
       "kind": "script",
       "harness": "shared",

@@ -38,8 +38,11 @@ test('healthy pinned history renders three answer lines + the nothing-needs-atte
   const root = mkdtempSync(join(tmpdir(), 'ans-healthy-'));
   try {
     const project = makeProject(root);
-    appendScorecard(project, card('2026-07-20T00:00:00Z', { self_test: { headline: 0.80, round_id: 1 } }));
-    appendScorecard(project, card('2026-07-21T00:00:00Z'));
+    // Relative timestamps: the staleness wire reads the wall clock, so a healthy
+    // history must be recent on the day the test runs.
+    const day = 24 * 3600 * 1000;
+    appendScorecard(project, card(new Date(Date.now() - 2 * day).toISOString(), { self_test: { headline: 0.80, round_id: 1 } }));
+    appendScorecard(project, card(new Date(Date.now() - day).toISOString()));
     const view = renderAnswerView(gatherAnswers(project));
     assert.match(view, /Is it storing the right memories\?/);
     assert.match(view, /Is it loading them when you need\?/);
