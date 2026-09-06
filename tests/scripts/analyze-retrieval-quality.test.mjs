@@ -499,7 +499,7 @@ test('escalation rate: per-turn hook events count none/directive/shards; rows wi
     { ...base, trigger: 'manual', escalation: 'shards' }, // not a per-turn row
   ]);
   const e = report.escalation;
-  assert.deepEqual(e, { per_turn: 5, none: 2, directive: 1, shards: 1, legacy: 1, rate: 0.5, mean_shard_rows: 120 });
+  assert.deepEqual(e, { per_turn: 5, none: 2, directive: 1, shards: 1, unenriched: 0, legacy: 1, rate: 0.5, mean_shard_rows: 120 });
   const text = formatReport(report);
   assert.match(text, /Escalation rate: 50% of 4 per-turn retrievals \(shards 1, directive 1\)/);
 });

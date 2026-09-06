@@ -43,7 +43,7 @@ import { metricsEnabled } from '../scripts/log-event.mjs';
 import { captureTurnEvidence, turnCaptureEnabled, computeStoreSignature } from '../scripts/turn-capture.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
-import { thinSignal, shouldEscalate, buildReasoningShards, renderEscalationPack, escalationByteCap } from '../scripts/reasoning-shortlist.mjs';
+import { thinSignal, shouldEscalate, buildReasoningShards, renderEscalationPack, escalationByteCap, packAllowed } from '../scripts/reasoning-shortlist.mjs';
 import { logHookEvent, PRODUCER_VERSION, PRODUCER_SHA } from './hook-log.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
@@ -164,9 +164,18 @@ export async function main() {
     }
     if (thin) {
       try {
-        const shards = buildReasoningShards(prompt, store, { shards: 2, shardSize: 80, snapshot: trace.stages?.snapshot || null });
-        const pack = renderEscalationPack(shards, { byteCap: escalationByteCap() });
-        if (pack.rows > 0) { escalationPack = pack.text; shardRows = pack.rows; escalation = 'shards'; }
+        const snapshot = trace.stages?.snapshot || null;
+        // The shard order only carries the measured lift on an enriched store;
+        // an unenriched store gets the pack only when two shards already cover
+        // every unit. Otherwise the text directive below is the honest fallback.
+        const gate = packAllowed(store, { shards: 2, shardSize: 80, snapshot });
+        if (!gate.allowed) {
+          escalation = 'unenriched';
+        } else {
+          const shards = buildReasoningShards(prompt, store, { shards: 2, shardSize: 80, snapshot });
+          const pack = renderEscalationPack(shards, { byteCap: escalationByteCap() });
+          if (pack.rows > 0) { escalationPack = pack.text; shardRows = pack.rows; escalation = 'shards'; }
+        }
       } catch { /* fall through: the zero-hit directive below still fires */ }
     }
   }
@@ -183,7 +192,7 @@ export async function main() {
       if (shards.length) {
         const unitsTotal = shards[0].units_total;
         reasoningDirective = `CORE reasoning escalation required: Tier 1 found no lexical context. Follow the Tier 3 retrieval protocol and inspect all ${shards.length} shard(s) covering ${unitsTotal} active units with select-relevant-units.mjs; reason over each shard using the current prompt before concluding no relevant memory exists.\n`;
-        escalation = 'directive';
+        if (escalation === 'none') escalation = 'directive';
       }
     } catch { /* fail-open: the ordinary no-hit remains honest and observable */ }
   }

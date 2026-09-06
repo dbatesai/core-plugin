@@ -437,18 +437,18 @@ function formatByCode(bucket) {
  * so a misfiring trigger floor shows up here rather than staying invisible.
  */
 export function computeEscalationRate(events) {
-  const out = { per_turn: 0, none: 0, directive: 0, shards: 0, legacy: 0, rate: null, mean_shard_rows: null };
+  const out = { per_turn: 0, none: 0, directive: 0, shards: 0, unenriched: 0, legacy: 0, rate: null, mean_shard_rows: null };
   const rows = [];
   for (const ev of events) {
     if (!ev || ev.trigger !== 'per-turn-hook') continue;
     out.per_turn++;
-    if (ev.escalation === 'none' || ev.escalation === 'directive' || ev.escalation === 'shards') {
+    if (['none', 'directive', 'shards', 'unenriched'].includes(ev.escalation)) {
       out[ev.escalation]++;
       if (ev.escalation === 'shards' && Number.isInteger(ev.shard_rows)) rows.push(ev.shard_rows);
     } else out.legacy++;
   }
-  const known = out.none + out.directive + out.shards;
-  if (known) out.rate = (out.directive + out.shards) / known;
+  const known = out.none + out.directive + out.shards + out.unenriched;
+  if (known) out.rate = (out.directive + out.shards + out.unenriched) / known;
   if (rows.length) out.mean_shard_rows = Math.round(rows.reduce((a, b) => a + b, 0) / rows.length);
   return out;
 }
@@ -524,8 +524,8 @@ export function formatReport(report) {
   lines.push('Note: T1 counts only logged retrievals — days with no retrieval events are excluded, not counted as perfect T1.');
   const esc = report.escalation;
   if (esc && esc.rate !== null) {
-    const known = esc.none + esc.directive + esc.shards;
-    lines.push(`Escalation rate: ${pct(esc.rate)} of ${known} per-turn retrievals (shards ${esc.shards}, directive ${esc.directive})${esc.mean_shard_rows ? ` · mean ${esc.mean_shard_rows} shard rows` : ''}${esc.legacy ? ` · ${esc.legacy} older rows without the field` : ''}`);
+    const known = esc.none + esc.directive + esc.shards + esc.unenriched;
+    lines.push(`Escalation rate: ${pct(esc.rate)} of ${known} per-turn retrievals (shards ${esc.shards}, directive ${esc.directive}${esc.unenriched ? `, withheld on an unenriched store ${esc.unenriched}` : ''})${esc.mean_shard_rows ? ` · mean ${esc.mean_shard_rows} shard rows` : ''}${esc.legacy ? ` · ${esc.legacy} older rows without the field` : ''}`);
   }
   lines.push('');
 

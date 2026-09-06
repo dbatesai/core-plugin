@@ -13,8 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (up to 160 `id — summary` rows, enrichment-ordered, 32 KB cap) so the active model reasons
   over them in the same turn. `CORE_ESCALATION=0` restores the text-only directive;
   `CORE_ESCALATION_BYTE_CAP` lowers the cap; `CORE_ESCALATION_MIN_TERMS` /
-  `CORE_ESCALATION_FLAT_FLOOR` move the trigger. New module `scripts/reasoning-shortlist.mjs`.
-- Retrieval events and the hook receipt carry `escalation: none | directive | shards` and
+  `CORE_ESCALATION_FLAT_FLOOR` / `CORE_ESCALATION_MAX_TERMS` move the trigger. Prompts over 40
+  content terms never trigger. On a store where under half the active units carry a current
+  enrichment record (and two shards aren't already exhaustive) the pack is withheld and the
+  event says `escalation: unenriched` — `CORE_ESCALATION_ENRICHMENT_FLOOR` moves that gate.
+  New module `scripts/reasoning-shortlist.mjs`.
+- Retrieval events and the hook receipt carry `escalation: none | directive | shards | unenriched` and
   `shard_rows`; `analyze-retrieval-quality.mjs` reports the escalation rate.
 - Retrieval harness `escalated` arm: with `CORE_HARNESS_REASONER` set to a command that reads
   the pack on stdin and prints `{"picks":[ids]}`, the arm ranks the reasoner's picks ahead of

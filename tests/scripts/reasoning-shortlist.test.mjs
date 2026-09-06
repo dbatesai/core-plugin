@@ -33,10 +33,10 @@ test('thinSignal: an abstract question with no shared words has a flat top and e
   assert.equal(shouldEscalate(s), true);
 });
 
-test('shouldEscalate: commands and short prompts never escalate; zero-hit always does', () => {
+test('shouldEscalate: commands and short prompts never escalate; a real zero-hit does', () => {
   assert.equal(shouldEscalate({ qterms: 5, isQuestion: false, top: 12, flatTop: 0.96, zeroHit: false }), false, 'a command with a flat top is still a command');
   assert.equal(shouldEscalate({ qterms: 2, isQuestion: true, top: 5, flatTop: 0.99, zeroHit: false }), false, 'too few terms');
-  assert.equal(shouldEscalate({ qterms: 1, isQuestion: false, top: 0, flatTop: 1, zeroHit: true }), true, 'zero-hit');
+  assert.equal(shouldEscalate({ qterms: 3, isQuestion: false, top: 0, flatTop: 1, zeroHit: true }), true, 'zero-hit');
   assert.equal(shouldEscalate({ qterms: 9, isQuestion: true, top: 19, flatTop: 0.6, zeroHit: false }), false, 'clear winner');
 });
 
@@ -108,4 +108,41 @@ test('escalationByteCap: env can only lower the cap', () => {
   process.env.CORE_ESCALATION_BYTE_CAP = '4096'; assert.equal(escalationByteCap(), 4096);
   process.env.CORE_ESCALATION_BYTE_CAP = 'nope'; assert.equal(escalationByteCap(), ESCALATION_BYTE_CAP);
   delete process.env.CORE_ESCALATION_BYTE_CAP;
+});
+
+// Trigger bounds (Critic phase-2 change 1): pasted content and compaction
+// continuations never fire; a one-word or slash-command zero-hit never fires.
+
+test('shouldEscalate: prompts above maxTerms never fire, however flat the ranking', () => {
+  const t = escalationThresholds();
+  assert.equal(t.maxTerms, 40);
+  assert.equal(shouldEscalate({ qterms: 41, isQuestion: true, flatTop: 0.99, zeroHit: false }, t), false);
+  assert.equal(shouldEscalate({ qterms: 40, isQuestion: true, flatTop: 0.99, zeroHit: false }, t), true);
+  assert.equal(shouldEscalate({ qterms: 900, isQuestion: true, flatTop: 0.9, zeroHit: true }, t), false, 'a pasted zero-hit wall of text is not a memory question');
+});
+
+test('shouldEscalate: a zero-hit fires only for a real prompt — not one term, not a slash command', () => {
+  const t = escalationThresholds();
+  assert.equal(shouldEscalate(thinSignal('ed', FIXT), t), false);
+  assert.equal(shouldEscalate(thinSignal('/finalize', FIXT), t), false);
+  assert.equal(shouldEscalate(thinSignal('zzqx unmatchable quark', FIXT), t), true);
+});
+
+// Coverage gate (Critic phase-2 change 2): the shard order only carries the
+// measured lift when the store is enriched; an unenriched store pays the pack
+// cost for substrate order. The pack still goes out when it is exhaustive —
+// two shards already cover every active unit — because then order is moot.
+
+test('packAllowed: exhaustive pack on a small unenriched store; large unenriched store is gated off; enriched large store allowed', async () => {
+  const { packAllowed, enrichmentCoverage } = await import(pathToFileURL(join(SCRIPTS, 'reasoning-shortlist.mjs')).href);
+  const cov = enrichmentCoverage(FIXT);
+  assert.equal(cov.covered, 0); assert.ok(cov.total >= 6);
+  assert.equal(packAllowed(FIXT, { shards: 2, shardSize: 80 }).allowed, true, 'six units fit in one shard: exhaustive');
+  assert.equal(packAllowed(FIXT, { shards: 2, shardSize: 2 }).allowed, false, 'three shards needed, no enrichment: gated');
+  const fake = { index: { units: Array.from({ length: 200 }, (_, i) => ({ id: `u${i}` })) }, enrichments: { documents: Array.from({ length: 120 }, (_, i) => ({ id: `u${i}` })) } };
+  assert.equal(packAllowed(FIXT, { shards: 2, shardSize: 80, snapshot: fake }).allowed, true, '60% enriched: allowed');
+  fake.enrichments.documents.length = 80;
+  const r = packAllowed(FIXT, { shards: 2, shardSize: 80, snapshot: fake });
+  assert.equal(r.allowed, false, '40% enriched: gated');
+  assert.equal(r.reason, 'unenriched');
 });

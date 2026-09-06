@@ -497,3 +497,20 @@ test('escalation: an abstract question with a flat ranking gets ordinary pack + 
   assert.equal(evt.escalation, 'shards');
   assert.ok(Number.isInteger(evt.shard_rows) && evt.shard_rows > 0);
 });
+
+test('escalation: a large store with no enrichment gets the directive, event escalation unenriched', () => {
+  const root = makeStore(mkdtempSync(join(trustedTestTmpRoot(), 'rh-unenriched-')));
+  try {
+    // 200 active units, none enriched: two shards of 80 are not exhaustive and the
+    // order would be substrate order — the pack is gated off.
+    for (let i = 0; i < 200; i++) {
+      wf(join(root, '_memories', `obs-filler-${i}.md`), `---\nid: obs-filler-${i}\ntype: observation\nstatus: active\ncreated: 2026-07-03\ntopics:\n  - filler${i}\n---\n\nFiller body number ${i}.\n`);
+    }
+    const out = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1' }, root);
+    assert.match(out, /CORE reasoning escalation required/);
+    assert.doesNotMatch(out, /CORE memory escalation:/);
+    const evt = readEventRows(root).at(-1);
+    assert.equal(evt.escalation, 'unenriched');
+    assert.equal(evt.shard_rows, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

@@ -18,7 +18,12 @@ import { loadSnapshot } from './generate-summary-index.mjs';
 // a literal question has one clear winner (well under 0.8); an abstract question has a
 // crowd of equally weak matches (0.8 and up). Scale-free, so it carries across stores.
 export const MIN_TERMS_DEFAULT = 4;
+export const MAX_TERMS_DEFAULT = 40;   // pasted reports and compaction continuations sit far above this
 export const FLAT_FLOOR_DEFAULT = 0.8;
+// Below this share of active units with a valid enrichment record the shard order
+// is substrate order, which measured 0 of 6 gold units in the first two shards —
+// not worth the pack's cost unless the pack is exhaustive anyway.
+export const ENRICHMENT_FLOOR_DEFAULT = 0.5;
 
 const QUESTION_OPENERS = /^\s*(should|can|could|is|are|do|does|did|what|which|how|why|when|where|would|will|has|have|was|were|any|if)\b/i;
 const QUESTION_SHAPES = /\b(should i|should we|can i|can we|do i|do we|is it|are we|is there)\b/i;
@@ -41,6 +46,7 @@ function envNumber(name, fallback) {
 export function escalationThresholds() {
   return {
     minTerms: envNumber('CORE_ESCALATION_MIN_TERMS', MIN_TERMS_DEFAULT),
+    maxTerms: envNumber('CORE_ESCALATION_MAX_TERMS', MAX_TERMS_DEFAULT),
     flatFloor: envNumber('CORE_ESCALATION_FLAT_FLOOR', FLAT_FLOOR_DEFAULT),
   };
 }
@@ -50,6 +56,7 @@ export function thinSignal(query, storePath, { snapshot = null } = {}) {
   const root = resolve(storePath);
   const snap = snapshot || loadSnapshot(root, { captureBodies: true });
   const qterms = new Set(tokenize(query)).size;
+  const slash = /^\s*\//.test(String(query || ''));
   const body = bm25Scores(query, root, { snapshot: snap }).map(s => s.score).sort((a, b) => b - a);
   const top = body[0] || 0;
   const second = body[1] || 0;
@@ -60,14 +67,37 @@ export function thinSignal(query, storePath, { snapshot = null } = {}) {
     top: +top.toFixed(4),
     flatTop: top > 0 ? +(second / top).toFixed(4) : 1,
     zeroHit: substrate.length === 0,
+    slash,
   };
 }
 
 /** Escalate on an empty result, or on a question whose keyword ranking has no clear winner. */
 export function shouldEscalate(signal, thresholds = escalationThresholds()) {
   if (!signal) return false;
-  if (signal.zeroHit) return true;
+  if (signal.qterms > thresholds.maxTerms) return false;           // pasted content, continuations
+  if (signal.zeroHit) return signal.qterms >= 2 && !signal.slash;  // a real prompt, not a typo or a command
   return Boolean(signal.isQuestion) && signal.qterms >= thresholds.minTerms && signal.flatTop >= thresholds.flatFloor;
+}
+
+/** Share of active units carrying a valid (current-hash) enrichment record. */
+export function enrichmentCoverage(storePath, { snapshot = null } = {}) {
+  const snap = snapshot || loadSnapshot(resolve(storePath), { captureBodies: true });
+  const total = (snap.index.units || []).length;
+  const covered = (snap.enrichments?.documents || []).length;
+  return { covered, total, ratio: total ? covered / total : 0 };
+}
+
+/**
+ * Whether the shard pack is worth injecting on this store: yes when the first
+ * `shards` shards already cover every active unit (order is moot), or when
+ * enrichment coverage is at or above the floor (the order carries the measured
+ * lift). Otherwise the text directive is the honest fallback.
+ */
+export function packAllowed(storePath, { shards = 2, shardSize = 80, snapshot = null, floor = envNumber('CORE_ESCALATION_ENRICHMENT_FLOOR', ENRICHMENT_FLOOR_DEFAULT) } = {}) {
+  const cov = enrichmentCoverage(storePath, { snapshot });
+  if (cov.total <= shards * shardSize) return { allowed: true, reason: 'exhaustive', ...cov };
+  if (cov.ratio >= floor) return { allowed: true, reason: 'enriched', ...cov };
+  return { allowed: false, reason: 'unenriched', ...cov };
 }
 
 const SUMMARY_CLIP = 160;
