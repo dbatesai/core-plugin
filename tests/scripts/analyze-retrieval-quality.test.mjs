@@ -487,3 +487,19 @@ test('a negligible share of corrupt rows does not suppress the verdict', () => {
   assert.notEqual(report.receipt.action, 'repair-corrupt-evidence');
   assert.equal(report.rejected.total, 1, 'still counted and reported');
 });
+
+test('escalation rate: per-turn hook events count none/directive/shards; rows without the field are legacy', () => {
+  const base = { ts: '2026-09-06T10:00:00.000Z', trigger: 'per-turn-hook', tier_reached: 1, escalation_path: [1], units_retrieved: [], intent_topics: [] };
+  const report = buildReport([
+    { ...base, escalation: 'none' },
+    { ...base, escalation: 'none' },
+    { ...base, escalation: 'shards', shard_rows: 120 },
+    { ...base, escalation: 'directive' },
+    { ...base },                                   // pre-S2 row: no field
+    { ...base, trigger: 'manual', escalation: 'shards' }, // not a per-turn row
+  ]);
+  const e = report.escalation;
+  assert.deepEqual(e, { per_turn: 5, none: 2, directive: 1, shards: 1, legacy: 1, rate: 0.5, mean_shard_rows: 120 });
+  const text = formatReport(report);
+  assert.match(text, /Escalation rate: 50% of 4 per-turn retrievals \(shards 1, directive 1\)/);
+});
