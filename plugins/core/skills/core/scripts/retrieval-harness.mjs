@@ -239,7 +239,8 @@ function escalatedRankedIds(query, qid, store, snapshot, reasonerCmd, escalatedQ
   const key = createHash('sha256').update(prompt).digest('hex');
   let picks = cache.get(key);
   if (!picks) {
-    const r = spawnSync('sh', ['-c', reasonerCmd], { input: prompt, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    // shell:true so the same command string runs under sh on POSIX and cmd.exe on Windows.
+    const r = spawnSync(reasonerCmd, { shell: true, input: prompt, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
     if (r.status !== 0) throw new Error(`reasoner exited ${r.status}: ${(r.stderr || '').slice(0, 400)}`);
     const m = (r.stdout || '').match(/\{[\s\S]*\}/);
     picks = m ? (JSON.parse(m[0]).picks || []) : [];
