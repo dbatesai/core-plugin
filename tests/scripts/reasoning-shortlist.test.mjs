@@ -53,3 +53,33 @@ test('escalationThresholds: env overrides are numeric and fall back to defaults 
   assert.equal(t.minTerms, 5); assert.equal(t.flatFloor, 0.8);
   delete process.env.CORE_ESCALATION_MIN_TERMS; delete process.env.CORE_ESCALATION_FLAT_FLOOR;
 });
+
+const { buildReasoningShards } = await import(pathToFileURL(join(SCRIPTS, 'reasoning-shortlist.mjs')).href);
+const { writeEnrichment } = await import(pathToFileURL(join(SCRIPTS, 'enrichment-sidecar.mjs')).href);
+const { selectCandidateShards } = await import(pathToFileURL(join(SCRIPTS, 'select-relevant-units.mjs')).href);
+
+test('buildReasoningShards: without a sidecar the order equals the exhaustive shard plan and covers every unit once', () => {
+  const q = 'something with no keyword overlap at all zzqx';
+  const mine = buildReasoningShards(q, FIXT, { shards: 10, shardSize: 3 });
+  const theirs = selectCandidateShards(q, FIXT, { shardSize: 3 });
+  assert.deepEqual(mine.flatMap(s => s.rows.map(r => r.id)), theirs.flatMap(s => s.candidates.map(c => c.id)));
+  const ids = mine.flatMap(s => s.rows.map(r => r.id));
+  assert.equal(new Set(ids).size, ids.length, 'no unit appears twice');
+  assert.equal(ids.length, mine[0].units_total, 'every active unit appears once');
+  assert.equal(mine[0].shard_count, theirs[0].shard_count);
+});
+
+test('buildReasoningShards: an enrichment record that matches the prompt pulls its unit to the front of shard 0', () => {
+  const store = mkdtempSync(join(tmpdir(), 'obligation3-enriched-'));
+  cpSync(FIXT_SRC, store, { recursive: true });
+  writeEnrichment(store, {
+    unitPath: 'values-heritage.md', writerModelFamily: 'openai', answerModelFamily: 'anthropic',
+    likelyQuestions: ['should I lean toward things that were the first of their kind and carry a long story behind whoever built them'],
+  });
+  const q = 'Should I lean toward things that were the very first of their kind and carry a long story behind whoever built them?';
+  const shards = buildReasoningShards(q, store, { shards: 1, shardSize: 3 });
+  assert.equal(shards[0].rows[0].id, 'values-heritage');
+  assert.ok(shards[0].rows[0].summary.length <= 160);
+  assert.ok(shards[0].rows.every(r => typeof r.tier === 'string'));
+  rmSync(store, { recursive: true, force: true });
+});

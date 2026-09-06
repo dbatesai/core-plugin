@@ -69,3 +69,44 @@ export function shouldEscalate(signal, thresholds = escalationThresholds()) {
   if (signal.zeroHit) return true;
   return Boolean(signal.isQuestion) && signal.qterms >= thresholds.minTerms && signal.flatTop >= thresholds.flatFloor;
 }
+
+const SUMMARY_CLIP = 160;
+const clip = (s) => {
+  const t = String(s || '').replace(/\s+/g, ' ').trim();
+  return t.length > SUMMARY_CLIP ? `${t.slice(0, SUMMARY_CLIP - 1)}…` : t;
+};
+
+/**
+ * The first `shards` candidate shards over the active corpus, ordered so the likely
+ * units come first: enrichment-arm score (descending), then the shipped substrate
+ * rank, then unit id. With no enrichment sidecar this is exactly the exhaustive
+ * shard plan `select-relevant-units.mjs` emits, so an unenriched store degrades to
+ * today's order. The union of all shards is every active unit exactly once.
+ */
+export function buildReasoningShards(query, storePath, { shards = 2, shardSize = 80, snapshot = null } = {}) {
+  const root = resolve(storePath);
+  const snap = snapshot || loadSnapshot(root, { captureBodies: true });
+  const units = snap.index.units;
+  const enrichment = new Map(
+    bm25DocumentScores(query, snap.enrichments?.documents || []).filter(s => s.score > 0).map(s => [s.id, s.score]),
+  );
+  const substrateRank = new Map(productRankedScores(query, root, null, snap).map((s, i) => [s.id, i]));
+  const rankOf = (id) => (substrateRank.has(id) ? substrateRank.get(id) : Infinity);
+  const ordered = [...units].sort((a, b) =>
+    (enrichment.get(b.id) || 0) - (enrichment.get(a.id) || 0)
+    || rankOf(a.id) - rankOf(b.id)
+    || a.id.localeCompare(b.id));
+  const size = Math.max(1, shardSize);
+  const total = Math.ceil(ordered.length / size);
+  const out = [];
+  for (let i = 0; i < Math.min(Math.max(0, shards), total); i++) {
+    const slice = ordered.slice(i * size, (i + 1) * size);
+    out.push({
+      shard: i,
+      shard_count: total,
+      units_total: ordered.length,
+      rows: slice.map(u => ({ id: u.id, tier: u.tier || 'canonical', summary: clip(u.summary) })),
+    });
+  }
+  return out;
+}
