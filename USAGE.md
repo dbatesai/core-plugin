@@ -17,6 +17,7 @@ The agent. Type it to start or resume work on a project.
 - **What it does:** loads your project context and prints a readiness summary before anything else — what the project's state is, the active risks worth surfacing, any signals that escalated since last session, and the top items on the agenda. Then it works with you: writing observations as you talk, rendering `PROJECT.md` sections as things change, surfacing decisions and risks, and pushing back when the evidence doesn't support your framing.
 - **When to use:** every session. It's the entry point.
 - **Resume vs. work:** a bare `/core` (or "where are we") re-composes a fresh readiness summary. `/core <task>` picks up the task with full context loaded.
+- **Abstract questions:** when the per-turn keyword search comes back empty or has no clear winner for a question, the agent gets the first 160 candidate memory units (id and summary) in the same turn and reasons over them before answering. Off switch: `CORE_ESCALATION=0`.
 - **Reads:** `PROJECT.md`, the unit store at `_memories/`, workspace metadata. **Writes:** observations, unit edits, `PROJECT.md` renders, the autonomous run log.
 - **First session on a project:** it figures out whether the folder is new, has prior content to migrate, or is a returning workspace, and routes accordingly — no setup command required.
 

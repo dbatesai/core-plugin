@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Reasoning escalation in the per-turn retrieval hook: when the keyword result is empty, or
+  a question's ranking has no clear winner, the hook injects the first two candidate shards
+  (up to 160 `id — summary` rows, enrichment-ordered, 32 KB cap) so the active model reasons
+  over them in the same turn. `CORE_ESCALATION=0` restores the text-only directive;
+  `CORE_ESCALATION_BYTE_CAP` lowers the cap; `CORE_ESCALATION_MIN_TERMS` /
+  `CORE_ESCALATION_FLAT_FLOOR` move the trigger. New module `scripts/reasoning-shortlist.mjs`.
+- Retrieval events and the hook receipt carry `escalation: none | directive | shards` and
+  `shard_rows`; `analyze-retrieval-quality.mjs` reports the escalation rate.
+- Retrieval harness `escalated` arm: with `CORE_HARNESS_REASONER` set to a command that reads
+  the pack on stdin and prints `{"picks":[ids]}`, the arm ranks the reasoner's picks ahead of
+  the substrate on triggered queries; without one it prints `— (no reasoner configured)`.
+  The manifest names the reasoner and model.
+
 ## [3.16.1] — 2026-07-31
 
 ### Added
