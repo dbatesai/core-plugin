@@ -83,3 +83,29 @@ test('buildReasoningShards: an enrichment record that matches the prompt pulls i
   assert.ok(shards[0].rows.every(r => typeof r.tier === 'string'));
   rmSync(store, { recursive: true, force: true });
 });
+
+const { renderEscalationPack, ESCALATION_HEADER, escalationByteCap, ESCALATION_BYTE_CAP } =
+  await import(pathToFileURL(join(SCRIPTS, 'reasoning-shortlist.mjs')).href);
+
+test('renderEscalationPack: header + one row per unit, never split mid-row, honest truncated flag', () => {
+  const shards = [{ shard: 0, shard_count: 1, units_total: 3, rows: [
+    { id: 'a', tier: 'canonical', summary: 'alpha summary' },
+    { id: 'b', tier: 'canonical', summary: 'béta summary with ünïcode' },
+    { id: 'c', tier: 'observation', summary: 'gamma' } ] }];
+  const full = renderEscalationPack(shards, { byteCap: 100000 });
+  assert.ok(full.text.startsWith(ESCALATION_HEADER));
+  assert.equal(full.rows, 3); assert.equal(full.truncated, false);
+  assert.match(full.text, /^b — béta summary with ünïcode$/m);
+  const tight = renderEscalationPack(shards, { byteCap: Buffer.byteLength(ESCALATION_HEADER, 'utf8') + 20 });
+  assert.equal(tight.truncated, true);
+  assert.ok(tight.rows < 3);
+  assert.ok(Buffer.byteLength(tight.text, 'utf8') <= Buffer.byteLength(ESCALATION_HEADER, 'utf8') + 20 + 1);
+  for (const line of tight.text.split('\n').slice(1)) if (line) assert.match(line, /^[^ ]+ — .+$/, 'every emitted row is complete');
+});
+
+test('escalationByteCap: env can only lower the cap', () => {
+  process.env.CORE_ESCALATION_BYTE_CAP = '999999'; assert.equal(escalationByteCap(), ESCALATION_BYTE_CAP);
+  process.env.CORE_ESCALATION_BYTE_CAP = '4096'; assert.equal(escalationByteCap(), 4096);
+  process.env.CORE_ESCALATION_BYTE_CAP = 'nope'; assert.equal(escalationByteCap(), ESCALATION_BYTE_CAP);
+  delete process.env.CORE_ESCALATION_BYTE_CAP;
+});

@@ -110,3 +110,33 @@ export function buildReasoningShards(query, storePath, { shards = 2, shardSize =
   }
   return out;
 }
+
+// The injected pack's budget. Two shards of 80 rows at ~180 bytes is ~29KB (~7K
+// tokens), paid only on escalated turns. The env override can lower it, never raise it.
+export const ESCALATION_BYTE_CAP = 32768;
+export const ESCALATION_HEADER = 'CORE memory escalation: the keyword search was thin for this prompt. Before answering, read the candidate memory units below (id — summary), pick the ones that actually bear on the question by reasoning about what it asks (the situation, the judgment, the analogy), Read those units in full, and cite them. If none apply, say so; do not invent memory.';
+
+export function escalationByteCap() {
+  const raw = Number(process.env.CORE_ESCALATION_BYTE_CAP);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(ESCALATION_BYTE_CAP, Math.floor(raw)) : ESCALATION_BYTE_CAP;
+}
+
+/** The text the hook injects: the header, then one `id — summary` row per unit, cut at a whole row. */
+export function renderEscalationPack(shards, { byteCap = escalationByteCap() } = {}) {
+  const lines = [ESCALATION_HEADER];
+  let bytes = Buffer.byteLength(ESCALATION_HEADER, 'utf8');
+  let rows = 0;
+  let truncated = false;
+  for (const shard of shards || []) {
+    for (const r of shard.rows || []) {
+      const line = `${r.id} — ${r.summary}`;
+      const add = Buffer.byteLength(line, 'utf8') + 1;
+      if (bytes + add > byteCap) { truncated = true; break; }
+      lines.push(line);
+      bytes += add;
+      rows += 1;
+    }
+    if (truncated) break;
+  }
+  return { text: `${lines.join('\n')}\n`, rows, truncated };
+}
