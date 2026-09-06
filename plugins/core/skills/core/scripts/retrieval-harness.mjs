@@ -50,6 +50,9 @@ import { loadSnapshot } from './generate-summary-index.mjs';
 import { lexicalRankedIds, productRankedIds, retrieveContext, buildFinalContextPack } from './retrieve-context.mjs';
 import { bm25Rank } from './bm25.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { spawnSync } from 'node:child_process';
+import { basename } from 'node:path';
+import { thinSignal, shouldEscalate, escalationThresholds, buildReasoningShards, renderEscalationPack, escalationByteCap } from './reasoning-shortlist.mjs';
 
 const KS = [5, 10, 30, 100];
 const FORBIDDEN_K = 10; // depth at which a surfaced forbidden id counts as contamination
@@ -118,7 +121,17 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     // three items, so R@5/R@10/… on it would relabel R@3 as deeper recall.
     context3: { run: (q) => buildFinalContextPack(retrieveContext(q, store, { topN: 3, snapshot })).accepted.map(a => a.id), ks: [3] },
     bm25: { run: (q) => bm25Rank(q, store, { snapshot }) },              // summary+topics+body BM25 arm (not body-only — the loader prepends title/topics)
+    // ESCALATED — the product's reasoning tier, measured: substrate ranking, and
+    // when the hook's thin-signal trigger fires, the same two enrichment-ordered
+    // shards the hook injects go to an external reasoner (CORE_HARNESS_REASONER:
+    // a shell command, prompt on stdin, prints {"picks":[ids]}). Ranked list =
+    // picks (known ids only) then substrate, deduped. No reasoner → the arm is
+    // reported unconfigured, never silently equal to the substrate.
+    escalated: { run: (q, qid) => escalatedRankedIds(q, qid, store, snapshot, reasonerCmd, escalatedQueries, escalationCache) },
   };
+  const reasonerCmd = process.env.CORE_HARNESS_REASONER || null;
+  const escalatedQueries = [];
+  const escalationCache = new Map();
   // ONE ranking pass per arm: metrics, raw ranks, and latency all come from the
   // SAME observations (the re-review caught the double-run emitting raw evidence
   // that wasn't the run the metrics were computed from).
@@ -131,11 +144,12 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     for (const q of gold) {
       const t0 = process.hrtime.bigint();
       let ranked;
-      try { ranked = await arm.run(q.query); } catch { ranked = null; }
+      try { ranked = await arm.run(q.query, q.id); } catch { ranked = null; }
       times.push(Number(process.hrtime.bigint() - t0) / 1e6);
       rankedByQuery[q.id] = ranked;
     }
     results[name] = scoreRankedLists(rankedByQuery, gold, arm.ks || KS);
+    if (name === 'escalated' && !reasonerCmd) results[name] = { unavailable: true, reason: 'no reasoner configured' };
     rawRanks[name] = Object.fromEntries(Object.entries(rankedByQuery)
       .map(([qid, r]) => [qid, r === null ? null : r.slice(0, Math.max(...KS))]));
     times.sort((a, b) => a - b);
@@ -191,14 +205,49 @@ export async function runHarness(store, goldPath, { snapshot: injectedSnapshot =
     // per-file signature) — and taken FROM the capture, never re-walked from
     // the live store after the snapshot was minted.
     corpus_content_sha256: snapshot.snapshotId,
-    arm_params: { bm25: { k1: 1.5, b: 0.75 }, context3: { topN: 3 } },
+    arm_params: {
+      bm25: { k1: 1.5, b: 0.75 },
+      context3: { topN: 3 },
+      escalated: {
+        reasoner: reasonerCmd,
+        reasoner_basename: reasonerCmd ? basename(reasonerCmd.trim().split(/\s+/).find((t, i, a) => i > 0 || a.length === 1) || reasonerCmd) : null,
+        model: process.env.CORE_HARNESS_REASONER_MODEL || null,
+        shards: 2, shard_size: 80, byte_cap: escalationByteCap(),
+        min_terms: escalationThresholds().minTerms,
+        flat_floor: escalationThresholds().flatFloor,
+      },
+    },
     counts: {
       queries: gold.length,
       no_answer: gold.filter(q => q.no_answer === true).length,
       declared_supports: gold.reduce((s, q) => s + (q.expected || []).length, 0),
     },
   };
-  return { store: resolve(store), manifest, latency, total, mix, nQueries: gold.length, gold, rawRanks, results };
+  return { store: resolve(store), manifest, latency, total, mix, nQueries: gold.length, gold, rawRanks, results, escalatedQueries };
+}
+
+function escalatedRankedIds(query, qid, store, snapshot, reasonerCmd, escalatedQueries, cache) {
+  const substrate = productRankedIds(query, store, { snapshot });
+  if (!reasonerCmd) return null;
+  if (!shouldEscalate(thinSignal(query, store, { snapshot }))) return substrate;
+  escalatedQueries.push(qid);
+  const shards = buildReasoningShards(query, store, { shards: 2, shardSize: 80, snapshot });
+  const pack = renderEscalationPack(shards, { byteCap: escalationByteCap() });
+  const prompt = `${pack.text}\nQuestion: ${query}\nReply with JSON only: {"picks": [unit ids that bear on the question, best first]}\n`;
+  const units = snapshot.index.units;
+  const known = new Set(Array.isArray(units) ? units.map(u => u.id) : Object.keys(units || {}));
+  const key = createHash('sha256').update(prompt).digest('hex');
+  let picks = cache.get(key);
+  if (!picks) {
+    const r = spawnSync('sh', ['-c', reasonerCmd], { input: prompt, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    if (r.status !== 0) throw new Error(`reasoner exited ${r.status}: ${(r.stderr || '').slice(0, 400)}`);
+    const m = (r.stdout || '').match(/\{[\s\S]*\}/);
+    picks = m ? (JSON.parse(m[0]).picks || []) : [];
+    cache.set(key, picks);
+  }
+  const out = [];
+  for (const id of [...picks, ...substrate]) if (known.has(id) && !out.includes(id)) out.push(id);
+  return out;
 }
 
 /** Score pre-computed ranked lists (one observation set for metrics AND raw evidence). */
@@ -242,7 +291,9 @@ function renderText(out) {
   const lines = [];
   lines.push(`\nRetrieval Recall@K — ${out.store}`);
   lines.push(`plugin: v${out.manifest.plugin_version ?? 'unresolved'} · commit ${out.manifest.source_commit ? out.manifest.source_commit.slice(0, 8) : 'n/a'} · gold sha256 ${out.manifest.gold_sha256.slice(0, 12)}… · corpus content ${out.manifest.corpus_content_sha256.slice(0, 12)}…`);
-  lines.push('arms: ranking = pre-expansion substrate (productRankedIds) · context3 = FINAL injected top-3 (retrieveContext; only R@3 meaningful) · bm25 = summary+topics+body');
+  lines.push('arms: ranking = pre-expansion substrate (productRankedIds) · context3 = FINAL injected top-3 (retrieveContext; only R@3 meaningful) · bm25 = summary+topics+body · escalated = substrate + reasoner picks on triggered queries');
+  const esc = out.manifest.arm_params?.escalated;
+  if (esc?.reasoner) lines.push(`escalated: reasoner ${esc.reasoner_basename}${esc.model ? ` (${esc.model})` : ''} · triggered ${out.escalatedQueries.length}/${out.nQueries} queries · flat floor ${esc.flat_floor} · min terms ${esc.min_terms}`);
   lines.push(`latency: ${Object.entries(out.latency).map(([a, l]) => `${a} p50 ${l.p50_ms}ms / p95 ${l.p95_ms}ms`).join(' · ')}`);
   lines.push(`store: ${out.total} active units · gold: ${out.nQueries} queries`);
   lines.push(`unit-type mix: ${Object.entries(out.mix).map(([t, n]) => `${t}:${n}`).join(' ')}`);
@@ -250,7 +301,7 @@ function renderText(out) {
   lines.push('');
   lines.push(`arm       R@5   R@10  R@30  R@100  MRR   forbid@${FORBIDDEN_K}`);
   for (const [name, r] of Object.entries(out.results)) {
-    if (r.unavailable) { lines.push(`${name.padEnd(9)} (arm unavailable)`); continue; }
+    if (r.unavailable) { lines.push(`${name.padEnd(9)} — (${r.reason || 'arm unavailable'})`); continue; }
     lines.push(`${name.padEnd(9)} ${fmt(r.recall[5])} ${fmt(r.recall[10])} ${fmt(r.recall[30])} ${fmt(r.recall[100])}  ${fmt(r.mrr)}  ${fmt(r.forbiddenRate)}`);
   }
   // Per-rung R@10, the rung where lexical is known to collapse. Only rungs

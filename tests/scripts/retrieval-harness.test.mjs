@@ -239,3 +239,66 @@ test('close-path-6: the context3 arm reports R@3 only — a 3-item delivered con
       'unbounded arms keep the full K ladder');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// escalated arm (S2): substrate first; when the thin-signal trigger fires, the
+// two enrichment-ordered shards go to an external reasoner command and its
+// picks lead the ranked list.
+
+const FAKE_REASONER = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'fake-reasoner.mjs');
+
+async function goldFile(queries) {
+  const { writeFileSync, mkdtempSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'esc-gold-'));
+  const goldPath = join(dir, 'gold.json');
+  writeFileSync(goldPath, JSON.stringify({ queries }));
+  return { dir, goldPath };
+}
+
+test('escalated arm: without a reasoner it is reported unconfigured, never silently equal to the substrate', async () => {
+  const { dir, goldPath } = await goldFile([
+    { id: 'q1', query: 'zzqx unmatchable quark', rung: 'category', expected: ['values-heritage'] },
+  ]);
+  const saved = process.env.CORE_HARNESS_REASONER; delete process.env.CORE_HARNESS_REASONER;
+  try {
+    const report = await runHarness(FIXT, goldPath);
+    assert.equal(report.results.escalated.unavailable, true);
+    assert.equal(report.results.escalated.reason, 'no reasoner configured');
+    assert.equal(report.manifest.arm_params.escalated.reasoner, null);
+    assert.ok(report.results.ranking.recall, 'substrate arms still printed beside it');
+  } finally { if (saved !== undefined) process.env.CORE_HARNESS_REASONER = saved; rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('escalated arm: with a reasoner the ranked list is picks then substrate (deduped); untriggered queries stay substrate; manifest names the reasoner', async () => {
+  const { dir, goldPath } = await goldFile([
+    { id: 'thin', query: 'zzqx unmatchable quark', rung: 'category', expected: ['values-heritage'] },
+    { id: 'literal', query: 'omega speedmaster', rung: 'literal', expected: ['want-omega-speedmaster-on-sale-wait'] },
+  ]);
+  const { readFileSync } = await import('node:fs');
+  const log = join(dir, 'prompt.txt');
+  const saved = { ...process.env };
+  process.env.CORE_HARNESS_REASONER = `node ${FAKE_REASONER}`;
+  process.env.CORE_HARNESS_REASONER_MODEL = 'fake-model';
+  process.env.FAKE_REASONER_PICKS = 'values-heritage,distractor-coffee-grinder,not-a-unit';
+  process.env.FAKE_REASONER_LOG = log;
+  try {
+    const report = await runHarness(FIXT, goldPath);
+    const thin = report.rawRanks.escalated.thin;
+    assert.deepEqual(thin.slice(0, 2), ['values-heritage', 'distractor-coffee-grinder'], 'picks lead');
+    assert.ok(!thin.includes('not-a-unit'), 'unknown ids are dropped');
+    assert.equal(new Set(thin).size, thin.length, 'no duplicates');
+    assert.deepEqual(report.rawRanks.escalated.literal, report.rawRanks.ranking.literal, 'untriggered query = substrate');
+    assert.deepEqual(report.escalatedQueries, ['thin']);
+    assert.equal(report.results.escalated.recall[5], 1);
+    const prompt = readFileSync(log, 'utf8');
+    assert.match(prompt, /CORE memory escalation:/, 'reasoner sees the exact hook pack text');
+    assert.match(prompt, /zzqx unmatchable quark/, '…plus the question');
+    const p = report.manifest.arm_params.escalated;
+    assert.equal(p.reasoner_basename, 'fake-reasoner.mjs');
+    assert.equal(p.model, 'fake-model');
+    assert.equal(typeof p.flat_floor, 'number');
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
