@@ -233,7 +233,7 @@ function escalatedRankedIds(query, qid, store, snapshot, reasonerCmd, escalatedQ
   escalatedQueries.push(qid);
   const shards = buildReasoningShards(query, store, { shards: 2, shardSize: 80, snapshot });
   const pack = renderEscalationPack(shards, { byteCap: escalationByteCap() });
-  const prompt = `${pack.text}\nQuestion: ${query}\nReply with JSON only: {"picks": [unit ids that bear on the question, best first]}\n`;
+  const prompt = `${pack.text}\nQuestion: ${query}\nReply with JSON only: {"picks": [up to 3 unit ids that actually bear on the question, best first — an empty list if none do]}\n`;
   const units = snapshot.index.units;
   const known = new Set(Array.isArray(units) ? units.map(u => u.id) : Object.keys(units || {}));
   const key = createHash('sha256').update(prompt).digest('hex');

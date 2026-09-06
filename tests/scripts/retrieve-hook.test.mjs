@@ -468,6 +468,8 @@ test('escalation: a zero-hit injects the shard pack; CORE_ESCALATION=0 restores 
   assert.equal(rows[0].result, 'no-hit', 'the substrate still reports an honest no-hit');
   assert.equal(rows[0].escalation, 'shards');
   assert.ok(Number.isInteger(rows[0].shard_rows) && rows[0].shard_rows > 0);
+  assert.equal(rows[0].enrichment_valid, 0, 'the receipt says how enriched the store was when the pack fired');
+  assert.ok(rows[0].enrichment_total >= 6);
 
   const off = runHook('zzqx unmatchable quark', { CORE_METRICS_ENABLED: '1', CORE_ESCALATION: '0' });
   assert.match(off, /CORE reasoning escalation required/);

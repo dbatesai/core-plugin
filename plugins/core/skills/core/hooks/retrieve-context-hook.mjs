@@ -156,6 +156,7 @@ export async function main() {
   let escalation = 'none';
   let escalationPack = '';
   let shardRows = 0;
+  let enrichmentValid = null; // valid enrichment records / active units, when the pack fired
   const escalationEnabled = process.env.CORE_ESCALATION !== '0';
   if (escalationEnabled) {
     let thin = zeroHit;
@@ -169,6 +170,7 @@ export async function main() {
         // an unenriched store gets the pack only when two shards already cover
         // every unit. Otherwise the text directive below is the honest fallback.
         const gate = packAllowed(store, { shards: 2, shardSize: 80, snapshot });
+        enrichmentValid = { valid: gate.covered, total: gate.total };
         if (!gate.allowed) {
           escalation = 'unenriched';
         } else {
@@ -257,6 +259,7 @@ export async function main() {
         context_pack_token_estimate: trace.pack ? Math.round((trace.pack.bytes || 0) * 0.30) : 0,
         escalation,
         ...(shardRows ? { shard_rows: shardRows } : {}),
+        ...(enrichmentValid ? { enrichment_valid: enrichmentValid.valid, enrichment_total: enrichmentValid.total } : {}),
       }, { sessionId: payload.session_id || undefined });
       if (!out.written) telemetryReason = 'event-write-failed';
 
