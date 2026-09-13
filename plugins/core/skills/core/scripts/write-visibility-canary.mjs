@@ -29,7 +29,7 @@ import { existsSync, readFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { mapProjectPathToSlug } from './project-slug.mjs';
+import { mapMemoryProjectPathToSlug } from './project-slug.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -48,7 +48,11 @@ const CANARY_LINE_RE = /^(?:<!--.*CORE-VISIBILITY-CANARY.*-->|CORE-VISIBILITY-CA
 export function mappedMemoryPath(cwd, home) {
   // Forward-slash join (not path.join) — Claude Code's projects-folder slug uses '/'
   // and the cross-platform tests expect it; Node's fs accepts forward slashes on Windows.
-  return [home, '.claude', 'projects', mapProjectPathToSlug(cwd), 'memory', 'MEMORY.md'].join('/');
+  // Memory is keyed on the git worktree root, so a project inside a larger repository
+  // shares this file with its siblings; the canary line is a single top line and the
+  // last writer wins — a known limit, and the workspace's own canary file still says
+  // which token THIS workspace expects to see echoed.
+  return [home, '.claude', 'projects', mapMemoryProjectPathToSlug(cwd), 'memory', 'MEMORY.md'].join('/');
 }
 export function canaryFilePath(workspaceId, home) {
   return join(home, '.core', 'workspaces', workspaceId, 'visibility-canary.json');

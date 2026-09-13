@@ -25,6 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the substrate on triggered queries; without one it prints `— (no reasoner configured)`.
   The manifest names the reasoner and model.
 
+### Fixed
+- Auto-memory path resolution now matches Claude Code: MEMORY.md is keyed on the git worktree
+  root (the cwd outside a repo), not the cwd. A project nested inside a larger repository
+  (a home-directory repo is the common case) had every memory script — `check-context-integrity`,
+  `write-visibility-canary`, the auto-memory-injection probe, `audit-memory-boundary`,
+  `generate-memory-index` — reading and writing `~/.claude/projects/<cwd-slug>/memory/`, a
+  folder the harness never injects: a false `CONTEXT-PARTIAL` every session, a visibility
+  canary planted where the agent could never see it (perpetual `memory-visible-in-agent-context`
+  DEGRADED), and a 30 KB orphan MEMORY.md nobody read. New `resolveMemoryProjectRoot` /
+  `mapMemoryProjectPathToSlug` in `project-slug.mjs`; transcripts keep the cwd slug on purpose.
+  `generate-memory-index` skips the per-project priority block (exit 0, one-line reason) when
+  the memory file is a repository-wide one shared with sibling projects.
+
 ## [3.16.1] — 2026-07-31
 
 ### Added

@@ -32,7 +32,7 @@ import { isCliEntry } from './cli-entry.mjs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { detectHarness } from './configure-project.mjs';
-import { mapProjectPathToSlug } from './project-slug.mjs';
+import { mapMemoryProjectPathToSlug } from './project-slug.mjs';
 
 export const DEFAULT_MEMORY_CAP_BYTES = 24576; // ~24KB harness injection budget
 export const BYTES_PER_UNIT = 400;             // rough MEMORY.md entry size for the lost-count estimate
@@ -60,7 +60,7 @@ export function resolveAutoMemorySurface({
   if (h === 'claude-code') {
     return {
       harness: h,
-      path: join(home, '.claude', 'projects', mapProjectPathToSlug(cwd), 'memory', 'MEMORY.md'),
+      path: join(home, '.claude', 'projects', mapMemoryProjectPathToSlug(cwd), 'memory', 'MEMORY.md'),
       skipped: false,
     };
   }

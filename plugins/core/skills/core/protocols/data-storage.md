@@ -570,7 +570,7 @@ When the user goes quiet mid-conversation and you've staged a Mode B proposal: a
 
 ## Harness-local recall integration
 
-Harness-local recall is its own store at a harness-specific path — Claude Code uses `~/.claude/projects/<cwd>/memory/`, Codex uses `~/.codex/memories/`, future harnesses bring their own. The `read-auto-memory` adapter verb resolves the path per harness (see `harnesses/<name>.md`). By design it's surface 4 in the authority stack — recall, never authoritative.
+Harness-local recall is its own store at a harness-specific path — Claude Code uses `~/.claude/projects/<git-root, or cwd outside a repo>/memory/`, Codex uses `~/.codex/memories/`, future harnesses bring their own. The `read-auto-memory` adapter verb resolves the path per harness (see `harnesses/<name>.md`). By design it's surface 4 in the authority stack — recall, never authoritative.
 
 - Loaded at session start by the harness when it has an auto-load surface (Claude Code does, Codex doesn't auto-load memory).
 - Holds cross-session workflow lessons — user preferences, patterns, references, harness-specific empirical findings.
