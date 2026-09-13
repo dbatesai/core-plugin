@@ -25,7 +25,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname } from 'node:path';
 import { rankUnits } from './priority.mjs';
-import { mapProjectPathToSlug } from './project-slug.mjs';
+import { mapMemoryProjectPathToSlug, resolveMemoryProjectRoot } from './project-slug.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
@@ -163,10 +163,11 @@ export function spliceSection(memoryMdText, newSection) {
 // the target's units are silently overwritten with the source's — a destructive
 // cross-project contamination with no recovery path.
 //
-// Claude Code maps a project cwd to ~/.claude/projects/<mapped-cwd>/memory/MEMORY.md
-// where <mapped-cwd> is the absolute cwd with path separators turned into dashes.
-// So the target's project identity is recoverable from its path, and we can
-// assert it matches the source project (the parent of _memories) before writing.
+// Claude Code maps a project to ~/.claude/projects/<mapped-root>/memory/MEMORY.md
+// where <mapped-root> is the git worktree root (the cwd outside a repo) with path
+// separators turned into dashes. So the target's project identity is recoverable from
+// its path, and we can assert it matches the source project (the parent of _memories)
+// before writing.
 //
 // Returns null when same-project (or when the target isn't a standard Claude Code
 // memory path — test fixtures, custom targets — where we can't assert and don't
@@ -178,7 +179,7 @@ export function projectIdentityMismatch(memoriesDir, memoryMdPath) {
   if (!m) return null; // non-standard target — cannot assert identity, don't block
   const actualMapped = m[1];
   const projectRoot = dirname(memoriesDir);
-  const expectedMapped = mapProjectPathToSlug(projectRoot);
+  const expectedMapped = mapMemoryProjectPathToSlug(projectRoot);
   if (actualMapped === expectedMapped) return null;
   return { projectRoot, expectedMapped, actualMapped };
 }
@@ -223,6 +224,20 @@ export function main(argv) {
   // would otherwise throw an uncaught ENOENT deep in iterUnits→readdirSync. Refuse with exit 2.
   try { readdirSync(memoriesDir); }
   catch { process.stderr.write(`error: _memories source dir not readable: ${memoriesDir}\n`); return 2; }
+
+  // A project inside a larger repository has no MEMORY.md of its own: the harness
+  // injects the repository root's file, shared with every sibling project. A 15–30
+  // unit priority block written there would crowd (or overflow) that shared index
+  // and be overwritten by the next sibling's finalize. Skip, say why, exit clean.
+  const projectRoot = dirname(memoriesDir);
+  const memoryRoot = resolveMemoryProjectRoot(projectRoot);
+  if (memoryRoot !== projectRoot) {
+    process.stderr.write(
+      `Skipped: auto-memory for this project is the repository-wide MEMORY.md of ${memoryRoot} ` +
+      '(shared with every project in that repository), so no per-project priority block is written.\n'
+    );
+    return 0;
+  }
 
   const mismatch = projectIdentityMismatch(memoriesDir, memoryMdPath);
   if (mismatch) {

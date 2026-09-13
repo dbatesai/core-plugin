@@ -67,7 +67,7 @@ Edit `~/.claude/settings.json` (global) or `<project>/.claude/settings.json` (pr
 
 ## read-auto-memory
 
-Read `~/.claude/projects/<encoded-cwd>/memory/MEMORY.md` (first 200 lines auto-injected at session start; rest available on-demand). Cross-project index at `~/.claude/memory/memory.md`.
+Read `~/.claude/projects/<encoded-root>/memory/MEMORY.md` (first 200 lines auto-injected at session start; rest available on-demand), where `<encoded-root>` is the git worktree root — not the cwd — with `/`, `.`, and `:` turned into dashes; outside a repo it's the cwd. A project inside a larger repository shares this file with its siblings. Transcripts, by contrast, stay under the cwd slug. Cross-project index at `~/.claude/memory/memory.md`.
 
 Per `dc-86-harness-local-memory-recall`, this is harness-local recall — level 5 in the five-level authority ordering at `protocols/data-storage.md §"Authority ordering"`. Treat as scratch cache: useful for warm-start hints, never authoritative. Verify project-specific claims against `<project>/_memories/` before acting.
 

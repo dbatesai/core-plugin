@@ -31,7 +31,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { mapProjectPathToSlug } from '../project-slug.mjs';
+import { mapMemoryProjectPathToSlug, resolveMemoryProjectRoot } from '../project-slug.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'auto-memory-injection';
@@ -40,7 +40,8 @@ export const CANARY = '## Recent activity';
 
 /**
  * Map an absolute cwd to the Claude Code project-memory directory name.
- * Claude Code replaces every '/', '\', '.', and ':' in the absolute path with '-'.
+ * Claude Code keys memory on the git worktree root (cwd outside a repo) and replaces
+ * every '/', '\', '.', and ':' in that absolute path with '-'.
  * /Users/<user>/Documents/Projects/CORE → -Users-<user>-Documents-Projects-CORE
  */
 export function mappedMemoryPath(cwd, home = homedir()) {
@@ -52,7 +53,7 @@ export function mappedMemoryPath(cwd, home = homedir()) {
   // `.replace(/[/\\]/g, '-')` misses the Windows drive colon and any dot in
   // the path, making the probe report a false-DEGRADED ("memory not visible")
   // on a store the harness actually injects fine.
-  const mapped = mapProjectPathToSlug(cwd);
+  const mapped = mapMemoryProjectPathToSlug(cwd);
   return [home, '.claude', 'projects', mapped, 'memory', 'MEMORY.md'].join('/');
 }
 
@@ -62,7 +63,7 @@ export function mappedMemoryPath(cwd, home = homedir()) {
  * Evidence weights follow row-schema.md: PASS carries a 'primary' entry,
  * DEGRADED carries a 'conflicting' entry. No 'supporting' (not a schema weight).
  */
-export function classifyMemoryState({ pathResolved, fileExists, content }) {
+export function classifyMemoryState({ pathResolved, fileExists, content, shared = false }) {
   if (!pathResolved) {
     return {
       identity_status: 'UNKNOWN',
@@ -73,6 +74,18 @@ export function classifyMemoryState({ pathResolved, fileExists, content }) {
     return {
       identity_status: 'NOT-YET',
       evidence: [{ source: 'file-presence', value: 'MEMORY.md not found for mapped cwd', agrees_with_others: true, weight: 'corroborating' }],
+    };
+  }
+  // A project nested inside a larger repository reads the repository-wide MEMORY.md,
+  // which CORE does not manage (generate-memory-index skips it), so the structural
+  // marker is not expected there. Presence is the whole claim: the harness injects it.
+  if (shared) {
+    return {
+      identity_status: 'PASS',
+      evidence: [
+        { source: 'file-presence', value: 'MEMORY.md exists', agrees_with_others: true, weight: 'primary' },
+        { source: 'shared-root', value: 'repository-wide MEMORY.md shared with sibling projects; CORE structural marker not expected', agrees_with_others: true, weight: 'corroborating' },
+      ],
     };
   }
   const hasCanary = typeof content === 'string' && content.includes(CANARY);
@@ -110,7 +123,8 @@ export async function probe(opts = {}) {
   if (fileExists) {
     try { content = readFileSync(memPath, 'utf8'); } catch { content = null; }
   }
-  const { identity_status, evidence } = classifyMemoryState({ pathResolved, fileExists, content });
+  const shared = pathResolved && resolveMemoryProjectRoot(cwd) !== String(cwd);
+  const { identity_status, evidence } = classifyMemoryState({ pathResolved, fileExists, content, shared });
 
   return buildRow({ identity_status, evidence, cwd, memPath, observed_at: new Date().toISOString() });
 }

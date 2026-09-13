@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapProjectPathToSlug } from '../../plugins/core/skills/core/scripts/project-slug.mjs';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import {
+  mapProjectPathToSlug, resolveMemoryProjectRoot, mapMemoryProjectPathToSlug,
+} from '../../plugins/core/skills/core/scripts/project-slug.mjs';
 import { projectIdentityMismatch } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
 import { mappedMemoryPath } from '../../plugins/core/skills/core/scripts/write-visibility-canary.mjs';
 
@@ -51,4 +57,46 @@ test('mappedMemoryPath: dotted username resolves the right MEMORY.md (regression
     mappedMemoryPath('/Users/David.Bates28/proj', '/home/u'),
     '/home/u/.claude/projects/-Users-David-Bates28-proj/memory/MEMORY.md',
   );
+});
+
+// --- resolveMemoryProjectRoot: memory is keyed on the git worktree root, not the cwd ---
+
+test('resolveMemoryProjectRoot: a project folder inside a larger repo resolves to the repo root', () => {
+  // The home-directory-repo case: cwd is <repo>/Documents/Projects/<proj>, the harness
+  // injects <repo>'s MEMORY.md. Before the fix every memory script used the cwd slug.
+  const repo = mkdtempSync(join(tmpdir(), 'slug-repo-'));
+  try {
+    execFileSync('git', ['-C', repo, 'init', '-q']);
+    const proj = join(repo, 'Documents', 'Projects', 'proj');
+    mkdirSync(proj, { recursive: true });
+    const root = resolveMemoryProjectRoot(proj);
+    assert.notEqual(root, proj, 'nested project must not resolve to itself');
+    assert.equal(mapMemoryProjectPathToSlug(proj), mapProjectPathToSlug(root));
+    assert.ok(!mapMemoryProjectPathToSlug(proj).endsWith('-proj'), 'slug is the root, not the cwd');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('resolveMemoryProjectRoot: the repo root itself comes back unchanged (same spelling)', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'slug-root-'));
+  try {
+    execFileSync('git', ['-C', repo, 'init', '-q']);
+    // tmpdir may be a symlink (macOS /var -> /private/var); the caller's spelling must
+    // survive so own-repo projects keep the exact slug they had before this change.
+    assert.equal(resolveMemoryProjectRoot(repo), repo);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('resolveMemoryProjectRoot: outside any repo, and for a path that does not exist, the cwd wins', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'slug-norepo-'));
+  try {
+    assert.equal(resolveMemoryProjectRoot(dir), dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.equal(resolveMemoryProjectRoot('/no/such/dir/anywhere'), '/no/such/dir/anywhere');
+  assert.equal(mapMemoryProjectPathToSlug('C:\\Users\\David.Bates28\\proj'), 'C--Users-David-Bates28-proj');
 });
