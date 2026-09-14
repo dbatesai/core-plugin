@@ -56,7 +56,9 @@ export function resolveMemoryProjectRoot(cwd) {
     const top = execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
     }).trim();
-    if (!top || realpathSync(top) === realpathSync(dir)) return dir;
+    // realpathSync.native expands Windows 8.3 short names (a temp dir comes back as
+    // `RUNNER~1` while git prints the long name); the JS realpath does not.
+    if (!top || realpathSync.native(top) === realpathSync.native(dir)) return dir;
     return top;
   } catch {
     return dir;
