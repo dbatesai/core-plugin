@@ -21,8 +21,7 @@
 import { readFileSync, existsSync, statSync, readdirSync, rmSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { buildIndex as buildDecisionsIndex } from './generate-decisions-index.mjs';
-import { buildIndex as buildRisksIndex } from './generate-risks-index.mjs';
+import { buildIndex as buildUnitIndex } from './generate-unit-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { hashText, stampFiles } from './state-cache.mjs';
 import { resolveWorkspaceId } from './log-event.mjs';
@@ -99,12 +98,12 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
       const stampEntries = [];
 
       const decisionsPath = join(mem, 'INDEX-decisions.md');
-      const decisionsText = buildDecisionsIndex(mem);
+      const decisionsText = buildUnitIndex(mem, 'decisions');
       atomicWriteFileSync(decisionsPath, decisionsText);
       stampEntries.push({ path: decisionsPath, hash: hashText(decisionsText), lastWrittenBy: 'maintenance-run' });
 
       const risksPath = join(mem, 'INDEX-risks.md');
-      const risksText = buildRisksIndex(mem);
+      const risksText = buildUnitIndex(mem, 'risks');
       atomicWriteFileSync(risksPath, risksText);
       stampEntries.push({ path: risksPath, hash: hashText(risksText), lastWrittenBy: 'maintenance-run' });
 

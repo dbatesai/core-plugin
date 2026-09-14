@@ -5,7 +5,7 @@
  * instructions; per-harness CLAUDE.md / AGENTS.md are GENERATED from it.
  * This module holds what all three generators share — the parser, the schema check, the
  * harness render, and the deterministic provenance header — so generate-harness-md
- * agents-md stay thin (harness specifics are just the name + filename).
+ * stays thin (harness specifics are just the name, the filename, and the missing-contract policy).
  *
  * The load-bearing property is DETERMINISM: the provenance `generated_at` is the
  * contract's `last_revised` (NOT wall-clock), and `contract_hash` is the sha256 of the

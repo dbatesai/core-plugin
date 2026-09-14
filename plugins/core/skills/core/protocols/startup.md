@@ -264,8 +264,8 @@ Update `~/.core/workspaces/<id>/workspace.json` to v2 schema, preserving prior m
 |---|---|---|
 | a | `node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" --store <project> --schema` | Exit 0 — no frontmatter mismatches, no invalid status/type enums, no dangling edges at the schema level |
 | b | `node "${CORE_ROOT}/skills/core/scripts/check-units.mjs" --store <project> --integrity` | Exit 0 — no orphans (or expected-orphan pattern named in plan), no broken edge targets, no stale-flagged units |
-| c | `node "${CORE_ROOT}/skills/core/scripts/generate-decisions-index.mjs" --store <project>` | Writes `INDEX-decisions.md` with the expected decision count |
-| d | `node "${CORE_ROOT}/skills/core/scripts/generate-risks-index.mjs" --store <project>` | Writes `INDEX-risks.md` with the expected risk count |
+| c | `node "${CORE_ROOT}/skills/core/scripts/generate-unit-index.mjs" --kind decisions --store <project>` | Writes `INDEX-decisions.md` with the expected decision count |
+| d | `node "${CORE_ROOT}/skills/core/scripts/generate-unit-index.mjs" --kind risks --store <project>` | Writes `INDEX-risks.md` with the expected risk count |
 | e | `node "${CORE_ROOT}/skills/core/scripts/priority.mjs" <project>/_memories --top 10` | Ranks successfully; foundational decisions and high-severity risks surface at top; topics field populated |
 | f | `node "${CORE_ROOT}/skills/core/scripts/compact-project.mjs" --check <project>` | Reports PROJECT.md under cap |
 

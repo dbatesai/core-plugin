@@ -23,12 +23,13 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/priority.mjs <project>/_memories/
 
 Used by Tier 2 retrieval (R·S proxy for walk pruning) and full-priority ranking at retrieval time. Weights live in this file so tuning propagates to every project via the next plugin update — not per-project drift.
 
-### `generate-decisions-index.mjs`
+### `generate-unit-index.mjs`
 
-Walks `<project>/_memories/dc-*.md`, parses YAML frontmatter, extracts H1 summaries, and writes `_memories/INDEX-decisions.md`. Pure logic over the units; deterministic output.
+Walks one unit family (`--kind decisions` → `dc-*.md`, `--kind risks` → `risk-*.md`), parses YAML frontmatter, extracts H1 summaries, and writes `_memories/INDEX-decisions.md` or `INDEX-risks.md`. Pure logic over the units; deterministic output; the per-kind facts live in one table.
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-decisions-index.mjs [<project>/_memories/]
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-unit-index.mjs --kind decisions [<project>/_memories/]
+node ${CLAUDE_PLUGIN_ROOT}/skills/core/scripts/generate-unit-index.mjs --kind risks --store <project>
 ```
 
 Invoked by the memory hygiene protocol's "regenerate canonical indexes" step.

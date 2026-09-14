@@ -245,7 +245,7 @@ export function loadUnitBodies(storePath, index) {
 }
 
 // First `# ` heading stripped, else first non-blank non-heading line. Mirrors
-// generate-decisions-index.mjs extractSummary so the index reads the same shape.
+// generate-unit-index.mjs extractSummary so the index reads the same shape.
 export function deriveSummary(body) {
   for (const line of body.split('\n')) {
     const s = line.trim();

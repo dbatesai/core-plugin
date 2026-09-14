@@ -268,13 +268,6 @@
       "surface": "shipped"
     },
     {
-      "name": "generate-decisions-index",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/generate-decisions-index.mjs",
-      "surface": "shipped"
-    },
-    {
       "name": "generate-harness-md",
       "kind": "script",
       "harness": "shared",
@@ -289,17 +282,17 @@
       "surface": "shipped"
     },
     {
-      "name": "generate-risks-index",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/generate-risks-index.mjs",
-      "surface": "shipped"
-    },
-    {
       "name": "generate-summary-index",
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/generate-summary-index.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-unit-index",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/generate-unit-index.mjs",
       "surface": "shipped"
     },
     {

@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { truncate } from '../../plugins/core/skills/core/scripts/text-truncate.mjs';
 
-// The one shared truncate() behind generate-summary-index.mjs,
-// generate-decisions-index.mjs, and generate-risks-index.mjs — collapsed from
+// The one shared truncate() behind generate-summary-index.mjs and
+// generate-unit-index.mjs (once two per-kind scripts) — collapsed from
 // three hand-duplicated copies after the surrogate-splitting bug turned out to
 // be fixed in one of them but not the other two.
 
