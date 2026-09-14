@@ -52,13 +52,9 @@ Units get renamed, archived, or deleted; typed edges that pointed at them become
 
 The rule that matters: for structural edge types (`supersedes`, `depends-on`, `conflicts-with`) on any unit, surface the dangler for user review — never auto-remove. For informational types (`cites`, `references-person`, `references-topic`), auto-remove and log. After any merge or rename, rewrite inverse edges pointing at the old ID. A light wikilink pass promotes `[[wikilink-id]]` body references to typed `cites` frontmatter edges.
 
-### 3e — Session Log Prune
+### 3e — Session Log Prune (retired)
 
-Session logs in `<project>/_sessions/` are ephemeral by design and grow without bound unless pruned. A log is eligible if all three conditions hold: older than 90 days, no unit's `sources:` or `cites:` edge references it, no session summary references it.
-
-The citation check is what decides. If a session log got cited by a unit, someone reached back for it — preserve it. Age and summary-reference checks filter the rest. Narrate every deletion in the pass's report; clean up empty directories.
-
-What this phase never touches: session summaries, outputs, swarm-effectiveness reports, or any cited session log.
+Retired without replacement. No automated session-log cleanup ships: `_sessions/` grows until the user prunes it, and no hygiene pass deletes a session log. The former rule (older than 90 days, uncited by any unit or summary) is kept here only so an old reference reads correctly; `protocols/hygiene.md` and `protocols/data-storage.md` are the current word.
 
 ## Phase 4: Pattern Synthesis
 

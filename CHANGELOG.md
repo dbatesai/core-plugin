@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **`/orient`** — the deprecation shim's sunset (2026-08-15) passed; `/core` has carried its behavior since v3.4. The skill directory and its shim test are gone.
+- **`/vibecheck`** — no script, hook, or protocol consumed it and nothing read its output back. Seven companions ship now; eight slash commands.
+- **`protocols/self-evolution.md`** — folded into `protocols/hygiene.md` as the "Self-evolution — session-end learning" section (universal self-improvement invariant, trip-wire escalation, harness-local recall capture, session-end steps, effectiveness narrative and report, risk tiers). One contradiction reconciled while folding: session-log auto-prune is retired without replacement (`hygiene.md` and `data-storage.md` already said so); `references/hygiene-strategies.md §3e` now says the same instead of describing a live procedure.
+
+### Changed
+- **`generate-harness-md.mjs --harness claude-code|codex`** replaces `generate-claude-md.mjs` and `generate-agents-md.mjs`. One wrapper; a per-harness table carries the output filename and the missing-contract policy (Claude Code: error, exit 2; Codex: clean skip, exit 0). `configure-project` calls it for Codex. Both old test files' coverage merged into one.
+- **`generate-unit-index.mjs --kind decisions|risks`** replaces `generate-decisions-index.mjs` and `generate-risks-index.mjs`. One `KINDS` table; `maintenance-run` calls it twice. Both old test files' coverage merged, plus a per-kind separation test and a CLI test.
+- `scripts/validate.mjs` stays, explicitly: the second retrieval simulator is kept for historical validation comparability.
+
 ### Added
 - Reasoning escalation in the per-turn retrieval hook: when the keyword result is empty, or
   a question's ranking has no clear winner, the hook injects the first two candidate shards

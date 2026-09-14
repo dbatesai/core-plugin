@@ -92,11 +92,10 @@ Paths in this index resolve relative to the skill base directory (the one contai
 | Harness adapter | `protocols/harness.md` | At the start of startup's Identity load; defines abstract verbs and points at the per-harness adapter |
 | Workspace | `protocols/workspace.md` | Creating or resuming a workspace |
 | Data storage | `protocols/data-storage.md` | Before writing any unit, observation, or render |
-| Memory hygiene | `protocols/hygiene.md` | At `/finalize`, after meaningful change, on-demand |
+| Memory hygiene | `protocols/hygiene.md` | At `/finalize`, after meaningful change, on-demand; its self-evolution section at session end and after multi-agent runs |
 | Execution | `protocols/execution.md` | Before any non-trivial task |
 | Multi-agent analysis | `protocols/analysis.md` | When you decide a single pass isn't enough |
 | Validation | `protocols/validation.md` | On-demand retrieval health checks |
-| Self-evolution | `protocols/self-evolution.md` | Session end, hygiene-triggered learning |
 
 ### Harness adapter — read once at session start
 

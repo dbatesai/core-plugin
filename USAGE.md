@@ -93,11 +93,10 @@ Protocols are internal documents `/core` reads when it needs them — they aren'
 | `harness.md` | The abstract-verb contract and how it maps to each harness (Claude Code, Codex). |
 | `workspace.md` | Creating, resuming, or winding down a workspace. |
 | `data-storage.md` | The unit format, the edge types, the retrieval ladder, and the promotion modes — read before writing any unit, observation, or render. |
-| `hygiene.md` | The three hygiene verbs (archive, retire, cold-store), graduation, and continuous self-evaluation. |
+| `hygiene.md` | The three hygiene verbs (archive, retire, cold-store), graduation, continuous self-evaluation, and the session-end self-evolution loop (effectiveness reports, risk tiers, trip-wires). |
 | `execution.md` | Execution discipline, solo and swarm. |
 | `analysis.md` | The multi-agent machinery — phase structure, the anti-convergence discipline, the monitor pattern — invoked when stakes warrant a single pass isn't enough. |
 | `validation.md` | Retrieval-health checks: substrate, convergence, ranking quality. |
-| `self-evolution.md` | Session-end learning and hygiene-triggered skill evolution. |
 
 Supporting references live alongside them: `retrieval.md` (the four-tier ladder in depth), `model-assignments.md` (which model tier per pipeline stage), `hygiene-strategies.md`, `confidence-assignment-guide.md`, `memory-extension-contracts.md`, `architecture-doctrines.md`.
 

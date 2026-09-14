@@ -91,7 +91,7 @@ Multi-agent runs land structured output in two places:
 
 Why both: the SYNTHESIS holds the full narrative for the human reader; the unit holds the durable, retrievable record that surfaces in future retrieval-ladder queries.
 
-Effectiveness observations land in `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md` per `protocols/self-evolution.md`.
+Effectiveness observations land in `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md` per `protocols/hygiene.md §"Self-evolution — session-end learning"`.
 
 ## Persuasion log + mind changes
 
@@ -210,7 +210,7 @@ Once accepted:
 1. Save the synthesis to `<project>/_outputs/<date>/<topic>/SYNTHESIS.md` BEFORE TeamDelete.
 2. Write the review-finding unit at `<project>/_memories/rf-<topic>-<YYYY-MM-DD>.md` with edges to implicated files.
 3. Append the effectiveness narrative to `~/.core/workspaces/<id>/swarm-narrative.md`.
-4. Write the effectiveness report at `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md` per `protocols/self-evolution.md`.
+4. Write the effectiveness report at `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md` per `protocols/hygiene.md §"Self-evolution — session-end learning"`.
 5. Promote generalizable insights to `~/.core/research/` (research mode) or `~/.core/agents/` + `~/.core/task-configs/` (compositional patterns).
 6. Update `PROJECT.md` if the synthesis produced new decisions, risks, or moves.
 7. Verify the writes landed before freeing anything: the synthesis, the review-finding unit, the swarm-narrative append, and the effectiveness report must each exist on disk with non-zero size (one `ls -la` over the four paths, or read each file's first line). A write can fail silently — disk full, permission, a bad path — and after TeamDelete the content is unrecoverable. On any missing or empty file, surface the error and retry the write; don't TeamDelete until all four check out.

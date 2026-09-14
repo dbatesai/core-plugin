@@ -116,4 +116,4 @@ notes: "Added <date> after observing miss in <session>."
 ---
 ```
 
-The corpus grows organically. The continuous self-evaluation loop in `protocols/self-evolution.md` feeds back into corpus growth — every observed retrieval failure becomes a test.
+The corpus grows organically. The continuous self-evaluation loop in `protocols/hygiene.md` feeds back into corpus growth — every observed retrieval failure becomes a test.

@@ -103,5 +103,5 @@ For multi-agent runs specifically:
 
 - Synthesis output lands in `<project>/_outputs/<date>/<topic>/SYNTHESIS.md`.
 - Findings worth keeping become units (`type: review-finding`, prefix `rf-`) with edges to the implicated files or other units.
-- Effectiveness observations land in `~/.core/swarm-effectiveness/` and feed the continuous self-evaluation loop in `protocols/self-evolution.md`.
+- Effectiveness observations land in `~/.core/swarm-effectiveness/` and feed the continuous self-evaluation loop in `protocols/hygiene.md`.
 
