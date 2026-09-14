@@ -656,9 +656,11 @@ ${m.metrics.cached
   .sidebar li.row { display: grid; grid-template-columns: 12px 1fr auto; gap: 0.15rem 0.6rem; align-items: baseline;
     padding: 0.55rem 0.9rem; cursor: pointer; border-bottom: 1px solid var(--line);
     content-visibility: auto; contain-intrinsic-size: auto 64px; }
+  /* the id selector outranks .sidebar li.row's display:grid, so a hidden row is actually gone */
+  #list li.hidden { display: none; }
   .sidebar li.row:hover { background: var(--code-bg); }
-  .sidebar li.row.sel { background: var(--accent); color: #fff; }
-  .sidebar li.row.sel .preview, .sidebar li.row.sel .when { color: rgba(255,255,255,0.85); }
+  /* selection is a tint plus an accent bar — text keeps its full-contrast ink in both themes */
+  .sidebar li.row.sel { background: var(--code-bg); box-shadow: inset 3px 0 0 var(--accent); }
   .sidebar li.row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .sidebar li.row.faded .utitle, .sidebar li.row.faded .preview { opacity: 0.55; text-decoration: line-through; }
   .sidebar .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dot, var(--muted)); align-self: center; }
@@ -728,6 +730,8 @@ ${filterRules}
   .reader { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
     padding: 1.1rem 1.3rem; min-height: 12rem; }
   .reader .placeholder { color: var(--muted); }
+  .reader h3:focus { outline: none; }
+  .reader h3:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
   .reader h3 { font-family: var(--font-display); font-weight: 600; margin: 0; font-size: 1.45rem; letter-spacing: -0.01em; text-wrap: balance; }
   .reader .meta { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; color: var(--muted); font-size: 0.82rem; margin: 0.4rem 0 0.9rem; }
   .reader .meta .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dot, var(--muted)); display: inline-block; }
@@ -779,7 +783,7 @@ ${filterRules}
         <input id="filter" type="search" placeholder="Search" aria-label="Search units">
       </div>
       <div class="segs" id="segs" role="group" aria-label="Show only">
-        <button type="button" class="seg on" data-seg="">All</button>${types.map((t) => `<button type="button" class="seg" data-seg="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('')}
+        <button type="button" class="seg on" aria-pressed="true" data-seg="">All</button>${types.map((t) => `<button type="button" class="seg" aria-pressed="false" data-seg="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('')}
       </div>
       <ul id="list"></ul>
     </nav>
@@ -856,7 +860,7 @@ ${filterRules}
     out = out.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
     out = out.replace(/\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]/g, function (_, id) {
       id = id.trim();
-      if (byId[id]) return '<a class="ulink" data-unit="' + esc(id) + '">' + esc(id) + '</a>';
+      if (byId[id]) return '<a class="ulink" href="#" data-unit="' + esc(id) + '">' + esc(id) + '</a>';
       return '[[' + esc(id) + ']]';
     });
     out = out.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function (_, t, u) { return t + ' (' + u + ')'; });
@@ -1022,7 +1026,7 @@ ${filterRules}
     var b = e.target.closest('button[data-seg]');
     if (!b) return;
     seg = b.getAttribute('data-seg');
-    document.querySelectorAll('#segs .seg').forEach(function (x) { x.classList.toggle('on', x === b); });
+    document.querySelectorAll('#segs .seg').forEach(function (x) { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
     applyListFilter(filterEl.value);
   });
   listEl.addEventListener('click', function (e) {
@@ -1074,7 +1078,7 @@ ${filterRules}
   // their titles; every raw field one fold down. ----
   var readerEl = document.getElementById('reader');
   function unitLink(id, label) {
-    if (byId[id]) return '<a class="ulink" data-unit="' + esc(id) + '">' + esc(label || id) + '</a>';
+    if (byId[id]) return '<a class="ulink" href="#" data-unit="' + esc(id) + '">' + esc(label || id) + '</a>';
     return esc(label || id) + ' <span class="badge">not in this snapshot</span>';
   }
   function relatedRow(rel, id, dir) {
@@ -1091,7 +1095,7 @@ ${filterRules}
     var edges = (u.edges || []).map(function (e) { return relatedRow(e.type, e.target, 'out'); }).join('');
     var bl = (backlinks[id] || []).map(function (b) { return relatedRow(b.type, b.from, 'in'); }).join('');
     readerEl.innerHTML =
-      '<h3>' + esc(u.title) + '</h3>' +
+      '<h3 tabindex="-1" id="reader-title">' + esc(u.title) + '</h3>' +
       '<div class="meta"><span class="dot" style="--dot:' + colorFor(u.type) + '"></span>' + esc(u.type || 'untyped') +
         ' <span class="badge status-' + esc(u.status) + '">' + esc(u.status) + '</span>' +
         (u.updated ? '<span>updated ' + esc(u.updated) + '</span>' : '') +
@@ -1100,14 +1104,19 @@ ${filterRules}
       '<div class="body-md">' + mdToHtml(u.body || '(empty body)') + '</div>' +
       '<div class="related"><b>Related</b><ul>' + (edges + bl || '<li><span></span><span class="rel">nothing linked</span></li>') + '</ul></div>' +
       '<details class="more"><summary>All fields &middot; ' + esc(u.id) + '</summary><div class="unit-id">' + esc(u.path) + '</div>' + renderProperties(u.properties) + '</details>';
-    if (!(opts && opts.boot)) { shellEl.classList.add('reading'); readerEl.scrollIntoView({ block: 'start' }); }
+    if (!(opts && opts.boot)) {
+      shellEl.classList.add('reading');
+      readerEl.scrollIntoView({ block: 'start' });
+      var h = document.getElementById('reader-title');
+      if (h) h.focus({ preventScroll: true });
+    }
     document.querySelector('.mode-toggle button[data-mode="focus"]').disabled = false;
     highlightNode(id);
     setMode('focus');
   }
   readerEl.addEventListener('click', function (e) {
     var a = e.target.closest('a.ulink');
-    if (a) select(a.getAttribute('data-unit'));
+    if (a) { e.preventDefault(); select(a.getAttribute('data-unit')); }
   });
 
   // ---- graph: DOM built exactly ONCE from the precomputed coordinates.
