@@ -8,7 +8,7 @@ For the design reasoning behind any of this, see [ARCHITECTURE.md](ARCHITECTURE.
 
 ## Commands
 
-Ten slash commands ship with the plugin: `/core`, eight companions, and one deprecation shim. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own; the shims forward to where their behavior moved.
+Eight slash commands ship with the plugin: `/core` and seven companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
 
 ### `/core`
 
@@ -61,13 +61,6 @@ A one-shot setup-and-health check that confirms a harness is wired correctly aga
 - **When to use:** setting up CORE on a folder under Codex, when a second harness joins a folder Claude Code already manages, or any time you want a "is this wired right?" check.
 - **Idempotent and report-only by default.** The only write it ever makes is generating `AGENTS.md`, and only with `--apply`.
 
-### `/vibecheck`
-
-Capture the emotional truth of a session as ASCII art.
-
-- **What it does:** renders how the session felt — not a status report, the actual vibe — and logs it to `~/.core/vibes/vibe-log.md`. Terminal-only, no browser.
-- **When to use:** "vibecheck," or whenever you want to mark the feel of a session.
-
 ### `/metrics`
 
 The one door to memory health (v3.14.0). The default answers the three questions that matter in plain sentences; the deeper instruments live behind explicit modes.
@@ -86,12 +79,6 @@ Browse what CORE knows — the unit graph, full unit bodies, edges and backlinks
 - **What it does:** generates a single HTML snapshot from the project's memory store (active units by default; archive and per-topic exclusions are explicit choices), then shows you a preflight manifest — unit count, byte count, scope, snapshot id, and a sensitivity warning. Publishing follows one consent contract with two modes. **Default:** each publish waits for your explicit yes to that manifest, and a yes covers that one publish only — nothing carries forward. **Standing authorization:** a grant you make prospectively — recorded durably where the agent can verify it, scoped to artifact publishes of your own project data to your own private account, revocable at any time — under which each publish (including live mode's republishes) narrates the same manifest in the conversation and proceeds while the grant remains valid. In either mode, anything involving another party's data or content you've flagged sensitive asks first, and publishing never runs at startup, at session close, or on a schedule. The page itself is stamped point-in-time and read-only, with the generating plugin version and store snapshot id in the banner. Each generation writes a local receipt (`~/.core/workspaces/<id>/artifact-receipts/`) recording exactly what was generated for publish and when.
 - **When to use:** "publish the memory view," "refresh the memory artifact," "let me browse the graph on my phone," or any time seeing the store beats being told about it. On a harness with no artifact surface (Codex), it generates the same page locally and gives you the file path instead — no faking.
 - **Writes:** the HTML file to the scratch path you choose (never into the project or the store — the store is read-only to this flow) and the local receipt. Unit content never routes into the anonymized `/metrics export` zip.
-
-### `/orient` *(deprecated shim — folded into `/core`)*
-
-Session bootstrap is part of CORE's startup protocol now, so `/orient` does no work of its own: it prints a notice pointing at `/core` and stops. Kept only so an existing habit doesn't hit an unrecognized command. Removal scheduled for 2026-08-15.
-
----
 
 ## Additional reference
 

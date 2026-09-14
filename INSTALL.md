@@ -32,10 +32,8 @@ Start a fresh session and type `/core`. That's it — the plugin registers the m
 | `/process-memory` | Clean up memory on demand — back-fill auto-closed sessions, pull the inbox, promote the notes worth keeping, check the units, rebuild the indexes, trim `PROJECT.md` when it is over the size cap. |
 | `/register-sources` | Point CORE at outside data that should feed the project's memory. |
 | `/configure-project` | Set up and health-check a project's CORE files. Read-only unless you pass `--apply`. |
-| `/vibecheck` | Capture how the session felt as ASCII art, saved to `~/.core/vibes/`. |
 | `/metrics` | The one door to memory health. Default: three plain-language answers (storing the right memories? loading them when needed? passing its own blind test?) from pinned history. Modes: `/metrics full` (complete instrument readout), `/metrics export` (anonymized stats zip), `/metrics self-test` (a blind test round now). |
 | `/memory-view` | Browse what CORE knows as one read-only page — graph, unit bodies, backlinks, health section. Published as a private artifact under one consent contract: by default each publish waits for your explicit yes to the preflight manifest; a standing authorization you grant prospectively (your own recorded, revocable decision, scoped to your own data on your own account) lets publishes narrate and proceed while it remains valid. Runs only when you ask — never at startup, close, or on a schedule. |
-| `/orient` | Deprecated shim (removal 2026-08-15) — session bootstrap folded into `/core`. |
 
 ### Shipped hooks (installed with the plugin)
 
@@ -117,7 +115,7 @@ test -f ~/.codex/plugins/cache/core/core/<version>/.codex-plugin/plugin.json
 test -f ~/.codex/plugins/cache/core/core/<version>/skills/core/SKILL.md
 ```
 
-Codex finds the bundled skills (`core`, `finalize`, `refocus`, `process-memory`, `register-sources`, `configure-project`, `vibecheck`, `metrics`, `memory-view`, and the deprecated `orient` shim) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
+Codex finds the bundled skills (`core`, `finalize`, `refocus`, `process-memory`, `register-sources`, `configure-project`, `metrics`, and `memory-view`) through the manifest's `skills:` pointer. Any standalone skills you already keep at `~/.codex/skills/` are left untouched.
 
 Two differences from Claude Code worth knowing.
 
@@ -141,6 +139,6 @@ Your project data — `PROJECT.md`, `_memories/`, `_summaries/` inside each proj
 
 **The agent doesn't introduce itself by name.** It picks a name on first run. If it didn't, ask it to.
 
-**A sub-skill name collides.** If another plugin already claims `/finalize`, `/process-memory`, `/register-sources`, `/configure-project`, or `/vibecheck`, registration can clash. Disable or remove the other plugin.
+**A sub-skill name collides.** If another plugin already claims `/finalize`, `/process-memory`, `/register-sources`, or `/configure-project`, registration can clash. Disable or remove the other plugin.
 
 **Installing from a zip through the desktop app's upload dialog.** That dialog currently fails for `.zip` and `.plugin` files on both Windows and macOS (a known Claude bug). Use the marketplace path above instead — it's the supported route.

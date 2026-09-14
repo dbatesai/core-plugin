@@ -695,13 +695,6 @@
       "invocation": "user"
     },
     {
-      "name": "orient",
-      "kind": "skill",
-      "harness": "shared",
-      "status": "deprecated",
-      "invocation": "user"
-    },
-    {
       "name": "process-memory",
       "kind": "skill",
       "harness": "shared",
@@ -717,13 +710,6 @@
     },
     {
       "name": "register-sources",
-      "kind": "skill",
-      "harness": "shared",
-      "status": "active",
-      "invocation": "user"
-    },
-    {
-      "name": "vibecheck",
       "kind": "skill",
       "harness": "shared",
       "status": "active",
