@@ -978,8 +978,13 @@ test('responsive chrome keeps the mobile browse loop reachable; long lists rende
     const chrome = html.replace(raw, '');
     assert.match(chrome, /\.edge-legend svg\s*\{[^}]*min-height:\s*0/s,
       'edge legend SVGs must override the graph SVG minimum height');
-    assert.match(chrome, /@media \(max-width: 860px\)[\s\S]*?\.sidebar\s*\{[^}]*max-height:\s*52vh !important/,
-      'the mobile unit list stays bounded instead of expanding every unit before the graph');
+    // Phone width is the mail pattern: the list fills the screen, and opening
+    // a unit replaces the list with the reading pane (a Back control returns).
+    assert.match(chrome, /@media \(max-width: 860px\)[\s\S]*?\.shell\.reading \.sidebar\s*\{[^}]*display:\s*none/,
+      'on a phone the reading pane replaces the list instead of stacking under it');
+    assert.match(chrome, /\.shell:not\(\.reading\) \.main-col\s*\{[^}]*display:\s*none/,
+      'on a phone the list is the whole first screen');
+    assert.ok(chrome.includes('id="back"'), 'a Back control returns to the list');
     assert.match(chrome, /footer\s*\{[^}]*overflow-wrap:\s*anywhere/s,
       'the snapshot id cannot force horizontal overflow');
     const rowRule = chrome.match(/\.sidebar li\.row \{[^}]*\}/s);
