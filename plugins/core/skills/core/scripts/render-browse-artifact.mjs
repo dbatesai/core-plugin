@@ -924,6 +924,8 @@ ${filterRules}
   var listEl = document.getElementById('list');
   var shellEl = document.getElementById('shell');
   var selected = null;
+  // the list row the reader was entered from; related-unit hops never change it
+  var origin = null;
   var rowById = {};
   var listGroups = [];
   var seg = '';
@@ -1031,16 +1033,19 @@ ${filterRules}
   });
   listEl.addEventListener('click', function (e) {
     var li = e.target.closest('li[data-unit]');
-    if (li) select(li.getAttribute('data-unit'));
+    if (li) { origin = li.getAttribute('data-unit'); select(origin); }
   });
   listEl.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     var li = e.target.closest('li[data-unit]');
-    if (li) { e.preventDefault(); select(li.getAttribute('data-unit')); }
+    if (li) { e.preventDefault(); origin = li.getAttribute('data-unit'); select(origin); }
   });
+  // Back returns focus to the row the reader was entered from, if it is still
+  // visible under the current search/segment; otherwise to the search control.
   document.getElementById('back').addEventListener('click', function () {
     shellEl.classList.remove('reading');
-    if (selected && rowById[selected]) rowById[selected].focus();
+    var row = origin && rowById[origin];
+    if (row && !row.classList.contains('hidden')) row.focus(); else filterEl.focus();
   });
   function markSelected(id) {
     if (selected && rowById[selected]) rowById[selected].classList.remove('sel');

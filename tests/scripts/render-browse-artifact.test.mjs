@@ -991,6 +991,8 @@ test('responsive chrome keeps the mobile browse loop reachable; long lists rende
     assert.match(chrome, /class="seg on" aria-pressed="true"/, 'type segments expose pressed state');
     assert.match(chrome, /<a class="ulink" href="#"/, 'related units are real links (Tab + Enter work natively)');
     assert.match(chrome, /id="reader-title"/, 'selection moves focus into the reader');
+    assert.match(chrome, /var row = origin && rowById\[origin\];/, 'Back restores the list origin, not the last related hop');
+    assert.match(chrome, /else filterEl\.focus\(\)/, 'a filtered-out origin falls back to the search control');
     assert.match(chrome, /footer\s*\{[^}]*overflow-wrap:\s*anywhere/s,
       'the snapshot id cannot force horizontal overflow');
     const rowRule = chrome.match(/\.sidebar li\.row \{[^}]*\}/s);
