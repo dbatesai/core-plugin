@@ -643,7 +643,7 @@ ${m.metrics.cached
   .sidebar input { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: var(--code-bg); color: var(--ink);
     padding: 0.45rem 0.7rem; margin-top: 0.5rem; font: inherit; outline: none; flex: none; }
   .sidebar input:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .segs { display: flex; gap: 0.3rem; overflow-x: auto; padding: 0.4rem 0.9rem 0.55rem; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+  .segs { flex: none; display: flex; gap: 0.3rem; overflow-x: auto; padding: 0.4rem 0.9rem 0.55rem; border-bottom: 1px solid var(--line); scrollbar-width: none; }
   .segs::-webkit-scrollbar { display: none; }
   .seg { flex: none; font: inherit; font-size: 0.76rem; padding: 0.2rem 0.7rem; border-radius: 999px; border: 1px solid var(--line);
     background: transparent; color: var(--muted); cursor: pointer; }
