@@ -985,7 +985,7 @@ test('responsive chrome keeps the mobile browse loop reachable; long lists rende
     assert.match(chrome, /\.shell:not\(\.reading\) \.main-col\s*\{[^}]*display:\s*none/,
       'on a phone the list is the whole first screen');
     assert.ok(chrome.includes('id="back"'), 'a Back control returns to the list');
-    // Hale's 2026-09-13 review: .hidden alone lost to the row's display:grid,
+    // Review finding: .hidden alone lost to the row's display:grid,
     // so search could report zero matches while every row stayed on screen.
     assert.match(chrome, /#list li\.hidden \{ display: none; \}/, 'the hidden rule outranks the row display rule');
     assert.match(chrome, /class="seg on" aria-pressed="true"/, 'type segments expose pressed state');
