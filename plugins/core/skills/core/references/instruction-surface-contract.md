@@ -7,7 +7,7 @@ Read this when a project asks to adopt the contract system, when you're editing 
 ## The pieces (all ship as plugin scripts under `skills/core/scripts/`)
 
 - `contract-format.mjs` — the shared core. `parseContract` (frontmatter + `##` sections + `### <harness>-only` subsections, with schema validation), `renderForHarness`, `parseOverrides`, deterministic provenance, and `generateForHarness` (the body every generator calls).
-- `generate-claude-md.mjs` / `generate-agents-md.mjs` — thin per-harness wrappers. Modes: `--mode write|check|dry-run`.
+- `generate-harness-md.mjs --harness claude-code|codex` — one thin wrapper for every harness; a per-harness table carries the output filename and the missing-contract policy (Claude Code: error; Codex: skip). Modes: `--mode write|check|dry-run`.
 - `migrate-to-contract.mjs` — bootstraps a **draft** contract from a project's existing harness files.
 
 ## CONTRACT.md shape

@@ -268,24 +268,17 @@
       "surface": "shipped"
     },
     {
-      "name": "generate-agents-md",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/generate-agents-md.mjs",
-      "surface": "shipped"
-    },
-    {
-      "name": "generate-claude-md",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/generate-claude-md.mjs",
-      "surface": "shipped"
-    },
-    {
       "name": "generate-decisions-index",
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/generate-decisions-index.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-harness-md",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/generate-harness-md.mjs",
       "surface": "shipped"
     },
     {
