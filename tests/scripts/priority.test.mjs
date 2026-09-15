@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 // Validity predicates now live in priority.mjs (the canonical unit module) per the
@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import {
   effectiveValidity, validAt, isInvalidated, parseIsoDate,
   parseFrontmatter, normalizeNewlines, _todayFromArg,
-  rankUnits, main as priorityMain, iterArchivedUnits,
+  rankUnits, main as priorityMain, iterArchivedUnits, iterUnits,
   score, signalS, NO_SOURCES_DEFAULT_S,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
@@ -251,4 +251,42 @@ test('ranking population: nested active observation ranks; archive/retired exclu
     assert.deepEqual(retrieved, ['nested', 'root'], 'Per-turn retrieval must reach nested active notes and preserve exclusions');
     assert.ok(ranked.includes('nested'), 'DEFECT: nested active observation is absent from priority ranking');
   } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('ranking population: an unreadable nested unit lands on the skipped list and in the excluded counts, never silently vanishes', { skip: process.platform === 'win32' ? 'chmod has no effect on win32; the read-failure control needs a POSIX mode bit' : false }, () => {
+  const project = mkdtempSync(join(tmpdir(), 'ranking-unreadable-'));
+  const mem = join(project, '_memories');
+  const nested = join(mem, 'observations', '2026-09');
+  const locked = join(nested, 'obs-locked.md');
+  try {
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(mem, 'dc-root.md'), '---\nid: root\ntype: decision\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# root\n');
+    writeFileSync(locked, '---\nid: locked\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# locked\n');
+    chmodSync(locked, 0o000);
+    const units = iterUnits(mem);
+    assert.deepEqual(units.map(u => u.id), ['root'], 'the unreadable unit is not loaded');
+    assert.equal(units.skipped.length, 1, 'the unreadable unit is on the skipped list');
+    assert.equal(units.skipped[0].path, locked, 'skipped entry carries the native absolute path');
+    const ranked = rankUnits(mem, { today: parseIsoDate('2026-09-15') });
+    assert.equal(ranked.excluded.unreadable, 1, 'rankUnits reports the unreadable count');
+    assert.equal(ranked.excluded.read, 1, 'rankUnits reports how many it actually read');
+  } finally { try { chmodSync(locked, 0o644); } catch {} rmSync(project, { recursive: true, force: true }); }
+});
+
+test('ranking population: the path iterUnits returns for a nested unit is the state-cache key shape — a stamp on it is found by the consumer lookup', async () => {
+  const { stampFile, readProjectCache } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-cache-key-'));
+  const home = mkdtempSync(join(tmpdir(), 'ranking-cache-home-'));
+  const mem = join(project, '_memories');
+  try {
+    mkdirSync(join(mem, 'observations', '2026-09'), { recursive: true });
+    mkdirSync(join(mem, '_lib'), { recursive: true });
+    writeFileSync(join(mem, 'observations', '2026-09', 'obs-nested.md'), '---\nid: nested\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# nested\n');
+    const [u] = iterUnits(mem);
+    assert.equal(u.id, 'nested');
+    stampFile(project, u.path, 'deadbeef', 'test', { home });
+    const cache = readProjectCache(project);
+    assert.ok(cache.files[u.path], 'the consumer finds the nested unit under the exact path the walk returned');
+    assert.ok(!cache.files[u.path.replace(/\\/g, '/')] || u.path === u.path.replace(/\\/g, '/'), 'no second, normalized identity was introduced');
+  } finally { rmSync(project, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }); }
 });

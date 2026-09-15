@@ -490,13 +490,18 @@ export function iterArchivedUnits(memoriesDir) {
  */
 export function rankUnits(memoriesDir, { sessionTopics = [], today = null, includeInvalidated = false } = {}) {
   const t = today || _todayUTC();
-  const pool = includeInvalidated ? iterUnits(memoriesDir).concat(iterArchivedUnits(memoriesDir)) : iterUnits(memoriesDir);
+  const live = iterUnits(memoriesDir);
+  const pool = includeInvalidated ? live.concat(iterArchivedUnits(memoriesDir)) : live;
+  if (pool !== live) Object.defineProperty(pool, 'skipped', { value: live.skipped || [], enumerable: false });
+  const excluded = { malformed: 0, status: 0, invalidated: 0, unreadable: (pool.skipped || []).length, read: pool.length };
   const ranked = pool
-    .filter(u => !u.fm._load_error)
-    .filter(u => includeInvalidated || isActiveStatus(u.fm))
-    .filter(u => includeInvalidated || !isInvalidated(u, t))
+    .filter(u => { if (u.fm._load_error) { excluded.malformed++; return false; } return true; })
+    .filter(u => { if (!includeInvalidated && !isActiveStatus(u.fm)) { excluded.status++; return false; } return true; })
+    .filter(u => { if (!includeInvalidated && isInvalidated(u, t)) { excluded.invalidated++; return false; } return true; })
     .map(u => [score(u, sessionTopics, t), u]);
   ranked.sort((a, b) => b[0] - a[0]);
+  // The denominator rides along so every consumer can say what it did not rank.
+  Object.defineProperty(ranked, 'excluded', { value: excluded, enumerable: false });
   return ranked;
 }
 
@@ -589,7 +594,8 @@ export function main(argv) {
 
   if (sections) return _cliSections(ranked, topPerSection);
 
-  console.log(`Ranking ${ranked.length} units in ${memoriesDir}`);
+  const ex = ranked.excluded || {};
+  console.log(`Ranking ${ranked.length} units in ${memoriesDir} (${ex.read ?? '?'} read; excluded: ${ex.status ?? 0} by status, ${ex.invalidated ?? 0} invalidated, ${ex.malformed ?? 0} malformed; unreadable: ${ex.unreadable ?? 0})`);
   console.log(`Date: ${today.toISOString().slice(0, 10)}, intent topics: ${intent.length ? intent.join(',') : '(none)'}`);
   console.log('-'.repeat(64));
   for (const [s, u] of ranked.slice(0, topN)) {
