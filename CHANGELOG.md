@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.17.1] — 2026-09-14
+
+### Fixed
+- `source_sha` in both plugin manifests now names the commit the package is built from. v3.17.0 shipped carrying the v3.16.1 stamp (the version-bump script sets versions only, and the freshness check ran only on one path), so the retrieval and answer-close hooks wrote a commit 70 files behind the code as `producer_sha` on every metrics row. The release flow now stamps before the release commit and checks freshness on every cut.
+
 ## [3.17.0] — 2026-09-14
 
 ### Release notes — why 3.17.0 and not 4.0.0
