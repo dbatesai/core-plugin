@@ -404,7 +404,10 @@ export function candidatesForSynthesis(projectDir, { top = DEFAULT_CANDIDATE_COU
   const memoriesDir = join(projectDir, '_memories');
   let units;
   try { units = iterUnits(memoriesDir); } catch { return []; }
-  if (!Array.isArray(units) || units.length === 0) return [];
+  // An unreadable population must stay distinguishable from a healthy empty store:
+  // the zero-loaded return carries the skip evidence too.
+  const withSkipped = (arr) => { Object.defineProperty(arr, 'skipped', { value: (units && units.skipped) || [], enumerable: false }); return arr; };
+  if (!Array.isArray(units) || units.length === 0) return withSkipped([]);
 
   // Validity-suppression uses the same shared predicate every other reader
   // does: a unit whose t_invalid has passed stopped being true, so it is
@@ -433,9 +436,7 @@ export function candidatesForSynthesis(projectDir, { top = DEFAULT_CANDIDATE_COU
     })
     .sort((a, b) => b.score - a.score);
 
-  const out = scored.slice(0, top);
-  Object.defineProperty(out, 'skipped', { value: units.skipped || [], enumerable: false });
-  return out;
+  return withSkipped(scored.slice(0, top));
 }
 
 function extractTitle(unit) {

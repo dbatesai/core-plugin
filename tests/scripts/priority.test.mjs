@@ -338,3 +338,26 @@ test('ranking coverage: excluded-by-status is broken out by status value', () =>
     assert.equal(ranked.excluded.read, 4);
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
+
+test('ranking coverage: when the only unit sits under an unlistable subtree, hot-section candidates are empty but still carry the skip evidence (reviewer no-root case)', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { candidatesForSynthesis, main: hotMain } = await import('../../plugins/core/skills/core/scripts/hot-section.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-noroot-'));
+  const mem = join(project, '_memories'), blocked = join(mem, 'observations', '2026-09');
+  const realReaddir = fs.readdirSync, realStderr = process.stderr.write, realStdout = process.stdout.write;
+  try {
+    mkdirSync(blocked, { recursive: true });
+    writeFileSync(join(blocked, 'nested.md'), '---\nid: nested\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# nested\n');
+    assert.deepEqual(candidatesForSynthesis(project, { today: new Date('2026-09-15') }).map(c => c.id), ['nested'], 'positive control');
+    fs.readdirSync = (p, ...a) => { if (String(p) === blocked) throw Object.assign(new Error('synthetic EACCES'), { code: 'EACCES' }); return realReaddir(p, ...a); };
+    syncBuiltinESMExports();
+    process.stderr.write = () => true; let out = ''; process.stdout.write = (c) => { out += c; return true; };
+    const cands = candidatesForSynthesis(project, { today: new Date('2026-09-15') });
+    assert.deepEqual(cands, []);
+    assert.equal(cands.skipped.length, 1, 'empty result still names the unread subtree');
+    const exit = hotMain(['candidates', project, '--json']);
+    assert.equal(exit, 0);
+    assert.equal(JSON.parse(out).coverage_incomplete.length, 1, 'JSON CLI keeps the evidence on the zero-candidate path');
+  } finally { fs.readdirSync = realReaddir; syncBuiltinESMExports(); process.stderr.write = realStderr; process.stdout.write = realStdout; rmSync(project, { recursive: true, force: true }); }
+});
