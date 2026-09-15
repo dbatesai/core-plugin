@@ -105,6 +105,8 @@ export function renderPriorityBlock({ memoriesDir, topN, today, existingDescript
   const dateStr = today.toISOString().slice(0, 10);
 
   const lines = [`## Top project units (refreshed from priority.mjs --top ${topN}, ${dateStr})`, ''];
+  const ex = ranked.excluded;
+  if (ex && ex.unreadable) lines.push(`> Coverage incomplete: ${ex.unreadable} path(s) could not be read — ${ex.skipped.map(s => relative(projectRoot, String(s.path)).replace(/\\/g, '/') + ' (' + s.reason + ')').join('; ')}. Units under them are unaccounted for, not absent.`, '');
   for (const [, u] of top) {
     const relPath = relative(projectRoot, String(u.path)).replace(/\\/g, '/');
     const existing = existingDescriptions.get(u.id);
