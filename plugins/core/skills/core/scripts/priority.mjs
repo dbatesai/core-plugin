@@ -407,28 +407,50 @@ export function unitSection(unit) {
 
 // ---------- Unit iteration ----------
 
+// Walks the store recursively so dated observations/<YYYY-MM>/ subfolders rank.
+// Excluded by path segment, never by prefix: any directory named `archive`
+// (iterArchivedUnits walks that tree explicitly) and any `_`-prefixed directory
+// (_lib, _validation, ...). Unit paths stay absolute, exactly as join() builds
+// them — the state cache keys on that shape, so no normalizer is introduced here.
 export function iterUnits(memoriesDir) {
   const units = [];
-  for (const fname of readdirSync(memoriesDir).sort()) {
-    if (!fname.endsWith('.md')) continue;
-    if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
-    const path = join(memoriesDir, fname);
-    try {
-      const u = loadUnit(path);
-      if (!Object.keys(u.fm).length) {
-        // Malformed/absent frontmatter parses to an empty map and would score
-        // on pure defaults, surfacing unflagged in ranked output.
-        // Tag it so rankUnits() excludes it; the stderr warn makes the damage
-        // visible (check-units reports the same file as a schema failure).
-        u.fm._load_error = true;
-        process.stderr.write(`warn: ${fname}: no parseable frontmatter — excluded from ranking\n`);
+  const skipped = [];
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch (e) { if (dir === memoriesDir) throw e; skipped.push({ path: dir, reason: e && e.code ? e.code : 'readdir-failed' }); return; }
+    entries.sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
+    for (const ent of entries) {
+      const fname = ent.name;
+      if (ent.isDirectory()) {
+        if (fname === 'archive' || fname.startsWith('_') || fname.startsWith('.')) continue;
+        walk(join(dir, fname));
+        continue;
       }
-      units.push(u);
-    } catch (e) {
-      // A bare catch would swallow read failures silently — warn instead.
-      process.stderr.write(`warn: ${fname}: failed to load (${e && e.message ? e.message : e}) — excluded from ranking\n`);
+      if (!fname.endsWith('.md')) continue;
+      if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
+      const path = join(dir, fname);
+      try {
+        const u = loadUnit(path);
+        if (!Object.keys(u.fm).length) {
+          // Malformed/absent frontmatter parses to an empty map and would score
+          // on pure defaults, surfacing unflagged in ranked output.
+          // Tag it so rankUnits() excludes it; the stderr warn makes the damage
+          // visible (check-units reports the same file as a schema failure).
+          u.fm._load_error = true;
+          process.stderr.write(`warn: ${fname}: no parseable frontmatter — excluded from ranking\n`);
+        }
+        units.push(u);
+      } catch (e) {
+        // A bare catch would swallow read failures silently — warn instead, and
+        // keep the skip on the list so a caller can report an unverified denominator.
+        skipped.push({ path, reason: e && e.message ? e.message : String(e) });
+        process.stderr.write(`warn: ${fname}: failed to load (${e && e.message ? e.message : e}) — excluded from ranking\n`);
+      }
     }
-  }
+  };
+  walk(memoriesDir);
+  Object.defineProperty(units, 'skipped', { value: skipped, enumerable: false });
   return units;
 }
 
@@ -436,10 +458,9 @@ export function iterUnits(memoriesDir) {
  * iterArchivedUnits — the ONE archive-aware companion to iterUnits, for the
  * explicit-history modes only. Archiving a unit
  * (a separate, independent action from retiring it — see hygiene.md) is what
- * physically relocates it to `archive/`, but iterUnits is top-level-only by
- * design (default retrieval must stay non-recursive, per
- * ARCHITECTURE.md/data-storage.md). Without this companion, an archived unit
- * would silently
+ * physically relocates it to `archive/`, and iterUnits skips every directory
+ * named `archive` by design (default ranking never reads cold history).
+ * Without this companion, an archived unit would silently
  * disappear from every "--include-invalid" / cold-history caller too, not
  * just default retrieval -- losing complete recall there is a defect, not a
  * side effect of the archive action

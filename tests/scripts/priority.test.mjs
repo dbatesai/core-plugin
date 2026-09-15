@@ -225,3 +225,30 @@ test('signalS: both agent-profile and the legacy dm-profile source paths score a
   assert.equal(modern, legacy, 'renamed profile path must not change a unit\'s provenance score');
   assert.ok(modern > NO_SOURCES_DEFAULT_S, 'profile-sourced units outrank unknown provenance');
 });
+
+// Reviewer-supplied synthetic control (files repo receipt codex-to-all-20260915T195633Z). Acceptance test for the
+// bounded ranking-population repair: nested active notes must rank; archive exclusion, retired suppression,
+// explicit history, and per-turn retrieval must keep their current behavior. Red on 3.17.1 at the last assertion only.
+test('ranking population: nested active observation ranks; archive/retired exclusions and explicit history preserved (reviewer check-ranking)', async () => {
+  const { retrieveContext } = await import('../../plugins/core/skills/core/scripts/retrieve-context.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-population-'));
+  const mem = join(project, '_memories');
+  try {
+    for (const dir of ['', 'observations/2026-09', 'archive']) mkdirSync(join(mem, dir), { recursive: true });
+    for (const [file, id, state, type] of [
+      ['dc-root.md', 'root', 'active', 'decision'],
+      ['observations/2026-09/obs-nested.md', 'nested', 'active', 'observation'],
+      ['dc-retired.md', 'retired', 'retired', 'decision'],
+      ['archive/dc-archived.md', 'archived', 'active', 'decision'],
+    ]) writeFileSync(join(mem, file), `---\nid: ${id}\ntype: ${type}\nstatus: ${state}\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [recovery]\n---\n# Recovery ${id}\nSynthetic recovery constraint.\n`);
+    const ranked = rankUnits(mem).map(([, u]) => u.id).sort();
+    const historical = rankUnits(mem, { includeInvalidated: true }).map(([, u]) => u.id).sort();
+    const retrieved = retrieveContext('recovery', project, { topN: 10 }).map(u => u.id).sort();
+    assert.ok(ranked.includes('root'), 'Root active control must rank');
+    assert.ok(!ranked.includes('retired'), 'Retired control must stay excluded');
+    assert.ok(!ranked.includes('archived'), 'Archive path must stay excluded even with active status');
+    assert.ok(historical.includes('archived'), 'Explicit history must still reach the archive');
+    assert.deepEqual(retrieved, ['nested', 'root'], 'Per-turn retrieval must reach nested active notes and preserve exclusions');
+    assert.ok(ranked.includes('nested'), 'DEFECT: nested active observation is absent from priority ranking');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
