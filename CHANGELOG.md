@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.17.0] — 2026-09-14
+
+### Release notes — why 3.17.0 and not 4.0.0
+
+Two commands leave in this release, and strict semantic versioning would call that a major bump. It is cut as a minor one on purpose: `/orient` had been a no-op since v3.4, printed a deprecation notice, and carried a published sunset date (2026-08-15) that passed before this release; `/vibecheck` had no script, hook, or protocol consumer and nothing read its output back. Neither removal changes how anyone interacts with `/core`. The user-visible change in this release is an addition — reasoning escalation in the per-turn retrieval hook — which is what a minor bump is for.
+
+Review status, stated plainly: the memory-view inbox and the six consolidation changes each carry an independent review artifact (source reviews with defects found and fixed; ratifications; one explicit abstention by scope). The two auto-memory path commits do not — they landed on the maintainer's explicit go with field evidence from two affected workspaces, and the requested code review was withdrawn before it happened. They ship with that gap named rather than implied closed.
+
 ### Removed
 - **`/orient`** — the deprecation shim's sunset (2026-08-15) passed; `/core` has carried its behavior since v3.4. The skill directory and its shim test are gone.
 - **`/vibecheck`** — no script, hook, or protocol consumed it and nothing read its output back. Seven companions ship now; eight slash commands.
