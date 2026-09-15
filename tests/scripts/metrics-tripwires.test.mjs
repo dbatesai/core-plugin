@@ -45,7 +45,10 @@ test('healthy history → no trips, CLI prints nothing', () => {
   const root = mkdtempSync(join(tmpdir(), 'tw-healthy-'));
   try {
     const project = makeProject(root);
-    plant(project, [card('2026-07-20T00:00:00Z'), card('2026-07-21T00:00:00Z')]);
+    // Relative timestamps: the staleness wire reads the wall clock (the CLI has
+    // no injectable clock), so a healthy history must be recent on the day the test runs.
+    const day = 24 * 3600 * 1000;
+    plant(project, [card(new Date(Date.now() - 2 * day).toISOString()), card(new Date(Date.now() - day).toISOString())]);
     const res = evaluateTripwires(project);
     assert.equal(res.healthy, true);
     assert.deepEqual(res.tripped, []);

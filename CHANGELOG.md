@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.17.0] — 2026-09-14
+
+### Release notes — why 3.17.0 and not 4.0.0
+
+Two commands leave in this release, and strict semantic versioning would call that a major bump. It is cut as a minor one on purpose: `/orient` had been a no-op since v3.4, printed a deprecation notice, and carried a published sunset date (2026-08-15) that passed before this release; `/vibecheck` had no script, hook, or protocol consumer and nothing read its output back. Neither removal changes how anyone interacts with `/core`. The user-visible change in this release is an addition — reasoning escalation in the per-turn retrieval hook — which is what a minor bump is for.
+
+Review status, stated plainly: the memory-view inbox and the six consolidation changes each carry an independent review artifact (source reviews with defects found and fixed; ratifications; one explicit abstention by scope). The two auto-memory path commits do not — they landed on the maintainer's explicit go with field evidence from two affected workspaces, and the requested code review was withdrawn before it happened. They ship with that gap named rather than implied closed.
+
+### Removed
+- **`/orient`** — the deprecation shim's sunset (2026-08-15) passed; `/core` has carried its behavior since v3.4. The skill directory and its shim test are gone.
+- **`/vibecheck`** — no script, hook, or protocol consumed it and nothing read its output back. Seven companions ship now; eight slash commands.
+- **`protocols/self-evolution.md`** — folded into `protocols/hygiene.md` as the "Self-evolution — session-end learning" section (universal self-improvement invariant, trip-wire escalation, harness-local recall capture, session-end steps, effectiveness narrative and report, risk tiers). One contradiction reconciled while folding: session-log auto-prune is retired without replacement (`hygiene.md` and `data-storage.md` already said so); `references/hygiene-strategies.md §3e` now says the same instead of describing a live procedure.
+
+### Changed
+- **`generate-harness-md.mjs --harness claude-code|codex`** replaces `generate-claude-md.mjs` and `generate-agents-md.mjs`. One wrapper; a per-harness table carries the output filename and the missing-contract policy (Claude Code: error, exit 2; Codex: clean skip, exit 0). `configure-project` calls it for Codex. Both old test files' coverage merged into one.
+- **`generate-unit-index.mjs --kind decisions|risks`** replaces `generate-decisions-index.mjs` and `generate-risks-index.mjs`. One `KINDS` table; `maintenance-run` calls it twice. Both old test files' coverage merged, plus a per-kind separation test and a CLI test.
+- `scripts/validate.mjs` stays, explicitly: the second retrieval simulator is kept for historical validation comparability.
+
+### Added
+- Reasoning escalation in the per-turn retrieval hook: when the keyword result is empty, or
+  a question's ranking has no clear winner, the hook injects the first two candidate shards
+  (up to 160 `id — summary` rows, enrichment-ordered, 32 KB cap) so the active model reasons
+  over them in the same turn. `CORE_ESCALATION=0` restores the text-only directive;
+  `CORE_ESCALATION_BYTE_CAP` lowers the cap; `CORE_ESCALATION_MIN_TERMS` /
+  `CORE_ESCALATION_FLAT_FLOOR` / `CORE_ESCALATION_MAX_TERMS` move the trigger. Prompts over 40
+  content terms never trigger. On a store where under half the active units carry a current
+  enrichment record (and two shards aren't already exhaustive) the pack is withheld and the
+  event says `escalation: unenriched` — `CORE_ESCALATION_ENRICHMENT_FLOOR` moves that gate.
+  New module `scripts/reasoning-shortlist.mjs`.
+- Retrieval events and the hook receipt carry `escalation: none | directive | shards | unenriched` and
+  `shard_rows`; `analyze-retrieval-quality.mjs` reports the escalation rate.
+- Retrieval harness `escalated` arm: with `CORE_HARNESS_REASONER` set to a command that reads
+  the pack on stdin and prints `{"picks":[ids]}`, the arm ranks the reasoner's picks ahead of
+  the substrate on triggered queries; without one it prints `— (no reasoner configured)`.
+  The manifest names the reasoner and model.
+
+### Fixed
+- Auto-memory path resolution now matches Claude Code: MEMORY.md is keyed on the git worktree
+  root (the cwd outside a repo), not the cwd. A project nested inside a larger repository
+  (a home-directory repo is the common case) had every memory script — `check-context-integrity`,
+  `write-visibility-canary`, the auto-memory-injection probe, `audit-memory-boundary`,
+  `generate-memory-index` — reading and writing `~/.claude/projects/<cwd-slug>/memory/`, a
+  folder the harness never injects: a false `CONTEXT-PARTIAL` every session, a visibility
+  canary planted where the agent could never see it (perpetual `memory-visible-in-agent-context`
+  DEGRADED), and a 30 KB orphan MEMORY.md nobody read. New `resolveMemoryProjectRoot` /
+  `mapMemoryProjectPathToSlug` in `project-slug.mjs`; transcripts keep the cwd slug on purpose.
+  `generate-memory-index` skips the per-project priority block (exit 0, one-line reason) when
+  the memory file is a repository-wide one shared with sibling projects.
+
 ## [3.16.1] — 2026-07-31
 
 ### Added

@@ -625,44 +625,68 @@ ${m.metrics.cached
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
     font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .snapshot-banner { position: sticky; top: 0; z-index: 60;
-    background: repeating-linear-gradient(45deg, var(--banner-bg), var(--banner-bg) 14px, var(--banner-stripe) 14px, var(--banner-stripe) 28px);
-    color: var(--banner-ink); padding: 0.9rem 1.2rem; text-align: center;
-    border-bottom: 3px solid var(--banner-stripe); }
-  .snapshot-banner .headline { font-size: 1.25rem; font-weight: 800; letter-spacing: 0.08em; }
-  .snapshot-banner .provenance { margin-top: 0.35rem; font-size: 0.82rem; opacity: 0.95;
-    font-family: ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
-  .snapshot-banner .age-badge { margin-top: 0.3rem; font-size: 0.85rem; font-weight: 700; letter-spacing: 0.02em; }
-  main { max-width: 1320px; margin: 0 auto; padding: 1.2rem; }
-  h1 { font-family: var(--font-display); font-weight: 600; font-size: 1.6rem; margin: 0.6rem 0 0.15rem; letter-spacing: -0.01em; }
-  h2.eyebrow { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em;
-    color: var(--muted); margin: 2rem 0 0.6rem; border-bottom: 1px solid var(--line); padding-bottom: 0.45rem; }
-  .subtitle { color: var(--muted); margin: 0 0 1.1rem; max-width: 62ch; }
+  .snapshot-banner { position: sticky; top: 0; z-index: 60; background: var(--banner-bg); color: var(--banner-ink);
+    padding: 0.35rem 1rem; display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; align-items: baseline; justify-content: center; font-size: 0.78rem; }
+  .snapshot-banner .headline { font-weight: 800; letter-spacing: 0.06em; }
+  .snapshot-banner .provenance { font-family: ui-monospace, Menlo, Consolas, monospace; overflow-wrap: anywhere; opacity: 0.95; }
+  .snapshot-banner .age-badge { font-weight: 700; }
+  main { max-width: 1320px; margin: 0 auto; padding: 1rem; }
   .hidden { display: none; }
 
-  /* ---- shell: sidebar + main column, Obsidian-style ---- */
-  .shell { display: grid; grid-template-columns: 280px 1fr; gap: 1.1rem; align-items: start; }
-  @media (max-width: 860px) { .shell { grid-template-columns: 1fr; } .sidebar { position: static !important; max-height: 52vh !important; } }
-  .sidebar { position: sticky; top: 4.2rem; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 12px; box-shadow: var(--shadow); max-height: calc(100vh - 5.5rem); display: flex; flex-direction: column; overflow: hidden; }
-  .sidebar input { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink);
-    padding: 0.7rem 0.9rem; font: inherit; outline: none; flex: none; }
+  /* ---- shell: inbox list + reading pane (the mail layout everyone already reads) ---- */
+  .shell { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 1rem; align-items: start; }
+  .sidebar { position: sticky; top: 3.2rem; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: var(--shadow); max-height: calc(100vh - 4.2rem); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar .box-head { padding: 0.8rem 0.9rem 0.5rem; }
+  .sidebar h1 { font-family: var(--font-display); font-weight: 600; font-size: 1.25rem; margin: 0; letter-spacing: -0.01em; }
+  .sidebar .count { color: var(--muted); font-size: 0.8rem; }
+  .sidebar input { width: 100%; border: 1px solid var(--line); border-radius: 9px; background: var(--code-bg); color: var(--ink);
+    padding: 0.45rem 0.7rem; margin-top: 0.5rem; font: inherit; outline: none; flex: none; }
   .sidebar input:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .sidebar ul { list-style: none; margin: 0; padding: 0.3rem 0; overflow: auto; }
+  .segs { flex: none; display: flex; gap: 0.3rem; overflow-x: auto; padding: 0.4rem 0.9rem 0.55rem; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+  .segs::-webkit-scrollbar { display: none; }
+  .seg { flex: none; font: inherit; font-size: 0.76rem; padding: 0.2rem 0.7rem; border-radius: 999px; border: 1px solid var(--line);
+    background: transparent; color: var(--muted); cursor: pointer; }
+  .seg.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .seg:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .sidebar ul { list-style: none; margin: 0; padding: 0; overflow: auto; }
   /* content-visibility skips rendering for off-screen rows while keeping them
      findable in-page and present in the accessibility tree (unlike a virtual
      scroller); contain-intrinsic-size keeps the scrollbar honest. */
-  .sidebar li.row { padding: 0.4rem 0.9rem; cursor: pointer; border-left: 3px solid transparent;
-    content-visibility: auto; contain-intrinsic-size: auto 44px; }
+  .sidebar li.row { display: grid; grid-template-columns: 12px 1fr auto; gap: 0.15rem 0.6rem; align-items: baseline;
+    padding: 0.55rem 0.9rem; cursor: pointer; border-bottom: 1px solid var(--line);
+    content-visibility: auto; contain-intrinsic-size: auto 64px; }
+  /* the id selector outranks .sidebar li.row's display:grid, so a hidden row is actually gone */
+  #list li.hidden { display: none; }
   .sidebar li.row:hover { background: var(--code-bg); }
-  .sidebar li.row.sel { border-left-color: var(--accent); background: var(--code-bg); }
+  /* selection is a tint plus an accent bar — text keeps its full-contrast ink in both themes */
+  .sidebar li.row.sel { background: var(--code-bg); box-shadow: inset 3px 0 0 var(--accent); }
   .sidebar li.row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .sidebar .uid { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.76rem; overflow-wrap: anywhere; color: var(--ink); }
-  .sidebar .utitle { font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; }
-  .type-head { padding: 0.55rem 0.9rem 0.15rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.08em; color: var(--muted); background: var(--panel); position: sticky; top: 0; }
-
+  .sidebar li.row.faded .utitle, .sidebar li.row.faded .preview { opacity: 0.55; text-decoration: line-through; }
+  .sidebar .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dot, var(--muted)); align-self: center; }
+  .sidebar .utitle { font-weight: 600; font-size: 0.9rem; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+  .sidebar .when { font-size: 0.74rem; color: var(--muted); white-space: nowrap; }
+  .sidebar .preview { grid-column: 2 / 4; font-size: 0.8rem; color: var(--muted); line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+  .type-head { padding: 0.5rem 0.9rem 0.2rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); background: var(--panel); position: sticky; top: 0; z-index: 1; }
+  .type-head.pinned { color: var(--accent-ink); }
   .main-col { min-width: 0; }
+  .back { display: none; font: inherit; font-size: 0.9rem; color: var(--accent-ink); background: none; border: 0; padding: 0.2rem 0; cursor: pointer; margin-bottom: 0.4rem; }
+  @media (max-width: 860px) {
+    .shell { grid-template-columns: 1fr; }
+    .sidebar { position: static !important; max-height: none; }
+    .shell:not(.reading) .main-col { display: none; }
+    .shell.reading .sidebar { display: none; }
+    .back { display: inline-block; }
+  }
+  .fold { margin-top: 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+  .fold > summary { cursor: pointer; padding: 0.7rem 1rem; font-weight: 600; font-size: 0.9rem; list-style: none; display: flex; justify-content: space-between; }
+  .fold > summary::-webkit-details-marker { display: none; }
+  .fold > summary::after { content: "›"; color: var(--muted); transition: transform 0.12s ease; }
+  .fold[open] > summary::after { transform: rotate(90deg); }
+  .fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 12px; }
+  .fold .fold-body { padding: 0 1rem 1rem; }
+  .fold .graph-wrap { border: 0; box-shadow: none; border-radius: 0; }
 
   /* ---- graph panel ---- */
   .graph-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; position: relative; }
@@ -704,28 +728,37 @@ ${filterRules}
 
   /* ---- reader ---- */
   .reader { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
-    padding: 1.1rem 1.3rem; min-height: 12rem; margin-top: 1.1rem; }
+    padding: 1.1rem 1.3rem; min-height: 12rem; }
   .reader .placeholder { color: var(--muted); }
-  .badges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.9rem; }
+  .reader h3:focus { outline: none; }
+  .reader h3:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+  .reader h3 { font-family: var(--font-display); font-weight: 600; margin: 0; font-size: 1.45rem; letter-spacing: -0.01em; text-wrap: balance; }
+  .reader .meta { display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; color: var(--muted); font-size: 0.82rem; margin: 0.4rem 0 0.9rem; }
+  .reader .meta .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dot, var(--muted)); display: inline-block; }
   .badge { font-size: 0.72rem; padding: 0.1rem 0.55rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
   .badge.status-archived, .badge.status-retired, .badge.status-superseded { border-color: var(--banner-bg); color: var(--banner-ink); background: var(--banner-bg); }
-  .reader h3 { font-family: var(--font-display); font-weight: 600; margin: 0; font-size: 1.35rem; letter-spacing: -0.01em; }
-  .reader .unit-id { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; margin-top: 0.15rem; }
-  .props { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0.7rem 0 0.9rem;
+  .unit-id { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
+  .props { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0.5rem 0 0;
     padding: 0.7rem 0.9rem; background: var(--code-bg); border-radius: 8px; font-size: 0.84rem; }
   .props dt { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; align-self: baseline; padding-top: 0.15rem; }
   .props dd { margin: 0; overflow-wrap: anywhere; }
   .props .pchip { display: inline-block; font-size: 0.78rem; background: var(--panel); border: 1px solid var(--line);
     border-radius: 999px; padding: 0.02rem 0.55rem; margin: 0.05rem 0.25rem 0.05rem 0; }
-  .edges, .backlinks { margin: 0.9rem 0; font-size: 0.86rem; }
-  .edges b, .backlinks b { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
-  .edges ul, .backlinks ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
+  .related { margin-top: 1.1rem; border-top: 1px solid var(--line); padding-top: 0.8rem; }
+  .related b { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+  .related ul { list-style: none; margin: 0.4rem 0 0; padding: 0; }
+  .related li { display: grid; grid-template-columns: 12px 1fr; gap: 0.6rem; align-items: baseline; padding: 0.45rem 0.2rem; border-bottom: 1px solid var(--line); }
+  .related li .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--dot, var(--muted)); align-self: center; }
+  .related .rel { font-size: 0.74rem; color: var(--muted); display: block; }
+  .related .rel .arrow { font-family: ui-monospace, Menlo, Consolas, monospace; }
   .edge-type-tag { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.74rem; padding: 0 0.35rem;
     border-radius: 4px; color: #fff; margin-right: 0.3rem; }
   a.ulink { color: var(--accent-ink); cursor: pointer; text-decoration: underline; overflow-wrap: anywhere; }
+  .related a.ulink { text-decoration: none; font-weight: 600; color: var(--ink); }
   a.ulink:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .body-md { border-top: 1px solid var(--line); margin-top: 0.9rem; padding-top: 0.9rem; overflow-x: auto;
-    content-visibility: auto; contain-intrinsic-size: auto 480px; }
+  .reader details.more { margin-top: 0.9rem; }
+  .reader details.more > summary { cursor: pointer; font-size: 0.8rem; color: var(--muted); }
+  .body-md { overflow-x: auto; max-width: 72ch; content-visibility: auto; contain-intrinsic-size: auto 480px; }
   .body-md h4 { margin: 1rem 0 0.4rem; }
   .body-md pre { background: var(--code-bg); padding: 0.6rem 0.8rem; border-radius: 8px; overflow-x: auto; font-size: 0.82rem; }
   .body-md code { background: var(--code-bg); border-radius: 4px; padding: 0.05rem 0.3rem; font-size: 0.85em;
@@ -737,21 +770,30 @@ ${filterRules}
   footer { color: var(--muted); font-size: 0.8rem; margin: 2.5rem 0 1rem; text-align: center; overflow-wrap: anywhere; }
 </style>
 <div class="snapshot-banner">
-  <div class="headline">POINT-IN-TIME SNAPSHOT &mdash; READ-ONLY</div>
-  <div class="provenance">generated <time id="gen-time" datetime="${escapeHtml(m.generatedAt)}">${escapeHtml(m.generatedAt)}</time> &middot; ${escapeHtml(m.producer.plugin || 'core')} v${escapeHtml(m.producer.plugin_version || 'unknown')} (${escapeHtml(shaShort)}) &middot; store snapshot ${escapeHtml(String(m.snapshotId).slice(0, 12))} &middot; ${escapeHtml(m.scopeDesc)} &middot; ${m.unitCount} units</div>
-  <div class="age-badge" id="age-badge"></div>
+  <span class="headline">POINT-IN-TIME SNAPSHOT &mdash; READ-ONLY</span>
+  <span class="provenance">generated <time id="gen-time" datetime="${escapeHtml(m.generatedAt)}">${escapeHtml(m.generatedAt)}</time> &middot; ${escapeHtml(m.producer.plugin || 'core')} v${escapeHtml(m.producer.plugin_version || 'unknown')} (${escapeHtml(shaShort)}) &middot; store ${escapeHtml(String(m.snapshotId).slice(0, 12))} &middot; ${escapeHtml(m.scopeDesc)}</span>
+  <span class="age-badge" id="age-badge"></span>
 </div>
 <main>
-  <h1>CORE Memory — ${escapeHtml(m.projectName)}</h1>
-  <p class="subtitle">What CORE knows in this project's memory store, frozen at the moment in the banner above. Nothing here is live, and nothing here can be edited — <code>PROJECT.md</code> and the store itself remain the only writing surfaces.</p>
-
-  <div class="shell">
+  <div class="shell" id="shell">
     <nav class="sidebar" aria-label="Units">
-      <input id="filter" type="search" placeholder="Filter by id, title, or topic&hellip;" aria-label="Filter units">
+      <div class="box-head">
+        <h1>${escapeHtml(m.projectName)}</h1>
+        <div class="count">${m.unitCount} things CORE knows here, newest first. Nothing on this page can change them.</div>
+        <input id="filter" type="search" placeholder="Search" aria-label="Search units">
+      </div>
+      <div class="segs" id="segs" role="group" aria-label="Show only">
+        <button type="button" class="seg on" aria-pressed="true" data-seg="">All</button>${types.map((t) => `<button type="button" class="seg" aria-pressed="false" data-seg="${escapeHtml(t)}">${escapeHtml(t)}</button>`).join('')}
+      </div>
       <ul id="list"></ul>
     </nav>
     <div class="main-col">
-      <h2 class="eyebrow">Graph</h2>
+      <button type="button" class="back" id="back">&lsaquo; All</button>
+      <div class="reader" id="reader"><p class="placeholder">Pick something on the left to read it.</p></div>
+
+      <details class="fold" id="map">
+        <summary>Map — how this connects</summary>
+        <div class="fold-body">
       <div class="graph-wrap">
         <div class="graph-toolbar">
           <div class="mode-toggle" id="modeToggle" role="group" aria-label="Graph mode">
@@ -769,11 +811,13 @@ ${filterRules}
           <div class="legend-group" id="edgeLegend"><b>Edges</b>${edgeLegend}</div>
         </div>
       </div>
+        </div>
+      </details>
 
-      <div class="reader" id="reader"><p class="placeholder">Click a node or a list entry to read the full unit — its properties, body, edges, and the graph's local neighborhood all come with it.</p></div>
-
-      <h2 class="eyebrow">Memory health</h2>
-      ${metricsBlock}
+      <details class="fold">
+        <summary>Memory health</summary>
+        <div class="fold-body">${metricsBlock}</div>
+      </details>
     </div>
   </div>
 
@@ -816,7 +860,7 @@ ${filterRules}
     out = out.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
     out = out.replace(/\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]/g, function (_, id) {
       id = id.trim();
-      if (byId[id]) return '<a class="ulink" data-unit="' + esc(id) + '">' + esc(id) + '</a>';
+      if (byId[id]) return '<a class="ulink" href="#" data-unit="' + esc(id) + '">' + esc(id) + '</a>';
       return '[[' + esc(id) + ']]';
     });
     out = out.replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, function (_, t, u) { return t + ' (' + u + ')'; });
@@ -873,40 +917,89 @@ ${filterRules}
   var globalPos = {};
   Object.keys(LAYOUT).forEach(function (id) { globalPos[id] = { x: LAYOUT[id][0], y: LAYOUT[id][1] }; });
 
-  // ---- unit list: DOM built ONCE; the filter input toggles a hidden class
-  // per row (debounced), never re-serializing innerHTML per keystroke. ----
+  // ---- unit list: DOM built ONCE, newest first, grouped by when it changed
+  // (Today / Yesterday / This week / …) like a mail inbox; search and the
+  // type segments toggle a hidden class per row, never re-serializing. ----
+  var GEN = Date.parse(${JSON.stringify(m.generatedAt)}) || Date.now();
   var listEl = document.getElementById('list');
+  var shellEl = document.getElementById('shell');
   var selected = null;
+  // the list row the reader was entered from; related-unit hops never change it
+  var origin = null;
   var rowById = {};
   var listGroups = [];
+  var seg = '';
+  function dayStr(ms) { return new Date(ms).toISOString().slice(0, 10); }
+  function dayDiff(ymd) { var t = Date.parse(ymd); return isNaN(t) ? null : Math.floor((GEN - t) / 86400000); }
+  function whenLabel(ymd) {
+    var d = dayDiff(ymd);
+    if (d === null) return '';
+    if (d <= 0) return 'Today';
+    if (d === 1) return 'Yesterday';
+    var dt = new Date(Date.parse(ymd));
+    try { return new Intl.DateTimeFormat(undefined, d < 300 ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short' }).format(dt); } catch (e) { return ymd; }
+  }
+  function groupLabel(ymd) {
+    var d = dayDiff(ymd);
+    if (d === null) return 'Undated';
+    if (d <= 0) return 'Today';
+    if (d === 1) return 'Yesterday';
+    if (d < 7) return 'This week';
+    if (d < 31) return 'This month';
+    return 'Earlier';
+  }
+  // ponytail: preview = first body paragraph that is not the title, markdown marks stripped; good enough for a two-line teaser
+  function preview(u) {
+    var lines = String(u.body || '').split('\\n');
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i].trim();
+      if (!ln || /^#/.test(ln) || /^<!--/.test(ln) || /^\\|/.test(ln) || /^---/.test(ln) || /^\`\`\`/.test(ln)) continue;
+      var t = ln.replace(/^[-*]\\s+/, '').replace(/\\*\\*/g, '').replace(/\`/g, '').replace(/\\[\\[([^\\]|]+)(?:\\|[^\\]]*)?\\]\\]/g, '$1').replace(/\\[([^\\]]+)\\]\\([^)]*\\)/g, '$1');
+      if (t.toLowerCase() === String(u.title).toLowerCase()) continue;
+      return t;
+    }
+    return '';
+  }
+  var pinned = function (u) { return /question/.test(u.type || '') && (u.status || 'active') === 'active'; };
+  var ordered = units.slice().sort(function (a, b) { return (b.updated || '').localeCompare(a.updated || '') || a.id.localeCompare(b.id); });
   function buildList() {
-    var byType = {};
-    units.forEach(function (u) {
-      var t = u.type || 'untyped';
-      (byType[t] = byType[t] || []).push(u);
+    var groups = [];
+    function grp(name, cls) { var g = { name: name, cls: cls || '', rows: [] }; groups.push(g); return g; }
+    var still = grp('Still open', 'pinned');
+    ordered.forEach(function (u) { if (pinned(u)) still.rows.push(u); });
+    var current = null;
+    ordered.forEach(function (u) {
+      if (pinned(u)) return;
+      var gl = groupLabel(u.updated);
+      if (!current || current.name !== gl) current = grp(gl);
+      current.rows.push(u);
     });
     var html = '';
-    Object.keys(byType).sort().forEach(function (t) {
-      html += '<li class="type-head">' + esc(t) + ' (<span>' + byType[t].length + '</span>)</li>';
-      byType[t].forEach(function (u) {
-        html += '<li class="row" tabindex="0" role="button" data-unit="' + esc(u.id) + '">' +
-          '<div class="uid">' + esc(u.id) + '</div><div class="utitle">' + esc(u.title) + '</div></li>';
+    groups.forEach(function (g) {
+      if (!g.rows.length) return;
+      html += '<li class="type-head ' + g.cls + '">' + esc(g.name) + ' (<span>' + g.rows.length + '</span>)</li>';
+      g.rows.forEach(function (u) {
+        var faded = (u.status || 'active') !== 'active';
+        html += '<li class="row' + (faded ? ' faded' : '') + '" tabindex="0" role="button" data-unit="' + esc(u.id) + '" data-type="' + esc(u.type || 'untyped') + '">' +
+          '<span class="dot" style="--dot:' + colorFor(u.type) + '"></span>' +
+          '<div class="utitle">' + esc(u.title) + '</div><div class="when">' + esc(whenLabel(u.updated)) + '</div>' +
+          '<div class="preview">' + esc(preview(u) || (u.type || 'untyped') + (u.topics && u.topics.length ? ' · ' + u.topics.join(', ') : '')) + '</div></li>';
       });
     });
-    html += '<li class="type-head hidden" id="no-match">no units match</li>';
+    html += '<li class="type-head hidden" id="no-match">nothing matches</li>';
     listEl.innerHTML = html;
-    var current = null;
+    var cur = null;
     listEl.querySelectorAll('li').forEach(function (li) {
       if (li.id === 'no-match') return;
       if (li.classList.contains('type-head')) {
-        current = { head: li, count: li.querySelector('span'), rows: [] };
-        listGroups.push(current);
+        cur = { head: li, count: li.querySelector('span'), rows: [] };
+        listGroups.push(cur);
         return;
       }
       var id = li.getAttribute('data-unit');
       var u = byId[id];
       rowById[id] = li;
-      current.rows.push({ el: li, hay: (u.id + ' ' + u.title + ' ' + (u.topics || []).join(' ')).toLowerCase() });
+      cur.rows.push({ el: li, type: u.type || 'untyped', hay: (u.id + ' ' + u.title + ' ' + (u.topics || []).join(' ') + ' ' + String(u.body || '').slice(0, 4000)).toLowerCase() });
     });
   }
   function applyListFilter(filter) {
@@ -915,7 +1008,7 @@ ${filterRules}
     listGroups.forEach(function (g) {
       var vis = 0;
       g.rows.forEach(function (r) {
-        var show = !f || r.hay.indexOf(f) !== -1;
+        var show = (!f || r.hay.indexOf(f) !== -1) && (!seg || r.type === seg);
         r.el.classList.toggle('hidden', !show);
         if (show) vis++;
       });
@@ -931,14 +1024,28 @@ ${filterRules}
     clearTimeout(filterTimer);
     filterTimer = setTimeout(function () { applyListFilter(filterEl.value); }, 100);
   });
+  document.getElementById('segs').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-seg]');
+    if (!b) return;
+    seg = b.getAttribute('data-seg');
+    document.querySelectorAll('#segs .seg').forEach(function (x) { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+    applyListFilter(filterEl.value);
+  });
   listEl.addEventListener('click', function (e) {
     var li = e.target.closest('li[data-unit]');
-    if (li) select(li.getAttribute('data-unit'));
+    if (li) { origin = li.getAttribute('data-unit'); select(origin); }
   });
   listEl.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     var li = e.target.closest('li[data-unit]');
-    if (li) { e.preventDefault(); select(li.getAttribute('data-unit')); }
+    if (li) { e.preventDefault(); origin = li.getAttribute('data-unit'); select(origin); }
+  });
+  // Back returns focus to the row the reader was entered from, if it is still
+  // visible under the current search/segment; otherwise to the search control.
+  document.getElementById('back').addEventListener('click', function () {
+    shellEl.classList.remove('reading');
+    var row = origin && rowById[origin];
+    if (row && !row.classList.contains('hidden')) row.focus(); else filterEl.focus();
   });
   function markSelected(id) {
     if (selected && rowById[selected]) rowById[selected].classList.remove('sel');
@@ -946,7 +1053,7 @@ ${filterRules}
   }
 
   // ---- properties panel: every frontmatter field, 'edges' excluded (it has
-  // its own linked section below — a raw dump beside it would just be noise). ----
+  // its own linked section — a raw dump beside it would just be noise). ----
   var PROP_ORDER = ['id', 'type', 'status', 'updated', 'created', 'topics'];
   function renderProperties(props) {
     if (!props) return '';
@@ -972,45 +1079,49 @@ ${filterRules}
     return '<dl class="props">' + rows + '</dl>';
   }
 
-  // ---- reader ----
+  // ---- reader: the body first; related things as tappable rows named by
+  // their titles; every raw field one fold down. ----
   var readerEl = document.getElementById('reader');
   function unitLink(id, label) {
-    if (byId[id]) return '<a class="ulink" data-unit="' + esc(id) + '">' + esc(label || id) + '</a>';
+    if (byId[id]) return '<a class="ulink" href="#" data-unit="' + esc(id) + '">' + esc(label || id) + '</a>';
     return esc(label || id) + ' <span class="badge">not in this snapshot</span>';
   }
-  function select(id) {
+  function relatedRow(rel, id, dir) {
+    var u = byId[id];
+    return '<li><span class="dot" style="--dot:' + (u ? colorFor(u.type) : 'var(--muted)') + '"></span><div>' +
+      '<span class="rel"><span class="arrow">' + (dir === 'out' ? '→' : '←') + '</span> ' + esc(rel) + (u ? ' · ' + esc(u.type || 'untyped') : '') + '</span>' +
+      unitLink(id, u ? u.title : id) + '</div></li>';
+  }
+  function select(id, opts) {
     var u = byId[id];
     if (!u) return;
     markSelected(id);
     selected = id;
-    var edges = (u.edges || []).map(function (e) {
-      var st = edgeStyle(e.type);
-      return '<li><span class="edge-type-tag" style="background:' + (st.stroke === 'currentColor' ? 'var(--muted)' : st.stroke) + '">' + esc(e.type) + '</span>' + unitLink(e.target) + '</li>';
-    }).join('');
-    var bl = (backlinks[id] || []).map(function (b) {
-      var st = edgeStyle(b.type);
-      return '<li><span class="edge-type-tag" style="background:' + (st.stroke === 'currentColor' ? 'var(--muted)' : st.stroke) + '">' + esc(b.type) + '</span>' + unitLink(b.from) + '</li>';
-    }).join('');
+    var edges = (u.edges || []).map(function (e) { return relatedRow(e.type, e.target, 'out'); }).join('');
+    var bl = (backlinks[id] || []).map(function (b) { return relatedRow(b.type, b.from, 'in'); }).join('');
     readerEl.innerHTML =
-      '<h3>' + esc(u.title) + '</h3>' +
-      '<div class="unit-id">' + esc(u.id) + ' &middot; ' + esc(u.path) + '</div>' +
-      '<div class="badges">' +
-        '<span class="badge">' + esc(u.type || 'untyped') + '</span>' +
-        '<span class="badge status-' + esc(u.status) + '">' + esc(u.status) + '</span>' +
-        (u.updated ? '<span class="badge">updated ' + esc(u.updated) + '</span>' : '') +
+      '<h3 tabindex="-1" id="reader-title">' + esc(u.title) + '</h3>' +
+      '<div class="meta"><span class="dot" style="--dot:' + colorFor(u.type) + '"></span>' + esc(u.type || 'untyped') +
+        ' <span class="badge status-' + esc(u.status) + '">' + esc(u.status) + '</span>' +
+        (u.updated ? '<span>updated ' + esc(u.updated) + '</span>' : '') +
         (u.topics || []).map(function (t) { return '<span class="badge">' + esc(t) + '</span>'; }).join('') +
       '</div>' +
-      renderProperties(u.properties) +
-      '<div class="edges"><b>Edges</b><ul>' + (edges || '<li>none</li>') + '</ul></div>' +
-      '<div class="backlinks"><b>Backlinks</b><ul>' + (bl || '<li>none</li>') + '</ul></div>' +
-      '<div class="body-md">' + mdToHtml(u.body || '(empty body)') + '</div>';
+      '<div class="body-md">' + mdToHtml(u.body || '(empty body)') + '</div>' +
+      '<div class="related"><b>Related</b><ul>' + (edges + bl || '<li><span></span><span class="rel">nothing linked</span></li>') + '</ul></div>' +
+      '<details class="more"><summary>All fields &middot; ' + esc(u.id) + '</summary><div class="unit-id">' + esc(u.path) + '</div>' + renderProperties(u.properties) + '</details>';
+    if (!(opts && opts.boot)) {
+      shellEl.classList.add('reading');
+      readerEl.scrollIntoView({ block: 'start' });
+      var h = document.getElementById('reader-title');
+      if (h) h.focus({ preventScroll: true });
+    }
     document.querySelector('.mode-toggle button[data-mode="focus"]').disabled = false;
     highlightNode(id);
     setMode('focus');
   }
   readerEl.addEventListener('click', function (e) {
     var a = e.target.closest('a.ulink');
-    if (a) select(a.getAttribute('data-unit'));
+    if (a) { e.preventDefault(); select(a.getAttribute('data-unit')); }
   });
 
   // ---- graph: DOM built exactly ONCE from the precomputed coordinates.
@@ -1281,7 +1392,7 @@ ${filterRules}
   applyListFilter('');
   updateAge();
   if (DEFAULT_FOCUS && byId[DEFAULT_FOCUS.id]) {
-    select(DEFAULT_FOCUS.id);
+    select(DEFAULT_FOCUS.id, { boot: true });
   } else {
     setMode('global');
   }

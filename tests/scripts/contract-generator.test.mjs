@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import {
   parseContract, parseOverrides, renderForHarness, HARNESS_OUTPUT,
 } from '../../plugins/core/skills/core/scripts/contract-format.mjs';
-import { generate } from '../../plugins/core/skills/core/scripts/generate-claude-md.mjs';
+import { generate as generateHarness } from '../../plugins/core/skills/core/scripts/generate-harness-md.mjs';
+const generate = (o) => generateHarness({ harness: 'claude-code', ...o });
 
 const FIXTURE = `---
 schema_version: 1.0
@@ -139,7 +140,7 @@ test('HARNESS_OUTPUT maps harnesses to canonical filenames', () => {
 test('generate: warns when target harness is not in canonical_for', async () => {
   const { dir, p } = tmpContract(FIXTURE.replace('canonical_for: ["claude-code", "codex"]', 'canonical_for: ["codex"]'));
   try {
-    const r = await generate({ contractPath: p, mode: 'dry-run' }); // generate-claude-md, but contract is codex-only
+    const r = await generate({ contractPath: p, mode: 'dry-run' }); // claude-code harness, but contract is codex-only
     assert.ok(r.warnings.some((w) => /not in canonical_for/.test(w)));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -208,8 +209,9 @@ test('parseOverrides: hash is over RAW bytes — a whitespace-only edit changes 
 });
 
 test('both generators: each emits its own harness-only section, excludes the other', async () => {
-  const { generate: genClaude } = await import('../../plugins/core/skills/core/scripts/generate-claude-md.mjs');
-  const { generate: genAgents } = await import('../../plugins/core/skills/core/scripts/generate-agents-md.mjs');
+  const { generate: gen } = await import('../../plugins/core/skills/core/scripts/generate-harness-md.mjs');
+  const genClaude = (o) => gen({ harness: 'claude-code', ...o });
+  const genAgents = (o) => gen({ harness: 'codex', ...o });
   const { dir, p } = tmpContract();
   try {
     const c = await genClaude({ contractPath: p, mode: 'dry-run' });

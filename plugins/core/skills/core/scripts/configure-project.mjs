@@ -39,7 +39,7 @@ import { fileURLToPath } from 'node:url';
 
 import { checkFork } from './workspace-fork-check.mjs';
 import { iterActiveUnits, checkSchema, checkIntegrity, exitCode } from './check-units.mjs';
-import { generate as generateAgentsMd } from './generate-agents-md.mjs';
+import { generate as generateHarnessMd } from './generate-harness-md.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 // ── CORE_ROOT (the plugin root) ──────────────────────────────────────────────
@@ -203,7 +203,7 @@ export async function planAgentsMd(projectPath, { apply = false } = {}) {
   if (existsSync(agentsPath) && !agentsMdIsGeneratorStamped(agentsPath)) {
     return { status: 'refused-hand-authored', contractPath, agentsPath };
   }
-  const r = await generateAgentsMd({ contractPath, outputPath: agentsPath, mode: 'write' });
+  const r = await generateHarnessMd({ harness: 'codex', contractPath, outputPath: agentsPath, mode: 'write' });
   // The existsSync above already proved the contract present, so r.skipped can only
   // fire if CONTRACT.md vanished between the check and the read (TOCTOU) — report it
   // as that, not the duplicate 'skipped-no-contract' the precheck already returns.

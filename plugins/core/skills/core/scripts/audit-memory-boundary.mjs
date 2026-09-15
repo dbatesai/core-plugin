@@ -39,7 +39,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { mapProjectPathToSlug } from './project-slug.mjs';
+import { mapMemoryProjectPathToSlug } from './project-slug.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
@@ -48,14 +48,15 @@ export const DEFAULT_SAMPLE = 25;
 /**
  * Default native-memory surface for a project on Claude Code:
  * ~/.claude/projects/<canonical-slug>/memory/MEMORY.md. Uses the canonical
- * mapProjectPathToSlug so a dotted corporate username encodes dots→dashes and
- * matches the real folder (the dotted-username bug project-slug.mjs kills).
+ * mapMemoryProjectPathToSlug so a dotted corporate username encodes dots→dashes and
+ * a project inside a larger repository resolves to the repository root's folder —
+ * the one the harness actually injects.
  */
 export function mappedNativePath(projectRoot, { home = homedir() } = {}) {
   // Forward-slash join (not path.join) so the slug path is identical on Windows and
   // POSIX — Claude Code's projects-folder shape uses '/'-derived dashes, and Node's fs
   // accepts forward slashes on Windows. path.join would emit backslashes and mislocate.
-  return [home, '.claude', 'projects', mapProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md'].join('/');
+  return [home, '.claude', 'projects', mapMemoryProjectPathToSlug(String(projectRoot)), 'memory', 'MEMORY.md'].join('/');
 }
 
 // High-signal identifier shapes (mirrors analyze-retrieval-skip's term policy): DC-/R-

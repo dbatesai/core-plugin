@@ -8,7 +8,7 @@ For the design reasoning behind any of this, see [ARCHITECTURE.md](ARCHITECTURE.
 
 ## Commands
 
-Ten slash commands ship with the plugin: `/core`, eight companions, and one deprecation shim. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own; the shims forward to where their behavior moved.
+Eight slash commands ship with the plugin: `/core` and seven companions. `/core` is the agent; the companions are operations CORE invokes during a session and that you can also run on their own.
 
 ### `/core`
 
@@ -17,6 +17,7 @@ The agent. Type it to start or resume work on a project.
 - **What it does:** loads your project context and prints a readiness summary before anything else — what the project's state is, the active risks worth surfacing, any signals that escalated since last session, and the top items on the agenda. Then it works with you: writing observations as you talk, rendering `PROJECT.md` sections as things change, surfacing decisions and risks, and pushing back when the evidence doesn't support your framing.
 - **When to use:** every session. It's the entry point.
 - **Resume vs. work:** a bare `/core` (or "where are we") re-composes a fresh readiness summary. `/core <task>` picks up the task with full context loaded.
+- **Abstract questions:** when the per-turn keyword search comes back empty or has no clear winner for a question, the agent gets the first 160 candidate memory units (id and summary) in the same turn and reasons over them before answering. Off switch: `CORE_ESCALATION=0`.
 - **Reads:** `PROJECT.md`, the unit store at `_memories/`, workspace metadata. **Writes:** observations, unit edits, `PROJECT.md` renders, the autonomous run log.
 - **First session on a project:** it figures out whether the folder is new, has prior content to migrate, or is a returning workspace, and routes accordingly — no setup command required.
 
@@ -60,13 +61,6 @@ A one-shot setup-and-health check that confirms a harness is wired correctly aga
 - **When to use:** setting up CORE on a folder under Codex, when a second harness joins a folder Claude Code already manages, or any time you want a "is this wired right?" check.
 - **Idempotent and report-only by default.** The only write it ever makes is generating `AGENTS.md`, and only with `--apply`.
 
-### `/vibecheck`
-
-Capture the emotional truth of a session as ASCII art.
-
-- **What it does:** renders how the session felt — not a status report, the actual vibe — and logs it to `~/.core/vibes/vibe-log.md`. Terminal-only, no browser.
-- **When to use:** "vibecheck," or whenever you want to mark the feel of a session.
-
 ### `/metrics`
 
 The one door to memory health (v3.14.0). The default answers the three questions that matter in plain sentences; the deeper instruments live behind explicit modes.
@@ -86,12 +80,6 @@ Browse what CORE knows — the unit graph, full unit bodies, edges and backlinks
 - **When to use:** "publish the memory view," "refresh the memory artifact," "let me browse the graph on my phone," or any time seeing the store beats being told about it. On a harness with no artifact surface (Codex), it generates the same page locally and gives you the file path instead — no faking.
 - **Writes:** the HTML file to the scratch path you choose (never into the project or the store — the store is read-only to this flow) and the local receipt. Unit content never routes into the anonymized `/metrics export` zip.
 
-### `/orient` *(deprecated shim — folded into `/core`)*
-
-Session bootstrap is part of CORE's startup protocol now, so `/orient` does no work of its own: it prints a notice pointing at `/core` and stops. Kept only so an existing habit doesn't hit an unrecognized command. Removal scheduled for 2026-08-15.
-
----
-
 ## Additional reference
 
 ### Protocols
@@ -105,11 +93,10 @@ Protocols are internal documents `/core` reads when it needs them — they aren'
 | `harness.md` | The abstract-verb contract and how it maps to each harness (Claude Code, Codex). |
 | `workspace.md` | Creating, resuming, or winding down a workspace. |
 | `data-storage.md` | The unit format, the edge types, the retrieval ladder, and the promotion modes — read before writing any unit, observation, or render. |
-| `hygiene.md` | The three hygiene verbs (archive, retire, cold-store), graduation, and continuous self-evaluation. |
+| `hygiene.md` | The three hygiene verbs (archive, retire, cold-store), graduation, continuous self-evaluation, and the session-end self-evolution loop (effectiveness reports, risk tiers, trip-wires). |
 | `execution.md` | Execution discipline, solo and swarm. |
 | `analysis.md` | The multi-agent machinery — phase structure, the anti-convergence discipline, the monitor pattern — invoked when stakes warrant a single pass isn't enough. |
 | `validation.md` | Retrieval-health checks: substrate, convergence, ranking quality. |
-| `self-evolution.md` | Session-end learning and hygiene-triggered skill evolution. |
 
 Supporting references live alongside them: `retrieval.md` (the four-tier ladder in depth), `model-assignments.md` (which model tier per pipeline stage), `hygiene-strategies.md`, `confidence-assignment-guide.md`, `memory-extension-contracts.md`, `architecture-doctrines.md`.
 
@@ -117,12 +104,12 @@ Supporting references live alongside them: `retrieval.md` (the four-tier ladder 
 
 The plugin ships the deterministic spine the commands run on — the surfaces where inference can't be trusted to be exact. You don't call these directly; the commands and protocols do. Grouped by what they're for:
 
-- **Memory store & retrieval** — `retrieve-context.mjs` (the live retriever: title ∪ body-BM25 over one request-scoped snapshot + one-hop edge expansion; `buildFinalContextPack` is the single implementation of the delivered context — ordering, tier labels, byte cap — that the per-turn hook, the `--pack` CLI mode, and the measurement harness all call; `buildRetrievalTrace` records a local-only per-request evidence trace), `bm25.mjs` (the body-search arm + tokenizer), `generate-summary-index.mjs` (the recursive path-bearing retrieval index + validating loader + `loadSnapshot` content-addressed snapshot identity), `select-relevant-units.mjs` (the reasoning-tier shortlist), `retrieval-harness.mjs` (offline recall measurement on the product path; its final-context arm scores delivered identities, byte cap included), `aggregate-receipt.mjs` (the privacy-safe evidence exporter: whitelist-built aggregate receipt + refusal scan; rows stay local), `priority.mjs` (the ranking function), `check-units.mjs` (schema + integrity validation), `graph-walk.mjs` (typed-edge traversal), `generate-decisions-index.mjs` / `generate-risks-index.mjs` / `generate-memory-index.mjs` (the indexes).
+- **Memory store & retrieval** — `retrieve-context.mjs` (the live retriever: title ∪ body-BM25 over one request-scoped snapshot + one-hop edge expansion; `buildFinalContextPack` is the single implementation of the delivered context — ordering, tier labels, byte cap — that the per-turn hook, the `--pack` CLI mode, and the measurement harness all call; `buildRetrievalTrace` records a local-only per-request evidence trace), `bm25.mjs` (the body-search arm + tokenizer), `generate-summary-index.mjs` (the recursive path-bearing retrieval index + validating loader + `loadSnapshot` content-addressed snapshot identity), `select-relevant-units.mjs` (the reasoning-tier shortlist), `retrieval-harness.mjs` (offline recall measurement on the product path; its final-context arm scores delivered identities, byte cap included), `aggregate-receipt.mjs` (the privacy-safe evidence exporter: whitelist-built aggregate receipt + refusal scan; rows stay local), `priority.mjs` (the ranking function), `check-units.mjs` (schema + integrity validation), `graph-walk.mjs` (typed-edge traversal), `generate-unit-index.mjs` (`--kind decisions|risks`) / `generate-memory-index.mjs` (the indexes).
 - **`PROJECT.md` rendering & hygiene** — `hot-section.mjs` (the top-of-file "right now" block), `compact-project.mjs` (file-cap compaction), `demote-moves.mjs` / `demote-state-narrative.mjs` (tier discipline), `decorate-graph.mjs` (in-place Obsidian `[[wikilink]]` decoration of `_memories/`, run automatically at close and on-demand hygiene passes), `render-browse-artifact.mjs` (the `/memory-view` generator: one self-contained, read-only HTML snapshot of the store plus the preflight manifest and local receipt — it never uploads anything itself).
 - **Validity dimension** — `bitemporal.mjs` (the `t_valid`/`t_invalid` stamp, as-of queries, storage-health metrics), `impact-trace.mjs` (what an invalidation touches).
 - **Self-measurement** — `metrics-init.mjs`, `classify-turns.mjs`, `metrics-rollup.mjs`, `metrics-detectors.mjs`, `calibrate-classifier.mjs`, `metrics-check.mjs` (the `/metrics` live evidence check: round-trip probe + store health + calibration-pool progress; prefers a frozen self-test round when one exists), `self-test-round.mjs` (the `/metrics self-test` round manager: freezes the corpus, emits the blind-authoring brief, mechanically verifies + freezes an authored question set, runs the real harness against it, computes the old-vs-new-round overfitting delta), `log-event.mjs`, `record-retrieval-event.mjs`, `analyze-retrieval-quality.mjs`, `analyze-retrieval-skip.mjs`, `read-transcript.mjs`.
 - **Capability & identity** — `resolve-plugin-root.mjs`, `capability-probe.mjs`, `capability-history.mjs`, `record-capability-snapshot.mjs`, `analyze-capability-drift.mjs`, `workspace-fork-check.mjs`, `project-slug.mjs`, `write-visibility-canary.mjs`.
 - **Validation & integrity** — `validate.mjs` (retrieval-health runner), `orphan-detector.mjs` (every script reached, every protocol indexed), `audit-memory-boundary.mjs` (native-memory vs. CORE-store boundary).
 - **Multi-agent** — `adversarial-run-gate.mjs`.
-- **Instruction surface (staged)** — `contract-format.mjs`, `generate-agents-md.mjs`, `generate-claude-md.mjs`, `migrate-to-contract.mjs`, `configure-project.mjs`.
+- **Instruction surface (staged)** — `contract-format.mjs`, `generate-harness-md.mjs` (`--harness claude-code|codex`), `migrate-to-contract.mjs`, `configure-project.mjs`.
 - **Helpers** — `frontmatter-flat.mjs`, `fs-atomic.mjs`.

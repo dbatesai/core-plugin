@@ -139,3 +139,17 @@ test('probe: row always carries the required schema fields', async () => {
     for (const e of row.evidence) assert.ok(VALID_WEIGHTS.has(e.weight));
   });
 });
+
+// A project nested in a larger repository reads the repository-wide MEMORY.md, which CORE
+// does not manage — the structural marker is not expected there, presence is the claim.
+test('classifyMemoryState: shared repository-wide MEMORY.md without the marker is PASS, not DEGRADED', () => {
+  const r = classifyMemoryState({ pathResolved: true, fileExists: true, content: '# home index\n- a', shared: true });
+  assert.equal(r.identity_status, 'PASS');
+  assert.ok(r.evidence.some(e => e.weight === 'primary'));
+  assert.ok(r.evidence.some(e => e.source === 'shared-root'));
+});
+
+test('classifyMemoryState: shared flag does not rescue a missing file', () => {
+  const r = classifyMemoryState({ pathResolved: true, fileExists: false, content: null, shared: true });
+  assert.equal(r.identity_status, 'NOT-YET');
+});

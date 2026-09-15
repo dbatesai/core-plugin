@@ -28,7 +28,7 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
 
 const REPRESENTATIVES = [
   'maintenance-run.mjs',
-  'generate-claude-md.mjs',
+  'generate-harness-md.mjs',
   'validate.mjs',
   'retrieve-context.mjs',
   'bm25.mjs',

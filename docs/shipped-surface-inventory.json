@@ -268,24 +268,10 @@
       "surface": "shipped"
     },
     {
-      "name": "generate-agents-md",
+      "name": "generate-harness-md",
       "kind": "script",
       "harness": "shared",
-      "path": "skills/core/scripts/generate-agents-md.mjs",
-      "surface": "shipped"
-    },
-    {
-      "name": "generate-claude-md",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/generate-claude-md.mjs",
-      "surface": "shipped"
-    },
-    {
-      "name": "generate-decisions-index",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/generate-decisions-index.mjs",
+      "path": "skills/core/scripts/generate-harness-md.mjs",
       "surface": "shipped"
     },
     {
@@ -296,17 +282,17 @@
       "surface": "shipped"
     },
     {
-      "name": "generate-risks-index",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/generate-risks-index.mjs",
-      "surface": "shipped"
-    },
-    {
       "name": "generate-summary-index",
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/generate-summary-index.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "generate-unit-index",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/generate-unit-index.mjs",
       "surface": "shipped"
     },
     {
@@ -520,6 +506,13 @@
       "surface": "shipped"
     },
     {
+      "name": "reasoning-shortlist",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/reasoning-shortlist.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "record-capability-snapshot",
       "kind": "script",
       "harness": "shared",
@@ -688,13 +681,6 @@
       "invocation": "user"
     },
     {
-      "name": "orient",
-      "kind": "skill",
-      "harness": "shared",
-      "status": "deprecated",
-      "invocation": "user"
-    },
-    {
       "name": "process-memory",
       "kind": "skill",
       "harness": "shared",
@@ -710,13 +696,6 @@
     },
     {
       "name": "register-sources",
-      "kind": "skill",
-      "harness": "shared",
-      "status": "active",
-      "invocation": "user"
-    },
-    {
-      "name": "vibecheck",
       "kind": "skill",
       "harness": "shared",
       "status": "active",

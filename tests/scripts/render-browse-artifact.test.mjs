@@ -978,8 +978,21 @@ test('responsive chrome keeps the mobile browse loop reachable; long lists rende
     const chrome = html.replace(raw, '');
     assert.match(chrome, /\.edge-legend svg\s*\{[^}]*min-height:\s*0/s,
       'edge legend SVGs must override the graph SVG minimum height');
-    assert.match(chrome, /@media \(max-width: 860px\)[\s\S]*?\.sidebar\s*\{[^}]*max-height:\s*52vh !important/,
-      'the mobile unit list stays bounded instead of expanding every unit before the graph');
+    // Phone width is the mail pattern: the list fills the screen, and opening
+    // a unit replaces the list with the reading pane (a Back control returns).
+    assert.match(chrome, /@media \(max-width: 860px\)[\s\S]*?\.shell\.reading \.sidebar\s*\{[^}]*display:\s*none/,
+      'on a phone the reading pane replaces the list instead of stacking under it');
+    assert.match(chrome, /\.shell:not\(\.reading\) \.main-col\s*\{[^}]*display:\s*none/,
+      'on a phone the list is the whole first screen');
+    assert.ok(chrome.includes('id="back"'), 'a Back control returns to the list');
+    // Review finding: .hidden alone lost to the row's display:grid,
+    // so search could report zero matches while every row stayed on screen.
+    assert.match(chrome, /#list li\.hidden \{ display: none; \}/, 'the hidden rule outranks the row display rule');
+    assert.match(chrome, /class="seg on" aria-pressed="true"/, 'type segments expose pressed state');
+    assert.match(chrome, /<a class="ulink" href="#"/, 'related units are real links (Tab + Enter work natively)');
+    assert.match(chrome, /id="reader-title"/, 'selection moves focus into the reader');
+    assert.match(chrome, /var row = origin && rowById\[origin\];/, 'Back restores the list origin, not the last related hop');
+    assert.match(chrome, /else filterEl\.focus\(\)/, 'a filtered-out origin falls back to the search control');
     assert.match(chrome, /footer\s*\{[^}]*overflow-wrap:\s*anywhere/s,
       'the snapshot id cannot force horizontal overflow');
     const rowRule = chrome.match(/\.sidebar li\.row \{[^}]*\}/s);

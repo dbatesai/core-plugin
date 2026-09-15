@@ -25,8 +25,49 @@
  * The plugin ships Node.js (.mjs) only.
  */
 
+import { existsSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+
 export function mapProjectPathToSlug(p) {
   return String(p).replace(/[/\\.:]/g, '-');
+}
+
+/**
+ * resolveMemoryProjectRoot — the directory Claude Code keys AUTO-MEMORY on.
+ *
+ * Transcripts live under the cwd slug, but MEMORY.md lives under the slug of the git
+ * worktree root. A project folder inside a larger repository (a home-directory repo is
+ * the common case) therefore shares `~/.claude/projects/<root-slug>/memory/` with every
+ * sibling in that repository, and a cwd-derived slug names a folder the harness never
+ * injects. Confirmed 2026-09-13 on a home-level repo: the harness announced
+ * `-Users-<user>/memory/` while every CORE memory script wrote to and measured
+ * `-Users-<user>-Documents-Projects-<proj>/memory/` — a false CONTEXT-PARTIAL every
+ * session, and a visibility canary planted where the agent could never see it.
+ *
+ * Returns `cwd` unchanged (same spelling) when it is itself the worktree root, doesn't
+ * exist, isn't inside a git worktree, or git isn't available — in all of those the cwd
+ * slug is the harness's own answer. Only memory-path callers use this;
+ * `read-transcript.mjs` keeps the cwd slug on purpose.
+ */
+export function resolveMemoryProjectRoot(cwd) {
+  const dir = String(cwd);
+  if (!existsSync(dir)) return dir;
+  try {
+    const top = execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
+    }).trim();
+    // realpathSync.native expands Windows 8.3 short names (a temp dir comes back as
+    // `RUNNER~1` while git prints the long name); the JS realpath does not.
+    if (!top || realpathSync.native(top) === realpathSync.native(dir)) return dir;
+    return top;
+  } catch {
+    return dir;
+  }
+}
+
+/** Slug of the auto-memory folder: the git-root slug, or the cwd slug outside a repo. */
+export function mapMemoryProjectPathToSlug(cwd) {
+  return mapProjectPathToSlug(resolveMemoryProjectRoot(cwd));
 }
 
 /**

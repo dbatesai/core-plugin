@@ -384,7 +384,7 @@ export function checkIntegrity(units, memoriesDir, today, report) {
       report.push({ level: 'PASS', check: 'index-drift', unit_id: '', detail: 'INDEX-decisions.md in sync with dc-* units' });
     }
   } catch {
-    report.push({ level: 'WARN', check: 'index-missing', unit_id: '', detail: 'INDEX-decisions.md not found — run generate-decisions-index.mjs' });
+    report.push({ level: 'WARN', check: 'index-missing', unit_id: '', detail: 'INDEX-decisions.md not found — run generate-unit-index.mjs --kind decisions' });
   }
 
   // Fresh-store hint: if many units are orphans, it's usually a freshly-

@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSyn
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { main, spliceSection } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
 
 const SRC = readFileSync(
@@ -164,4 +165,24 @@ test('splice ends with exactly one trailing newline when the section is last', (
   const out = spliceSection(md, '## Top project units (refreshed 2026-06-09)\n\n- [b](b.md) — two\n');
   assert.match(out, /two\n$/, 'POSIX final newline present');
   assert.doesNotMatch(out, /\n\n$/, 'exactly one, not several');
+});
+
+// A project inside a larger repository has no MEMORY.md of its own — the harness injects
+// the repository root's file, shared with every sibling. Writing a priority block there
+// would crowd the shared index, so main() skips with exit 0 and leaves the file alone.
+test('main: skips the priority block (exit 0, file untouched) for a project nested in a larger repo', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'gmi-shared-'));
+  try {
+    execFileSync('git', ['-C', repo, 'init', '-q']);
+    const memories = join(repo, 'Documents', 'proj', '_memories');
+    mkdirSync(memories, { recursive: true });
+    const memoryMd = join(repo, 'MEMORY.md');
+    const before = '# Index\n\n- [x](x.md) — one line\n';
+    writeFileSync(memoryMd, before);
+    const rc = quietStderr(() => main([memories, '--memory-md', memoryMd, '--top', '5']));
+    assert.equal(rc, 0);
+    assert.equal(readFileSync(memoryMd, 'utf8'), before, 'shared MEMORY.md must not be rewritten');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
