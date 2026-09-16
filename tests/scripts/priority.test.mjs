@@ -361,3 +361,31 @@ test('ranking coverage: when the only unit sits under an unlistable subtree, hot
     assert.equal(JSON.parse(out).coverage_incomplete.length, 1, 'JSON CLI keeps the evidence on the zero-candidate path');
   } finally { fs.readdirSync = realReaddir; syncBuiltinESMExports(); process.stderr.write = realStderr; process.stdout.write = realStdout; rmSync(project, { recursive: true, force: true }); }
 });
+
+test('ranking coverage: a symlink or junction inside the store is not followed and is recorded as skipped, reaching the CLI line, the memory-index block, and the candidates (Windows reviewer finding)', async () => {
+  const { symlinkSync } = await import('node:fs');
+  const { renderPriorityBlock } = await import('../../plugins/core/skills/core/scripts/generate-memory-index.mjs');
+  const { candidatesForSynthesis } = await import('../../plugins/core/skills/core/scripts/hot-section.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-junction-'));
+  const mem = join(project, '_memories'), real = join(project, 'elsewhere');
+  const realStdout = process.stdout.write;
+  try {
+    mkdirSync(join(mem, 'observations', '2026-09'), { recursive: true }); mkdirSync(real, { recursive: true });
+    const note = id => `---\nid: ${id}\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# ${id}\n`;
+    writeFileSync(join(mem, 'observations', '2026-09', 'obs-real.md'), note('real'));
+    writeFileSync(join(real, 'obs-behind-link.md'), note('behind-link'));
+    symlinkSync(real, join(mem, 'linked'), 'junction');
+    symlinkSync(mem, join(mem, 'observations', 'loop'), 'junction');
+    const units = iterUnits(mem);
+    assert.deepEqual(units.map(u => u.id), ['real'], 'the readable sibling ranks; nothing behind a link is loaded and the self-link does not loop');
+    assert.deepEqual(units.skipped.map(s => [s.kind, s.reason]).sort(), [['link', 'symlink-or-junction-not-followed'], ['link', 'symlink-or-junction-not-followed']]);
+    const ranked = rankUnits(mem, { today: parseIsoDate('2026-09-15') });
+    assert.equal(ranked.excluded.unreadable, 2);
+    const block = renderPriorityBlock({ memoriesDir: mem, topN: 10, today: new Date('2026-09-15'), existingDescriptions: new Map() });
+    assert.match(block, /Coverage incomplete: 2 path\(s\)[^\n]*_memories\/linked \(symlink-or-junction-not-followed\)/);
+    assert.equal(candidatesForSynthesis(project, { today: new Date('2026-09-15') }).skipped.length, 2);
+    let out = ''; process.stdout.write = (c) => { out += c; return true; };
+    priorityMain([mem, '--top', '1']);
+    assert.match(out, /unreadable: 2/); assert.match(out, /COVERAGE INCOMPLETE:.*symlink-or-junction-not-followed/);
+  } finally { process.stdout.write = realStdout; rmSync(project, { recursive: true, force: true }); }
+});

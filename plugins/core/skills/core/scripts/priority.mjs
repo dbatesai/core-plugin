@@ -428,6 +428,14 @@ export function iterUnits(memoriesDir) {
     entries.sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
     for (const ent of entries) {
       const fname = ent.name;
+      if (ent.isSymbolicLink()) {
+        // A symlink or Windows junction is reported as neither file nor directory. Not following it is
+        // defensible; not counting it is not — record it so units behind it are unaccounted-for, not absent.
+        // Following would need realpath + cycle detection; today's non-traversal is what keeps a
+        // self-referential junction from looping the walk.
+        skipped.push({ path: join(dir, fname), reason: 'symlink-or-junction-not-followed', kind: 'link' });
+        continue;
+      }
       if (ent.isDirectory()) {
         if (fname === 'archive' || fname.startsWith('_') || fname.startsWith('.')) continue;
         walk(join(dir, fname));
