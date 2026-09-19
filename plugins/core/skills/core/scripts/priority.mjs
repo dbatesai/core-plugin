@@ -125,6 +125,18 @@ export function normalizeNewlines(text) {
 // on purpose: priority is the base unit module that many scripts — including the parser's
 // other callers — import, so taking a dependency the other way risks an import cycle. Both
 // parsers normalize CRLF, so they agree on behavior; this is a deliberate duplication, not drift.
+//
+// WRITER CONTRACT: any script that WRITES unit frontmatter must edit specific lines in
+// place (targeted string.replace on the exact line(s) changing), never re-dump or
+// re-serialize the whole frontmatter block with a generic YAML writer. See bitemporal.mjs
+// and lifecycle-detect.mjs for the established pattern. This parser is a hand-written state
+// machine, not a real YAML parser — it expects the formatting that already exists in this
+// project's units, and a generic dumper's default output (list items at the same indent as
+// their parent key, e.g. PyYAML's default block style) can silently corrupt fields it
+// doesn't touch. The list-continuation branch below tolerates that one specific shape
+// defensively, but that's a safety net, not a license to re-dump — anything a full
+// re-serialize could produce that this parser doesn't defend against (key reordering,
+// quoting changes, comment loss) is still a real risk a targeted edit avoids entirely.
 export function parseFrontmatter(rawText) {
   const text = normalizeNewlines(rawText);
   if (!text.startsWith('---\n')) return [{}, text];
@@ -140,6 +152,31 @@ export function parseFrontmatter(rawText) {
     if (!line.trim() || line.trimStart().startsWith('#')) continue;
     const indent = line.length - line.trimStart().length;
     const stripped = line.trim();
+    // A `- ` line continues the most recently opened list REGARDLESS OF INDENT, as long
+    // as a list is actually open. This must run before the indent===0 branch below: a
+    // generic YAML dumper's default block style (PyYAML, yaml.dump(), js-yaml, ...) writes
+    // list items at the SAME indent as their parent key (`edges:\n- type: cites\n  target: x`),
+    // not indented under it. Without this, an indent-0 `- type: cites` line was read as a
+    // brand-new top-level key `"- type"`, silently resetting currentList and losing the whole
+    // list — confirmed live 2026-09-19 by a peer session that nearly shipped 48 units with
+    // emptied edges/topics after a PyYAML rewrite. See docs/playbooks/pre-ship-verification.md.
+    if (stripped.startsWith('- ') && currentList !== null) {
+      const item = stripped.slice(2).trim();
+      if (item.startsWith('{') && item.endsWith('}')) {
+        currentDict = _parseInlineMap(item.slice(1, -1));
+        currentList.push(currentDict);
+      } else if (item.includes(':') && !item.startsWith('http')) {
+        const colonIdx = item.indexOf(':');
+        const k = item.slice(0, colonIdx).trim();
+        const v = item.slice(colonIdx + 1).trim();
+        currentDict = { [k]: _coerce(v) };
+        currentList.push(currentDict);
+      } else {
+        currentList.push(_coerce(item));
+        currentDict = null;
+      }
+      continue;
+    }
     if (indent === 0) {
       currentDict = null;
       if (!stripped.includes(':')) continue;
@@ -152,21 +189,6 @@ export function parseFrontmatter(rawText) {
       } else {
         fm[k] = _coerce(v);
         currentList = null;
-      }
-    } else if (stripped.startsWith('- ')) {
-      const item = stripped.slice(2).trim();
-      if (item.startsWith('{') && item.endsWith('}')) {
-        currentDict = _parseInlineMap(item.slice(1, -1));
-        if (currentList !== null) currentList.push(currentDict);
-      } else if (item.includes(':') && !item.startsWith('http')) {
-        const colonIdx = item.indexOf(':');
-        const k = item.slice(0, colonIdx).trim();
-        const v = item.slice(colonIdx + 1).trim();
-        currentDict = { [k]: _coerce(v) };
-        if (currentList !== null) currentList.push(currentDict);
-      } else {
-        if (currentList !== null) currentList.push(_coerce(item));
-        currentDict = null;
       }
     } else if (currentDict !== null && stripped.includes(':')) {
       const colonIdx = stripped.indexOf(':');
