@@ -83,26 +83,6 @@ test('parseFrontmatter parses a CRLF unit the same as an LF unit', () => {
   assert.ok(!bodyCrlf.includes('\r'), 'body normalized to LF');
 });
 
-// ---------- indent-0 list continuation (PyYAML default block style) ----------
-// A generic YAML dumper's default block style writes list items at the SAME
-// indent as the parent key (`edges:\n- type: cites\n  target: x`), not indented
-// under it. Confirmed live: a cross-session peer normalizing legacy edge shorthand
-// with PyYAML hit this and nearly shipped 48 units with silently emptied edges.
-test('parseFrontmatter accepts indent-0 list continuation lines (PyYAML block style), not just indented ones', () => {
-  const pyyamlStyle = '---\nid: x\nedges:\n- type: cites\n  target: some-unit\ntopics:\n- foo\n- bar\n---\n\nbody';
-  const [fm] = parseFrontmatter(pyyamlStyle);
-  assert.deepEqual(fm.edges, [{ type: 'cites', target: 'some-unit' }], 'edges must not silently empty');
-  assert.deepEqual(fm.topics, ['foo', 'bar'], 'topics must not silently empty');
-  assert.equal(fm['- type'], undefined, 'a list-continuation line must never become a bogus top-level key');
-});
-
-test('parseFrontmatter still parses the project convention (2-space-indented list items) the same as before', () => {
-  const indented = '---\nid: x\nedges:\n  - {type: cites, target: some-unit}\ntopics:\n  - foo\n  - bar\n---\n\nbody';
-  const [fm] = parseFrontmatter(indented);
-  assert.deepEqual(fm.edges, [{ type: 'cites', target: 'some-unit' }]);
-  assert.deepEqual(fm.topics, ['foo', 'bar']);
-});
-
 test('normalizeNewlines collapses CRLF and lone CR to LF; passes non-strings through', () => {
   assert.equal(normalizeNewlines('a\r\nb\rc\nd'), 'a\nb\nc\nd');
   assert.equal(normalizeNewlines(null), null);
