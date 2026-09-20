@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 // Validity predicates now live in priority.mjs (the canonical unit module) per the
@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import {
   effectiveValidity, validAt, isInvalidated, parseIsoDate,
   parseFrontmatter, normalizeNewlines, _todayFromArg,
-  rankUnits, main as priorityMain, iterArchivedUnits,
+  rankUnits, main as priorityMain, iterArchivedUnits, iterUnits,
   score, signalS, NO_SOURCES_DEFAULT_S,
 } from '../../plugins/core/skills/core/scripts/priority.mjs';
 
@@ -224,4 +224,168 @@ test('signalS: both agent-profile and the legacy dm-profile source paths score a
   const legacy = signalS({ fm: { sources: ['~/.core/dm-profile.md'] } });
   assert.equal(modern, legacy, 'renamed profile path must not change a unit\'s provenance score');
   assert.ok(modern > NO_SOURCES_DEFAULT_S, 'profile-sourced units outrank unknown provenance');
+});
+
+// Reviewer-supplied synthetic control (files repo receipt codex-to-all-20260915T195633Z). Acceptance test for the
+// bounded ranking-population repair: nested active notes must rank; archive exclusion, retired suppression,
+// explicit history, and per-turn retrieval must keep their current behavior. Red on 3.17.1 at the last assertion only.
+test('ranking population: nested active observation ranks; archive/retired exclusions and explicit history preserved (reviewer check-ranking)', async () => {
+  const { retrieveContext } = await import('../../plugins/core/skills/core/scripts/retrieve-context.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-population-'));
+  const mem = join(project, '_memories');
+  try {
+    for (const dir of ['', 'observations/2026-09', 'archive']) mkdirSync(join(mem, dir), { recursive: true });
+    for (const [file, id, state, type] of [
+      ['dc-root.md', 'root', 'active', 'decision'],
+      ['observations/2026-09/obs-nested.md', 'nested', 'active', 'observation'],
+      ['dc-retired.md', 'retired', 'retired', 'decision'],
+      ['archive/dc-archived.md', 'archived', 'active', 'decision'],
+    ]) writeFileSync(join(mem, file), `---\nid: ${id}\ntype: ${type}\nstatus: ${state}\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [recovery]\n---\n# Recovery ${id}\nSynthetic recovery constraint.\n`);
+    const ranked = rankUnits(mem).map(([, u]) => u.id).sort();
+    const historical = rankUnits(mem, { includeInvalidated: true }).map(([, u]) => u.id).sort();
+    const retrieved = retrieveContext('recovery', project, { topN: 10 }).map(u => u.id).sort();
+    assert.ok(ranked.includes('root'), 'Root active control must rank');
+    assert.ok(!ranked.includes('retired'), 'Retired control must stay excluded');
+    assert.ok(!ranked.includes('archived'), 'Archive path must stay excluded even with active status');
+    assert.ok(historical.includes('archived'), 'Explicit history must still reach the archive');
+    assert.deepEqual(retrieved, ['nested', 'root'], 'Per-turn retrieval must reach nested active notes and preserve exclusions');
+    assert.ok(ranked.includes('nested'), 'DEFECT: nested active observation is absent from priority ranking');
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('ranking population: an unreadable nested unit lands on the skipped list and in the excluded counts, never silently vanishes', { skip: process.platform === 'win32' ? 'chmod has no effect on win32; the read-failure control needs a POSIX mode bit' : false }, () => {
+  const project = mkdtempSync(join(tmpdir(), 'ranking-unreadable-'));
+  const mem = join(project, '_memories');
+  const nested = join(mem, 'observations', '2026-09');
+  const locked = join(nested, 'obs-locked.md');
+  try {
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(mem, 'dc-root.md'), '---\nid: root\ntype: decision\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# root\n');
+    writeFileSync(locked, '---\nid: locked\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# locked\n');
+    chmodSync(locked, 0o000);
+    const units = iterUnits(mem);
+    assert.deepEqual(units.map(u => u.id), ['root'], 'the unreadable unit is not loaded');
+    assert.equal(units.skipped.length, 1, 'the unreadable unit is on the skipped list');
+    assert.equal(units.skipped[0].path, locked, 'skipped entry carries the native absolute path');
+    const ranked = rankUnits(mem, { today: parseIsoDate('2026-09-15') });
+    assert.equal(ranked.excluded.unreadable, 1, 'rankUnits reports the unreadable count');
+    assert.equal(ranked.excluded.read, 1, 'rankUnits reports how many it actually read');
+  } finally { try { chmodSync(locked, 0o644); } catch {} rmSync(project, { recursive: true, force: true }); }
+});
+
+test('ranking population: the path iterUnits returns for a nested unit is the state-cache key shape — a stamp on it is found by the consumer lookup', async () => {
+  const { stampFile, readProjectCache } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-cache-key-'));
+  const home = mkdtempSync(join(tmpdir(), 'ranking-cache-home-'));
+  const mem = join(project, '_memories');
+  try {
+    mkdirSync(join(mem, 'observations', '2026-09'), { recursive: true });
+    mkdirSync(join(mem, '_lib'), { recursive: true });
+    writeFileSync(join(mem, 'observations', '2026-09', 'obs-nested.md'), '---\nid: nested\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# nested\n');
+    const [u] = iterUnits(mem);
+    assert.equal(u.id, 'nested');
+    stampFile(project, u.path, 'deadbeef', 'test', { home });
+    const cache = readProjectCache(project);
+    assert.ok(cache.files[u.path], 'the consumer finds the nested unit under the exact path the walk returned');
+    assert.ok(!cache.files[u.path.replace(/\\/g, '/')] || u.path === u.path.replace(/\\/g, '/'), 'no second, normalized identity was introduced');
+  } finally { rmSync(project, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }); }
+});
+
+// Fault-injected subtree (reviewer-supplied shape, files repo receipt codex-to-all-20260915T222006Z): a directory that
+// will not list must be reported as unreadable by the ranker and by both downstream consumers, in live and history modes.
+for (const history of [false, true]) test(`ranking coverage: an unlistable ${history ? 'archive' : 'live'} subtree is reported by rankUnits, the memory-index block, and hot-section candidates`, async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { renderPriorityBlock } = await import('../../plugins/core/skills/core/scripts/generate-memory-index.mjs');
+  const { candidatesForSynthesis } = await import('../../plugins/core/skills/core/scripts/hot-section.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-coverage-'));
+  const mem = join(project, '_memories'), blocked = join(mem, history ? 'archive' : 'observations', '2026-09');
+  const realReaddir = fs.readdirSync, realStderr = process.stderr.write;
+  try {
+    mkdirSync(blocked, { recursive: true });
+    const note = id => `---\nid: ${id}\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# ${id}\n`;
+    writeFileSync(join(mem, 'root.md'), note('root')); writeFileSync(join(blocked, 'nested.md'), note('nested'));
+    assert.deepEqual(rankUnits(mem, { includeInvalidated: history, today: parseIsoDate('2026-09-15') }).map(([, u]) => u.id).sort(), ['nested', 'root'], 'positive control: both rank before the fault');
+    fs.readdirSync = (p, ...a) => { if (String(p) === blocked) throw Object.assign(new Error('synthetic EACCES'), { code: 'EACCES' }); return realReaddir(p, ...a); };
+    syncBuiltinESMExports();
+    let err = ''; process.stderr.write = (c) => { err += c; return true; };
+    const ranked = rankUnits(mem, { includeInvalidated: history, today: parseIsoDate('2026-09-15') });
+    assert.deepEqual(ranked.map(([, u]) => u.id), ['root']);
+    assert.equal(ranked.excluded.unreadable, 1, 'the unlistable subtree is counted as unreadable');
+    assert.equal(ranked.excluded.skipped[0].kind, 'directory');
+    assert.match(err, /failed to list/, 'the failed subtree is warned on stderr');
+    if (!history) {
+      const block = renderPriorityBlock({ memoriesDir: mem, topN: 10, today: new Date('2026-09-15'), existingDescriptions: new Map() });
+      assert.match(block, /Coverage incomplete: 1 path\(s\) could not be read — _memories\/observations\/2026-09 \(EACCES\)/, 'the memory-index block names the unread path');
+      const cands = candidatesForSynthesis(project, { today: new Date('2026-09-15') });
+      assert.deepEqual(cands.map(c => c.id), ['root']);
+      assert.equal(cands.skipped.length, 1, 'hot-section candidates carry the skip evidence');
+    }
+  } finally { fs.readdirSync = realReaddir; syncBuiltinESMExports(); process.stderr.write = realStderr; rmSync(project, { recursive: true, force: true }); }
+});
+
+test('ranking coverage: excluded-by-status is broken out by status value', () => {
+  const project = mkdtempSync(join(tmpdir(), 'ranking-bystatus-'));
+  const mem = join(project, '_memories');
+  try {
+    mkdirSync(join(mem, 'observations', '2026-06'), { recursive: true });
+    const note = (id, status) => `---\nid: ${id}\ntype: observation\nstatus: ${status}\ncreated: 2026-06-01\nupdated: 2026-06-01\ntopics: [a]\n---\n# ${id}\n`;
+    writeFileSync(join(mem, 'a.md'), note('a', 'active')); writeFileSync(join(mem, 'r.md'), note('r', 'retired'));
+    writeFileSync(join(mem, 'observations', '2026-06', 'x.md'), note('x', 'archived')); writeFileSync(join(mem, 'observations', '2026-06', 'y.md'), note('y', 'archived'));
+    const ranked = rankUnits(mem, { today: parseIsoDate('2026-09-15') });
+    assert.deepEqual(ranked.map(([, u]) => u.id), ['a']);
+    assert.deepEqual(ranked.excluded.byStatus, { archived: 2, retired: 1 });
+    assert.equal(ranked.excluded.read, 4);
+  } finally { rmSync(project, { recursive: true, force: true }); }
+});
+
+test('ranking coverage: when the only unit sits under an unlistable subtree, hot-section candidates are empty but still carry the skip evidence (reviewer no-root case)', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { candidatesForSynthesis, main: hotMain } = await import('../../plugins/core/skills/core/scripts/hot-section.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-noroot-'));
+  const mem = join(project, '_memories'), blocked = join(mem, 'observations', '2026-09');
+  const realReaddir = fs.readdirSync, realStderr = process.stderr.write, realStdout = process.stdout.write;
+  try {
+    mkdirSync(blocked, { recursive: true });
+    writeFileSync(join(blocked, 'nested.md'), '---\nid: nested\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# nested\n');
+    assert.deepEqual(candidatesForSynthesis(project, { today: new Date('2026-09-15') }).map(c => c.id), ['nested'], 'positive control');
+    fs.readdirSync = (p, ...a) => { if (String(p) === blocked) throw Object.assign(new Error('synthetic EACCES'), { code: 'EACCES' }); return realReaddir(p, ...a); };
+    syncBuiltinESMExports();
+    process.stderr.write = () => true; let out = ''; process.stdout.write = (c) => { out += c; return true; };
+    const cands = candidatesForSynthesis(project, { today: new Date('2026-09-15') });
+    assert.deepEqual(cands, []);
+    assert.equal(cands.skipped.length, 1, 'empty result still names the unread subtree');
+    const exit = hotMain(['candidates', project, '--json']);
+    assert.equal(exit, 0);
+    assert.equal(JSON.parse(out).coverage_incomplete.length, 1, 'JSON CLI keeps the evidence on the zero-candidate path');
+  } finally { fs.readdirSync = realReaddir; syncBuiltinESMExports(); process.stderr.write = realStderr; process.stdout.write = realStdout; rmSync(project, { recursive: true, force: true }); }
+});
+
+test('ranking coverage: a symlink or junction inside the store is not followed and is recorded as skipped, reaching the CLI line, the memory-index block, and the candidates (Windows reviewer finding)', async () => {
+  const { symlinkSync } = await import('node:fs');
+  const { renderPriorityBlock } = await import('../../plugins/core/skills/core/scripts/generate-memory-index.mjs');
+  const { candidatesForSynthesis } = await import('../../plugins/core/skills/core/scripts/hot-section.mjs');
+  const project = mkdtempSync(join(tmpdir(), 'ranking-junction-'));
+  const mem = join(project, '_memories'), real = join(project, 'elsewhere');
+  const realStdout = process.stdout.write;
+  try {
+    mkdirSync(join(mem, 'observations', '2026-09'), { recursive: true }); mkdirSync(real, { recursive: true });
+    const note = id => `---\nid: ${id}\ntype: observation\nstatus: active\ncreated: 2026-09-15\nupdated: 2026-09-15\ntopics: [a]\n---\n# ${id}\n`;
+    writeFileSync(join(mem, 'observations', '2026-09', 'obs-real.md'), note('real'));
+    writeFileSync(join(real, 'obs-behind-link.md'), note('behind-link'));
+    symlinkSync(real, join(mem, 'linked'), 'junction');
+    symlinkSync(mem, join(mem, 'observations', 'loop'), 'junction');
+    const units = iterUnits(mem);
+    assert.deepEqual(units.map(u => u.id), ['real'], 'the readable sibling ranks; nothing behind a link is loaded and the self-link does not loop');
+    assert.deepEqual(units.skipped.map(s => [s.kind, s.reason]).sort(), [['link', 'symlink-or-junction-not-followed'], ['link', 'symlink-or-junction-not-followed']]);
+    const ranked = rankUnits(mem, { today: parseIsoDate('2026-09-15') });
+    assert.equal(ranked.excluded.unreadable, 2);
+    const block = renderPriorityBlock({ memoriesDir: mem, topN: 10, today: new Date('2026-09-15'), existingDescriptions: new Map() });
+    assert.match(block, /Coverage incomplete: 2 path\(s\)[^\n]*_memories\/linked \(symlink-or-junction-not-followed\)/);
+    assert.equal(candidatesForSynthesis(project, { today: new Date('2026-09-15') }).skipped.length, 2);
+    let out = ''; process.stdout.write = (c) => { out += c; return true; };
+    priorityMain([mem, '--top', '1']);
+    assert.match(out, /unreadable: 2/); assert.match(out, /COVERAGE INCOMPLETE:.*symlink-or-junction-not-followed/);
+  } finally { process.stdout.write = realStdout; rmSync(project, { recursive: true, force: true }); }
 });

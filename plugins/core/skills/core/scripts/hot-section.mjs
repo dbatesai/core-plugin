@@ -404,7 +404,10 @@ export function candidatesForSynthesis(projectDir, { top = DEFAULT_CANDIDATE_COU
   const memoriesDir = join(projectDir, '_memories');
   let units;
   try { units = iterUnits(memoriesDir); } catch { return []; }
-  if (!Array.isArray(units) || units.length === 0) return [];
+  // An unreadable population must stay distinguishable from a healthy empty store:
+  // the zero-loaded return carries the skip evidence too.
+  const withSkipped = (arr) => { Object.defineProperty(arr, 'skipped', { value: (units && units.skipped) || [], enumerable: false }); return arr; };
+  if (!Array.isArray(units) || units.length === 0) return withSkipped([]);
 
   // Validity-suppression uses the same shared predicate every other reader
   // does: a unit whose t_invalid has passed stopped being true, so it is
@@ -433,7 +436,7 @@ export function candidatesForSynthesis(projectDir, { top = DEFAULT_CANDIDATE_COU
     })
     .sort((a, b) => b.score - a.score);
 
-  return scored.slice(0, top);
+  return withSkipped(scored.slice(0, top));
 }
 
 function extractTitle(unit) {
@@ -501,10 +504,12 @@ function cmdCandidates(args) {
   const top = args.flags.has('top') ? Number(args.flags.get('top')) : DEFAULT_CANDIDATE_COUNT;
   const sessionTopics = args.flags.has('session-topic') ? args.flags.get('session-topic') : [];
   const cands = candidatesForSynthesis(projectDir, { top, sessionTopics });
+  const skipped = cands.skipped || [];
   if (args.flags.has('json')) {
-    process.stdout.write(JSON.stringify(cands, null, 2) + '\n');
+    process.stdout.write(JSON.stringify(skipped.length ? { candidates: cands, coverage_incomplete: skipped } : cands, null, 2) + '\n');
     return 0;
   }
+  if (skipped.length) process.stdout.write(`COVERAGE INCOMPLETE: ${skipped.map(s => `${s.path} (${s.reason})`).join('; ')} — units under these paths are unaccounted for\n\n`);
   if (cands.length === 0) {
     process.stdout.write('(no candidates — _memories/ is empty or unreadable)\n');
     return 0;

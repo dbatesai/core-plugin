@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.17.2] — 2026-09-19
+
+### Fixed
+- Units stored in dated `observations/<YYYY-MM>/` subfolders were invisible to the ranking system used by the priority CLI, the memory index, and hot-section candidate selection — the directory walk read only the store's top level. On one real project's memory store this affected roughly 4 in 10 units. The walk now recurses into the store, while still excluding `archive/` and hidden/underscore-prefixed directories.
+- A symlink or junction inside the unit store is now recorded as skipped rather than silently vanishing from the count.
+
+### Changed
+- Ranking now reports *why* units were excluded (retired/superseded status, invalidated, malformed, unreadable) instead of a single opaque total, and the CLI, memory-index block, and hot-section candidates all surface an incompleteness note when a population couldn't be fully read — so a broken scan now looks different from a genuinely empty or small store.
+
 ## [3.17.1] — 2026-09-14
 
 ### Fixed

@@ -407,28 +407,64 @@ export function unitSection(unit) {
 
 // ---------- Unit iteration ----------
 
+// Walks the store recursively so dated observations/<YYYY-MM>/ subfolders rank.
+// Excluded by path segment, never by prefix: any directory named `archive`
+// (iterArchivedUnits walks that tree explicitly) and any `_`-prefixed directory
+// (_lib, _validation, ...). Unit paths stay absolute, exactly as join() builds
+// them — the state cache keys on that shape, so no normalizer is introduced here.
 export function iterUnits(memoriesDir) {
   const units = [];
-  for (const fname of readdirSync(memoriesDir).sort()) {
-    if (!fname.endsWith('.md')) continue;
-    if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
-    const path = join(memoriesDir, fname);
-    try {
-      const u = loadUnit(path);
-      if (!Object.keys(u.fm).length) {
-        // Malformed/absent frontmatter parses to an empty map and would score
-        // on pure defaults, surfacing unflagged in ranked output.
-        // Tag it so rankUnits() excludes it; the stderr warn makes the damage
-        // visible (check-units reports the same file as a schema failure).
-        u.fm._load_error = true;
-        process.stderr.write(`warn: ${fname}: no parseable frontmatter — excluded from ranking\n`);
-      }
-      units.push(u);
-    } catch (e) {
-      // A bare catch would swallow read failures silently — warn instead.
-      process.stderr.write(`warn: ${fname}: failed to load (${e && e.message ? e.message : e}) — excluded from ranking\n`);
+  const skipped = [];
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch (e) {
+      if (dir === memoriesDir) throw e;
+      // A subtree that will not list is an unknown quantity, not a count of missing units.
+      skipped.push({ path: dir, reason: e && e.code ? e.code : 'readdir-failed', kind: 'directory' });
+      process.stderr.write(`warn: ${dir}: failed to list (${e && e.code ? e.code : e}) — every unit under it is unaccounted for\n`);
+      return;
     }
-  }
+    entries.sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
+    for (const ent of entries) {
+      const fname = ent.name;
+      if (ent.isSymbolicLink()) {
+        // A symlink or Windows junction is reported as neither file nor directory. Not following it is
+        // defensible; not counting it is not — record it so units behind it are unaccounted-for, not absent.
+        // Following would need realpath + cycle detection; today's non-traversal is what keeps a
+        // self-referential junction from looping the walk.
+        skipped.push({ path: join(dir, fname), reason: 'symlink-or-junction-not-followed', kind: 'link' });
+        continue;
+      }
+      if (ent.isDirectory()) {
+        if (fname === 'archive' || fname.startsWith('_') || fname.startsWith('.')) continue;
+        walk(join(dir, fname));
+        continue;
+      }
+      if (!fname.endsWith('.md')) continue;
+      if (fname.startsWith('_') || fname.startsWith('INDEX') || fname === 'README.md') continue;
+      const path = join(dir, fname);
+      try {
+        const u = loadUnit(path);
+        if (!Object.keys(u.fm).length) {
+          // Malformed/absent frontmatter parses to an empty map and would score
+          // on pure defaults, surfacing unflagged in ranked output.
+          // Tag it so rankUnits() excludes it; the stderr warn makes the damage
+          // visible (check-units reports the same file as a schema failure).
+          u.fm._load_error = true;
+          process.stderr.write(`warn: ${fname}: no parseable frontmatter — excluded from ranking\n`);
+        }
+        units.push(u);
+      } catch (e) {
+        // A bare catch would swallow read failures silently — warn instead, and
+        // keep the skip on the list so a caller can report an unverified denominator.
+        skipped.push({ path, reason: e && e.message ? e.message : String(e), kind: 'file' });
+        process.stderr.write(`warn: ${fname}: failed to load (${e && e.message ? e.message : e}) — excluded from ranking\n`);
+      }
+    }
+  };
+  walk(memoriesDir);
+  Object.defineProperty(units, 'skipped', { value: skipped, enumerable: false });
   return units;
 }
 
@@ -436,10 +472,9 @@ export function iterUnits(memoriesDir) {
  * iterArchivedUnits — the ONE archive-aware companion to iterUnits, for the
  * explicit-history modes only. Archiving a unit
  * (a separate, independent action from retiring it — see hygiene.md) is what
- * physically relocates it to `archive/`, but iterUnits is top-level-only by
- * design (default retrieval must stay non-recursive, per
- * ARCHITECTURE.md/data-storage.md). Without this companion, an archived unit
- * would silently
+ * physically relocates it to `archive/`, and iterUnits skips every directory
+ * named `archive` by design (default ranking never reads cold history).
+ * Without this companion, an archived unit would silently
  * disappear from every "--include-invalid" / cold-history caller too, not
  * just default retrieval -- losing complete recall there is a defect, not a
  * side effect of the archive action
@@ -469,14 +504,28 @@ export function iterArchivedUnits(memoriesDir) {
  */
 export function rankUnits(memoriesDir, { sessionTopics = [], today = null, includeInvalidated = false } = {}) {
   const t = today || _todayUTC();
-  const pool = includeInvalidated ? iterUnits(memoriesDir).concat(iterArchivedUnits(memoriesDir)) : iterUnits(memoriesDir);
+  const live = iterUnits(memoriesDir);
+  const archived = includeInvalidated ? iterArchivedUnits(memoriesDir) : [];
+  const pool = includeInvalidated ? live.concat(archived) : live;
+  // Skip evidence from both populations rides along; explicit history must not drop the archive side.
+  const skipped = (live.skipped || []).concat(archived.skipped || []);
+  if (pool !== live) Object.defineProperty(pool, 'skipped', { value: skipped, enumerable: false });
+  const excluded = { malformed: 0, status: 0, byStatus: {}, invalidated: 0, unreadable: skipped.length, read: pool.length, skipped };
   const ranked = pool
-    .filter(u => !u.fm._load_error)
-    .filter(u => includeInvalidated || isActiveStatus(u.fm))
-    .filter(u => includeInvalidated || !isInvalidated(u, t))
+    .filter(u => { if (u.fm._load_error) { excluded.malformed++; return false; } return true; })
+    .filter(u => { if (!includeInvalidated && !isActiveStatus(u.fm)) { excluded.status++; const s = String(u.fm.status || '(none)').toLowerCase(); excluded.byStatus[s] = (excluded.byStatus[s] || 0) + 1; return false; } return true; })
+    .filter(u => { if (!includeInvalidated && isInvalidated(u, t)) { excluded.invalidated++; return false; } return true; })
     .map(u => [score(u, sessionTopics, t), u]);
   ranked.sort((a, b) => b[0] - a[0]);
+  // The denominator rides along so every consumer can say what it did not rank.
+  Object.defineProperty(ranked, 'excluded', { value: excluded, enumerable: false });
   return ranked;
+}
+
+// One sentence every consumer can print about what the walk did not rank.
+export function coverageSummary(ex = {}) {
+  const by = ex.byStatus && Object.keys(ex.byStatus).length ? ` (${Object.entries(ex.byStatus).sort().map(([k, v]) => `${k} ${v}`).join(', ')})` : '';
+  return `${ex.read ?? '?'} read; excluded: ${ex.status ?? 0} by status${by}, ${ex.invalidated ?? 0} invalidated, ${ex.malformed ?? 0} malformed; unreadable: ${ex.unreadable ?? 0}`;
 }
 
 // ---------- CLI ----------
@@ -568,7 +617,9 @@ export function main(argv) {
 
   if (sections) return _cliSections(ranked, topPerSection);
 
-  console.log(`Ranking ${ranked.length} units in ${memoriesDir}`);
+  const ex = ranked.excluded || {};
+  console.log(`Ranking ${ranked.length} units in ${memoriesDir} (${coverageSummary(ex)})`);
+  if (ex.unreadable) console.log(`COVERAGE INCOMPLETE: ${ex.skipped.map(s => `${s.path} (${s.reason}${s.kind === 'directory' ? ', whole subtree unaccounted for' : ''})`).join('; ')}`);
   console.log(`Date: ${today.toISOString().slice(0, 10)}, intent topics: ${intent.length ? intent.join(',') : '(none)'}`);
   console.log('-'.repeat(64));
   for (const [s, u] of ranked.slice(0, topN)) {
