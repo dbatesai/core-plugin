@@ -75,13 +75,7 @@ Record op `session-summary`.
 
 ## Step 5 — Harness memory refresh (cheap, Claude Code only)
 
-On Claude Code: run `node ${CORE_ROOT}/skills/core/scripts/generate-memory-index.mjs <project>/_memories --memory-md ~/.claude/projects/<mapped-root>/memory/MEMORY.md --top 15`, where `<mapped-root>` is the slug of the git worktree root (the cwd when the project isn't in a repo) — that's the folder the harness actually injects; the system prompt's "persistent, file-based memory system at …" line names it. A project inside a larger repository (a home-directory repo) shares that file with its siblings, and the script skips the priority block there on its own with a one-line reason — expected, not a failure. Add this session's one-line entry to "Recent activity", drop pointers to anything retired, keep MEMORY.md under 200 lines. Then write the visibility canary:
-
-```bash
-node "${CORE_ROOT}/skills/core/scripts/write-visibility-canary.mjs" --workspace-id <id> --session-id "${CLAUDE_CODE_SESSION_ID:-}" 2>/dev/null || true
-```
-
-Passing this session's id is what lets next session's probe tell a real echo from this session re-reading a token it wrote itself.
+On Claude Code: run `node ${CORE_ROOT}/skills/core/scripts/generate-memory-index.mjs <project>/_memories --memory-md ~/.claude/projects/<mapped-root>/memory/MEMORY.md --top 15`, where `<mapped-root>` is the slug of the git worktree root (the cwd when the project isn't in a repo) — that's the folder the harness actually injects; the system prompt's "persistent, file-based memory system at …" line names it. A project inside a larger repository (a home-directory repo) shares that file with its siblings, and the script skips the priority block there on its own with a one-line reason — expected, not a failure. Add this session's one-line entry to "Recent activity", drop pointers to anything retired, keep MEMORY.md under 200 lines. The script also removes any leftover visibility-canary line from MEMORY.md; CORE no longer writes one.
 
 On Codex: no harness-memory writes (explicit-save only) — confirm the facts are in `_memories/` and the summary from Step 4, and say so in one line.
 

@@ -122,6 +122,15 @@ export function renderPriorityBlock({ memoriesDir, topN, today, existingDescript
   return lines.join('\n');
 }
 
+// Every managed canary shape CORE ever wrote: the data-only line, the imperative
+// echo line, and the HTML comment. Prose that merely mentions the tag is left alone.
+const CANARY_LINE_RE = /^(?:<!--.*CORE-VISIBILITY-CANARY.*-->|CORE-VISIBILITY-CANARY\s+\S+\s+\(CORE memory-visibility probe token|CORE-VISIBILITY-CANARY\s+\S+.*VISIBILITY-CANARY-ECHO).*$\n?/gm;
+
+export function stripCanaryLines(memoryMdText) {
+  const stripped = memoryMdText.replace(CANARY_LINE_RE, '');
+  return stripped === memoryMdText ? memoryMdText : stripped.replace(/^\n+/, '');
+}
+
 export function spliceSection(memoryMdText, newSection) {
   const lines = memoryMdText.split('\n');
   let startIdx = -1;
@@ -226,6 +235,18 @@ export function main(argv) {
   // would otherwise throw an uncaught ENOENT deep in iterUnits→readdirSync. Refuse with exit 2.
   try { readdirSync(memoriesDir); }
   catch { process.stderr.write(`error: _memories source dir not readable: ${memoriesDir}\n`); return 2; }
+
+  // CORE no longer writes a visibility-canary line. Remove any left in MEMORY.md: its
+  // echo-this-token shape reads as a prompt injection. Runs before the shared-file skip
+  // because the line is CORE's own wherever it sits.
+  if (!dryRun && existsSync(memoryMdPath)) {
+    const text = readFileSync(memoryMdPath, 'utf8');
+    const cleaned = stripCanaryLines(text);
+    if (cleaned !== text) {
+      atomicWriteFileSync(memoryMdPath, cleaned);
+      process.stderr.write(`Removed a leftover visibility-canary line from ${memoryMdPath}\n`);
+    }
+  }
 
   // A project inside a larger repository has no MEMORY.md of its own: the harness
   // injects the repository root's file, shared with every sibling project. A 15–30

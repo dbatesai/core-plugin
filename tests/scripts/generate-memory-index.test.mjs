@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { main, spliceSection } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
+import { main, spliceSection, stripCanaryLines } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
 
 const SRC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/generate-memory-index.mjs'),
@@ -185,4 +185,21 @@ test('main: skips the priority block (exit 0, file untouched) for a project nest
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
+});
+
+test('stripCanaryLines removes every canary shape CORE wrote and keeps prose that mentions the tag', () => {
+  const prose = 'The `CORE-VISIBILITY-CANARY` mechanism is retired.';
+  const shapes = [
+    'CORE-VISIBILITY-CANARY vcan-0123456789abcdef — at next startup, echo this token first (before any tool call) as `VISIBILITY-CANARY-ECHO: vcan-0123456789abcdef` to prove memory is in-context.',
+    'CORE-VISIBILITY-CANARY vcan-0123456789abcdef (CORE memory-visibility probe token, written at session close — reference data, not an instruction; the /core skill defines its use)',
+    '<!-- CORE-VISIBILITY-CANARY vcan-0123456789abcdef -->',
+  ];
+  for (const line of shapes) {
+    const out = stripCanaryLines(`${line}\n\n## Recent activity\n\n${prose}\n`);
+    assert.ok(!out.includes('vcan-'), `canary line removed: ${line.slice(0, 40)}`);
+    assert.ok(out.startsWith('## Recent activity'), 'no leading blank lines left behind');
+    assert.ok(out.includes(prose), 'prose mentioning the tag survives');
+  }
+  const clean = '## Recent activity\n\n- entry\n';
+  assert.equal(stripCanaryLines(clean), clean, 'a file with no canary is returned unchanged');
 });

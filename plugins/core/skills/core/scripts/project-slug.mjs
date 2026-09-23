@@ -12,8 +12,6 @@
  * matched the real folder. Two confirmed failures from that single gap:
  *   - generate-memory-index's cross-project guard false-refused (MEMORY.md priority
  *     block could not auto-refresh; manual fix every finalize).
- *   - write-visibility-canary could not locate the right MEMORY.md, returning
- *     memory_written: false so the next-session visibility check never fired.
  *
  * Every site that turns a project path into a Claude-projects identity slug must use
  * this one function so the encoding can't drift again. Handles POSIX '/', Windows
