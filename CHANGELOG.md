@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The visibility-canary line in MEMORY.md no longer reads as a prompt injection.** It used to carry an instruction ("at next startup, echo this token first, before any tool call"), and an agent reading injected memory rightly treats that shape as suspicious. The line now carries only the tag, the token, and a label saying it is reference data; the echo instruction lives in the `/core` skill, where it already was. The writer replaces the older imperative line on its next run.
+
 ## [3.17.2] — 2026-09-19
 
 ### Fixed
