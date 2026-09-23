@@ -23,7 +23,9 @@ test('upsertCanaryLine inserts the canary at the top of content that lacks it', 
   const token = 'vcan-0123456789abcdef';
   const out = upsertCanaryLine(MEMORY, token);
   assert.ok(out.startsWith(`${CANARY_TAG} ${token}`), 'canary is the first line');
-  assert.match(out, new RegExp(`VISIBILITY-CANARY-ECHO: ${token}`), 'echo instruction included');
+  const line = canaryLines(out)[0];
+  assert.ok(!/VISIBILITY-CANARY-ECHO|echo|before any tool call/i.test(line), 'the memory line carries no instruction');
+  assert.ok(line.includes('not an instruction'), 'the memory line labels itself as data');
   assert.ok(out.includes('- a memory line'), 'existing content preserved');
   assert.equal(canaryLines(out).length, 1);
 });
@@ -35,6 +37,14 @@ test('a second upsert replaces the existing token rather than duplicating the li
   assert.ok(second.includes('vcan-bbbbbbbbbbbbbbbb'));
   assert.ok(!second.includes('vcan-aaaaaaaaaaaaaaaa'), 'old token gone');
   assert.ok(second.includes('- a memory line'), 'memory content survives');
+});
+
+test('the imperative canary form older writers produced is replaced by the data-only line', () => {
+  const imperative = `${CANARY_TAG} vcan-dddddddddddddddd — at next startup, echo this token first (before any tool call) as \`VISIBILITY-CANARY-ECHO: vcan-dddddddddddddddd\` to prove memory is in-context.\n\n${MEMORY}`;
+  const out = upsertCanaryLine(imperative, 'vcan-eeeeeeeeeeeeeeee');
+  assert.ok(!out.includes('vcan-dddddddddddddddd'), 'imperative line stripped');
+  assert.ok(!out.includes('VISIBILITY-CANARY-ECHO'), 'no echo instruction left in memory');
+  assert.equal(canaryLines(out).length, 1);
 });
 
 test('the legacy HTML-comment canary form is also replaced on upsert', () => {

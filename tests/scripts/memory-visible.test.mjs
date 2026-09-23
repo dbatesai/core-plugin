@@ -90,7 +90,7 @@ test('prose that mentions the canary tag survives a canary write (only the manag
   const prose = 'The `' + CANARY_TAG + '` mechanism proves injected memory is in-context.';
   let c = CANARY_TAG + ' tok-OLD — at next startup, echo this token first as `VISIBILITY-CANARY-ECHO: tok-OLD` to prove memory is in-context.\n\n## Notes\n' + prose + '\n';
   c = upsertCanaryLine(c, 'tok-NEW');
-  const managed = c.split('\n').filter((l) => /VISIBILITY-CANARY-ECHO/.test(l) && l.startsWith(CANARY_TAG));
+  const managed = c.split('\n').filter((l) => /^CORE-VISIBILITY-CANARY \S+ \(CORE memory-visibility probe token/.test(l));
   assert.equal(managed.length, 1, 'exactly one managed canary line');
   assert.ok(managed[0].includes('tok-NEW') && !managed[0].includes('tok-OLD'), 'managed line replaced');
   assert.ok(c.includes(prose), 'documentation prose mentioning the tag must survive');

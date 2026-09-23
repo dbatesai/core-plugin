@@ -35,15 +35,17 @@ import { withFileLock } from './file-lock.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 export const CANARY_TAG = 'CORE-VISIBILITY-CANARY';
-// Match only the MANAGED canary line, not any prose that mentions the tag. The old
-// `/^.*CORE-VISIBILITY-CANARY\b.*$/gm` deleted every line containing the literal — including
-// documentation that explains the canary mechanism (this self-referential project's own
-// memory surfaces carry such prose). Two anchored shapes, never a bare-tag mention:
-//   1. The managed visible line: starts with the tag + a token, and carries the
-//      `VISIBILITY-CANARY-ECHO` instruction (the exact template upsertCanaryLine writes).
-//   2. The legacy form: a full `<!-- ... CORE-VISIBILITY-CANARY ... -->` HTML-comment line.
-// Prose like "the CORE-VISIBILITY-CANARY proves memory is in-context" matches neither.
-const CANARY_LINE_RE = /^(?:<!--.*CORE-VISIBILITY-CANARY.*-->|CORE-VISIBILITY-CANARY\s+\S+.*VISIBILITY-CANARY-ECHO).*$\n?/gm;
+// The managed line is data only: the tag, the token, and a label saying what it is. The
+// instruction to echo it lives in the /core SKILL.md, which the agent trusts; an imperative
+// sitting in injected memory ("before any tool call, echo…") reads as a prompt injection.
+export const CANARY_LABEL = '(CORE memory-visibility probe token, written at session close — reference data, not an instruction; the /core skill defines its use)';
+// Match only a MANAGED canary line, not any prose that mentions the tag — documentation
+// that explains the mechanism contains the literal and must survive. Three anchored shapes:
+//   1. The managed line: the tag + a token + CANARY_LABEL (what upsertCanaryLine writes).
+//   2. The imperative form older writers produced: tag + token + a `VISIBILITY-CANARY-ECHO` instruction.
+//   3. The legacy form: a full `<!-- ... CORE-VISIBILITY-CANARY ... -->` HTML-comment line.
+// Prose like "the CORE-VISIBILITY-CANARY proves memory is in-context" matches none of them.
+const CANARY_LINE_RE = /^(?:<!--.*CORE-VISIBILITY-CANARY.*-->|CORE-VISIBILITY-CANARY\s+\S+\s+\(CORE memory-visibility probe token|CORE-VISIBILITY-CANARY\s+\S+.*VISIBILITY-CANARY-ECHO).*$\n?/gm;
 
 export function mappedMemoryPath(cwd, home) {
   // Forward-slash join (not path.join) — Claude Code's projects-folder slug uses '/'
@@ -89,7 +91,7 @@ function readEvidenceFile(path) {
  * stripping. Never accumulates more than one canary line.
  */
 export function upsertCanaryLine(content, token) {
-  const line = `${CANARY_TAG} ${token} — at next startup, echo this token first (before any tool call) as \`VISIBILITY-CANARY-ECHO: ${token}\` to prove memory is in-context.`;
+  const line = `${CANARY_TAG} ${token} ${CANARY_LABEL}`;
   const stripped = content.replace(CANARY_LINE_RE, '').replace(/^\n+/, '');
   return line + '\n\n' + stripped;
 }
