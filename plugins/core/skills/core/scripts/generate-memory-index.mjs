@@ -124,11 +124,12 @@ export function renderPriorityBlock({ memoriesDir, topN, today, existingDescript
 
 // Every managed canary shape CORE ever wrote: the data-only line, the imperative
 // echo line, and the HTML comment. Prose that merely mentions the tag is left alone.
-const CANARY_LINE_RE = /^(?:<!--.*CORE-VISIBILITY-CANARY.*-->|CORE-VISIBILITY-CANARY\s+\S+\s+\(CORE memory-visibility probe token|CORE-VISIBILITY-CANARY\s+\S+.*VISIBILITY-CANARY-ECHO).*$\n?/gm;
+// The line ending is consumed whole (CRLF or LF) so a Windows-authored file keeps no stray `\r`.
+const CANARY_LINE_RE = /^(?:<!--.*CORE-VISIBILITY-CANARY.*-->|CORE-VISIBILITY-CANARY\s+\S+\s+\(CORE memory-visibility probe token|CORE-VISIBILITY-CANARY\s+\S+.*VISIBILITY-CANARY-ECHO).*(?:\r?\n)?/gm;
 
 export function stripCanaryLines(memoryMdText) {
   const stripped = memoryMdText.replace(CANARY_LINE_RE, '');
-  return stripped === memoryMdText ? memoryMdText : stripped.replace(/^\n+/, '');
+  return stripped === memoryMdText ? memoryMdText : stripped.replace(/^(?:\r?\n)+/, '');
 }
 
 export function spliceSection(memoryMdText, newSection) {
