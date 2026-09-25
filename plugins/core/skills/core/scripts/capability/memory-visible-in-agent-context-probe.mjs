@@ -1,8 +1,8 @@
 /**
  * memory-visible-in-agent-context-probe.mjs — Claude-Code-specific capability.
  *
- * Answers the question the visibility canary used to answer and got removed
- * (DC-148, v3.18.0): did MEMORY.md actually reach the agent's context this session, not
+ * Answers the question the visibility canary used to answer before it was removed
+ * (v3.18.0, per user instruction): did MEMORY.md actually reach the agent's context this session, not
  * merely exist on disk? auto-memory-injection-probe.mjs checks file-presence + a
  * structural marker on disk — it cannot see whether the harness attached the file.
  * This probe reads the harness's OWN record of what it attached: Claude Code writes a

@@ -33,7 +33,7 @@
           "capability_id": "memory-visible-in-agent-context",
           "capability_kind": "observation",
           "delegate": "capability/memory-visible-in-agent-context-probe.mjs",
-          "_doc": "Transcript-observed replacement for the removed visibility canary (DC-148) — reads Claude Code's own attachment-record line rather than asking the agent to echo a token. No known Codex equivalent; declared claude-code-only.",
+          "_doc": "Transcript-observed replacement for the removed visibility canary — reads Claude Code's own attachment-record line rather than asking the agent to echo a token. No known Codex equivalent; declared claude-code-only.",
           "required_for_actions": []
         },
         {
