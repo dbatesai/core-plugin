@@ -387,6 +387,13 @@
       "surface": "shipped"
     },
     {
+      "name": "memory-visible-in-agent-context-probe",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/capability/memory-visible-in-agent-context-probe.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "metrics-check",
       "kind": "script",
       "harness": "shared",
