@@ -9,13 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [3.18.0] — 2026-09-23
 
+### Added
+
+- **A memory-visibility check that puts nothing into memory.** The `memory-visible-in-agent-context` capability now reads Claude Code's own session transcript, which records every file the harness attached to context at session start, and looks for the MEMORY.md entry and its injected size. PASS means the harness loaded the file. It doesn't show that the agent used it; the memory-accessed check measures use. It reports DEGRADED when MEMORY.md exists but no attachment was recorded, NOT-YET when there is no MEMORY.md, and UNKNOWN when the transcript can't be read or the harness isn't Claude Code. Codex has no equivalent record, so the check reports UNKNOWN there rather than guessing. Paths are compared without regard to separator style, and case-insensitively on Windows.
+
 ### Changed
 
 - **Memory decisions run on the agent's judgment; the A/B/C promotion modes are gone.** The agent captures, graduates, supersedes and resolves contradictions on its own and narrates what it did. It asks the user only for a critical decision it can't settle from the evidence: overriding something the user wrote, bringing back something they removed, recording a commitment nobody made, settling a contradiction that changes what someone does, or changing a structural pattern or default. Nothing is deleted, so a wrong call is recoverable. Inbox blocks from extractors no longer wait for the user's review: `/process-memory` graduates them, and it answers a `mode: C` block's `judgment-needed` question from the evidence when it can. The inbox block shape (`mode: B | C`, `judgment-needed`) is unchanged, so existing extractors keep working. Pushes and destructive or external writes keep their own gates. (`SKILL.md`, `protocols/data-storage.md` §"Deciding on memory writes", `hygiene.md`, `startup.md`, `process-memory`, the source-registration framework §4.)
 
 ### Removed
 
-- **The memory-visibility canary is gone.** At every session close CORE used to write a token into MEMORY.md with an instruction to echo it back first thing next session, to prove memory had reached the agent's context. An instruction arriving through injected memory looks exactly like a prompt injection, and users were getting alerts. `write-visibility-canary.mjs`, the `memory-visible-in-agent-context` capability probe, the SKILL.md echo section and the `/finalize` step are removed. `generate-memory-index.mjs` (run by `/finalize`) now strips any canary line already sitting in MEMORY.md, LF or CRLF, so existing installs clean themselves up at their next close. The problem the canary targeted, confirming memory actually reaches the agent, is open again and will get a solution that puts nothing instruction-shaped into memory.
+- **The memory-visibility canary is gone.** At every session close CORE used to write a token into MEMORY.md with an instruction to echo it back first thing next session, to prove memory had reached the agent's context. An instruction arriving through injected memory looks exactly like a prompt injection, and users were getting alerts. `write-visibility-canary.mjs`, the old token-echo version of the `memory-visible-in-agent-context` probe, the SKILL.md echo section and the `/finalize` step are removed. `generate-memory-index.mjs` (run by `/finalize`) now strips any canary line already sitting in MEMORY.md, LF or CRLF, so existing installs clean themselves up at their next close. The replacement check is listed under Added.
 
 ### Fixed
 
