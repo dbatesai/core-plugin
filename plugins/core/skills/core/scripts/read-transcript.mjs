@@ -181,24 +181,13 @@ function filesRecursive(root, pred) {
 
 /**
  * Parse Claude Code transcript lines into ordered events.
- * Event shape: { idx, kind: 'text'|'tool'|'attachment', role?, name?, text?, attachmentType?, files? }.
- *
- * 'attachment' events surface Claude Code's own record of what it attached to context at
- * session start — top-level lines with `type: 'attachment'` and `attachment: {type, files}`,
- * where `files` entries carry {path, type, content}. `type: 'AutoMem'` marks the auto-loaded
- * MEMORY.md entry specifically. This is the harness's own accounting of what it injected, not
- * a text-search over message content — the strongest available evidence that injection
- * happened and exactly how much content it carried (used by
- * capability/memory-visible-in-agent-context-probe.mjs).
+ * Event shape: { idx, kind: 'text'|'tool', role?, name?, text? }.
  */
 export function parseClaudeCode(lines) {
   const events = [];
   lines.forEach((line, idx) => {
     if (!line || !line.trim()) return;
     let e; try { e = JSON.parse(line); } catch { return; }
-    if (e?.type === 'attachment' && e.attachment && Array.isArray(e.attachment.files)) {
-      events.push({ idx, kind: 'attachment', attachmentType: e.attachment.type, files: e.attachment.files });
-    }
     const content = e?.message?.content;
     const role = e?.message?.role;
     if (!Array.isArray(content)) return;
