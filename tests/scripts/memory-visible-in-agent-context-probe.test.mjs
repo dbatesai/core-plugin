@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  findAutoMemEntry, classifyVisibility, probe, SCHEMA_VERSION, CAPABILITY_ID,
+  findAutoMemEntry, classifyVisibility, probe, samePath, SCHEMA_VERSION, CAPABILITY_ID,
 } from '../../plugins/core/skills/core/scripts/capability/memory-visible-in-agent-context-probe.mjs';
 import { parseClaudeCode } from '../../plugins/core/skills/core/scripts/read-transcript.mjs';
 
@@ -43,6 +43,19 @@ test('findAutoMemEntry finds the AutoMem-typed file by path', () => {
   const hit = findAutoMemEntry(events, '/x/MEMORY.md');
   assert.ok(hit);
   assert.equal(hit.content, 'mem body');
+});
+
+test('findAutoMemEntry matches a backslash-recorded path against a forward-slash expected path', () => {
+  const events = [{ kind: 'attachment', files: [
+    { path: 'C:\\Users\\u\\.claude\\projects\\C--proj\\memory\\MEMORY.md', type: 'AutoMem', content: 'mem body' },
+  ] }];
+  const hit = findAutoMemEntry(events, 'C:\\Users\\u/.claude/projects/C--proj/memory/MEMORY.md');
+  assert.ok(hit);
+});
+
+test('samePath folds case only on win32', () => {
+  assert.ok(samePath('C:\\Users\\U\\MEMORY.md', 'c:/users/u/MEMORY.md', 'win32'));
+  assert.ok(!samePath('/Users/U/MEMORY.md', '/users/u/MEMORY.md', 'linux'));
 });
 
 test('findAutoMemEntry returns null when no AutoMem entry present', () => {

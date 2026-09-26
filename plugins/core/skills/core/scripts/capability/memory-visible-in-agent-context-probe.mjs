@@ -42,12 +42,22 @@ import { mappedMemoryPath } from './auto-memory-injection-probe.mjs';
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-visible-in-agent-context';
 
+// The harness records native separators (backslashes on Windows) while mappedMemoryPath
+// joins with '/'; Windows paths are also case-insensitive.
+export function samePath(a, b, platform = process.platform) {
+  const norm = (p) => {
+    const s = String(p).replace(/\\/g, '/');
+    return platform === 'win32' ? s.toLowerCase() : s;
+  };
+  return norm(a) === norm(b);
+}
+
 /** Find the AutoMem entry in a set of parsed 'attachment' events, if any. */
 export function findAutoMemEntry(attachmentEvents, expectedPath) {
   for (const e of attachmentEvents || []) {
     if (e.kind !== 'attachment' || !Array.isArray(e.files)) continue;
     for (const f of e.files) {
-      if (f && f.type === 'AutoMem' && (!expectedPath || f.path === expectedPath)) return f;
+      if (f && f.type === 'AutoMem' && (!expectedPath || samePath(f.path, expectedPath))) return f;
     }
   }
   return null;
