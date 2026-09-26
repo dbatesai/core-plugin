@@ -73,7 +73,7 @@ function fixture() {
       'dup-a1': { harness: 'claude-code', evidence: 'fixture' }, 'dup-a2': { harness: 'claude-code', evidence: 'fixture' },
       'dup-b1': { harness: 'codex', evidence: 'fixture' }, 'dup-b2': { harness: 'codex', evidence: 'fixture' },
       'dup-c1': { harness: 'claude-code', evidence: 'fixture' }, 'dup-c2': { harness: 'claude-code', evidence: 'fixture' },
-      'advisor-codex': { harness: 'antigravity', evidence: 'agent is a Gemini advisor despite the id' },
+      'advisor-codex': { harness: 'claude-code', evidence: 'fixture: the id suffix names the wrong harness' },
       gone: { harness: 'codex', evidence: 'fixture' },
     },
   };
@@ -108,7 +108,7 @@ test('the harness comes from the table, never from the id spelling', () => {
   const f = fixture();
   try {
     const e = byId(buildManifest({ coreDir: f.coreDir, table: f.table }));
-    assert.equal(e['advisor-codex'].harness, 'antigravity');
+    assert.equal(e['advisor-codex'].harness, 'claude-code');
     assert.equal(e['advisor-codex'].class, 'migrate');
   } finally { f.cleanup(); }
 });

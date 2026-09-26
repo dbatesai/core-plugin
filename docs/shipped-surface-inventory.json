@@ -464,6 +464,13 @@
       "surface": "shipped"
     },
     {
+      "name": "migrate-workspace-state",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/migrate-workspace-state.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "orphan-detector",
       "kind": "script",
       "harness": "shared",
@@ -496,6 +503,13 @@
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/project-slug.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "project-state",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/project-state.mjs",
       "surface": "shipped"
     },
     {

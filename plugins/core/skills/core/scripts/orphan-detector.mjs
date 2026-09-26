@@ -46,6 +46,16 @@ export const ALLOWLIST = Object.freeze({
     allowlistDate: '2026-07-28',
     reviewBy: '2026-10-28',
   },
+  'project-state.mjs': {
+    reason: 'The in-project state resolver, built and tested before the call sites that build ~/.core/workspaces paths by hand switch to it; those switch in the same release.',
+    allowlistDate: '2026-09-26',
+    reviewBy: '2026-10-26',
+  },
+  'migrate-workspace-state.mjs': {
+    reason: 'The legacy-workspace migration classifier, built as a dry run before startup wires the apply step to it; startup calls it in the same release.',
+    allowlistDate: '2026-09-26',
+    reviewBy: '2026-10-26',
+  },
 });
 
 // Back-compat: callers (and older trees) may still pass string-form entries.
