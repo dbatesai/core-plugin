@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A memory-visibility check that puts nothing into memory.** The `memory-visible-in-agent-context` capability reads Claude Code's own session transcript, which records every file the harness attached to context at session start, and looks for the MEMORY.md entry and its injected size. PASS means the harness loaded the file. It doesn't show that the agent used it; the memory-accessed check measures use. It reports DEGRADED when MEMORY.md exists but no attachment was recorded, NOT-YET when there is no MEMORY.md, and UNKNOWN when the transcript can't be read or the harness isn't Claude Code. Codex has no equivalent record, so the check reports UNKNOWN there rather than guessing. Paths are compared without regard to separator style, and case-insensitively on Windows.
+
 ## [3.18.0] — 2026-09-23
 
 ### Changed
