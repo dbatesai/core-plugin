@@ -4,9 +4,8 @@
  * Probes whether the harness's auto-loaded memory surface is present and carries
  * its expected structure. On Claude Code, that's
  * ~/.claude/projects/<mapped-cwd>/memory/MEMORY.md — loaded automatically at
- * session start. This is the file-present + canary check; it does NOT prove the
- * agent actually loaded the content into context (that's memory-visible-probe.mjs,
- * which uses a dynamic per-session canary).
+ * session start. This is the file-present + structure-marker check; it does NOT prove
+ * the agent actually loaded the content into context.
  *
  * Called by capability-probe.mjs when the descriptor declares
  * delegate: 'capability/auto-memory-injection-probe.mjs'.

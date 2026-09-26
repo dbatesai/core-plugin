@@ -1,17 +1,16 @@
 /**
  * memory-accessed-probe.mjs — memory-authority store-selection probe.
  *
- * The observed-access tier, between memory-file-present (it exists on disk) and
- * memory-visible (it was injected into context). This asks a different question the
- * other two miss: did the agent actually REACH FOR the CORE store this session, or
+ * The observed-access tier, one step past memory-file-present (it exists on disk).
+ * This asks a question file presence misses: did the agent actually REACH FOR the CORE store this session, or
  * did it only touch harness-native scratch memory? That gap is the store-selection
  * failure: a store can hold dozens of CORE units while the agent reaches for
  * native harness memory several times as often. Corpus present !=
- * corpus reached — a recognition-failure cousin that neither file-present nor
- * an injection canary can detect.
+ * corpus reached — a recognition-failure cousin that file presence
+ * can't detect.
  *
  * Honest boundary: this reports OBSERVED ACCESS (a tool read/grep of a CORE surface
- * shows in the transcript). accessed != reasoned-over — like memory-visible, it does
+ * shows in the transcript). accessed != reasoned-over — it does
  * NOT prove the content was used. It is one tier stronger than present, one weaker
  * than use.
  *

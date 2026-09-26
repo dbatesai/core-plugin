@@ -78,7 +78,7 @@ during weekly sync.
 
 Location: `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Date-organized for browsability — observations are high-volume; flat-with-prefix at the unit-store root would overwhelm. This is the explicit observation exception to the flat-layout rule.
 
-You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `~/.core/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, you can add it under Mode A (autonomous, narrated). When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
+You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `~/.core/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, add it yourself and narrate it. When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
 
 ### External-source observations — three-layer filtering
 
@@ -260,9 +260,9 @@ Missed graduations on complex observations compound across sessions. When uncert
 
 The graduation subagent — both paths — can invoke Tier 3 retrieval (Explore) internally when it needs to answer "what existing units does this observation touch semantically?" That's a Sonnet subagent spawned from inside the graduation subagent's context, not a separate dispatch from the main agent.
 
-### Mode A vs Mode B at graduation
+### Graduation decides; it doesn't wait
 
-Most graduations are Mode A — the subagent completes, writes the unit, narrates the outcome to the main agent which narrates to the user. Mode B fires when the graduated unit would supersede or conflict with an existing canonical unit. The graduation subagent surfaces the conflict to the main agent; the main agent surfaces it to the user; the unit doesn't land until the user confirms.
+The graduation subagent writes the unit, and the main agent narrates the outcome. When the new unit would supersede or conflict with an existing one, resolve it from the evidence: the user's own words outrank everything else, a sourced fact outranks an inferred one, and a newer primary source outranks an older one. Write the successor with a `supersedes` edge (or keep both with `conflicts-with` when both genuinely hold), put the reasoning in the new unit's body, and narrate. The predecessor is retired, never deleted, so the call can be reversed. Go to the user only when the conflict is one of the critical cases in §"Deciding on memory writes" and the evidence doesn't settle it.
 
 Full matrix at `references/model-assignments.md`.
 
@@ -350,25 +350,27 @@ Priority is computed at retrieval time over a candidate set, never persisted as 
 
 ---
 
-## Promotion modes (internal vocabulary)
+## Deciding on memory writes
 
-You reason about three modes internally. In conversation with the user, plain language: "I'll do X," "want me to do X?", or just doing what they said.
+Memory decisions are yours. Capturing an observation, graduating it, superseding a unit, adding a topic, creating a stub, resolving a contradiction, rendering PROJECT.md: decide with your best judgment, act, and narrate what you did and why. You can do this safely because the store never deletes anything. A superseded or retired unit is still there, so a wrong call is corrected by the next supersession, not lost.
 
-- **Mode A — autonomous.** You act, you narrate the action. Most operations. The criterion is integrity uncertainty: if you're reasonably confident the action preserves project-context accuracy, act.
-- **Mode B — propose-and-wait.** You propose, you wait for explicit yes. Fires when integrity uncertainty kicks in: smuggling risk, overwriting user authorship, new structural commitment, irreversible, push.
-- **Mode C — explicit.** The user uses vocabulary like "remember," "forget," "pin," "save as X" — you obey without re-asking. Overrides the cost gate entirely.
+When the user tells you directly ("remember X", "forget Y", "pin this", "save as a decision"), do exactly that without re-asking.
 
-### What triggers integrity uncertainty (the Mode B switch)
+**Ask the user only for a critical decision you can't make.** Both conditions must hold.
 
-- Destination is durable (PROJECT.md, agent-profile.md, canonical unit) — except a graduation writing a new, non-conflicting unit, which stays Mode A per "Mode A vs Mode B at graduation" above; that section's supersede/conflict trigger is the narrower rule for that specific action, not this general one.
-- Action would overwrite content the user authored.
-- New structural pattern the user hasn't endorsed.
-- Action is irreversible or hard to undo.
-- High contradiction risk against existing decisions or risks.
-- Inference distance is long (extrapolation, not direct user statement).
-- Smuggling tripwire categories: data topology, identity, protocol migration, invariant changes, global defaults.
+A decision is **critical** when it would:
 
-When in doubt, propose first. A bad Mode B prompt costs the user a small interruption. A smuggled Mode A action costs you trust.
+- override or archive something the user wrote, or retire a fact they explicitly kept or restored (their authorship outranks your judgment — the user-control invariant);
+- bring back something the user removed (anti-resurrection);
+- record a decision, commitment, owner or deadline as made by the user or anyone else when the evidence doesn't show they made it;
+- settle a contradiction between sources on a fact that changes what someone does (a date, an owner, a commitment, a decision);
+- change a structural pattern or a default the user hasn't endorsed (data topology, identity, protocol migration, invariants, global defaults).
+
+You **can't make** it when you've looked (the retrieval ladder, the sources the units cite, the user's own words in the transcript) and the evidence still doesn't settle it. If the evidence does settle it, decide, even when the decision is on the list above, and put the evidence in the unit body.
+
+When you do ask: one question, in plain words, with your best guess and why. Keep working on everything else while you wait. Record the question as an open-question unit so it outlives the session (the deferral ladder in SKILL.md §"Persist on hard questions" takes it from there).
+
+Everything that isn't memory keeps its own gate: pushes follow the push policy below, and destructive or external writes follow the guard in `protocols/execution.md`.
 
 ### Push policy is per-user, per-repo
 
@@ -494,7 +496,7 @@ Each addition is appended to a changelog at the top of the file:
 - 2026-05-16: added memory-architecture — coalescing topic across the memory-architecture decisions
 ```
 
-This is Mode A (autonomous, narrated). No per-tag confirmation required.
+You add tags on your own and narrate them. No per-tag confirmation.
 
 Auto-extraction at observation write time uses the current vocabulary plus your judgment to populate `references-topic` frontmatter on the observation.
 
@@ -502,7 +504,7 @@ Auto-extraction at observation write time uses the current vocabulary plus your 
 
 ## Auto-creating people, topics, and deliverables on observation reference
 
-When you write an observation that references a person, topic, or deliverable that doesn't already have a unit, you create the stub unit autonomously (Mode A). Don't leave dangling edges into thin air — edges into non-existent units break the retrieval graph at Tier 2.
+When you write an observation that references a person, topic, or deliverable that doesn't already have a unit, you create the stub unit on your own and narrate it. Don't leave dangling edges into thin air — edges into non-existent units break the retrieval graph at Tier 2.
 
 **Stub creation triggers:**
 
@@ -525,7 +527,7 @@ sources:
 canonical: false
 last_accessed: <ISO timestamp>
 ---
-Stub unit — created Mode A from <observation-id>. Body fills in as more observations reference this entity.
+Stub unit — created from <observation-id>. Body fills in as more observations reference this entity.
 ```
 
 Narrate the creation: *"Creating stub unit `who-architect-name.md` — first mention in `obs-2026-05-17-1432-architect-timeline`."* That keeps the visible-curation contract.
@@ -556,7 +558,7 @@ Reconcile at the next hygiene pass. The reconciliation either merges them (pick 
 
 ### Retired content re-emerges in a conversation
 
-The anti-resurrection rule fires. You don't re-promote the retired unit. If the new conversation generates a genuinely new framing of the underlying fact, that's a new unit — composed fresh, not a revival. The retired unit stays retired unless the user explicitly un-retires it (Mode C).
+The anti-resurrection rule fires. You don't re-promote the retired unit. If the new conversation generates a genuinely new framing of the underlying fact, that's a new unit — composed fresh, not a revival. The retired unit stays retired unless the user explicitly un-retires it.
 
 ### Cross-project drift (different projects, same fact, different framings)
 
@@ -564,7 +566,7 @@ You don't auto-reconcile across projects. The cross-project store is `~/.core/re
 
 ### No-response-inference default
 
-When the user goes quiet mid-conversation and you've staged a Mode B proposal: act on your best judgment, narrate what you did, log it. The delay is concrete and measured in agent turns — you can't observe wall-clock time between turns. In an autonomous run, proceed after one turn; the user is intentionally unavailable and waiting longer buys nothing. In an interactive session, surface the proposal once more after about three turns, then act. Don't block the session indefinitely waiting for a yes/no on something you can reverse. If the action is irreversible — a push, a create/update/delete on an external system, anything that destroys or publishes what you can't restore — it does not auto-execute at any delay: it blocks for the session until the user answers. Self-unblock by lining up everything short of the irreversible step (staged commit, drafted payload, verified parameters) so the user's "yes" is the only thing left.
+When the user goes quiet mid-conversation and you've asked them something: act on your best judgment, narrate what you did, log it. The delay is concrete and measured in agent turns — you can't observe wall-clock time between turns. In an autonomous run, proceed after one turn; the user is intentionally unavailable and waiting longer buys nothing. In an interactive session, surface the proposal once more after about three turns, then act. Don't block the session indefinitely waiting for a yes/no on something you can reverse. If the action is irreversible — a push, a create/update/delete on an external system, anything that destroys or publishes what you can't restore — it does not auto-execute at any delay: it blocks for the session until the user answers. Self-unblock by lining up everything short of the irreversible step (staged commit, drafted payload, verified parameters) so the user's "yes" is the only thing left.
 
 ---
 

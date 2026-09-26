@@ -26,7 +26,7 @@ These are the operational primitives. Each has a trigger, an action, and a retri
 
 **Retrieval impact.** Archived units are not in the default candidate set. Tier 1 grep and Tier 2 graph walks skip the archive directory. Explicit queries like "historical context on X" or "show me archived units" still reach them.
 
-**Never autonomous on user-authored units.** This is the integrity-uncertainty case named in SKILL.md §"Act first, confirm when integrity is uncertain." Archive of a user-authored unit would overwrite their authorship, which triggers Mode B (propose, wait for explicit yes). Surface the candidate list at `/process-memory` and let the user choose `y` (archive all), `N` (none), or `per-unit`. Even if priority math says low-value, the user may have intent the math can't see.
+**Never autonomous on user-authored units.** Archiving a unit the user wrote is one of the critical cases in `protocols/data-storage.md` §"Deciding on memory writes": their authorship outranks your judgment, and priority math can't see their intent. Surface those candidates at `/process-memory` and let the user choose `y` (archive all), `N` (none), or `per-unit`. Units you wrote are yours to archive on your own judgment; narrate it.
 
 ### Retire — declare no longer current truth; keep the trace
 
@@ -36,7 +36,7 @@ These are the operational primitives. Each has a trigger, an action, and a retri
 
 **Retrieval impact.** Retired units don't appear in default retrieval. They're reachable by chasing a `supersedes` edge from the canonical successor, or by explicit "what was the predecessor of X" queries.
 
-**Anti-resurrection rule.** When a retired claim shows up again in a later render, you don't un-retire it on your own. Either the user un-retires it (Mode C explicit), or a successor unit captures the new framing without resurrecting the retired one.
+**Anti-resurrection rule.** When a retired claim shows up again in a later render, you don't un-retire it on your own. Either the user explicitly un-retires it, or a successor unit captures the new framing without resurrecting the retired one.
 
 ### Cold-store — fully out-of-band; only deep historical queries reach
 
@@ -121,7 +121,7 @@ It is **signature-gated** (regenerates only when the unit set changed since last
 
 Maintenance is ledger-first on purpose: it runs **at invocation** (`/process-memory`, the startup backstop, on-demand), not on a per-turn hook. Running any maintenance op unattended/autonomously is gated behind four preconditions, none yet built:
 
-1. a **deterministic "clear-cut" gate** (like the six-factor promotion cost gate) — no agent-adjudicated "clear-cut";
+1. a **deterministic "clear-cut" gate** — no agent-adjudicated "clear-cut" when no agent is present;
 2. a **kill switch** (env var / workspace flag);
 3. a **per-change audit log** (what changed, not just that an op ran);
 4. **cadence evidence** from the ledger showing the op has enough work to justify unattended runs.
@@ -136,7 +136,7 @@ Autonomous graduation, autonomous edge-writing, and autonomous PROJECT.md §Stat
 - **Retire → active**: flip frontmatter `status: retired` back to `status: active`. Remove `retired_at:` and `retired_reason:`.
 - **Cold-store → active**: move file from `_memories/cold-storage/<YYYY>/<MM>/` back to `_memories/`.
 
-Reversal is autonomous (Mode A) when it's a self-correction (you just archived something and you realize it shouldn't have been). It's confirm-first (Mode B) when the user-initiated reversal is ambiguous (which unit, which version, etc.).
+Reversal is yours to do when it's a self-correction (you archived something and realize it shouldn't have been). When the user asks for a reversal and it's ambiguous which unit or version they mean, pick the most likely one from the evidence and narrate the pick. Ask only if a wrong pick would override something they wrote.
 
 ---
 

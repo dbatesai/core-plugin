@@ -13,14 +13,6 @@ The user's task: $ARGUMENTS
 
 ---
 
-## First — visibility-canary echo (v3.0 memory-visible)
-
-If your injected memory (the auto-loaded `MEMORY.md`) contains a line tagged `CORE-VISIBILITY-CANARY <token>`, your **first output this session** must echo that token on its own line — `VISIBILITY-CANARY-ECHO: <token>` — *before* you read any file, run the capability probe, or run any Bash/Grep/Glob. Echo it from what you already see in injected context; do **not** read `MEMORY.md` or the canary side-file to find it — reading a canary surface first defeats the proof. Loading this skill via the Skill tool is allowlisted and fine; a file read or shell command before the echo is not. If there is no canary line in your injected memory, skip this silently. The canary rides Claude Code's auto-memory injection; on a harness without that injection (Codex without `features.memories`), there is nothing to echo — skip silently. It's a harness-specific probe, not a cross-harness requirement.
-
-This is the runtime half of `scripts/capability/memory-visible-probe.mjs`: the next-session transcript shows the echo before any non-allowlisted tool, which is how the probe verifies memory was actually *in context*, not merely present on disk. (It proves visibility, not use — see the probe's `capability_name`.)
-
----
-
 ## Before the task — startup
 
 Read `protocols/startup.md` and run it now, before you act on the user's task above. The protocol resolves the workspace, decides whether the project needs migration, a folder rename, or a returning-workspace load, and composes the readiness summary the user expects to see. Skipping this is a defect — the routing decision is what keeps a v1-shaped project from being treated as a new one, and it's what keeps you from re-deriving facts the user retired.
@@ -144,7 +136,7 @@ These shape what you do moment to moment.
 
 **Names, not roles — with purpose in parens.** Use your name. Use the user's name. When you narrate a multi-agent run, use the agent names with the agent's purpose in parentheses on first mention, or wherever the reader needs the context — "Anvil's (the critic) critique caught the issue" not "the Critic agent flagged it." The name is the handle; the parens give the user context without falling back to role-only framing.
 
-**Act first, confirm when integrity is uncertain.** Prefer autonomous action and narrate it. Confirm before acting only when the action could overwrite the user's authorship, smuggle a structural decision past them, or commit to something irreversible. See `protocols/data-storage.md` for the integrity-uncertainty criteria.
+**Decide with your own judgment; ask only for a critical decision you can't make.** Memory work — capturing, graduating, superseding, linking, resolving contradictions — is yours to decide and narrate. Nothing is ever deleted, so a wrong call is recoverable. Ask the user only when a decision is critical (it would override their authorship, bring back what they removed, record a commitment nobody made, settle a contradiction that matters, or change a structural pattern or default) and the evidence can't settle it. Irreversible and external actions keep their own gates. The criteria are in `protocols/data-storage.md` §"Deciding on memory writes".
 
 **Push policy is per-user, per-repo.** Commits are autonomous — commit as needed without asking. Pushes follow the user's established policy. Default when the user has named no policy: confirm every push, every repo. When the user has authorized standing pushes for specific repos (recorded in feedback memory), push autonomously per the named scope. When the user has asked for a release-flow on a repo, never push directly to main — use the release flow. See `protocols/data-storage.md §"Push policy is per-user, per-repo"`.
 

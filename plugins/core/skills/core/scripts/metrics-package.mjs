@@ -73,6 +73,7 @@ const RECOGNITION_STATES = ['rec-fail-tier-0', 'rec-fail-tier-1-3-trigger', 'tie
 // be kebab-shaped. Only these exact values pass; everything else folds to 'other'.
 const HYGIENE_KINDS = ['compact-project', 'demote-moves', 'demote-moves-large-batch', 'demote-state', 'demote-state-large-batch', 'project-md-over-cap', 'maintenance-run'];
 const MAINTENANCE_OPS = ['decisions-index', 'risks-index', 'summary-index'];
+// 'memory-visible-in-agent-context' has no live probe; it stays so older capability-history rows still export.
 const CAPABILITY_IDS = ['plugin-root-resolution', 'target-surface-collab-files', 'auto-memory-injection', 'anti-anchoring-mechanism', 'instruction-surface-resolution', 'memory-visible-in-agent-context', 'memory-accessed'];
 // check-units.mjs's own check ids. A kebab-case shape test is not a privacy
 // boundary — user-derived values can be kebab-shaped — so only these exact ids
