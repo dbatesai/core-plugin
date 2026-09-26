@@ -8,7 +8,7 @@ import {
   mapProjectPathToSlug, resolveMemoryProjectRoot, mapMemoryProjectPathToSlug,
 } from '../../plugins/core/skills/core/scripts/project-slug.mjs';
 import { projectIdentityMismatch } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
-import { mappedMemoryPath } from '../../plugins/core/skills/core/scripts/write-visibility-canary.mjs';
+import { mappedMemoryPath } from '../../plugins/core/skills/core/scripts/capability/auto-memory-injection-probe.mjs';
 
 test('mapProjectPathToSlug: converts / and . to - (Claude projects-folder encoding)', () => {
   // The bug: a dotted username (corporate accounts) must encode the dot to a hyphen

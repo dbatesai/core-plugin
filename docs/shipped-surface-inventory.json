@@ -387,13 +387,6 @@
       "surface": "shipped"
     },
     {
-      "name": "memory-visible-probe",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/capability/memory-visible-probe.mjs",
-      "surface": "shipped"
-    },
-    {
       "name": "metrics-check",
       "kind": "script",
       "harness": "shared",
@@ -636,13 +629,6 @@
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/workspace-fork-check.mjs",
-      "surface": "shipped"
-    },
-    {
-      "name": "write-visibility-canary",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/write-visibility-canary.mjs",
       "surface": "shipped"
     },
     {

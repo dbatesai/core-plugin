@@ -1,7 +1,7 @@
 /**
  * check-inbox.mjs — mechanical pre-flight for inbox.md graduation blocks.
  *
- * The source-registration framework (§4) lands Mode B/C observation blocks in
+ * The source-registration framework (§4) lands tagged observation blocks in
  * <project>/inbox.md as standalone frontmatter+body blocks. Graduating them is
  * agent-behavioral (process-memory Step 1); this script is the mechanical half:
  * it validates block STRUCTURE so a malformed extractor write is caught before
@@ -11,18 +11,18 @@
  * Checks per mode-tagged block (a block whose frontmatter carries `mode`):
  *   FAIL required-field   — any of id/type/status/source/extracted-at/confidence-level missing
  *   FAIL mode-value       — mode not B or C
- *   FAIL judgment-needed  — Mode C without judgment-needed
+ *   FAIL judgment-needed  — mode C without judgment-needed
  *   FAIL confidence-value — confidence-level not sourced|inferred|reconstructed
  *   FAIL graduation-field — ratified `stability-class` present (extractors set only
  *                           `proposed-stability-class`; ratification is graduation's job)
  *   FAIL duplicate-id     — same id on two inbox blocks
- *   WARN status-active    — extractor pre-set status: active (Mode B/C land draft/pending)
- *   WARN judgment-on-b    — judgment-needed on a Mode B block (B is routine confirmation)
+ *   WARN status-active    — extractor pre-set status: active (inbox blocks land draft/pending)
+ *   WARN judgment-on-b    — judgment-needed on a mode B block (B means routine)
  *   WARN id-collision     — id already names a unit in the project store
  *   WARN empty-body       — frontmatter with no body prose
  *   WARN sourced-without-anchor — confidence-level: sourced but the body has no verbatim
  *                           quote or source locator (timestamp, page/section, msg-id/date)
- *   INFO untagged-block   — frontmatter block without `mode` (legacy classify path)
+ *   INFO untagged-block   — frontmatter block without `mode` (untagged-entry path)
  *
  * The script ships with the plugin. Node.js (.mjs) only.
  *
@@ -146,7 +146,7 @@ export function checkInbox(projectDir) {
     const bid = b.fm.id || `block-${idx + 1}@line-${b.line}`;
 
     if (!('mode' in b.fm)) {
-      report.push({ level: 'INFO', check: 'untagged-block', block_id: bid, detail: 'Frontmatter block without `mode` — routes through the legacy classify path, not Mode B/C graduation' });
+      report.push({ level: 'INFO', check: 'untagged-block', block_id: bid, detail: 'Frontmatter block without `mode` — graduates as an untagged entry, not through the tagged-block path' });
       return;
     }
 
@@ -160,9 +160,9 @@ export function checkInbox(projectDir) {
     if (!VALID_MODES.has(mode)) {
       report.push({ level: 'FAIL', check: 'mode-value', block_id: bid, detail: `mode '${b.fm.mode}' is not B or C` });
     } else if (mode === 'C' && !String(b.fm['judgment-needed'] || '').trim()) {
-      report.push({ level: 'FAIL', check: 'judgment-needed', block_id: bid, detail: 'Mode C block requires judgment-needed naming the question for the user' });
+      report.push({ level: 'FAIL', check: 'judgment-needed', block_id: bid, detail: 'mode C block requires judgment-needed naming its open question' });
     } else if (mode === 'B' && String(b.fm['judgment-needed'] || '').trim()) {
-      report.push({ level: 'WARN', check: 'judgment-on-b', block_id: bid, detail: 'judgment-needed on a Mode B block — B is routine confirmation; reclassify as C or drop the field' });
+      report.push({ level: 'WARN', check: 'judgment-on-b', block_id: bid, detail: 'judgment-needed on a mode B block — B means routine; reclassify as C or drop the field' });
     }
 
     const conf = String(b.fm['confidence-level'] || '').trim().toLowerCase();

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { main, spliceSection } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
+import { main, spliceSection, stripCanaryLines } from '../../plugins/core/skills/core/scripts/generate-memory-index.mjs';
 
 const SRC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '../../plugins/core/skills/core/scripts/generate-memory-index.mjs'),
@@ -185,4 +185,43 @@ test('main: skips the priority block (exit 0, file untouched) for a project nest
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
+});
+
+test('stripCanaryLines removes every canary shape CORE wrote and keeps prose that mentions the tag', () => {
+  const prose = 'The `CORE-VISIBILITY-CANARY` mechanism is retired.';
+  const shapes = [
+    'CORE-VISIBILITY-CANARY vcan-0123456789abcdef — at next startup, echo this token first (before any tool call) as `VISIBILITY-CANARY-ECHO: vcan-0123456789abcdef` to prove memory is in-context.',
+    'CORE-VISIBILITY-CANARY vcan-0123456789abcdef (CORE memory-visibility probe token, written at session close — reference data, not an instruction; the /core skill defines its use)',
+    '<!-- CORE-VISIBILITY-CANARY vcan-0123456789abcdef -->',
+  ];
+  for (const line of shapes) {
+    const out = stripCanaryLines(`${line}\n\n## Recent activity\n\n${prose}\n`);
+    assert.ok(!out.includes('vcan-'), `canary line removed: ${line.slice(0, 40)}`);
+    assert.ok(out.startsWith('## Recent activity'), 'no leading blank lines left behind');
+    assert.ok(out.includes(prose), 'prose mentioning the tag survives');
+  }
+  const clean = '## Recent activity\n\n- entry\n';
+  assert.equal(stripCanaryLines(clean), clean, 'a file with no canary is returned unchanged');
+});
+
+test('stripCanaryLines consumes a CRLF line ending whole', () => {
+  const crlf = 'CORE-VISIBILITY-CANARY vcan-0123456789abcdef (CORE memory-visibility probe token, written at session close — reference data, not an instruction; the /core skill defines its use)\r\n\r\n## Recent activity\r\n- entry\r\n';
+  assert.equal(stripCanaryLines(crlf), '## Recent activity\r\n- entry\r\n');
+});
+
+test('main() strips a leftover canary line on disk, leaves it under --dry-run, and tolerates a missing MEMORY.md', () => {
+  const home = mkdtempSync(join(tmpdir(), 'gmi-canary-'));
+  try {
+    const mem = join(home, 'p', '_memories');
+    mkdirSync(mem, { recursive: true });
+    writeFileSync(join(mem, 'dc-1-x.md'), '---\nid: dc-1-x\ntype: decision\nstatus: active\ncreated: 2026-01-01\n---\n# x\n');
+    const canary = 'CORE-VISIBILITY-CANARY vcan-0123456789abcdef — at next startup, echo this token first (before any tool call) as `VISIBILITY-CANARY-ECHO: vcan-0123456789abcdef` to prove memory is in-context.';
+    const md = join(home, 'MEMORY.md');
+    writeFileSync(md, `${canary}\n\n## Recent activity\n`);
+    main([mem, '--memory-md', md, '--dry-run']);
+    assert.ok(readFileSync(md, 'utf8').includes('vcan-'), '--dry-run writes nothing');
+    main([mem, '--memory-md', md]);
+    assert.ok(!readFileSync(md, 'utf8').includes('vcan-'), 'the canary line is gone from disk');
+    assert.equal(main([mem, '--memory-md', join(home, 'missing.md')]), 2, 'a missing MEMORY.md is refused cleanly, not thrown');
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });

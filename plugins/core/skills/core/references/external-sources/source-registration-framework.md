@@ -194,58 +194,48 @@ The intake protocol is part of CORE's startup flow — the new-workspace branch 
 
 ---
 
-## 4. Promotion-mode landing destinations
+## 4. Landing destinations
 
-When the extractor produces an observation, the observation lands in one of three destinations based on the promotion modes. The mode is determined by the extractor at write time using confidence-level and content signals.
+When the extractor produces an observation, it lands in one of two places. An extractor is a script with no judgment, so the only question it answers is whether an observation is settled enough to go straight into memory or needs an agent to look at it first. The user is not in this path: the agent graduates inbox items with its own judgment and asks the user only for a critical decision it can't make (`protocols/data-storage.md` §"Deciding on memory writes").
 
-### The three destinations
+### The two destinations
 
-**Mode A — autonomous.** Observation lands directly in `<project>/_memories/` as an active unit. `status: active`. No user review required.
+**Direct landing (no `mode` field).** Observation lands directly in `<project>/_memories/` as an active unit. `status: active`.
 
-Criteria for Mode A (all must hold):
+Criteria for direct landing (all must hold):
 - `confidence-level: sourced`
 - No contradicting unit in existing memory (runtime check at write time)
 - Source-of-authority is settled for this source
 
-A `sourced` observation may carry `proposed-stability-class` and still go Mode A. The stability proposal sits unratified in the active unit; `/process-memory` ratifies it on the next review pass. Blocking Mode A on unratified stability proposals would force every structured-field finding from automation-provenance sources through inbox.md, which is exactly where Mode A's review-burden reduction matters most.
+A `sourced` observation may carry `proposed-stability-class` and still land directly. The stability proposal sits unratified in the active unit; `/process-memory` ratifies it on the next pass. Holding direct landing for unratified stability proposals would push every structured-field finding from automation-provenance sources through inbox.md for no gain.
 
-Promotion-to-decision/risk is graduation's job, not the write-time mode decision. Mode A writes the observation as active; if it later warrants promotion, `/process-memory` handles it. "This observation could conceivably become a decision later" is not a Mode B trigger.
+Promotion to a decision or risk is graduation's job, not the extractor's. "This observation could conceivably become a decision later" is not a reason to route it to the inbox.
 
-**Mode B — confirmed.** Observation lands in `<project>/inbox.md` as a pending item with full proposed frontmatter inline. Next `/process-memory` pass surfaces the item; user confirms or adjusts at the review.
+**Inbox landing (`mode: B` or `mode: C`).** Observation lands in `<project>/inbox.md` as a pending block with full proposed frontmatter inline. The next `/process-memory` pass (or the agent sooner, if it bears on the session's work) graduates it on its own judgment.
 
-Criteria for Mode B (any of):
-- `confidence-level: inferred`
-- `proposed-stability-class: durably-suspect` specifically — this is a flag about potential incorrectness and warrants explicit review (proposed `durably-correct` does not gate Mode B; it can ride along on a Mode A observation)
-- Observation extends or updates an existing unit non-trivially
+The extractor tags the block with a hint about what the agent will find:
 
-**Mode C — explicit.** Observation lands in `inbox.md` flagged as requiring explicit user judgment. The flag carries the reason for explicit-mode classification. Synthesis/render passes don't pull this observation until it's resolved.
-
-Criteria for Mode C (any of):
-- `confidence-level: reconstructed`
-- Observation contradicts an existing unit
-- Source-of-authority is unsettled or being challenged
-- Graduation can't be made mechanical (genuinely judgment-heavy)
+- **`mode: B` — routine.** Any of: `confidence-level: inferred`; `proposed-stability-class: durably-suspect` (a flag about potential incorrectness; proposed `durably-correct` can ride along on a direct landing); the observation extends or updates an existing unit non-trivially.
+- **`mode: C` — carries an open question**, named in `judgment-needed`. Any of: `confidence-level: reconstructed`; the observation contradicts an existing unit; source-of-authority is unsettled or challenged; graduation genuinely needs judgment. Synthesis and render passes don't pull a `mode: C` observation until it's resolved.
 
 ### Landing format in `inbox.md`
 
-Mode B and Mode C observations land in `inbox.md` as standalone blocks with full frontmatter and body inline (so the full observation is reviewable without leaving the file). The graduation pass at `/process-memory` reads these blocks, presents them for review, and on confirmation moves them into `_memories/` as active units (with `status: active`).
-
-Each inbox block carries two additional frontmatter fields beyond the observation schema:
+Inbox observations land as standalone blocks with full frontmatter and body inline, so each one is readable without leaving the file. Each block carries two fields beyond the observation schema:
 
 ```yaml
 mode: B | C
-judgment-needed: <prose, required when mode is C — names what judgment is required>
+judgment-needed: <prose, required when mode is C — the open question>
 ```
 
-`mode` lets graduation distinguish Mode B (routine confirmation) from Mode C (explicit user judgment) without re-deriving the mode from criteria. `judgment-needed` is required for Mode C and carries the specific question the user must answer (e.g., *"contradicts dc-42-bgl-date on the BGL date — confirm which is authoritative"*; *"reconstruction from three chat threads; verify the inferred decision is correct"*).
+`mode` saves graduation from re-deriving the extractor's routing. `judgment-needed` names the specific open question (e.g., *"contradicts dc-42-bgl-date on the BGL date — which is authoritative?"*; *"reconstruction from three chat threads; is the inferred decision real?"*). It is a question for the agent first: the agent answers it from the evidence when it can, and takes it to the user only when it's a critical decision the evidence can't settle.
 
-Blocks land in chronological order, no source/confidence/mode sectioning required. Mode-labeled blocks in chronological order are scannable at typical volumes (under a hundred items per inbox). Installations may add structure if their volume warrants; the framework doesn't mandate it.
+Blocks land in chronological order, no sectioning required; installations may add structure if their volume warrants.
 
 ### The graduation pass
 
-`/process-memory` (existing skill) gains a step that walks `inbox.md`, presents Mode B items for confirmation, presents Mode C items for explicit user judgment, handles ratifications and contradictions. This is integrated with `/process-memory`'s existing observation-graduation logic.
+`/process-memory` walks `inbox.md` and graduates every block with the agent's judgment: routine blocks are written as active units; `mode: C` blocks get their question answered from the evidence, with the answer recorded in the unit. Only a critical question the evidence can't settle goes to the user, and the block waits in the inbox until they answer. This is integrated with `/process-memory`'s existing observation-graduation logic.
 
-Mode A observations don't pass through `/process-memory` for graduation — they're already active when extraction writes them. They do pass through `/process-memory`'s other hygiene operations (validation, archival check, etc.).
+Direct-landing observations don't pass through the inbox walk; they do pass through `/process-memory`'s other hygiene operations (validation, archival check, etc.).
 
 ---
 
@@ -295,11 +285,11 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 2. **Invoke the per-source extractor.** Installation owns the extractor implementation; the skill knows how to call it.
 
-3. **Ensure observations land at the correct destination** per Mode A/B/C criteria. Either the extractor writes to the destination directly (preferred), or the orchestration skill routes the extractor's output.
+3. **Ensure observations land at the correct destination** per the §4 criteria. Either the extractor writes to the destination directly (preferred), or the orchestration skill routes the extractor's output.
 
-   Mode B/C blocks landing in `inbox.md` can be pre-flighted mechanically:
+   Blocks landing in `inbox.md` can be pre-flighted mechanically:
    `node <plugin-root>/skills/core/scripts/check-inbox.mjs <project>` validates block structure
-   (required pre-graduation fields, valid `mode`, `judgment-needed` on Mode C, no graduation-only
+   (required pre-graduation fields, valid `mode`, `judgment-needed` on `mode: C`, no graduation-only
    fields). Extractors get a pass/fail signal at write time instead of waiting for a human
    session; `/process-memory` runs the same check before its inbox walk.
 
@@ -311,7 +301,7 @@ CORE does not ship an orchestration skill. Installations do — naming and shape
 
 ### Prohibited behaviors
 
-- Must not bypass the destination rules. All writes go through the Mode A/B/C destinations.
+- Must not bypass the destination rules. All writes go through the §4 destinations.
 - Must not re-judge `confidence-level` after the extractor sets it. Confidence is the extractor's call.
 - Must not auto-ratify `proposed-stability-class`. That's graduation's job.
 - Must not assume a single cadence pattern across all sources. Per-source cadence is in each source's registration.
@@ -347,6 +337,8 @@ One JSON object per line. Append-only. No mutation of existing lines.
 ```jsonl
 {"timestamp": "<ISO-8601>", "source": "<source-name>", "cadence": "<cadence-from-registration>", "candidates": <count>, "mode-a": <count>, "mode-b": <count>, "mode-c": <count>, "errors": [<error-objects>], "duration-ms": <int>}
 ```
+
+`mode-a` counts direct landings; `mode-b` and `mode-c` count inbox blocks by their tag.
 
 Schema evolution: new fields added with default values for backward compatibility. Existing fields never removed or repurposed.
 
@@ -389,7 +381,7 @@ The framework requires:
 
 - Sources are registered at intake
 - Extractors produce observations matching the schema
-- Observations land at Mode A/B/C destinations per the criteria
+- Observations land at the §4 destinations per the criteria
 - The orchestration skill writes the monitoring log
 
 That's the contract. Everything else is installation-level choice.

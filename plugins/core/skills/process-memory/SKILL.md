@@ -15,7 +15,7 @@ allowed-tools:
 
 Run the memory housekeeping pass: pull the inbox, graduate the observations that are ready, validate the units, regenerate both indexes, compact `PROJECT.md` when it's over the file cap.
 
-The pass is best-effort, not a guarantee. Some work is deliberately left open and named rather than forced: a Mode C block the user defers stays in the inbox, a unit that fails validation is surfaced for judgment instead of auto-fixed, and `PROJECT.md` or `IMPROVEMENT_LOG.md` can finish over cap with a recommendation rather than a rewrite. Step 8 narrates whatever remains open, so the honest postcondition is "everything resolvable is resolved, and anything still open is named."
+The pass is best-effort, not a guarantee. Some work is deliberately left open and named rather than forced: an inbox block waiting on a critical question the user hasn't answered stays in the inbox, a unit that fails validation is surfaced for judgment instead of auto-fixed, and `PROJECT.md` or `IMPROVEMENT_LOG.md` can finish over cap with a recommendation rather than a rewrite. Step 8 narrates whatever remains open, so the honest postcondition is "everything resolvable is resolved, and anything still open is named."
 
 Runs synchronously in the current session.
 
@@ -71,27 +71,27 @@ If `<project>/inbox.md` is non-empty, run the mechanical pre-flight first:
 node "${CORE_ROOT}/skills/core/scripts/check-inbox.mjs" "<project>"
 ```
 
-It validates block structure — required pre-graduation fields, valid `mode` values, `judgment-needed` present on Mode C, no graduation-only fields (a ratified `stability-class` belongs to graduation, not the extractor). FAILs name the block and field; fix or bounce the block back to its source rather than graduating it on a guess. WARNs ride along into the walk as context. Then walk the entries. Two shapes can appear:
+It validates block structure — required pre-graduation fields, valid `mode` values, `judgment-needed` present on `mode: C`, no graduation-only fields (a ratified `stability-class` belongs to graduation, not the extractor). FAILs name the block and field; fix or bounce the block back to its source rather than graduating it on a guess. WARNs ride along into the walk as context. Then walk the entries and graduate them yourself — the inbox waits on your judgment, not the user's review (`protocols/data-storage.md` §"Deciding on memory writes"). Two shapes can appear:
 
-**Mode-tagged observation blocks** carry full frontmatter (id, type, status, source, source-instance, extracted-at, references-person, confidence-level, body) plus two framework fields: `mode: B | C` and, when Mode C, `judgment-needed: <prose>`. These come from extractors implementing the source-registration framework (see `references/external-sources/source-registration-framework.md §4`). The mode tells you the routing without re-deriving it from criteria. The two framework fields (`mode`, `judgment-needed`) are inbox-only annotations — strip them from the frontmatter before writing the graduated unit.
+**Tagged observation blocks** carry full frontmatter (id, type, status, source, source-instance, extracted-at, references-person, confidence-level, body) plus two framework fields: `mode: B | C` and, on `mode: C`, `judgment-needed: <prose>`. These come from extractors implementing the source-registration framework (`references/external-sources/source-registration-framework.md §4`). The two framework fields are inbox-only annotations — strip them from the frontmatter before writing the graduated unit.
 
-- **Mode B blocks** — read the body and the proposed frontmatter back to the user in plain voice and ask for confirmation. On confirmation, write the block to `<project>/_memories/observations/<YYYY-MM>/obs-<id>.md` with `status: active` and the two inbox-only fields removed. Apply any user-supplied adjustments before the write. On rejection, discard with a one-line note.
-- **Mode C blocks** — surface the `judgment-needed` question to the user verbatim. Wait for an explicit answer. Don't graduate on routine confirmation — Mode C means the judgment is the user's call. Acceptable resolutions: (a) the user resolves the question and the block graduates to `<project>/_memories/observations/<YYYY-MM>/obs-<id>.md` with the judgment recorded as a `## Resolution` body subsection, `status: active`, and the two inbox-only fields stripped; (b) the user defers and the block stays in `inbox.md` until next pass; (c) the user rejects and the block is discarded with a one-line note. Don't auto-resolve a deferred Mode C block on a subsequent pass — wait for explicit input each time.
+- **`mode: B` (routine)** — check the proposed frontmatter against the store, adjust anything wrong, and write the block to `<project>/_memories/observations/<YYYY-MM>/obs-<id>.md` with `status: active`. Discard noise with a one-line note. Narrate what you graduated.
+- **`mode: C` (open question)** — answer the `judgment-needed` question from the evidence: the retrieval ladder, the sources the block and the existing units cite, the user's own words. When the evidence settles it, graduate the block with your answer and its evidence in a `## Resolution` body subsection. When it's a critical decision the evidence can't settle, ask the user that one question with your best guess, record it as an open-question unit, and leave the block in `inbox.md` until they answer.
 
-**Untagged entries** (free-form text, observations dropped in without frontmatter) follow the legacy classify path:
-- Clear-cut observations → write to `_memories/observations/<YYYY-MM>/`
-- Items needing user review → surface inline
+**Untagged entries** (free-form text, observations dropped in without frontmatter):
+- Worth keeping → write to `_memories/observations/<YYYY-MM>/`
 - Noise → discard with a one-line note
 
-Truncate processed entries when done. Mode C blocks the user deferred stay in place. Mode B blocks the user adjusted but didn't reject also truncate after the graduated unit lands.
+Truncate processed entries when done. Only blocks waiting on a user answer stay in place.
 
 ---
 
 ## Step 2 — Walk recent observations
 
 For each file in `_memories/observations/<YYYY-MM>/` not yet reviewed this session, apply the graduation criteria from `protocols/data-storage.md §Graduation`:
-- Clear-cut candidates → graduate to units, update edges
-- Borderline → surface for user decision inline
+- Graduate what's ready on your own judgment, update edges, narrate
+- Leave what isn't ready as an observation; it gets another look next pass
+- Ask the user only for a critical decision you can't make (`protocols/data-storage.md` §"Deciding on memory writes")
 
 ---
 

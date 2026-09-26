@@ -30,7 +30,7 @@ today, with no core change:
   `confidence-level`, `topics`, `sources`, body subsections; CORE's readers consume them as-is.
 - **The `world-time-policy` registration hook** (§2) and the other per-source registration
   fields (`body-construction-policy`, `stability-defaults`, `confidence-default`).
-- **Inbox Mode B/C blocks** — any extractor that writes the block shape in
+- **Inbox blocks (`mode: B | C`)** — any extractor that writes the block shape in
   `external-sources/source-registration-framework.md §4` gets graduated by `/process-memory`,
   and can pre-flight its output mechanically with `scripts/check-inbox.mjs`.
 - **Metrics capture passthrough** — extra event fields and new `query_shape` values ride
@@ -128,7 +128,7 @@ blast-radius policy (MAJOR/MINOR on the plugin version) and called out in `CHANG
   `scripts/check-units.mjs` (`REQUIRED_FIELDS`, `VALID_STATUSES`).
 - **The committed edge-type set** — additive growth only; existing types are never
   re-semanticized or removed without a supersession note.
-- **The inbox Mode B/C block shape** (`external-sources/source-registration-framework.md §4`)
+- **The inbox block shape (`mode: B | C`)** (`external-sources/source-registration-framework.md §4`)
   and the strip-on-graduation rule for `mode` / `judgment-needed`.
 - **Metrics event passthrough** — unknown event fields and `query_shape` values are never
   rejected by capture.
