@@ -127,7 +127,10 @@ export function trustedMetricsDir(projectDir, { home = homedir(), env = process.
  *   4. the project's trusted manifest (`.core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
  *   5. the same manifest `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
  *      A manifest whose stamp does not verify (planted by a clone) is not read.
- *   6. default → ON.
+ *   6. a `workspace.json` at the project root with `"metrics_enabled": false` → OFF.
+ *      It may be committed by the repo's owner, so it is untrusted, and an untrusted
+ *      source can only ever switch capture off, never on.
+ *   7. default → ON.
  */
 export function metricsEnabled({ project, env = process.env, home = homedir() } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
@@ -142,6 +145,10 @@ export function metricsEnabled({ project, env = process.env, home = homedir() } 
     } catch { m = null; }
     if (m && m.metrics_enabled === false) return false; // per-project opt-out
     if (m && m.metrics_enabled === true) return true;   // per-project opt-in (explicit)
+    try {
+      const rootManifest = JSON.parse(readFileSync(join(projectRootFor(project, { home, coreDir: join(home, '.core') }), 'workspace.json'), 'utf8'));
+      if (rootManifest && rootManifest.metrics_enabled === false) return false;
+    } catch { /* absent or unreadable: no opt-out */ }
   }
   return true; // default-ON: instrument by default; opt out via env or workspace flag
 }

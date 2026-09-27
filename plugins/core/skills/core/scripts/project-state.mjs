@@ -321,14 +321,17 @@ export function containedInState(stateDir, candidate) {
 
 /**
  * The harness whose subfolder this process reads and writes. CORE_HARNESS wins
- * when it is a safe name; Codex exposes CODEX_* env; everything else is Claude Code.
+ * when it is a safe name; otherwise each harness is detected by its own positive
+ * env signal. An unrecognized harness gets 'unknown' rather than borrowing another
+ * harness's subfolder, so two harnesses never share one manifest by accident.
  * Canonical signal list: harnesses/<name>.md §detect-harness (env-visible subset).
  */
 export function detectStateHarness(env = process.env) {
   const forced = env && env.CORE_HARNESS;
   if (typeof forced === 'string' && HARNESS_RE.test(forced)) return forced;
   if (env && (env.CODEX_PLUGIN_ROOT || env.CODEX_THREAD_ID || env.CODEX_HARNESS || env.CODEX_SANDBOX)) return 'codex';
-  return 'claude-code';
+  if (env && (env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT || env.CLAUDE_PLUGIN_ROOT)) return 'claude-code';
+  return 'unknown';
 }
 
 /**

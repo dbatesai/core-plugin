@@ -351,3 +351,30 @@ test('ensureInstallIdentity keeps the secret owner-only', { skip: isWin }, () =>
     assert.equal(statSync(join(s.coreDir, 'install-secret')).mode & 0o777, 0o600);
   } finally { s.cleanup(); }
 });
+
+test('detectStateHarness: positive signals only; an unrecognized harness gets its own subfolder', async () => {
+  const { detectStateHarness } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  assert.equal(detectStateHarness({ CLAUDECODE: '1' }), 'claude-code');
+  assert.equal(detectStateHarness({ CLAUDE_PLUGIN_ROOT: '/x' }), 'claude-code');
+  assert.equal(detectStateHarness({ CODEX_THREAD_ID: 't' }), 'codex');
+  assert.equal(detectStateHarness({ CORE_HARNESS: 'antigravity' }), 'antigravity');
+  assert.equal(detectStateHarness({}), 'unknown');
+});
+
+test('metricsEnabled: a root workspace.json can switch capture off but never on', async () => {
+  const { metricsEnabled } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { mkdtempSync, writeFileSync: wf, rmSync: rm } = await import('node:fs');
+  const { tmpdir: td } = await import('node:os');
+  const { join: j } = await import('node:path');
+  const home = mkdtempSync(j(td(), 'optout-home-'));
+  const project = mkdtempSync(j(td(), 'optout-proj-'));
+  try {
+    const env = { CLAUDECODE: '1' };
+    assert.equal(metricsEnabled({ project, env, home }), true);
+    wf(j(project, 'workspace.json'), JSON.stringify({ metrics_enabled: false }));
+    assert.equal(metricsEnabled({ project, env, home }), false);
+    wf(j(project, 'workspace.json'), JSON.stringify({ metrics_enabled: true, metrics_disclosure_shown: true }));
+    assert.equal(metricsEnabled({ project, env, home }), true);
+    assert.equal(metricsEnabled({ project, env: { ...env, CORE_METRICS_ENABLED: '0' }, home }), false);
+  } finally { rm(home, { recursive: true, force: true }); rm(project, { recursive: true, force: true }); }
+});
