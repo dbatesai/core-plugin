@@ -15,7 +15,7 @@ allowed-tools:
 
 Run the memory housekeeping pass: pull the inbox, graduate the observations that are ready, validate the units, regenerate both indexes, compact `PROJECT.md` when it's over the file cap.
 
-The pass is best-effort, not a guarantee. Some work is deliberately left open and named rather than forced: an inbox block waiting on a critical question the user hasn't answered stays in the inbox, a unit that fails validation is surfaced for judgment instead of auto-fixed, and `PROJECT.md` or `IMPROVEMENT_LOG.md` can finish over cap with a recommendation rather than a rewrite. Step 8 narrates whatever remains open, so the honest postcondition is "everything resolvable is resolved, and anything still open is named."
+The pass is best-effort, not a guarantee. Almost everything gets decided in-pass, on judgment — that's the default outcome, not the exception. What's deliberately left open and named rather than forced is narrower than it looks: an inbox block on a genuinely critical question the user hasn't answered stays in the inbox, and `PROJECT.md` or `IMPROVEMENT_LOG.md` can finish over cap with a recommendation rather than a rewrite. Step 8 narrates whatever remains open, so the honest postcondition is "everything resolvable is resolved, and anything still open is named."
 
 Runs synchronously in the current session.
 
@@ -76,7 +76,7 @@ It validates block structure — required pre-graduation fields, valid `mode` va
 **Tagged observation blocks** carry full frontmatter (id, type, status, source, source-instance, extracted-at, references-person, confidence-level, body) plus two framework fields: `mode: B | C` and, on `mode: C`, `judgment-needed: <prose>`. These come from extractors implementing the source-registration framework (`references/external-sources/source-registration-framework.md §4`). The two framework fields are inbox-only annotations — strip them from the frontmatter before writing the graduated unit.
 
 - **`mode: B` (routine)** — check the proposed frontmatter against the store, adjust anything wrong, and write the block to `<project>/_memories/observations/<YYYY-MM>/obs-<id>.md` with `status: active`. Discard noise with a one-line note. Narrate what you graduated.
-- **`mode: C` (open question)** — answer the `judgment-needed` question from the evidence: the retrieval ladder, the sources the block and the existing units cite, the user's own words. When the evidence settles it, graduate the block with your answer and its evidence in a `## Resolution` body subsection. When it's a critical decision the evidence can't settle, ask the user that one question with your best guess, record it as an open-question unit, and leave the block in `inbox.md` until they answer.
+- **`mode: C` (open question)** — answer the `judgment-needed` question from the evidence: the retrieval ladder, the sources the block and the existing units cite, the user's own words. Expect this to resolve the large majority of mode-C blocks — a contradiction usually has a higher-authority source (sourced beats inferred, newer beats older, the user's own words beat everything), and a genuinely unresolvable tie is rare. When the evidence settles it, graduate the block with your answer and its evidence in a `## Resolution` body subsection, even when you're not fully certain — a wrong call here is corrected by the next supersession, not lost. Only when it meets the critical bar in `protocols/data-storage.md` §"Deciding on memory writes" AND the evidence genuinely can't settle it: ask the user that one question with your best guess, record it as an open-question unit, and leave the block in `inbox.md` until they answer.
 
 **Untagged entries** (free-form text, observations dropped in without frontmatter):
 - Worth keeping → write to `_memories/observations/<YYYY-MM>/`
@@ -120,12 +120,14 @@ Read the output. The validator emits three counts: PASS, WARN, FAIL.
 - `edge-unknown-type`: edge type not in the committed set (`cites`, `supersedes`, `superseded-by`, `depends-on`, `conflicts-with`, `references-person`, `references-topic`, `depended-on-by`, `supersedes-claim`, `refines`, `amends`) → three cases: (a) `superseded-by`/`depended-on-by` → remove (the inverse already lives on the other unit); (b) a type in the normalize map (`relates`/`relates-to`/`related` → `cites`) → **relabel to the named target** — the validator prints the target in the warning detail, so this is a mechanical safe-fix, not a guess; (c) anything else → surface for a bless-or-relabel decision (don't invent a type). `refines` and `amends` are committed types (distinct from `supersedes`) and do not flag.
 - `external-ref`: a cross-store/citation/path edge target recognized as legitimately outside the unit store (benign; not a break) — no fix, leave it.
 
-**Surface for human judgment** without auto-fixing:
-- `dangling-edge` / `edge-target-missing` — a missing in-store unit (real break) or a typo; the user decides. (Recognized cross-store refs are `external-ref`, handled above — they do not show here.)
-- `orphan` (no edges) — sometimes deliberate (risks often stand alone), sometimes a graduation gap.
-- Anything else the validator flags that isn't on the safe-fix list.
+**Decide the rest yourself** — a WARN isn't an escalation signal, it's the validator telling you something isn't mechanically safe to guess at *automatically*; you still resolve it the same way as any other memory decision (`protocols/data-storage.md` §"Deciding on memory writes"), you just can't do it by pattern-matching a fixed rule the way the auto-fix list above does:
+- `dangling-edge` / `edge-target-missing` — look at what the edge was pointing at and decide: a renamed/retired unit → relabel to the current id; a typo → fix it; genuinely nothing there → remove the edge. (Recognized cross-store refs are `external-ref`, handled above — they do not show here.)
+- `orphan` (no edges) — link it to related units if any are findable via the retrieval ladder, or write one line arguing why it stands alone (risks and some assumptions legitimately do) and move on.
+- Anything else the validator flags that isn't on the safe-fix list — same standard: decide and narrate what you did and why.
 
-After auto-fixing, re-run the validator and report the new counts.
+Escalate a specific instance only if it independently meets the critical bar in `protocols/data-storage.md` §"Deciding on memory writes" (for example, a dangling edge that turns out to point at something the user explicitly retired, where restoring the link would be a resurrection call) — that should be rare, not the default handling for the category. FAIL is the severity that blocks: fix it or don't graduate past it. WARN just means "no fixed rule for this one" — it doesn't mean "ask the user."
+
+After fixing what you can, re-run the validator and report the new counts.
 
 ---
 

@@ -356,17 +356,17 @@ Memory decisions are yours. Capturing an observation, graduating it, superseding
 
 When the user tells you directly ("remember X", "forget Y", "pin this", "save as a decision"), do exactly that without re-asking.
 
-**Ask the user only for a critical decision you can't make.** Both conditions must hold.
+**Ask the user only for a critical decision you can't make.** Both conditions must hold, and the bar sits high on purpose: told directly to use your own judgment, you're usually right, so asking is the exception this list carves out, not a default you fall back on when a call merely feels uncomfortable.
 
 A decision is **critical** when it would:
 
 - override or archive something the user wrote, or retire a fact they explicitly kept or restored (their authorship outranks your judgment — the user-control invariant);
 - bring back something the user removed (anti-resurrection);
 - record a decision, commitment, owner or deadline as made by the user or anyone else when the evidence doesn't show they made it;
-- settle a contradiction between sources on a fact that changes what someone does (a date, an owner, a commitment, a decision);
-- change a structural pattern or a default the user hasn't endorsed (data topology, identity, protocol migration, invariants, global defaults).
+- settle a contradiction between sources on a fact that **materially** changes what someone does (a date, an owner, a commitment, a decision) — not any contradiction, only one where guessing wrong would actually mislead someone;
+- change a structural pattern or a default the user hasn't endorsed (data topology, identity, protocol migration, invariants, global defaults) **and** the change is hard to unwind — most memory writes aren't: the store never deletes, so a wrong supersession call is corrected by the next one, not lost. Reserve this bullet for the rare change that isn't cheaply reversible that way.
 
-You **can't make** it when you've looked (the retrieval ladder, the sources the units cite, the user's own words in the transcript) and the evidence still doesn't settle it. If the evidence does settle it, decide, even when the decision is on the list above, and put the evidence in the unit body.
+You **can't make** it when you've looked (the retrieval ladder, the sources the units cite, the user's own words in the transcript) and the evidence still doesn't settle it. If the evidence does settle it, decide, even when the decision is on the list above, and put the evidence in the unit body. When genuinely torn, decide and narrate the reasoning rather than asking — a visible, reversible call beats an interruption.
 
 When you do ask: one question, in plain words, with your best guess and why. Keep working on everything else while you wait. Record the question as an open-question unit so it outlives the session (the deferral ladder in SKILL.md §"Persist on hard questions" takes it from there).
 
