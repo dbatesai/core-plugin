@@ -214,7 +214,7 @@ export function checkStateContainment({ root, harness }) {
 export function ensureStateDir(opts) {
   const target = projectStateDir(opts);
   if (target.location === 'project') {
-    const dir = join(canonical(opts.root), STATE_DIRNAME, assertHarnessName(opts.harness));
+    const dir = join(ensureCoreDir(opts.root, opts.harness), assertHarnessName(opts.harness));
     if (!existsSync(dir)) writeStamp({ root: opts.root, harness: opts.harness, coreDir: opts.coreDir || defaultCoreDir() });
     return { ...target, dir };
   }
