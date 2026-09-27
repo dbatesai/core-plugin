@@ -16,7 +16,7 @@
  * qualified with confidence low|med|high.
  */
 
-import { writeFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { writeFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { readHistory } from './capability-history.mjs';
 import { projectRootFor, detectStateHarness } from './project-state.mjs';

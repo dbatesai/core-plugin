@@ -1,7 +1,7 @@
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { metricsEnabled, logEvent } from '../../plugins/core/skills/core/scripts/log-event.mjs';

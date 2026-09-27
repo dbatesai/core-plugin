@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolveRegisteredRoot } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 import { registerProject, touchProject, recordBootstrap } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
-import { readManifest, updateManifest, stateDir, ensureInstallIdentity } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { readManifest, updateManifest, ensureInstallIdentity } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { applyMigration } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { appendRows } from '../../plugins/core/skills/core/scripts/capability-history.mjs';

@@ -18,7 +18,6 @@
 
 import { statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { join } from 'node:path';
 import { runStartup, SCHEMA_VERSION } from './capability-probe.mjs';
 import { appendRows } from './capability-history.mjs';
 import { projectRootFor, detectStateHarness } from './project-state.mjs';
