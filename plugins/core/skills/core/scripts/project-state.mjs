@@ -326,12 +326,19 @@ export function containedInState(stateDir, candidate) {
  * harness's subfolder, so two harnesses never share one manifest by accident.
  * Canonical signal list: harnesses/<name>.md §detect-harness (env-visible subset).
  */
-export function detectStateHarness(env = process.env) {
-  const forced = env && env.CORE_HARNESS;
+function harnessFromEnv(env) {
+  if (!env) return null;
+  const forced = env.CORE_HARNESS;
   if (typeof forced === 'string' && HARNESS_RE.test(forced)) return forced;
-  if (env && (env.CODEX_PLUGIN_ROOT || env.CODEX_THREAD_ID || env.CODEX_HARNESS || env.CODEX_SANDBOX)) return 'codex';
-  if (env && (env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT || env.CLAUDE_PLUGIN_ROOT)) return 'claude-code';
-  return 'unknown';
+  if (env.CODEX_PLUGIN_ROOT || env.CODEX_THREAD_ID || env.CODEX_HARNESS || env.CODEX_SANDBOX) return 'codex';
+  if (env.CLAUDECODE || env.CLAUDE_CODE_ENTRYPOINT || env.CLAUDE_PLUGIN_ROOT) return 'claude-code';
+  return null;
+}
+
+// A caller's env object often carries only config flags; with no harness signal in it,
+// the process's own env decides, so a partial env never re-files state under 'unknown'.
+export function detectStateHarness(env = process.env) {
+  return harnessFromEnv(env) ?? (env !== process.env ? harnessFromEnv(process.env) : null) ?? 'unknown';
 }
 
 /**

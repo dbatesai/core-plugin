@@ -358,7 +358,13 @@ test('detectStateHarness: positive signals only; an unrecognized harness gets it
   assert.equal(detectStateHarness({ CLAUDE_PLUGIN_ROOT: '/x' }), 'claude-code');
   assert.equal(detectStateHarness({ CODEX_THREAD_ID: 't' }), 'codex');
   assert.equal(detectStateHarness({ CORE_HARNESS: 'other-harness' }), 'other-harness');
-  assert.equal(detectStateHarness({}), 'unknown');
+  const saved = { ...process.env };
+  try {
+    for (const k of Object.keys(process.env)) if (/^(CLAUDE|CODEX|CORE_HARNESS)/.test(k)) delete process.env[k];
+    assert.equal(detectStateHarness({}), 'unknown');
+    process.env.CLAUDECODE = '1';
+    assert.equal(detectStateHarness({ CORE_METRICS_ENABLED: '1' }), 'claude-code', 'a config-only env falls back to the process env');
+  } finally { for (const k of Object.keys(process.env)) delete process.env[k]; Object.assign(process.env, saved); }
 });
 
 test('metricsEnabled: a root workspace.json can switch capture off but never on', async () => {
