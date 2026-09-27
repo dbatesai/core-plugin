@@ -135,7 +135,7 @@ function chromeOf(html) {
 }
 
 function fixtureProject({ workspace = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'metrics-artifact-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'metrics-artifact-')));
   const home = join(root, 'home');
   mkdirSync(join(home, '.core'), { recursive: true });
   // A registered project keeps its receipts in its own .core/<harness>/.
@@ -466,7 +466,7 @@ test('ACCEPTANCE (dirty-tree provenance): pluginTreeDirty is true on a modified 
   const { execFileSync: exec } = await import('node:child_process');
   const { pluginTreeDirty } = await import(pathToFileURL(join(SCRIPTS, 'artifact-provenance.mjs')).href);
   // Controlled fixture: a throwaway git repo with a plugin-root-shaped subtree.
-  const repo = mkdtempSync(join(tmpdir(), 'prov-dirty-'));
+  const repo = realpathSync.native(mkdtempSync(join(tmpdir(), 'prov-dirty-')));
   try {
     const pluginRoot = join(repo, 'plugins', 'core');
     const scriptsDir = join(pluginRoot, 'skills', 'core', 'scripts');
@@ -546,7 +546,7 @@ test('--record-publish on a metrics generation receipt lands kind core-metrics-a
 });
 
 test('published-private REFUSES to record without a consent record (--consent-by + --consent-mechanism)', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'receipts-consent-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipts-consent-')));
   const genPath = join(dir, 'gen.json');
   try {
     writeGenerationReceipt(genPath);
@@ -561,7 +561,7 @@ test('published-private REFUSES to record without a consent record (--consent-by
 });
 
 test('browse-kind publish receipt copies snapshot_id from the generation receipt (self-contained after deletion)', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'receipts-snapshot-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipts-snapshot-')));
   const genPath = join(dir, '2026-07-22T21-00-00-000Z.json');
   try {
     writeGenerationReceipt(genPath, {
@@ -584,7 +584,7 @@ test('browse-kind publish receipt copies snapshot_id from the generation receipt
 });
 
 test('declined outcomes record without consent flags; unknown generation kinds are refused', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'receipts-declined-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipts-declined-')));
   const genPath = join(dir, 'gen.json');
   try {
     writeGenerationReceipt(genPath);
@@ -605,7 +605,7 @@ test('declined outcomes record without consent flags; unknown generation kinds a
 });
 
 test('--record-revocation stamps revoked_at on a PUBLISHED-PRIVATE receipt, then refuses a double revoke', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'receipts-revoke-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipts-revoke-')));
   const genPath = join(dir, '2026-07-23T02-00-00-000Z.json');
   try {
     writeGenerationReceipt(genPath);
@@ -628,7 +628,7 @@ test('--record-revocation stamps revoked_at on a PUBLISHED-PRIVATE receipt, then
 // ---------- ACCEPTANCE: receipt hardening ----------
 
 test('ACCEPTANCE (receipt hardening): a forged generation receipt with no content digest is REFUSED (full schema, not just kind)', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'receipts-forged-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipts-forged-')));
   try {
     // A blob with a VALID kind but no content digest — the old check passed on
     // kind alone; full-schema validation refuses it.
@@ -656,7 +656,7 @@ test('ACCEPTANCE (receipt hardening): a forged generation receipt with no conten
 });
 
 test('ACCEPTANCE (receipt hardening): the artifact content digest is copied into the publish receipt', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'receipts-digest-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipts-digest-')));
   const genPath = join(dir, 'gen.json');
   try {
     const digest = writeGenerationReceipt(genPath, { html: '<html>exact bytes</html>' });
@@ -672,7 +672,7 @@ test('ACCEPTANCE (receipt hardening): the artifact content digest is copied into
 });
 
 test('ACCEPTANCE (receipt hardening): published-private REFUSES a null artifact_url', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'receipts-nourl-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipts-nourl-')));
   const genPath = join(dir, 'gen.json');
   try {
     writeGenerationReceipt(genPath);
@@ -688,7 +688,7 @@ test('ACCEPTANCE (receipt hardening): published-private REFUSES a null artifact_
 
 test('ACCEPTANCE (receipt hardening): a declined/failed receipt can NEVER be marked revoked', () => {
   for (const status of ['declined', 'failed']) {
-    const dir = mkdtempSync(join(tmpdir(), `receipts-${status}-`));
+    const dir = realpathSync.native(mkdtempSync(join(tmpdir(), `receipts-${status}-`)));
     const genPath = join(dir, 'gen.json');
     try {
       writeGenerationReceipt(genPath);
@@ -709,7 +709,7 @@ test('ACCEPTANCE (receipt hardening): a declined/failed receipt can NEVER be mar
 test('refused project state (a symlinked .core): receipt lands in the flagged fallback location', { skip: process.platform === 'win32' }, async () => {
   if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const { root, home } = fixtureProject();
-  const elsewhere = mkdtempSync(join(tmpdir(), 'metrics-elsewhere-'));
+  const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'metrics-elsewhere-')));
   try {
     symlinkSync(elsewhere, join(root, '.core'));
     const dataPath = join(root, 'metrics.json');

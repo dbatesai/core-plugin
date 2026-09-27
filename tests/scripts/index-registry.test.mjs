@@ -27,7 +27,7 @@ function spawnAsync(args) {
 }
 
 function sandbox() {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), 'index-registry-')));
+  const base = realpathSync(realpathSync.native(mkdtempSync(join(tmpdir(), 'index-registry-'))));
   const home = join(base, 'home');
   const coreDir = join(home, '.core');
   mkdirSync(coreDir, { recursive: true });

@@ -62,7 +62,7 @@ const rtest = (name, fn) => test(name, TREE_CLEAN ? fn : () => { assert.fail(DIR
 const stubMetrics = async () => ({ report: 'STUB METRICS REPORT (four evidence classes)', mechanics: { status: 'WORKING' } });
 
 function fixtureProject({ workspace = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'browse-artifact-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-artifact-')));
   const mem = join(root, '_memories');
   mkdirSync(join(mem, 'archive'), { recursive: true });
   writeFileSync(join(mem, 'dc-1-alpha.md'),
@@ -234,7 +234,7 @@ rtest('writes a local receipt in the project state with content identical to the
 
 rtest('refused project state (a symlinked .core) → receipt still written to the flagged fallback location', { skip: process.platform === 'win32' }, async () => {
   const { root, home } = fixtureProject();
-  const elsewhere = mkdtempSync(join(tmpdir(), 'browse-elsewhere-'));
+  const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-elsewhere-')));
   try {
     symlinkSync(elsewhere, join(root, '.core'));
     const { manifest, receiptWritten } = await generate(root, home);
@@ -486,7 +486,7 @@ test('falsifier: in a CLEAN git checkout the emitted source SHA equals git rev-p
 
 test('installed tree (no .git): stamped manifest identity used; no SHA at all: fail closed, nothing rendered', async () => {
   // Copy the whole plugin tree (plugins/core) outside any git repo — tmpdir.
-  const pluginCopy = mkdtempSync(join(tmpdir(), 'browse-plugin-copy-'));
+  const pluginCopy = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-plugin-copy-')));
   const { root, home } = fixtureProject();
   const cli = join(pluginCopy, 'skills', 'core', 'scripts', 'render-browse-artifact.mjs');
   const manifestPath = join(pluginCopy, '.claude-plugin', 'plugin.json');
@@ -603,7 +603,7 @@ test('--record-revocation stamps revoked_at and preserves a manually-authored re
   // Fixture mirrors the shape of the real hand-written first publish receipt
   // (2026-07-22T22-41-34-360Z.publish.json) including its extra fields —
   // schema compatibility means the manual record stays a valid citizen.
-  const dir = mkdtempSync(join(tmpdir(), 'browse-revoke-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-revoke-')));
   const p = join(dir, '2026-07-22T22-41-34-360Z.publish.json');
   try {
     writeFileSync(p, JSON.stringify({
@@ -680,9 +680,9 @@ rtest('CLI: stdout is exactly one JSON manifest with the stable shape', () => {
 const { generationReceiptLocation } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
 
 test('a planted .core cannot redirect the receipt out of the operational root', { skip: process.platform === 'win32' }, () => {
-  const home = mkdtempSync(join(tmpdir(), 'receipt-home-'));
-  const project = mkdtempSync(join(tmpdir(), 'receipt-project-'));
-  const stolen = mkdtempSync(join(tmpdir(), 'receipt-stolen-'));
+  const home = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-home-')));
+  const project = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-project-')));
+  const stolen = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-stolen-')));
   try {
     mkdirSync(join(home, '.core'), { recursive: true });
     writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
@@ -712,7 +712,7 @@ const { publishArtifactWithReceipt, resolveArtifactDestination, artifactContentD
   await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
 
 function publishFixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'publish-tx-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'publish-tx-')));
   const outPath = join(dir, 'out', 'page.html');
   const receiptDir = join(dir, 'receipts');
   const html = '<h1>page</h1>';
@@ -759,7 +759,7 @@ test('the happy path writes both and binds the receipt to the exact bytes', () =
 });
 
 test('output containment is judged on the real path, not the spelling', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'out-contain-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'out-contain-')));
   const store = join(dir, 'project', '_memories');
   mkdirSync(store, { recursive: true });
   const outside = join(dir, 'elsewhere');
@@ -785,7 +785,7 @@ test('output containment is judged on the real path, not the spelling', () => {
 });
 
 test('a truncated unit is named as unreadable, never embedded as a blank one', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'structural-loss-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'structural-loss-')));
   const mem = join(dir, '_memories');
   mkdirSync(join(mem, 'archive'), { recursive: true });
   writeFileSync(join(mem, 'good.md'),
@@ -811,7 +811,7 @@ test('a truncated unit is named as unreadable, never embedded as a blank one', (
 // ============================================================
 
 test('collectUnits carries every frontmatter field as properties — not just the curated badge subset', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'properties-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'properties-')));
   const mem = join(dir, '_memories');
   mkdirSync(mem, { recursive: true });
   writeFileSync(join(mem, 'dc-1-props.md'),

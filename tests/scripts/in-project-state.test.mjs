@@ -27,7 +27,7 @@ const isWin = process.platform === 'win32';
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
 
 function sandbox() {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), 'in-project-state-')));
+  const base = realpathSync(realpathSync.native(mkdtempSync(join(tmpdir(), 'in-project-state-'))));
   const home = join(base, 'home');
   const coreDir = join(home, '.core');
   mkdirSync(coreDir, { recursive: true });

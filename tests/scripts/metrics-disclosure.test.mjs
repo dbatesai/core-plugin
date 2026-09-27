@@ -14,7 +14,7 @@ const HARNESS = 'claude-code';
 const ENV = { CORE_HARNESS: HARNESS };
 
 function sandbox(fn, { registered = true } = {}) {
-  const base = mkdtempSync(join(tmpdir(), 'metrics-disclosure-'));
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'metrics-disclosure-')));
   const home = join(base, 'home');
   const coreDir = join(home, '.core');
   const project = join(base, 'project');
