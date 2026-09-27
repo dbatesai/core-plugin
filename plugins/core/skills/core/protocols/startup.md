@@ -67,12 +67,14 @@ Note the printed profile for later; don't narrate it unless the session actually
 **Resolve the project.** Run the registration script as the first action of workspace resolution. The guard is mechanical, not advisory — if `CORE_ROOT` is blank or its scripts dir is absent, the call skips with a marker instead of running `node` against an empty/wrong path:
 
 ```bash
-[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] \
-  && node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" register \
-  || echo "CORE-ROOT-UNRESOLVED: skipping project registration"
+if [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ]; then
+  node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" register
+else
+  echo "CORE-ROOT-UNRESOLVED: skipping project registration"
+fi
 ```
 
-It prints one JSON line with an `action`:
+It prints one JSON line with an `action`. `ask`, `adopt-ask` and `refuse` exit non-zero on purpose; the JSON line is the answer, and a non-zero exit here is not an unresolved root:
 
 - `registered` — the working directory is a registered project. `root` is the project.
 - `new` — it wasn't registered and now is. `root` is the project; routing will treat it as new unless it has content.
