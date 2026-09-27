@@ -209,6 +209,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
 
 const LOCK_STALE_MS = 15 * 60 * 1000;
 const RECEIPT = 'migrated-from.json';
+const LEGACY_MANIFEST = 'legacy-workspace.json';
 // Per-project records the new layout keeps; lock artifacts and the retired canary are not copied.
 const SKIP_ON_COPY = [/\.lock(\.g\d+)?(\.done)?$/, /\.lock\.g\d+\.done$/, /^\.DS_Store$/, /^visibility-canary\.json$/];
 // Files that belong in the 'hot' state location (append-heavy or lock-bearing).
@@ -306,7 +307,8 @@ export function applyMigration({ root, harness = detectStateHarness(), coreDir =
           const target = HOT_TOP.has(name) ? hot.dir : durable.dir;
           if (st.isDirectory()) { copyTree(from, join(target, name), copies); continue; }
           if (SKIP_ON_COPY.some((re) => re.test(name))) continue;
-          const to = join(target, name);
+          // The legacy manifest is kept verbatim beside the live one, which is built from its fields.
+          const to = join(target, name === 'workspace.json' ? LEGACY_MANIFEST : name);
           copyFileSync(from, to);
           copies.push({ from, to, sha256: sha256(from) });
         }
@@ -321,7 +323,11 @@ export function applyMigration({ root, harness = detectStateHarness(), coreDir =
       const pointer = readJson(join(real, 'workspace.json'), {});
       const carry = {};
       for (const k of ['metrics_enabled', 'turn_capture']) if (typeof pointer[k] === 'boolean') carry[k] = pointer[k];
-      if (live) updateManifest({ root: real, harness, coreDir, fields: { ...carry, project_id: live.workspace_id, harness, migrated_from: live.workspace_id } });
+      if (live) {
+        const legacy = readJson(join(coreDir, 'workspaces', live.workspace_id, 'workspace.json'), {});
+        const { workspace_id: _id, path: _path, project_path: _pp, ...kept } = legacy && typeof legacy === 'object' ? legacy : {};
+        updateManifest({ root: real, harness, coreDir, fields: { ...kept, ...carry, project_id: live.workspace_id, harness, migrated_from: live.workspace_id } });
+      }
 
       atomicWriteFileSync(receiptFile, JSON.stringify({
         complete: true, migrated_at: iso, harness, root: real,

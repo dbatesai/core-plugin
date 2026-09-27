@@ -1,3 +1,4 @@
+import { realpathSync, symlinkSync } from 'node:fs';
 /**
  * render-metrics-artifact — the /metrics artifact-page generator.
  * Covers:
@@ -135,9 +136,10 @@ function chromeOf(html) {
 
 function fixtureProject({ workspace = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'metrics-artifact-'));
-  if (workspace) writeFileSync(join(root, 'workspace.json'), JSON.stringify({ workspace_id: 'metrics-test-ws' }));
   const home = join(root, 'home');
-  mkdirSync(home, { recursive: true });
+  mkdirSync(join(home, '.core'), { recursive: true });
+  // A registered project keeps its receipts in its own .core/<harness>/.
+  if (workspace) writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: root }]));
   return { root, home };
 }
 
@@ -372,7 +374,7 @@ test('CLI --json-in: renders from a pre-captured canonical object; manifest is a
     assert.equal(manifest.content_note, METRICS_ARTIFACT_CONTENT_NOTE);
     assert.equal(manifest.data_source, 'json-in');
     assert.equal(manifest.data_generated_at, '2026-07-22T20:00:00.000Z');
-    assert.equal(manifest.workspace_id, 'metrics-test-ws');
+    assert.match(manifest.project_id, /^[0-9a-f]{32}$/);
     assert.equal(manifest.receipt_fallback, false);
     // Lighter than browse — deliberately no unit-count/sensitivity machinery.
     assert.ok(!('unit_count' in manifest), 'no unit-count machinery');
@@ -380,8 +382,8 @@ test('CLI --json-in: renders from a pre-captured canonical object; manifest is a
     const onDisk = readFileSync(out);
     assert.equal(manifest.total_bytes, onDisk.length, 'total_bytes == real file size');
     assert.match(onDisk.toString('utf8'), /1 &middot; Does the machinery work\?/);
-    // Generation receipt written under the workspace, content == manifest.
-    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'workspaces', 'metrics-test-ws', 'artifact-receipts')));
+    // Generation receipt written in the project's own state, content == manifest.
+    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '.core')));
     assert.deepEqual(JSON.parse(readFileSync(manifest.receipt_path, 'utf8')), manifest);
     // Truthful renderer identity, distinct from the data producer.
     assert.equal(manifest.producer.script, 'render-metrics-artifact.mjs');
@@ -702,20 +704,22 @@ test('ACCEPTANCE (receipt hardening): a declined/failed receipt can NEVER be mar
   }
 });
 
-// ---------- no-workspace fallback ----------
+// ---------- refused-state fallback ----------
 
-test('no workspace.json: receipt lands in the flagged fallback location', async () => {
+test('refused project state (a symlinked .core): receipt lands in the flagged fallback location', { skip: process.platform === 'win32' }, async () => {
   if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
-  const { root, home } = fixtureProject({ workspace: false });
+  const { root, home } = fixtureProject();
+  const elsewhere = mkdtempSync(join(tmpdir(), 'metrics-elsewhere-'));
   try {
+    symlinkSync(elsewhere, join(root, '.core'));
     const dataPath = join(root, 'metrics.json');
     writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
     const { manifest, receiptWritten } = await renderMetricsArtifact(root, { outPath: join(root, 'out', 'v.html'), jsonIn: dataPath, home });
     assert.equal(receiptWritten, true);
     assert.equal(manifest.receipt_fallback, true);
-    assert.equal(manifest.workspace_id, null);
+    assert.equal(manifest.project_id, null);
     assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'artifact-receipts')));
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(elsewhere, { recursive: true, force: true }); }
 });
 
 test('sanitizeForEmbed: an unknown top-level field never reaches the embed, and the drop is disclosed', async () => {

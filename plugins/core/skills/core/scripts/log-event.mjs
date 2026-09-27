@@ -91,7 +91,9 @@ export function operationalMetricsDir(projectDir, { home = homedir(), env = proc
   const coreDir = join(home, '.core');
   const root = projectRootFor(projectDir, { home, coreDir });
   const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir, forWrite: true });
-  return join(s.dir, 'metrics');
+  const dir = join(s.dir, 'metrics');
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 /** The metrics dir when trustworthy state already exists for this project; null otherwise. Never writes. */
