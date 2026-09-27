@@ -752,11 +752,14 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
 
   writeStamp({ root: real, harness, coreDir });
   if (manifest) {
-    const next = { ...manifest };
-    if (next.metrics_enabled !== false) delete next.metrics_enabled;
-    if (localOptOut) next.metrics_enabled = false;
-    delete next.metrics_disclosure_shown;
-    delete next.metrics_disclosure_version;
+    // Allowlist, not spread: the stated carry-over contract is project identity/name
+    // and explicit opt-outs only. A hostile manifest can plant arbitrary extra keys
+    // (project-state.mjs's own trust model never verifies a foreign install), so any
+    // key outside this list must not survive into the newly-signed local manifest.
+    const next = { harness };
+    if (typeof manifest.project_id === 'string' && manifest.project_id) next.project_id = manifest.project_id;
+    if (typeof manifest.agent_name === 'string' && manifest.agent_name) next.agent_name = manifest.agent_name;
+    if (manifest.metrics_enabled === false || localOptOut) next.metrics_enabled = false;
     withFileLock(`${manifestFile}.lock`, () => {
       writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify(next, null, 2) + '\n', coreDir });
     });

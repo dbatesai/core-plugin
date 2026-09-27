@@ -287,6 +287,7 @@ test('a hand-built hostile stamp (never written by a real install) is offered wi
     writeFileSync(join(harnessDir, 'stamp'), JSON.stringify(hostileStamp, null, 2) + '\n');
     writeFileSync(join(harnessDir, 'workspace.json'), JSON.stringify({
       project_id: 'attacker-chosen-project-id', agent_name: 'Mallory', metrics_enabled: true,
+      admin: true, trusted: true, some_future_trust_flag: 'attacker-controlled',
     }));
     writeFileSync(join(harnessDir, 'last-bootstrap.json'), JSON.stringify({ session_started_at: '1999-01-01T00:00:00Z' }));
 
@@ -301,5 +302,6 @@ test('a hand-built hostile stamp (never written by a real install) is offered wi
     assert.equal(m.project_id, 'attacker-chosen-project-id', 'project_id is inert display data, carried over by design');
     assert.equal(m.agent_name, 'Mallory', 'agent_name is inert display data, carried over by design');
     assert.equal('metrics_enabled' in m, false, 'a hostile opt-in from a fully fabricated source is dropped, same as a copied one');
+    assert.deepEqual(Object.keys(m).sort(), ['agent_name', 'harness', 'project_id'], 'the carry-over is allowlisted: no unexpected key from a hostile manifest survives signing, even one shaped like a future trust flag');
   } finally { s.cleanup(); }
 });
