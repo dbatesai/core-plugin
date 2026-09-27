@@ -22,6 +22,9 @@ import {
   TURN_CAPTURE_FILE_MODE,
 } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
 
+// Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
+process.env.CORE_HARNESS ||= 'claude-code';
+
 // Opt-outs live in the project's trusted per-harness manifest. The manifest for an
 // unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
 // redirected for this file's process.

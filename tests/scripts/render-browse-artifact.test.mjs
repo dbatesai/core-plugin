@@ -21,6 +21,9 @@ import { join, dirname, basename, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { symlinkSync, realpathSync } from 'node:fs';
 
+// Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
+process.env.CORE_HARNESS ||= 'claude-code';
+
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const {

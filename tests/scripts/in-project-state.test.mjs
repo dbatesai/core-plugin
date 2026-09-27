@@ -357,7 +357,7 @@ test('detectStateHarness: positive signals only; an unrecognized harness gets it
   assert.equal(detectStateHarness({ CLAUDECODE: '1' }), 'claude-code');
   assert.equal(detectStateHarness({ CLAUDE_PLUGIN_ROOT: '/x' }), 'claude-code');
   assert.equal(detectStateHarness({ CODEX_THREAD_ID: 't' }), 'codex');
-  assert.equal(detectStateHarness({ CORE_HARNESS: 'antigravity' }), 'antigravity');
+  assert.equal(detectStateHarness({ CORE_HARNESS: 'other-harness' }), 'other-harness');
   assert.equal(detectStateHarness({}), 'unknown');
 });
 

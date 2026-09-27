@@ -9,6 +9,9 @@ import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { initMetrics } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 import { resolveStoragePath, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 
+// Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
+process.env.CORE_HARNESS ||= 'claude-code';
+
 const METRICS_INIT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/metrics-init.mjs', import.meta.url));
 
 // prove the actual scaffold + the actual consume path, not prose.
