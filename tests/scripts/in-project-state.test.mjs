@@ -384,3 +384,23 @@ test('metricsEnabled: a root workspace.json can switch capture off but never on'
     assert.equal(metricsEnabled({ project, env: { ...env, CORE_METRICS_ENABLED: '0' }, home }), false);
   } finally { rm(home, { recursive: true, force: true }); rm(project, { recursive: true, force: true }); }
 });
+
+test('concurrent first writes in a fresh project never set each other aside', async () => {
+  for (let round = 0; round < 5; round++) {
+    const s = sandbox();
+    try {
+      const p = s.mk('Projects', `Fresh${round}`);
+      registerProject(s.coreDir, p);
+      const cmds = [];
+      for (let i = 0; i < 4; i++) {
+        cmds.push(spawnAsync([REGISTRY_CLI, 'touch', '--root', p, '--harness', 'claude-code', '--core-dir', s.coreDir]));
+        cmds.push(spawnAsync([REGISTRY_CLI, 'manifest', '--root', p, '--harness', 'claude-code', '--set-json', JSON.stringify({ [`k${i}`]: i }), '--core-dir', s.coreDir]));
+      }
+      for (const r of await Promise.all(cmds)) assert.equal(r.status, 0, r.stderr);
+      const dir = join(p, '.core', 'claude-code');
+      assert.ok(existsSync(join(dir, 'last-active')), 'last-active survived');
+      assert.ok(!readdirSync(dir).includes('superseded'), 'nothing was set aside');
+      assert.deepEqual(readdirSync(join(p, '.core')).filter((n) => n.startsWith('.creating-')), [], 'no temp folders left');
+    } finally { s.cleanup(); }
+  }
+});

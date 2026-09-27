@@ -21,12 +21,13 @@
  */
 
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
-  writeFileSync, accessSync, constants as fsConstants,
+  existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
+  rmSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { withFileLock } from './file-lock.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { projectPathContainsOneDriveSubstring } from './metrics-init.mjs';
 import { requireTrustedHome, containedPath } from './trusted-home.mjs';
@@ -212,13 +213,17 @@ export function checkStateContainment({ root, harness }) {
  */
 export function ensureStateDir(opts) {
   const target = projectStateDir(opts);
-  if (target.location === 'project') return { ...target, dir: ensureInProjectDir(opts.root, opts.harness) };
+  if (target.location === 'project') {
+    const dir = join(canonical(opts.root), STATE_DIRNAME, assertHarnessName(opts.harness));
+    if (!existsSync(dir)) writeStamp({ root: opts.root, harness: opts.harness, coreDir: opts.coreDir || defaultCoreDir() });
+    return { ...target, dir };
+  }
   mkdirSync(target.dir, { recursive: true });
   return target;
 }
 
-/** Create <root>/.core/<harness>/ — refusing a symlinked or escaping .core, .gitignore first. */
-function ensureInProjectDir(root, harness) {
+/** Create <root>/.core/ — refusing a symlinked or escaping .core — with .gitignore first. */
+function ensureCoreDir(root, harness) {
   const real = canonical(root);
   const containment = checkStateContainment({ root: real, harness });
   if (containment && containment !== 'ok' && containment !== 'ok-absent-harness') {
@@ -228,15 +233,37 @@ function ensureInProjectDir(root, harness) {
   mkdirSync(coreDir, { recursive: true });
   const gitignore = join(coreDir, '.gitignore');
   if (!existsSync(gitignore)) writeFileSync(gitignore, '*\n');
-  const dir = join(coreDir, assertHarnessName(harness));
-  mkdirSync(dir, { recursive: true });
-  return dir;
+  return coreDir;
+}
+
+// A harness folder never exists without its stamp: it is built beside its final name
+// with the stamp inside and renamed into place, so a concurrent reader can't see an
+// unstamped folder and set it aside as planted. Losing the rename race is fine.
+function createStampedHarnessDir(stateRoot, harness, stampBody) {
+  const final = join(stateRoot, harness);
+  if (existsSync(final)) return final;
+  const tmp = join(stateRoot, `.creating-${harness}-${randomBytes(6).toString('hex')}`);
+  mkdirSync(tmp);
+  try {
+    writeFileSync(join(tmp, 'stamp'), stampBody);
+    renameSync(tmp, final);
+  } catch (err) {
+    rmSync(tmp, { recursive: true, force: true });
+    if (!existsSync(final)) throw err;
+  }
+  return final;
 }
 
 // ---------- install identity and the stamp ----------
 
+// Written whole to a temp file, then hard-linked into place: a concurrent reader sees
+// either no file or the complete one, never an empty file mid-write.
 function createOnce(file, content, mode) {
-  try { writeFileSync(file, content, { flag: 'wx', mode }); } catch (err) { if (err.code !== 'EEXIST') throw err; }
+  if (!existsSync(file)) {
+    const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    writeFileSync(tmp, content, { mode });
+    try { linkSync(tmp, file); } catch (err) { if (err.code !== 'EEXIST') throw err; } finally { rmSync(tmp, { force: true }); }
+  }
   return readFileSync(file, 'utf8').trim();
 }
 
@@ -259,8 +286,9 @@ export function writeStamp({ root, harness, coreDir = defaultCoreDir() }) {
   const path = canonical(root);
   const stamp = { path, harness: assertHarnessName(harness), install_id: installId };
   stamp.hmac = stampHmac(secret, stamp);
-  const dir = ensureInProjectDir(path, harness);
-  atomicWriteFileSync(join(dir, 'stamp'), JSON.stringify(stamp, null, 2) + '\n');
+  const body = JSON.stringify(stamp, null, 2) + '\n';
+  const dir = createStampedHarnessDir(ensureCoreDir(path, harness), stamp.harness, body);
+  atomicWriteFileSync(join(dir, 'stamp'), body);
   return stamp;
 }
 
@@ -425,6 +453,9 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
     case 'planted':
     case 'copied': {
       if (!forWrite) return null;
+      if (classifyStamp({ root: real, harness, coreDir }).status === 'verified') {
+        return { dir: target.dir, location: 'project', status: 'verified', trusted: true };
+      }
       const label = `${verdict.status === 'copied' ? 'copied' : 'unverified'}-${isoStamp()}`;
       const aside = setAside(harnessDir, label);
       writeStamp({ root: real, harness, coreDir });
@@ -455,16 +486,18 @@ export function readManifest({ root, harness, coreDir = defaultCoreDir() }) {
 export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fields = {}, onEvent }) {
   const s = stateDir({ root, harness, kind: 'durable', coreDir, forWrite: true, onEvent });
   const file = join(s.dir, MANIFEST);
-  let current = {};
-  if (existsSync(file)) {
-    // An unparseable manifest is surfaced, never silently replaced.
-    try { current = JSON.parse(readFileSync(file, 'utf8')); } catch (err) {
-      throw Object.assign(new Error(`manifest-unparseable: ${file}: ${err.message}`), { code: 'MANIFEST_UNPARSEABLE' });
+  return withFileLock(`${file}.lock`, () => {
+    let current = {};
+    if (existsSync(file)) {
+      // An unparseable manifest is surfaced, never silently replaced.
+      try { current = JSON.parse(readFileSync(file, 'utf8')); } catch (err) {
+        throw Object.assign(new Error(`manifest-unparseable: ${file}: ${err.message}`), { code: 'MANIFEST_UNPARSEABLE' });
+      }
     }
-  }
-  const next = { ...current, ...fields };
-  if (!next.project_id) next.project_id = randomBytes(16).toString('hex');
-  if (!next.harness) next.harness = harness;
-  atomicWriteFileSync(file, JSON.stringify(next, null, 2) + '\n');
-  return next;
+    const next = { ...current, ...fields };
+    if (!next.project_id) next.project_id = randomBytes(16).toString('hex');
+    if (!next.harness) next.harness = harness;
+    atomicWriteFileSync(file, JSON.stringify(next, null, 2) + '\n');
+    return next;
+  });
 }
