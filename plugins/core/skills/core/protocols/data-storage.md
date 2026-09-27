@@ -673,13 +673,15 @@ Three rings, one read at runtime.
     └── <harness>/                 ← one per harness: claude-code, codex, …
         ├── stamp                  ← provenance: HMAC of (path, harness, install id)
         ├── workspace.json         ← manifest: project_id, agent_name, disclosure flags, opt-outs
+        ├── workspace.json.mac     ← content MAC; a missing or wrong one reads the manifest as absent
         ├── last-active
         ├── last-bootstrap.json    ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
+        ├── last-bootstrap.json.mac
         ├── capability-history.jsonl
         ├── metrics/               ← derived metrics, calibration pool, rollups
         ├── artifact-receipts/
         ├── drafts/
-        └── superseded/            ← state set aside (unverified, copied, migrated duplicates)
+        └── superseded/            ← state set aside (unverified, copied, migrated duplicates, legacy-<date> drift)
 ```
 
 **Agent operational ring** — `~/.core/`

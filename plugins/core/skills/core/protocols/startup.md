@@ -86,7 +86,11 @@ Use `root` as `<root>` everywhere below.
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
 node "${CORE_ROOT}/skills/core/scripts/migrate-workspace-state.mjs" --apply --root <root> || true
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/migrate-workspace-state.mjs" --drift-check --root <root> || true
 ```
+
+The drift check catches an older build of this harness that kept writing to the old workspace after migration (a rollback, or a second machine). Log lines it appended arrive in the project's copy exactly once; other changed files land in `superseded/legacy-<date>/`. When `status` is `brought-in`, say in one line what arrived. `unchanged`, `not-migrated` and `no-state` need no mention.
 
 It copies (never moves) the old workspace into `<root>/.core/<harness>/`, verifies every copy, and leaves the old folder in place. Mention it in one line when `status` is `migrated`. When it is `held`, name the held workspaces and the reason; they wait for the user.
 
@@ -453,8 +457,8 @@ The marker is the first-user-message timestamp. `last-bootstrap.json`'s `session
 The check, in order:
 
 1. **New workspace — no dedup.** No registered project for the cwd (`index-registry.mjs last-active` prints `(none)`) means startup has never run here; it's startup that creates the registration and the state. Skip the dedup check and run the protocol. The check applies to returning sessions only.
-2. **Resolve and compare.** Read `<root>/.core/<harness>/last-bootstrap.json` for the registered project containing the cwd, and compare its `session_started_at` to the timestamp of the current session's first user message. Same first message (allow a few minutes of tolerance for format and timezone jitter — the question is "same session?", not "same second?") → bootstrap already ran; skip the protocol read.
-3. **Can't determine → run.** If you can't see the first user message's timestamp, or the file is absent or unparseable, treat bootstrap as not-yet-run and run the protocol. The failure direction is chosen deliberately: re-running bootstrap wastes a little time; wrongly skipping it means operating without routing, edit-detection, or the readiness contract.
+2. **Resolve and compare.** Run `node <CORE_ROOT>/skills/core/scripts/index-registry.mjs bootstrap-status --root <root>` for the registered project containing the cwd. It prints the verified `session_started_at`, or `(none)` when the record is absent, untrusted, git-tracked, or fails its signature check. Don't read `last-bootstrap.json` directly, because a direct read skips that check. Compare the printed `session_started_at` to the timestamp of the current session's first user message. Same first message (allow a few minutes of tolerance for format and timezone jitter — the question is "same session?", not "same second?") → bootstrap already ran; skip the protocol read.
+3. **Can't determine → run.** If you can't see the first user message's timestamp, or `bootstrap-status` prints `(none)`, treat bootstrap as not-yet-run and run the protocol. The failure direction is chosen deliberately: re-running bootstrap wastes a little time; wrongly skipping it means operating without routing, edit-detection, or the readiness contract.
 
 Known limitation, named: on a harness that exposes no message timestamps, this gate can't distinguish sessions and effectively always re-runs bootstrap. That is the designed degradation — double-bootstrap, never silent-skip.
 

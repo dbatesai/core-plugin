@@ -21,11 +21,12 @@
  */
 
 import {
-  existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
+  chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
   rmSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
@@ -467,21 +468,92 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
   }
 }
 
+// ---------- signed control files ----------
+
+// A stamp proves where state belongs, not that its files are unchanged. Files whose
+// values can suppress a safety action (the manifest's disclosure and metrics flags,
+// the bootstrap dedup record) carry a MAC sidecar; a missing or wrong MAC, or a copy
+// git tracks (a force-added file a pull could overwrite), reads as absent.
+
+const MAC_SUFFIX = '.mac';
+
+export function contentMac(secret, rel, bytes) {
+  return createHmac('sha256', secret).update(JSON.stringify([rel, Buffer.from(bytes).toString('base64')])).digest('hex');
+}
+
+/** Names under .core/<harness>/ that git tracks at `root`; empty outside a repo or without git. */
+export function trackedStateFiles(root, harness) {
+  const prefix = `${STATE_DIRNAME}/${harness}/`;
+  let names = new Set();
+  try {
+    // Without --full-name, ls-files prints paths relative to -C, so a project nested
+    // inside a larger repo still lists as `.core/<harness>/<name>`.
+    const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', prefix], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
+    });
+    names = new Set(out.split('\0').filter(Boolean).filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length)));
+  } catch { names = new Set(); }
+  return names;
+}
+
+/** Write `name` in the state dir with its MAC sidecar. Callers hold the file's lock. */
+export function writeSignedFile({ dir, name, body, coreDir = defaultCoreDir(), mode }) {
+  const { secret } = ensureInstallIdentity({ coreDir });
+  const file = join(dir, name);
+  atomicWriteFileSync(file, body);
+  if (mode) { try { chmodSync(file, mode); } catch { /* Windows: mode is advisory */ } }
+  atomicWriteFileSync(`${file}${MAC_SUFFIX}`, contentMac(secret, name, body) + '\n');
+  return file;
+}
+
+/**
+ * The verified bytes of `name` in the state for (root, harness), as a string, or null
+ * when the state is absent or untrusted, git tracks the file, or its MAC doesn't match.
+ * A writer sits between the file and its sidecar for a moment, so one re-read is taken
+ * before calling a mismatch.
+ */
+export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir() }) {
+  const s = stateDir({ root, harness, kind: 'durable', coreDir });
+  if (!s) return null;
+  if (s.location === 'project' && trackedStateFiles(canonical(root), harness).has(name)) return null;
+  let secret;
+  try { ({ secret } = ensureInstallIdentity({ coreDir })); } catch { return null; }
+  const file = join(s.dir, name);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let bytes, mac;
+    try {
+      bytes = readFileSync(file);
+      mac = readFileSync(`${file}${MAC_SUFFIX}`, 'utf8').trim();
+    } catch { return null; }
+    const want = Buffer.from(contentMac(secret, name, bytes), 'hex');
+    const got = /^[0-9a-f]{64}$/.test(mac) ? Buffer.from(mac, 'hex') : null;
+    if (got && timingSafeEqual(want, got)) return bytes.toString('utf8');
+    if (attempt === 0) sleepMs(25);
+  }
+  return null;
+}
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 // ---------- the per-harness manifest (workspace.json) ----------
 
 const MANIFEST = 'workspace.json';
 
-/** The manifest for (root, harness), or null when absent or untrusted. */
+/** The manifest for (root, harness), or null when absent, untrusted, tracked, or its MAC fails. */
 export function readManifest({ root, harness, coreDir = defaultCoreDir() }) {
-  const s = stateDir({ root, harness, kind: 'durable', coreDir });
-  if (!s) return null;
-  try { return JSON.parse(readFileSync(join(s.dir, MANIFEST), 'utf8')); } catch { return null; }
+  const text = readSignedFile({ root, harness, name: MANIFEST, coreDir });
+  if (text === null) return null;
+  try { return JSON.parse(text); } catch { return null; }
 }
 
 /**
  * Merge `fields` into the manifest. A manifest created here gets a fresh random
  * project_id; a copied project's replacement manifest therefore gets a new one.
- * Throws MANIFEST_UNPARSEABLE rather than overwrite a manifest it cannot read.
+ * A manifest whose MAC doesn't verify is set aside unread (never deleted) and the
+ * merge starts from empty. Throws MANIFEST_UNPARSEABLE rather than overwrite a
+ * verified manifest it cannot parse.
  */
 export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fields = {}, onEvent }) {
   const s = stateDir({ root, harness, kind: 'durable', coreDir, forWrite: true, onEvent });
@@ -489,15 +561,41 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
   return withFileLock(`${file}.lock`, () => {
     let current = {};
     if (existsSync(file)) {
-      // An unparseable manifest is surfaced, never silently replaced.
-      try { current = JSON.parse(readFileSync(file, 'utf8')); } catch (err) {
-        throw Object.assign(new Error(`manifest-unparseable: ${file}: ${err.message}`), { code: 'MANIFEST_UNPARSEABLE' });
+      const text = readSignedFile({ root, harness, name: MANIFEST, coreDir });
+      if (text === null) {
+        renameSync(file, `${file}.unverified-${isoStamp()}`);
+      } else {
+        // An unparseable manifest is surfaced, never silently replaced.
+        try { current = JSON.parse(text); } catch (err) {
+          throw Object.assign(new Error(`manifest-unparseable: ${file}: ${err.message}`), { code: 'MANIFEST_UNPARSEABLE' });
+        }
       }
     }
     const next = { ...current, ...fields };
     if (!next.project_id) next.project_id = randomBytes(16).toString('hex');
     if (!next.harness) next.harness = harness;
-    atomicWriteFileSync(file, JSON.stringify(next, null, 2) + '\n');
+    writeSignedFile({ dir: s.dir, name: MANIFEST, body: JSON.stringify(next, null, 2) + '\n', coreDir });
     return next;
   });
+}
+
+// ---------- the bootstrap record (last-bootstrap.json) ----------
+
+const BOOTSTRAP = 'last-bootstrap.json';
+
+/** Record that bootstrap ran; signed, owner-only, written under its own lock. */
+export function writeBootstrap({ root, harness, coreDir = defaultCoreDir(), record }) {
+  const s = stateDir({ root, harness, kind: 'durable', coreDir, forWrite: true });
+  const file = join(s.dir, BOOTSTRAP);
+  withFileLock(`${file}.lock`, () => {
+    writeSignedFile({ dir: s.dir, name: BOOTSTRAP, body: JSON.stringify(record, null, 2) + '\n', coreDir, mode: 0o600 });
+  });
+  return file;
+}
+
+/** The verified bootstrap record, or null (absent, untrusted, tracked, or MAC fails). */
+export function readBootstrap({ root, harness, coreDir = defaultCoreDir() }) {
+  const text = readSignedFile({ root, harness, name: BOOTSTRAP, coreDir });
+  if (text === null) return null;
+  try { return JSON.parse(text); } catch { return null; }
 }

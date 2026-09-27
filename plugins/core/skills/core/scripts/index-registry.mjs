@@ -33,14 +33,14 @@
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
-import { readFileSync, existsSync, mkdirSync, chmodSync, readdirSync, renameSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
-  canonical, classifyRegistration, resolveProjectRoot, stateDir, detectStateHarness, updateManifest, readManifest,
+  canonical, classifyRegistration, resolveProjectRoot, stateDir, detectStateHarness, updateManifest, readManifest, writeBootstrap, readBootstrap,
   classifyStamp, writeStamp, STATE_DIRNAME,
 } from './project-state.mjs';
 
@@ -204,12 +204,17 @@ export function recordBootstrap(coreDir, { root, harness = detectStateHarness(),
   const core = coreDir || defaultCoreDir();
   const r = rootOrThrow(root, core);
   updateManifest({ root: r, harness, coreDir: core });
-  const s = stateDir({ root: r, harness, kind: 'durable', coreDir: core, forWrite: true });
-  const path = join(s.dir, 'last-bootstrap.json');
   const record = { session_started_at: sessionStartedAt ?? null, bootstrap_completed_at: completedAt };
-  atomicWriteFileSync(path, JSON.stringify(record, null, 2) + '\n');
-  try { chmodSync(path, 0o600); } catch { /* Windows: mode is advisory */ }
+  const path = writeBootstrap({ root: r, harness, coreDir: core, record });
   return { path, record };
+}
+
+/** The verified bootstrap record for the project, or null (absent, untrusted, or tampered). */
+export function readBootstrapRecord(coreDir, { root, harness = detectStateHarness() } = {}) {
+  const core = coreDir || defaultCoreDir();
+  let r;
+  try { r = rootOrThrow(root, core); } catch { return null; }
+  return readBootstrap({ root: r, harness, coreDir: core });
 }
 
 /** The project's last-active time, or null when absent or its state is untrusted. */
@@ -282,12 +287,17 @@ export function main(argv = process.argv.slice(2)) {
         const r = recordBootstrap(coreDir, { root: args.root, harness, sessionStartedAt: args.sessionStarted || null });
         process.stdout.write(`${r.path}\n`); return 0;
       }
+      case 'bootstrap-status': {
+        const rec = readBootstrapRecord(coreDir, { root: args.root, harness });
+        process.stdout.write((rec && rec.session_started_at ? rec.session_started_at : '(none)') + '\n');
+        return rec ? 0 : 1;
+      }
       case 'last-active': {
         const v = readLastActive(coreDir, { root: args.root, harness });
         process.stdout.write((v || '(none)') + '\n'); return v ? 0 : 1;
       }
       default:
-        process.stderr.write('usage: index-registry.mjs <register|list|touch|state|manifest|bootstrap|last-active> [dir] [--root dir] [--when ISO] [--session-started ISO] [--harness h] [--confirm-new] [--accept-move|--fresh] [--set-json json] [--core-dir dir]\n');
+        process.stderr.write('usage: index-registry.mjs <register|list|touch|state|manifest|bootstrap|bootstrap-status|last-active> [dir] [--root dir] [--when ISO] [--session-started ISO] [--harness h] [--confirm-new] [--accept-move|--fresh] [--set-json json] [--core-dir dir]\n');
         return 2;
     }
   } catch (e) {

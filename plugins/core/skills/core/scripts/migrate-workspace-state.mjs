@@ -43,7 +43,7 @@
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
-import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -51,6 +51,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
+  writeSignedFile,
 } from './project-state.mjs';
 import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
@@ -227,7 +228,7 @@ function copyTree(src, dest, recorded) {
     const to = join(dest, rel);
     mkdirSync(dirname(to), { recursive: true });
     copyFileSync(from, to);
-    recorded.push({ from, to, sha256: sha256(from) });
+    recorded.push({ from, to, sha256: sha256(from), length: statSync(from).size });
   }
 }
 
@@ -309,8 +310,13 @@ export function applyMigration({ root, harness = detectStateHarness(), coreDir =
           if (SKIP_ON_COPY.some((re) => re.test(name))) continue;
           // The legacy manifest is kept verbatim beside the live one, which is built from its fields.
           const to = join(target, name === 'workspace.json' ? LEGACY_MANIFEST : name);
-          copyFileSync(from, to);
-          copies.push({ from, to, sha256: sha256(from) });
+          if (name === 'last-bootstrap.json') {
+            // A control file: carried over with its MAC so it verifies in the new layout.
+            writeSignedFile({ dir: target, name, body: readFileSync(from), coreDir, mode: 0o600 });
+          } else {
+            copyFileSync(from, to);
+          }
+          copies.push({ from, to, sha256: sha256(from), length: statSync(from).size });
         }
       }
       for (const c of copies) {
@@ -332,7 +338,7 @@ export function applyMigration({ root, harness = detectStateHarness(), coreDir =
       atomicWriteFileSync(receiptFile, JSON.stringify({
         complete: true, migrated_at: iso, harness, root: real,
         live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
-        files: copies.map((c) => ({ from: c.from, to: c.to, sha256: c.sha256 })),
+        files: copies.map((c) => ({ from: c.from, to: c.to, sha256: c.sha256, length: c.length })),
       }, null, 2) + '\n');
     }
 
@@ -378,11 +384,108 @@ export function applyMigration({ root, harness = detectStateHarness(), coreDir =
   }
 }
 
+// ---------- old builds after migration ----------
+
+function sha256Prefix(file, length) {
+  const fd = openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(length);
+    let off = 0;
+    while (off < length) {
+      const n = readSync(fd, buf, off, length - off, off);
+      if (n === 0) break;
+      off += n;
+    }
+    return off === length ? createHash('sha256').update(buf).digest('hex') : null;
+  } finally { closeSync(fd); }
+}
+
+function readRange(file, start) {
+  const bytes = readFileSync(file);
+  return bytes.subarray(start);
+}
+
+/**
+ * An older build of the same harness (a rollback, or a second machine) can keep
+ * writing to the legacy workspace after migration. Compare each legacy file with the
+ * receipt: an append-only log (*.jsonl) whose recorded prefix is unchanged gets its new
+ * tail appended to the in-project copy; anything else that changed or appeared is
+ * copied to superseded/legacy-<date>/. The receipt is updated so a re-run is a no-op.
+ * Returns { status, root, harness, appended: [...], superseded: [...] }.
+ */
+export function checkLegacyDrift({ root, harness = detectStateHarness(), coreDir = defaultCoreDir(), now = new Date() } = {}) {
+  assertHarnessName(harness);
+  const real = canonical(root);
+  const durable = stateDir({ root: real, harness, kind: 'durable', coreDir });
+  if (!durable) return { status: 'no-state', root: real, harness };
+  const receiptFile = join(durable.dir, RECEIPT);
+  const receipt = readJson(receiptFile, null);
+  if (!receipt || !receipt.complete) return { status: 'not-migrated', root: real, harness };
+
+  const lockFile = join(real, '_memories', '_close.lock');
+  mkdirSync(dirname(lockFile), { recursive: true });
+  const lock = acquireFileLock(lockFile, { extra: { session_id: `legacy-drift-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
+  if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
+  try {
+    const hot = stateDir({ root: real, harness, kind: 'hot', coreDir, forWrite: true });
+    const byFrom = new Map((receipt.files || []).map((f) => [f.from, f]));
+    const sources = [
+      ...(receipt.live ? [{ id: receipt.live, superseded: false }] : []),
+      ...(receipt.superseded || []).map((id) => ({ id, superseded: true })),
+    ];
+    const day = now.toISOString().slice(0, 10);
+    const appended = [];
+    const superseded = [];
+    for (const { id, superseded: isSup } of sources) {
+      assertSafeWorkspaceId(id);
+      const src = join(coreDir, 'workspaces', id);
+      if (!existsSync(src)) continue;
+      for (const rel of listFiles(src)) {
+        const base = rel.split('/').pop();
+        if (base === 'MOVED.md' || SKIP_ON_COPY.some((re) => re.test(base))) continue;
+        const from = join(src, rel);
+        const size = statSync(from).size;
+        const known = byFrom.get(from);
+        if (known && known.sha256 === sha256(from)) continue;
+
+        const top = rel.split('/')[0];
+        const defaultTo = isSup
+          ? join(durable.dir, 'superseded', id, rel)
+          : join(HOT_TOP.has(top) ? hot.dir : durable.dir, rel === 'workspace.json' ? LEGACY_MANIFEST : rel);
+        const to = known ? known.to : defaultTo;
+        const priorLen = known && typeof known.length === 'number' ? known.length : 0;
+        const appendOnly = base.endsWith('.jsonl') && size >= priorLen
+          && (!known || (typeof known.length === 'number' && sha256Prefix(from, priorLen) === known.sha256));
+
+        if (appendOnly) {
+          mkdirSync(dirname(to), { recursive: true });
+          appendFileSync(to, readRange(from, priorLen));
+          appended.push({ from, to, bytes: size - priorLen });
+          byFrom.set(from, { from, to, sha256: sha256(from), length: size });
+        } else {
+          const aside = join(durable.dir, 'superseded', `legacy-${day}`, id, rel);
+          mkdirSync(dirname(aside), { recursive: true });
+          copyFileSync(from, aside);
+          superseded.push({ from, to: aside });
+          byFrom.set(from, { from, to: known ? known.to : aside, sha256: sha256(from), length: size });
+        }
+      }
+    }
+    if (appended.length || superseded.length) {
+      atomicWriteFileSync(receiptFile, JSON.stringify({ ...receipt, files: [...byFrom.values()], legacy_checked_at: now.toISOString() }, null, 2) + '\n');
+    }
+    return { status: appended.length || superseded.length ? 'brought-in' : 'unchanged', root: real, harness, appended, superseded };
+  } finally {
+    releaseFileLock(lockFile, lock.nonce);
+  }
+}
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--manifest') out.manifest = true;
+    else if (a === '--drift-check') out.driftCheck = true;
     else if (a === '--apply') out.apply = true;
     else if (a === '--root') out.root = argv[++i];
     else if (a === '--harness') out.harness = argv[++i];
@@ -397,21 +500,21 @@ function parseArgs(argv) {
 if (isCliEntry(import.meta.url)) {
   try {
     const args = parseArgs(process.argv.slice(2));
-    if (!args.manifest && !args.apply) {
-      throw new Error('usage: migrate-workspace-state.mjs --manifest|--apply [--root <dir>] [--harness <h>] [--core-dir <dir>] [--table <file>] [--out <file>]');
+    if (!args.manifest && !args.apply && !args.driftCheck) {
+      throw new Error('usage: migrate-workspace-state.mjs --manifest|--apply|--drift-check [--root <dir>] [--harness <h>] [--core-dir <dir>] [--table <file>] [--out <file>]');
     }
     const coreDir = args.coreDir || defaultCoreDir();
     const tableFile = args.table || join(coreDir, 'migrate-harness-table.json');
     const table = existsSync(tableFile) ? JSON.parse(readFileSync(tableFile, 'utf8')) : { entries: {} };
     let result;
-    if (args.apply) {
+    if (args.apply || args.driftCheck) {
       const harness = args.harness || detectStateHarness();
       let root = args.root;
       if (!root) {
         const found = resolveProjectRoot(process.cwd(), { home: dirname(coreDir), coreDir });
         root = found.root || process.cwd();
       }
-      result = applyMigration({ root, harness, coreDir, table });
+      result = args.apply ? applyMigration({ root, harness, coreDir, table }) : checkLegacyDrift({ root, harness, coreDir });
     } else {
       result = buildManifest({ coreDir, table, applyHarness: args.harness || null });
     }
