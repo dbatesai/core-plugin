@@ -259,3 +259,47 @@ test('the home folder is never offered for adoption, even holding a foreign stam
     assert.equal(adoptionCandidate({ root: homeB, harness: H, coreDir: coreB }), null);
   } finally { s.cleanup(); }
 });
+
+// A build-time review's falsifier: every fixture above descends from a real writeStamp() /
+// updateManifest() call (a legitimate prior install), then gets copied. That never
+// exercises the actual attack this feature is exposed to — a folder that was never a
+// real CORE install at all, hand-built to *look* like one. wellFormed() only checks
+// shape (project-state.mjs), and a foreign stamp's hmac is never cryptographically
+// checked — there is no shared secret to check it against. So oldPath/lastWritten are
+// attacker-controlled display strings, not verified facts; the mitigation is the
+// prompt disclosing that plainly (spec updated alongside this test), not a code gate.
+// This proves the mechanism still degrades safely on a fully fabricated candidate.
+test('a hand-built hostile stamp (never written by a real install) is offered with its attacker-controlled fields, and yes still only carries the intended inert data', () => {
+  const s = sandbox();
+  try {
+    const homeB = s.home('homeB');
+    const coreB = join(homeB, '.core');
+    const target = s.mk('Target', 'Folder');
+    const harnessDir = join(target, '.core', H);
+    mkdirSync(harnessDir, { recursive: true });
+
+    const hostileStamp = {
+      path: '/nowhere/an-attacker-typed-this-path',
+      harness: H,
+      install_id: 'attacker-picked-id',
+      hmac: 'a'.repeat(64), // shape-valid; never verified for a foreign install_id
+    };
+    writeFileSync(join(harnessDir, 'stamp'), JSON.stringify(hostileStamp, null, 2) + '\n');
+    writeFileSync(join(harnessDir, 'workspace.json'), JSON.stringify({
+      project_id: 'attacker-chosen-project-id', agent_name: 'Mallory', metrics_enabled: true,
+    }));
+    writeFileSync(join(harnessDir, 'last-bootstrap.json'), JSON.stringify({ session_started_at: '1999-01-01T00:00:00Z' }));
+
+    const cand = adoptionCandidate({ root: target, harness: H, coreDir: coreB });
+    assert.ok(cand, 'a merely well-formed hand-built stamp is offered — the display, never a code gate, is the safeguard');
+    assert.equal(cand.oldPath, hostileStamp.path, 'oldPath is exactly the attacker string, unverified — this is what the prompt must disclose as such');
+
+    const r = adoptForeignState({ root: target, harness: H, coreDir: coreB, decision: 'yes' });
+    assert.equal(r.status, 'adopted');
+    assert.equal(classifyStamp({ root: target, harness: H, coreDir: coreB }).status, 'verified', 'adoption re-stamps with THIS install\'s own secret; the fabricated install_id is never trusted afterward');
+    const m = readManifest({ root: target, harness: H, coreDir: coreB });
+    assert.equal(m.project_id, 'attacker-chosen-project-id', 'project_id is inert display data, carried over by design');
+    assert.equal(m.agent_name, 'Mallory', 'agent_name is inert display data, carried over by design');
+    assert.equal('metrics_enabled' in m, false, 'a hostile opt-in from a fully fabricated source is dropped, same as a copied one');
+  } finally { s.cleanup(); }
+});

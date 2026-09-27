@@ -511,19 +511,25 @@ function indexMightTrack(root, prefix) {
   return buf.includes(prefix);
 }
 
+// Returned when git ls-files errors or times out while the index says the prefix
+// MIGHT be tracked: we can no longer tell which names are tracked, so every name
+// must read as tracked (untrusted) rather than falling back to "nothing tracked".
+// Fail-closed duck-types the real Set's only call-site contract, `.has(name)`.
+const UNKNOWN_TRACKED = { has: () => true };
+
 export function trackedStateFiles(root, harness) {
   const prefix = `${STATE_DIRNAME}/${harness}/`;
-  let names = new Set();
-  if (!indexMightTrack(root, prefix)) return names;
+  if (!indexMightTrack(root, prefix)) return new Set();
   try {
     // Without --full-name, ls-files prints paths relative to -C, so a project nested
     // inside a larger repo still lists as `.core/<harness>/<name>`.
     const out = execFileSync('git', ['-C', root, 'ls-files', '-z', '--', prefix], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
     });
-    names = new Set(out.split('\0').filter(Boolean).filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length)));
-  } catch { names = new Set(); }
-  return names;
+    return new Set(out.split('\0').filter(Boolean).filter((n) => n.startsWith(prefix)).map((n) => n.slice(prefix.length)));
+  } catch {
+    return UNKNOWN_TRACKED;
+  }
 }
 
 /** Write `name` in the state dir with its MAC sidecar. Callers hold the file's lock. */

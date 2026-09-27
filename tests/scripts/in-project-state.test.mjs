@@ -468,6 +468,30 @@ test('a force-added .core file that git tracks is ignored, even with a valid MAC
   } finally { s.cleanup(); }
 });
 
+test('a force-added tracked file still reads as absent when git ls-files itself errors (index unreadable)', { skip: isWin || isRoot }, () => {
+  // A build-time review's falsifier: trackedStateFiles() used to fall back to "nothing
+  // tracked" whenever the git spawn failed, so an error mid-check (not just a clean
+  // "untracked" answer) would let a force-added, validly-MACed control file be read
+  // and trusted. Force-add the files as before, then make `.git/index` unreadable so
+  // `git ls-files` itself errors (not merely reports untracked) while the working
+  // tree, and the MAC files, stay intact. Both signed reads must still come back null.
+  const s = sandbox();
+  try {
+    const p = signedProject(s);
+    assert.equal(git(p, 'init', '-q').status, 0);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Wren' } });
+    recordBootstrap(s.coreDir, { root: p, harness: H, sessionStartedAt: '2026-09-26T10:00:00Z' });
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Wren');
+    assert.equal(git(p, 'add', '-f', '.core/claude-code/workspace.json', '.core/claude-code/workspace.json.mac', '.core/claude-code/last-bootstrap.json').status, 0);
+    const indexFile = join(p, '.git', 'index');
+    chmodSync(indexFile, 0o000);
+    try {
+      assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }), null, 'a tracked manifest reads as absent even when the tracking check itself errors');
+      assert.equal(readBootstrapRecord(s.coreDir, { root: p, harness: H }), null, 'a tracked bootstrap record reads as absent even when the tracking check itself errors');
+    } finally { chmodSync(indexFile, 0o644); }
+  } finally { s.cleanup(); }
+});
+
 test('the tracked guard still sees a force-added file under a v4 (prefix-compressed) index and in a nested project', () => {
   const s = sandbox();
   try {
