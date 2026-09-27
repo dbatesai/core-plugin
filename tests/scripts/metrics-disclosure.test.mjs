@@ -1,168 +1,148 @@
-// Behavioral test for the one-time first-run metrics disclosure (Fix 1 of the
-// The public-marketplace gap: metrics capture is default-on but was never
-// disclosed to users). HOME is redirected to a temp dir so the manifest write
-// under `~/.core/workspaces/<id>/workspace.json` never touches the real ~/.core.
+// Behavioral test for the one-time first-run metrics disclosure. Every test runs
+// against a temp home and temp project folders, so nothing touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir, platform } from 'node:os';
 import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
+import { updateManifest, readManifest, stateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 
 const SCRIPT = join(process.cwd(), 'plugins/core/skills/core/scripts/metrics-disclosure.mjs');
+const HARNESS = 'claude-code';
+const ENV = { CORE_HARNESS: HARNESS };
 
-function withFakeHome(fn) {
-  const fakeHome = mkdtempSync(join(tmpdir(), 'metrics-disclosure-home-'));
-  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
-  process.env.HOME = fakeHome;
-  process.env.USERPROFILE = fakeHome;
-  try {
-    return fn(fakeHome);
-  } finally {
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-    rmSync(fakeHome, { recursive: true, force: true });
-  }
+function sandbox(fn, { registered = true } = {}) {
+  const base = mkdtempSync(join(tmpdir(), 'metrics-disclosure-'));
+  const home = join(base, 'home');
+  const coreDir = join(home, '.core');
+  const project = join(base, 'project');
+  mkdirSync(coreDir, { recursive: true });
+  mkdirSync(project, { recursive: true });
+  if (registered) writeFileSync(join(coreDir, 'projects.json'), JSON.stringify([{ path: project }]));
+  try { return fn({ home, coreDir, project }); }
+  finally { rmSync(base, { recursive: true, force: true }); }
 }
 
-test('first call for a workspace id shows the notice and persists the flag', () => {
-  withFakeHome((fakeHome) => {
-    const workspaceId = 'test-disclosure-a1';
-    const manifestDir = join(fakeHome, '.core', 'workspaces', workspaceId);
-    mkdirSync(manifestDir, { recursive: true });
-    writeFileSync(join(manifestDir, 'workspace.json'), JSON.stringify({ workspace_id: workspaceId, schema_version: 'v2' }, null, 2));
+const manifestFile = (coreDir, project) =>
+  join(stateDir({ root: project, harness: HARNESS, coreDir, forWrite: true }).dir, 'workspace.json');
 
-    const result = checkMetricsDisclosure({ workspaceId });
-
+test('first call for a project shows the notice and persists the flag in its .core manifest', () => {
+  sandbox(({ home, coreDir, project }) => {
+    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { schema_version: 'v2' } });
+    const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(result.ok, true);
     assert.equal(result.shown, true);
     assert.equal(result.alreadyShown, false);
     assert.equal(result.noticeText, NOTICE_TEXT);
-
-    const manifest = JSON.parse(readFileSync(join(manifestDir, 'workspace.json'), 'utf8'));
+    const file = manifestFile(coreDir, project);
+    assert.equal(file, join(realpathSync(project), '.core', HARNESS, 'workspace.json'), 'the manifest lives in the project');
+    const manifest = JSON.parse(readFileSync(file, 'utf8'));
     assert.equal(manifest.metrics_disclosure_shown, true, 'flag persisted into the manifest');
-    assert.equal(manifest.workspace_id, workspaceId, 'pre-existing manifest fields preserved, not clobbered');
     assert.equal(manifest.schema_version, 'v2', 'pre-existing manifest fields preserved, not clobbered');
   });
 });
 
-test('second and subsequent calls for the same workspace id report ALREADY-SHOWN and write nothing further', () => {
-  withFakeHome((fakeHome) => {
-    const workspaceId = 'test-disclosure-a2';
-    const manifestDir = join(fakeHome, '.core', 'workspaces', workspaceId);
-    mkdirSync(manifestDir, { recursive: true });
-    writeFileSync(join(manifestDir, 'workspace.json'), JSON.stringify({ workspace_id: workspaceId }, null, 2));
-
-    const first = checkMetricsDisclosure({ workspaceId });
-    assert.equal(first.shown, true);
-
-    const beforeSecond = readFileSync(join(manifestDir, 'workspace.json'), 'utf8');
-
-    const second = checkMetricsDisclosure({ workspaceId });
+test('second and subsequent calls report ALREADY-SHOWN and write nothing further', () => {
+  sandbox(({ home, coreDir, project }) => {
+    assert.equal(checkMetricsDisclosure({ projectDir: project, home, env: ENV }).shown, true);
+    const before = readFileSync(manifestFile(coreDir, project), 'utf8');
+    const second = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(second.ok, true);
     assert.equal(second.shown, false);
     assert.equal(second.alreadyShown, true);
     assert.equal(second.noticeText, null, 'no notice text on repeat calls — never nags');
-
-    const third = checkMetricsDisclosure({ workspaceId });
-    assert.equal(third.alreadyShown, true);
-
-    const afterThird = readFileSync(join(manifestDir, 'workspace.json'), 'utf8');
-    assert.equal(afterThird, beforeSecond, 'manifest untouched on repeat calls');
+    assert.equal(checkMetricsDisclosure({ projectDir: project, home, env: ENV }).alreadyShown, true);
+    assert.equal(readFileSync(manifestFile(coreDir, project), 'utf8'), before, 'manifest untouched on repeat calls');
   });
 });
 
-test('a workspace with no manifest yet still shows once and creates the manifest with the flag set', () => {
-  withFakeHome((fakeHome) => {
-    const workspaceId = 'test-disclosure-no-manifest';
-    const manifestPath = join(fakeHome, '.core', 'workspaces', workspaceId, 'workspace.json');
-    assert.equal(existsSync(manifestPath), false);
-
-    const result = checkMetricsDisclosure({ workspaceId });
+test('a project with no manifest yet still shows once and creates the manifest with the flag set', () => {
+  sandbox(({ home, coreDir, project }) => {
+    assert.equal(existsSync(join(project, '.core')), false);
+    const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(result.shown, true);
-    assert.ok(existsSync(manifestPath), 'manifest created');
-    assert.equal(JSON.parse(readFileSync(manifestPath, 'utf8')).metrics_disclosure_shown, true);
+    assert.equal(readManifest({ root: project, harness: HARNESS, coreDir }).metrics_disclosure_shown, true);
   });
 });
 
-test('missing workspaceId fails without throwing and shows nothing', () => {
+test('a flag planted by a cloned repo never suppresses the notice', () => {
+  sandbox(({ home, project }) => {
+    const planted = join(project, '.core', HARNESS);
+    mkdirSync(planted, { recursive: true });
+    writeFileSync(join(planted, 'workspace.json'), JSON.stringify({ metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION }));
+    const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(result.shown, true, 'an unstamped manifest is not trusted');
+    assert.equal(result.noticeText, NOTICE_TEXT);
+  });
+});
+
+test('an unregistered folder shows the notice and keeps its manifest out of the folder', () => {
+  sandbox(({ home, project }) => {
+    const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(result.shown, true);
+    assert.equal(existsSync(join(project, '.core')), false, 'no .core/ planted in an unregistered folder');
+  }, { registered: false });
+});
+
+test('missing projectDir fails without throwing and shows nothing', () => {
   const result = checkMetricsDisclosure({});
   assert.equal(result.ok, false);
   assert.equal(result.shown, false);
   assert.equal(result.noticeText, null);
-  assert.equal(result.reason, 'missing-workspace-id');
+  assert.equal(result.reason, 'missing-project-dir');
 });
 
-test('an unparseable manifest fails without throwing rather than silently skipping or clobbering', () => {
-  withFakeHome((fakeHome) => {
-    const workspaceId = 'test-disclosure-corrupt';
-    const manifestDir = join(fakeHome, '.core', 'workspaces', workspaceId);
-    mkdirSync(manifestDir, { recursive: true });
-    writeFileSync(join(manifestDir, 'workspace.json'), '{ not valid json');
-
-    const result = checkMetricsDisclosure({ workspaceId });
+test('an unparseable manifest is never clobbered, and the notice still shows', () => {
+  sandbox(({ home, coreDir, project }) => {
+    const file = manifestFile(coreDir, project);
+    writeFileSync(file, '{ not valid json');
+    const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(result.ok, false);
-    assert.equal(result.noticeText, null);
+    assert.equal(result.noticeText, NOTICE_TEXT, 'fails toward showing the notice');
     assert.match(result.reason, /manifest-unparseable/);
+    assert.equal(readFileSync(file, 'utf8'), '{ not valid json', 'the unreadable manifest is left as it was');
   });
 });
 
 test('the notice text names both opt-out mechanisms and the local-only claim', () => {
   assert.match(NOTICE_TEXT, /CORE_METRICS_ENABLED=0/, 'names the env-var opt-out');
-  assert.match(NOTICE_TEXT, /metrics_enabled:\s*false/, 'names the workspace.json opt-out');
-  assert.match(NOTICE_TEXT, /workspace\.json/, 'names the config file by its real name');
+  assert.match(NOTICE_TEXT, /metrics_enabled:\s*false/, 'names the manifest opt-out');
+  assert.match(NOTICE_TEXT, /\.core\/<harness>\/workspace\.json/, 'names the config file where it really lives');
   assert.match(NOTICE_TEXT, /this machine/i, 'states the local-only claim in plain terms');
 });
 
 test('CLI: first run prints the notice text; second run prints ALREADY-SHOWN', { skip: platform() === 'win32' ? 'shell redirection differs on Windows CI' : false }, () => {
-  withFakeHome((fakeHome) => {
-    const workspaceId = 'test-disclosure-cli';
-    const env = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome };
-
-    const firstOut = execFileSync('node', [SCRIPT, 'check', workspaceId], { encoding: 'utf8', env });
+  sandbox(({ home, project }) => {
+    const env = { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: HARNESS };
+    const firstOut = execFileSync('node', [SCRIPT, 'check', project], { encoding: 'utf8', env });
     assert.equal(firstOut.trim(), NOTICE_TEXT.trim());
-
-    const secondOut = execFileSync('node', [SCRIPT, 'check', workspaceId], { encoding: 'utf8', env });
+    const secondOut = execFileSync('node', [SCRIPT, 'check', project], { encoding: 'utf8', env });
     assert.equal(secondOut.trim(), 'ALREADY-SHOWN');
   });
 });
 
-test('CLI: missing workspace-id argument exits nonzero with a usage message', () => {
+test('CLI: an unknown subcommand exits nonzero with a usage message', () => {
   assert.throws(() => {
-    execFileSync('node', [SCRIPT, 'check'], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    execFileSync('node', [SCRIPT, 'nope'], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
   }, /Command failed/);
 });
 
-test('a workspace stamped under an older notice version is shown the current notice again', () => {
-  withFakeHome((fakeHome) => {
-    const workspaceId = 'ws-old-notice';
-    const dir = join(fakeHome, '.core', 'workspaces', workspaceId);
-    mkdirSync(dir, { recursive: true });
-    // Stamped by a build whose notice described less than today's does.
-    writeFileSync(join(dir, 'workspace.json'),
-      JSON.stringify({ workspace_id: workspaceId, metrics_disclosure_shown: true }, null, 2));
-
-    const res = checkMetricsDisclosure({ workspaceId });
-    assert.equal(res.shown, true, 'a materially newer notice must reach an already-stamped workspace');
+test('a project stamped under an older notice version is shown the current notice again', () => {
+  sandbox(({ home, coreDir, project }) => {
+    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { metrics_disclosure_shown: true } });
+    const res = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(res.shown, true, 'a materially newer notice must reach an already-stamped project');
     assert.equal(res.noticeText, NOTICE_TEXT);
-    const after = JSON.parse(readFileSync(join(dir, 'workspace.json'), 'utf8'));
-    assert.equal(after.metrics_disclosure_version, NOTICE_VERSION);
+    assert.equal(readManifest({ root: project, harness: HARNESS, coreDir }).metrics_disclosure_version, NOTICE_VERSION);
   });
 });
 
-test('a workspace stamped at the current notice version stays silent', () => {
-  withFakeHome((fakeHome) => {
-    const workspaceId = 'ws-current-notice';
-    const dir = join(fakeHome, '.core', 'workspaces', workspaceId);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'workspace.json'), JSON.stringify({
-      workspace_id: workspaceId, metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION,
-    }, null, 2));
-
-    const res = checkMetricsDisclosure({ workspaceId });
+test('a project stamped at the current notice version stays silent', () => {
+  sandbox(({ home, coreDir, project }) => {
+    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION } });
+    const res = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(res.shown, false);
     assert.equal(res.alreadyShown, true);
   });

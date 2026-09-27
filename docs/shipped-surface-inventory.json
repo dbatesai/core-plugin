@@ -646,13 +646,6 @@
       "surface": "shipped"
     },
     {
-      "name": "workspace-fork-check",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/workspace-fork-check.mjs",
-      "surface": "shipped"
-    },
-    {
       "name": "configure-project",
       "kind": "skill",
       "harness": "shared",

@@ -149,6 +149,7 @@ test('ensureStateDir writes .core/.gitignore ("*") and puts state under .core/<h
   const s = sandbox();
   try {
     const p = mk(s.home, 'Projects', 'P');
+    register(s.coreDir, [p]);
     const out = ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir });
     assert.equal(out.location, 'project');
     assert.equal(out.dir, join(p, '.core', 'claude-code'));
@@ -160,6 +161,7 @@ test('hot state under a sync client goes to ~/.core/local; durable state stays i
   const s = sandbox();
   try {
     const p = mk(s.home, 'Library', 'CloudStorage', 'Dropbox', 'P');
+    register(s.coreDir, [p]);
     const hot = projectStateDir({ root: p, harness: 'codex', kind: 'hot', coreDir: s.coreDir });
     assert.equal(hot.location, 'local');
     assert.equal(hot.reason, 'synced-folder');
@@ -182,11 +184,23 @@ test('a read-only project root keeps all its state in ~/.core/local', { skip: is
   const s = sandbox();
   const p = mk(s.home, 'Projects', 'RO');
   try {
+    register(s.coreDir, [p]);
     chmodSync(p, 0o555);
     const out = projectStateDir({ root: p, harness: 'claude-code', kind: 'durable', coreDir: s.coreDir });
     assert.equal(out.location, 'local');
     assert.equal(out.reason, 'root-not-writable');
   } finally { chmodSync(p, 0o755); s.cleanup(); }
+});
+
+test('an unregistered folder never gets a .core/: its state stays in ~/.core/local', () => {
+  const s = sandbox();
+  try {
+    const p = mk(s.home, 'Projects', 'Unregistered');
+    const out = ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+    assert.equal(out.location, 'local');
+    assert.equal(out.reason, 'unregistered');
+    assert.equal(existsSync(join(p, '.core')), false, 'nothing planted in the folder');
+  } finally { s.cleanup(); }
 });
 
 test('harness names are a single safe segment', () => {
@@ -259,6 +273,7 @@ test('a symlinked .core is refused on read and on write', { skip: isWin }, () =>
     mkdirSync(join(target, 'claude-code'));
     const p = mk(s.base, 'clone');
     symlinkSync(target, join(p, '.core'));
+    register(s.coreDir, [p]);
     assert.deepEqual(classifyStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir }), { status: 'refused', reason: 'symlink' });
     assert.throws(() => ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir }), /symlink/);
     assert.deepEqual(readdirSync(join(target, 'claude-code')), []);

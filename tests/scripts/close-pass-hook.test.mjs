@@ -111,18 +111,22 @@ test('spawn pre-check: closed store, nothing owed, no transcript → no spawn', 
   rmSync(store, { recursive: true, force: true });
 });
 
-test('isRegisteredWorkspace: only a path in ~/.core/index.json passes (security gate)', async () => {
+test('isRegisteredWorkspace: only a path in the ~/.core registry passes (security gate)', async () => {
   const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const registry = mkdtempSync(join(tmpdir(), 'reg-core-'));
   const good = mkdtempSync(join(tmpdir(), 'reg-ws-'));
   const evil = mkdtempSync(join(tmpdir(), 'evil-ws-'));
   mkdirSync(join(evil, '_memories'), { recursive: true }); // attacker plants a _memories dir
-  const idxPath = join(good, 'index.json');
-  writeFileSync(idxPath, JSON.stringify([{ workspace_id: 'g', path: good }]));
+  mkdirSync(join(evil, '.core', 'claude-code'), { recursive: true }); // and a .core/ state folder
+  const idxPath = join(registry, 'projects.json');
+  writeFileSync(idxPath, JSON.stringify([{ path: good }]));
   assert.equal(cp.isRegisteredWorkspace(good, { indexPath: idxPath }), true, 'a registered path passes');
   assert.equal(cp.isRegisteredWorkspace(evil, { indexPath: idxPath }), false,
-    'a dir with a _memories folder but NOT in the registry must be rejected');
-  rmSync(good, { recursive: true, force: true });
-  rmSync(evil, { recursive: true, force: true });
+    'a dir with _memories and .core folders but NOT in the registry must be rejected');
+  // The legacy index.json still counts while older installs register there.
+  writeFileSync(join(registry, 'index.json'), JSON.stringify([{ workspace_id: 'old', path: evil }]));
+  assert.equal(cp.isRegisteredWorkspace(evil, { indexPath: idxPath }), true, 'a legacy registration passes');
+  for (const d of [registry, good, evil]) rmSync(d, { recursive: true, force: true });
 });
 
 test('inspectLock: a LIVE pid is never stealable at any age; a DEAD pid is stealable past staleMs', async () => {

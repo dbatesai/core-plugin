@@ -31,11 +31,16 @@
  * wx-create fallback is covered by the young-unreadable-is-held rule below
  * (proven by the forced-fallback race test, not asserted).
  *
- * Locks are advisory and same-machine. EPERM under sync/AV tooling reads as
+ * Locks are advisory. Each lock records the install that took it (`machine`, the
+ * value of ~/.core/install-id): a lock from another install — one that arrived
+ * through a synced or copied folder — is never treated as held because its pid
+ * happens to be alive here, and is stale once the hard ceiling passes. A lock
+ * with no `machine` field is treated as local. The id is stable across hostname
+ * changes, which on macOS follow the network. EPERM under sync/AV tooling reads as
  * "couldn't acquire, retry", never a crash. Callers with more than one lock
  * follow the total order: per-project lock BEFORE any global ~/.core lock.
  *
- * Ships with the plugin as prescriptive code; .mjs only, node:* imports only.
+ * Ships with the plugin as prescriptive code; .mjs only.
  */
 
 import {
@@ -45,6 +50,7 @@ import {
 } from 'node:fs';
 import { dirname, basename, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { trustedHome } from './trusted-home.mjs';
 
 // Same calibration as close-pass.mjs: generous enough for a real close pass.
 export const DEFAULT_STALE_MS = 10 * 60 * 1000;
@@ -57,6 +63,19 @@ export const DEFAULT_STALE_MS = 10 * 60 * 1000;
 // not integrity) and surfaces as a loud LOCK_HELD error naming the pid, remedied
 // by the operator force-release.
 export const DEFAULT_HARD_STALE_MS = 30 * 60 * 1000;
+
+let cachedMachineId;
+
+/** This install's id (~/.core/install-id under the trusted home), or null when absent. Never creates it. */
+export function localMachineId() {
+  if (cachedMachineId !== undefined) return cachedMachineId;
+  try {
+    const home = trustedHome();
+    const id = home ? readFileSync(join(home, '.core', 'install-id'), 'utf8').trim() : '';
+    cachedMachineId = id || null;
+  } catch { cachedMachineId = null; }
+  return cachedMachineId;
+}
 
 export function pidAlive(pid) {
   if (!pid || typeof pid !== 'number') return false;
@@ -107,7 +126,7 @@ export function currentLockFile(lockPath) {
  * `gens` so a held-check and a maxN computation can share ONE listGenerations()
  * read instead of two independent ones taken at two different instants.
  */
-function inspectFromGenerations(gens, { now, staleMs, hardStaleMs }) {
+function inspectFromGenerations(gens, { now, staleMs, hardStaleMs, machine }) {
   const live = gens.filter(g => !g.done);
   if (!live.length) return { held: false, lock: null, stale: false };
   live.sort((a, b) => b.n - a.n);
@@ -123,13 +142,18 @@ function inspectFromGenerations(gens, { now, staleMs, hardStaleMs }) {
     const stale = ageMs > staleMs;
     return { held: !stale, lock: null, stale };
   }
-  // A lock with a recorded pid: stale only when aged AND the owner is dead.
+  // Another install's lock: its pid names a process on a different machine, so a
+  // live local pid proves nothing — stale once the hard ceiling passes.
+  // A local lock with a recorded pid: stale only when aged AND the owner is dead.
   // NO liveness override at any age: a suspended-then-revived
   // owner past any ceiling would overlap its superseder. A readable lock with
   // no usable pid falls back to the hard ceiling.
-  const stale = typeof lock.pid === 'number'
-    ? (ageMs > staleMs && !pidAlive(lock.pid))
-    : ageMs > hardStaleMs;
+  const foreign = typeof lock.machine === 'string' && !!machine && lock.machine !== machine;
+  const stale = foreign
+    ? ageMs > hardStaleMs
+    : typeof lock.pid === 'number'
+      ? (ageMs > staleMs && !pidAlive(lock.pid))
+      : ageMs > hardStaleMs;
   return { held: !stale, lock, stale };
 }
 
@@ -143,8 +167,9 @@ export function inspectFileLock(lockPath, {
   now = Date.now(),
   staleMs = DEFAULT_STALE_MS,
   hardStaleMs = DEFAULT_HARD_STALE_MS,
+  machine = localMachineId(),
 } = {}) {
-  return inspectFromGenerations(listGenerations(lockPath), { now, staleMs, hardStaleMs });
+  return inspectFromGenerations(listGenerations(lockPath), { now, staleMs, hardStaleMs, machine });
 }
 
 /**
@@ -183,6 +208,7 @@ export function acquireFileLock(lockPath, {
   now = Date.now(),
   staleMs = DEFAULT_STALE_MS,
   hardStaleMs = DEFAULT_HARD_STALE_MS,
+  machine = localMachineId(),
 } = {}) {
   mkdirSync(dirname(lockPath), { recursive: true });
   const nonce = newNonce();
@@ -212,7 +238,7 @@ export function acquireFileLock(lockPath, {
   // retryable loss instead of proceeding as if we held an honest lock.
   const gens = listGenerations(lockPath);
   const maxN = gens.reduce((m, g) => Math.max(m, g.n), 0);
-  const { held, lock, stale } = inspectFromGenerations(gens, { now, staleMs, hardStaleMs });
+  const { held, lock, stale } = inspectFromGenerations(gens, { now, staleMs, hardStaleMs, machine });
 
   // Test-only seam: widen the snapshot-to-create
   // window deterministically so the stale-target race can be reproduced
@@ -238,6 +264,7 @@ export function acquireFileLock(lockPath, {
   const payload = JSON.stringify({
     ...extra,
     pid: process.pid,
+    ...(machine ? { machine } : {}),
     nonce,
     gen: target,
     started_at: new Date(now).toISOString(),

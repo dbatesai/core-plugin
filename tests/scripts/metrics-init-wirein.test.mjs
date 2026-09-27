@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { initMetrics } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
-import { resolveStoragePath } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { resolveStoragePath, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 
 const METRICS_INIT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/metrics-init.mjs', import.meta.url));
 
@@ -28,10 +28,10 @@ test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pi
     // "fell back to project-local".
     process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
 
-    const r = initMetrics({ projectDir: project, workspaceId: 'ws-mi' });
+    const r = initMetrics({ projectDir: project, env: {} });
     assert.ok(r.ok, `scaffold ok: ${JSON.stringify(r)}`);
 
-    const pinFile = join(home, '.core', 'workspaces', 'ws-mi', 'metrics', 'storage-path.txt');
+    const pinFile = join(operationalMetricsDir(project, { home, env: {} }), 'storage-path.txt');
     assert.ok(existsSync(pinFile), 'pin file written');
     const pinned = readFileSync(pinFile, 'utf8').trim();
     assert.match(pinned, /core-metrics/, 'pinned to the forced appdata path, not project-local');
@@ -44,7 +44,7 @@ test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pi
     }
 
     // The actual consume path: log-event's resolveStoragePath reads the pin.
-    const resolved = resolveStoragePath(project, { workspaceId: 'ws-mi' });
+    const resolved = resolveStoragePath(project, { env: {} });
     assert.equal(resolved, pinned, 'log-event resolves to the metrics-init pin, not the project-local default');
   } finally {
     if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
@@ -65,8 +65,8 @@ test('wire-in: metrics-init is idempotent (second run leaves the pin intact)', (
     process.env.HOME = home;
     process.env.USERPROFILE = home; // Windows: os.homedir() reads USERPROFILE, not HOME
     assert.equal(homedir(), home);
-    const r1 = initMetrics({ projectDir: project, workspaceId: 'ws-idem' });
-    const r2 = initMetrics({ projectDir: project, workspaceId: 'ws-idem' });
+    const r1 = initMetrics({ projectDir: project, env: {} });
+    const r2 = initMetrics({ projectDir: project, env: {} });
     assert.ok(r1.ok && r2.ok);
     assert.equal(r1.storagePath, r2.storagePath, 'storage path stable across runs');
   } finally {
@@ -89,15 +89,15 @@ test('metrics-init still runs when invoked through a symlink (entry guard canoni
   const link = join(linkDir, 'metrics-init.mjs');
   try {
     symlinkSync(METRICS_INIT, link);
-    const out = execFileSync('node', [link, project, 'ws-symlink'], {
-      env: { ...process.env, HOME: home, USERPROFILE: home }, // USERPROFILE: Windows homedir()
+    const out = execFileSync('node', [link, project], {
+      env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' }, // USERPROFILE: Windows homedir()
       encoding: 'utf8',
     });
     // On the buggy one-sided guard the module imports, the guard is false, and the
     // process exits 0 having printed nothing. The fix makes it actually run.
     const parsed = JSON.parse(out);
     assert.equal(parsed.ok, true, 'metrics-init actually executed through the symlink');
-    assert.ok(existsSync(join(home, '.core', 'workspaces', 'ws-symlink', 'metrics', 'storage-path.txt')),
+    assert.ok(existsSync(join(operationalMetricsDir(project, { home, env: {} }), 'storage-path.txt')),
       'the storage-path pin was written — the scaffold ran');
   } finally {
     rmSync(home, { recursive: true, force: true });

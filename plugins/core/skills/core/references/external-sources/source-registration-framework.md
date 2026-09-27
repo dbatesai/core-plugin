@@ -323,10 +323,10 @@ The orchestration skill writes a structured log of every source pull. This enabl
 ### Location
 
 ```
-~/.core/workspaces/<id>/source-pull-log.jsonl
+<project>/.core/<harness>/source-pull-log.jsonl
 ```
 
-Workspace-meta layer, not project layer. The log is monitoring data (agent operational meta), not project context the user reads or edits. It belongs alongside `state-cache.json`, `last-bootstrap.json`, etc.
+Operational-state layer, not the project's content layer. The log is monitoring data (agent operational state), not project context the user reads or edits. It belongs alongside `last-bootstrap.json` in the project's `.core/<harness>/`, which git ignores; resolve the directory through `scripts/project-state.mjs` rather than building the path by hand.
 
 This location also survives project repository operations (archive/restore, fork, rename) — project-folder logs become fragile against these operations.
 

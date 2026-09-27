@@ -1,3 +1,4 @@
+import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 // The answer-shaped /metrics default view (v3.14.0 Component 6): three
 // outcome questions in sentences, sourced from PINNED scorecards + tripwire
 // state only — presentation, no fresh computation. Honest degradation states.
@@ -11,13 +12,24 @@ import { fileURLToPath } from 'node:url';
 import { gatherAnswers, renderAnswerView } from '../../plugins/core/skills/core/scripts/metrics-check.mjs';
 import { appendScorecard } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
 
+// Opt-outs live in the project's trusted per-harness manifest. The manifest for an
+// unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
+// redirected for this file's process.
+const TEST_HOME = mkdtempSync(join(tmpdir(), 'optout-home-'));
+process.env.HOME = TEST_HOME;
+process.env.USERPROFILE = TEST_HOME;
+process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
+function writeManifestFlags(project, fields) {
+  updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
+}
+
+
 const CHECK_CLI = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'metrics-check.mjs');
 
 function makeProject(root) {
   const project = join(root, 'proj');
   mkdirSync(join(project, '_memories'), { recursive: true });
-  writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'ans-fixture' }));
   return project;
 }
 
@@ -68,7 +80,7 @@ test('capture opted out → storing/loading lines say so instead of pretending',
   try {
     const project = join(root, 'proj');
     mkdirSync(join(project, '_memories'), { recursive: true });
-    writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'ans-off', turn_capture: false }));
+    writeManifestFlags(project, { turn_capture: false });
     const view = renderAnswerView(gatherAnswers(project));
     assert.match(view, /turn capture is off/i);
   } finally { rmSync(root, { recursive: true, force: true }); }

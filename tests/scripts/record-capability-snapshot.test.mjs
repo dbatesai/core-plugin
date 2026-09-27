@@ -1,11 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   resolveSessionId, recordSnapshot,
 } from '../../plugins/core/skills/core/scripts/record-capability-snapshot.mjs';
+
+
+// A project folder inside the temp home, so no state ever lands in the working tree.
+function projectIn(home) {
+  const dir = join(home, 'proj');
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 test('resolveSessionId honors an explicit id over everything else', () => {
   const sid = resolveSessionId({ sessionId: 'explicit-id', env: { CLAUDE_CODE_SESSION_ID: 'env-id' } });
@@ -28,23 +36,22 @@ test('resolveSessionId with an empty env generates a distinct per-invocation fal
   assert.notEqual(a, b, 'fallback ids are distinct across invocations');
 });
 
-test('recordSnapshot appends to the workspace history rather than clobbering it', async () => {
+test('recordSnapshot appends to the project history rather than clobbering it', async () => {
   const home = mkdtempSync(join(tmpdir(), 'rcs-home-'));
   try {
     // Pass an explicit harness — recordSnapshot detects it from env at real startup,
     // but CI has no harness env signal, so an ambient-detected 'unknown' harness yields
     // zero probe rows. The test verifies append behavior, not harness detection.
-    const r1 = await recordSnapshot({ workspaceId: 'ws-test', harness: 'claude-code', home, sessionId: 's-one' });
-    assert.equal(r1.workspace_id, 'ws-test');
+    const r1 = await recordSnapshot({ cwd: projectIn(home), harness: 'claude-code', home, sessionId: 's-one' });
     assert.equal(r1.session_id, 's-one');
-    assert.equal(r1.storage, 'home');
+    assert.equal(r1.storage, 'state');
     assert.ok(r1.appended > 0, 'startup probes produced rows');
     assert.ok(existsSync(r1.path), 'history file created under the temp home');
     assert.ok(r1.path.startsWith(home), 'writes stay inside the temp home');
     const lines1 = readFileSync(r1.path, 'utf8').trim().split('\n');
     assert.equal(lines1.length, r1.appended);
 
-    const r2 = await recordSnapshot({ workspaceId: 'ws-test', harness: 'claude-code', home, sessionId: 's-two' });
+    const r2 = await recordSnapshot({ cwd: projectIn(home), harness: 'claude-code', home, sessionId: 's-two' });
     const lines2 = readFileSync(r2.path, 'utf8').trim().split('\n');
     assert.equal(r2.path, r1.path, 'same history file');
     assert.equal(lines2.length, r1.appended + r2.appended, 'second snapshot appended');
@@ -55,7 +62,7 @@ test('recordSnapshot appends to the workspace history rather than clobbering it'
 test('a snapshot over an unprobed harness is reported incomplete, not as a clean snapshot', async () => {
   const home = mkdtempSync(join(tmpdir(), 'rcs-unknown-'));
   try {
-    const r = await recordSnapshot({ workspaceId: 'ws-unknown', harness: 'no-such-harness', home, sessionId: 's-1' });
+    const r = await recordSnapshot({ cwd: projectIn(home), harness: 'no-such-harness', home, sessionId: 's-1' });
     assert.equal(r.complete, false, 'an unprobed capability set is not a complete snapshot');
     assert.equal(r.summary.unknown, 1, 'the gap is recorded as an UNKNOWN row');
     assert.equal(r.appended, 1, 'the UNKNOWN row is persisted so history carries the gap');
@@ -65,7 +72,7 @@ test('a snapshot over an unprobed harness is reported incomplete, not as a clean
 test('a snapshot over a probed harness is reported complete', async () => {
   const home = mkdtempSync(join(tmpdir(), 'rcs-complete-'));
   try {
-    const r = await recordSnapshot({ workspaceId: 'ws-ok', harness: 'claude-code', home, sessionId: 's-1' });
+    const r = await recordSnapshot({ cwd: projectIn(home), harness: 'claude-code', home, sessionId: 's-1' });
     assert.equal(r.complete, true);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

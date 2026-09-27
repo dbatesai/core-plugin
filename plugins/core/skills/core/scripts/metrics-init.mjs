@@ -11,7 +11,7 @@
  *
  * Library usage:
  *   import { initMetrics } from './metrics-init.mjs';
- *   const result = initMetrics({ projectDir: '/path/to/project', workspaceId: 'core-framework' });
+ *   const result = initMetrics({ projectDir: '/path/to/project' });
  *
  * CLI usage:
  *   node metrics-init.mjs <project-dir> <workspace-id>
@@ -26,6 +26,8 @@ import { isCliEntry } from './cli-entry.mjs';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { mapProjectPathToSlug } from './project-slug.mjs';
+import { operationalMetricsDir } from './log-event.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -42,7 +44,7 @@ export const CAPTURE_DISABLED_MARKER = 'capture-disabled.json';
  */
 export function captureDisabledMarkerCandidates({ projectDir, operationalMetaDir }) {
   return [
-    join(operationalMetaDir, CAPTURE_DISABLED_MARKER),
+    ...(operationalMetaDir ? [join(operationalMetaDir, CAPTURE_DISABLED_MARKER)] : []),
     join(projectDir, '_metrics', CAPTURE_DISABLED_MARKER),
   ];
 }
@@ -75,24 +77,26 @@ function clearCaptureDisabledMarkers({ projectDir, operationalMetaDir }) {
  *
  * @param {object} args
  * @param {string} args.projectDir - Absolute path to the project root.
- * @param {string} args.workspaceId - Workspace identifier (kebab-case).
+ * @param {string} [args.home] - Home directory (tests); defaults to the OS home.
+ * @param {object} [args.env] - Environment for harness detection.
  * @returns {object} - { ok, storagePath, detection, scaffold_log_line }
  */
-export function initMetrics({ projectDir, workspaceId }) {
-  if (!projectDir || !workspaceId) {
+export function initMetrics({ projectDir, home = homedir(), env = process.env }) {
+  if (!projectDir) {
     return { ok: false, reason: 'missing-required-args' };
   }
   if (!existsSync(projectDir)) {
     return { ok: false, reason: 'project-dir-does-not-exist' };
   }
 
-  const detection = detectStoragePath({ projectDir, workspaceId });
+  const detection = detectStoragePath({ projectDir, home });
   const storagePath = detection.path;
 
   // Write the forensic line BEFORE any other work so a partial failure
   // still leaves a debug trail.
-  const operationalMetaDir = join(homedir(), '.core', 'workspaces', workspaceId, 'metrics');
+  let operationalMetaDir;
   try {
+    operationalMetaDir = operationalMetricsDir(projectDir, { home, env });
     mkdirSync(operationalMetaDir, { recursive: true });
   } catch (err) {
     return { ok: false, reason: 'cannot-create-operational-meta-dir', err: err.message };
@@ -100,7 +104,6 @@ export function initMetrics({ projectDir, workspaceId }) {
 
   const scaffoldLogLine = formatScaffoldLog({
     timestamp: new Date().toISOString(),
-    workspace_id: workspaceId,
     project_dir: projectDir,
     detection_methods: detection.methods,
     chosen_storage: storagePath,
@@ -136,10 +139,10 @@ export function initMetrics({ projectDir, workspaceId }) {
     });
     process.stderr.write(
       `CORE-METRICS-PIN-FAILED: cannot pin metrics storage to ${storagePath} `
-      + `(${err && (err.code || err.message)}); metrics capture is DISABLED for workspace ${workspaceId} `
+      + `(${err && (err.code || err.message)}); metrics capture is DISABLED for project ${projectDir} `
       + `(marker: ${markerPath || 'unwritable — both marker locations failed'}). `
       + 'Capture never falls back silently into the synced project folder. '
-      + 'Fix the permissions on the workspace metrics dir and re-run metrics-init to re-enable.\n',
+      + 'Fix the permissions on the project metrics dir and re-run metrics-init to re-enable.\n',
     );
     return {
       ok: false,
@@ -194,7 +197,8 @@ export function initMetrics({ projectDir, workspaceId }) {
  * Decide where storage lives for this project. Honors CORE_METRICS_FORCE_PROJECT_LOCAL=1
  * as a user escape hatch.
  */
-export function detectStoragePath({ projectDir, workspaceId }) {
+export function detectStoragePath({ projectDir, home = homedir() }) {
+  const appDataPath = join(home, 'AppData', 'Local', 'core-metrics', mapProjectPathToSlug(projectDir));
   if (process.env.CORE_METRICS_FORCE_PROJECT_LOCAL === '1') {
     return {
       path: join(projectDir, '_metrics'),
@@ -205,7 +209,7 @@ export function detectStoragePath({ projectDir, workspaceId }) {
 
   if (process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK === '1') {
     return {
-      path: join(homedir(), 'AppData', 'Local', 'core-metrics', workspaceId),
+      path: appDataPath,
       methods: { forced: 'appdata-fallback' },
       reason: 'forced-appdata-fallback-via-env',
     };
@@ -226,7 +230,7 @@ export function detectStoragePath({ projectDir, workspaceId }) {
 
   if (methodA || methodC) {
     return {
-      path: join(homedir(), 'AppData', 'Local', 'core-metrics', workspaceId),
+      path: appDataPath,
       methods: { a: methodA, c: methodC, b: 'not-implemented' },
       reason: 'windows-onedrive-detected-redirect-appdata',
     };
@@ -341,7 +345,7 @@ export function writeStubReadme({ projectDir, actualStoragePath }) {
     '',
     'Detection-method results are logged at:',
     '',
-    '    ~/.core/workspaces/<workspace-id>/metrics/scaffold.log',
+    '    <project>/.core/<harness>/metrics/scaffold.log',
     '',
     'If you want to force project-local storage instead (accepting cloud-sync of',
     'metrics payloads), set `CORE_METRICS_FORCE_PROJECT_LOCAL=1` in your shell',
@@ -356,7 +360,6 @@ export function writeStubReadme({ projectDir, actualStoragePath }) {
  */
 export function formatScaffoldLog({
   timestamp,
-  workspace_id,
   project_dir,
   detection_methods,
   chosen_storage,
@@ -365,16 +368,16 @@ export function formatScaffoldLog({
   const methodSummary = Object.entries(detection_methods)
     .map(([k, v]) => `(${k})=${v}`)
     .join(' ');
-  return `${timestamp} metrics-init workspace=${workspace_id} project=${project_dir} methods: ${methodSummary} → ${chosen_storage} (${chosen_reason})`;
+  return `${timestamp} metrics-init project=${project_dir} methods: ${methodSummary} → ${chosen_storage} (${chosen_reason})`;
 }
 
 if (isCliEntry(import.meta.url)) {
-  const [projectDir, workspaceId] = process.argv.slice(2);
-  if (!projectDir || !workspaceId) {
-    console.error('usage: node metrics-init.mjs <project-dir> <workspace-id>');
+  const [projectDir] = process.argv.slice(2);
+  if (!projectDir) {
+    console.error('usage: node metrics-init.mjs <project-dir>');
     process.exit(1);
   }
-  const result = initMetrics({ projectDir, workspaceId });
+  const result = initMetrics({ projectDir });
   if (!result.ok) {
     console.error('metrics-init failed:', result.reason, result.err || '');
     process.exit(2);

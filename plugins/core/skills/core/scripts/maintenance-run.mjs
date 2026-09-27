@@ -24,7 +24,6 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { buildIndex as buildUnitIndex } from './generate-unit-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { hashText, stampFiles } from './state-cache.mjs';
-import { resolveWorkspaceId } from './log-event.mjs';
 import { runTurnCaptureRetention, purgeTurnCapture, TURN_CAPTURE_RETENTION_DAYS } from './turn-capture.mjs';
 import { runClassifiedRetention } from './classify-turns.mjs';
 import { resolveStoragePath } from './log-event.mjs';
@@ -140,7 +139,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // assertions; it never touches user memory units or PROJECT.md. Honors
   // dry-run: apply:false reports what WOULD be deleted and removes nothing.
   try {
-    const tc = runTurnCaptureRetention(root, { apply, now, windowDays: TURN_CAPTURE_RETENTION_DAYS, workspaceId: resolveWorkspaceId(root) });
+    const tc = runTurnCaptureRetention(root, { apply, now, windowDays: TURN_CAPTURE_RETENTION_DAYS });
     if (tc.ran) {
       if (apply && tc.deleted.length) {
         ranOps.push('turn-capture-retention');
@@ -161,7 +160,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // makes legible for the capture stream this mirrors.
   if (apply) {
     try {
-      const cr = runClassifiedRetention(root, { workspaceId: resolveWorkspaceId(root), now: now ? new Date(now) : new Date() });
+      const cr = runClassifiedRetention(root, { now: now ? new Date(now) : new Date() });
       if (cr.ran && cr.deleted.length) {
         ranOps.push('classified-retention');
         notes.push(`classified-log retention: deleted ${cr.deleted.length} day file(s) older than ${cr.windowDays}d`);
@@ -179,7 +178,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // boundary discipline as every deletion op here. Remove this block in v3.15.0.
   if (apply) {
     try {
-      const base = resolveStoragePath(root, { workspaceId: resolveWorkspaceId(root) });
+      const base = resolveStoragePath(root);
       const legacyDir = join(base, 'rich-context');
       const legacyLock = join(base, '.rich-context.lock');
       if (existsSync(legacyDir)) {
@@ -322,7 +321,7 @@ async function main(argv) {
   // directory-name assertion so it can only ever remove
   // <storage-base>/turn-capture/. Respects --dry-run.
   if (argv.includes('--purge-turn-capture')) {
-    const res = purgeTurnCapture(projectPath, { apply: !dryRun, workspaceId: resolveWorkspaceId(projectPath) });
+    const res = purgeTurnCapture(projectPath, { apply: !dryRun });
     if (json) process.stdout.write(JSON.stringify(res) + '\n');
     else if (res.purged) process.stdout.write(`Purged the turn-capture evidence stream: ${res.dir}\n`);
     else if (res.reason === 'dry-run') process.stdout.write(`Would purge the turn-capture evidence stream: ${res.dir}\n`);

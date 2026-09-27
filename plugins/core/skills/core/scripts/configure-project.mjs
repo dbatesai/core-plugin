@@ -13,7 +13,7 @@
  *
  * Idempotent. Default mode is REPORT-ONLY (--dry-run is implied): the only write
  * it ever performs is generating AGENTS.md, and only under --apply. Workspace
- * identity is detected, never mutated here (forking is startup's job).
+ * identity is detected, never mutated here (registration is startup's job).
  *
  *   node configure-project.mjs [--project <dir>] [--harness claude-code|codex]
  *                              [--apply] [--json] [--core-root <dir>]
@@ -37,7 +37,7 @@ import { resolve, join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { checkFork } from './workspace-fork-check.mjs';
+import { classifyRegistration, classifyStamp } from './project-state.mjs';
 import { iterActiveUnits, checkSchema, checkIntegrity, exitCode } from './check-units.mjs';
 import { generate as generateHarnessMd } from './generate-harness-md.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -111,17 +111,17 @@ function hasUnitFiles(dir) {
   } catch { return false; }
 }
 
-// ── Workspace identity (script-visible, detect-only) ─────────────────────────
-// Always dry-run: configure-project REPORTS the identity decision; it never
-// mutates identity (the fork mutation is startup's job). Wrapped in its
-// own try/catch because we import checkFork directly, bypassing the CLI main's
-// error wrapper.
-export function detectIdentity(projectPath, coreDir, now = new Date()) {
+// ── Project identity (script-visible, detect-only) ───────────────────────────
+// Always read-only: configure-project REPORTS which registered project this folder
+// is and whether its per-harness state can be trusted; registration and any
+// set-aside of untrusted state are startup's job.
+export function detectIdentity(projectPath, coreDir, harness = 'claude-code') {
   try {
-    const r = checkFork({ cwd: projectPath, coreDir, now, dryRun: true });
-    if (r.action === 'error') return { status: 'error', detail: r.error };
-    if (r.action === 'would-fork') return { status: 'would-fork', original_id: r.original_id, new_id: r.new_id };
-    return { status: 'returning-or-new', reason: r.reason, workspace_id: r.workspace_id || null };
+    const home = dirname(coreDir);
+    const reg = classifyRegistration(projectPath, { home, coreDir });
+    const root = reg.action === 'registered' ? reg.root : reg.action === 'ask' ? reg.parent : null;
+    const stamp = root ? classifyStamp({ root, harness, coreDir }).status : null;
+    return { status: reg.action, root, reason: reg.reason || null, parent: reg.parent || null, state: stamp };
   } catch (e) {
     return { status: 'error', detail: e.message };
   }
@@ -221,7 +221,7 @@ export async function configureProject({
 
   const manifests = checkManifests(coreRoot);
   const store = validateStore(proj, today);
-  const identity = detectIdentity(proj, coreDir, today);
+  const identity = detectIdentity(proj, coreDir, harness || detectHarness());
   const mcp = readConfiguredMcp(proj, harness, home);
   const connectorMap = readConnectorMap(proj);
   const agentsMd = await planAgentsMd(proj, { apply });
@@ -276,12 +276,11 @@ export function formatReceipt(r) {
 }
 
 function describeIdentity(id) {
-  if (id.status === 'would-fork') return `would fork (copied pointer from ${id.original_id}) — run /core to register as ${id.new_id}`;
   if (id.status === 'error') return `could not resolve (${id.detail})`;
-  if (id.reason === 'path-match') return `returning workspace${id.workspace_id ? ` (${id.workspace_id})` : ''}`;
-  if (id.reason === 'no-pointer' || id.reason === 'no-index') return 'new / unregistered (no pointer or index yet)';
-  if (id.reason === 'unregistered-id') return 'pointer id not in index — new registration';
-  return id.reason || 'resolved';
+  if (id.status === 'registered') return `registered project (${id.root}); state: ${id.state || 'none yet'}`;
+  if (id.status === 'ask') return `inside registered project ${id.parent} — /core asks: join it, or start a new project here`;
+  if (id.status === 'refuse') return `not registrable here (${id.reason})`;
+  return 'new / unregistered — /core registers it';
 }
 
 function describeAgents(a) {

@@ -1,7 +1,8 @@
+import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
 // a temp dir for the initMetrics test so the operational-meta write under
-// `~/.core/workspaces/<id>/metrics/` never touches the real ~/.core.
+// the project's metrics state never touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
@@ -38,11 +39,10 @@ test('initMetrics scaffolds the metrics storage observably on disk', () => {
   withCleanEnv(() => {
     const fakeHome = mkdtempSync(join(tmpdir(), 'metrics-home-'));
     const projectDir = mkdtempSync(join(tmpdir(), 'metrics-proj-'));
-    const workspaceId = 'test-metrics-init-a7';
     process.env.HOME = fakeHome;
     process.env.USERPROFILE = fakeHome; // os.homedir() source on Windows
     try {
-      const result = initMetrics({ projectDir, workspaceId });
+      const result = initMetrics({ projectDir, env: {} });
 
       assert.equal(result.ok, true);
       assert.equal(result.storagePath, join(projectDir, '_metrics'));
@@ -55,7 +55,7 @@ test('initMetrics scaffolds the metrics storage observably on disk', () => {
       }
 
       // Operational meta landed under the redirected HOME, never the real one
-      const metaDir = join(fakeHome, '.core', 'workspaces', workspaceId, 'metrics');
+      const metaDir = operationalMetricsDir(projectDir, { home: fakeHome, env: {} });
       assert.equal(result.operationalMetaDir, metaDir);
       assert.ok(existsSync(join(metaDir, 'scaffold.log')), 'forensic scaffold.log written');
       assert.equal(
@@ -65,7 +65,7 @@ test('initMetrics scaffolds the metrics storage observably on disk', () => {
       );
 
       // Idempotent: a re-run still reports ok against existing structure
-      assert.equal(initMetrics({ projectDir, workspaceId }).ok, true);
+      assert.equal(initMetrics({ projectDir, env: {} }).ok, true);
     } finally {
       rmSync(fakeHome, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
@@ -77,7 +77,7 @@ test('detectStoragePath returns the default project-local path when the path has
   withCleanEnv(() => {
     const projectDir = mkdtempSync(join(tmpdir(), 'metrics-detect-'));
     try {
-      const detection = detectStoragePath({ projectDir, workspaceId: 'test-detect-a7' });
+      const detection = detectStoragePath({ projectDir });
       assert.equal(detection.path, join(projectDir, '_metrics'));
       // On non-Windows the platform branch decides; on Windows it's the
       // no-OneDrive branch. Either way the reason names project-local.

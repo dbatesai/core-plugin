@@ -27,7 +27,7 @@ import { readdirSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
-import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { todayUTC, resolveSessionId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 import { TERMINAL_STATUSES } from './unit-vocab.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
@@ -373,8 +373,8 @@ function walkMd(dir, cb, depth = 0, withPath = false) {
 // Unified runner
 // ============================================================
 
-export function runDetectors({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, workspaceId, env }) {
-  if (!metricsEnabled({ project, env })) {
+export function runDetectors({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, env }) {
+  if (!metricsEnabled({ project, env, home })) {
     return { status: 'DISABLED', reason: 'metrics opt-in not set' };
   }
   const t = readTranscript({ harness, cwd: cwd || project, home, sessionId, env });
@@ -384,7 +384,6 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
   const index = buildUnitIndex(memoriesDir);
   const sid = resolveSessionId({ explicit: sessionId });
   const date = today || todayUTC();
-  const wid = workspaceId || resolveWorkspaceId(project);
 
   const brokenCitations = runCitationResolver(t.events, index);
   const staleUnits = runStaleContextTripwire(t.events, memoriesDir, date);
@@ -439,14 +438,13 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
   ];
 
   try {
-    const dir = join(operationalMetricsDir(wid, { home }), 'detectors');
+    const dir = join(operationalMetricsDir(project, { home, env }), 'detectors');
     mkdirSync(dir, { recursive: true });
     for (const r of records) appendFileSync(join(dir, `${date}.jsonl`), JSON.stringify(r) + '\n');
   } catch { /* best-effort */ }
 
   return {
     status: 'OK',
-    workspace_id: wid,
     transcript_resolution: t.meta.transcript_resolution,
     broken_citations: brokenCitations.length,
     stale_units: staleUnits.length,

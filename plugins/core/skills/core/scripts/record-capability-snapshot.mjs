@@ -3,24 +3,25 @@
  *
  * The wire between the producer and the store: startup runs the capability probe
  * and writes capability-state.json; this script runs runStartup() and appends the
- * rows to ~/.core/workspaces/<id>/capability-history.jsonl via appendRows(), which
+ * rows to the project's `.core/<harness>/capability-history.jsonl` via appendRows(), which
  * is what gives drift/regression analysis something to read across sessions.
  *
  * Used by protocols/startup.md (once per session, fail-open) so each session
  * leaves a capability snapshot; analyze-capability-drift.mjs then reads the
  * accumulated history in /finalize and /process-memory.
  *
- * CLI: node record-capability-snapshot.mjs --workspace-id <id>
+ * CLI: node record-capability-snapshot.mjs [--cwd <path>] [--harness <h>]
  *      [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>]
  *
  * The script ships with the plugin by design. The plugin ships .mjs only, zero dependencies.
  */
 
-import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { runStartup, SCHEMA_VERSION } from './capability-probe.mjs';
 import { appendRows } from './capability-history.mjs';
+import { projectRootFor, detectStateHarness } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 /**
@@ -39,14 +40,16 @@ export function resolveSessionId(opts = {}) {
 }
 
 function isStoreUnavailable(err) {
-  return ['EPERM', 'EACCES', 'EROFS', 'ENOTDIR'].includes(err?.code);
+  // EEXIST: ~/.core (which holds the install secret the state stamp needs) is a file, not a directory.
+  return ['EPERM', 'EACCES', 'EROFS', 'ENOTDIR', 'EEXIST'].includes(err?.code);
 }
 
-function resolveFallbackProject(opts = {}) {
-  const candidates = [opts.project, opts.cwd, process.cwd()].filter(Boolean);
-  for (const candidate of candidates) {
+// The project-local fallback store: an explicit --project, else the resolved
+// project root when it is a real folder.
+function resolveFallbackProject(opts = {}, root = null) {
+  for (const candidate of [opts.project, root].filter(Boolean)) {
     try {
-      if (existsSync(join(candidate, 'workspace.json'))) return candidate;
+      if (statSync(candidate).isDirectory()) return candidate;
     } catch { /* ignore invalid candidate */ }
   }
   return null;
@@ -57,8 +60,10 @@ function resolveFallbackProject(opts = {}) {
  * history. Returns a small summary. opts.home is a test seam (defaults to $HOME).
  */
 export async function recordSnapshot(opts = {}) {
-  const { workspaceId, harness, cwd } = opts;
-  if (!workspaceId) throw new Error('record-capability-snapshot: workspaceId is required');
+  const { harness, cwd } = opts;
+  const where = cwd || process.cwd();
+  const root = opts.root || projectRootFor(where, opts.home ? { home: opts.home } : {});
+  const target = { root, harness: opts.stateHarness || harness || detectStateHarness(opts.env || process.env) };
   const sessionId = resolveSessionId(opts);
 
   const startup = await runStartup({ harness, cwd });
@@ -69,22 +74,22 @@ export async function recordSnapshot(opts = {}) {
   if (opts.lockOpts) appendOpts.lockOpts = opts.lockOpts;
 
   let appendResult;
-  let storage = 'home';
+  let storage = 'state';
   let primaryError = null;
   try {
     appendResult = appendRows(
-      workspaceId,
+      target,
       rows,
       { schema_version: SCHEMA_VERSION, runner_version: SCHEMA_VERSION, session_id: sessionId },
       appendOpts,
     );
   } catch (err) {
-    const project = resolveFallbackProject(opts);
+    const project = resolveFallbackProject(opts, root);
     if (!project || !isStoreUnavailable(err)) throw err;
     primaryError = err.message;
     storage = 'project-fallback';
     appendResult = appendRows(
-      workspaceId,
+      target,
       rows,
       { schema_version: SCHEMA_VERSION, runner_version: SCHEMA_VERSION, session_id: sessionId },
       { ...appendOpts, project },
@@ -92,7 +97,7 @@ export async function recordSnapshot(opts = {}) {
   }
 
   return {
-    workspace_id: workspaceId,
+    root,
     harness: startup.harness,
     session_id: sessionId,
     // Carried through from the probe run: an appended count says how much was written,
@@ -107,20 +112,15 @@ export async function recordSnapshot(opts = {}) {
 }
 
 export async function main(argv) {
-  let workspaceId = null, harness = null, cwd = null, sessionId = null, project = null;
+  let harness = null, cwd = null, sessionId = null, project = null;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--workspace-id') workspaceId = argv[++i];
-    else if (argv[i] === '--harness') harness = argv[++i];
+    if (argv[i] === '--harness') harness = argv[++i];
     else if (argv[i] === '--cwd') cwd = argv[++i];
     else if (argv[i] === '--session-id') sessionId = argv[++i];
     else if (argv[i] === '--project') project = argv[++i];
   }
-  if (!workspaceId) {
-    process.stderr.write('usage: record-capability-snapshot.mjs --workspace-id <id> [--harness <h>] [--cwd <path>] [--project <path>] [--session-id <sid>]\n');
-    return 2;
-  }
   try {
-    const r = await recordSnapshot({ workspaceId, harness, cwd, sessionId, project });
+    const r = await recordSnapshot({ harness, cwd, sessionId, project });
     console.log(JSON.stringify(r));
     return 0;
   } catch (e) {

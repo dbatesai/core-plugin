@@ -86,11 +86,11 @@ test('containedPath / regularFileWithin: a symlink is judged by its real target'
 test('trusted-tree consumers fail closed when the account home is unavailable', async () => {
   const noHome = { resolve: () => null };
   const { defaultCoreDir } = await import('../../plugins/core/skills/core/scripts/index-registry.mjs');
-  const { defaultForkCoreDir } = await import('../../plugins/core/skills/core/scripts/workspace-fork-check.mjs');
+  const { defaultCoreDir: projectStateCoreDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
   const { globalCacheDir } = await import('../../plugins/core/skills/core/scripts/state-cache.mjs');
   for (const [name, fn] of [
     ['index-registry.defaultCoreDir', defaultCoreDir],
-    ['workspace-fork-check.defaultForkCoreDir', defaultForkCoreDir],
+    ['project-state.defaultCoreDir', projectStateCoreDir],
     ['state-cache.globalCacheDir', globalCacheDir],
   ]) {
     assert.throws(() => fn(noHome), (e) => e.code === 'NO_TRUSTED_HOME', `${name} must fail closed`);

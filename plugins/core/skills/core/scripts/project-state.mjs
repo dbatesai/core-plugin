@@ -21,7 +21,7 @@
  */
 
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, realpathSync,
+  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
   writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -160,12 +160,25 @@ export function localStateDir({ root, harness, coreDir = defaultCoreDir() }) {
  * kind 'durable' (manifest, stamp, drafts) stays in the project unless the root
  * is not writable; kind 'hot' (append logs, metrics, locks) also moves to local/
  * when the root is under a sync client.
+ * A root that is not registered (~/.core/projects.json, or the legacy index.json)
+ * never gets in-project state: its state lives under ~/.core/local/.
  * Returns { dir, location: 'project' | 'local', reason }.
  */
-export function projectStateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir() }) {
+export function projectStateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), registered }) {
   assertHarnessName(harness);
   if (kind !== 'durable' && kind !== 'hot') throw new Error(`projectStateDir: unknown kind ${kind}`);
   const real = canonical(root);
+  const core = canonical(coreDir);
+  if (real === dirname(core) || isInside(real, core)) {
+    return { dir: localStateDir({ root: real, harness, coreDir }), location: 'local', reason: 'not-a-project-root' };
+  }
+  // Only a folder the user registered by running /core gets a .core/ inside it; a
+  // hook or script working anywhere else keeps its state on this machine.
+  let roots = registered;
+  if (!roots) { try { roots = readRegisteredRoots({ coreDir: core }); } catch { roots = new Set(); } }
+  if (!roots.has(real)) {
+    return { dir: localStateDir({ root: real, harness, coreDir }), location: 'local', reason: 'unregistered' };
+  }
   if (!isWritableDir(real)) {
     return { dir: localStateDir({ root: real, harness, coreDir }), location: 'local', reason: 'root-not-writable' };
   }
@@ -199,19 +212,25 @@ export function checkStateContainment({ root, harness }) {
  */
 export function ensureStateDir(opts) {
   const target = projectStateDir(opts);
-  if (target.location === 'project') {
-    const real = canonical(opts.root);
-    const containment = checkStateContainment({ root: real, harness: opts.harness });
-    if (containment && containment !== 'ok' && containment !== 'ok-absent-harness') {
-      throw Object.assign(new Error(`refusing ${join(real, STATE_DIRNAME)}: ${containment}`), { code: 'STATE_CONTAINMENT', reason: containment });
-    }
-    const coreDir = join(real, STATE_DIRNAME);
-    mkdirSync(coreDir, { recursive: true });
-    const gitignore = join(coreDir, '.gitignore');
-    if (!existsSync(gitignore)) writeFileSync(gitignore, '*\n');
-  }
+  if (target.location === 'project') return { ...target, dir: ensureInProjectDir(opts.root, opts.harness) };
   mkdirSync(target.dir, { recursive: true });
   return target;
+}
+
+/** Create <root>/.core/<harness>/ — refusing a symlinked or escaping .core, .gitignore first. */
+function ensureInProjectDir(root, harness) {
+  const real = canonical(root);
+  const containment = checkStateContainment({ root: real, harness });
+  if (containment && containment !== 'ok' && containment !== 'ok-absent-harness') {
+    throw Object.assign(new Error(`refusing ${join(real, STATE_DIRNAME)}: ${containment}`), { code: 'STATE_CONTAINMENT', reason: containment });
+  }
+  const coreDir = join(real, STATE_DIRNAME);
+  mkdirSync(coreDir, { recursive: true });
+  const gitignore = join(coreDir, '.gitignore');
+  if (!existsSync(gitignore)) writeFileSync(gitignore, '*\n');
+  const dir = join(coreDir, assertHarnessName(harness));
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
 // ---------- install identity and the stamp ----------
@@ -240,7 +259,7 @@ export function writeStamp({ root, harness, coreDir = defaultCoreDir() }) {
   const path = canonical(root);
   const stamp = { path, harness: assertHarnessName(harness), install_id: installId };
   stamp.hmac = stampHmac(secret, stamp);
-  const { dir } = ensureStateDir({ root: path, harness, kind: 'durable', coreDir });
+  const dir = ensureInProjectDir(path, harness);
   atomicWriteFileSync(join(dir, 'stamp'), JSON.stringify(stamp, null, 2) + '\n');
   return stamp;
 }
@@ -296,4 +315,146 @@ export function classifyStamp({ root, harness, coreDir = defaultCoreDir() }) {
 /** A path read out of project state must resolve inside that state directory. */
 export function containedInState(stateDir, candidate) {
   return containedPath(stateDir, candidate);
+}
+
+// ---------- the harness and the root a caller is working in ----------
+
+/**
+ * The harness whose subfolder this process reads and writes. CORE_HARNESS wins
+ * when it is a safe name; Codex exposes CODEX_* env; everything else is Claude Code.
+ * Canonical signal list: harnesses/<name>.md §detect-harness (env-visible subset).
+ */
+export function detectStateHarness(env = process.env) {
+  const forced = env && env.CORE_HARNESS;
+  if (typeof forced === 'string' && HARNESS_RE.test(forced)) return forced;
+  if (env && (env.CODEX_PLUGIN_ROOT || env.CODEX_THREAD_ID || env.CODEX_HARNESS || env.CODEX_SANDBOX)) return 'codex';
+  return 'claude-code';
+}
+
+/**
+ * The project root a script working on `projectDir` should use: its registered
+ * root when it is (or sits inside) a registered project, otherwise the directory
+ * itself — a store that has not been registered yet still gets its own state.
+ */
+export function projectRootFor(projectDir, { home = defaultHome(), coreDir } = {}) {
+  const found = resolveProjectRoot(projectDir, { home, coreDir: coreDir || join(home, '.core') });
+  return found.root || canonical(projectDir);
+}
+
+// ---------- trust-gated state access ----------
+
+function isoStamp(now = new Date()) {
+  return now.toISOString().replace(/[:.]/g, '-');
+}
+
+/** Move everything in a harness state dir except superseded/ into superseded/<label>/, unread. */
+function setAside(harnessDir, label) {
+  const dest = join(harnessDir, 'superseded', label);
+  mkdirSync(dest, { recursive: true });
+  for (const name of readdirSync(harnessDir)) {
+    if (name === 'superseded') continue;
+    renameSync(join(harnessDir, name), join(dest, name));
+  }
+  return dest;
+}
+
+/**
+ * The state directory to use for (root, harness, kind), applying the stamp rules.
+ *
+ * Returns { dir, location, status, trusted } or null when there is nothing
+ * trustworthy to read (forWrite false). With forWrite true the directory exists on
+ * return and is this install's: an absent state dir is created and stamped; planted
+ * or copied state is set aside unread under superseded/ and replaced; another
+ * install's state and an unresolved move/copy ('ask') route to ~/.core/local/;
+ * a moved project is re-stamped at its new path.
+ *
+ * Refused containment (a symlinked or escaping .core) throws on write and reads as null.
+ */
+export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), forWrite = false, onEvent } = {}) {
+  assertHarnessName(harness);
+  const real = canonical(root);
+  const target = projectStateDir({ root: real, harness, kind, coreDir });
+  if (target.location === 'local') {
+    if (forWrite) mkdirSync(target.dir, { recursive: true });
+    else if (!existsSync(target.dir)) return null;
+    return { dir: target.dir, location: 'local', status: target.reason, trusted: true };
+  }
+
+  const verdict = classifyStamp({ root: real, harness, coreDir });
+  const harnessDir = join(real, STATE_DIRNAME, harness);
+  const local = () => {
+    const dir = localStateDir({ root: real, harness, coreDir });
+    if (forWrite) mkdirSync(dir, { recursive: true });
+    else if (!existsSync(dir)) return null;
+    return { dir, location: 'local', status: verdict.status, trusted: true };
+  };
+  const note = (event) => { if (typeof onEvent === 'function') onEvent({ ...event, root: real, harness }); };
+
+  switch (verdict.status) {
+    case 'verified':
+      if (forWrite) mkdirSync(target.dir, { recursive: true });
+      return { dir: target.dir, location: 'project', status: 'verified', trusted: true };
+    case 'refused':
+      if (forWrite) {
+        throw Object.assign(new Error(`refusing ${join(real, STATE_DIRNAME)}: ${verdict.reason}`), { code: 'STATE_CONTAINMENT', reason: verdict.reason });
+      }
+      return null;
+    case 'foreign-install':
+    case 'ask':
+      return local();
+    case 'absent':
+      if (!forWrite) return null;
+      writeStamp({ root: real, harness, coreDir });
+      note({ kind: 'state-created' });
+      return { dir: target.dir, location: 'project', status: 'created', trusted: true };
+    case 'moved':
+      if (!forWrite) return { dir: target.dir, location: 'project', status: 'moved', trusted: true };
+      writeStamp({ root: real, harness, coreDir });
+      note({ kind: 'state-moved', oldPath: verdict.oldPath });
+      return { dir: target.dir, location: 'project', status: 'moved', trusted: true, oldPath: verdict.oldPath };
+    case 'planted':
+    case 'copied': {
+      if (!forWrite) return null;
+      const label = `${verdict.status === 'copied' ? 'copied' : 'unverified'}-${isoStamp()}`;
+      const aside = setAside(harnessDir, label);
+      writeStamp({ root: real, harness, coreDir });
+      note({ kind: verdict.status === 'copied' ? 'state-copied' : 'state-unverified', setAside: aside, oldPath: verdict.oldPath });
+      return { dir: target.dir, location: 'project', status: verdict.status, trusted: true, setAside: aside };
+    }
+    default:
+      return null;
+  }
+}
+
+// ---------- the per-harness manifest (workspace.json) ----------
+
+const MANIFEST = 'workspace.json';
+
+/** The manifest for (root, harness), or null when absent or untrusted. */
+export function readManifest({ root, harness, coreDir = defaultCoreDir() }) {
+  const s = stateDir({ root, harness, kind: 'durable', coreDir });
+  if (!s) return null;
+  try { return JSON.parse(readFileSync(join(s.dir, MANIFEST), 'utf8')); } catch { return null; }
+}
+
+/**
+ * Merge `fields` into the manifest. A manifest created here gets a fresh random
+ * project_id; a copied project's replacement manifest therefore gets a new one.
+ * Throws MANIFEST_UNPARSEABLE rather than overwrite a manifest it cannot read.
+ */
+export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fields = {}, onEvent }) {
+  const s = stateDir({ root, harness, kind: 'durable', coreDir, forWrite: true, onEvent });
+  const file = join(s.dir, MANIFEST);
+  let current = {};
+  if (existsSync(file)) {
+    // An unparseable manifest is surfaced, never silently replaced.
+    try { current = JSON.parse(readFileSync(file, 'utf8')); } catch (err) {
+      throw Object.assign(new Error(`manifest-unparseable: ${file}: ${err.message}`), { code: 'MANIFEST_UNPARSEABLE' });
+    }
+  }
+  const next = { ...current, ...fields };
+  if (!next.project_id) next.project_id = randomBytes(16).toString('hex');
+  if (!next.harness) next.harness = harness;
+  atomicWriteFileSync(file, JSON.stringify(next, null, 2) + '\n');
+  return next;
 }

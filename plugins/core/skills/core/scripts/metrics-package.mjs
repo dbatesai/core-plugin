@@ -52,6 +52,8 @@ import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { trustedMetricsDir } from './log-event.mjs';
+import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots } from './project-state.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'metrics-package-salt';
@@ -604,13 +606,12 @@ export function maintenanceStats(projectDir) {
   return { available: true, _trust: TRUST.DIRECT, _trust_basis: 'state file', ops, pm_last_run: pmLastRun };
 }
 
-export function workspaceMetrics(home, workspaceId) {
-  if (!workspaceId) return { available: false, reason: 'no workspace.json pointer (project not registered)', _trust: TRUST.DIRECT, _trust_basis: 'metrics layer' };
-  const wsDir = join(home, '.core', 'workspaces', workspaceId);
-  if (!existsSync(wsDir)) return { available: false, reason: 'workspace meta dir absent', _trust: TRUST.DIRECT, _trust_basis: 'metrics layer' };
+export function workspaceMetrics(home, projectDir) {
+  const metricsDir = projectDir ? trustedMetricsDir(projectDir, { home }) : null;
+  if (!metricsDir || !existsSync(metricsDir)) return { available: false, reason: 'no trusted project metrics state', _trust: TRUST.DIRECT, _trust_basis: 'metrics layer' };
 
   const recognition = { available: false, reason: 'no classified turn files', _trust: TRUST.PROVISIONAL, _trust_basis: 'classifier has not cleared its calibration gate — trends only, never levels', days: {} };
-  const clsDir = join(wsDir, 'metrics', 'classified');
+  const clsDir = join(metricsDir, 'classified');
   if (existsSync(clsDir)) {
     // Read-side replay dedupe + instrument-cohort gate (metrics-dedupe.mjs):
     // the classified store is append-only, so re-processed sessions appear
@@ -688,7 +689,7 @@ export function workspaceMetrics(home, workspaceId) {
   }
 
   let calibration = { available: false, reason: 'no calibration-state.json' };
-  const calPath = join(wsDir, 'metrics', 'calibration-state.json');
+  const calPath = join(metricsDir, 'calibration-state.json');
   if (existsSync(calPath)) {
     try {
       const j = JSON.parse(readFileSync(calPath, 'utf8'));
@@ -720,7 +721,7 @@ export function workspaceMetrics(home, workspaceId) {
   }
 
   let capability = { available: false, reason: 'no capability-history.jsonl' };
-  const capPath = join(wsDir, 'capability-history.jsonl');
+  const capPath = join(dirname(metricsDir), 'capability-history.jsonl');
   if (existsSync(capPath)) {
     const { rows } = readJsonlSafe(capPath);
     const byCap = {};
@@ -1161,12 +1162,14 @@ export function enforceExportAllowlist(value, schema) {
 // ---------- project collection ----------
 
 export function collectProject(projectDir, { home, seal }) {
-  const wsPointer = join(projectDir, 'workspace.json');
-  let workspaceId = null;
-  if (existsSync(wsPointer)) {
-    try { workspaceId = JSON.parse(readFileSync(wsPointer, 'utf8')).workspace_id || null; } catch { workspaceId = null; }
-  }
-  const pseudonym = seal('project', workspaceId || basename(projectDir));
+  // The pseudonym seeds from the project's own id (a migrated project keeps its old
+  // workspace id there), so exports stay continuous across a folder move.
+  let projectId = null;
+  try {
+    const coreDir = join(home, '.core');
+    projectId = readManifest({ root: projectRootFor(projectDir, { home, coreDir }), harness: detectStateHarness(), coreDir })?.project_id || null;
+  } catch { projectId = null; }
+  const pseudonym = seal('project', projectId || basename(projectDir));
   const localBlocks = {
     'retrieval-stats': retrievalStats(projectDir, seal),
     'hygiene-stats': hygieneStats(projectDir),
@@ -1174,7 +1177,7 @@ export function collectProject(projectDir, { home, seal }) {
     'validator': validatorStats(projectDir),
     'project-md': projectMdStats(projectDir),
     'maintenance': maintenanceStats(projectDir),
-    'workspace-metrics': workspaceMetrics(home, workspaceId),
+    'workspace-metrics': workspaceMetrics(home, projectDir),
     'self-test': selfTestStats(projectDir),
   };
   // Population gate on per-unit rankings: below the floor a
@@ -1352,20 +1355,25 @@ export function runPackage(argv, { homeOverride } = {}) {
   const { salt, created: saltCreated } = loadOrCreateSalt(coreDir);
   const seal = makeSeal(salt);
 
-  // resolve project set
-  let indexEntries = [];
-  const indexPath = join(coreDir, 'index.json');
-  if (existsSync(indexPath)) {
-    try { indexEntries = JSON.parse(readFileSync(indexPath, 'utf8')); } catch { indexEntries = []; }
-    if (!Array.isArray(indexEntries)) indexEntries = indexEntries.workspaces || [];
+  // Every registered project's name and path feed the leak scan, legacy registrations included.
+  const indexEntries = [];
+  for (const file of ['index.json', 'projects.json']) {
+    try {
+      const parsed = JSON.parse(readFileSync(join(coreDir, file), 'utf8'));
+      const list = Array.isArray(parsed) ? parsed : (parsed.workspaces || []);
+      for (const e of list) if (e) indexEntries.push({ id: e.workspace_id || e.id || null, path: e.path || e.project_path || null });
+    } catch { /* absent or unreadable registry */ }
   }
+
+  // resolve project set
   let projectDirs = [];
   if (flagsIn.all) {
-    for (const e of indexEntries) {
-      const p = e && (e.path || e.project_path);
-      if (p && existsSync(join(p, '_memories'))) projectDirs.push(resolve(p));
+    let roots = new Set();
+    try { roots = readRegisteredRoots({ coreDir }); } catch { roots = new Set(); }
+    for (const p of roots) {
+      if (existsSync(join(p, '_memories'))) projectDirs.push(p);
     }
-    if (!projectDirs.length) return { exit: 2, error: '--all found no registered workspaces with a _memories/ store' };
+    if (!projectDirs.length) return { exit: 2, error: '--all found no registered projects with a _memories/ store' };
   } else {
     const p = resolve(positional[0] || process.cwd());
     projectDirs = [p];

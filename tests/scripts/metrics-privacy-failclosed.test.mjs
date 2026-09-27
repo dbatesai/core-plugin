@@ -1,3 +1,4 @@
+import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 // metrics-privacy-failclosed.test.mjs — the OneDrive privacy redirect must
 // FAIL CLOSED when its storage pin cannot be written.
 //
@@ -39,18 +40,17 @@ function runChild(runner, env) {
 test('pin write failure fails CLOSED: ok:false, typed marker, loud stderr, capture gates read OFF', { skip: WIN_SKIP }, () => {
   const fakeHome = mkdtempSync(join(tmpdir(), 'core-pin-home-'));
   const project = mkdtempSync(join(tmpdir(), 'core-pin-project-'));
-  const ws = 'pin-fail-ws';
-  const meta = join(fakeHome, '.core', 'workspaces', ws, 'metrics');
+  const meta = operationalMetricsDir(project, { home: fakeHome, env: {} });
   mkdirSync(meta, { recursive: true });
   chmodSync(meta, 0o500); // pin (and meta-dir marker) unwritable
   const runner = [
     `import { initMetrics } from ${JSON.stringify(INIT_URL)};`,
     `import { resolveStoragePath, metricsEnabled } from ${JSON.stringify(LOG_EVENT_URL)};`,
     `import { turnCaptureEnabled } from ${JSON.stringify(TURN_CAPTURE_URL)};`,
-    `const result = initMetrics({ projectDir: ${JSON.stringify(project)}, workspaceId: ${JSON.stringify(ws)} });`,
+    `const result = initMetrics({ projectDir: ${JSON.stringify(project)}});`,
     'process.stdout.write(JSON.stringify({',
     '  result,',
-    `  resolved: resolveStoragePath(${JSON.stringify(project)}, { workspaceId: ${JSON.stringify(ws)} }),`,
+    `  resolved: resolveStoragePath(${JSON.stringify(project)}),`,
     `  metricsOn: metricsEnabled({ project: ${JSON.stringify(project)} }),`,
     `  turnCaptureOn: turnCaptureEnabled({ project: ${JSON.stringify(project)} }),`,
     '}));',
@@ -116,7 +116,6 @@ test('capture-disabled marker beats an explicit CORE_METRICS_ENABLED=1 opt-in (p
 test('a successful pin is atomic-written and clears a stale capture-disabled marker (recovery path)', () => {
   const fakeHome = mkdtempSync(join(tmpdir(), 'core-pin-recover-home-'));
   const project = mkdtempSync(join(tmpdir(), 'core-pin-recover-'));
-  const ws = 'pin-recover-ws';
   try {
     // Stale marker from a previously failed scaffold.
     mkdirSync(join(project, '_metrics'), { recursive: true });
@@ -125,7 +124,7 @@ test('a successful pin is atomic-written and clears a stale capture-disabled mar
     const runner = [
       `import { initMetrics } from ${JSON.stringify(INIT_URL)};`,
       `import { metricsEnabled } from ${JSON.stringify(LOG_EVENT_URL)};`,
-      `const result = initMetrics({ projectDir: ${JSON.stringify(project)}, workspaceId: ${JSON.stringify(ws)} });`,
+      `const result = initMetrics({ projectDir: ${JSON.stringify(project)}});`,
       `process.stdout.write(JSON.stringify({ result, metricsOn: metricsEnabled({ project: ${JSON.stringify(project)} }) }));`,
     ].join('\n');
     const child = runChild(runner, { HOME: fakeHome, USERPROFILE: fakeHome, CORE_METRICS_FORCE_PROJECT_LOCAL: '1' });
@@ -134,7 +133,7 @@ test('a successful pin is atomic-written and clears a stale capture-disabled mar
     assert.equal(observed.result.ok, true, JSON.stringify(observed.result));
 
     // Pin landed with the resolved storage path as its exact content.
-    const pin = join(fakeHome, '.core', 'workspaces', ws, 'metrics', 'storage-path.txt');
+    const pin = join(operationalMetricsDir(project, { home: fakeHome, env: {} }), 'storage-path.txt');
     assert.ok(existsSync(pin), 'pin file exists after a successful scaffold');
     assert.equal(readFileSync(pin, 'utf8'), observed.result.storagePath);
 
@@ -144,7 +143,7 @@ test('a successful pin is atomic-written and clears a stale capture-disabled mar
     assert.equal(observed.metricsOn, true);
 
     // No torn sibling temp left behind by the atomic write.
-    const metaDir = join(fakeHome, '.core', 'workspaces', ws, 'metrics');
+    const metaDir = operationalMetricsDir(project, { home: fakeHome, env: {} });
     const leftovers = readdirSync(metaDir).filter((f) => f.includes('.tmp-'));
     assert.deepEqual(leftovers, [], 'no .tmp- litter after the atomic pin write');
   } finally {

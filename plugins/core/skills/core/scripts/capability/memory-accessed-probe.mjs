@@ -30,6 +30,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readTranscript } from '../read-transcript.mjs';
+import { projectRootFor, detectStateHarness, readManifest } from '../project-state.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 export const CAPABILITY_ID = 'memory-accessed';
@@ -90,9 +91,10 @@ function gatherEnvSignals(env = {}) {
   return out;
 }
 
-function readWorkspaceId(cwd) {
+function readWorkspaceId(cwd, home) {
   try {
-    return JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8')).workspace_id ?? null;
+    const coreDir = join(home, '.core');
+    return readManifest({ root: projectRootFor(cwd, { home, coreDir }), harness: detectStateHarness(), coreDir })?.project_id ?? null;
   } catch { return null; }
 }
 
@@ -113,7 +115,7 @@ export async function probe(opts = {}) {
   });
   return buildRow({
     ...r, harness, transcriptAvailable: t.available, coreStorePresent, cwd, observed_at,
-    workspace_id: readWorkspaceId(cwd), env_signals: gatherEnvSignals(env),
+    workspace_id: readWorkspaceId(cwd, home), env_signals: gatherEnvSignals(env),
   });
 }
 

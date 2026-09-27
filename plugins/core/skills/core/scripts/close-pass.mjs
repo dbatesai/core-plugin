@@ -35,11 +35,12 @@
 
 import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, renameSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
+import { resolveStoragePath } from './log-event.mjs';
 import { buildCloseRecord, renderCloseSummary } from './close-payload.mjs';
 import { trustedHome } from './trusted-home.mjs';
+import { readRegisteredRoots, resolveProjectRoot } from './project-state.mjs';
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -257,7 +258,7 @@ export function sessionKey(sessionId) {
 /** Resolve the receipt directory. `opts.storageRoot` keeps tests hermetic. */
 function receiptDir(store, { storageRoot = null } = {}) {
   const root = storageRoot
-    || resolveStoragePath(resolve(store), { workspaceId: resolveWorkspaceId(resolve(store)) });
+    || resolveStoragePath(resolve(store));
   return join(root, 'close', 'receipts');
 }
 
@@ -410,22 +411,25 @@ function extractTimestampRange(transcriptPath) {
 }
 
 /**
- * Security gate: is `store` a CORE workspace we should auto-close?
- * A generic `_memories/` dirname is NOT proof — an attacker-supplied repo can have one, and the
- * close enqueues the deterministic per-session close. The trust anchor is the ~/.core/index.json
- * registry, which an attacker can't plant from inside a project dir. Requires the canonicalized
- * (realpath'd) store to match a registered workspace path.
+ * Security gate: which registered CORE project, if any, does `store` belong to?
+ * A generic `_memories/` dirname is NOT proof — an attacker-supplied repo can have one,
+ * and neither is a `.core/` folder. The trust anchor is the ~/.core registry
+ * (projects.json, plus the legacy index.json while older installs still register
+ * there), which an attacker can't plant from inside a project dir. The store's
+ * realpath resolves to its nearest registered ancestor, stopping at any `.git`
+ * boundary, so a plain subfolder closes its project while a worktree or vendored
+ * clone inside it closes nothing.
  */
-// Resolve the workspace-registry path. CORE_CLOSE_INDEX is an override, but Claude
-// Code forwards a trusted project's .claude/settings.json env into hook
-// subprocesses — so a hostile-but-trusted repo could aim the trust check at its own
-// fake index. Honor the override only when it resolves inside ~/.core; otherwise
-// ignore it and use the real registry. Pure + exported for unit testing.
+// Resolve the registry directory. CORE_CLOSE_INDEX is an override naming a registry
+// file, but Claude Code forwards a trusted project's .claude/settings.json env into
+// hook subprocesses — so a hostile-but-trusted repo could aim the trust check at its
+// own fake registry. Honor the override only when it resolves inside ~/.core;
+// otherwise ignore it and use the real registry. Pure + exported for unit testing.
 export function resolveIndexPath(env = process.env) {
   const home = trustedHome();
   if (!home) return null;                 // no trusted OS home → caller fails closed
   const coreDir = join(home, '.core');
-  const dflt = join(coreDir, 'index.json');
+  const dflt = join(coreDir, 'projects.json');
   const override = env && env.CORE_CLOSE_INDEX;
   if (!override) return dflt;
   const resolved = resolve(override);
@@ -437,26 +441,24 @@ export function resolveIndexPath(env = process.env) {
 
 // resolveIndexPath() (above) is the hardened resolver: it bases ~/.core on the trusted
 // OS home (not the spoofable $HOME) and ignores any CORE_CLOSE_INDEX pointing outside it.
-// It is the active default here. The explicit
-// `indexPath` option is the TRUSTED in-process channel — a caller passing it does so from
-// code, not from a project's forwarded env — which is how the tests exercise the positive
-// path. Untrusted env cannot redirect the gate; a subprocess can't fake trustedHome().
-export function isRegisteredWorkspace(store, { indexPath = resolveIndexPath() } = {}) {
-  if (!indexPath) return false;               // no trusted registry → fail closed
+// It is the active default here. The explicit `indexPath` option is the TRUSTED
+// in-process channel — a caller passing it does so from code, not from a project's
+// forwarded env — which is how the tests exercise the positive path. The registry
+// read is the directory holding that file.
+export function resolveRegisteredRoot(store, { indexPath = resolveIndexPath() } = {}) {
+  if (!indexPath) return null;                // no trusted registry → fail closed
   const home = trustedHome();
-  let canon;
-  try { canon = realpathSync(store); } catch { canon = resolve(store); }
-  let idx;
-  try { idx = JSON.parse(readFileSync(indexPath, 'utf8')); } catch { return false; }
-  if (!Array.isArray(idx)) return false;
-  return idx.some(e => {
-    if (!e || typeof e.path !== 'string') return false;
-    // `home` is guaranteed non-null here (null trustedHome fails closed at the top),
-    // so the ~ expansion never falls back to the spoofable homedir().
-    let p = e.path.startsWith('~') ? join(home, e.path.slice(1)) : e.path;
-    try { p = realpathSync(p); } catch { p = resolve(p); }
-    return p === canon;
-  });
+  if (!home) return null;
+  const coreDir = dirname(indexPath);
+  let registered;
+  try { registered = readRegisteredRoots({ coreDir }); } catch { return null; }
+  try {
+    return resolveProjectRoot(store, { home, coreDir, registered }).root;
+  } catch { return null; }
+}
+
+export function isRegisteredWorkspace(store, opts = {}) {
+  return resolveRegisteredRoot(store, opts) !== null;
 }
 
 // The op set a session close is responsible for (single source — docs and the

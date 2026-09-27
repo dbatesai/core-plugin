@@ -10,7 +10,7 @@ Read this when creating a new workspace, winding one down, or handling a project
 
 ## What the workspace is, and what it isn't
 
-The delivery workspace at `~/.core/workspaces/<id>/` is your **operational meta** — how you've been working on the project. It holds the manifest, cross-session observations, pointers to session logs, the swarm-narrative log.
+The delivery workspace is your **operational state** for the project — how you've been working on it. It lives inside the project at `<project>/.core/<harness>/`, one subfolder per harness, ignored by git and trusted only when its stamp verifies. It holds the manifest, cross-session observations, pointers to session logs, the swarm-narrative log. Because it's inside the project, it moves, backs up, and is deleted with the project; a copy of the folder starts with fresh state.
 
 **Project facts don't live here.** They live in `<project>/PROJECT.md` (rendered six-section view) and `<project>/_memories/` (canonical units). PROJECT.md is the user's editable surface; the workspace folder is operational only. When the two disagree, PROJECT.md wins because the user controls it.
 
@@ -54,7 +54,7 @@ Don't re-read session summary bodies at reactivation. Summaries are narrative fo
 
 ## Cross-workspace awareness
 
-You have access to every workspace in `~/.core/index.json`, but context boundaries are a discipline, not a data boundary. Anchor to the workspace resolved at bootstrap — usually inferred from CWD (see `protocols/startup.md`). Cross-workspace reference is your call when it clearly adds value (a similar risk in another project, a reusable pattern). Never user-prompted, never assumed.
+You have access to every project in `~/.core/projects.json`, but context boundaries are a discipline, not a data boundary. Anchor to the workspace resolved at bootstrap — usually inferred from CWD (see `protocols/startup.md`). Cross-workspace reference is your call when it clearly adds value (a similar risk in another project, a reusable pattern). Never user-prompted, never assumed.
 
 When you do reach across workspaces, name the move: *"Same pattern I hit in the auth-rewrite project last month — flagging in case it applies."*
 

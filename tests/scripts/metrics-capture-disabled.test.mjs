@@ -1,3 +1,4 @@
+import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -6,12 +7,22 @@ import { tmpdir } from 'node:os';
 import { computeScorecard, appendScorecard } from '../../plugins/core/skills/core/scripts/scorecard.mjs';
 import { evaluateTripwires } from '../../plugins/core/skills/core/scripts/metrics-tripwires.mjs';
 
+// Opt-outs live in the project's trusted per-harness manifest. The manifest for an
+// unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
+// redirected for this file's process.
+const TEST_HOME = mkdtempSync(join(tmpdir(), 'optout-home-'));
+process.env.HOME = TEST_HOME;
+process.env.USERPROFILE = TEST_HOME;
+process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
+function writeManifestFlags(project, fields) {
+  updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
+}
+
+
 function makeProject(root, { captureOff = false } = {}) {
   const project = join(root, 'proj');
   mkdirSync(join(project, '_memories'), { recursive: true });
-  const pointer = { workspace_id: 'capture-disabled-fixture' };
-  if (captureOff) pointer.turn_capture = false;
-  writeFileSync(join(project, 'workspace.json'), JSON.stringify(pointer));
+  if (captureOff) writeManifestFlags(project, { turn_capture: false });
   return project;
 }
 

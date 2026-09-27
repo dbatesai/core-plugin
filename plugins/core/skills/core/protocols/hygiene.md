@@ -276,13 +276,13 @@ Why scratch cache: the user's control over project knowledge runs through PROJEC
 
 ### Analysis-protocol effectiveness narrative
 
-After running a multi-agent analysis via `protocols/analysis.md`, append to the workspace narrative at `~/.core/workspaces/<id>/swarm-narrative.md`. Not a mechanical record — a reflective account written for your own future swarm runs in this workspace.
+After running a multi-agent analysis via `protocols/analysis.md`, append to the workspace narrative at `<project>/.core/<harness>/swarm-narrative.md`. Not a mechanical record — a reflective account written for your own future swarm runs in this workspace.
 
 Each entry captures: what this swarm revealed about agent effectiveness, what you chose to eliminate and why, what you preserved and why, and what questions remain open. Workspace-scoped — stays distinct from cross-workspace learnings in `agent-profile.md`.
 
 ### Analysis-protocol effectiveness report
 
-After every substantial multi-agent run, write a structured effectiveness report to `~/.core/swarm-effectiveness/<workspace-id>-<YYYY-MM-DD>.md`. Verify it exists with non-zero size before the swarm's TeamDelete — the after-action checklist in `protocols/analysis.md` carries the full verification step. A silently failed write here costs future calibration: these reports are read before composing the next swarm.
+After every substantial multi-agent run, write a structured effectiveness report to `~/.core/swarm-effectiveness/<project-slug>-<YYYY-MM-DD>.md` (the slug is the project folder's name). Verify it exists with non-zero size before the swarm's TeamDelete — the after-action checklist in `protocols/analysis.md` carries the full verification step. A silently failed write here costs future calibration: these reports are read before composing the next swarm.
 
 | Section | What to cover |
 |---|---|

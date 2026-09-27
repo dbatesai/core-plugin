@@ -25,6 +25,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest } from './project-state.mjs';
 
 /**
  * Fail-closed capture gate. metrics-init.mjs writes a typed
@@ -33,10 +34,9 @@ import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
  * into the synced project folder the OneDrive redirect exists to avoid.
  * Returns the marker path when capture is disabled, null otherwise.
  */
-export function captureDisabledMarkerPath(projectDir, { workspaceId, home = homedir() } = {}) {
+export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = process.env } = {}) {
   if (!projectDir) return null;
-  const ws = workspaceId || resolveWorkspaceId(projectDir);
-  const operationalMetaDir = join(home, '.core', 'workspaces', ws, 'metrics');
+  const operationalMetaDir = trustedMetricsDir(projectDir, { home, env });
   for (const candidate of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
     try { if (existsSync(candidate)) return candidate; } catch { /* unreadable location — keep checking */ }
   }
@@ -47,9 +47,9 @@ export function captureDisabledMarkerPath(projectDir, { workspaceId, home = home
  * Resolve where the metrics storage lives — honors what `metrics-init.mjs`
  * pinned at scaffold time per matrix (+g.5) + (+m).
  *
- * Reads `~/.core/workspaces/<workspaceId>/metrics/storage-path.txt` if the
- * workspace has been scaffolded. Falls back to `<projectDir>/_metrics/` if
- * the pin file is absent (scaffold not run yet, or workspace id unknown).
+ * Reads `storage-path.txt` from the project's trusted metrics state if the
+ * project has been scaffolded. Falls back to `<projectDir>/_metrics/` if
+ * the pin file is absent or the state is untrusted (scaffold not run yet).
  *
  * Without this, writers would hardcode a project-local path and bypass
  * (g.5)'s AppData redirect on Windows+OneDrive.
@@ -59,9 +59,10 @@ export function captureDisabledMarkerPath(projectDir, { workspaceId, home = home
  * capture producers never reach this fallback in that state. The fallback here
  * serves the legitimate pre-scaffold default and read-side path resolution.
  */
-export function resolveStoragePath(projectDir, { workspaceId } = {}) {
-  if (workspaceId) {
-    const pinFile = join(homedir(), '.core', 'workspaces', workspaceId, 'metrics', 'storage-path.txt');
+export function resolveStoragePath(projectDir, { home = homedir(), env = process.env } = {}) {
+  const meta = trustedMetricsDir(projectDir, { home, env });
+  if (meta) {
+    const pinFile = join(meta, 'storage-path.txt');
     if (existsSync(pinFile)) {
       try {
         const pinned = readFileSync(pinFile, 'utf8').trim();
@@ -79,26 +80,28 @@ export function todayUTC() {
 }
 
 /**
- * Resolve the workspace id for a project from its <project>/workspace.json
- * pointer. Falls back to the project basename slug when the pointer is absent.
- * Layer-2/3 metrics derivatives (classified, detectors, rollups) live under the
- * operational-meta dir keyed by this id (spec §17.6).
+ * Operational-meta metrics dir for a project (spec §17.6): the derived,
+ * regeneratable side of the split — classified/, detectors/, rollups/, etc.
+ * It lives in the project's per-harness state (`.core/<harness>/metrics`), or
+ * under ~/.core/local/ when the project is synced, read-only, or another
+ * install's. Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
+ * Creates the directory (stamping new state) — use trustedMetricsDir for a pure read.
  */
-export function resolveWorkspaceId(projectDir) {
-  try {
-    const p = JSON.parse(readFileSync(join(projectDir, 'workspace.json'), 'utf8'));
-    if (p && p.workspace_id) return p.workspace_id;
-  } catch { /* fall through */ }
-  return (projectDir.split(/[\\/]/).pop() || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+export function operationalMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {
+  const coreDir = join(home, '.core');
+  const root = projectRootFor(projectDir, { home, coreDir });
+  const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir, forWrite: true });
+  return join(s.dir, 'metrics');
 }
 
-/**
- * Operational-meta metrics dir for a workspace (spec §17.6): the derived,
- * regeneratable side of the split — classified/, detectors/, rollups/, etc.
- * Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
- */
-export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
-  return join(home, '.core', 'workspaces', workspaceId, 'metrics');
+/** The metrics dir when trustworthy state already exists for this project; null otherwise. Never writes. */
+export function trustedMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {
+  try {
+    const coreDir = join(home, '.core');
+    const root = projectRootFor(projectDir, { home, coreDir });
+    const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir });
+    return s ? join(s.dir, 'metrics') : null;
+  } catch { return null; }
 }
 
 /**
@@ -119,21 +122,24 @@ export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
  *      opt-in — re-enabling is fixing the pin (re-run metrics-init), not
  *      overriding the marker.
  *   3. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
- *   4. `<project>/workspace.json` `"metrics_enabled": false` → OFF — per-workspace opt-out.
- *   5. `<project>/workspace.json` `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
+ *   4. the project's trusted manifest (`.core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
+ *   5. the same manifest `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
+ *      A manifest whose stamp does not verify (planted by a clone) is not read.
  *   6. default → ON.
  */
-export function metricsEnabled({ project, env = process.env } = {}) {
+export function metricsEnabled({ project, env = process.env, home = homedir() } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
-  if (project && captureDisabledMarkerPath(project)) return false; // fail-closed pin failure beats opt-in
+  if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
+    let m = null;
     try {
-      const p = JSON.parse(readFileSync(join(project, 'workspace.json'), 'utf8'));
-      if (p && p.metrics_enabled === false) return false; // per-workspace opt-out
-      if (p && p.metrics_enabled === true) return true;   // per-workspace opt-in (explicit)
-    } catch { /* fall through */ }
+      const coreDir = join(home, '.core');
+      m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
+    } catch { m = null; }
+    if (m && m.metrics_enabled === false) return false; // per-project opt-out
+    if (m && m.metrics_enabled === true) return true;   // per-project opt-in (explicit)
   }
   return true; // default-ON: instrument by default; opt out via env or workspace flag
 }

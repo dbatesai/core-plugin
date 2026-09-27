@@ -60,10 +60,10 @@ function missRate(cardRow) {
  * { healthy, tripped: [{kind, message}] }. Never throws; an unreadable
  * history is healthy silence (nothing trustworthy to alarm about).
  */
-export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWIRE_THRESHOLDS, now = new Date() } = {}) {
+export function evaluateTripwires(projectDir, { thresholds = TRIPWIRE_THRESHOLDS, now = new Date() } = {}) {
   const tripped = [];
   let cards = [];
-  try { cards = latestScorecards(projectDir, 5, { workspaceId }); } catch { cards = []; }
+  try { cards = latestScorecards(projectDir, 5); } catch { cards = []; }
   if (cards.length === 0) return { healthy: true, tripped: [] };
   const newest = cards[0];
 
@@ -134,7 +134,7 @@ export function evaluateTripwires(projectDir, { workspaceId, thresholds = TRIPWI
     : turnCaptureEnabled({ project: projectDir });
 
   // 4. Capture failures — two floors: the rate needs volume; a streak never does.
-  const health = newest.capture_health || readCaptureHealth(projectDir, { workspaceId });
+  const health = newest.capture_health || readCaptureHealth(projectDir);
   if (captureEnabled && health && typeof health.attempts === 'number') {
     const streak = (health.consecutive_failures || 0) >= thresholds.capture_consecutive_failures;
     const rate = health.attempts >= thresholds.capture_failure_min_attempts

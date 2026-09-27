@@ -157,27 +157,23 @@ test('validateStore: a schema-invalid unit hard-fails (tier 2)', async () => {
 
 // ---------- identity (detect-only, never mutates) ----------
 
-test('detectIdentity: a copied pointer reports would-fork and writes nothing', async () => {
-  await withFixture({
-    pointer: { workspace_id: 'orig', name: 'p' },
-    index: [{ workspace_id: 'orig', name: 'p', path: '/elsewhere/entirely' }],
-  }, ({ projectPath, home }) => {
+test('detectIdentity: an unregistered folder reports new and writes nothing', async () => {
+  await withFixture({}, ({ projectPath, home }) => {
     const coreDir = join(home, '.core');
-    const before = readFileSync(join(coreDir, 'index.json'), 'utf8');
-    const id = detectIdentity(projectPath, coreDir, NOW);
-    assert.equal(id.status, 'would-fork');
-    assert.equal(id.original_id, 'orig');
-    assert.equal(readFileSync(join(coreDir, 'index.json'), 'utf8'), before, 'identity detection must not mutate the index');
+    const id = detectIdentity(projectPath, coreDir, 'claude-code');
+    assert.equal(id.status, 'new');
+    assert.equal(existsSync(join(coreDir, 'projects.json')), false, 'identity detection must not register');
+    assert.equal(existsSync(join(projectPath, '.core')), false, 'identity detection must not create state');
   });
 });
 
-test('detectIdentity: a registered path is returning', async () => {
-  await withFixture({ pointer: { workspace_id: 'ws', name: 'p' } }, ({ projectPath, home }) => {
+test('detectIdentity: a registered path is registered, with its state status', async () => {
+  await withFixture({}, ({ projectPath, home }) => {
     const coreDir = join(home, '.core');
-    writeFileSync(join(coreDir, 'index.json'),
-      JSON.stringify([{ workspace_id: 'ws', name: 'p', path: projectPath }], null, 2));
-    const id = detectIdentity(projectPath, coreDir, NOW);
-    assert.equal(id.reason, 'path-match');
+    writeFileSync(join(coreDir, 'projects.json'), JSON.stringify([{ path: projectPath }], null, 2));
+    const id = detectIdentity(projectPath, coreDir, 'claude-code');
+    assert.equal(id.status, 'registered');
+    assert.equal(id.state, 'absent');
   });
 });
 
@@ -282,12 +278,11 @@ test('configureProject: assembles the two-tier report; report-only writes nothin
     pointer: { workspace_id: 'ws', name: 'p' },
     claudeJson: { mcpServers: { foo: {} } },
   }, async ({ projectPath, home, coreRoot }) => {
-    writeFileSync(join(home, '.core', 'index.json'),
-      JSON.stringify([{ workspace_id: 'ws', name: 'p', path: projectPath }], null, 2));
+    writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: projectPath }], null, 2));
     const r = await configureProject({ projectPath, coreRoot, harness: 'claude-code', home, today: NOW });
     assert.equal(r.schema, 'configure-project/1');
     assert.equal(r.scriptVisible.store.noUnits, false);
-    assert.equal(r.scriptVisible.identity.reason, 'path-match');
+    assert.equal(r.scriptVisible.identity.status, 'registered');
     assert.equal(r.scriptVisible.mcp.checked, true);
     assert.equal(r.scriptVisible.agentsMd.status, 'would-generate', 'report-only does not generate');
     assert.ok(Array.isArray(r.sessionLive) && r.sessionLive.length >= 1, 'session-live questions present');

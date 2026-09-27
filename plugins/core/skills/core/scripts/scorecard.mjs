@@ -28,19 +28,19 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
+import { resolveStoragePath } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
 import { readCaptureHealth, listTurnCaptureFiles, turnCaptureEnabled, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 export const SCORECARD_SCHEMA_VERSION = '1.0.0';
 
-export function scorecardLogPath(projectDir, { workspaceId } = {}) {
-  return join(resolveStoragePath(projectDir, { workspaceId }), 'scorecard-log.jsonl');
+export function scorecardLogPath(projectDir) {
+  return join(resolveStoragePath(projectDir), 'scorecard-log.jsonl');
 }
 
-function scorecardLockPath(projectDir, { workspaceId } = {}) {
-  return join(resolveStoragePath(projectDir, { workspaceId }), '.scorecard.lock');
+function scorecardLockPath(projectDir) {
+  return join(resolveStoragePath(projectDir), '.scorecard.lock');
 }
 
 function readJsonl(file) {
@@ -66,8 +66,8 @@ function readSessionLog(projectDir, filename) {
   return out;
 }
 
-function readJudgments(projectDir, { workspaceId } = {}) {
-  return readJsonl(join(resolveStoragePath(projectDir, { workspaceId }), JUDGMENT_LOG_FILENAME));
+function readJudgments(projectDir) {
+  return readJsonl(join(resolveStoragePath(projectDir), JUDGMENT_LOG_FILENAME));
 }
 
 function newestTs(rows) {
@@ -81,11 +81,10 @@ function newestTs(rows) {
  * write (appendScorecard does). `thresholds` is stamped through verbatim so a
  * threshold change is visible in history (Link 5 wires the real values).
  */
-export function computeScorecard(projectDir, { now, thresholds = null, workspaceId } = {}) {
-  const wsId = workspaceId || resolveWorkspaceId(projectDir);
+export function computeScorecard(projectDir, { now, thresholds = null } = {}) {
   const ts = now || new Date().toISOString();
 
-  const judgments = readJudgments(projectDir, { workspaceId: wsId });
+  const judgments = readJudgments(projectDir);
   const hindsight = { judged_turns: 0, hit_right: 0, noise: 0, hindsight_miss: 0, storage_gap: 0 };
   let judgeVersion = null;
   for (const j of judgments) {
@@ -102,7 +101,7 @@ export function computeScorecard(projectDir, { now, thresholds = null, workspace
   const newestSelfTest = selfTests.reduce((best, r) =>
     (!best || String(r.ts || '') > String(best.ts || '')) ? r : best, null);
 
-  const prior = latestScorecards(projectDir, 1, { workspaceId: wsId });
+  const prior = latestScorecards(projectDir, 1);
   // Window start: the previous card's timestamp. Cumulative totals alone can't
   // show a stream that stopped — any historical volume masks present silence —
   // so every volume is also counted over the window this card actually covers.
@@ -111,7 +110,7 @@ export function computeScorecard(projectDir, { now, thresholds = null, workspace
 
   let turnsCaptured = 0;
   let turnsCapturedWindow = 0;
-  for (const { file } of listTurnCaptureFiles(projectDir, { workspaceId: wsId })) {
+  for (const { file } of listTurnCaptureFiles(projectDir)) {
     const rows = readJsonl(file);
     turnsCaptured += rows.length;
     turnsCapturedWindow += rows.filter(inWindow).length;
@@ -145,7 +144,7 @@ export function computeScorecard(projectDir, { now, thresholds = null, workspace
       retrieval_rows_window: retrievalRowsWindow,
       hook_retrieval_rows_window: hookRetrievalRowsWindow,
     },
-    capture_health: readCaptureHealth(projectDir, { workspaceId: wsId }),
+    capture_health: readCaptureHealth(projectDir),
     // Whether the recorder was ON for this window. Without it, zero captured
     // turns reads the same whether the user opted out or the recorder died.
     capture_enabled: turnCaptureEnabled({ project: projectDir }),
@@ -153,12 +152,11 @@ export function computeScorecard(projectDir, { now, thresholds = null, workspace
 }
 
 /** Append one scorecard row — append-only, under the stream's own lock. */
-export function appendScorecard(projectDir, card, { workspaceId } = {}) {
-  const wsId = workspaceId || resolveWorkspaceId(projectDir);
-  const file = scorecardLogPath(projectDir, { workspaceId: wsId });
-  const base = resolveStoragePath(projectDir, { workspaceId: wsId });
+export function appendScorecard(projectDir, card) {
+  const file = scorecardLogPath(projectDir);
+  const base = resolveStoragePath(projectDir);
   try {
-    withFileLock(scorecardLockPath(projectDir, { workspaceId: wsId }), () => {
+    withFileLock(scorecardLockPath(projectDir), () => {
       mkdirSync(base, { recursive: true });
       appendFileSync(file, JSON.stringify(card) + '\n');
       // Owner-only, re-asserted every append (the stream it summarizes is too).
@@ -171,8 +169,8 @@ export function appendScorecard(projectDir, card, { workspaceId } = {}) {
 }
 
 /** Newest-first stored scorecards, up to n. */
-export function latestScorecards(projectDir, n = 5, { workspaceId } = {}) {
-  const rows = readJsonl(scorecardLogPath(projectDir, { workspaceId }))
+export function latestScorecards(projectDir, n = 5) {
+  const rows = readJsonl(scorecardLogPath(projectDir))
     .filter((r) => r.kind === 'scorecard');
   rows.sort((a, b) => String(b.ts || '').localeCompare(String(a.ts || '')));
   return rows.slice(0, n);
@@ -182,14 +180,13 @@ export function latestScorecards(projectDir, n = 5, { workspaceId } = {}) {
  * Cadence gate for the maintenance op: compute only when a judgment or
  * self-test row postdates the last pinned scorecard (or exists unpinned).
  */
-export function shouldComputeScorecard(projectDir, { workspaceId } = {}) {
-  const wsId = workspaceId || resolveWorkspaceId(projectDir);
+export function shouldComputeScorecard(projectDir) {
   const newestInput = [
-    newestTs(readJudgments(projectDir, { workspaceId: wsId })),
+    newestTs(readJudgments(projectDir)),
     newestTs(readSessionLog(projectDir, 'self-test-log.jsonl').filter((r) => r.kind === 'self-test-run')),
   ].filter(Boolean).sort().pop() || null;
   if (!newestInput) return false; // nothing to pin
-  const prior = latestScorecards(projectDir, 1, { workspaceId: wsId });
+  const prior = latestScorecards(projectDir, 1);
   if (!prior.length) return true;
   return newestInput > String(prior[0].ts || '');
 }

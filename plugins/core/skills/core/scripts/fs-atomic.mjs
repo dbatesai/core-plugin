@@ -2,7 +2,7 @@
  * fs-atomic.mjs — atomic file writes for irreplaceable surfaces.
  *
  * The hygiene mutators (demote-moves, demote-state-narrative, compact-project,
- * hot-section) and workspace-fork-check all rewrite files the user cannot easily
+ * hot-section) and the project registry all rewrite files the user cannot easily
  * reconstruct — PROJECT.md, PROJECT-ARCHIVE.md, the local workspace pointer. A bare
  * writeFileSync truncates the target the instant it opens the fd, so an interrupted
  * write (crash, EACCES mid-write, ENOSPC, a kill) leaves a half-written or empty file.

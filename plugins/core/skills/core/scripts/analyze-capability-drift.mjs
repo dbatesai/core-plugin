@@ -19,6 +19,7 @@
 import { writeFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { readHistory } from './capability-history.mjs';
+import { projectRootFor, detectStateHarness } from './project-state.mjs';
 
 // identity_status rank — higher is healthier. Drift = new rank < old rank.
 const STATUS_RANK = { PASS: 3, DEGRADED: 2, 'NOT-YET': 1, UNKNOWN: 0 };
@@ -251,11 +252,11 @@ export function countUntaggedSessions(history) {
   return history.filter(e => e.session_id == null || e.session_id === '').length;
 }
 
-export function loadCapabilityHistory(workspaceId, project = null, opts = {}) {
+export function loadCapabilityHistory(target, project = null, opts = {}) {
   const histories = [];
-  try { histories.push(...readHistory(workspaceId, { home: opts.home })); } catch { /* unavailable home history */ }
+  try { histories.push(...readHistory(target, { home: opts.home })); } catch { /* unavailable state history */ }
   if (project) {
-    try { histories.push(...readHistory(workspaceId, { project })); } catch { /* unavailable project history */ }
+    try { histories.push(...readHistory(target, { project })); } catch { /* unavailable project history */ }
   }
   // The same observation can exist in BOTH the home and project store. Concatenating
   // double-counts it, inflating drift transitions and regression comparisons. Dedup on the
@@ -284,25 +285,15 @@ export function removeLegacyDriftLog(project) {
 }
 
 export function main(argv) {
-  let project = null, workspaceId = null;
+  let project = null, harness = null;
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--workspace-id') workspaceId = argv[++i];
+    if (argv[i] === '--harness') harness = argv[++i];
     else if (!argv[i].startsWith('--') && project === null) project = argv[i];
   }
-  if (!project) { process.stderr.write('usage: analyze-capability-drift.mjs <project> [--workspace-id <id>]\n'); return 2; }
+  if (!project) { process.stderr.write('usage: analyze-capability-drift.mjs <project> [--harness <h>]\n'); return 2; }
 
-  // Resolve workspace id from <project>/workspace.json if not passed
-  if (!workspaceId) {
-    try {
-      const wsPath = join(project, 'workspace.json');
-      if (existsSync(wsPath)) {
-        workspaceId = JSON.parse(readFileSync(wsPath, 'utf8')).workspace_id;
-      }
-    } catch { /* fall through */ }
-  }
-  if (!workspaceId) { process.stderr.write('could not resolve workspace id (pass --workspace-id)\n'); return 2; }
-
-  const history = loadCapabilityHistory(workspaceId, project);
+  const target = { root: projectRootFor(project), harness: harness || detectStateHarness() };
+  const history = loadCapabilityHistory(target, project);
   const { drift, healing, ambiguous } = detectDrift(history);
   const regressions = detectRegression(history);
   const now = new Date().toISOString();

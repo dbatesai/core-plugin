@@ -37,7 +37,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { isRegisteredWorkspace, shouldEnqueueClose } from '../scripts/close-pass.mjs';
+import { resolveRegisteredRoot, shouldEnqueueClose } from '../scripts/close-pass.mjs';
 import { logHookEvent } from './hook-log.mjs';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
 
@@ -69,13 +69,16 @@ function main() {
     return 0;
   }
 
-  // Canonicalize (realpath) then require a REGISTERED CORE workspace before spawning anything.
-  // Security: a generic `_memories/` dir is not proof; the ~/.core
+  // Canonicalize (realpath) then require a REGISTERED CORE project before spawning anything.
+  // Security: a generic `_memories/` dir or a `.core/` folder is not proof; the ~/.core
   // registry is the trust anchor an attacker can't plant from inside a project dir.
-  let store = resolve(payload.cwd || process.cwd());
-  try { store = realpathSync(store); } catch { /* keep resolved */ }
-  if (!isRegisteredWorkspace(store)) {
-    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-registered-workspace', cwd: store });
+  // A session in a plain subfolder closes its registered project; one inside a nested
+  // `.git` (worktree, vendored clone) closes nothing.
+  let cwd = resolve(payload.cwd || process.cwd());
+  try { cwd = realpathSync(cwd); } catch { /* keep resolved */ }
+  const store = resolveRegisteredRoot(cwd);
+  if (!store) {
+    logHookEvent({ hook: 'session-end', action: 'skip', reason: 'not-registered-workspace', cwd });
     return 0;
   }
 
