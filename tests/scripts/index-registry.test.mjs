@@ -92,14 +92,14 @@ test('touch on a moved project re-stamps it and moves the registry entry', () =>
   try {
     const p = s.mk('Projects', 'Old');
     registerProject(s.coreDir, p);
-    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Keel' } });
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
     const moved = join(s.base, 'Projects', 'New');
     renameSync(p, moved);
     registerProject(s.coreDir, moved); // startup registers the new path first
     const r = touchProject(s.coreDir, { root: moved, harness: H });
     assert.ok(r.events.some((e) => e.kind === 'state-moved' && e.oldPath === p));
     assert.deepEqual(paths(s.coreDir), [moved], 'the registry follows the move');
-    assert.equal(readManifest({ root: moved, harness: H, coreDir: s.coreDir }).agent_name, 'Keel', 'history kept');
+    assert.equal(readManifest({ root: moved, harness: H, coreDir: s.coreDir }).agent_name, 'Plover', 'history kept');
   } finally { s.cleanup(); }
 });
 
@@ -108,7 +108,7 @@ test('touch on a copy sets the inherited state aside, keeps the original untouch
   try {
     const p = s.mk('Projects', 'Orig');
     registerProject(s.coreDir, p);
-    const orig = updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Keel' } });
+    const orig = updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
     const copy = join(s.base, 'Projects', 'Copy');
     cpSync(p, copy, { recursive: true });
     const before = readFileSync(join(p, '.core', H, 'workspace.json'), 'utf8');
@@ -128,7 +128,7 @@ test('state-ask: a verified stamp for a path whose parent is gone waits for the 
     try {
       const gone = s.mk('Drive', 'Projects', 'P');
       registerProject(s.coreDir, gone);
-      updateManifest({ root: gone, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Keel' } });
+      updateManifest({ root: gone, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
       const here = join(s.base, 'P');
       renameSync(gone, here);
       rmSync(join(s.base, 'Drive'), { recursive: true, force: true });
@@ -138,7 +138,7 @@ test('state-ask: a verified stamp for a path whose parent is gone waits for the 
       const out = settleState(s.coreDir, { root: here, harness: H, decision });
       assert.equal(out.changed, true);
       const m = readManifest({ root: here, harness: H, coreDir: s.coreDir });
-      if (decision === 'accept-move') assert.equal(m.agent_name, 'Keel', 'accepting the move keeps the history');
+      if (decision === 'accept-move') assert.equal(m.agent_name, 'Plover', 'accepting the move keeps the history');
       else assert.equal(m.agent_name, undefined, 'fresh starts over, old state set aside');
     } finally { s.cleanup(); }
   }
@@ -170,8 +170,8 @@ test('CLI: register, list, touch, last-active, manifest, bootstrap', () => {
     assert.equal(run(s.coreDir, ['list']).stdout.trim(), p);
     assert.equal(run(s.coreDir, ['touch', '--root', p, '--when', '2026-09-26T01:00:00Z']).status, 0);
     assert.equal(run(s.coreDir, ['last-active', '--root', p]).stdout.trim(), '2026-09-26T01:00:00Z');
-    const m = run(s.coreDir, ['manifest', '--root', p, '--set-json', '{"agent_name":"Keel"}']);
-    assert.equal(JSON.parse(m.stdout).agent_name, 'Keel');
+    const m = run(s.coreDir, ['manifest', '--root', p, '--set-json', '{"agent_name":"Plover"}']);
+    assert.equal(JSON.parse(m.stdout).agent_name, 'Plover');
     const b = run(s.coreDir, ['bootstrap', '--root', p, '--session-started', '2026-09-26T09:00:00Z']);
     assert.equal(b.status, 0, b.stderr);
     const rec = JSON.parse(readFileSync(join(p, '.core', H, 'last-bootstrap.json'), 'utf8'));

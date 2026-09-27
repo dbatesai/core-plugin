@@ -111,7 +111,7 @@ function migrationFixture() {
   const p = s.mk('Projects', 'Legacy');
   const index = [
     legacyWorkspace(s, 'legacy', { path: p, lastActive: '2026-09-20T00:00:00Z', files: {
-      'workspace.json': JSON.stringify({ workspace_id: 'legacy', agent_name: 'Keel' }),
+      'workspace.json': JSON.stringify({ workspace_id: 'legacy', agent_name: 'Plover' }),
       'capability-history.jsonl': '{"row":1}\n',
       'metrics/classified/2026-09-01.jsonl': '{"state":"tier-0-win"}\n',
       'metrics/storage-path.txt': join(p, '_metrics'),
@@ -123,7 +123,7 @@ function migrationFixture() {
       'notes.md': 'older duplicate\n',
     } }),
     legacyWorkspace(s, 'legacy-codex', { path: p, files: {
-      'workspace.json': JSON.stringify({ workspace_id: 'legacy-codex', agent_name: 'Hale' }),
+      'workspace.json': JSON.stringify({ workspace_id: 'legacy-codex', agent_name: 'Finch' }),
     } }),
   ];
   writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index, null, 2));
@@ -161,7 +161,7 @@ test('migration copies every legacy byte, verifies it, and a re-run is a no-op',
 
     const m = readManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir });
     assert.equal(m.project_id, 'legacy', 'the old workspace id carries on as project_id');
-    assert.equal(m.agent_name, 'Keel');
+    assert.equal(m.agent_name, 'Plover');
     assert.equal(m.metrics_enabled, false, "the pointer's opt-out carries into the manifest");
     assert.equal(readFileSync(join(operationalMetricsDir(p, { home: s.home, env: { CORE_HARNESS: 'claude-code' } }), 'classified', '2026-09-01.jsonl'), 'utf8'), '{"state":"tier-0-win"}\n');
     assert.ok(existsSync(join(p, '.core', 'claude-code', 'superseded', 'legacy-old', 'notes.md')), 'the duplicate is kept, not live');
@@ -185,7 +185,7 @@ test('the old pointer, MOVED.md and the index marks wait until every harness on 
     const second = applyMigration({ root: p, harness: 'codex', coreDir: s.coreDir, table });
     assert.equal(second.status, 'migrated');
     assert.equal(second.released, true);
-    assert.equal(readManifest({ root: p, harness: 'codex', coreDir: s.coreDir }).agent_name, 'Hale');
+    assert.equal(readManifest({ root: p, harness: 'codex', coreDir: s.coreDir }).agent_name, 'Finch');
     for (const id of ['legacy', 'legacy-old', 'legacy-codex']) {
       assert.ok(existsSync(join(s.coreDir, 'workspaces', id, 'MOVED.md')), `${id} carries MOVED.md`);
       assert.ok(existsSync(join(s.coreDir, 'workspaces', id, 'workspace.json')), `${id} is kept, never deleted`);
@@ -252,7 +252,7 @@ function exerciseState(s, root) {
   registerProject(s.coreDir, root);
   touchProject(s.coreDir, { root, harness: 'claude-code' });
   recordBootstrap(s.coreDir, { root, harness: 'claude-code', sessionStartedAt: '2026-09-26T00:00:00Z' });
-  updateManifest({ root, harness: 'claude-code', coreDir: s.coreDir, fields: { agent_name: 'Keel' } });
+  updateManifest({ root, harness: 'claude-code', coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
   const metrics = operationalMetricsDir(root, { home: s.home, env: { CORE_HARNESS: 'claude-code' } });
   writeFileSync(join(metrics, 'orient-signal.txt'), 'signal\n');
   appendRows({ root, harness: 'claude-code' }, [{ capability_id: 'x', identity_status: 'PASS' }], {}, { home: s.home });
