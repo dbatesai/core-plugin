@@ -13,9 +13,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolveRegisteredRoot } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
-import { registerProject, touchProject, recordBootstrap } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
-import { readManifest, updateManifest, ensureInstallIdentity } from '../../plugins/core/skills/core/scripts/project-state.mjs';
-import { applyMigration } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
+import { registerProject, touchProject, recordBootstrap, readBootstrapRecord } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
+import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
+import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { appendRows } from '../../plugins/core/skills/core/scripts/capability-history.mjs';
 import { acquireFileLock, inspectFileLock, releaseFileLock } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
@@ -403,4 +404,111 @@ test('concurrent first writes in a fresh project never set each other aside', as
       assert.deepEqual(readdirSync(join(p, '.core')).filter((n) => n.startsWith('.creating-')), [], 'no temp folders left');
     } finally { s.cleanup(); }
   }
+});
+
+
+// ---------- signed control files ----------
+
+function signedProject(s) {
+  const p = s.mk('Projects', 'Signed');
+  registerProject(s.coreDir, p);
+  return p;
+}
+const H = 'claude-code';
+const stateFile = (p, name) => join(p, '.core', H, name);
+
+test('a normal write of the manifest and bootstrap record verifies on read, with MAC sidecars beside them', () => {
+  const s = sandbox();
+  try {
+    const p = signedProject(s);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Wren' } });
+    recordBootstrap(s.coreDir, { root: p, harness: H, sessionStartedAt: '2026-09-26T10:00:00Z' });
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Wren');
+    assert.equal(readBootstrapRecord(s.coreDir, { root: p, harness: H }).session_started_at, '2026-09-26T10:00:00Z');
+    assert.ok(existsSync(stateFile(p, 'workspace.json.mac')));
+    assert.ok(existsSync(stateFile(p, 'last-bootstrap.json.mac')));
+  } finally { s.cleanup(); }
+});
+
+test('same-path tamper: edited control files read as absent while the stamp still verifies', () => {
+  const s = sandbox();
+  try {
+    const p = signedProject(s);
+    const env = { CORE_HARNESS: H };
+    // First contact shows the notice and records it; a second call doesn't.
+    assert.equal(checkMetricsDisclosure({ projectDir: p, home: s.home, env }).noticeText, NOTICE_TEXT);
+    assert.notEqual(checkMetricsDisclosure({ projectDir: p, home: s.home, env }).noticeText, NOTICE_TEXT);
+    recordBootstrap(s.coreDir, { root: p, harness: H, sessionStartedAt: '2026-09-26T10:00:00Z' });
+
+    // Someone edits the files in place: the disclosure flag and the bootstrap marker.
+    const m = JSON.parse(readFileSync(stateFile(p, 'workspace.json'), 'utf8'));
+    writeFileSync(stateFile(p, 'workspace.json'), JSON.stringify({ ...m, agent_name: 'Mallory', metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION }));
+    writeFileSync(stateFile(p, 'last-bootstrap.json'), JSON.stringify({ session_started_at: '2026-09-27T09:00:00Z', bootstrap_completed_at: '2026-09-27T09:00:01Z' }));
+    assert.equal(classifyStamp({ root: p, harness: H, coreDir: s.coreDir }).status, 'verified', 'the stamp alone is untouched');
+
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }), null, 'the tampered manifest reads as absent');
+    assert.equal(readBootstrapRecord(s.coreDir, { root: p, harness: H }), null, 'the tampered bootstrap record reads as absent');
+    const cli = spawnSync(process.execPath, [REGISTRY_CLI, 'bootstrap-status', '--root', p, '--harness', H, '--core-dir', s.coreDir], { encoding: 'utf8' });
+    assert.equal(cli.stdout.trim(), '(none)', 'startup dedup sees no record, so startup runs in full');
+    assert.equal(checkMetricsDisclosure({ projectDir: p, home: s.home, env }).noticeText, NOTICE_TEXT, 'the disclosure shows again');
+  } finally { s.cleanup(); }
+});
+
+test('a force-added .core file that git tracks is ignored, even with a valid MAC', () => {
+  const s = sandbox();
+  try {
+    const p = signedProject(s);
+    assert.equal(git(p, 'init', '-q').status, 0);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Wren' } });
+    recordBootstrap(s.coreDir, { root: p, harness: H, sessionStartedAt: '2026-09-26T10:00:00Z' });
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Wren');
+    assert.equal(git(p, 'add', '-f', '.core/claude-code/workspace.json', '.core/claude-code/workspace.json.mac', '.core/claude-code/last-bootstrap.json').status, 0);
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }), null, 'a tracked manifest reads as absent');
+    assert.equal(readBootstrapRecord(s.coreDir, { root: p, harness: H }), null, 'a tracked bootstrap record reads as absent');
+  } finally { s.cleanup(); }
+});
+
+// ---------- old builds after migration ----------
+
+test('old -> new -> old -> new: every line an older build appends reaches the project exactly once', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const legacyDir = join(s.coreDir, 'workspaces', 'legacy');
+    const legacyLog = join(legacyDir, 'capability-history.jsonl');
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'migrated');
+    const receiptFile = stateFile(p, 'migrated-from.json');
+    const entry = JSON.parse(readFileSync(receiptFile, 'utf8')).files.find((f) => f.from === legacyLog);
+    assert.equal(typeof entry.length, 'number', 'the receipt records each file\'s length');
+    const projectLog = entry.to;
+
+    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'unchanged');
+
+    // Old build appends; the new build appends to its own copy meanwhile.
+    writeFileSync(legacyLog, '{"row":1}\n{"row":"old-2"}\n');
+    writeFileSync(projectLog, readFileSync(projectLog, 'utf8') + '{"row":"new-1"}\n');
+    let d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
+    assert.equal(d.status, 'brought-in');
+    assert.equal(d.appended.length, 1);
+    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'unchanged', 'a re-run is a no-op');
+
+    // Old build again: another append, an edited draft, and a brand-new log.
+    writeFileSync(legacyLog, '{"row":1}\n{"row":"old-2"}\n{"row":"old-3"}\n');
+    writeFileSync(join(legacyDir, 'hot-section-draft.md'), 'edited by the old build\n');
+    writeFileSync(join(legacyDir, 'sessions.jsonl'), '{"s":1}\n');
+    writeFileSync(projectLog, readFileSync(projectLog, 'utf8') + '{"row":"new-2"}\n');
+    d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir, now: new Date('2026-09-27T12:00:00Z') });
+    assert.equal(d.status, 'brought-in');
+    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'unchanged', 'a re-run is a no-op');
+
+    const lines = readFileSync(projectLog, 'utf8').trim().split('\n');
+    for (const row of ['{"row":1}', '{"row":"old-2"}', '{"row":"old-3"}', '{"row":"new-1"}', '{"row":"new-2"}']) {
+      assert.equal(lines.filter((l) => l === row).length, 1, `${row} appears exactly once`);
+    }
+    assert.equal(lines.length, 5);
+    assert.equal(readFileSync(join(p, '.core', H, 'superseded', 'legacy-2026-09-27', 'legacy', 'hot-section-draft.md'), 'utf8'), 'edited by the old build\n');
+    assert.equal(readFileSync(join(p, '.core', H, 'hot-section-draft.md'), 'utf8'), 'draft\n', 'the live copy of a non-log file is never overwritten');
+    const newLog = JSON.parse(readFileSync(receiptFile, 'utf8')).files.find((f) => f.from === join(legacyDir, 'sessions.jsonl'));
+    assert.equal(readFileSync(newLog.to, 'utf8'), '{"s":1}\n', 'a new log arrives whole');
+  } finally { s.cleanup(); }
 });

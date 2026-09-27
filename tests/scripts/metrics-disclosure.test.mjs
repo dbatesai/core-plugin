@@ -2,12 +2,12 @@
 // against a temp home and temp project folders, so nothing touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir, platform } from 'node:os';
 import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
-import { updateManifest, readManifest, stateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { updateManifest, readManifest, stateDir, writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 
 const SCRIPT = join(process.cwd(), 'plugins/core/skills/core/scripts/metrics-disclosure.mjs');
 const HARNESS = 'claude-code';
@@ -94,15 +94,28 @@ test('missing projectDir fails without throwing and shows nothing', () => {
   assert.equal(result.reason, 'missing-project-dir');
 });
 
-test('an unparseable manifest is never clobbered, and the notice still shows', () => {
+test('an unsigned manifest reads as absent: the notice shows and the old bytes are set aside, not clobbered', () => {
   sandbox(({ home, coreDir, project }) => {
     const file = manifestFile(coreDir, project);
     writeFileSync(file, '{ not valid json');
     const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(result.noticeText, NOTICE_TEXT, 'fails toward showing the notice');
+    const dir = stateDir({ root: project, harness: HARNESS, coreDir }).dir;
+    const aside = readdirSync(dir).filter((n) => n.startsWith('workspace.json.unverified-'));
+    assert.equal(aside.length, 1, 'the unverified manifest is kept beside the new one');
+    assert.equal(readFileSync(join(dir, aside[0]), 'utf8'), '{ not valid json', 'its bytes are untouched');
+  });
+});
+
+test('a signed but unparseable manifest is never clobbered, and the notice still shows', () => {
+  sandbox(({ home, coreDir, project }) => {
+    const dir = stateDir({ root: project, harness: HARNESS, coreDir, forWrite: true }).dir;
+    writeSignedFile({ dir, name: 'workspace.json', body: '{ not valid json', coreDir });
+    const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(result.ok, false);
     assert.equal(result.noticeText, NOTICE_TEXT, 'fails toward showing the notice');
     assert.match(result.reason, /manifest-unparseable/);
-    assert.equal(readFileSync(file, 'utf8'), '{ not valid json', 'the unreadable manifest is left as it was');
+    assert.equal(readFileSync(join(dir, 'workspace.json'), 'utf8'), '{ not valid json', 'the unreadable manifest is left as it was');
   });
 });
 
