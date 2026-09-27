@@ -25,7 +25,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified } from './project-state.mjs';
 
 /**
  * Fail-closed capture gate. metrics-init.mjs writes a typed
@@ -127,7 +127,8 @@ export function trustedMetricsDir(projectDir, { home = homedir(), env = process.
  *   4. the project's trusted manifest (`.core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
  *   5. the same manifest `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
  *      A manifest whose stamp does not verify (planted by a clone) is not read.
- *   6. a `workspace.json` at the project root with `"metrics_enabled": false` → OFF.
+ *   6. this harness's manifest says `"metrics_enabled": false` but doesn't verify → OFF,
+ *      or a `workspace.json` at the project root says so → OFF.
  *      It may be committed by the repo's owner, so it is untrusted, and an untrusted
  *      source can only ever switch capture off, never on.
  *   7. default → ON.
@@ -145,8 +146,10 @@ export function metricsEnabled({ project, env = process.env, home = homedir() } 
     } catch { m = null; }
     if (m && m.metrics_enabled === false) return false; // per-project opt-out
     if (m && m.metrics_enabled === true) return true;   // per-project opt-in (explicit)
+    const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
+    if (!m && manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
     try {
-      const rootManifest = JSON.parse(readFileSync(join(projectRootFor(project, { home, coreDir: join(home, '.core') }), 'workspace.json'), 'utf8'));
+      const rootManifest = JSON.parse(readFileSync(join(root, 'workspace.json'), 'utf8'));
       if (rootManifest && rootManifest.metrics_enabled === false) return false;
     } catch { /* absent or unreadable: no opt-out */ }
   }

@@ -482,9 +482,38 @@ export function contentMac(secret, rel, bytes) {
 }
 
 /** Names under .core/<harness>/ that git tracks at `root`; empty outside a repo or without git. */
+/** The git index file for the repo containing `root` (worktrees and submodules included), or null. */
+function gitIndexFile(root) {
+  for (let dir = root; ; dir = dirname(dir)) {
+    const dotGit = join(dir, '.git');
+    try {
+      const st = lstatSync(dotGit);
+      if (st.isDirectory()) return join(dotGit, 'index');
+      const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, 'utf8'));
+      return m ? join(resolve(dir, m[1]), 'index') : null;
+    } catch { /* no .git here; keep walking */ }
+    if (dirname(dir) === dir) return null;
+  }
+}
+
+// Paths sit in a v2/v3 index as plain bytes, so a file that never mentions the state
+// prefix can't be tracking anything under it; that skips spawning git on every read.
+// A v4 (prefix-compressed) or split index can hide the bytes, so those always ask git.
+function indexMightTrack(root, prefix) {
+  const idx = gitIndexFile(root);
+  if (!idx) return false;
+  let buf;
+  try { buf = readFileSync(idx); } catch { return true; }
+  const version = buf.length >= 8 ? buf.readUInt32BE(4) : 0;
+  if (version >= 4) return true;
+  try { if (readdirSync(dirname(idx)).some((n) => n.startsWith('sharedindex.'))) return true; } catch { return true; }
+  return buf.includes(prefix);
+}
+
 export function trackedStateFiles(root, harness) {
   const prefix = `${STATE_DIRNAME}/${harness}/`;
   let names = new Set();
+  if (!indexMightTrack(root, prefix)) return names;
   try {
     // Without --full-name, ls-files prints paths relative to -C, so a project nested
     // inside a larger repo still lists as `.core/<harness>/<name>`.
@@ -563,6 +592,8 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
     if (existsSync(file)) {
       const text = readSignedFile({ root, harness, name: MANIFEST, coreDir });
       if (text === null) {
+        // An untrusted manifest can only make capture safer: its opt-out survives the set-aside.
+        if (untrustedOptOut(file)) current = { metrics_enabled: false };
         renameSync(file, `${file}.unverified-${isoStamp()}`);
       } else {
         // An unparseable manifest is surfaced, never silently replaced.
@@ -577,6 +608,18 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
     writeSignedFile({ dir: s.dir, name: MANIFEST, body: JSON.stringify(next, null, 2) + '\n', coreDir });
     return next;
   });
+}
+
+function untrustedOptOut(file) {
+  try { return JSON.parse(readFileSync(file, 'utf8')).metrics_enabled === false; } catch { return false; }
+}
+
+/**
+ * True when this harness's manifest says metrics_enabled:false but doesn't verify.
+ * Untrusted content may switch capture off, never on.
+ */
+export function manifestOptsOutUnverified({ root, harness }) {
+  return untrustedOptOut(join(canonical(root), STATE_DIRNAME, harness, MANIFEST));
 }
 
 // ---------- the bootstrap record (last-bootstrap.json) ----------

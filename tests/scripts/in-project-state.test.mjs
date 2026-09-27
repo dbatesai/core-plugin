@@ -468,6 +468,27 @@ test('a force-added .core file that git tracks is ignored, even with a valid MAC
   } finally { s.cleanup(); }
 });
 
+test('the tracked guard still sees a force-added file under a v4 (prefix-compressed) index and in a nested project', () => {
+  const s = sandbox();
+  try {
+    const repo = s.mk('Repo');
+    assert.equal(git(repo, 'init', '-q').status, 0);
+    const p = join(repo, 'sub', 'Proj');
+    mkdirSync(p, { recursive: true });
+    registerProject(s.coreDir, p);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Wren' } });
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Wren', 'untracked: trusted, and no git spawn needed');
+    assert.equal(git(repo, 'update-index', '--index-version', '4').status, 0);
+    // A neighbour that sorts just before the target ('-' < '/') makes v4 store the target
+    // as a suffix of '.core/claude-code', so the prefix never appears as plain bytes.
+    mkdirSync(join(p, '.core', 'claude-code-x'), { recursive: true });
+    writeFileSync(join(p, '.core', 'claude-code-x', 'f'), 'x');
+    assert.equal(git(repo, 'add', '-f', 'sub/Proj/.core/claude-code-x/f', 'sub/Proj/.core/claude-code/workspace.json', 'sub/Proj/.core/claude-code/workspace.json.mac').status, 0);
+    assert.ok(!readFileSync(join(repo, '.git', 'index')).includes('.core/claude-code/'), 'the fixture really hides the prefix');
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }), null, 'tracked under a v4 index reads as absent');
+  } finally { s.cleanup(); }
+});
+
 // ---------- old builds after migration ----------
 
 test('old -> new -> old -> new: every line an older build appends reaches the project exactly once', () => {
@@ -510,5 +531,23 @@ test('old -> new -> old -> new: every line an older build appends reaches the pr
     assert.equal(readFileSync(join(p, '.core', H, 'hot-section-draft.md'), 'utf8'), 'draft\n', 'the live copy of a non-log file is never overwritten');
     const newLog = JSON.parse(readFileSync(receiptFile, 'utf8')).files.find((f) => f.from === join(legacyDir, 'sessions.jsonl'));
     assert.equal(readFileSync(newLog.to, 'utf8'), '{"s":1}\n', 'a new log arrives whole');
+  } finally { s.cleanup(); }
+});
+
+test('a manifest whose MAC breaks keeps its opt-out: capture stays off, before and after the next write', async () => {
+  const { metricsEnabled } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'OptOut');
+    registerProject(s.coreDir, p);
+    const env = { CORE_HARNESS: 'claude-code' };
+    updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { metrics_enabled: false } });
+    assert.equal(metricsEnabled({ project: p, env, home: s.home }), false);
+    const file = join(p, '.core', 'claude-code', 'workspace.json');
+    writeFileSync(file, readFileSync(file, 'utf8').replace('"harness"', '"harness_x": 1, "harness"'));
+    assert.equal(metricsEnabled({ project: p, env, home: s.home }), false, 'unverified manifest still opts out');
+    updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { agent_name: 'x' } });
+    assert.equal(readManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir }).metrics_enabled, false, 'opt-out carried past the set-aside');
+    assert.equal(metricsEnabled({ project: p, env, home: s.home }), false);
   } finally { s.cleanup(); }
 });
