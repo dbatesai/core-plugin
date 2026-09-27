@@ -20,6 +20,11 @@
  *
  * CLI (root defaults to the registered project containing the working directory):
  *   node index-registry.mjs register [<dir>] [--confirm-new]          [--core-dir <dir>]
+ *        prints action adopt-ask (exit 5) instead of registering when the folder carries
+ *        another install's CORE state the user hasn't declined; ask, then run adopt
+ *   node index-registry.mjs adopt-status [--root <dir>]               [--core-dir <dir>]
+ *   node index-registry.mjs adopt --yes|--no [--root <dir>]           [--core-dir <dir>]
+ *        interactive /core startup only, after the user answers the adoption question
  *   node index-registry.mjs list                                      [--core-dir <dir>]
  *   node index-registry.mjs touch [--root <dir>] [--when <ISO>]       [--core-dir <dir>]
  *        also prints one line per state event: state-created, state-unverified (set aside
@@ -41,7 +46,7 @@ import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, classifyRegistration, resolveProjectRoot, stateDir, detectStateHarness, updateManifest, readManifest, writeBootstrap, readBootstrap,
-  classifyStamp, writeStamp, STATE_DIRNAME,
+  classifyStamp, writeStamp, STATE_DIRNAME, adoptionCandidate, adoptForeignState,
 } from './project-state.mjs';
 
 /**
@@ -100,7 +105,7 @@ export function mutateIndex(coreDir, mutator) {
  * inside a registered project (the caller asks join-or-new, then passes
  * { confirmNew: true }). Idempotent for an already-registered root.
  */
-export function registerProject(coreDir, dir, { home, confirmNew = false, now = new Date().toISOString() } = {}) {
+export function registerProject(coreDir, dir, { home, confirmNew = false, offerAdopt = false, harness, now = new Date().toISOString() } = {}) {
   const core = coreDir || defaultCoreDir();
   const homeDir = home || dirname(core);
   const verdict = classifyRegistration(dir, { home: homeDir, coreDir: core });
@@ -108,6 +113,10 @@ export function registerProject(coreDir, dir, { home, confirmNew = false, now = 
   if (verdict.action === 'registered') return verdict;
   if (verdict.action === 'ask' && !confirmNew) return verdict;
   const root = canonical(dir);
+  if (offerAdopt) {
+    const cand = adoptionCandidate({ root, harness: harness || detectStateHarness(), coreDir: core });
+    if (cand) return { action: 'adopt-ask', root, old_path: cand.oldPath, last_written: cand.lastWritten };
+  }
   return mutateProjects(core, (entries) => {
     if (entries.some((e) => e && typeof e.path === 'string' && canonical(e.path) === root)) {
       return { entries, result: { action: 'registered', root } };
@@ -241,6 +250,8 @@ function parseArgs(argv) {
     else if (a === '--confirm-new') out.confirmNew = true;
     else if (a === '--accept-move') out.decision = 'accept-move';
     else if (a === '--fresh') out.decision = 'fresh';
+    else if (a === '--yes') out.decision = 'yes';
+    else if (a === '--no') out.decision = 'no';
     else if (a === '--set-json') out.setJson = argv[++i];
     else out._.push(a);
   }
@@ -255,9 +266,20 @@ export function main(argv = process.argv.slice(2)) {
   try {
     switch (sub) {
       case 'register': {
-        const r = registerProject(coreDir, target || process.cwd(), { confirmNew: !!args.confirmNew });
+        const r = registerProject(coreDir, target || process.cwd(), { confirmNew: !!args.confirmNew, offerAdopt: true, harness });
         process.stdout.write(JSON.stringify(r) + '\n');
-        return r.action === 'refuse' ? 3 : r.action === 'ask' ? 4 : 0;
+        return r.action === 'refuse' ? 3 : r.action === 'ask' ? 4 : r.action === 'adopt-ask' ? 5 : 0;
+      }
+      case 'adopt-status': {
+        const c = adoptionCandidate({ root: args.root || target || process.cwd(), harness, coreDir });
+        process.stdout.write(c ? `adopt-ask old_path=${c.oldPath} last_written=${c.lastWritten ?? 'unknown'}\n` : '(none)\n');
+        return 0;
+      }
+      case 'adopt': {
+        if (args.decision !== 'yes' && args.decision !== 'no') throw new Error('adopt needs --yes or --no');
+        const r = adoptForeignState({ root: args.root || target || process.cwd(), harness, coreDir, decision: args.decision });
+        process.stdout.write(JSON.stringify(r) + '\n');
+        return r.status === 'not-a-candidate' ? 6 : 0;
       }
       case 'list': {
         for (const e of readProjects(coreDir)) process.stdout.write(`${e.path}\n`);

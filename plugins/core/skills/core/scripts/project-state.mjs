@@ -21,7 +21,7 @@
  */
 
 import {
-  chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
+  appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
   rmSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -32,6 +32,7 @@ import { withFileLock } from './file-lock.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { projectPathContainsOneDriveSubstring } from './metrics-init.mjs';
 import { requireTrustedHome, containedPath } from './trusted-home.mjs';
+import { registerProject } from './index-registry.mjs';
 
 export const STATE_DIRNAME = '.core';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -641,4 +642,131 @@ export function readBootstrap({ root, harness, coreDir = defaultCoreDir() }) {
   const text = readSignedFile({ root, harness, name: BOOTSTRAP, coreDir });
   if (text === null) return null;
   try { return JSON.parse(text); } catch { return null; }
+}
+
+// ---------- adopting another install's state (a restore) ----------
+
+const DECLINED_ADOPT = 'declined-adopt';
+
+function declinedAdoptFile({ root, coreDir }) {
+  return join(coreDir, 'local', mapProjectPathToSlug(canonical(root)), DECLINED_ADOPT);
+}
+
+function declinedStamps({ root, coreDir }) {
+  try {
+    return new Set(readFileSync(declinedAdoptFile({ root, coreDir }), 'utf8').split('\n').map((l) => l.trim()).filter(Boolean));
+  } catch { return new Set(); }
+}
+
+function lastWrittenAt(dir) {
+  let newest = 0;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (name === 'superseded') continue;
+      try { newest = Math.max(newest, lstatSync(join(dir, name)).mtimeMs); } catch { /* vanished */ }
+    }
+  } catch { return null; }
+  return newest ? new Date(newest).toISOString() : null;
+}
+
+/**
+ * The adoption question for (root, harness), or null when there's nothing to offer.
+ * Offered only for a folder not registered here whose .core/<harness>/ is a real
+ * directory holding a well-formed stamp from another install, for this harness,
+ * that git doesn't track and the user hasn't declined. Reads the stamp and file
+ * times only, never any other state file.
+ * Returns { root, harness, oldPath, lastWritten, stampHmac }.
+ */
+export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() }) {
+  assertHarnessName(harness);
+  const real = canonical(root);
+  const core = canonical(coreDir);
+  if (readRegisteredRoots({ coreDir: core }).has(real)) return null;
+  if (classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
+  if (checkStateContainment({ root: real, harness }) !== 'ok') return null;
+  const harnessDir = join(real, STATE_DIRNAME, harness);
+  let stamp = null;
+  try {
+    const st = lstatSync(join(harnessDir, 'stamp'));
+    if (st.isFile()) stamp = JSON.parse(readFileSync(join(harnessDir, 'stamp'), 'utf8'));
+  } catch { return null; }
+  if (!wellFormed(stamp) || stamp.harness !== harness) return null;
+  if (stamp.install_id === ensureInstallIdentity({ coreDir }).installId) return null;
+  if (trackedStateFiles(real, harness).has('stamp')) return null;
+  if (declinedStamps({ root: real, coreDir }).has(stamp.hmac)) return null;
+  return { root: real, harness, oldPath: stamp.path, lastWritten: lastWrittenAt(harnessDir), stampHmac: stamp.hmac };
+}
+
+function setAsideUnparseable(file) {
+  const tag = `unparseable-${isoStamp()}`;
+  renameSync(file, `${file}.${tag}`);
+  if (existsSync(`${file}${MAC_SUFFIX}`)) renameSync(`${file}${MAC_SUFFIX}`, `${file}${MAC_SUFFIX}.${tag}`);
+}
+
+/**
+ * Act on the user's answer to the adoption question. Only an interactive /core
+ * startup calls this, after asking.
+ *   'no'  — remember the refusal for this stamp; the foreign state is left untouched.
+ *   'yes' — make the state this install's: re-stamp it, re-sign the manifest and
+ *           bootstrap record (an unparseable one is set aside, not adopted), then
+ *           register the folder. project_id and agent_name carry over. Adoption never
+ *           switches capture on: an explicit metrics_enabled:true is dropped, an
+ *           opt-out (the adopted one or this machine's own) is kept, and the metrics
+ *           notice shows again on this machine.
+ * Returns { status: 'adopted' | 'declined' | 'not-a-candidate', ... }.
+ */
+export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), decision }) {
+  if (decision !== 'yes' && decision !== 'no') throw new Error(`adoptForeignState: decision must be 'yes' or 'no', got ${JSON.stringify(decision)}`);
+  const cand = adoptionCandidate({ root, harness, coreDir });
+  if (!cand) return { status: 'not-a-candidate' };
+  const real = cand.root;
+
+  if (decision === 'no') {
+    const file = declinedAdoptFile({ root: real, coreDir });
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, cand.stampHmac + '\n');
+    return { status: 'declined', oldPath: cand.oldPath };
+  }
+
+  const localOptOut = readManifest({ root: real, harness, coreDir })?.metrics_enabled === false;
+  const harnessDir = join(real, STATE_DIRNAME, harness);
+  const manifestFile = join(harnessDir, MANIFEST);
+  const bootstrapFile = join(harnessDir, BOOTSTRAP);
+
+  let manifest = null;
+  if (existsSync(manifestFile)) {
+    try { manifest = JSON.parse(readFileSync(manifestFile, 'utf8')); } catch { manifest = null; }
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) { setAsideUnparseable(manifestFile); manifest = null; }
+  }
+  let bootstrapBody = null;
+  if (existsSync(bootstrapFile)) {
+    bootstrapBody = readFileSync(bootstrapFile, 'utf8');
+    try { JSON.parse(bootstrapBody); } catch { setAsideUnparseable(bootstrapFile); bootstrapBody = null; }
+  }
+
+  writeStamp({ root: real, harness, coreDir });
+  if (manifest) {
+    const next = { ...manifest };
+    if (next.metrics_enabled !== false) delete next.metrics_enabled;
+    if (localOptOut) next.metrics_enabled = false;
+    delete next.metrics_disclosure_shown;
+    delete next.metrics_disclosure_version;
+    withFileLock(`${manifestFile}.lock`, () => {
+      writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify(next, null, 2) + '\n', coreDir });
+    });
+  } else if (localOptOut) {
+    withFileLock(`${manifestFile}.lock`, () => {
+      writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify({ metrics_enabled: false, harness }, null, 2) + '\n', coreDir });
+    });
+  }
+  if (bootstrapBody !== null) {
+    withFileLock(`${bootstrapFile}.lock`, () => {
+      writeSignedFile({ dir: harnessDir, name: BOOTSTRAP, body: bootstrapBody, coreDir, mode: 0o600 });
+    });
+  }
+  const registered = registerProject(coreDir, real, { home: dirname(canonical(coreDir)), confirmNew: true });
+  return {
+    status: 'adopted', oldPath: cand.oldPath, registration: registered,
+    project_id: manifest?.project_id ?? null, agent_name: manifest?.agent_name ?? null,
+  };
 }
