@@ -42,19 +42,19 @@ function scratch(flags) {
 
 test('capture gate defaults ON with no env and no workspace flag', () => {
   const dir = scratch({ workspace_id: 'x' });
-  try { assert.equal(metricsEnabled({ project: dir, env: {} }), true); }
+  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), true); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('a project opts OUT via its manifest metrics_enabled:false', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: false });
-  try { assert.equal(metricsEnabled({ project: dir, env: {} }), false); }
+  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), false); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('manifest metrics_enabled:true stays ON (explicit opt-in, harmless under default-on)', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: true });
-  try { assert.equal(metricsEnabled({ project: dir, env: {} }), true); }
+  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), true); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

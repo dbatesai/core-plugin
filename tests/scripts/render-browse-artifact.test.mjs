@@ -687,7 +687,7 @@ test('a planted .core cannot redirect the receipt out of the operational root', 
     mkdirSync(join(home, '.core'), { recursive: true });
     writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
     symlinkSync(stolen, join(project, '.core'));
-    const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: {} });
+    const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
     assert.equal(loc.projectId, null, 'refused state yields no project id');
     assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),
       'it falls back to the flagged location, never to a project-chosen path');
@@ -695,7 +695,7 @@ test('a planted .core cannot redirect the receipt out of the operational root', 
     assert.deepEqual(readdirSync(stolen), [], 'nothing lands in the symlink target');
 
     rmSync(join(project, '.core'));
-    const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: {} });
+    const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
     assert.match(ok.projectId, /^[0-9a-f]{32}$/);
     assert.equal(ok.receiptDir, join(realpathSync(project), '.core', 'claude-code', 'artifact-receipts'));
   } finally {

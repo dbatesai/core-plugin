@@ -31,10 +31,10 @@ test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pi
     // "fell back to project-local".
     process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
 
-    const r = initMetrics({ projectDir: project, env: {} });
+    const r = initMetrics({ projectDir: project, env: { CORE_HARNESS: 'claude-code' } });
     assert.ok(r.ok, `scaffold ok: ${JSON.stringify(r)}`);
 
-    const pinFile = join(operationalMetricsDir(project, { home, env: {} }), 'storage-path.txt');
+    const pinFile = join(operationalMetricsDir(project, { home, env: { CORE_HARNESS: 'claude-code' } }), 'storage-path.txt');
     assert.ok(existsSync(pinFile), 'pin file written');
     const pinned = readFileSync(pinFile, 'utf8').trim();
     assert.match(pinned, /core-metrics/, 'pinned to the forced appdata path, not project-local');
@@ -47,7 +47,7 @@ test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pi
     }
 
     // The actual consume path: log-event's resolveStoragePath reads the pin.
-    const resolved = resolveStoragePath(project, { env: {} });
+    const resolved = resolveStoragePath(project, { env: { CORE_HARNESS: 'claude-code' } });
     assert.equal(resolved, pinned, 'log-event resolves to the metrics-init pin, not the project-local default');
   } finally {
     if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
@@ -68,8 +68,8 @@ test('wire-in: metrics-init is idempotent (second run leaves the pin intact)', (
     process.env.HOME = home;
     process.env.USERPROFILE = home; // Windows: os.homedir() reads USERPROFILE, not HOME
     assert.equal(homedir(), home);
-    const r1 = initMetrics({ projectDir: project, env: {} });
-    const r2 = initMetrics({ projectDir: project, env: {} });
+    const r1 = initMetrics({ projectDir: project, env: { CORE_HARNESS: 'claude-code' } });
+    const r2 = initMetrics({ projectDir: project, env: { CORE_HARNESS: 'claude-code' } });
     assert.ok(r1.ok && r2.ok);
     assert.equal(r1.storagePath, r2.storagePath, 'storage path stable across runs');
   } finally {
@@ -100,7 +100,7 @@ test('metrics-init still runs when invoked through a symlink (entry guard canoni
     // process exits 0 having printed nothing. The fix makes it actually run.
     const parsed = JSON.parse(out);
     assert.equal(parsed.ok, true, 'metrics-init actually executed through the symlink');
-    assert.ok(existsSync(join(operationalMetricsDir(project, { home, env: {} }), 'storage-path.txt')),
+    assert.ok(existsSync(join(operationalMetricsDir(project, { home, env: { CORE_HARNESS: 'claude-code' } }), 'storage-path.txt')),
       'the storage-path pin was written — the scaffold ran');
   } finally {
     rmSync(home, { recursive: true, force: true });
