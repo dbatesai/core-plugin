@@ -65,15 +65,30 @@ function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return fallback; }
 }
 
-function listFiles(dir) {
+// A legacy workspace is read for two different jobs. Classifying it only needs to know
+// whether it holds data, so an unreadable corner is skipped. Copying it has to be exact:
+// `strict` makes an unreadable folder, an unstatable entry or any symlink stop the walk,
+// because a partial list would be copied and then signed off as complete, and a symlink
+// would be followed out of the workspace by the copy.
+class LegacyStateError extends Error {
+  constructor(code, path, detail) {
+    super(`legacy state cannot be migrated safely: ${detail}: ${path}`);
+    this.code = code; this.path = path;
+  }
+}
+
+function listFiles(dir, { strict = false } = {}) {
   const out = [];
   const walk = (d) => {
     let names;
-    try { names = readdirSync(d); } catch { return; }
+    try { names = readdirSync(d); }
+    catch (e) { if (strict) throw new LegacyStateError('LEGACY_UNREADABLE', d, `cannot list (${e.code || e.message})`); return; }
     for (const n of names) {
       const p = join(d, n);
       let st;
-      try { st = lstatSync(p); } catch { continue; }
+      try { st = lstatSync(p); }
+      catch (e) { if (strict) throw new LegacyStateError('LEGACY_UNREADABLE', p, `cannot stat (${e.code || e.message})`); continue; }
+      if (strict && st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', p, 'symlink inside the legacy workspace');
       if (st.isDirectory()) walk(p);
       else out.push(relative(dir, p).replace(/\\/g, '/'));
     }
@@ -221,7 +236,7 @@ function sha256(file) {
 }
 
 function copyTree(src, dest, recorded) {
-  for (const rel of listFiles(src)) {
+  for (const rel of listFiles(src, { strict: true })) {
     const base = rel.split('/').pop();
     if (SKIP_ON_COPY.some((re) => re.test(base))) continue;
     const from = join(src, rel);
@@ -289,7 +304,12 @@ function gitTracks(root, rel) {
  *   { status: 'migrated' | 'already-migrated' | 'nothing-to-migrate' | 'held' | 'lock-held', ... }
  */
 export function applyMigration(opts = {}) {
-  return duringMigration(() => applyMigrationInner(opts));
+  try { return duringMigration(() => applyMigrationInner(opts)); }
+  catch (e) {
+    // The marker stays, so nothing reads the half-copied state; the old workspace is untouched.
+    if (e instanceof LegacyStateError) return { status: 'legacy-held', root: canonical(opts.root), code: e.code, path: e.path, reason: e.message };
+    throw e;
+  }
 }
 
 function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date() } = {}) {
@@ -340,7 +360,9 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
         // Live workspace: hot files to the hot location, everything else to durable.
         for (const name of readdirSync(src)) {
           const from = join(src, name);
-          let st; try { st = lstatSync(from); } catch { continue; }
+          let st;
+          try { st = lstatSync(from); } catch (e) { throw new LegacyStateError('LEGACY_UNREADABLE', from, `cannot stat (${e.code || e.message})`); }
+          if (st.isSymbolicLink()) throw new LegacyStateError('LEGACY_SYMLINK', from, 'symlink inside the legacy workspace');
           const target = HOT_TOP.has(name) ? hot.dir : durable.dir;
           if (st.isDirectory()) { copyTree(from, join(target, name), copies); continue; }
           if (SKIP_ON_COPY.some((re) => re.test(name))) continue;
@@ -450,7 +472,15 @@ function readRange(file, start) {
  * copied to superseded/legacy-<date>/. The receipt is updated so a re-run is a no-op.
  * Returns { status, root, harness, appended: [...], superseded: [...] }.
  */
-export function checkLegacyDrift({ root, harness = detectStateHarness(), coreDir = defaultCoreDir(), now = new Date() } = {}) {
+export function checkLegacyDrift(opts = {}) {
+  try { return checkLegacyDriftInner(opts); }
+  catch (e) {
+    if (e instanceof LegacyStateError) return { status: 'legacy-held', root: canonical(opts.root), code: e.code, path: e.path, reason: e.message };
+    throw e;
+  }
+}
+
+function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir = defaultCoreDir(), now = new Date() } = {}) {
   assertHarnessName(harness);
   const real = canonical(root);
   const durable = stateDir({ root: real, harness, kind: 'durable', coreDir });
@@ -478,11 +508,15 @@ export function checkLegacyDrift({ root, harness = detectStateHarness(), coreDir
     const day = now.toISOString().slice(0, 10);
     const appended = [];
     const superseded = [];
-    for (const { id, superseded: isSup } of sources) {
+    // Every source is listed before anything is written: an unreadable folder or a symlink
+    // must stop the check with the project's copies and the receipt still as they were.
+    const listed = sources.map(({ id, superseded: isSup }) => {
       assertSafeWorkspaceId(id);
       const src = join(coreDir, 'workspaces', id);
-      if (!existsSync(src)) continue;
-      for (const rel of listFiles(src)) {
+      return { id, isSup, src, rels: existsSync(src) ? listFiles(src, { strict: true }) : [] };
+    });
+    for (const { id, isSup, src, rels } of listed) {
+      for (const rel of rels) {
         const base = rel.split('/').pop();
         if (base === 'MOVED.md' || SKIP_ON_COPY.some((re) => re.test(base))) continue;
         const from = join(src, rel);

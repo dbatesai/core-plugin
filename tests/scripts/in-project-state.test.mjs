@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, realpathSync, chmodSync, statSync,
-  utimesSync,
+  utimesSync, symlinkSync,
 } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -663,5 +663,66 @@ test('drift never appends to a destination outside the state, whether the receip
     assert.equal(d.status, 'receipt-unverified');
     assert.ok(d.problems.some((x) => x.startsWith('destination outside')));
     assert.equal(sha(outside), before, 'signed but out of bounds: the outside file is byte-identical');
+  } finally { s.cleanup(); }
+});
+
+test('an unreadable legacy folder stops the migration: no receipt, no release, state fenced, and a later run completes it', { skip: isWin || isRoot }, () => {
+  const { s, p, table } = migrationFixture();
+  const legacy = join(s.coreDir, 'workspaces', 'legacy');
+  const nested = join(legacy, 'metrics', 'classified');
+  const inProject = join(p, '.core', H);
+  try {
+    chmodSync(nested, 0o000);
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'legacy-held');
+    assert.equal(r.code, 'LEGACY_UNREADABLE');
+    assert.ok(r.path.startsWith(nested));
+    assert.equal(existsSync(join(inProject, RECEIPT_NAME)), false, 'no completion receipt');
+    assert.ok(existsSync(join(inProject, '.migrating')), 'the marker stays');
+    assert.equal(existsSync(join(legacy, 'MOVED.md')), false, 'the old state is not released');
+    assert.equal(stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).status, 'migrating');
+
+    chmodSync(nested, 0o755);
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    const receipt = JSON.parse(readFileSync(join(inProject, RECEIPT_NAME), 'utf8'));
+    assert.ok(receipt.files.some((f) => f.to.endsWith('2026-09-01.jsonl')), 'the once-unreadable log is in the receipt');
+  } finally { try { chmodSync(nested, 0o755); } catch { /* gone */ } s.cleanup(); }
+});
+
+test('a symlink inside the legacy workspace is refused, and its target is never copied', { skip: isWin }, () => {
+  const { s, p, table } = migrationFixture();
+  const legacy = join(s.coreDir, 'workspaces', 'legacy');
+  try {
+    const outside = join(s.base, 'outside-secret.txt');
+    writeFileSync(outside, 'not part of the workspace\n');
+    symlinkSync(outside, join(legacy, 'linked-secret.txt'));
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'legacy-held');
+    assert.equal(r.code, 'LEGACY_SYMLINK');
+    assert.equal(existsSync(join(p, '.core', H, RECEIPT_NAME)), false);
+    assert.equal(existsSync(join(legacy, 'MOVED.md')), false);
+    const copied = [];
+    const walk = (d) => { for (const n of readdirSync(d, { withFileTypes: true })) { const f = join(d, n.name); if (n.isDirectory()) walk(f); else copied.push(f); } };
+    walk(join(p, '.core'));
+    assert.ok(!copied.some((f) => readFileSync(f, 'utf8') === 'not part of the workspace\n'), 'the outside bytes are nowhere in the project state');
+  } finally { s.cleanup(); }
+});
+
+test('drift refuses to run over a legacy symlink or unreadable folder and leaves the copies and the receipt as they were', { skip: isWin || isRoot }, () => {
+  const { s, p, table } = migrationFixture();
+  const legacy = join(s.coreDir, 'workspaces', 'legacy');
+  try {
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    const receiptFile = join(p, '.core', H, RECEIPT_NAME);
+    const receiptBefore = sha(receiptFile);
+    const legacyLog = join(legacy, 'capability-history.jsonl');
+    const projectLog = JSON.parse(readFileSync(receiptFile, 'utf8')).files.find((f) => f.from === legacyLog).to;
+    const logBefore = sha(projectLog);
+    writeFileSync(legacyLog, '{"row":1}\n{"row":"old-2"}\n');
+    symlinkSync(join(s.base, 'nowhere'), join(legacy, 'dangling'));
+    const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
+    assert.equal(d.status, 'legacy-held');
+    assert.equal(sha(receiptFile), receiptBefore, 'the receipt is untouched');
+    assert.equal(sha(projectLog), logBefore, 'nothing was appended before the walk failed');
   } finally { s.cleanup(); }
 });
