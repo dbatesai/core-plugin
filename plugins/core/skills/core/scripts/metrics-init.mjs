@@ -224,17 +224,18 @@ const APPDATA_OWNER_FILE = '.project-root';
 
 /**
  * The AppData folder for a project's redirected metrics. The readable slug maps `.`, `-`,
- * `/` and `:` all to `-`, so two projects (`a.b`, `a-b`) can share one slug. A slug folder
- * is therefore used only when it is unclaimed (an install that predates the claim keeps its
- * data) or claimed by this very project; otherwise, and for any new folder, the name carries
- * a hash of the full path. The scaffold writes the claim.
+ * `/` and `:` all to `-`, so two projects (`a.b`, `a-b`) can share one slug, and who first
+ * scaffolds a slug folder says nothing about whose bytes are in it. So a slug folder is used
+ * only when this very project claimed it (`.project-root`); every other case gets a name with
+ * a hash of the full path. An existing folder reaches a project the trustworthy way, through
+ * the project's own earlier pin (see keptExternalPin), and is claimed there. A legacy folder
+ * nobody claimed and no pin names is left alone for a person to sort out.
  */
 function appDataStorePath(projectDir, home) {
   const legacy = join(home, 'AppData', 'Local', 'core-metrics', mapProjectPathToSlug(projectDir));
-  if (existsSync(legacy)) {
-    try { return readFileSync(join(legacy, APPDATA_OWNER_FILE), 'utf8').trim() === projectDir ? legacy : `${legacy}-${pathHash(projectDir)}`; }
-    catch { return legacy; }
-  }
+  try {
+    if (readFileSync(join(legacy, APPDATA_OWNER_FILE), 'utf8').trim() === projectDir) return legacy;
+  } catch { /* unclaimed or absent */ }
   return `${legacy}-${pathHash(projectDir)}`;
 }
 

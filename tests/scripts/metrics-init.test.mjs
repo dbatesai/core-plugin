@@ -98,26 +98,52 @@ test('projectPathContainsOneDriveSubstring is true for OneDrive paths and false 
   assert.equal(projectPathContainsOneDriveSubstring('/Users/david/OneDrive-backup-archive/app'), false);
 });
 
-test('the AppData metrics folder is one-to-one: a.b and a-b never share it, and an unclaimed legacy folder keeps its owner', () => {
+test('the AppData metrics folder is one-to-one, and an unclaimed legacy folder is never taken by whichever project scaffolds first', () => {
   withCleanEnv(() => {
     const home = mkdtempSync(join(tmpdir(), 'metrics-appdata-'));
     process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
     try {
-      const a = detectStoragePath({ projectDir: join(home, 'p', 'a.b'), home }).path;
-      const b = detectStoragePath({ projectDir: join(home, 'p', 'a-b'), home }).path;
-      assert.notEqual(a, b);
+      const A = join(home, 'p', 'a.b');
+      const B = join(home, 'p', 'a-b');
+      const slug = (p) => p.replace(/[/\\.:]/g, '-');
+      assert.notEqual(detectStoragePath({ projectDir: A, home }).path, detectStoragePath({ projectDir: B, home }).path);
 
-      // A folder from before the claim existed: the first project to scaffold keeps it and claims it.
-      const legacy = join(home, 'AppData', 'Local', 'core-metrics', join(home, 'p', 'a.b').replace(/[/\\.:]/g, '-'));
+      const legacy = join(home, 'AppData', 'Local', 'core-metrics', slug(A));
+      assert.equal(slug(A), slug(B), 'the two names really do share one slug');
       mkdirSync(legacy, { recursive: true });
-      assert.equal(detectStoragePath({ projectDir: join(home, 'p', 'a.b'), home }).path, legacy, 'unclaimed: kept for continuity');
-      writeFileSync(join(legacy, '.project-root'), join(home, 'p', 'a.b') + '\n');
-      assert.equal(detectStoragePath({ projectDir: join(home, 'p', 'a.b'), home }).path, legacy, 'claimed by this project: kept');
-      const other = join(home, 'p', 'a-b');
-      const legacyOther = join(home, 'AppData', 'Local', 'core-metrics', other.replace(/[/\\.:]/g, '-'));
-      assert.equal(legacyOther, legacy, 'the two names really do share one slug');
-      assert.notEqual(detectStoragePath({ projectDir: other, home }).path, legacy, 'claimed by another project: this one gets its own');
+      writeFileSync(join(legacy, 'evidence.jsonl'), '{"a":1}\n');
+      assert.notEqual(detectStoragePath({ projectDir: B, home }).path, legacy, 'unclaimed: not taken by B');
+      assert.notEqual(detectStoragePath({ projectDir: A, home }).path, legacy, 'unclaimed: not taken by A either, it comes through A\'s own pin');
+      assert.equal(existsSync(join(legacy, '.project-root')), false, 'and nobody claimed it by asking');
+
+      writeFileSync(join(legacy, '.project-root'), A + '\n');
+      assert.equal(detectStoragePath({ projectDir: A, home }).path, legacy, 'claimed by A: A keeps it');
+      assert.notEqual(detectStoragePath({ projectDir: B, home }).path, legacy, 'claimed by A: B gets its own');
     } finally { rmSync(home, { recursive: true, force: true }); }
+  });
+});
+
+test('B scaffolding first cannot take A\'s unclaimed legacy folder; A keeps it through its own pin and claims it then', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-owner-home-'));
+    const A = mkdtempSync(join(tmpdir(), 'metrics-a.b-'));
+    const B = mkdtempSync(join(tmpdir(), 'metrics-a-b-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try {
+      const legacy = join(home, 'AppData', 'Local', 'core-metrics', 'shared-slug-with-old-evidence');
+      mkdirSync(legacy, { recursive: true });
+      writeFileSync(join(legacy, 'evidence.jsonl'), '{"a":1}\n');
+      writeFileSync(join(operationalMetricsDir(A, { home, env: {} }), 'storage-path.txt'), legacy);
+
+      const rb = initMetrics({ projectDir: B, env: {} });
+      assert.notEqual(rb.storagePath, legacy, 'B is not handed A\'s bytes');
+      const ra = initMetrics({ projectDir: A, env: {} });
+      assert.equal(ra.storagePath, legacy, 'A keeps the folder its own pin names');
+      assert.equal(readFileSync(join(legacy, '.project-root'), 'utf8').trim(), A, 'and claims it');
+      assert.equal(readFileSync(join(legacy, 'evidence.jsonl'), 'utf8'), '{"a":1}\n');
+    } finally { for (const d of [home, A, B]) rmSync(d, { recursive: true, force: true }); }
   });
 });
 
