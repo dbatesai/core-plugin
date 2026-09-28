@@ -208,6 +208,9 @@ test('a pin that this install did not sign, or that names somewhere metrics may 
 
       const inside = join(home, 'AppData', 'Local', 'core-metrics', 'ok');
       mkdirSync(inside, { recursive: true });
+      writeFileSync(join(meta, 'storage-path.txt'), inside);
+      rmSync(join(meta, 'storage-path.txt.mac'), { force: true });
+      assert.equal(resolveStoragePath(projectDir, { home, env: {} }), join(projectDir, '_metrics'), 'an unsigned pin is ignored even when it names an allowed folder');
       signedPin(meta, home, inside);
       assert.equal(resolveStoragePath(projectDir, { home, env: {} }), inside, 'a signed pin inside AppData is honored');
     } finally { for (const d of [home, projectDir, outside]) rmSync(d, { recursive: true, force: true }); }
