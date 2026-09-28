@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writeSignedFile, writePinSigned, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor } from './project-state.mjs';
+import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -112,9 +112,16 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   if (pin && pin.path) {
     storagePath = pin.path;
     detection = { ...detection, path: pin.path, reason: 'existing-external-pin-kept' };
+  } else if (!pin) {
+    // A hold an earlier run or the migration recorded stays reported until somebody claims the folder.
+    const earlier = readHeldSigned({ dir: operationalMetaDir, coreDir: join(home, '.core') });
+    if (earlier && existsSync(earlier.folder) && !existsSync(join(earlier.folder, APPDATA_OWNER_FILE))) {
+      heldLegacyFolder = earlier;
+      detection = { ...detection, reason: `${detection.reason}; legacy folder ${earlier.folder} held` };
+    }
   } else if (pin && pin.held) {
     heldLegacyFolder = pin.held;
-    try { writeSignedFile({ dir: operationalMetaDir, name: HELD_FILE, body: pin.held.folder, coreDir: join(home, '.core') }); } catch { /* the hold still applies to this run */ }
+    try { writeHeldSigned({ dir: operationalMetaDir, folder: pin.held.folder, alsoNamedBy: pin.held.also_named_by, coreDir: join(home, '.core') }); } catch { /* the hold still applies to this run */ }
     detection = { ...detection, reason: `${detection.reason}; legacy folder ${pin.held.folder} held: also named by ${pin.held.also_named_by.join(', ')}` };
   }
 
@@ -233,10 +240,9 @@ function keptExternalPin({ operationalMetaDir, projectDir, home, env }) {
   return also.length ? { held: { folder: pinned, also_named_by: also } } : { path: pinned };
 }
 
-// Same names as METRICS_OWNER_FILE / METRICS_HELD_FILE in project-state.mjs; kept literal here because this
-// module and project-state load in a cycle and a module-level read of its exports would hit a not-yet-set binding.
+// Same name as METRICS_OWNER_FILE in project-state.mjs; kept literal here because this module and
+// project-state load in a cycle and a module-level read of its exports would hit a not-yet-set binding.
 const APPDATA_OWNER_FILE = '.project-root';
-const HELD_FILE = 'held-legacy-folder.txt';
 
 /**
  * The AppData folder for a project's redirected metrics. The readable slug maps `.`, `-`,
@@ -445,6 +451,10 @@ if (isCliEntry(import.meta.url)) {
   if (!result.ok) {
     console.error('metrics-init failed:', result.reason, result.err || '');
     process.exit(2);
+  }
+  if (result.held_legacy_folder) {
+    // stderr, which startup does not discard: the readiness summary names it.
+    console.error(`CORE-METRICS-LEGACY-FOLDER-HELD: ${result.held_legacy_folder.folder} is named by more than one project and was left untouched (also: ${(result.held_legacy_folder.also_named_by || []).join(', ') || 'unknown'})`);
   }
   console.log(JSON.stringify(result, null, 2));
 }

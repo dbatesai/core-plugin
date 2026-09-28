@@ -416,6 +416,8 @@ node "${CORE_ROOT}/skills/core/scripts/metrics-init.mjs" <project> >/dev/null \
   || echo "CORE-METRICS-INIT-FAILED: metrics scaffold did not complete — capture is degraded or disabled this session (details on stderr above)"
 ```
 
+A `CORE-METRICS-LEGACY-FOLDER-HELD: <folder> …` line on stderr means an old metrics folder is named by more than one project, so it was given to none of them and left untouched; say so in one plain sentence, naming the folder, and that a person must decide whose it is (claiming it means writing that project's root into a `.project-root` file inside it). A migration that hit the same case says so in a `metrics_held` field of its JSON.
+
 Only stdout (the JSON result) is discarded — stderr stays visible by contract. If the `CORE-METRICS-INIT-FAILED` marker (or a `CORE-METRICS-PIN-FAILED` stderr line) appears, put one plain-voice line in the readiness summary saying metrics capture is off and why; never report a healthy capture state over a failed scaffold.
 
 **Metrics tripwires (v3.14.0 Link 5 — proactive degradation surfacing).** A cheap check over the PINNED scorecards and capture health — never a live recomputation. Run it right after the scaffold; echo each stdout line **verbatim** into the readiness summary (the lines are already written in plain language with the likely locus). No output → say nothing, per the readiness-only-escalations rule.

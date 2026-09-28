@@ -662,8 +662,23 @@ export function metricsStorageAllowed(pinned, { projectDir, home }) {
   return true;
 }
 
+/** Record, signed, that this project was held off an ambiguously named legacy metrics folder. */
+export function writeHeldSigned({ dir, folder, alsoNamedBy = [], coreDir = defaultCoreDir() }) {
+  writeSignedFile({ dir, name: 'held-legacy-folder.txt', body: JSON.stringify({ folder, also_named_by: alsoNamedBy }), coreDir });
+}
+
+/** The signed hold record in `dir` as { folder, also_named_by }, or null. Reads the older plain-folder body too. */
+export function readHeldSigned({ dir, coreDir = defaultCoreDir() }) {
+  const raw = readSignedFileAt({ dir, name: 'held-legacy-folder.txt', coreDir });
+  if (raw === null) return null;
+  try {
+    const j = JSON.parse(raw);
+    if (j && typeof j.folder === 'string') return { folder: j.folder, also_named_by: Array.isArray(j.also_named_by) ? j.also_named_by : [] };
+  } catch { /* an older record: the body is the folder */ }
+  return raw.trim() ? { folder: raw.trim(), also_named_by: [] } : null;
+}
+
 export const METRICS_OWNER_FILE = '.project-root';
-export const METRICS_HELD_FILE = 'held-legacy-folder.txt';
 
 /**
  * The other registered projects, on this machine and readable by this install, whose signed
@@ -684,7 +699,7 @@ export function otherProjectsNamingFolder(folder, { projectDir, home, env }) {
       if (!s) continue;
       const metricsDir = join(s.dir, 'metrics');
       const named = readPinSigned({ dir: metricsDir, root, coreDir }) === folder
-        || (readSignedFileAt({ dir: metricsDir, name: METRICS_HELD_FILE, coreDir }) || '').trim() === folder;
+        || readHeldSigned({ dir: metricsDir, coreDir })?.folder === folder;
       if (named) out.push(root);
     } catch { /* an unreadable project cannot vouch for a claim */ }
   }

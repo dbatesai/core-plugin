@@ -961,3 +961,38 @@ test('migration signs a carried metrics pin for neither project when a not-yet-m
     assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), false, 'first to migrate does not take the folder');
   } finally { s.cleanup(); }
 });
+
+test('an ambiguous legacy metrics folder is reported by the migration and again by the scaffold, and stays reported until someone claims it', async () => {
+  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  const { s, p, table } = migrationFixture();
+  const savedForce = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
+  const savedHome = process.env.HOME;
+  try {
+    const peerPath = s.mk('Projects', 'PeerProject');
+    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+    index.push(legacyWorkspace(s, 'peer', { path: peerPath, files: { 'workspace.json': JSON.stringify({ workspace_id: 'peer' }) } }));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index));
+    const table2 = { ...table, entries: { ...table.entries, peer: { harness: H, evidence: 'fixture' } } };
+    const shared = join(s.home, 'AppData', 'Local', 'core-metrics', 'shared-old');
+    mkdirSync(shared, { recursive: true });
+    mkdirSync(join(s.coreDir, 'workspaces', 'peer', 'metrics'), { recursive: true });
+    writeFileSync(join(s.coreDir, 'workspaces', 'peer', 'metrics', 'storage-path.txt'), shared);
+    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), shared);
+
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 });
+    assert.equal(r.metrics_held.folder, shared, 'the migration says which folder it held');
+    assert.equal(r.metrics_held.also_named_by.length, 1);
+
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    process.env.HOME = s.home;
+    const init = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
+    assert.equal(init.held_legacy_folder.folder, shared, 'the scaffold reports the same hold from the migration record');
+    assert.notEqual(init.storagePath, shared);
+    writeFileSync(join(shared, '.project-root'), p + '\n');
+    assert.equal(initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } }).held_legacy_folder, null, 'claimed: no longer reported');
+  } finally {
+    if (savedForce === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = savedForce;
+    if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+    s.cleanup();
+  }
+});
