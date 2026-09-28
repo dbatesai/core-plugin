@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical } from './project-state.mjs';
+import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, writeSignedFile, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical, stateDir, detectStateHarness } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -166,6 +166,15 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   // project folder the redirect exists to avoid.
   try {
     writePinSigned({ dir: operationalMetaDir, path: storagePath, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') });
+    if (storagePath !== join(projectDir, '_metrics')) {
+      // A durable marker, outside the hot metrics dir the pin itself lives in, so that losing the
+      // pin's two files together still leaves evidence this project was ever redirected externally
+      // — storagePinInvalid reads it to refuse rather than silently read an empty project-local folder.
+      try {
+        const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: env.CORE_HARNESS || detectStateHarness(env), coreDir: join(home, '.core'), forWrite: true });
+        if (durable) writeSignedFile({ dir: durable.dir, name: EXTERNAL_MARKER, body: JSON.stringify({ folder: storagePath }), coreDir: join(home, '.core') });
+      } catch { /* best-effort: the pin itself is still the primary record */ }
+    }
     // The hold is retired only once the new pin is written and reads back as this folder; if the
     // write failed the record stays, so the next scaffold can still reattach.
     if (reattachedLegacyFolder && readPinSigned({ dir: operationalMetaDir, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) === storagePath) {
@@ -265,6 +274,7 @@ function keptExternalPin({ operationalMetaDir, projectDir, home, env }) {
 // Same name as METRICS_OWNER_FILE in project-state.mjs; kept literal here because this module and
 // project-state load in a cycle and a module-level read of its exports would hit a not-yet-set binding.
 const APPDATA_OWNER_FILE = '.project-root';
+export const EXTERNAL_MARKER = 'metrics-ever-external.txt';
 
 /**
  * The AppData folder for a project's redirected metrics. The readable slug maps `.`, `-`,

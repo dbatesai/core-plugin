@@ -1,4 +1,4 @@
-import { operationalMetricsDir, resolveStoragePath, metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { operationalMetricsDir, resolveStoragePath, metricsEnabled, storagePinInvalid } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { writePinSigned, readPinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
@@ -352,5 +352,56 @@ test('with a pin that does not verify, purge and stats refuse with pin-unverifie
       signedPin(meta, home, store, projectDir);
       assert.equal(purgeTurnCapture(projectDir, { apply: false }).existed, true, 'once the pin is repaired the stream is located again');
     } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
+test('a pin body missing while its signature remains (or the reverse) refuses instead of reading the fallback as clean', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-halfpin-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-halfpin-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try {
+      const r = initMetrics({ projectDir, env: {} });
+      assert.equal(r.ok, true);
+      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      const store = r.storagePath;
+      writeFileSync(join(store, 'rows.jsonl'), '{"row":1}\n{"row":2}\n');
+
+      rmSync(join(meta, 'storage-path.txt'));   // signature remains, body gone
+      assert.equal(storagePinInvalid(projectDir, { env: {} }), true, 'body missing, .mac present: invalid, not absent');
+      assert.equal(resolveStoragePath(projectDir, { home, env: {} }), join(projectDir, '_metrics'));
+
+      const after = initMetrics({ projectDir, env: {} });
+      assert.equal(after.ok, true, 'the scaffold repairs it');
+      assert.equal(storagePinInvalid(projectDir, { env: {} }), false);
+      assert.equal(readFileSync(join(store, 'rows.jsonl'), 'utf8'), '{"row":1}\n{"row":2}\n', 'the AppData rows were never touched');
+
+      rmSync(join(meta, 'storage-path.txt.mac'));   // body remains, signature gone
+      assert.equal(storagePinInvalid(projectDir, { env: {} }), true, '.mac missing, body present: invalid, not absent');
+    } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
+test('losing the pin entirely after an external scaffold is still caught by a durable marker; a project never redirected reads clean', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-lostpin-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-lostpin-proj-'));
+    const never = mkdtempSync(join(tmpdir(), 'metrics-neverext-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try {
+      initMetrics({ projectDir, env: {} });
+      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      rmSync(join(meta, 'storage-path.txt'), { force: true });
+      rmSync(join(meta, 'storage-path.txt.mac'), { force: true });
+      assert.equal(storagePinInvalid(projectDir, { env: {} }), true, 'both files gone, but the durable marker remembers this project was redirected');
+
+      delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
+      initMetrics({ projectDir: never, env: {} });   // this one was never redirected (no OneDrive/AppData force)
+      assert.equal(storagePinInvalid(never, { env: {} }), false, 'a project that was never externally pinned reads clean, no marker written');
+    } finally { for (const d of [home, projectDir, never]) rmSync(d, { recursive: true, force: true }); }
   });
 });

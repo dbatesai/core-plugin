@@ -25,8 +25,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
-import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder } from './project-state.mjs';
+import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder, readSignedFileAt } from './project-state.mjs';
 
 /**
  * Fail-closed capture gate. metrics-init.mjs writes a typed
@@ -79,7 +79,23 @@ export function resolveStoragePath(projectDir, { home = homedir(), env = process
  */
 export function storagePinInvalid(projectDir, { home = homedir(), env = process.env } = {}) {
   const meta = trustedMetricsDir(projectDir, { home, env });
-  if (!meta || !existsSync(join(meta, 'storage-path.txt'))) return false;
+  if (!meta) return false;
+  const bodyExists = existsSync(join(meta, 'storage-path.txt'));
+  const macExists = existsSync(join(meta, 'storage-path.txt.mac'));
+  if (!bodyExists && !macExists) {
+    // No pin sits where one would be — but a durable marker (kept outside this dir, written the one
+    // time an external pin was created) can still say this project was redirected before. Losing
+    // both pin files at once should not silently resume capture into the empty project-local folder.
+    try {
+      const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core') });
+      if (durable && readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir: join(home, '.core') }) !== null) return true;
+    } catch { /* no durable state yet: this really is a project that was never redirected */ }
+    return false;
+  }
+  // A signature with no body, or a body with no signature, is not a clean absence — it is what a
+  // partial loss of the pin's two files looks like, and the folder it named cannot be recovered
+  // from what remains. Refuse rather than fall back and read the wrong (empty) folder as truth.
+  if (!bodyExists || !macExists) return true;
   const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
   if (!(pinned && metricsStorageAllowed(pinned, { projectDir, home }))) return true;
   // An AppData folder nobody claimed that another project's signed pin also names is not this
