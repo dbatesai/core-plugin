@@ -115,12 +115,18 @@ export function readSessionInventory(projectDir) {
  *  (`observations/<YYYY-MM>/`) included. Directories are excluded by name —
  *  `archive`, `_`-prefixed (_lib, _validation, ...) and dot directories — the
  *  same rule the ranking walk uses; generated `INDEX-*` files are excluded too.
- *  A directory that will not list contributes nothing. */
+ *  A store with no `_memories/` yet has no units. Any other directory that will
+ *  not list is returned as a path itself, so classification reports it
+ *  `read-only` and the units under it count as unknown. */
 export function unitPaths(memoriesDir) {
   const out = [];
   const walk = (dir) => {
     let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch (e) {
+      if (!(dir === memoriesDir && e && e.code === 'ENOENT')) out.push(dir);
+      return;
+    }
     for (const ent of entries) {
       if (ent.isDirectory()) {
         if (ent.name === 'archive' || ent.name.startsWith('_') || ent.name.startsWith('.')) continue;

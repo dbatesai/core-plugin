@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -53,4 +53,18 @@ test('piped --json output arrives whole when the report is larger than one pipe 
     assert.equal(JSON.parse(r.stdout).files.length, 900);
     assert.equal(r.status, 1, 'unstamped files still exit nonzero');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a store with no _memories/ has no units; a subfolder that will not list is reported read-only', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  const { detectStore } = await import('../../plugins/core/skills/core/scripts/lifecycle-detect.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'lifecycle-unlistable-'));
+  const locked = join(dir, '_memories', 'observations');
+  try {
+    assert.deepEqual(detectStore(dir).files, []);
+    mkdirSync(locked, { recursive: true });
+    writeFileSync(join(locked, 'obs-hidden.md'), '---\nid: x\n---\nbody\n');
+    chmodSync(locked, 0o000);
+    const r = detectStore(dir);
+    assert.deepEqual(r.needs_attention.map(f => [f.path, f.classification]), [[locked, 'read-only']]);
+  } finally { if (existsSync(locked)) chmodSync(locked, 0o755); rmSync(dir, { recursive: true, force: true }); }
 });
