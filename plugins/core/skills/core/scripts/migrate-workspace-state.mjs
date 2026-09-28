@@ -453,16 +453,18 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
             writePinSigned({ dir: dirname(pinFile), path: pinned, root: real, coreDir });
             // Same durable marker a fresh scaffold writes, so losing this carried pin later is caught
             // the same way. A failure here does not undo the file copy this migration already did —
-            // that succeeded — but it must not leave a signed external pin with no marker behind it,
-            // the exact gap the marker exists to close. The pin is rolled back instead: metrics
-            // capture reads as un-pinned until the next scaffold, which either writes a working pin
-            // and marker together or fails closed the same way a fresh scaffold's pin-write failure
-            // does. Named in the result rather than hidden either way.
+            // that succeeded. The pin is deliberately NOT rolled back on a marker failure: removing it
+            // would erase the one signal that this project was ever redirected, and a project whose
+            // real path carries no redirect signal of its own would then read as clean rather than
+            // refused — a false purge/false-clean-stats result, not a fixed one (caught by review
+            // against a real fault fixture). Left signed, storagePinInvalid's own backfill sees a
+            // valid pin with no marker on the very next read, tries the same write, fails the same
+            // way, and refuses — closed immediately, not only after a later loss. Named in the
+            // result either way.
             try {
               markMetricsEverExternal({ projectDir: real, harness, home: homeDir, coreDir, folder: pinned });
             } catch (e) {
-              for (const f of ['storage-path.txt', 'storage-path.txt.mac']) rmSync(join(dirname(pinFile), f), { force: true });
-              metricsMarkerFailed = { folder: pinned, err: String(e && e.message), pin_rolled_back: true };
+              metricsMarkerFailed = { folder: pinned, err: String(e && e.message) };
             }
           } else if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir })) {
             // Ambiguous: left unsigned, and recorded so the scaffold and the readiness summary can say so.

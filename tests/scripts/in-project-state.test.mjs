@@ -926,23 +926,28 @@ test('migration signs a carried metrics pin only when it names a place metrics m
   }
 });
 
-test('a marker write failure during migration rolls the carried pin back instead of completing with a signed pin and no marker', () => {
+test('a marker write failure during migration leaves the pin signed, and the next read refuses immediately rather than reading clean', async () => {
+  const { storagePinInvalid } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const { s, p, table } = migrationFixture();
   try {
     const pinned = join(s.home, 'AppData', 'Local', 'core-metrics', 'old-workspace-id');
     mkdirSync(pinned, { recursive: true });
     writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), pinned);
     // Obstruct the marker's target file before migration runs: a directory in its place makes the
-    // marker's atomic write fail with EISDIR.
+    // marker's atomic write fail with EISDIR, and stays in place for the read afterward too — the
+    // same obstruction that made the migration's own write fail also makes the read-time backfill
+    // fail, which is exactly what a rollback here would have thrown away: removing the pin erases
+    // the one signal this project was ever redirected, and a project whose real path carries no
+    // redirect signal of its own would then read as clean instead of refused.
     const durable = stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).dir;
     mkdirSync(join(durable, 'metrics-ever-external.txt'), { recursive: true });
     const result = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
     assert.equal(result.status, 'migrated', 'the file copy this migration did still stands');
     assert.ok(result.metrics_marker_failed, 'the marker failure is named in the result');
-    assert.equal(result.metrics_marker_failed.pin_rolled_back, true);
     const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
-    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt')), false, 'no pin was left behind with no marker to back it');
-    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), false);
+    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt')), true, 'the pin is left signed, not rolled back');
+    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), true);
+    assert.equal(storagePinInvalid(p, { home: s.home, env: { CORE_HARNESS: H } }), true, 'refused on the very next read, via the backfill hitting the same obstruction — not only after a later pin loss');
   } finally { s.cleanup(); }
 });
 
