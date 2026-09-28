@@ -92,10 +92,9 @@ export function storagePinInvalid(projectDir, { home = homedir(), env = process.
     } catch { /* no durable state yet: this really is a project that was never redirected */ }
     return false;
   }
-  // A signature with no body, or a body with no signature, is not a clean absence — it is what a
-  // partial loss of the pin's two files looks like, and the folder it named cannot be recovered
-  // from what remains. Refuse rather than fall back and read the wrong (empty) folder as truth.
-  if (!bodyExists || !macExists) return true;
+  // A signature with no body, or a body with no signature (checked below via readPinSigned, which
+  // needs both files to verify), is not a clean absence — it is what a partial loss of the pin's two
+  // files looks like, and the folder it named cannot be recovered from what remains.
   const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
   if (!(pinned && metricsStorageAllowed(pinned, { projectDir, home }))) return true;
   // An AppData folder nobody claimed that another project's signed pin also names is not this
