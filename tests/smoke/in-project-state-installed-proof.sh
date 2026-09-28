@@ -91,7 +91,7 @@ import('$SCRIPTS/project-state.mjs').then(m=>{m.stateDir({root:'$PROJ',harness:'
 printf '{"complete":true}' > "$STATE/migrated-from.json"
 OUT="$(mig --apply)"; rc=$?; echo "  forged {complete:true} -> exit $rc, status $(echo "$OUT" | statusof)"
 [ $rc -eq 3 ] && [ "$(echo "$OUT" | statusof)" = receipt-unverified ] && ok "forged receipt refused" || bad "forged receipt: $OUT"
-[ ! -f "$STATE/capability-history.jsonl" ] && [ ! -f "$STATE/hot/capability-history.jsonl" ] && ok "the required copy was not skipped-and-signed off (nothing marked migrated)" || true
+[ ! -f "$STATE/capability-history.jsonl" ] && [ ! -f "$STATE/hot/capability-history.jsonl" ] && ok "nothing was copied on the strength of the forged receipt" || bad "the forged receipt let a copy through or a file was signed off"
 [ ! -f "$LEG/MOVED.md" ] && ok "old state not released on a forged receipt" || bad "released on forged receipt"
 
 new_world b2   # truncated after a real migration
