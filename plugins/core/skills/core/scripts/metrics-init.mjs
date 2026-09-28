@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, writeSignedFile, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical, stateDir, detectStateHarness, markMetricsEverExternal } from './project-state.mjs';
+import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical, detectStateHarness, markMetricsEverExternal } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
