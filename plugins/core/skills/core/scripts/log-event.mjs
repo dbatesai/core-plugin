@@ -70,6 +70,19 @@ export function resolveStoragePath(projectDir, { home = homedir(), env = process
   return join(projectDir, '_metrics');
 }
 
+/**
+ * True when the project has a storage pin that no longer verifies: unsigned or tampered, or
+ * naming somewhere metrics may not live or a folder another project owns. Capture stays off
+ * until the next scaffold writes a fresh signed pin. Falling back to `<project>/_metrics` here
+ * would quietly resume capture in the synced folder the redirect exists to avoid.
+ */
+export function storagePinInvalid(projectDir, { home = homedir(), env = process.env } = {}) {
+  const meta = trustedMetricsDir(projectDir, { home, env });
+  if (!meta || !existsSync(join(meta, 'storage-path.txt'))) return false;
+  const pinned = (readSignedFileAt({ dir: meta, name: 'storage-path.txt', coreDir: join(home, '.core') }) || '').trim();
+  return !(pinned && metricsStorageAllowed(pinned, { projectDir, home }));
+}
+
 export function todayUTC() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -132,6 +145,7 @@ export function metricsEnabled({ project, env = process.env, home = homedir() } 
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
   if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in
+  if (project && storagePinInvalid(project, { home, env })) return false; // a pin that stops verifying never falls back to project-local
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
     let m = null;

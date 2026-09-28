@@ -925,3 +925,20 @@ test('migration signs a carried metrics pin only when it names a place metrics m
     } finally { s.cleanup(); }
   }
 });
+
+test('migration does not sign a carried metrics pin when another project already names the same folder', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const other = s.mk('Projects', 'OtherProject');
+    registerProject(s.coreDir, other);
+    const shared = join(s.home, 'AppData', 'Local', 'core-metrics', 'shared-old');
+    mkdirSync(shared, { recursive: true });
+    const otherHot = stateDir({ root: other, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
+    mkdirSync(join(otherHot, 'metrics'), { recursive: true });
+    writeSignedFile({ dir: join(otherHot, 'metrics'), name: 'storage-path.txt', body: shared, coreDir: s.coreDir });
+    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), shared);
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
+    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), false, 'left unsigned, so the reader ignores it');
+  } finally { s.cleanup(); }
+});

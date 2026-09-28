@@ -628,12 +628,45 @@ export function readSignedFileAt({ dir, name, coreDir = defaultCoreDir() }) {
 /**
  * Where a project's metrics may be stored: its own `_metrics/`, or the Windows AppData
  * folder the OneDrive redirect uses. A pin naming anywhere else is refused, so a pin can
- * never send prompt and context evidence to an arbitrary directory or a mounted share.
+ * never send prompt and context evidence to an arbitrary directory or a mounted share. An
+ * AppData folder some other project claimed (`.project-root`) is refused too.
  */
 export function metricsStorageAllowed(pinned, { projectDir, home }) {
   if (typeof pinned !== 'string' || !isAbsolute(pinned)) return false;
   if (containedPath(join(projectDir, '_metrics'), pinned)) return true;
-  return !!containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned);
+  if (!containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned)) return false;
+  try {
+    const owner = readFileSync(join(pinned, METRICS_OWNER_FILE), 'utf8').trim();
+    if (owner && canonical(owner) !== canonical(projectDir)) return false;
+  } catch { /* unclaimed: whether this project may have it is decided where pins are compared */ }
+  return true;
+}
+
+export const METRICS_OWNER_FILE = '.project-root';
+export const METRICS_HELD_FILE = 'held-legacy-folder.txt';
+
+/**
+ * The other registered projects, on this machine and readable by this install, whose signed
+ * pin (or signed hold record) names `folder`. A hold record keeps the answer the same whichever
+ * project scaffolds first.
+ */
+export function otherProjectsNamingFolder(folder, { projectDir, home, env }) {
+  const coreDir = join(home, '.core');
+  const harness = detectStateHarness(env);
+  const out = [];
+  const self = canonical(projectDir);
+  let roots;
+  try { roots = readRegisteredRoots({ coreDir }); } catch { return out; }
+  for (const root of roots) {
+    if (root === self) continue;
+    try {
+      const s = stateDir({ root, harness, kind: 'hot', coreDir });
+      if (!s) continue;
+      const named = ['storage-path.txt', METRICS_HELD_FILE].some((name) => (readSignedFileAt({ dir: join(s.dir, 'metrics'), name, coreDir }) || '').trim() === folder);
+      if (named) out.push(root);
+    } catch { /* an unreadable project cannot vouch for a claim */ }
+  }
+  return out;
 }
 
 function sleepMs(ms) {

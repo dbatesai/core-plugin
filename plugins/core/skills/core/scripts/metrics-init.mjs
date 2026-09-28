@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writeSignedFile, readSignedFileAt, metricsStorageAllowed, readRegisteredRoots, stateDir, detectStateHarness, canonical } from './project-state.mjs';
+import { writeSignedFile, readSignedFileAt, metricsStorageAllowed, otherProjectsNamingFolder } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -229,30 +229,12 @@ function keptExternalPin({ operationalMetaDir, projectDir, home, env }) {
     const owner = readFileSync(join(pinned, '.project-root'), 'utf8').trim();
     return owner === projectDir ? { path: pinned } : null;
   } catch { /* unclaimed: fall through */ }
-  const also = otherProjectsNaming(pinned, { projectDir, home, env });
+  const also = otherProjectsNamingFolder(pinned, { projectDir, home, env });
   return also.length ? { held: { folder: pinned, also_named_by: also } } : { path: pinned };
 }
 
-function otherProjectsNaming(folder, { projectDir, home, env }) {
-  const coreDir = join(home, '.core');
-  const harness = detectStateHarness(env);
-  const out = [];
-  const self = canonical(projectDir);
-  let roots;
-  try { roots = readRegisteredRoots({ coreDir }); } catch { return out; }
-  for (const root of roots) {
-    if (root === self) continue;
-    try {
-      const s = stateDir({ root, harness, kind: 'hot', coreDir });
-      // A project that was itself held keeps a signed record of the folder it was held on, so
-      // the order the projects scaffold in cannot change who is told.
-      const named = ['storage-path.txt', HELD_FILE].some((name) => (readSignedFileAt({ dir: join(s.dir, 'metrics'), name, coreDir }) || '').trim() === folder);
-      if (s && named) out.push(root);
-    } catch { /* an unreadable project cannot vouch for a claim */ }
-  }
-  return out;
-}
-
+// Same names as METRICS_OWNER_FILE / METRICS_HELD_FILE in project-state.mjs; kept literal here because this
+// module and project-state load in a cycle and a module-level read of its exports would hit a not-yet-set binding.
 const APPDATA_OWNER_FILE = '.project-root';
 const HELD_FILE = 'held-legacy-folder.txt';
 

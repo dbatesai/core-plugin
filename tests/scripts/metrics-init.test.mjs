@@ -1,4 +1,4 @@
-import { operationalMetricsDir, resolveStoragePath } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { operationalMetricsDir, resolveStoragePath, metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
@@ -7,7 +7,7 @@ import { registerProject } from '../../plugins/core/skills/core/scripts/index-re
 // the project's metrics state never touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -240,10 +240,51 @@ test('two registered projects whose signed pins name the same unclaimed folder: 
         const r = initMetrics({ projectDir: me, env: {} });
         assert.notEqual(r.storagePath, shared, 'not taken, whoever scaffolds first');
         assert.equal(r.held_legacy_folder.folder, shared);
-        assert.deepEqual(r.held_legacy_folder.also_named_by.map((x) => x.replace(/^\/private/, '')), [other.replace(/^\/private/, '')]);
+        assert.deepEqual(r.held_legacy_folder.also_named_by.map((x) => realpathSync.native(x)), [realpathSync.native(other)]);
       }
       assert.equal(existsSync(join(shared, '.project-root')), false, 'still unclaimed');
       assert.equal(readFileSync(join(shared, 'evidence.jsonl'), 'utf8'), '{"who":"unknown"}\n');
+    } finally { for (const d of [home, A, B]) rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
+test('a pin that stops verifying turns capture off instead of falling back to the project folder, and the next scaffold recovers it', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-fail-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-fail-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      const ok = join(home, 'AppData', 'Local', 'core-metrics', 'ok');
+      mkdirSync(ok, { recursive: true });
+      signedPin(meta, home, ok);
+      assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), true, 'a valid pin leaves capture on');
+      writeFileSync(join(meta, 'storage-path.txt'), ok + '-tampered');
+      assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), false, 'a tampered pin switches capture off');
+      assert.equal(resolveStoragePath(projectDir, { home, env: {} }), join(projectDir, '_metrics'));
+      initMetrics({ projectDir, env: {} });
+      assert.equal(metricsEnabled({ project: projectDir, env: {}, home }), true, 'the scaffold writes a fresh signed pin and capture resumes');
+    } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
+test('a signed pin naming an AppData folder another project claimed is refused at the reader', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-xown-home-'));
+    const A = mkdtempSync(join(tmpdir(), 'metrics-xown-a-'));
+    const B = mkdtempSync(join(tmpdir(), 'metrics-xown-b-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const folderA = join(home, 'AppData', 'Local', 'core-metrics', 'a-store');
+      mkdirSync(folderA, { recursive: true });
+      writeFileSync(join(folderA, '.project-root'), A + '\n');
+      signedPin(operationalMetricsDir(B, { home, env: {} }), home, folderA);
+      assert.equal(metricsEnabled({ project: B, env: {}, home }), false, "B's pin into A's store switches B's capture off");
+      assert.notEqual(resolveStoragePath(B, { home, env: {} }), folderA, "and B never resolves to A's store");
+      signedPin(operationalMetricsDir(A, { home, env: {} }), home, folderA);
+      assert.equal(resolveStoragePath(A, { home, env: {} }), folderA, "A's own pin into its own claimed store still works");
     } finally { for (const d of [home, A, B]) rmSync(d, { recursive: true, force: true }); }
   });
 });
