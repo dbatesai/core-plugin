@@ -772,7 +772,7 @@ test('turn-capture: the ON line carries the disclosure, volumes, health, and eve
   assert.match(row.value, /^ON — /);
   assert.match(row.value, /saved locally/);
   assert.match(row.value, /never exported/);
-  assert.match(row.value, /auto-deleted after 30 days/);
+  assert.match(row.value, /kept until you purge it/);
   assert.match(row.value, /7 row\(s\) \/ 2 day\(s\)/);
   assert.match(row.value, /1 of 9 writes failed/);
   assert.match(row.value, /CORE_TURN_CAPTURE=0/);

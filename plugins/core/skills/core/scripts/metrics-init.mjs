@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writeSignedFile, readSignedFileAt, metricsStorageAllowed, readRegisteredRoots, stateDir, detectStateHarness } from './project-state.mjs';
+import { writeSignedFile, readSignedFileAt, metricsStorageAllowed, readRegisteredRoots, stateDir, detectStateHarness, canonical } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -114,6 +114,7 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
     detection = { ...detection, path: pin.path, reason: 'existing-external-pin-kept' };
   } else if (pin && pin.held) {
     heldLegacyFolder = pin.held;
+    try { writeSignedFile({ dir: operationalMetaDir, name: HELD_FILE, body: pin.held.folder, coreDir: join(home, '.core') }); } catch { /* the hold still applies to this run */ }
     detection = { ...detection, reason: `${detection.reason}; legacy folder ${pin.held.folder} held: also named by ${pin.held.also_named_by.join(', ')}` };
   }
 
@@ -236,19 +237,24 @@ function otherProjectsNaming(folder, { projectDir, home, env }) {
   const coreDir = join(home, '.core');
   const harness = detectStateHarness(env);
   const out = [];
+  const self = canonical(projectDir);
   let roots;
   try { roots = readRegisteredRoots({ coreDir }); } catch { return out; }
   for (const root of roots) {
-    if (root === projectDir) continue;
+    if (root === self) continue;
     try {
       const s = stateDir({ root, harness, kind: 'hot', coreDir });
-      if (s && (readSignedFileAt({ dir: join(s.dir, 'metrics'), name: 'storage-path.txt', coreDir }) || '').trim() === folder) out.push(root);
+      // A project that was itself held keeps a signed record of the folder it was held on, so
+      // the order the projects scaffold in cannot change who is told.
+      const named = ['storage-path.txt', HELD_FILE].some((name) => (readSignedFileAt({ dir: join(s.dir, 'metrics'), name, coreDir }) || '').trim() === folder);
+      if (s && named) out.push(root);
     } catch { /* an unreadable project cannot vouch for a claim */ }
   }
   return out;
 }
 
 const APPDATA_OWNER_FILE = '.project-root';
+const HELD_FILE = 'held-legacy-folder.txt';
 
 /**
  * The AppData folder for a project's redirected metrics. The readable slug maps `.`, `-`,
