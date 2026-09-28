@@ -141,7 +141,8 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     const dirExists = dirs.includes(id);
     const manifest = dirExists ? readJson(join(dir, 'workspace.json'), {}) : {};
     const files = dirExists ? dataFiles(dir) : [];
-    const rawPath = reg?.path || null;
+    // Older registrations spell the field `project_path`; both are read, `path` first.
+    const rawPath = reg?.path || reg?.project_path || null;
     const path = rawPath ? canonical(expandHome(rawPath, home)) : null;
     const pathExists = path ? existsSync(path) : false;
 

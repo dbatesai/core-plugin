@@ -8,7 +8,9 @@
 # old -> new -> old -> new rollback with once-only log import.
 #
 # What this does NOT prove: that the live installed plugin cache carries this build, or
-# anything on Windows. The chmod-based faults need a non-root POSIX user.
+# anything on Windows. The (a1) fault is chmod on POSIX (needs a non-root user) and an exclusive
+# open handle through PowerShell on Windows; the Windows branches follow a reviewer's patched copy
+# and have not been run by their author.
 # Never touches a real HOME or project. Re-runnable. Usage:
 #   bash tests/smoke/in-project-state-installed-proof.sh [<core-plugin-repo>]
 # PROOF_REF=<commit> packages that commit instead of HEAD, so the same checks can be run against an older build and shown to fail.
@@ -16,6 +18,7 @@
 set -u
 REPO="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/core-state-proof-XXXX")"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) IS_WIN=1; SCRATCH="$(cygpath -m "$SCRATCH")" ;; *) IS_WIN=0 ;; esac  # Windows node cannot resolve Git Bash /tmp paths
 PKG="$SCRATCH/plugin-root"
 SCRIPTS="$PKG/skills/core/scripts"
 pass=0; fail=0
@@ -31,9 +34,11 @@ if [ -n "${PROOF_PKG:-}" ]; then
   [ -d "$SCRIPTS" ] || { echo "PROOF_PKG has no skills/core/scripts: $PKG"; exit 1; }
   echo "installed plugin root: $PKG"
   # The installed bytes must be the committed package's bytes, or none of the results below mean anything.
-  mkdir -p "$SCRATCH/ref" && git -C "$REPO" archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$SCRATCH/ref" \
+  mkdir -p "$SCRATCH/ref" && git -C "$REPO" -c core.autocrlf=false archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$SCRATCH/ref" \
     || { echo "FAIL  cannot build the reference package for ${PROOF_REF:-HEAD}"; exit 1; }
-  if diff -r "$SCRATCH/ref" "$PKG" >"$SCRATCH/identity.diff" 2>&1; then
+  # On Windows an install can carry CRLF in files .gitattributes does not pin; only line endings are ignored there.
+  DIFFOPT=""; [ "$IS_WIN" = 1 ] && DIFFOPT="--strip-trailing-cr"
+  if diff -r $DIFFOPT "$SCRATCH/ref" "$PKG" >"$SCRATCH/identity.diff" 2>&1; then
     echo "byte-identical to the committed ${PROOF_REF:-HEAD} package: yes"
   else
     echo "FAIL  the installed root is NOT byte-identical to the committed ${PROOF_REF:-HEAD} package; stopping before any scenario"
@@ -41,7 +46,7 @@ if [ -n "${PROOF_PKG:-}" ]; then
   fi
 else
   mkdir -p "$PKG"
-  git -C "$REPO" archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$PKG" || { echo "package build failed"; exit 1; }
+  git -C "$REPO" -c core.autocrlf=false archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$PKG" || { echo "package build failed"; exit 1; }
 fi
 echo "source commit: $(git -C "$REPO" rev-parse "${PROOF_REF:-HEAD}")"
 echo "procedure sha256: $(sha "$0")"
@@ -76,9 +81,20 @@ OUT="$(mig --apply)"; rc=$?; [ "$(echo "$OUT" | statusof)" = already-migrated ] 
 
 echo; echo "== (a1) copy fault after the stamp: an unreadable top-level file =="
 new_world a1
-chmod 000 "$LEG/hot-section-draft.md"
+if [ "$IS_WIN" = 1 ]; then
+  WINF="$(cygpath -w "$LEG/hot-section-draft.md")"
+  powershell.exe -NoProfile -Command "\$f=[System.IO.File]::Open('$WINF','Open','ReadWrite','None'); Write-Output held; Start-Sleep 20; \$f.Close()" > "$SCRATCH/a1.hold" &
+  HOLDA1=$!; for i in 1 2 3 4 5 6 7 8 9 10; do grep -q held "$SCRATCH/a1.hold" 2>/dev/null && break; sleep 1; done
+  echo "  fault: exclusive handle on hot-section-draft.md: $(cat "$SCRATCH/a1.hold" 2>/dev/null)"
+else
+  chmod 000 "$LEG/hot-section-draft.md"
+fi
 OUT="$(mig --apply 2>"$SCRATCH/a1.err")"; rc=$?; echo "  \$ --apply -> exit $rc; stderr: $(head -c 160 "$SCRATCH/a1.err")"
-chmod 644 "$LEG/hot-section-draft.md"
+if [ "$IS_WIN" = 1 ]; then
+  kill $HOLDA1 2>/dev/null; taskkill //F //T //PID "$(cat /proc/$HOLDA1/winpid 2>/dev/null)" >/dev/null 2>&1; wait $HOLDA1 2>/dev/null; sleep 1
+else
+  chmod 644 "$LEG/hot-section-draft.md"
+fi
 [ $rc -ne 0 ] && ok "startup sees a nonzero exit (marker fires)" || bad "fault exited 0"
 [ ! -f "$STATE/migrated-from.json" ] && ok "no completion receipt" || bad "receipt written despite the fault"
 [ -f "$STATE/.migrating" ] && ok ".migrating marker left in place" || bad "marker missing"
@@ -92,7 +108,8 @@ OUT="$(mig --apply)"; [ "$(echo "$OUT" | statusof)" = migrated ] && [ ! -f "$STA
 echo; echo "== (a2) held lock =="
 new_world a2
 node --input-type=module -e "
-import { acquireFileLock } from '$SCRIPTS/file-lock.mjs';
+import { pathToFileURL } from 'node:url';
+const { acquireFileLock } = await import(pathToFileURL('$SCRIPTS/file-lock.mjs').href);
 const l = acquireFileLock('$PROJ/_memories/_close.lock', { extra: { session_id: 'proof-holder' }, staleMs: 900000, hardStaleMs: 1800000 });
 console.log(l.ok ? 'held' : 'not-acquired'); setTimeout(() => {}, 20000);" > "$SCRATCH/a2.lock" &
 HOLDER=$!; sleep 1
@@ -104,7 +121,7 @@ kill $HOLDER 2>/dev/null; wait $HOLDER 2>/dev/null
 echo; echo "== (b) forged, truncated and git-tracked receipts =="
 new_world b1   # forged before any copy
 mkdir -p "$STATE"; node -e "
-import('$SCRIPTS/project-state.mjs').then(m=>{m.stateDir({root:'$PROJ',harness:'claude-code',coreDir:'$CORE',forWrite:true})})"
+import(require('url').pathToFileURL('$SCRIPTS/project-state.mjs').href).then(m=>{m.stateDir({root:'$PROJ',harness:'claude-code',coreDir:'$CORE',forWrite:true})})"
 printf '{"complete":true}' > "$STATE/migrated-from.json"
 OUT="$(mig --apply)"; rc=$?; echo "  forged {complete:true} -> exit $rc, status $(echo "$OUT" | statusof)"
 [ $rc -eq 3 ] && [ "$(echo "$OUT" | statusof)" = receipt-unverified ] && ok "forged receipt refused" || bad "forged receipt: $OUT"

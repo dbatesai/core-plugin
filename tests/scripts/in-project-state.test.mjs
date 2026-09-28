@@ -1048,3 +1048,20 @@ test('a claimed held folder is not lost when the new pin cannot be written: the 
     s.cleanup();
   }
 });
+
+test('a legacy registry entry that spells its folder project_path is still seen by the migrator and the registered-root check', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index.map((e) => {
+      if (e.workspace_id !== 'legacy') return e;
+      const { path, ...rest } = e; // the same entry, older spelling
+      return { ...rest, project_path: path.replace(/\\/g, '/') };
+    })));
+    const roots = readRegisteredRoots({ coreDir: s.coreDir });
+    assert.ok(roots.has(realpathSync(p)), 'the registered-root check reads project_path');
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'migrated', 'the migrator resolves the entry instead of calling it orphan-gone');
+    assert.equal(r.live, 'legacy');
+  } finally { s.cleanup(); }
+});

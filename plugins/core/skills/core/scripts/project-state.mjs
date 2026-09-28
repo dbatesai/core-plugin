@@ -71,7 +71,7 @@ export function readRegisteredRoots({ coreDir = defaultCoreDir(), includeLegacyI
     // An entry the migration marked migrated is history: its project is registered in
     // projects.json at wherever it lives now, and its old path must not authorize
     // whatever folder later appears there.
-    for (const e of readJsonArray(join(coreDir, 'index.json'))) if (e && e.migrated !== true) paths.push(e.path);
+    for (const e of readJsonArray(join(coreDir, 'index.json'))) if (e && e.migrated !== true) paths.push(e.path || e.project_path);
   }
   const home = dirname(coreDir);
   const out = new Set();
