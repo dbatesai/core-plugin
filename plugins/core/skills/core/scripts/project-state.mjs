@@ -626,6 +626,26 @@ export function readSignedFileAt({ dir, name, coreDir = defaultCoreDir() }) {
 }
 
 /**
+ * The metrics storage pin is signed together with the project root it belongs to, so a pin
+ * file and its MAC copied into another project's state verify as a signature but name the
+ * wrong project and are refused.
+ */
+export function writePinSigned({ dir, path, root, coreDir = defaultCoreDir() }) {
+  writeSignedFile({ dir, name: 'storage-path.txt', body: JSON.stringify({ path, root: canonical(root) }), coreDir });
+}
+
+/** The pinned folder in `dir`, when it is signed by this install and was written for `root`; otherwise null. */
+export function readPinSigned({ dir, root, coreDir = defaultCoreDir() }) {
+  const raw = readSignedFileAt({ dir, name: 'storage-path.txt', coreDir });
+  if (raw === null) return null;
+  try {
+    const j = JSON.parse(raw);
+    if (j && typeof j.path === 'string' && typeof j.root === 'string' && canonical(j.root) === canonical(root)) return j.path.trim() || null;
+  } catch { /* not a pin this code wrote */ }
+  return null;
+}
+
+/**
  * Where a project's metrics may be stored: its own `_metrics/`, or the Windows AppData
  * folder the OneDrive redirect uses. A pin naming anywhere else is refused, so a pin can
  * never send prompt and context evidence to an arbitrary directory or a mounted share. An
@@ -662,7 +682,9 @@ export function otherProjectsNamingFolder(folder, { projectDir, home, env }) {
     try {
       const s = stateDir({ root, harness, kind: 'hot', coreDir });
       if (!s) continue;
-      const named = ['storage-path.txt', METRICS_HELD_FILE].some((name) => (readSignedFileAt({ dir: join(s.dir, 'metrics'), name, coreDir }) || '').trim() === folder);
+      const metricsDir = join(s.dir, 'metrics');
+      const named = readPinSigned({ dir: metricsDir, root, coreDir }) === folder
+        || (readSignedFileAt({ dir: metricsDir, name: METRICS_HELD_FILE, coreDir }) || '').trim() === folder;
       if (named) out.push(root);
     } catch { /* an unreadable project cannot vouch for a claim */ }
   }

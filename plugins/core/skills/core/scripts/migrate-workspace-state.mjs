@@ -51,7 +51,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
-  writeSignedFile, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder,
+  writeSignedFile, writePinSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder,
 } from './project-state.mjs';
 import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
@@ -439,7 +439,7 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
           const pinned = readFileSync(pinFile, 'utf8').trim();
           const homeDir = dirname(coreDir);
           if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir }) && !otherProjectsNamingFolder(pinned, { projectDir: real, home: homeDir, env: { CORE_HARNESS: harness } }).length) {
-            writeSignedFile({ dir: dirname(pinFile), name: 'storage-path.txt', body: pinned, coreDir });
+            writePinSigned({ dir: dirname(pinFile), path: pinned, root: real, coreDir });
           }
         }
       }

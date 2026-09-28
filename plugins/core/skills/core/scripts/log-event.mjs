@@ -23,9 +23,10 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readSignedFileAt, metricsStorageAllowed } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder } from './project-state.mjs';
 
 /**
  * Fail-closed capture gate. metrics-init.mjs writes a typed
@@ -64,7 +65,7 @@ export function resolveStoragePath(projectDir, { home = homedir(), env = process
   if (meta) {
     // The pin decides where every prompt and context row is written, so it is read only if this
     // install signed it and it names the project's own _metrics/ or the AppData redirect.
-    const pinned = (readSignedFileAt({ dir: meta, name: 'storage-path.txt', coreDir: join(home, '.core') }) || '').trim();
+    const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
     if (pinned && metricsStorageAllowed(pinned, { projectDir, home })) return pinned;
   }
   return join(projectDir, '_metrics');
@@ -79,8 +80,14 @@ export function resolveStoragePath(projectDir, { home = homedir(), env = process
 export function storagePinInvalid(projectDir, { home = homedir(), env = process.env } = {}) {
   const meta = trustedMetricsDir(projectDir, { home, env });
   if (!meta || !existsSync(join(meta, 'storage-path.txt'))) return false;
-  const pinned = (readSignedFileAt({ dir: meta, name: 'storage-path.txt', coreDir: join(home, '.core') }) || '').trim();
-  return !(pinned && metricsStorageAllowed(pinned, { projectDir, home }));
+  const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
+  if (!(pinned && metricsStorageAllowed(pinned, { projectDir, home }))) return true;
+  // An AppData folder nobody claimed that another project's signed pin also names is not this
+  // project's to write to; if that cannot be ruled out, capture stays off.
+  if (containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned) && !existsSync(join(pinned, '.project-root'))) {
+    try { return otherProjectsNamingFolder(pinned, { projectDir, home, env }).length > 0; } catch { return true; }
+  }
+  return false;
 }
 
 export function todayUTC() {

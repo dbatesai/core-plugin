@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolveRegisteredRoot } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 import { registerProject, touchProject, recordBootstrap, readBootstrapRecord } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
-import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp, stateDir, writeSignedFile, readRegisteredRoots } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp, stateDir, writeSignedFile, writePinSigned, readRegisteredRoots } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
@@ -935,7 +935,7 @@ test('migration does not sign a carried metrics pin when another project already
     mkdirSync(shared, { recursive: true });
     const otherHot = stateDir({ root: other, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
     mkdirSync(join(otherHot, 'metrics'), { recursive: true });
-    writeSignedFile({ dir: join(otherHot, 'metrics'), name: 'storage-path.txt', body: shared, coreDir: s.coreDir });
+    writePinSigned({ dir: join(otherHot, 'metrics'), path: shared, root: other, coreDir: s.coreDir });
     writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), shared);
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
     const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;

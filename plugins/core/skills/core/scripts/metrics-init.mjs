@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writeSignedFile, readSignedFileAt, metricsStorageAllowed, otherProjectsNamingFolder } from './project-state.mjs';
+import { writeSignedFile, writePinSigned, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -142,7 +142,7 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   // never a silent fall-through that puts turn capture back into the synced
   // project folder the redirect exists to avoid.
   try {
-    writeSignedFile({ dir: operationalMetaDir, name: 'storage-path.txt', body: storagePath, coreDir: join(home, '.core') });
+    writePinSigned({ dir: operationalMetaDir, path: storagePath, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') });
     // A successful pin supersedes any stale fail-closed marker from an earlier
     // failed scaffold — clear it so capture re-enables on recovery.
     clearCaptureDisabledMarkers({ projectDir, operationalMetaDir });
@@ -222,7 +222,7 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
 function keptExternalPin({ operationalMetaDir, projectDir, home, env }) {
   if (process.env.CORE_METRICS_FORCE_PROJECT_LOCAL === '1') return null;
   // Only a pin this install signed is kept, and only inside the folders metrics may live in.
-  const pinned = (readSignedFileAt({ dir: operationalMetaDir, name: 'storage-path.txt', coreDir: join(home, '.core') }) || '').trim();
+  const pinned = readPinSigned({ dir: operationalMetaDir, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
   if (!pinned || pinned === join(projectDir, '_metrics') || !metricsStorageAllowed(pinned, { projectDir, home })) return null;
   try { if (!statSync(pinned).isDirectory()) return null; } catch { return null; }
   try {
