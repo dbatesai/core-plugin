@@ -5,7 +5,7 @@ import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/lo
 // the project's metrics state never touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -96,4 +96,27 @@ test('projectPathContainsOneDriveSubstring is true for OneDrive paths and false 
   // Characterized: the "substring" check is a whole-path-component match, so a
   // component merely containing the word does not trip it.
   assert.equal(projectPathContainsOneDriveSubstring('/Users/david/OneDrive-backup-archive/app'), false);
+});
+
+test('the AppData metrics folder is one-to-one: a.b and a-b never share it, and an unclaimed legacy folder keeps its owner', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-appdata-'));
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try {
+      const a = detectStoragePath({ projectDir: join(home, 'p', 'a.b'), home }).path;
+      const b = detectStoragePath({ projectDir: join(home, 'p', 'a-b'), home }).path;
+      assert.notEqual(a, b);
+
+      // A folder from before the claim existed: the first project to scaffold keeps it and claims it.
+      const legacy = join(home, 'AppData', 'Local', 'core-metrics', join(home, 'p', 'a.b').replace(/[/\\.:]/g, '-'));
+      mkdirSync(legacy, { recursive: true });
+      assert.equal(detectStoragePath({ projectDir: join(home, 'p', 'a.b'), home }).path, legacy, 'unclaimed: kept for continuity');
+      writeFileSync(join(legacy, '.project-root'), join(home, 'p', 'a.b') + '\n');
+      assert.equal(detectStoragePath({ projectDir: join(home, 'p', 'a.b'), home }).path, legacy, 'claimed by this project: kept');
+      const other = join(home, 'p', 'a-b');
+      const legacyOther = join(home, 'AppData', 'Local', 'core-metrics', other.replace(/[/\\.:]/g, '-'));
+      assert.equal(legacyOther, legacy, 'the two names really do share one slug');
+      assert.notEqual(detectStoragePath({ projectDir: other, home }).path, legacy, 'claimed by another project: this one gets its own');
+    } finally { rmSync(home, { recursive: true, force: true }); }
+  });
 });

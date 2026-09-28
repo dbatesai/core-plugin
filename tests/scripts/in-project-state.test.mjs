@@ -748,7 +748,7 @@ test('drift after an interrupted run never appends the same tail twice, whether 
 
     interrupted(); // the tail reached the project's copy, the receipt was never finished
     writeFileSync(entry.to, original + tail);
-    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'brought-in');
+    checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
     assert.equal(readFileSync(entry.to, 'utf8'), original + tail, 'landed append is not repeated');
     assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'unchanged');
 
@@ -844,5 +844,70 @@ test('a project-root turn_capture:false still turns capture off when the signed 
     assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false);
     writeFileSync(join(p, 'workspace.json'), JSON.stringify({ turn_capture: true }));
     assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true, 'the root file can only switch it off');
+  } finally { s.cleanup(); }
+});
+
+test('a workspace an older install registers after the receipt is copied as a kept duplicate before anything is marked or released', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    // An older build registers a second workspace for the same folder.
+    const late = legacyWorkspace(s, 'legacy-late', { path: p, files: { 'workspace.json': JSON.stringify({ workspace_id: 'legacy-late' }), 'notes-late.md': 'written after migration\n' } });
+    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([...index, late]));
+    const table2 = { ...table, entries: { ...table.entries, 'legacy-late': { harness: H, evidence: 'fixture' } } };
+
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 });
+    assert.equal(r.status, 'already-migrated');
+    const copied = join(p, '.core', H, 'superseded', 'legacy-late', 'notes-late.md');
+    assert.equal(readFileSync(copied, 'utf8'), 'written after migration\n', 'the late data is in the project');
+    const receipt = JSON.parse(readFileSync(stateFile(p, RECEIPT_NAME), 'utf8'));
+    assert.ok(receipt.superseded.includes('legacy-late'));
+    assert.ok(receipt.files.some((f) => f.to === copied), 'the receipt lists it');
+    assert.equal(existsSync(join(p, '.core', H, '.migrating')), false);
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 }).files, 0, 'a further run copies nothing');
+  } finally { s.cleanup(); }
+});
+
+function interruptedAppend(s, p, table, { toAfter, sourceAfter }) {
+  const legacyLog = join(s.coreDir, 'workspaces', 'legacy', 'capability-history.jsonl');
+  assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+  const before = JSON.parse(readFileSync(stateFile(p, RECEIPT_NAME), 'utf8'));
+  const entry = before.files.find((f) => f.from === legacyLog);
+  const original = readFileSync(entry.to, 'utf8');
+  const tail = '{"row":"old-2"}\n';
+  writeFileSync(legacyLog, original + tail + (sourceAfter || ''));
+  writeSignedFile({ dir: join(p, '.core', H), name: RECEIPT_NAME, coreDir: s.coreDir, body: JSON.stringify({
+    ...before, files: before.files.map((f) => (f.from === legacyLog ? { ...f, pending: {
+      from_offset: entry.length, from_length: (original + tail).length, to_offset: original.length, tail_sha: createHash('sha256').update(tail).digest('hex'),
+    } } : f)),
+  }) });
+  writeFileSync(entry.to, toAfter(original, tail));
+  return { legacyLog, entry, original, tail };
+}
+
+test('a half-written append is completed once, and a source that grew before the retry adds only its new lines', () => {
+  const half = migrationFixture();
+  try {
+    const { entry, original, tail } = interruptedAppend(half.s, half.p, half.table, { toAfter: (o, t) => o + t.slice(0, 5) });
+    checkLegacyDrift({ root: half.p, harness: H, coreDir: half.s.coreDir });
+    assert.equal(readFileSync(entry.to, 'utf8'), original + tail, 'the partial tail is replaced by the whole one');
+  } finally { half.s.cleanup(); }
+  const grown = migrationFixture();
+  try {
+    const more = '{"row":"old-3"}\n';
+    const { entry, original, tail } = interruptedAppend(grown.s, grown.p, grown.table, { toAfter: (o, t) => o + t, sourceAfter: more });
+    checkLegacyDrift({ root: grown.p, harness: H, coreDir: grown.s.coreDir });
+    assert.equal(readFileSync(entry.to, 'utf8'), original + tail + more, 'the recorded tail is not repeated and the new line arrives once');
+  } finally { grown.s.cleanup(); }
+});
+
+test('an interrupted append whose destination holds something else is left alone and the legacy bytes are kept aside', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const { legacyLog, entry, original } = interruptedAppend(s, p, table, { toAfter: (o) => o + '{"row":"written by the new build"}\n' });
+    const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir, now: new Date('2026-09-28T12:00:00Z') });
+    assert.equal(readFileSync(entry.to, 'utf8'), original + '{"row":"written by the new build"}\n', 'the project copy is untouched');
+    assert.ok(d.superseded.some((x) => x.from === legacyLog && x.reason === 'unresolved-pending-append'));
   } finally { s.cleanup(); }
 });

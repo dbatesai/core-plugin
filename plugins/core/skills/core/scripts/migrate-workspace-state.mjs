@@ -43,7 +43,7 @@
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
-import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync, rmSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync, rmSync, truncateSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -275,6 +275,31 @@ function verifiedReceipt({ root, harness, coreDir, stateDirs }) {
   return { ok: problems.length === 0, receipt, problems };
 }
 
+/**
+ * Settle an append an earlier drift check recorded but may not have finished, before
+ * anything new is appended. The recorded range of the source is re-read and must still
+ * hash to what was recorded. In the project's copy, whatever sits past the recorded offset
+ * is one of: the whole tail (done), part of the tail (cut back to the offset and append it
+ * whole), or nothing (append it). Anything else is not ours to overwrite.
+ * Returns { known } (the entry as if the append had completed) or { conflict: true }.
+ */
+function resolvePendingAppend({ from, known }) {
+  const { from_offset: fromOffset, from_length: fromLength, to_offset: toOffset, tail_sha: tailSha } = known.pending;
+  const source = readFileSync(from);
+  const tail = source.subarray(fromOffset, fromLength);
+  if (source.length < fromLength || createHash('sha256').update(tail).digest('hex') !== tailSha) return { conflict: true };
+  const to = known.to;
+  const current = existsSync(to) ? readFileSync(to) : Buffer.alloc(0);
+  if (current.length < toOffset) return { conflict: true };
+  const extra = current.subarray(toOffset);
+  if (!(extra.length >= tail.length && extra.subarray(0, tail.length).equals(tail))) {
+    if (!tail.subarray(0, extra.length).equals(extra)) return { conflict: true };
+    if (extra.length) truncateSync(to, toOffset);
+    appendFileSync(to, tail);
+  }
+  return { known: { from, to, sha256: createHash('sha256').update(source.subarray(0, fromLength)).digest('hex'), length: fromLength } };
+}
+
 function manifestPath(coreDir) { return join(coreDir, 'migration-manifest.json'); }
 
 /**
@@ -344,6 +369,29 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
       // never repaired over: the project's copies may have moved on since. A person decides.
       const checked = verifiedReceipt({ root: real, harness, coreDir, stateDirs: [durable.dir, hot.dir] });
       if (!checked.ok) return { status: 'receipt-unverified', root: real, harness, problems: checked.problems.slice(0, 10) };
+      // A workspace an older install registered after the receipt was written is not covered
+      // by it. It is copied, as a kept duplicate and never over live state, before anything is
+      // marked migrated or released.
+      const covered = new Set([checked.receipt.live, ...(checked.receipt.superseded || [])].filter(Boolean));
+      const late = [...(live ? [live] : []), ...dups].filter((e) => !covered.has(e.workspace_id));
+      if (late.length) {
+        atomicWriteFileSync(markerFile, `${iso}\n`);
+        const lateCopies = [];
+        for (const e of late) {
+          assertSafeWorkspaceId(e.workspace_id);
+          const src = join(coreDir, 'workspaces', e.workspace_id);
+          if (existsSync(src)) copyTree(src, join(durable.dir, 'superseded', e.workspace_id), lateCopies);
+        }
+        for (const c of lateCopies) {
+          if (sha256(c.to) !== c.sha256) throw new Error(`copy verification failed: ${c.to}`);
+        }
+        writeSignedFile({ dir: durable.dir, name: RECEIPT, coreDir, body: JSON.stringify({
+          ...checked.receipt,
+          superseded: [...(checked.receipt.superseded || []), ...late.map((e) => e.workspace_id)],
+          files: [...checked.receipt.files, ...lateCopies.map((c) => ({ from: c.from, to: c.to, sha256: c.sha256, length: c.length }))],
+          late_registered_at: iso,
+        }, null, 2) + '\n' });
+      }
       rmSync(markerFile, { force: true });
       copies = null;
     }
@@ -524,7 +572,24 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
         if (base === 'MOVED.md' || SKIP_ON_COPY.some((re) => re.test(base))) continue;
         const from = join(src, rel);
         const size = statSync(from).size;
-        const known = byFrom.get(from);
+        let known = byFrom.get(from);
+        if (known && known.pending) {
+          const resolved = resolvePendingAppend({ from, known });
+          if (resolved.conflict) {
+            // The recorded range is gone from the source, or the project's copy holds something
+            // that is neither the tail nor a part of it: keep the legacy bytes aside and say so.
+            const aside = join(durable.dir, 'superseded', `legacy-${day}`, id, rel);
+            mkdirSync(dirname(aside), { recursive: true });
+            copyFileSync(from, aside);
+            superseded.push({ from, to: aside, reason: 'unresolved-pending-append' });
+            byFrom.set(from, { from, to: known.to, sha256: sha256(from), length: statSync(from).size });
+            persistReceipt();
+            continue;
+          }
+          known = resolved.known;
+          byFrom.set(from, known);
+          persistReceipt();
+        }
         if (known && known.sha256 === sha256(from)) continue;
 
         const top = rel.split('/')[0];
@@ -539,23 +604,13 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
         if (appendOnly) {
           mkdirSync(dirname(to), { recursive: true });
           const tail = readRange(from, priorLen);
-          const tailSha = createHash('sha256').update(tail).digest('hex');
-          const pending = known && known.pending;
-          let toOffset;
-          let alreadyAppended = false;
-          if (pending && pending.tail_sha === tailSha && pending.from_offset === priorLen && pending.from_length === size) {
-            // An earlier run recorded this append and stopped before finishing the receipt.
-            // If the tail is already in the project's copy at the recorded offset, it is not appended again.
-            toOffset = pending.to_offset;
-            alreadyAppended = existsSync(to) && statSync(to).size >= toOffset + tail.length
-              && createHash('sha256').update(readRange(to, toOffset).subarray(0, tail.length)).digest('hex') === tailSha;
-          } else {
-            // Write ahead: the intent reaches the signed receipt before the bytes reach the copy.
-            toOffset = existsSync(to) ? statSync(to).size : 0;
-            byFrom.set(from, { from, to, sha256: known ? known.sha256 : null, length: priorLen, pending: { from_offset: priorLen, from_length: size, to_offset: toOffset, tail_sha: tailSha } });
-            persistReceipt();
-          }
-          if (!alreadyAppended) appendFileSync(to, tail);
+          // Write ahead: the intent reaches the signed receipt before the bytes reach the copy.
+          byFrom.set(from, { from, to, sha256: known ? known.sha256 : null, length: priorLen, pending: {
+            from_offset: priorLen, from_length: size, to_offset: existsSync(to) ? statSync(to).size : 0,
+            tail_sha: createHash('sha256').update(tail).digest('hex'),
+          } });
+          persistReceipt();
+          appendFileSync(to, tail);
           appended.push({ from, to, bytes: size - priorLen });
           byFrom.set(from, { from, to, sha256: sha256(from), length: size });
           persistReceipt();

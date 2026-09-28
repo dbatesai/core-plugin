@@ -25,6 +25,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSyn
 import { isCliEntry } from './cli-entry.mjs';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
+import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
@@ -161,6 +162,9 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   // scaffolded.
   try {
     mkdirSync(storagePath, { recursive: true });
+    if (storagePath !== join(projectDir, '_metrics') && !existsSync(join(storagePath, APPDATA_OWNER_FILE))) {
+      writeFileSync(join(storagePath, APPDATA_OWNER_FILE), projectDir + '\n');
+    }
   } catch (err) {
     return { ok: false, reason: 'cannot-create-storage-dir', err: err.message, scaffoldLogLine };
   }
@@ -193,12 +197,32 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   };
 }
 
+const APPDATA_OWNER_FILE = '.project-root';
+
+/**
+ * The AppData folder for a project's redirected metrics. The readable slug maps `.`, `-`,
+ * `/` and `:` all to `-`, so two projects (`a.b`, `a-b`) can share one slug. A slug folder
+ * is therefore used only when it is unclaimed (an install that predates the claim keeps its
+ * data) or claimed by this very project; otherwise, and for any new folder, the name carries
+ * a hash of the full path. The scaffold writes the claim.
+ */
+function appDataStorePath(projectDir, home) {
+  const legacy = join(home, 'AppData', 'Local', 'core-metrics', mapProjectPathToSlug(projectDir));
+  if (existsSync(legacy)) {
+    try { return readFileSync(join(legacy, APPDATA_OWNER_FILE), 'utf8').trim() === projectDir ? legacy : `${legacy}-${pathHash(projectDir)}`; }
+    catch { return legacy; }
+  }
+  return `${legacy}-${pathHash(projectDir)}`;
+}
+
+function pathHash(p) { return createHash('sha256').update(p).digest('hex').slice(0, 12); }
+
 /**
  * Decide where storage lives for this project. Honors CORE_METRICS_FORCE_PROJECT_LOCAL=1
  * as a user escape hatch.
  */
 export function detectStoragePath({ projectDir, home = homedir() }) {
-  const appDataPath = join(home, 'AppData', 'Local', 'core-metrics', mapProjectPathToSlug(projectDir));
+  const appDataPath = appDataStorePath(projectDir, home);
   if (process.env.CORE_METRICS_FORCE_PROJECT_LOCAL === '1') {
     return {
       path: join(projectDir, '_metrics'),
