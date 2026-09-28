@@ -926,6 +926,26 @@ test('migration signs a carried metrics pin only when it names a place metrics m
   }
 });
 
+test('a marker write failure during migration rolls the carried pin back instead of completing with a signed pin and no marker', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const pinned = join(s.home, 'AppData', 'Local', 'core-metrics', 'old-workspace-id');
+    mkdirSync(pinned, { recursive: true });
+    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), pinned);
+    // Obstruct the marker's target file before migration runs: a directory in its place makes the
+    // marker's atomic write fail with EISDIR.
+    const durable = stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).dir;
+    mkdirSync(join(durable, 'metrics-ever-external.txt'), { recursive: true });
+    const result = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(result.status, 'migrated', 'the file copy this migration did still stands');
+    assert.ok(result.metrics_marker_failed, 'the marker failure is named in the result');
+    assert.equal(result.metrics_marker_failed.pin_rolled_back, true);
+    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
+    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt')), false, 'no pin was left behind with no marker to back it');
+    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), false);
+  } finally { s.cleanup(); }
+});
+
 test('migration does not sign a carried metrics pin when another project already names the same folder', () => {
   const { s, p, table } = migrationFixture();
   try {

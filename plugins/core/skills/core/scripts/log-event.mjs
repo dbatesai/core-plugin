@@ -108,14 +108,18 @@ export function storagePinInvalid(projectDir, { home = homedir(), env = process.
   if (pinned !== join(projectDir, '_metrics')) {
     // A valid external pin found with no marker behind it: an install from before the marker
     // existed, or a producer that failed to write one. Backfill it now, while the pin is still
-    // known-good, so a later loss of the pin is still caught. Best-effort: a read path never fails
-    // a project over write access to its own state.
+    // known-good, so a later loss of the pin is still caught. Not best-effort any more: a pin
+    // whose marker cannot be persisted is exactly the state the marker exists to prevent reading
+    // as safely established, so a write failure here refuses too, the same as everywhere else the
+    // marker is written. A durable state directory that genuinely does not exist yet (nothing has
+    // ever written to it) is a different, narrower case: nothing has failed, so it is not refused
+    // here on its own.
     try {
-      const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core') });
+      const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core'), forWrite: true });
       if (durable && readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir: join(home, '.core') }) === null) {
         markMetricsEverExternal({ projectDir, harness: detectStateHarness(env), home, coreDir: join(home, '.core'), folder: pinned });
       }
-    } catch { /* best-effort backfill; the pin itself is still valid right now */ }
+    } catch { return true; }
   }
   // An AppData folder nobody claimed that another project's signed pin also names is not this
   // project's to write to; if that cannot be ruled out, capture stays off.

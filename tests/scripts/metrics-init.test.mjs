@@ -478,3 +478,25 @@ test('a valid external pin from before the marker existed gets one backfilled on
     } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
   });
 });
+
+test('a valid external pin whose marker cannot be backfilled on read is refused, not reported clean', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-backfillfail-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-backfillfail-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    const stateEnv = { CORE_HARNESS: 'claude-code' };
+    try {
+      initMetrics({ projectDir, env: stateEnv });
+      const coreDir = join(home, '.core');
+      const durable = stateDir({ root: projectDir, harness: 'claude-code', coreDir, forWrite: true });
+      rmSync(join(durable.dir, 'metrics-ever-external.txt'), { force: true });
+      rmSync(join(durable.dir, 'metrics-ever-external.txt.mac'), { force: true });
+      // Block the backfill write the same way the migration-producer and scaffold fault tests do:
+      // a directory where the marker file must go.
+      mkdirSync(join(durable.dir, 'metrics-ever-external.txt'), { recursive: true });
+      assert.equal(storagePinInvalid(projectDir, { env: stateEnv }), true, 'a pin that is currently valid is still refused when its marker cannot be persisted — read-time protection, not best-effort');
+    } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
+  });
+});

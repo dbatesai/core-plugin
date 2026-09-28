@@ -452,12 +452,17 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
           if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir }) && !legacyPeers.length && !otherProjects.length) {
             writePinSigned({ dir: dirname(pinFile), path: pinned, root: real, coreDir });
             // Same durable marker a fresh scaffold writes, so losing this carried pin later is caught
-            // the same way. Attempted, not swallowed: a failure here does not undo an otherwise
-            // successful migration, but it is named in the result rather than hidden.
+            // the same way. A failure here does not undo the file copy this migration already did —
+            // that succeeded — but it must not leave a signed external pin with no marker behind it,
+            // the exact gap the marker exists to close. The pin is rolled back instead: metrics
+            // capture reads as un-pinned until the next scaffold, which either writes a working pin
+            // and marker together or fails closed the same way a fresh scaffold's pin-write failure
+            // does. Named in the result rather than hidden either way.
             try {
               markMetricsEverExternal({ projectDir: real, harness, home: homeDir, coreDir, folder: pinned });
             } catch (e) {
-              metricsMarkerFailed = { folder: pinned, err: String(e && e.message) };
+              for (const f of ['storage-path.txt', 'storage-path.txt.mac']) rmSync(join(dirname(pinFile), f), { force: true });
+              metricsMarkerFailed = { folder: pinned, err: String(e && e.message), pin_rolled_back: true };
             }
           } else if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir })) {
             // Ambiguous: left unsigned, and recorded so the scaffold and the readiness summary can say so.
