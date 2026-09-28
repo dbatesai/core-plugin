@@ -455,20 +455,26 @@ test('a valid external pin from before the marker existed gets one backfilled on
     process.env.USERPROFILE = home;
     process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
     try {
-      initMetrics({ projectDir, env: {} });
+      // env carries CORE_HARNESS explicitly throughout: storagePinInvalid's harness detection
+      // falls back to reading it straight off process.env when the passed env has no signal,
+      // which only resolves to 'claude-code' when actually run inside that harness. On a bare
+      // CI runner it resolves to 'unknown' instead, sending the backfill to the wrong harness
+      // folder — pin the harness so the test is deterministic regardless of where it runs.
+      const stateEnv = { CORE_HARNESS: 'claude-code' };
+      initMetrics({ projectDir, env: stateEnv });
       const coreDir = join(home, '.core');
       const durable = stateDir({ root: projectDir, harness: 'claude-code', coreDir, forWrite: true });
       rmSync(join(durable.dir, 'metrics-ever-external.txt'), { force: true });
       rmSync(join(durable.dir, 'metrics-ever-external.txt.mac'), { force: true });
       assert.equal(readSignedFileAt({ dir: durable.dir, name: 'metrics-ever-external.txt', coreDir }), null, 'no marker yet, as if from before it existed');
 
-      assert.equal(storagePinInvalid(projectDir, { env: {} }), false, 'the pin is currently valid');
+      assert.equal(storagePinInvalid(projectDir, { env: stateEnv }), false, 'the pin is currently valid');
       assert.notEqual(readSignedFileAt({ dir: durable.dir, name: 'metrics-ever-external.txt', coreDir }), null, 'reading a valid pin backfilled the marker');
 
-      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      const meta = operationalMetricsDir(projectDir, { home, env: stateEnv });
       rmSync(join(meta, 'storage-path.txt'), { force: true });
       rmSync(join(meta, 'storage-path.txt.mac'), { force: true });
-      assert.equal(storagePinInvalid(projectDir, { env: {} }), true, 'losing the pin afterward is still caught, via the backfilled marker');
+      assert.equal(storagePinInvalid(projectDir, { env: stateEnv }), true, 'losing the pin afterward is still caught, via the backfilled marker');
     } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
   });
 });
