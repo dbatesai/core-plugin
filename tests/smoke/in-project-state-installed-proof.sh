@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# in-project-state-installed-proof.sh — run the project-state migration and the startup
+# in-project-state-installed-proof.sh: run the project-state migration and the startup
 # commands that use it from a PACKAGED copy of the plugin (git archive of the committed
-# tree, exactly as source-package-smoke.sh builds it), against a sandbox HOME and a sandbox
-# project, and print commands, exit codes and before/after SHA-256 for the cases a reviewer
-# asked to see: (a) faults during the copy and a held lock, (b) forged, truncated and
-# git-tracked receipts, (c) a forged drift destination, (d) a clean migration and an
-# old -> new -> old -> new rollback with once-only log import.
+# tree, as source-package-smoke.sh builds it) or from an already-installed plugin root,
+# against a sandbox HOME and a sandbox project. It prints commands, exit codes and
+# before/after SHA-256 for these cases:
+#   (a) faults during the copy, and a held lock
+#   (b) forged, truncated and git-tracked receipts
+#   (c) a forged drift destination
+#   (d) a clean migration, and an old -> new -> old -> new rollback with once-only log import
 #
-# What this does NOT prove: that the live installed plugin cache carries this build, or
-# anything on Windows. The (a1) fault is chmod on POSIX (needs a non-root user) and an exclusive
-# open handle through PowerShell on Windows; the Windows branches follow a reviewer's patched copy
-# and have not been run by their author.
+# It does not prove that a live installed plugin cache carries the build under test, and it
+# does not drive a model-run startup or live hooks. The (a1) fault is chmod on POSIX (needs a
+# non-root user) and an exclusive open handle through PowerShell on Windows.
 # Never touches a real HOME or project. Re-runnable. Usage:
 #   bash tests/smoke/in-project-state-installed-proof.sh [<core-plugin-repo>]
-# PROOF_REF=<commit> packages that commit instead of HEAD, so the same checks can be run against an older build and shown to fail.
-# PROOF_PKG=<plugin root> runs the same checks from an already-installed plugin root instead of a fresh package.
+# PROOF_REF=<commit> packages that commit instead of HEAD, so the same checks can be run
+# against an older build and shown to fail.
+# PROOF_PKG=<plugin root> runs the same checks from an already-installed plugin root.
 set -u
 REPO="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/core-state-proof-XXXX")"

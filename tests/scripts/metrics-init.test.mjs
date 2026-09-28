@@ -319,3 +319,38 @@ test("a pin file and its MAC copied from another project verify as a signature b
     } finally { for (const d of [home, A, B]) rmSync(d, { recursive: true, force: true }); }
   });
 });
+
+test('with a pin that does not verify, purge and stats refuse with pin-unverified instead of reporting a clean result for the wrong folder', async () => {
+  const { purgeTurnCapture, turnCaptureStats } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-purge-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-purge-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      const store = join(home, 'AppData', 'Local', 'core-metrics', 'real-store');
+      mkdirSync(join(store, 'turn-capture'), { recursive: true });
+      const rows = join(store, 'turn-capture', '2026-09-28.jsonl');
+      writeFileSync(rows, '{"row":1}\n{"row":2}\n');
+      signedPin(meta, home, store, projectDir);
+      assert.equal(turnCaptureStats(projectDir, { env: {} }).rows, 2, 'with a good pin the stream is found');
+      assert.equal(purgeTurnCapture(projectDir, { apply: false }).existed, true);
+
+      writeFileSync(join(meta, 'storage-path.txt'), join(projectDir, '_metrics'));   // tamper only the pin
+      const dry = purgeTurnCapture(projectDir, { apply: false });
+      const real = purgeTurnCapture(projectDir, { apply: true });
+      const stats = turnCaptureStats(projectDir, { env: {} });
+      for (const r of [dry, real]) {
+        assert.equal(r.purged, false);
+        assert.equal(r.reason, 'pin-unverified');
+      }
+      assert.equal(stats.reason, 'pin-unverified');
+      assert.equal(stats.rows, null, 'stats do not say zero for rows that exist');
+      assert.equal(readFileSync(rows, 'utf8'), '{"row":1}\n{"row":2}\n', 'nothing was deleted');
+
+      signedPin(meta, home, store, projectDir);
+      assert.equal(purgeTurnCapture(projectDir, { apply: false }).existed, true, 'once the pin is repaired the stream is located again');
+    } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
+  });
+});

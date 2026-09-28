@@ -47,7 +47,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdir
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, metricsEnabled } from './log-event.mjs';
+import { resolveStoragePath, metricsEnabled, storagePinInvalid } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
@@ -367,6 +367,11 @@ export function listTurnCaptureFiles(projectDir) {
  * how much is captured. Row count is a line count (no per-row parse).
  */
 export function turnCaptureStats(projectDir, { env = process.env } = {}) {
+  // With a pin that no longer verifies, the stream's real folder is unknown, and reading the
+  // project-local fallback would report zero rows for rows that exist elsewhere.
+  if (storagePinInvalid(projectDir, { env })) {
+    return { enabled: false, days: null, rows: null, health: null, dir: null, reason: 'pin-unverified' };
+  }
   const enabled = turnCaptureEnabled({ project: projectDir, env });
   const files = listTurnCaptureFiles(projectDir);
   let rows = 0;
@@ -441,6 +446,9 @@ export function runTurnCaptureRetention(projectDir, {
   apply = true,
   now = new Date().toISOString(),
 } = {}) {
+  if (storagePinInvalid(projectDir)) {
+    return { ran: false, reason: 'pin-unverified', cutoff: null, windowDays, candidates: [], deleted: [], kept: [], verified: false };
+  }
   const dir = turnCaptureDir(projectDir);
   const base = { windowDays, candidates: [], deleted: [], kept: [], verified: true };
   if (!validWindow(windowDays)) {
@@ -486,6 +494,11 @@ export function runTurnCaptureRetention(projectDir, {
  * is not `purged`. Partial success is never narrated as success.
  */
 export function purgeTurnCapture(projectDir, { apply = true } = {}) {
+  // Refuse rather than purge the wrong folder and call it done: with a pin that no longer verifies,
+  // the captured rows may sit somewhere other than the project-local fallback this would target.
+  if (storagePinInvalid(projectDir)) {
+    return { purged: false, reason: 'pin-unverified', message: 'the metrics storage pin does not verify, so the capture folder cannot be located; run metrics-init for this project first', dir: null, existed: null, scope: [] };
+  }
   const dir = turnCaptureDir(projectDir);
   const base = resolveStoragePath(projectDir);
   const entries = turnCapturePurgeScope(projectDir);
