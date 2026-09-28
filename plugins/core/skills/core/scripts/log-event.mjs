@@ -25,7 +25,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readSignedFileAt, metricsStorageAllowed } from './project-state.mjs';
 
 /**
  * Fail-closed capture gate. metrics-init.mjs writes a typed
@@ -47,7 +47,7 @@ export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = 
  * Resolve where the metrics storage lives — honors what `metrics-init.mjs`
  * pinned at scaffold time per matrix (+g.5) + (+m).
  *
- * Reads `storage-path.txt` from the project's trusted metrics state if the
+ * Reads the signed `storage-path.txt` from the project's trusted metrics state if the
  * project has been scaffolded. Falls back to `<projectDir>/_metrics/` if
  * the pin file is absent or the state is untrusted (scaffold not run yet).
  *
@@ -62,15 +62,10 @@ export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = 
 export function resolveStoragePath(projectDir, { home = homedir(), env = process.env } = {}) {
   const meta = trustedMetricsDir(projectDir, { home, env });
   if (meta) {
-    const pinFile = join(meta, 'storage-path.txt');
-    if (existsSync(pinFile)) {
-      try {
-        const pinned = readFileSync(pinFile, 'utf8').trim();
-        if (pinned) return pinned;
-      } catch {
-        // Fall through to default
-      }
-    }
+    // The pin decides where every prompt and context row is written, so it is read only if this
+    // install signed it and it names the project's own _metrics/ or the AppData redirect.
+    const pinned = (readSignedFileAt({ dir: meta, name: 'storage-path.txt', coreDir: join(home, '.core') }) || '').trim();
+    if (pinned && metricsStorageAllowed(pinned, { projectDir, home })) return pinned;
   }
   return join(projectDir, '_metrics');
 }

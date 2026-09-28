@@ -23,12 +23,13 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
-import { join, isAbsolute } from 'node:path';
+import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
+import { writeSignedFile, readSignedFileAt, metricsStorageAllowed } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -106,7 +107,7 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   // A pin that already points at an existing external folder (one a migration carried in, or an
   // earlier scaffold chose) keeps pointing there: recomputing would leave the payloads written
   // so far at the old place while every reader and writer moved to the new one.
-  const kept = keptExternalPin({ operationalMetaDir, projectDir });
+  const kept = keptExternalPin({ operationalMetaDir, projectDir, home });
   if (kept) {
     storagePath = kept;
     detection = { ...detection, path: kept, reason: 'existing-external-pin-kept' };
@@ -136,7 +137,7 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   // never a silent fall-through that puts turn capture back into the synced
   // project folder the redirect exists to avoid.
   try {
-    atomicWriteFileSync(join(operationalMetaDir, 'storage-path.txt'), storagePath);
+    writeSignedFile({ dir: operationalMetaDir, name: 'storage-path.txt', body: storagePath, coreDir: join(home, '.core') });
     // A successful pin supersedes any stale fail-closed marker from an earlier
     // failed scaffold — clear it so capture re-enables on recovery.
     clearCaptureDisabledMarkers({ projectDir, operationalMetaDir });
@@ -206,12 +207,12 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   };
 }
 
-/** The folder an existing pin names, when it is outside the project, exists, and no other project claimed it. */
-function keptExternalPin({ operationalMetaDir, projectDir }) {
+/** The folder a signed pin names, when it is an allowed external folder, exists, and no other project claimed it. */
+function keptExternalPin({ operationalMetaDir, projectDir, home }) {
   if (process.env.CORE_METRICS_FORCE_PROJECT_LOCAL === '1') return null;
-  let pinned;
-  try { pinned = readFileSync(join(operationalMetaDir, 'storage-path.txt'), 'utf8').trim(); } catch { return null; }
-  if (!pinned || !isAbsolute(pinned) || pinned === join(projectDir, '_metrics')) return null;
+  // Only a pin this install signed is kept, and only inside the folders metrics may live in.
+  const pinned = (readSignedFileAt({ dir: operationalMetaDir, name: 'storage-path.txt', coreDir: join(home, '.core') }) || '').trim();
+  if (!pinned || pinned === join(projectDir, '_metrics') || !metricsStorageAllowed(pinned, { projectDir, home })) return null;
   try { if (!statSync(pinned).isDirectory()) return null; } catch { return null; }
   try {
     const owner = readFileSync(join(pinned, '.project-root'), 'utf8').trim();

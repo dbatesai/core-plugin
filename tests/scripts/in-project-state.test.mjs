@@ -911,3 +911,17 @@ test('an interrupted append whose destination holds something else is left alone
     assert.ok(d.superseded.some((x) => x.from === legacyLog && x.reason === 'unresolved-pending-append'));
   } finally { s.cleanup(); }
 });
+
+test('migration signs a carried metrics pin only when it names a place metrics may live', () => {
+  for (const [label, target, expectSigned] of [['AppData', 'APPDATA', true], ['elsewhere', 'OUTSIDE', false]]) {
+    const { s, p, table } = migrationFixture();
+    try {
+      const pinned = target === 'APPDATA' ? join(s.home, 'AppData', 'Local', 'core-metrics', 'old-workspace-id') : join(s.base, 'somewhere-else');
+      mkdirSync(pinned, { recursive: true });
+      writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), pinned);
+      assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+      const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
+      assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), expectSigned, label);
+    } finally { s.cleanup(); }
+  }
+});

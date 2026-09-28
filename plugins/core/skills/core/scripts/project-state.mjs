@@ -24,14 +24,14 @@ import {
   appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
   rmSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep, isAbsolute } from 'node:path';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { projectPathContainsOneDriveSubstring } from './metrics-init.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 import { registerProject } from './index-registry.mjs';
 
 export const STATE_DIRNAME = '.core';
@@ -600,6 +600,40 @@ export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir()
     if (attempt === 0) sleepMs(25);
   }
   return null;
+}
+
+/**
+ * The verified bytes of `name` in `dir` (any directory of this install's state, such as the
+ * metrics folder), or null when the file or its MAC sidecar is missing or the MAC does not
+ * match this install's secret. A file written by anything but writeSignedFile reads as absent.
+ */
+export function readSignedFileAt({ dir, name, coreDir = defaultCoreDir() }) {
+  let secret;
+  try { ({ secret } = ensureInstallIdentity({ coreDir })); } catch { return null; }
+  const file = join(dir, name);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let bytes, mac;
+    try {
+      bytes = readFileSync(file);
+      mac = readFileSync(`${file}${MAC_SUFFIX}`, 'utf8').trim();
+    } catch { return null; }
+    const want = Buffer.from(contentMac(secret, name, bytes), 'hex');
+    const got = /^[0-9a-f]{64}$/.test(mac) ? Buffer.from(mac, 'hex') : null;
+    if (got && timingSafeEqual(want, got)) return bytes.toString('utf8');
+    if (attempt === 0) sleepMs(25);
+  }
+  return null;
+}
+
+/**
+ * Where a project's metrics may be stored: its own `_metrics/`, or the Windows AppData
+ * folder the OneDrive redirect uses. A pin naming anywhere else is refused, so a pin can
+ * never send prompt and context evidence to an arbitrary directory or a mounted share.
+ */
+export function metricsStorageAllowed(pinned, { projectDir, home }) {
+  if (typeof pinned !== 'string' || !isAbsolute(pinned)) return false;
+  if (containedPath(join(projectDir, '_metrics'), pinned)) return true;
+  return !!containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned);
 }
 
 function sleepMs(ms) {

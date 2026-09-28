@@ -51,7 +51,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
-  writeSignedFile, readSignedFile, duringMigration, MIGRATING_MARKER,
+  writeSignedFile, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed,
 } from './project-state.mjs';
 import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
@@ -430,6 +430,17 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
       for (const c of copies) {
         const got = sha256(c.to);
         if (got !== c.sha256) throw new Error(`copy verification failed: ${c.to}`);
+      }
+      // The legacy metrics pin arrives unsigned. It is signed here only if it names a place metrics
+      // may live; anything else stays unsigned, which readers ignore.
+      if (live) {
+        const pinFile = join(hot.dir, 'metrics', 'storage-path.txt');
+        if (existsSync(pinFile)) {
+          const pinned = readFileSync(pinFile, 'utf8').trim();
+          if (metricsStorageAllowed(pinned, { projectDir: real, home: dirname(coreDir) })) {
+            writeSignedFile({ dir: dirname(pinFile), name: 'storage-path.txt', body: pinned, coreDir });
+          }
+        }
       }
 
       // The migrated manifest keeps the old workspace id as project_id (export

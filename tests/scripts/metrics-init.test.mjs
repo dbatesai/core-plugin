@@ -1,4 +1,5 @@
-import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { operationalMetricsDir, resolveStoragePath } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
 // a temp dir for the initMetrics test so the operational-meta write under
@@ -98,6 +99,8 @@ test('projectPathContainsOneDriveSubstring is true for OneDrive paths and false 
   assert.equal(projectPathContainsOneDriveSubstring('/Users/david/OneDrive-backup-archive/app'), false);
 });
 
+function signedPin(meta, home, path) { writeSignedFile({ dir: meta, name: 'storage-path.txt', body: path, coreDir: join(home, '.core') }); }
+
 test('the AppData metrics folder is one-to-one, and an unclaimed legacy folder is never taken by whichever project scaffolds first', () => {
   withCleanEnv(() => {
     const home = mkdtempSync(join(tmpdir(), 'metrics-appdata-'));
@@ -135,7 +138,7 @@ test('B scaffolding first cannot take A\'s unclaimed legacy folder; A keeps it t
       const legacy = join(home, 'AppData', 'Local', 'core-metrics', 'shared-slug-with-old-evidence');
       mkdirSync(legacy, { recursive: true });
       writeFileSync(join(legacy, 'evidence.jsonl'), '{"a":1}\n');
-      writeFileSync(join(operationalMetricsDir(A, { home, env: {} }), 'storage-path.txt'), legacy);
+      signedPin(operationalMetricsDir(A, { home, env: {} }), home, legacy);
 
       const rb = initMetrics({ projectDir: B, env: {} });
       assert.notEqual(rb.storagePath, legacy, 'B is not handed A\'s bytes');
@@ -159,7 +162,7 @@ test('a pin that already names an existing external folder survives the scaffold
       const old = join(home, 'AppData', 'Local', 'core-metrics', 'old-workspace-id');
       mkdirSync(old, { recursive: true });
       writeFileSync(join(old, 'evidence.jsonl'), '{"row":1}\n');
-      writeFileSync(pinFile, old);
+      signedPin(meta, home, old);
       process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
 
       let r = initMetrics({ projectDir, env: {} });
@@ -170,15 +173,43 @@ test('a pin that already names an existing external folder survives the scaffold
       r = initMetrics({ projectDir, env: {} });
       assert.notEqual(r.storagePath, old, 'a folder another project claimed is not reused');
 
-      writeFileSync(pinFile, join(home, 'gone'));
+      signedPin(meta, home, join(home, 'AppData', 'Local', 'core-metrics', 'gone'));
       r = initMetrics({ projectDir, env: {} });
-      assert.notEqual(r.storagePath, join(home, 'gone'), 'a pin to a missing folder is recomputed');
+      assert.notEqual(r.storagePath, join(home, 'AppData', 'Local', 'core-metrics', 'gone'), 'a pin to a missing folder is recomputed');
 
-      writeFileSync(pinFile, old);
+      signedPin(meta, home, old);
       rmSync(join(old, '.project-root'));
       process.env.CORE_METRICS_FORCE_PROJECT_LOCAL = '1';
       r = initMetrics({ projectDir, env: {} });
       assert.equal(r.storagePath, join(projectDir, '_metrics'), 'the force-local escape hatch still wins');
     } finally { rmSync(home, { recursive: true, force: true }); rmSync(projectDir, { recursive: true, force: true }); }
+  });
+});
+
+test('a pin that this install did not sign, or that names somewhere metrics may not live, redirects nothing', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-trust-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-trust-proj-'));
+    const outside = mkdtempSync(join(tmpdir(), 'metrics-trust-outside-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      writeFileSync(join(meta, 'storage-path.txt'), outside);
+      assert.equal(resolveStoragePath(projectDir, { home, env: {} }), join(projectDir, '_metrics'), 'an unsigned pin is ignored');
+      let r = initMetrics({ projectDir, env: {} });
+      assert.equal(r.storagePath, join(projectDir, '_metrics'), 'and the scaffold does not keep it');
+
+      signedPin(meta, home, outside);
+      assert.equal(resolveStoragePath(projectDir, { home, env: {} }), join(projectDir, '_metrics'), 'a signed pin outside the allowed folders is ignored');
+      process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+      r = initMetrics({ projectDir, env: {} });
+      assert.notEqual(r.storagePath, outside, 'the scaffold does not keep it either');
+
+      const inside = join(home, 'AppData', 'Local', 'core-metrics', 'ok');
+      mkdirSync(inside, { recursive: true });
+      signedPin(meta, home, inside);
+      assert.equal(resolveStoragePath(projectDir, { home, env: {} }), inside, 'a signed pin inside AppData is honored');
+    } finally { for (const d of [home, projectDir, outside]) rmSync(d, { recursive: true, force: true }); }
   });
 });
