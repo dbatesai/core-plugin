@@ -980,6 +980,7 @@ test('an ambiguous legacy metrics folder is reported by the migration and again 
     writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), shared);
 
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 });
+    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
     assert.equal(r.metrics_held.folder, shared, 'the migration says which folder it held');
     assert.equal(r.metrics_held.also_named_by.length, 1);
 
@@ -997,6 +998,50 @@ test('an ambiguous legacy metrics folder is reported by the migration and again 
     const again = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
     assert.equal(again.storagePath, shared, 'and it stays there on the next scaffold');
     assert.equal(again.reattached_legacy_folder, null);
+    assert.equal(existsSync(join(hot, 'metrics', 'held-legacy-folder.txt')), false, 'the hold is retired once the pin is written');
+  } finally {
+    if (savedForce === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = savedForce;
+    if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+    s.cleanup();
+  }
+});
+
+test('a claimed held folder is not lost when the new pin cannot be written: the hold survives and the next scaffold reattaches', async () => {
+  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  const { s, p, table } = migrationFixture();
+  const savedForce = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
+  const savedHome = process.env.HOME;
+  try {
+    const peerPath = s.mk('Projects', 'PeerProject');
+    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+    index.push(legacyWorkspace(s, 'peer', { path: peerPath, files: { 'workspace.json': JSON.stringify({ workspace_id: 'peer' }) } }));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index));
+    const table2 = { ...table, entries: { ...table.entries, peer: { harness: H, evidence: 'fixture' } } };
+    const shared = join(s.home, 'AppData', 'Local', 'core-metrics', 'shared-old');
+    mkdirSync(shared, { recursive: true });
+    mkdirSync(join(s.coreDir, 'workspaces', 'peer', 'metrics'), { recursive: true });
+    writeFileSync(join(s.coreDir, 'workspaces', 'peer', 'metrics', 'storage-path.txt'), shared);
+    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), shared);
+    applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 });
+    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    process.env.HOME = s.home;
+    initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
+    writeFileSync(join(shared, '.project-root'), p + '\n');
+
+    // Make the pin unwritable: a directory where storage-path.txt has to go.
+    const pinPath = join(hot, 'metrics', 'storage-path.txt');
+    rmSync(pinPath, { force: true });
+    rmSync(pinPath + '.mac', { force: true });
+    mkdirSync(pinPath);
+    const failed = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
+    assert.equal(failed.ok, false, 'the pin write fails');
+    assert.equal(existsSync(join(hot, 'metrics', 'held-legacy-folder.txt')), true, 'and the hold record is still there');
+
+    rmSync(pinPath, { recursive: true, force: true });
+    const retry = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
+    assert.equal(retry.storagePath, shared, 'after the fault is repaired the next scaffold reattaches');
+    assert.equal(existsSync(join(hot, 'metrics', 'held-legacy-folder.txt')), false, 'and only then retires the hold');
   } finally {
     if (savedForce === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = savedForce;
     if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;

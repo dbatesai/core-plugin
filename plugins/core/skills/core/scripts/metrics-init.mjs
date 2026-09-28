@@ -123,7 +123,6 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
     reattachedLegacyFolder = earlier.folder;
     storagePath = earlier.folder;
     detection = { ...detection, path: earlier.folder, reason: 'held-legacy-folder-claimed-and-reattached' };
-    for (const f of ['held-legacy-folder.txt', 'held-legacy-folder.txt.mac']) rmSync(join(operationalMetaDir, f), { force: true });
   } else {
     const pin = keptExternalPin({ operationalMetaDir, projectDir, home, env });
     if (pin && pin.path) {
@@ -167,6 +166,11 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   // project folder the redirect exists to avoid.
   try {
     writePinSigned({ dir: operationalMetaDir, path: storagePath, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') });
+    // The hold is retired only once the new pin is written and reads back as this folder; if the
+    // write failed the record stays, so the next scaffold can still reattach.
+    if (reattachedLegacyFolder && readPinSigned({ dir: operationalMetaDir, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) === storagePath) {
+      for (const f of ['held-legacy-folder.txt', 'held-legacy-folder.txt.mac']) rmSync(join(operationalMetaDir, f), { force: true });
+    }
     // A successful pin supersedes any stale fail-closed marker from an earlier
     // failed scaffold — clear it so capture re-enables on recovery.
     clearCaptureDisabledMarkers({ projectDir, operationalMetaDir });
