@@ -21,9 +21,9 @@
  * non-fatal — metrics capture degrades, the session continues.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -90,8 +90,8 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
     return { ok: false, reason: 'project-dir-does-not-exist' };
   }
 
-  const detection = detectStoragePath({ projectDir, home });
-  const storagePath = detection.path;
+  let detection = detectStoragePath({ projectDir, home });
+  let storagePath = detection.path;
 
   // Write the forensic line BEFORE any other work so a partial failure
   // still leaves a debug trail.
@@ -101,6 +101,15 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
     mkdirSync(operationalMetaDir, { recursive: true });
   } catch (err) {
     return { ok: false, reason: 'cannot-create-operational-meta-dir', err: err.message };
+  }
+
+  // A pin that already points at an existing external folder (one a migration carried in, or an
+  // earlier scaffold chose) keeps pointing there: recomputing would leave the payloads written
+  // so far at the old place while every reader and writer moved to the new one.
+  const kept = keptExternalPin({ operationalMetaDir, projectDir });
+  if (kept) {
+    storagePath = kept;
+    detection = { ...detection, path: kept, reason: 'existing-external-pin-kept' };
   }
 
   const scaffoldLogLine = formatScaffoldLog({
@@ -195,6 +204,20 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
     detection,
     scaffold_log_line: scaffoldLogLine,
   };
+}
+
+/** The folder an existing pin names, when it is outside the project, exists, and no other project claimed it. */
+function keptExternalPin({ operationalMetaDir, projectDir }) {
+  if (process.env.CORE_METRICS_FORCE_PROJECT_LOCAL === '1') return null;
+  let pinned;
+  try { pinned = readFileSync(join(operationalMetaDir, 'storage-path.txt'), 'utf8').trim(); } catch { return null; }
+  if (!pinned || !isAbsolute(pinned) || pinned === join(projectDir, '_metrics')) return null;
+  try { if (!statSync(pinned).isDirectory()) return null; } catch { return null; }
+  try {
+    const owner = readFileSync(join(pinned, '.project-root'), 'utf8').trim();
+    if (owner !== projectDir) return null;
+  } catch { /* unclaimed: it stays with the project whose pin names it */ }
+  return pinned;
 }
 
 const APPDATA_OWNER_FILE = '.project-root';

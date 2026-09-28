@@ -120,3 +120,39 @@ test('the AppData metrics folder is one-to-one: a.b and a-b never share it, and 
     } finally { rmSync(home, { recursive: true, force: true }); }
   });
 });
+
+test('a pin that already names an existing external folder survives the scaffold; a missing, foreign-claimed or forced-local one is recomputed', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-pin-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-pin-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      const pinFile = join(meta, 'storage-path.txt');
+      const old = join(home, 'AppData', 'Local', 'core-metrics', 'old-workspace-id');
+      mkdirSync(old, { recursive: true });
+      writeFileSync(join(old, 'evidence.jsonl'), '{"row":1}\n');
+      writeFileSync(pinFile, old);
+      process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+
+      let r = initMetrics({ projectDir, env: {} });
+      assert.equal(r.storagePath, old, 'the carried-in pin is kept');
+      assert.equal(readFileSync(pinFile, 'utf8'), old);
+
+      writeFileSync(join(old, '.project-root'), '/some/other/project\n');
+      r = initMetrics({ projectDir, env: {} });
+      assert.notEqual(r.storagePath, old, 'a folder another project claimed is not reused');
+
+      writeFileSync(pinFile, join(home, 'gone'));
+      r = initMetrics({ projectDir, env: {} });
+      assert.notEqual(r.storagePath, join(home, 'gone'), 'a pin to a missing folder is recomputed');
+
+      writeFileSync(pinFile, old);
+      rmSync(join(old, '.project-root'));
+      process.env.CORE_METRICS_FORCE_PROJECT_LOCAL = '1';
+      r = initMetrics({ projectDir, env: {} });
+      assert.equal(r.storagePath, join(projectDir, '_metrics'), 'the force-local escape hatch still wins');
+    } finally { rmSync(home, { recursive: true, force: true }); rmSync(projectDir, { recursive: true, force: true }); }
+  });
+});

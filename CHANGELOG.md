@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A migrated metrics folder is no longer abandoned at startup.** The migration carries a project's metrics pin into its state, but the scaffold recomputed the pin on the same startup and moved capture to a new folder, leaving the old payloads behind. A pin that names an existing folder outside the project, and that no other project claimed, is now kept. `CORE_METRICS_FORCE_PROJECT_LOCAL=1` still overrides.
 - **A workspace an older install registers after a migration is no longer skipped.** A finished receipt used to make every later run assume nothing was new, so data in a workspace registered afterwards was marked migrated without being copied. It is now copied into the project as a kept duplicate, under the migration fence, and only then marked and released.
 - **An interrupted drift append is settled before anything new is appended.** The recorded range is re-read from the old workspace and checked, a half-written tail in the project's copy is cut back and written whole, a source that grew meanwhile adds only its new lines, and a destination holding anything else is left alone with the old bytes kept aside.
 - **On Windows the AppData metrics folder is one-to-one with the project.** Two projects whose paths differ only by `.` versus `-` used to share it. New folders carry a hash of the full path; a folder from before this change stays with the first project that scaffolds it, which claims it.
