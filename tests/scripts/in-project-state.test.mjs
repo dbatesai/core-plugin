@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolveRegisteredRoot } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 import { registerProject, touchProject, recordBootstrap, readBootstrapRecord } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
-import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp, stateDir, writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp, stateDir, writeSignedFile, readRegisteredRoots } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
@@ -797,5 +797,52 @@ test('index-registry path names a file in the project\'s state the way stateDir 
     assert.equal(r.stdout.trim(), join(hot, 'capability-state.json'));
     assert.notEqual(run('--kind', 'hot', '--name', '../escape').status, 0);
     assert.notEqual(run('--kind', 'nope').status, 0);
+  } finally { s.cleanup(); }
+});
+
+test('an index.json entry the migration marked migrated no longer registers its old path', () => {
+  const s = sandbox();
+  try {
+    const live = s.mk('Projects', 'Live');
+    const moved = s.mk('Projects', 'OldPlace');
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([
+      { workspace_id: 'live', path: live },
+      { workspace_id: 'moved', path: moved, migrated: true, migrated_at: '2026-09-28T00:00:00Z' },
+    ]));
+    const roots = readRegisteredRoots({ coreDir: s.coreDir });
+    assert.ok(roots.has(realpathSync(live)), 'an unmigrated legacy entry still registers');
+    assert.ok(!roots.has(realpathSync(moved)), 'a migrated one does not authorize the old path');
+  } finally { s.cleanup(); }
+});
+
+test('two synced projects whose names differ only by . versus - keep separate local state and metrics pins', () => {
+  const s = sandbox();
+  try {
+    const a = s.mk('Dropbox', 'Projects', 'a.b');
+    const b = s.mk('Dropbox', 'Projects', 'a-b');
+    registerProject(s.coreDir, a);
+    registerProject(s.coreDir, b);
+    const hotA = stateDir({ root: a, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
+    const hotB = stateDir({ root: b, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
+    assert.notEqual(hotA, hotB);
+    const dirA = operationalMetricsDir(a, { home: s.home, env: { CORE_HARNESS: H } });
+    const dirB = operationalMetricsDir(b, { home: s.home, env: { CORE_HARNESS: H } });
+    assert.notEqual(dirA, dirB);
+    writeFileSync(join(dirA, 'storage-path.txt'), join(a, '_metrics'));
+    assert.notEqual(existsSync(join(dirB, 'storage-path.txt')), true, "B does not inherit A's pin");
+  } finally { s.cleanup(); }
+});
+
+test('a project-root turn_capture:false still turns capture off when the signed manifest has no such value', async () => {
+  const { turnCaptureEnabled } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const s = sandbox();
+  try {
+    const p = signedProject(s);
+    const env = { CORE_HARNESS: H };
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true, 'default is on');
+    writeFileSync(join(p, 'workspace.json'), JSON.stringify({ turn_capture: false }));
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false);
+    writeFileSync(join(p, 'workspace.json'), JSON.stringify({ turn_capture: true }));
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), true, 'the root file can only switch it off');
   } finally { s.cleanup(); }
 });

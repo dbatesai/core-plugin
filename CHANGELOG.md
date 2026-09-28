@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A migrated project's old path no longer registers whatever folder is there later.** Legacy `index.json` entries the migration marked migrated are ignored when deciding which folders are registered projects, so auto-close cannot be pointed at an unrelated folder that appears at a project's former location.
+- **Two projects can no longer share machine-local state.** The folder name for a project's local state is now the readable path slug plus a short hash of the full path; before, `a.b` and `a-b` mapped to the same folder and one project's captured turns could be routed into the other's `_metrics/`. (The Windows AppData metrics folder still uses the slug alone; it is left as is so existing pins keep working.)
+- **A project-root `turn_capture: false` still turns turn capture off.** It only ever switches capture off, matching how `metrics_enabled` behaves, until the signed manifest carries the value.
 - **Adopting another install's project state keeps the turn-evidence opt-out.** Adoption carried the metrics opt-out but dropped `turn_capture: false`, so turn capture came back on. Both the adopted manifest's and this machine's own setting now survive.
 - **The legacy drift check no longer appends a log tail twice after an interruption.** Each append is recorded in the signed receipt before it is made, so a rerun finds the tail already in the project's copy and skips it.
 - **A synced project's fast-changing state is fenced during a migration too.** It lives on this machine, so the project-side marker is now checked for it as well.

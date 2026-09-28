@@ -94,7 +94,8 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
  * Precedence (first match wins):
  *   1. aggregate metrics OFF (env/workspace metrics gate) → OFF.
  *   2. env `CORE_TURN_CAPTURE` false (0/false/no/off) → OFF; true → ON.
- *   3. the project's trusted manifest (`.core/<harness>/workspace.json`) `"turn_capture": false` → OFF.
+ *   3. the project's trusted manifest (`.core/<harness>/workspace.json`), or the project-root
+ *      `workspace.json`, says `"turn_capture": false` → OFF.
  *   4. default → ON.
  */
 export function turnCaptureEnabled({ project, env = process.env, home = homedir() } = {}) {
@@ -109,6 +110,13 @@ export function turnCaptureEnabled({ project, env = process.env, home = homedir(
       m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
     } catch { m = null; }
     if (m && m.turn_capture === false) return false;
+    // A project-root workspace.json can still say "off" (an older or copied project). Like
+    // metrics_enabled, it only ever switches capture off, and it keeps doing so until the
+    // signed manifest carries the value.
+    try {
+      const rootManifest = JSON.parse(readFileSync(join(projectRootFor(project, { home, coreDir: join(home, '.core') }), 'workspace.json'), 'utf8'));
+      if (rootManifest && rootManifest.turn_capture === false) return false;
+    } catch { /* absent or unreadable: no opt-out */ }
   }
   return true;
 }

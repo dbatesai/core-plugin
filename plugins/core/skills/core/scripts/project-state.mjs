@@ -25,7 +25,7 @@ import {
   rmSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
@@ -68,7 +68,10 @@ function readJsonArray(file) {
 export function readRegisteredRoots({ coreDir = defaultCoreDir(), includeLegacyIndex = true } = {}) {
   const paths = readJsonArray(join(coreDir, 'projects.json')).map((e) => e && e.path);
   if (includeLegacyIndex) {
-    for (const e of readJsonArray(join(coreDir, 'index.json'))) paths.push(e && e.path);
+    // An entry the migration marked migrated is history: its project is registered in
+    // projects.json at wherever it lives now, and its old path must not authorize
+    // whatever folder later appears there.
+    for (const e of readJsonArray(join(coreDir, 'index.json'))) if (e && e.migrated !== true) paths.push(e.path);
   }
   const home = dirname(coreDir);
   const out = new Set();
@@ -153,9 +156,19 @@ export function assertHarnessName(harness) {
   return harness;
 }
 
-/** ~/.core/local/<root-slug>/<harness>/ — state that must stay on this machine's disk. */
+/**
+ * ~/.core/local/<root-slug>-<hash>/<harness>/ — state that must stay on this machine's disk.
+ * The slug is for people reading the folder; the hash of the canonical root is what keeps
+ * the key one-to-one, because the slug maps `.`, `-`, `/` and `:` all to `-` and two
+ * different projects (`a.b`, `a-b`) would otherwise share one folder and one metrics pin.
+ */
+function localRootKey(root) {
+  const real = canonical(root);
+  return `${mapProjectPathToSlug(real)}-${createHash('sha256').update(real).digest('hex').slice(0, 12)}`;
+}
+
 export function localStateDir({ root, harness, coreDir = defaultCoreDir() }) {
-  return join(coreDir, 'local', mapProjectPathToSlug(canonical(root)), assertHarnessName(harness));
+  return join(coreDir, 'local', localRootKey(root), assertHarnessName(harness));
 }
 
 /**
@@ -675,7 +688,7 @@ export function readBootstrap({ root, harness, coreDir = defaultCoreDir() }) {
 const DECLINED_ADOPT = 'declined-adopt';
 
 function declinedAdoptFile({ root, coreDir }) {
-  return join(coreDir, 'local', mapProjectPathToSlug(canonical(root)), DECLINED_ADOPT);
+  return join(coreDir, 'local', localRootKey(root), DECLINED_ADOPT);
 }
 
 function declinedStamps({ root, coreDir }) {
