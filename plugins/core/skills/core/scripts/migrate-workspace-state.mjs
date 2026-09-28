@@ -368,7 +368,6 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
     const receiptFile = join(durable.dir, RECEIPT);
     let copies = [];
     let metricsHeld = null;
-    let metricsMarkerFailed = null;
     const markerFile = join(durable.dir, MIGRATING_MARKER);
     if (existsSync(receiptFile)) {
       // A receipt that claims success but does not match the disk is never trusted and
@@ -452,19 +451,20 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
           if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir }) && !legacyPeers.length && !otherProjects.length) {
             writePinSigned({ dir: dirname(pinFile), path: pinned, root: real, coreDir });
             // Same durable marker a fresh scaffold writes, so losing this carried pin later is caught
-            // the same way. A failure here does not undo the file copy this migration already did —
-            // that succeeded. The pin is deliberately NOT rolled back on a marker failure: removing it
-            // would erase the one signal that this project was ever redirected, and a project whose
-            // real path carries no redirect signal of its own would then read as clean rather than
-            // refused — a false purge/false-clean-stats result, not a fixed one (caught by review
-            // against a real fault fixture). Left signed, storagePinInvalid's own backfill sees a
-            // valid pin with no marker on the very next read, tries the same write, fails the same
-            // way, and refuses — closed immediately, not only after a later loss. Named in the
-            // result either way.
+            // the same way. Leaving the pin signed with no marker protects only the very next read
+            // (storagePinInvalid's backfill hits the same obstruction and refuses) — it does nothing
+            // for a LATER total pin loss, which is the whole reason the marker exists: with no marker
+            // ever persisted, a later loss falls through to "never redirected" and reads clean. So a
+            // failure here does not complete this migration at all. It throws the same class other
+            // unrecoverable mid-copy failures in this function throw (an unreadable legacy folder, a
+            // symlink): no completion receipt is written, the old state is not released, the
+            // `.migrating` marker stays in place, and a later run — once the obstruction is cleared —
+            // resumes and completes normally. The file copy already done on disk is untouched by this;
+            // only completion is withheld.
             try {
               markMetricsEverExternal({ projectDir: real, harness, home: homeDir, coreDir, folder: pinned });
             } catch (e) {
-              metricsMarkerFailed = { folder: pinned, err: String(e && e.message) };
+              throw new LegacyStateError('METRICS_MARKER_UNPERSISTED', pinned, `carried metrics pin's redirect marker could not be written (${e && e.message})`);
             }
           } else if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir })) {
             // Ambiguous: left unsigned, and recorded so the scaffold and the readiness summary can say so.
@@ -528,7 +528,7 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
     return {
       status: copies === null ? 'already-migrated' : 'migrated',
       root: real, harness, live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
-      files: copies ? copies.length : 0, released, ...(metricsHeld ? { metrics_held: metricsHeld } : {}), ...(metricsMarkerFailed ? { metrics_marker_failed: metricsMarkerFailed } : {}),
+      files: copies ? copies.length : 0, released, ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
     };
   } finally {
     releaseFileLock(lockFile, lock.nonce);

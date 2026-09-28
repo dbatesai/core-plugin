@@ -926,28 +926,33 @@ test('migration signs a carried metrics pin only when it names a place metrics m
   }
 });
 
-test('a marker write failure during migration leaves the pin signed, and the next read refuses immediately rather than reading clean', async () => {
-  const { storagePinInvalid } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+test('a marker write failure during migration blocks completion, not just an immediate read: no receipt, no release, state fenced, and a later run completes it', { skip: isWin || isRoot }, () => {
   const { s, p, table } = migrationFixture();
+  const inProject = join(p, '.core', H);
   try {
     const pinned = join(s.home, 'AppData', 'Local', 'core-metrics', 'old-workspace-id');
     mkdirSync(pinned, { recursive: true });
     writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), pinned);
     // Obstruct the marker's target file before migration runs: a directory in its place makes the
-    // marker's atomic write fail with EISDIR, and stays in place for the read afterward too — the
-    // same obstruction that made the migration's own write fail also makes the read-time backfill
-    // fail, which is exactly what a rollback here would have thrown away: removing the pin erases
-    // the one signal this project was ever redirected, and a project whose real path carries no
-    // redirect signal of its own would then read as clean instead of refused.
+    // marker's atomic write fail with EISDIR. Leaving the pin signed with no marker (an earlier,
+    // insufficient fix) only protects the very next read — a LATER total pin loss falls through to
+    // "never redirected" and reads clean, since no marker was ever actually persisted to catch it.
+    // So the migration does not complete at all: same class of failure as an unreadable legacy
+    // folder or a symlink, elsewhere in this function.
     const durable = stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).dir;
     mkdirSync(join(durable, 'metrics-ever-external.txt'), { recursive: true });
-    const result = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
-    assert.equal(result.status, 'migrated', 'the file copy this migration did still stands');
-    assert.ok(result.metrics_marker_failed, 'the marker failure is named in the result');
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'legacy-held');
+    assert.equal(r.code, 'METRICS_MARKER_UNPERSISTED');
+    assert.equal(existsSync(join(inProject, RECEIPT_NAME)), false, 'no completion receipt');
+    assert.ok(existsSync(join(inProject, '.migrating')), 'the marker stays');
+    assert.equal(existsSync(join(s.coreDir, 'workspaces', 'legacy', 'MOVED.md')), false, 'the old state is not released');
+
+    rmSync(join(durable, 'metrics-ever-external.txt'), { recursive: true, force: true });
+    const retried = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(retried.status, 'migrated', 'a later run, once the obstruction is cleared, completes normally');
     const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
-    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt')), true, 'the pin is left signed, not rolled back');
-    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), true);
-    assert.equal(storagePinInvalid(p, { home: s.home, env: { CORE_HARNESS: H } }), true, 'refused on the very next read, via the backfill hitting the same obstruction — not only after a later pin loss');
+    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), true, 'the pin is signed on the completed run');
   } finally { s.cleanup(); }
 });
 
