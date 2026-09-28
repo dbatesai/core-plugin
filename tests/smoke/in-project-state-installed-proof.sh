@@ -30,7 +30,15 @@ if [ -n "${PROOF_PKG:-}" ]; then
   PKG="$PROOF_PKG"; SCRIPTS="$PKG/skills/core/scripts"
   [ -d "$SCRIPTS" ] || { echo "PROOF_PKG has no skills/core/scripts: $PKG"; exit 1; }
   echo "installed plugin root: $PKG"
-  echo "byte-identical to the committed ${PROOF_REF:-HEAD} package: $(mkdir -p "$SCRATCH/ref" && git -C "$REPO" archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$SCRATCH/ref" && diff -r "$SCRATCH/ref" "$PKG" >/dev/null && echo yes || echo NO)"
+  # The installed bytes must be the committed package's bytes, or none of the results below mean anything.
+  mkdir -p "$SCRATCH/ref" && git -C "$REPO" archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$SCRATCH/ref" \
+    || { echo "FAIL  cannot build the reference package for ${PROOF_REF:-HEAD}"; exit 1; }
+  if diff -r "$SCRATCH/ref" "$PKG" >"$SCRATCH/identity.diff" 2>&1; then
+    echo "byte-identical to the committed ${PROOF_REF:-HEAD} package: yes"
+  else
+    echo "FAIL  the installed root is NOT byte-identical to the committed ${PROOF_REF:-HEAD} package; stopping before any scenario"
+    head -20 "$SCRATCH/identity.diff"; exit 1
+  fi
 else
   mkdir -p "$PKG"
   git -C "$REPO" archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$PKG" || { echo "package build failed"; exit 1; }
