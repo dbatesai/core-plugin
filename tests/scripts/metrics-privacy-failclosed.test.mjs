@@ -1,4 +1,5 @@
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { readPinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 // metrics-privacy-failclosed.test.mjs — the OneDrive privacy redirect must
 // FAIL CLOSED when its storage pin cannot be written.
 //
@@ -135,7 +136,7 @@ test('a successful pin is atomic-written and clears a stale capture-disabled mar
     // Pin landed with the resolved storage path as its exact content.
     const pin = join(operationalMetricsDir(project, { home: fakeHome, env: {} }), 'storage-path.txt');
     assert.ok(existsSync(pin), 'pin file exists after a successful scaffold');
-    assert.equal(readFileSync(pin, 'utf8'), observed.result.storagePath);
+    assert.equal(readPinSigned({ dir: join(pin, '..'), root: projectRootFor(project, { home: fakeHome, coreDir: join(fakeHome, '.core') }), coreDir: join(fakeHome, '.core') }), observed.result.storagePath);
 
     // Marker cleared; capture re-enabled.
     assert.equal(existsSync(join(project, '_metrics', 'capture-disabled.json')), false,

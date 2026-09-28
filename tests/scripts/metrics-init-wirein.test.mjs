@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { initMetrics } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 import { resolveStoragePath, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { readPinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
 process.env.CORE_HARNESS ||= 'claude-code';
@@ -36,7 +37,7 @@ test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pi
 
     const pinFile = join(operationalMetricsDir(project, { home, env: { CORE_HARNESS: 'claude-code' } }), 'storage-path.txt');
     assert.ok(existsSync(pinFile), 'pin file written');
-    const pinned = readFileSync(pinFile, 'utf8').trim();
+    const pinned = readPinSigned({ dir: join(pinFile, '..'), root: projectRootFor(project, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') });
     assert.match(pinned, /core-metrics/, 'pinned to the forced appdata path, not project-local');
 
     // Storage root created at the pinned location; retired OTel/push
