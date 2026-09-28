@@ -43,7 +43,7 @@
  * Ships with the plugin by convention; .mjs (Node.js) only, node:* imports only.
  */
 
-import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, lstatSync, mkdirSync, copyFileSync, statSync, appendFileSync, openSync, readSync, closeSync, rmSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -51,11 +51,11 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
-  writeSignedFile,
+  writeSignedFile, readSignedFile, duringMigration, MIGRATING_MARKER,
 } from './project-state.mjs';
 import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
-import { assertSafeWorkspaceId } from './trusted-home.mjs';
+import { assertSafeWorkspaceId, containedPath } from './trusted-home.mjs';
 
 // Bookkeeping, not data: a folder holding only these has nothing worth migrating.
 const BOOKKEEPING = [/^\.DS_Store$/, /^last-active$/, /^last-bootstrap\.json$/, /\.lock(\.g\d+)?(\.done)?$/, /^visibility-canary\.json$/];
@@ -232,6 +232,32 @@ function copyTree(src, dest, recorded) {
   }
 }
 
+/**
+ * A receipt is only a claim. `complete: true` says nothing about whether the files it
+ * lists are there, and a destination it names is only safe to write to if it lies inside
+ * this project's own state. So it is trusted only when this install signed it (a forged,
+ * copied or git-tracked receipt reads as unsigned), every destination resolves inside the
+ * state, and every listed file exists. Files are checked by existence, not hash: the
+ * project's copies legitimately change after migration. Returns { ok, receipt, problems }.
+ */
+function verifiedReceipt({ root, harness, coreDir, stateDirs }) {
+  const raw = readSignedFile({ root, harness, name: RECEIPT, coreDir });
+  if (raw === null) return { ok: false, problems: ['receipt is not signed by this install, or git tracks it'] };
+  let receipt;
+  try { receipt = JSON.parse(raw); } catch { return { ok: false, problems: ['receipt is not valid JSON'] }; }
+  if (!receipt || receipt.complete !== true) return { ok: false, receipt, problems: ['receipt does not say complete'] };
+  if (!Array.isArray(receipt.files)) return { ok: false, receipt, problems: ['receipt has no file list'] };
+  const problems = [];
+  for (const f of receipt.files) {
+    if (!f || typeof f.to !== 'string') { problems.push('a receipt entry has no destination'); continue; }
+    if (!stateDirs.some((d) => containedPath(d, f.to))) { problems.push(`destination outside this project's state: ${f.to}`); continue; }
+    let st;
+    try { st = lstatSync(f.to); } catch { problems.push(`missing: ${f.to}`); continue; }
+    if (!st.isFile()) problems.push(`not a regular file: ${f.to}`);
+  }
+  return { ok: problems.length === 0, receipt, problems };
+}
+
 function manifestPath(coreDir) { return join(coreDir, 'migration-manifest.json'); }
 
 /**
@@ -262,7 +288,11 @@ function gitTracks(root, rel) {
  * Migrate one project root for one harness. Returns a summary:
  *   { status: 'migrated' | 'already-migrated' | 'nothing-to-migrate' | 'held' | 'lock-held', ... }
  */
-export function applyMigration({ root, harness = detectStateHarness(), coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date() } = {}) {
+export function applyMigration(opts = {}) {
+  return duringMigration(() => applyMigrationInner(opts));
+}
+
+function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date() } = {}) {
   assertHarnessName(harness);
   const real = canonical(root);
   const iso = now.toISOString();
@@ -277,21 +307,27 @@ export function applyMigration({ root, harness = detectStateHarness(), coreDir =
     const live = mine.find((e) => e.class === 'migrate');
     const dups = mine.filter((e) => e.class === 'supersede');
     if (!live && !dups.length) {
+      const marker = join(real, '.core', harness, MIGRATING_MARKER);
+      if (existsSync(marker)) return { status: 'migration-incomplete', root: real, harness, reason: 'an earlier migration stopped part-way and there is no legacy state left to finish it from' };
       return { status: held.length ? 'held' : 'nothing-to-migrate', root: real, harness, held: held.map((e) => ({ workspace_id: e.workspace_id, reason: e.reason })) };
     }
 
     const durable = stateDir({ root: real, harness, kind: 'durable', coreDir, forWrite: true });
+    const hot = stateDir({ root: real, harness, kind: 'hot', coreDir, forWrite: true });
     const receiptFile = join(durable.dir, RECEIPT);
     let copies = [];
+    const markerFile = join(durable.dir, MIGRATING_MARKER);
     if (existsSync(receiptFile)) {
-      const r = readJson(receiptFile, null);
-      if (r && r.complete) {
-        copies = null;
-      }
+      // A receipt that claims success but does not match the disk is never trusted and
+      // never repaired over: the project's copies may have moved on since. A person decides.
+      const checked = verifiedReceipt({ root: real, harness, coreDir, stateDirs: [durable.dir, hot.dir] });
+      if (!checked.ok) return { status: 'receipt-unverified', root: real, harness, problems: checked.problems.slice(0, 10) };
+      rmSync(markerFile, { force: true });
+      copies = null;
     }
 
     if (copies) {
-      const hot = stateDir({ root: real, harness, kind: 'hot', coreDir, forWrite: true });
+      atomicWriteFileSync(markerFile, `${iso}\n`);
       const toCopy = [...(live ? [{ e: live, superseded: false }] : []), ...dups.map((e) => ({ e, superseded: true }))];
       for (const { e, superseded } of toCopy) {
         assertSafeWorkspaceId(e.workspace_id);
@@ -335,11 +371,12 @@ export function applyMigration({ root, harness = detectStateHarness(), coreDir =
         updateManifest({ root: real, harness, coreDir, fields: { ...kept, ...carry, project_id: live.workspace_id, harness, migrated_from: live.workspace_id } });
       }
 
-      atomicWriteFileSync(receiptFile, JSON.stringify({
+      writeSignedFile({ dir: durable.dir, name: RECEIPT, coreDir, body: JSON.stringify({
         complete: true, migrated_at: iso, harness, root: real,
         live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
         files: copies.map((c) => ({ from: c.from, to: c.to, sha256: c.sha256, length: c.length })),
-      }, null, 2) + '\n');
+      }, null, 2) + '\n' });
+      rmSync(markerFile, { force: true });
     }
 
     // Record the marks, then release the old surfaces once every harness on the path has migrated.
@@ -419,15 +456,20 @@ export function checkLegacyDrift({ root, harness = detectStateHarness(), coreDir
   const durable = stateDir({ root: real, harness, kind: 'durable', coreDir });
   if (!durable) return { status: 'no-state', root: real, harness };
   const receiptFile = join(durable.dir, RECEIPT);
-  const receipt = readJson(receiptFile, null);
-  if (!receipt || !receipt.complete) return { status: 'not-migrated', root: real, harness };
+  if (!existsSync(receiptFile)) return { status: 'not-migrated', root: real, harness };
+  const hotDir = stateDir({ root: real, harness, kind: 'hot', coreDir, forWrite: true });
+  const checked = verifiedReceipt({ root: real, harness, coreDir, stateDirs: [durable.dir, hotDir.dir] });
+  if (!checked.ok && !checked.receipt) return { status: 'receipt-unverified', root: real, harness, problems: checked.problems.slice(0, 10) };
+  if (!checked.receipt.complete) return { status: 'not-migrated', root: real, harness };
+  if (!checked.ok) return { status: 'receipt-unverified', root: real, harness, problems: checked.problems.slice(0, 10) };
+  const receipt = checked.receipt;
 
   const lockFile = join(real, '_memories', '_close.lock');
   mkdirSync(dirname(lockFile), { recursive: true });
   const lock = acquireFileLock(lockFile, { extra: { session_id: `legacy-drift-${harness}` }, staleMs: LOCK_STALE_MS, hardStaleMs: 2 * LOCK_STALE_MS });
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
   try {
-    const hot = stateDir({ root: real, harness, kind: 'hot', coreDir, forWrite: true });
+    const hot = hotDir;
     const byFrom = new Map((receipt.files || []).map((f) => [f.from, f]));
     const sources = [
       ...(receipt.live ? [{ id: receipt.live, superseded: false }] : []),
@@ -472,7 +514,7 @@ export function checkLegacyDrift({ root, harness = detectStateHarness(), coreDir
       }
     }
     if (appended.length || superseded.length) {
-      atomicWriteFileSync(receiptFile, JSON.stringify({ ...receipt, files: [...byFrom.values()], legacy_checked_at: now.toISOString() }, null, 2) + '\n');
+      writeSignedFile({ dir: durable.dir, name: RECEIPT, coreDir, body: JSON.stringify({ ...receipt, files: [...byFrom.values()], legacy_checked_at: now.toISOString() }, null, 2) + '\n' });
     }
     return { status: appended.length || superseded.length ? 'brought-in' : 'unchanged', root: real, harness, appended, superseded };
   } finally {

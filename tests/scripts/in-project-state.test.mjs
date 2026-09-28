@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolveRegisteredRoot } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 import { registerProject, touchProject, recordBootstrap, readBootstrapRecord } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
-import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp, stateDir, writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
@@ -573,5 +573,95 @@ test('a manifest whose MAC breaks keeps its opt-out: capture stays off, before a
     updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { agent_name: 'x' } });
     assert.equal(readManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir }).metrics_enabled, false, 'opt-out carried past the set-aside');
     assert.equal(metricsEnabled({ project: p, env, home: s.home }), false);
+  } finally { s.cleanup(); }
+});
+
+// ---------- migration holds: what a receipt may claim, and what half-copied state may do ----------
+
+const RECEIPT_NAME = 'migrated-from.json';
+
+test('a copy that fails part-way keeps every reader and writer out of the half-copied state until a later run finishes it', { skip: isWin || isRoot }, () => {
+  const { s, p, table } = migrationFixture();
+  const blocker = join(s.coreDir, 'workspaces', 'legacy', 'hot-section-draft.md');
+  const inProject = join(p, '.core', H);
+  try {
+    chmodSync(blocker, 0o000);
+    assert.throws(() => applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }), /EACCES|EPERM/);
+    assert.ok(existsSync(join(inProject, '.migrating')), 'the marker stays behind');
+
+    const read = stateDir({ root: p, harness: H, coreDir: s.coreDir });
+    assert.ok(read === null || (read.status === 'migrating' && !read.dir.startsWith(inProject)), 'a reader is not pointed at the half-copied state');
+    assert.equal(stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).status, 'migrating', 'a writer is diverted to this machine');
+    const touched = touchProject(s.coreDir, { root: p, harness: H });
+    assert.ok(!existsSync(join(inProject, 'last-active')), `a writer does not land in it either (${touched.root})`);
+
+    chmodSync(blocker, 0o644);
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    assert.equal(existsSync(join(inProject, '.migrating')), false, 'the marker is gone once the receipt is written');
+    assert.equal(stateDir({ root: p, harness: H, coreDir: s.coreDir }).status, 'verified');
+  } finally { try { chmodSync(blocker, 0o644); } catch { /* gone */ } s.cleanup(); }
+});
+
+test('an unsigned receipt that says complete does not skip the copy or release the old state', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const dir = stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).dir;
+    writeFileSync(join(dir, RECEIPT_NAME), JSON.stringify({ complete: true, files: [] }));
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'receipt-unverified');
+    assert.match(r.problems[0], /not signed by this install/);
+    assert.equal(existsSync(join(dir, 'capability-history.jsonl')), false, 'nothing was copied over the claim');
+    assert.equal(existsSync(join(s.coreDir, 'workspaces', 'legacy', 'MOVED.md')), false, 'the old state was not released');
+  } finally { s.cleanup(); }
+});
+
+test('a signed receipt whose listed file is gone is not trusted, and is not repaired over', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    const receipt = JSON.parse(readFileSync(stateFile(p, RECEIPT_NAME), 'utf8'));
+    const gone = receipt.files.find((f) => f.to.endsWith('hot-section-draft.md')).to;
+    rmSync(gone);
+    const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
+    assert.equal(r.status, 'receipt-unverified');
+    assert.ok(r.problems.some((x) => x.startsWith('missing:') && x.endsWith('hot-section-draft.md')));
+    assert.equal(existsSync(gone), false, 'the file is not silently re-copied');
+    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'receipt-unverified');
+  } finally { s.cleanup(); }
+});
+
+test('a git-tracked receipt is not trusted', { skip: isWin }, () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    git(p, 'init', '-q');
+    git(p, 'add', '-f', join('.core', H, RECEIPT_NAME));
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'receipt-unverified');
+    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'receipt-unverified');
+  } finally { s.cleanup(); }
+});
+
+test('drift never appends to a destination outside the state, whether the receipt is forged or signed', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    const legacyLog = join(s.coreDir, 'workspaces', 'legacy', 'capability-history.jsonl');
+    const outside = join(s.base, 'outside.txt');
+    writeFileSync(outside, 'untouched\n');
+    const before = sha(outside);
+    const receipt = JSON.parse(readFileSync(stateFile(p, RECEIPT_NAME), 'utf8'));
+    const forged = { ...receipt, files: receipt.files.map((f) => (f.from === legacyLog ? { ...f, to: outside } : f)) };
+    const body = JSON.stringify(forged);
+
+    writeFileSync(stateFile(p, RECEIPT_NAME), body);
+    writeFileSync(legacyLog, '{"row":1}\n{"row":"old-2"}\n');
+    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'receipt-unverified');
+    assert.equal(sha(outside), before, 'unsigned forgery: the outside file is byte-identical');
+
+    writeSignedFile({ dir: join(p, '.core', H), name: RECEIPT_NAME, body, coreDir: s.coreDir });
+    const d = checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
+    assert.equal(d.status, 'receipt-unverified');
+    assert.ok(d.problems.some((x) => x.startsWith('destination outside')));
+    assert.equal(sha(outside), before, 'signed but out of bounds: the outside file is byte-identical');
   } finally { s.cleanup(); }
 });

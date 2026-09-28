@@ -88,10 +88,14 @@ Use `root` as `<root>` everywhere below.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/migrate-workspace-state.mjs" --apply --root <root> || true
+node "${CORE_ROOT}/skills/core/scripts/migrate-workspace-state.mjs" --apply --root <root> \
+  || echo "CORE-STATE-MIGRATION-FAILED: the migration script errored, or CORE_ROOT is unresolved — the project's state may be half-migrated"
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/migrate-workspace-state.mjs" --drift-check --root <root> || true
+node "${CORE_ROOT}/skills/core/scripts/migrate-workspace-state.mjs" --drift-check --root <root> \
+  || echo "CORE-STATE-DRIFT-CHECK-FAILED: the legacy drift check errored, or CORE_ROOT is unresolved"
 ```
+
+If either `CORE-STATE-…-FAILED` marker prints, say so in one plain line in the readiness summary, with the script's stderr; the run is not "clean" and nothing below should claim it was. A `receipt-unverified` status means a migration receipt claims success but the files it lists are missing or point outside the project's state. Name the problems it lists and leave the state alone: don't re-run the copy over the project's files, and don't call the project migrated. A person decides.
 
 The drift check catches an older build of this harness that kept writing to the old workspace after migration (a rollback, or a second machine). Log lines it appended arrive in the project's copy exactly once; other changed files land in `superseded/legacy-<date>/`. When `status` is `brought-in`, say in one line what arrived. `unchanged`, `not-migrated` and `no-state` need no mention.
 

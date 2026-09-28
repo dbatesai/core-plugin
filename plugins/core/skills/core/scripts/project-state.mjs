@@ -342,6 +342,17 @@ export function classifyStamp({ root, harness, coreDir = defaultCoreDir() }) {
   return { status: 'ask', stamp, oldPath: stamp.path };
 }
 
+// A migration writes into the project's state before it is whole. While its marker is
+// present, everything except the migration itself is kept out of that state: reads see
+// nothing, and writes go to this machine's local state instead, so no reader or writer
+// consumes half a copy.
+export const MIGRATING_MARKER = '.migrating';
+let migrationDepth = 0;
+export function duringMigration(fn) {
+  migrationDepth++;
+  try { return fn(); } finally { migrationDepth--; }
+}
+
 /** A path read out of project state must resolve inside that state directory. */
 export function containedInState(stateDir, candidate) {
   return containedPath(stateDir, candidate);
@@ -432,6 +443,10 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
 
   switch (verdict.status) {
     case 'verified':
+      if (!migrationDepth && existsSync(join(harnessDir, MIGRATING_MARKER))) {
+        const held = local();
+        return held && { ...held, status: 'migrating' };
+      }
       if (forWrite) mkdirSync(target.dir, { recursive: true });
       return { dir: target.dir, location: 'project', status: 'verified', trusted: true };
     case 'refused':
