@@ -12,6 +12,7 @@
 # Never touches a real HOME or project. Re-runnable. Usage:
 #   bash tests/smoke/in-project-state-installed-proof.sh [<core-plugin-repo>]
 # PROOF_REF=<commit> packages that commit instead of HEAD, so the same checks can be run against an older build and shown to fail.
+# PROOF_PKG=<plugin root> runs the same checks from an already-installed plugin root instead of a fresh package.
 set -u
 REPO="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/core-state-proof-XXXX")"
@@ -24,8 +25,16 @@ sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' '
 cleanup() { chmod -R u+rwx "$SCRATCH" 2>/dev/null; rm -rf "$SCRATCH"; }
 trap cleanup EXIT
 
-mkdir -p "$PKG"
-git -C "$REPO" archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$PKG" || { echo "package build failed"; exit 1; }
+if [ -n "${PROOF_PKG:-}" ]; then
+  # An already-installed plugin root (for example the cache a throwaway CLAUDE_CONFIG_DIR installed).
+  PKG="$PROOF_PKG"; SCRIPTS="$PKG/skills/core/scripts"
+  [ -d "$SCRIPTS" ] || { echo "PROOF_PKG has no skills/core/scripts: $PKG"; exit 1; }
+  echo "installed plugin root: $PKG"
+  echo "byte-identical to the committed ${PROOF_REF:-HEAD} package: $(mkdir -p "$SCRATCH/ref" && git -C "$REPO" archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$SCRATCH/ref" && diff -r "$SCRATCH/ref" "$PKG" >/dev/null && echo yes || echo NO)"
+else
+  mkdir -p "$PKG"
+  git -C "$REPO" archive "${PROOF_REF:-HEAD}:plugins/core" | tar -x -C "$PKG" || { echo "package build failed"; exit 1; }
+fi
 echo "source commit: $(git -C "$REPO" rev-parse "${PROOF_REF:-HEAD}")"
 echo "procedure sha256: $(sha "$0")"
 [ "$(id -u)" = "0" ] && echo "NOTE: running as root, chmod faults will not fire"
