@@ -65,13 +65,22 @@ function readJsonArray(file) {
  * legacy index.json is read alongside it while older installs may still register
  * there (pass includeLegacyIndex: false once no unmigrated entry remains).
  */
+/**
+ * The folder a registry entry names. Older registrations spell the field `project_path`
+ * (schema v2, forward slashes); newer ones spell it `path`. Every reader of the legacy
+ * registry goes through this so the two spellings cannot drift apart again.
+ */
+export function registryEntryPath(entry) {
+  return (entry && (entry.path || entry.project_path)) || null;
+}
+
 export function readRegisteredRoots({ coreDir = defaultCoreDir(), includeLegacyIndex = true } = {}) {
   const paths = readJsonArray(join(coreDir, 'projects.json')).map((e) => e && e.path);
   if (includeLegacyIndex) {
     // An entry the migration marked migrated is history: its project is registered in
     // projects.json at wherever it lives now, and its old path must not authorize
     // whatever folder later appears there.
-    for (const e of readJsonArray(join(coreDir, 'index.json'))) if (e && e.migrated !== true) paths.push(e.path || e.project_path);
+    for (const e of readJsonArray(join(coreDir, 'index.json'))) if (e && e.migrated !== true) paths.push(registryEntryPath(e));
   }
   const home = dirname(coreDir);
   const out = new Set();

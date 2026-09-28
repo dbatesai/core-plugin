@@ -51,7 +51,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
-  writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder,
+  writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder, registryEntryPath,
 } from './project-state.mjs';
 import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
@@ -141,8 +141,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     const dirExists = dirs.includes(id);
     const manifest = dirExists ? readJson(join(dir, 'workspace.json'), {}) : {};
     const files = dirExists ? dataFiles(dir) : [];
-    // Older registrations spell the field `project_path`; both are read, `path` first.
-    const rawPath = reg?.path || reg?.project_path || null;
+    const rawPath = registryEntryPath(reg);
     const path = rawPath ? canonical(expandHome(rawPath, home)) : null;
     const pathExists = path ? existsSync(path) : false;
 

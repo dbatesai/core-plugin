@@ -39,7 +39,7 @@ if [ -n "${PROOF_PKG:-}" ]; then
   # On Windows an install can carry CRLF in files .gitattributes does not pin; only line endings are ignored there.
   DIFFOPT=""; [ "$IS_WIN" = 1 ] && DIFFOPT="--strip-trailing-cr"
   if diff -r $DIFFOPT "$SCRATCH/ref" "$PKG" >"$SCRATCH/identity.diff" 2>&1; then
-    echo "byte-identical to the committed ${PROOF_REF:-HEAD} package: yes"
+    if [ "$IS_WIN" = 1 ]; then echo "identical to the committed ${PROOF_REF:-HEAD} package, line endings ignored (Windows): yes; this is not a byte-identity claim"; else echo "byte-identical to the committed ${PROOF_REF:-HEAD} package: yes"; fi
   else
     echo "FAIL  the installed root is NOT byte-identical to the committed ${PROOF_REF:-HEAD} package; stopping before any scenario"
     head -20 "$SCRATCH/identity.diff"; exit 1

@@ -53,7 +53,7 @@ import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './
 import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
-import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots } from './project-state.mjs';
+import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots, registryEntryPath } from './project-state.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'metrics-package-salt';
@@ -1361,7 +1361,7 @@ export function runPackage(argv, { homeOverride } = {}) {
     try {
       const parsed = JSON.parse(readFileSync(join(coreDir, file), 'utf8'));
       const list = Array.isArray(parsed) ? parsed : (parsed.workspaces || []);
-      for (const e of list) if (e) indexEntries.push({ id: e.workspace_id || e.id || null, path: e.path || e.project_path || null });
+      for (const e of list) if (e) indexEntries.push({ id: e.workspace_id || e.id || null, path: registryEntryPath(e) });
     } catch { /* absent or unreadable registry */ }
   }
 

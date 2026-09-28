@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolveRegisteredRoot } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 import { registerProject, touchProject, recordBootstrap, readBootstrapRecord } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
-import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp, stateDir, writeSignedFile, writePinSigned, readRegisteredRoots } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { readManifest, updateManifest, ensureInstallIdentity, classifyStamp, stateDir, writeSignedFile, writePinSigned, readRegisteredRoots, registryEntryPath } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 import { applyMigration, checkLegacyDrift } from '../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
@@ -1056,7 +1056,8 @@ test('a legacy registry entry that spells its folder project_path is still seen 
     writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index.map((e) => {
       if (e.workspace_id !== 'legacy') return e;
       const { path, ...rest } = e; // the same entry, older spelling
-      return { ...rest, project_path: path.replace(/\\/g, '/') };
+      // The shape found on a real machine: schema v2, forward slashes, no `path`.
+      return { schema_version: 'v2', workspace_id: rest.workspace_id, name: rest.name, project_path: path.replace(/\\/g, '/'), last_active: '2026-07-20T00:00:00Z' };
     })));
     const roots = readRegisteredRoots({ coreDir: s.coreDir });
     assert.ok(roots.has(realpathSync(p)), 'the registered-root check reads project_path');
@@ -1064,4 +1065,11 @@ test('a legacy registry entry that spells its folder project_path is still seen 
     assert.equal(r.status, 'migrated', 'the migrator resolves the entry instead of calling it orphan-gone');
     assert.equal(r.live, 'legacy');
   } finally { s.cleanup(); }
+});
+
+test('registryEntryPath prefers path, falls back to project_path, and answers null for neither', () => {
+  assert.equal(registryEntryPath({ path: '/a', project_path: '/b' }), '/a');
+  assert.equal(registryEntryPath({ project_path: 'C:/Users/x/proj' }), 'C:/Users/x/proj');
+  assert.equal(registryEntryPath({ workspace_id: 'w' }), null);
+  assert.equal(registryEntryPath(null), null);
 });
