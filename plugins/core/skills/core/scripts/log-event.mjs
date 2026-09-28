@@ -25,7 +25,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
-import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
+import { captureDisabledMarkerCandidates, EXTERNAL_MARKER, detectStoragePath } from './metrics-init.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder, readSignedFileAt } from './project-state.mjs';
 
 /**
@@ -79,17 +79,24 @@ export function resolveStoragePath(projectDir, { home = homedir(), env = process
  */
 export function storagePinInvalid(projectDir, { home = homedir(), env = process.env } = {}) {
   const meta = trustedMetricsDir(projectDir, { home, env });
-  if (!meta) return false;
-  const bodyExists = existsSync(join(meta, 'storage-path.txt'));
-  const macExists = existsSync(join(meta, 'storage-path.txt.mac'));
+  const bodyExists = !!meta && existsSync(join(meta, 'storage-path.txt'));
+  const macExists = !!meta && existsSync(join(meta, 'storage-path.txt.mac'));
   if (!bodyExists && !macExists) {
-    // No pin sits where one would be — but a durable marker (kept outside this dir, written the one
-    // time an external pin was created) can still say this project was redirected before. Losing
-    // both pin files at once should not silently resume capture into the empty project-local folder.
+    // No pin sits where one would be — no metrics state at all yet, or state exists with neither
+    // file in it. A durable marker (kept outside the metrics dir, written the one time an external
+    // pin was created) can still say this project was redirected before; losing both pin files at
+    // once should not silently resume capture into the empty project-local folder.
     try {
       const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core') });
       if (durable && readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir: join(home, '.core') }) !== null) return true;
     } catch { /* no durable state yet: this really is a project that was never redirected */ }
+    // No pin, no marker — but a project's path alone can say it needs the redirect (a synced
+    // OneDrive folder on Windows), before it has ever been scaffolded. The very first capture can
+    // land before startup's scaffold call runs. Refuse rather than let it land in that synced
+    // folder even once; the scaffold, once it runs, both fixes this and clears it going forward.
+    try {
+      if (detectStoragePath({ projectDir, home }).path !== join(projectDir, '_metrics')) return true;
+    } catch { /* detection itself failing is not grounds to refuse a project with no other signal */ }
     return false;
   }
   // A signature with no body, or a body with no signature (checked below via readPinSigned, which

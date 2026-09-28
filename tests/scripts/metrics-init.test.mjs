@@ -405,3 +405,23 @@ test('losing the pin entirely after an external scaffold is still caught by a du
     } finally { for (const d of [home, projectDir, never]) rmSync(d, { recursive: true, force: true }); }
   });
 });
+
+test('a project detected as needing the AppData redirect but never scaffolded refuses capture instead of landing its first row in the synced folder', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-neverscaffolded-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-neverscaffolded-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    try {
+      // Never call initMetrics: no pin, no marker, nothing has run yet for this project.
+      process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';   // stands in for "path detection says redirect"
+      assert.equal(storagePinInvalid(projectDir, { env: {} }), true, 'refuses before the first scaffold, on path detection alone');
+      assert.equal(resolveStoragePath(projectDir, { home, env: {} }), join(projectDir, '_metrics'), 'read side still falls back, but a capture producer is gated off by storagePinInvalid');
+
+      delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
+      const notRedirected = mkdtempSync(join(tmpdir(), 'metrics-neverscaffolded-plain-'));
+      assert.equal(storagePinInvalid(notRedirected, { env: {} }), false, 'an ordinary project with no redirect signal reads clean with no scaffold at all');
+      rmSync(notRedirected, { recursive: true, force: true });
+    } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
+  });
+});
