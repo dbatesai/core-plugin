@@ -942,3 +942,22 @@ test('migration does not sign a carried metrics pin when another project already
     assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), false, 'left unsigned, so the reader ignores it');
   } finally { s.cleanup(); }
 });
+
+test('migration signs a carried metrics pin for neither project when a not-yet-migrated peer names the same folder', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const peerPath = s.mk('Projects', 'PeerProject');
+    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+    index.push(legacyWorkspace(s, 'peer', { path: peerPath, files: { 'workspace.json': JSON.stringify({ workspace_id: 'peer' }) } }));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index));
+    const table2 = { ...table, entries: { ...table.entries, peer: { harness: H, evidence: 'fixture' } } };
+    const shared = join(s.home, 'AppData', 'Local', 'core-metrics', 'shared-old');
+    mkdirSync(shared, { recursive: true });
+    mkdirSync(join(s.coreDir, 'workspaces', 'peer', 'metrics'), { recursive: true });
+    writeFileSync(join(s.coreDir, 'workspaces', 'peer', 'metrics', 'storage-path.txt'), shared);
+    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), shared);
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 }).status, 'migrated');
+    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
+    assert.equal(existsSync(join(hot, 'metrics', 'storage-path.txt.mac')), false, 'first to migrate does not take the folder');
+  } finally { s.cleanup(); }
+});

@@ -61,6 +61,10 @@ import { assertSafeWorkspaceId, containedPath } from './trusted-home.mjs';
 const BOOKKEEPING = [/^\.DS_Store$/, /^last-active$/, /^last-bootstrap\.json$/, /\.lock(\.g\d+)?(\.done)?$/, /^visibility-canary\.json$/];
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
+function readTextOrNull(file) {
+  try { return readFileSync(file, 'utf8').trim(); } catch { return null; }
+}
+
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return fallback; }
 }
@@ -438,7 +442,12 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
         if (existsSync(pinFile)) {
           const pinned = readFileSync(pinFile, 'utf8').trim();
           const homeDir = dirname(coreDir);
-          if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir }) && !otherProjectsNamingFolder(pinned, { projectDir: real, home: homeDir, env: { CORE_HARNESS: harness } }).length) {
+          // A peer that has not migrated yet still keeps its pin in its old workspace, where the
+          // project scan cannot see it, so those are read here: a folder two projects' pins name
+          // is signed for neither, whichever migrates first.
+          const legacyPeers = manifest.entries.filter((e) => e.path !== real && e.dir_exists && readTextOrNull(join(coreDir, 'workspaces', e.workspace_id, 'metrics', 'storage-path.txt')) === pinned);
+          if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir }) && !legacyPeers.length
+              && !otherProjectsNamingFolder(pinned, { projectDir: real, home: homeDir, env: { CORE_HARNESS: harness } }).length) {
             writePinSigned({ dir: dirname(pinFile), path: pinned, root: real, coreDir });
           }
         }
