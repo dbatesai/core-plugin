@@ -989,7 +989,14 @@ test('an ambiguous legacy metrics folder is reported by the migration and again 
     assert.equal(init.held_legacy_folder.folder, shared, 'the scaffold reports the same hold from the migration record');
     assert.notEqual(init.storagePath, shared);
     writeFileSync(join(shared, '.project-root'), p + '\n');
-    assert.equal(initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } }).held_legacy_folder, null, 'claimed: no longer reported');
+    const after = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
+    assert.equal(after.held_legacy_folder, null, 'claimed: no longer reported as held');
+    assert.equal(after.storagePath, shared, 'and capture is pointed back at the old folder, not left at the new one');
+    assert.equal(after.reattached_legacy_folder.folder, shared);
+    assert.equal(after.reattached_legacy_folder.interim_storage, init.storagePath, 'the interim folder is named');
+    const again = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
+    assert.equal(again.storagePath, shared, 'and it stays there on the next scaffold');
+    assert.equal(again.reattached_legacy_folder, null);
   } finally {
     if (savedForce === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = savedForce;
     if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;

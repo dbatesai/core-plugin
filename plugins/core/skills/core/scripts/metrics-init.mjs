@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor } from './project-state.mjs';
+import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -107,22 +107,39 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   // A pin that already points at an existing external folder (one a migration carried in, or an
   // earlier scaffold chose) keeps pointing there: recomputing would leave the payloads written
   // so far at the old place while every reader and writer moved to the new one.
-  const pin = keptExternalPin({ operationalMetaDir, projectDir, home, env });
   let heldLegacyFolder = null;
-  if (pin && pin.path) {
-    storagePath = pin.path;
-    detection = { ...detection, path: pin.path, reason: 'existing-external-pin-kept' };
-  } else if (!pin) {
-    // A hold an earlier run or the migration recorded stays reported until somebody claims the folder.
-    const earlier = readHeldSigned({ dir: operationalMetaDir, coreDir: join(home, '.core') });
-    if (earlier && existsSync(earlier.folder) && !existsSync(join(earlier.folder, APPDATA_OWNER_FILE))) {
-      heldLegacyFolder = earlier;
-      detection = { ...detection, reason: `${detection.reason}; legacy folder ${earlier.folder} held` };
+  let reattachedLegacyFolder = null;
+  let interimStorage = null;
+  const coreDir = join(home, '.core');
+  const earlier = readHeldSigned({ dir: operationalMetaDir, coreDir });
+  let earlierOwner = null;
+  if (earlier && existsSync(earlier.folder)) {
+    try { earlierOwner = readFileSync(join(earlier.folder, APPDATA_OWNER_FILE), 'utf8').trim() || null; } catch { /* unclaimed */ }
+  }
+  if (earlierOwner && canonical(earlierOwner) === canonical(projectRootFor(projectDir, { home, coreDir })) && metricsStorageAllowed(earlier.folder, { projectDir, home })) {
+    // A person decided this project owns the folder it was held off: capture goes back to it, the
+    // pin is rewritten for it, and the hold is retired. What was captured in the meantime stays where it is.
+    interimStorage = storagePath;
+    reattachedLegacyFolder = earlier.folder;
+    storagePath = earlier.folder;
+    detection = { ...detection, path: earlier.folder, reason: 'held-legacy-folder-claimed-and-reattached' };
+    for (const f of ['held-legacy-folder.txt', 'held-legacy-folder.txt.mac']) rmSync(join(operationalMetaDir, f), { force: true });
+  } else {
+    const pin = keptExternalPin({ operationalMetaDir, projectDir, home, env });
+    if (pin && pin.path) {
+      storagePath = pin.path;
+      detection = { ...detection, path: pin.path, reason: 'existing-external-pin-kept' };
+    } else if (!pin) {
+      // A hold an earlier run or the migration recorded stays reported until somebody claims the folder.
+      if (earlier && existsSync(earlier.folder) && !earlierOwner) {
+        heldLegacyFolder = earlier;
+        detection = { ...detection, reason: `${detection.reason}; legacy folder ${earlier.folder} held` };
+      }
+    } else if (pin.held) {
+      heldLegacyFolder = pin.held;
+      try { writeHeldSigned({ dir: operationalMetaDir, folder: pin.held.folder, alsoNamedBy: pin.held.also_named_by, coreDir }); } catch { /* the hold still applies to this run */ }
+      detection = { ...detection, reason: `${detection.reason}; legacy folder ${pin.held.folder} held: also named by ${pin.held.also_named_by.join(', ')}` };
     }
-  } else if (pin && pin.held) {
-    heldLegacyFolder = pin.held;
-    try { writeHeldSigned({ dir: operationalMetaDir, folder: pin.held.folder, alsoNamedBy: pin.held.also_named_by, coreDir: join(home, '.core') }); } catch { /* the hold still applies to this run */ }
-    detection = { ...detection, reason: `${detection.reason}; legacy folder ${pin.held.folder} held: also named by ${pin.held.also_named_by.join(', ')}` };
   }
 
   const scaffoldLogLine = formatScaffoldLog({
@@ -213,6 +230,7 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   return {
     ok: true,
     held_legacy_folder: heldLegacyFolder,
+    reattached_legacy_folder: reattachedLegacyFolder ? { folder: reattachedLegacyFolder, interim_storage: interimStorage } : null,
     storagePath,
     operationalMetaDir,
     detection,
@@ -455,6 +473,9 @@ if (isCliEntry(import.meta.url)) {
   if (result.held_legacy_folder) {
     // stderr, which startup does not discard: the readiness summary names it.
     console.error(`CORE-METRICS-LEGACY-FOLDER-HELD: ${result.held_legacy_folder.folder} is named by more than one project and was left untouched (also: ${(result.held_legacy_folder.also_named_by || []).join(', ') || 'unknown'})`);
+  }
+  if (result.reattached_legacy_folder) {
+    console.error(`CORE-METRICS-LEGACY-FOLDER-REATTACHED: capture now writes to ${result.reattached_legacy_folder.folder}; what was captured meanwhile stays in ${result.reattached_legacy_folder.interim_storage} and is not merged`);
   }
   console.log(JSON.stringify(result, null, 2));
 }
