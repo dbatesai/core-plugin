@@ -30,7 +30,7 @@ Create `<project>/inbox.md` if external pulls are expected. Startup's `index-reg
 node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" manifest --root <root> --set-json '{"schema_version":"v2","name":"<name>","created":"<ISO>"}'
 ```
 
-Create `<root>/.core/<harness>/swarm-narrative.md` empty for now. If `CORE_ROOT` is unresolved this session, defer both and surface it in the readiness receipt (registration and state land on the next healthy startup).
+Create `<durable>/swarm-narrative.md` empty for now. If `CORE_ROOT` is unresolved this session, defer both and surface it in the readiness receipt (registration and state land on the next healthy startup).
 
 **First-run metrics disclosure — structural, not a reminder to remember.** Metrics capture is default-on by design from this workspace's first turn onward: every turn gets locally classified, including a `user_text` field with real excerpts of what the user typed, written to `_metrics`/workspace metrics dirs. Nothing transmits over a network, but the user has had no way of knowing this happens at all — so the very first readiness summary this workspace ever gets must disclose it. This is scripted the same way project registration is (`protocols/startup.md` §"Resolve the project") so it can't be silently skipped: run the check immediately after the manifest write above:
 

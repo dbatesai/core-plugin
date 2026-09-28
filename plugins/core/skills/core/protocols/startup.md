@@ -89,13 +89,20 @@ Use `root` as `<root>` everywhere below.
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
 node "${CORE_ROOT}/skills/core/scripts/migrate-workspace-state.mjs" --apply --root <root> \
-  || echo "CORE-STATE-MIGRATION-FAILED: the migration script errored, or CORE_ROOT is unresolved — the project's state may be half-migrated"
+  || echo "CORE-STATE-MIGRATION-FAILED: the migration errored, could not finish (exit 3, see its status), or CORE_ROOT is unresolved — the project's state may be half-migrated"
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
 node "${CORE_ROOT}/skills/core/scripts/migrate-workspace-state.mjs" --drift-check --root <root> \
-  || echo "CORE-STATE-DRIFT-CHECK-FAILED: the legacy drift check errored, or CORE_ROOT is unresolved"
+  || echo "CORE-STATE-DRIFT-CHECK-FAILED: the legacy drift check errored, could not finish (exit 3, see its status), or CORE_ROOT is unresolved"
 ```
 
-If either `CORE-STATE-…-FAILED` marker prints, say so in one plain line in the readiness summary, with the script's stderr; the run is not "clean" and nothing below should claim it was. A `receipt-unverified` status means a migration receipt claims success but the files it lists are missing or point outside the project's state. Name the problems it lists and leave the state alone: don't re-run the copy over the project's files, and don't call the project migrated. A person decides.
+If either `CORE-STATE-…-FAILED` marker prints, say so in one plain line in the readiness summary, with the script's stderr and the JSON it printed; the run is not "clean" and nothing below should claim it was. The script exits 3 (after printing its JSON) when it could not finish, and these statuses each need a plain sentence:
+
+- `legacy-held` — the old workspace has an unreadable folder or a symlink, so nothing was copied or released. Name the `path` and `reason`. The project's state is fenced until a person fixes the permission or removes the link and the migration is run again.
+- `receipt-unverified` — a migration receipt claims success but is unsigned, tracked by git, lists missing files, or names a destination outside the project's state. Name the problems it lists and leave the state alone: don't re-run the copy over the project's files, and don't call the project migrated. A person decides.
+- `migration-incomplete` — an earlier migration stopped part-way and there is no old state left to finish it from. The project's state stays fenced; say so and stop there.
+- `lock-held` — another session holds the project's close lock, often a migration in progress. Say so; the state is fenced until it finishes.
+
+While a migration is unfinished, other reads of the project's state see nothing and writes go to this machine's local state, so a session must not treat missing state as a fresh project.
 
 The drift check catches an older build of this harness that kept writing to the old workspace after migration (a rollback, or a second machine). Log lines it appended arrive in the project's copy exactly once; other changed files land in `superseded/legacy-<date>/`. When `status` is `brought-in`, say in one line what arrived. `unchanged`, `not-migrated` and `no-state` need no mention.
 
@@ -115,6 +122,15 @@ Echo any line after the first verbatim into the readiness summary, then add one 
 - `state-moved` — the project was moved here; its history and registration followed.
 - `state-foreign` — another machine's state is in this synced or shared folder. It's left alone, and this machine's state for the project lives under `~/.core/local/`.
 - `state-ask` — the state names an old location that no longer exists, parent folder included. Ask: *"This project's CORE history says it used to be at <old path>. Did you move it here, or is this a new project?"* Then run `index-registry.mjs state --accept-move --root <root>` or `state --fresh --root <root>`.
+
+**State paths.** Never build a path under `<root>/.core/` by hand: a synced folder, a fenced migration or another install's state routes elsewhere. Ask the registry, guarded like every script call:
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" path --root <root> --kind durable --name <file>
+```
+
+`--kind durable` is for records (drafts, the swarm narrative, the manifest); `--kind hot` is for append-heavy files (capability state and history, metrics, the source pull log). Below, `<durable>/<file>` and `<hot>/<file>` mean the printed path for that kind and file name.
 
 **Layer separation reminder.** Project synthesis lives in `<project>/PROJECT.md`. The unit store lives in `<project>/_memories/`. CORE's operational state for the project lives at `<project>/.core/<harness>/` (self-ignored by git, trusted only when its stamp verifies). `~/.core/` holds only what serves every project.
 
@@ -254,7 +270,7 @@ The project has substantive prior content but no v2 unit store. Run the nine ste
 
 **Verify the model is appropriate.** Cold-start migration on a large project warrants Opus + ultrathink-level reasoning. Surface the recommendation if the session is on a smaller model before proceeding.
 
-**Step 1 — Draft the migration plan with unit inventory enumerated.** Before writing the migration-in-progress flag, before any destructive action, draft `<root>/.core/<harness>/drafts/migration-plan.md`. The plan must enumerate the unit inventory unit-by-unit (people, decisions, risks, observations, open questions) — not "I'll discover units as I go." Naming conventions, edge structure, phase ordering, stop conditions, and any environment-specific concerns (OneDrive `cp -r` + `rm -rf` instead of `mv`; anti-resurrection traps specific to this corpus) get named in the plan. Surface the plan to the user for review and get the go-ahead before executing. If that plan already exists from a prior planning session, read it and execute from that — don't re-design.
+**Step 1 — Draft the migration plan with unit inventory enumerated.** Before writing the migration-in-progress flag, before any destructive action, draft `<durable>/drafts/migration-plan.md`. The plan must enumerate the unit inventory unit-by-unit (people, decisions, risks, observations, open questions) — not "I'll discover units as I go." Naming conventions, edge structure, phase ordering, stop conditions, and any environment-specific concerns (OneDrive `cp -r` + `rm -rf` instead of `mv`; anti-resurrection traps specific to this corpus) get named in the plan. Surface the plan to the user for review and get the go-ahead before executing. If that plan already exists from a prior planning session, read it and execute from that — don't re-design.
 
 This step is load-bearing. Enumerating the inventory before any destructive action — so you're not discovering mid-flight — is what makes the rest mechanical.
 
@@ -282,7 +298,7 @@ Then record the migration in the project's manifest via the scripted writer, pre
 node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" manifest --root <root> --set-json '{"schema_version":"v2","migrated_at":"<ISO>"}'
 ```
 
-Create `<root>/.core/<harness>/swarm-narrative.md` (empty) for future swarm runs. Every write in this step is a full-content rewrite or an additive field update, so re-entry just redoes it — re-rendering PROJECT.md from the same units and re-setting the same manifest fields are no-ops in effect. On partial failure (say PROJECT.md landed but the manifest update errored): redo only the failed writes; verify each of the three surfaces (PROJECT.md, the manifest, swarm-narrative.md) exists and carries the expected change before appending `step-7-complete <ISO>` to the flag.
+Create `<durable>/swarm-narrative.md` (empty) for future swarm runs. Every write in this step is a full-content rewrite or an additive field update, so re-entry just redoes it — re-rendering PROJECT.md from the same units and re-setting the same manifest fields are no-ops in effect. On partial failure (say PROJECT.md landed but the manifest update errored): redo only the failed writes; verify each of the three surfaces (PROJECT.md, the manifest, swarm-narrative.md) exists and carries the expected change before appending `step-7-complete <ISO>` to the flag.
 
 **Step 8 — Six-command readiness check (numbered, not text).** Run these six commands explicitly. Do not demote this step into §Moves — a real-world migration retrospective surfaced exactly this trap: an agent silently moved "readiness check" into §Moves item #1 mid-migration, advisor caught the demotion, the check then revealed substantive issues that would have shipped uncaught. Naming it as a numbered step prevents the demotion.
 
@@ -359,11 +375,11 @@ The hot section sits atop `<project>/PROJECT.md` — 5–7 lines naming what mat
 node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" candidates <project> --top 12 --session-topic <topic1> --session-topic <topic2>
 ```
 
-Read the candidate list, then compose 5–7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Usually 1–3 items, no bold lead-in paragraphs unless the items genuinely need scannable headers. Write the composed prose to a draft file with your file-write tool — `<root>/.core/<harness>/drafts/hot-section-draft.md` — then land it by path. Never interpolate the prose into the shell as a `--text` argument: it's composed from unit bodies, which can carry quotes, backticks, and `$` that the shell will mangle or execute.
+Read the candidate list, then compose 5–7 lines of plain prose blending two inputs: the priority candidates (stable structural heft) and your session-level awareness (current work, recent reconciliations, forward moves). Usually 1–3 items, no bold lead-in paragraphs unless the items genuinely need scannable headers. Write the composed prose to a draft file with your file-write tool — `<durable>/drafts/hot-section-draft.md` — then land it by path. Never interpolate the prose into the shell as a `--text` argument: it's composed from unit bodies, which can carry quotes, backticks, and `$` that the shell will mangle or execute.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --file <root>/.core/<harness>/drafts/hot-section-draft.md
+node "${CORE_ROOT}/skills/core/scripts/hot-section.mjs" apply <project> --file <durable>/drafts/hot-section-draft.md
 ```
 
 (`apply` also reads stdin when neither `--text` nor `--file` is given. `--text` stays available for short hand-typed strings that contain no unit-derived content.)
@@ -380,7 +396,7 @@ Narrate the refresh in one sentence as part of readiness — *"Refreshed the hot
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/capability-probe.mjs" --startup --json \
-  > <root>/.core/<harness>/capability-state.json \
+  > <hot>/capability-state.json \
   || echo "CORE-CAPABILITY-PROBE-FAILED: startup probe did not complete; capability evidence is stale this session"
 ```
 
@@ -442,7 +458,7 @@ What to include:
 - Source-registration signals when they're worth mentioning: pending blocks in `<project>/inbox.md` (count plus what you'll do with them — *"three observations in the inbox; I'll graduate them at the next memory pass"*), any question from them you've escalated to the user, or observations citing a `source:` not in `<project>/_sources/` (drift signal — name the source). Skip silently when the inbox is empty and no drift surfaced.
 - The top 3 §Moves priorities as the agenda.
 - Anything auto-compacted during first-time setup, named explicitly (entries, not counts).
-- The recognition signal, when present and worth flagging: read the one-line `<root>/.core/<harness>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` the last time `/process-memory` or `/metrics` ran — that script is the mechanism's source of truth, and there is NO automatic hook: the signal refreshes only on those user-invoked passes, so a session that ends without them leaves the file stale, not wrong). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." Read it as "as of the last maintenance pass", never as continuous trending. It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
+- The recognition signal, when present and worth flagging: read the one-line `<hot>/metrics/orient-signal.txt` (pre-computed by `metrics-rollup.mjs` the last time `/process-memory` or `/metrics` ran — that script is the mechanism's source of truth, and there is NO automatic hook: the signal refreshes only on those user-invoked passes, so a session that ends without them leaves the file stale, not wrong). Surface it ONLY when the headline `rec-fail-tier-0` rate is trending up (the `↑` marker) — "the agent's own measurement says recognition is slipping." Read it as "as of the last maintenance pass", never as continuous trending. It is **PROVISIONAL** (the classifier isn't calibrated yet); frame it as a self-audit signal, never a graded metric. Absent file or a flat/down trend → say nothing (per `feedback_readiness_only_escalations`).
 - Plugin version + build: read both `version` and `build` from `../../.claude-plugin/plugin.json` relative to the skill base directory (which resolves to the plugin root's `plugin.json`) — that manifest is the single source of truth for both. Echo as "Plugin v<version> build <build>". If `plugin.json` is unreadable, omit the line; if it's readable but has no `build`, echo just "Plugin v<version>".
 
 Target voice:

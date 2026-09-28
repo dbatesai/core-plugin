@@ -276,7 +276,7 @@ Why scratch cache: the user's control over project knowledge runs through PROJEC
 
 ### Analysis-protocol effectiveness narrative
 
-After running a multi-agent analysis via `protocols/analysis.md`, append to the workspace narrative at `<project>/.core/<harness>/swarm-narrative.md`. Not a mechanical record — a reflective account written for your own future swarm runs in this workspace.
+After running a multi-agent analysis via `protocols/analysis.md`, append to the workspace narrative at `<durable>/swarm-narrative.md (path from `index-registry.mjs path --kind durable`)`. Not a mechanical record — a reflective account written for your own future swarm runs in this workspace.
 
 Each entry captures: what this swarm revealed about agent effectiveness, what you chose to eliminate and why, what you preserved and why, and what questions remain open. Workspace-scoped — stays distinct from cross-workspace learnings in `agent-profile.md`.
 

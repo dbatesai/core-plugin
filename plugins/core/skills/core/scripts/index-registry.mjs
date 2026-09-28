@@ -32,6 +32,7 @@
  *        install's state; this machine's lives under ~/.core/local/), state-ask
  *   node index-registry.mjs state --accept-move|--fresh [--root <dir>] [--core-dir <dir>]
  *   node index-registry.mjs manifest [--root <dir>] [--set-json '<json>'] [--core-dir <dir>]
+ *   node index-registry.mjs path --kind durable|hot [--name <file>] [--root <dir>] [--core-dir <dir>]
  *   node index-registry.mjs bootstrap [--root <dir>] [--session-started <ISO>] [--core-dir <dir>]
  *   node index-registry.mjs last-active [--root <dir>]                [--core-dir <dir>]
  *
@@ -39,7 +40,7 @@
  */
 
 import { readFileSync, existsSync, mkdirSync, readdirSync, renameSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, isAbsolute } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
@@ -253,6 +254,8 @@ function parseArgs(argv) {
     else if (a === '--yes') out.decision = 'yes';
     else if (a === '--no') out.decision = 'no';
     else if (a === '--set-json') out.setJson = argv[++i];
+    else if (a === '--kind') out.kind = argv[++i];
+    else if (a === '--name') out.name = argv[++i];
     else out._.push(a);
   }
   return out;
@@ -305,6 +308,18 @@ export function main(argv = process.argv.slice(2)) {
           : readManifest({ root, harness, coreDir });
         process.stdout.write(JSON.stringify(m, null, 2) + '\n'); return m ? 0 : 1;
       }
+      case 'path': {
+        // The one way prose and callers name a file in a project's state: this verb asks
+        // stateDir where it lives, so a synced folder, a fenced migration or another
+        // install's state routes the same way it does for every script.
+        const kind = args.kind === 'hot' ? 'hot' : args.kind === 'durable' ? 'durable' : null;
+        if (!kind) throw new Error('path needs --kind durable|hot');
+        if (args.name && (isAbsolute(args.name) || args.name.split(/[\\/]/).includes('..'))) throw new Error('path --name must be a relative name inside the state');
+        const root = rootOrThrow(args.root, coreDir);
+        const s = stateDir({ root, harness, kind, coreDir, forWrite: true });
+        process.stdout.write((args.name ? join(s.dir, args.name) : s.dir) + '\n');
+        return 0;
+      }
       case 'bootstrap': {
         const r = recordBootstrap(coreDir, { root: args.root, harness, sessionStartedAt: args.sessionStarted || null });
         process.stdout.write(`${r.path}\n`); return 0;
@@ -319,7 +334,7 @@ export function main(argv = process.argv.slice(2)) {
         process.stdout.write((v || '(none)') + '\n'); return v ? 0 : 1;
       }
       default:
-        process.stderr.write('usage: index-registry.mjs <register|list|touch|state|manifest|bootstrap|bootstrap-status|last-active> [dir] [--root dir] [--when ISO] [--session-started ISO] [--harness h] [--confirm-new] [--accept-move|--fresh] [--set-json json] [--core-dir dir]\n');
+        process.stderr.write('usage: index-registry.mjs <register|list|touch|state|manifest|path|bootstrap|bootstrap-status|last-active> [dir] [--root dir] [--when ISO] [--session-started ISO] [--harness h] [--confirm-new] [--accept-move|--fresh] [--set-json json] [--core-dir dir]\n');
         return 2;
     }
   } catch (e) {

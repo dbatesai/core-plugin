@@ -469,7 +469,7 @@ test('a force-added .core file that git tracks is ignored, even with a valid MAC
 });
 
 test('a force-added tracked file still reads as absent when git ls-files itself errors (index unreadable)', { skip: isWin || isRoot }, () => {
-  // A build-time review's falsifier: trackedStateFiles() used to fall back to "nothing
+  // Regression guard: trackedStateFiles() used to fall back to "nothing
   // tracked" whenever the git spawn failed, so an error mid-check (not just a clean
   // "untracked" answer) would let a force-added, validly-MACed control file be read
   // and trusted. Force-add the files as before, then make `.git/index` unreadable so
@@ -724,5 +724,78 @@ test('drift refuses to run over a legacy symlink or unreadable folder and leaves
     assert.equal(d.status, 'legacy-held');
     assert.equal(sha(receiptFile), receiptBefore, 'the receipt is untouched');
     assert.equal(sha(projectLog), logBefore, 'nothing was appended before the walk failed');
+  } finally { s.cleanup(); }
+});
+
+test('drift after an interrupted run never appends the same tail twice, whether the append landed or not', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    const legacyLog = join(s.coreDir, 'workspaces', 'legacy', 'capability-history.jsonl');
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    const receiptFile = stateFile(p, RECEIPT_NAME);
+    const before = JSON.parse(readFileSync(receiptFile, 'utf8'));
+    const entry = before.files.find((f) => f.from === legacyLog);
+    const original = readFileSync(entry.to, 'utf8');
+    const tail = '{"row":"old-2"}\n';
+    writeFileSync(legacyLog, original + tail);
+
+    // The state a run that stopped after writing its intent leaves behind.
+    const interrupted = () => writeSignedFile({ dir: join(p, '.core', H), name: RECEIPT_NAME, coreDir: s.coreDir, body: JSON.stringify({
+      ...before, files: before.files.map((f) => (f.from === legacyLog ? {
+        ...f, pending: { from_offset: entry.length, from_length: (original + tail).length, to_offset: original.length, tail_sha: createHash('sha256').update(tail).digest('hex') },
+      } : f)),
+    }) });
+
+    interrupted(); // the tail reached the project's copy, the receipt was never finished
+    writeFileSync(entry.to, original + tail);
+    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'brought-in');
+    assert.equal(readFileSync(entry.to, 'utf8'), original + tail, 'landed append is not repeated');
+    assert.equal(checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir }).status, 'unchanged');
+
+    interrupted(); // stopped before the append landed
+    writeFileSync(entry.to, original);
+    checkLegacyDrift({ root: p, harness: H, coreDir: s.coreDir });
+    assert.equal(readFileSync(entry.to, 'utf8'), original + tail, 'an append that never landed happens once');
+  } finally { s.cleanup(); }
+});
+
+test('a synced project\'s hot state is fenced by the migration marker, like its durable state', () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Dropbox', 'Projects', 'Synced');
+    registerProject(s.coreDir, p);
+    const dir = stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).dir;
+    writeFileSync(join(dir, '.migrating'), 'x\n');
+    assert.equal(stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }), null, 'a reader sees nothing');
+    const w = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true });
+    assert.equal(w.status, 'migrating');
+    assert.ok(w.dir.endsWith('.migrating-scratch'), 'a writer is diverted from the state the migration is filling');
+    rmSync(join(dir, '.migrating'));
+    assert.notEqual(stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).status, 'migrating');
+  } finally { s.cleanup(); }
+});
+
+test('the migration CLI exits 3 with its JSON when it could not finish, so startup cannot mistake it for a clean run', { skip: isWin }, () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    symlinkSync(join(s.base, 'nowhere'), join(s.coreDir, 'workspaces', 'legacy', 'dangling'));
+    writeFileSync(join(s.coreDir, 'migrate-harness-table.json'), JSON.stringify(table));
+    const r = spawnSync(process.execPath, [join(SCRIPTS, 'migrate-workspace-state.mjs'), '--apply', '--root', p, '--harness', H, '--core-dir', s.coreDir], { encoding: 'utf8' });
+    assert.equal(r.status, 3);
+    assert.equal(JSON.parse(r.stdout).status, 'legacy-held');
+  } finally { s.cleanup(); }
+});
+
+test('index-registry path names a file in the project\'s state the way stateDir does, and refuses names that leave it', () => {
+  const s = sandbox();
+  try {
+    const p = signedProject(s);
+    const run = (...a) => spawnSync(process.execPath, [REGISTRY_CLI, 'path', '--root', p, '--harness', H, '--core-dir', s.coreDir, ...a], { encoding: 'utf8' });
+    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).dir;
+    const r = run('--kind', 'hot', '--name', 'capability-state.json');
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout.trim(), join(hot, 'capability-state.json'));
+    assert.notEqual(run('--kind', 'hot', '--name', '../escape').status, 0);
+    assert.notEqual(run('--kind', 'nope').status, 0);
   } finally { s.cleanup(); }
 });

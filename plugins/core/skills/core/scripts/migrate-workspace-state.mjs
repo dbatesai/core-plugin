@@ -223,6 +223,8 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
 
 // ---------- apply ----------
 
+// Statuses that mean the project's state is not migrated and needs attention or a retry.
+const BLOCKED_STATUSES = new Set(['legacy-held', 'migration-incomplete', 'receipt-unverified', 'lock-held']);
 const LOCK_STALE_MS = 15 * 60 * 1000;
 const RECEIPT = 'migrated-from.json';
 const LEGACY_MANIFEST = 'legacy-workspace.json';
@@ -267,7 +269,7 @@ function verifiedReceipt({ root, harness, coreDir, stateDirs }) {
     if (!f || typeof f.to !== 'string') { problems.push('a receipt entry has no destination'); continue; }
     if (!stateDirs.some((d) => containedPath(d, f.to))) { problems.push(`destination outside this project's state: ${f.to}`); continue; }
     let st;
-    try { st = lstatSync(f.to); } catch { problems.push(`missing: ${f.to}`); continue; }
+    try { st = lstatSync(f.to); } catch { if (!f.pending) problems.push(`missing: ${f.to}`); continue; }
     if (!st.isFile()) problems.push(`not a regular file: ${f.to}`);
   }
   return { ok: problems.length === 0, receipt, problems };
@@ -508,6 +510,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
     const day = now.toISOString().slice(0, 10);
     const appended = [];
     const superseded = [];
+    const persistReceipt = () => writeSignedFile({ dir: durable.dir, name: RECEIPT, coreDir, body: JSON.stringify({ ...receipt, files: [...byFrom.values()], legacy_checked_at: now.toISOString() }, null, 2) + '\n' });
     // Every source is listed before anything is written: an unreadable folder or a symlink
     // must stop the check with the project's copies and the receipt still as they were.
     const listed = sources.map(({ id, superseded: isSup }) => {
@@ -531,13 +534,31 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
         const to = known ? known.to : defaultTo;
         const priorLen = known && typeof known.length === 'number' ? known.length : 0;
         const appendOnly = base.endsWith('.jsonl') && size >= priorLen
-          && (!known || (typeof known.length === 'number' && sha256Prefix(from, priorLen) === known.sha256));
+          && (!known || known.pending || (typeof known.length === 'number' && sha256Prefix(from, priorLen) === known.sha256));
 
         if (appendOnly) {
           mkdirSync(dirname(to), { recursive: true });
-          appendFileSync(to, readRange(from, priorLen));
+          const tail = readRange(from, priorLen);
+          const tailSha = createHash('sha256').update(tail).digest('hex');
+          const pending = known && known.pending;
+          let toOffset;
+          let alreadyAppended = false;
+          if (pending && pending.tail_sha === tailSha && pending.from_offset === priorLen && pending.from_length === size) {
+            // An earlier run recorded this append and stopped before finishing the receipt.
+            // If the tail is already in the project's copy at the recorded offset, it is not appended again.
+            toOffset = pending.to_offset;
+            alreadyAppended = existsSync(to) && statSync(to).size >= toOffset + tail.length
+              && createHash('sha256').update(readRange(to, toOffset).subarray(0, tail.length)).digest('hex') === tailSha;
+          } else {
+            // Write ahead: the intent reaches the signed receipt before the bytes reach the copy.
+            toOffset = existsSync(to) ? statSync(to).size : 0;
+            byFrom.set(from, { from, to, sha256: known ? known.sha256 : null, length: priorLen, pending: { from_offset: priorLen, from_length: size, to_offset: toOffset, tail_sha: tailSha } });
+            persistReceipt();
+          }
+          if (!alreadyAppended) appendFileSync(to, tail);
           appended.push({ from, to, bytes: size - priorLen });
           byFrom.set(from, { from, to, sha256: sha256(from), length: size });
+          persistReceipt();
         } else {
           const aside = join(durable.dir, 'superseded', `legacy-${day}`, id, rel);
           mkdirSync(dirname(aside), { recursive: true });
@@ -547,9 +568,7 @@ function checkLegacyDriftInner({ root, harness = detectStateHarness(), coreDir =
         }
       }
     }
-    if (appended.length || superseded.length) {
-      writeSignedFile({ dir: durable.dir, name: RECEIPT, coreDir, body: JSON.stringify({ ...receipt, files: [...byFrom.values()], legacy_checked_at: now.toISOString() }, null, 2) + '\n' });
-    }
+    if (appended.length || superseded.length) persistReceipt();
     return { status: appended.length || superseded.length ? 'brought-in' : 'unchanged', root: real, harness, appended, superseded };
   } finally {
     releaseFileLock(lockFile, lock.nonce);
@@ -597,7 +616,8 @@ if (isCliEntry(import.meta.url)) {
     const text = JSON.stringify(result, null, 2) + '\n';
     if (args.out) atomicWriteFileSync(args.out, text);
     else process.stdout.write(text);
-    process.exit(0);
+    // A migration that could not finish is not a clean run: exit 3 so a caller sees it.
+    process.exit(BLOCKED_STATUSES.has(result.status) ? 3 : 0);
   } catch (err) {
     process.stderr.write(`migrate-workspace-state: ${err.message}\n`);
     process.exit(2);

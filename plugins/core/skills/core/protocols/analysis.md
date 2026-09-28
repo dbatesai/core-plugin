@@ -209,7 +209,7 @@ Once accepted:
 
 1. Save the synthesis to `<project>/_outputs/<date>/<topic>/SYNTHESIS.md` BEFORE TeamDelete.
 2. Write the review-finding unit at `<project>/_memories/rf-<topic>-<YYYY-MM-DD>.md` with edges to implicated files.
-3. Append the effectiveness narrative to `<project>/.core/<harness>/swarm-narrative.md`.
+3. Append the effectiveness narrative to `<durable>/swarm-narrative.md (path from `index-registry.mjs path --kind durable`)`.
 4. Write the effectiveness report at `~/.core/swarm-effectiveness/<project-slug>-<YYYY-MM-DD>.md` per `protocols/hygiene.md §"Self-evolution — session-end learning"`.
 5. Promote generalizable insights to `~/.core/research/` (research mode) or `~/.core/agents/` + `~/.core/task-configs/` (compositional patterns).
 6. Update `PROJECT.md` if the synthesis produced new decisions, risks, or moves.

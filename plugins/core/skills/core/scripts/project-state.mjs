@@ -31,7 +31,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { projectPathContainsOneDriveSubstring } from './metrics-init.mjs';
-import { requireTrustedHome, containedPath } from './trusted-home.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
 import { registerProject } from './index-registry.mjs';
 
 export const STATE_DIRNAME = '.core';
@@ -353,11 +353,6 @@ export function duringMigration(fn) {
   try { return fn(); } finally { migrationDepth--; }
 }
 
-/** A path read out of project state must resolve inside that state directory. */
-export function containedInState(stateDir, candidate) {
-  return containedPath(stateDir, candidate);
-}
-
 // ---------- the harness and the root a caller is working in ----------
 
 /**
@@ -425,6 +420,16 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
   assertHarnessName(harness);
   const real = canonical(root);
   const target = projectStateDir({ root: real, harness, kind, coreDir });
+  if (target.location === 'local' && target.reason === 'synced-folder' && !migrationDepth
+      && existsSync(join(real, STATE_DIRNAME, harness, MIGRATING_MARKER))) {
+    // A synced project's hot state already lives on this machine, so the project-side
+    // marker is the only thing that says a migration is filling it. Same fence as the
+    // project case: reads see nothing, writes go to a scratch folder beside it.
+    if (!forWrite) return null;
+    const scratch = join(target.dir, '.migrating-scratch');
+    mkdirSync(scratch, { recursive: true });
+    return { dir: scratch, location: 'local', status: 'migrating', trusted: true };
+  }
   if (target.location === 'local') {
     if (forWrite) mkdirSync(target.dir, { recursive: true });
     else if (!existsSync(target.dir)) return null;
@@ -749,7 +754,9 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     return { status: 'declined', oldPath: cand.oldPath };
   }
 
-  const localOptOut = readManifest({ root: real, harness, coreDir })?.metrics_enabled === false;
+  const localManifest = readManifest({ root: real, harness, coreDir });
+  const localOptOut = localManifest?.metrics_enabled === false;
+  const localTurnOptOut = localManifest?.turn_capture === false;
   const harnessDir = join(real, STATE_DIRNAME, harness);
   const manifestFile = join(harnessDir, MANIFEST);
   const bootstrapFile = join(harnessDir, BOOTSTRAP);
@@ -775,12 +782,13 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     if (typeof manifest.project_id === 'string' && manifest.project_id) next.project_id = manifest.project_id;
     if (typeof manifest.agent_name === 'string' && manifest.agent_name) next.agent_name = manifest.agent_name;
     if (manifest.metrics_enabled === false || localOptOut) next.metrics_enabled = false;
+    if (manifest.turn_capture === false || localTurnOptOut) next.turn_capture = false;
     withFileLock(`${manifestFile}.lock`, () => {
       writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify(next, null, 2) + '\n', coreDir });
     });
-  } else if (localOptOut) {
+  } else if (localOptOut || localTurnOptOut) {
     withFileLock(`${manifestFile}.lock`, () => {
-      writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify({ metrics_enabled: false, harness }, null, 2) + '\n', coreDir });
+      writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify({ ...(localOptOut ? { metrics_enabled: false } : {}), ...(localTurnOptOut ? { turn_capture: false } : {}), harness }, null, 2) + '\n', coreDir });
     });
   }
   if (bootstrapBody !== null) {

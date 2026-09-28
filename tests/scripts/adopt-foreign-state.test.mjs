@@ -150,6 +150,22 @@ test("this machine's own opt-out for the folder survives adopting a manifest tha
   } finally { s.cleanup(); }
 });
 
+test('the turn-evidence opt-out carries through adoption from either side: the adopted manifest or this machine\'s own', () => {
+  const s = sandbox();
+  try {
+    const { coreB, restored } = restoredProject(s, { turn_capture: false });
+    adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
+    assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }).turn_capture, false);
+  } finally { s.cleanup(); }
+  const t = sandbox();
+  try {
+    const { coreB, restored } = restoredProject(t);
+    updateManifest({ root: restored, harness: H, coreDir: coreB, fields: { turn_capture: false } });
+    adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
+    assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }).turn_capture, false);
+  } finally { t.cleanup(); }
+});
+
 test('an unparseable manifest is set aside on yes, not adopted', () => {
   const s = sandbox();
   try {
@@ -260,7 +276,7 @@ test('the home folder is never offered for adoption, even holding a foreign stam
   } finally { s.cleanup(); }
 });
 
-// A build-time review's falsifier: every fixture above descends from a real writeStamp() /
+// Every fixture above descends from a real writeStamp() /
 // updateManifest() call (a legitimate prior install), then gets copied. That never
 // exercises the actual attack this feature is exposed to — a folder that was never a
 // real CORE install at all, hand-built to *look* like one. wellFormed() only checks
