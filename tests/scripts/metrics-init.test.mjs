@@ -1,5 +1,6 @@
 import { operationalMetricsDir, resolveStoragePath } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
 // a temp dir for the initMetrics test so the operational-meta write under
@@ -214,5 +215,35 @@ test('a pin that this install did not sign, or that names somewhere metrics may 
       signedPin(meta, home, inside);
       assert.equal(resolveStoragePath(projectDir, { home, env: {} }), inside, 'a signed pin inside AppData is honored');
     } finally { for (const d of [home, projectDir, outside]) rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
+test('two registered projects whose signed pins name the same unclaimed folder: neither takes it, both are told, and the bytes are untouched', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-hold-home-'));
+    const A = mkdtempSync(join(tmpdir(), 'metrics-hold-a-'));
+    const B = mkdtempSync(join(tmpdir(), 'metrics-hold-b-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try {
+      const coreDir = join(home, '.core');
+      registerProject(coreDir, A);
+      registerProject(coreDir, B);
+      const shared = join(home, 'AppData', 'Local', 'core-metrics', 'shared-before-the-claim');
+      mkdirSync(shared, { recursive: true });
+      writeFileSync(join(shared, 'evidence.jsonl'), '{"who":"unknown"}\n');
+      signedPin(operationalMetricsDir(A, { home, env: {} }), home, shared);
+      signedPin(operationalMetricsDir(B, { home, env: {} }), home, shared);
+
+      for (const [me, other] of [[B, A], [A, B]]) {
+        const r = initMetrics({ projectDir: me, env: {} });
+        assert.notEqual(r.storagePath, shared, 'not taken, whoever scaffolds first');
+        assert.equal(r.held_legacy_folder.folder, shared);
+        assert.deepEqual(r.held_legacy_folder.also_named_by.map((x) => x.replace(/^\/private/, '')), [other.replace(/^\/private/, '')]);
+      }
+      assert.equal(existsSync(join(shared, '.project-root')), false, 'still unclaimed');
+      assert.equal(readFileSync(join(shared, 'evidence.jsonl'), 'utf8'), '{"who":"unknown"}\n');
+    } finally { for (const d of [home, A, B]) rmSync(d, { recursive: true, force: true }); }
   });
 });

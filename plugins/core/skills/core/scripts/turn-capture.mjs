@@ -31,7 +31,7 @@
  *   - dir 0700 / files 0600, asserted on create and re-asserted per append;
  *   - one exclusion lock shared by append/retention/purge, a STABLE SIBLING
  *     outside the purged dir (`<base>/.turn-capture.lock`);
- *   - 30-day retention (maintenance cadence) + explicit `--purge`;
+ *   - kept until an explicit `--purge` (no scheduled deletion);
  *   - exporter isolation: `metrics-package.mjs` has no read path here, guarded
  *     by a planted-canary tripwire test.
  *

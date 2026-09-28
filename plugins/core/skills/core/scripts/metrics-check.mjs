@@ -438,7 +438,7 @@ export function computeRows(out) {
       trust: TRUST.DIRECT,
       noGauge: true,
       value: tc.enabled
-        ? `ON — each turn's prompt and the delivered memory context are saved locally so retrieval quality can be graded later (never exported, auto-deleted after 30 days): ${tc.rows || 0} row(s) / ${tc.days || 0} day(s), ${health.failures || 0} of ${health.attempts || 0} writes failed. Turn off with CORE_TURN_CAPTURE=0 or "turn_capture": false in this project's workspace.json (CORE_METRICS_ENABLED=0 turns off all local capture).`
+        ? `ON — each turn's prompt and the delivered memory context are saved locally so retrieval quality can be graded later (never exported, kept until you purge it): ${tc.rows || 0} row(s) / ${tc.days || 0} day(s), ${health.failures || 0} of ${health.attempts || 0} writes failed. Turn off with CORE_TURN_CAPTURE=0 or "turn_capture": false in this project's workspace.json (CORE_METRICS_ENABLED=0 turns off all local capture).`
         : 'OFF — turn capture is disabled for this project, so hindsight grading of retrieval quality has no evidence to work from.',
     });
   }
@@ -986,7 +986,7 @@ export function renderAnswerView({ project, cards, tripwires, capture, evidence 
   if (captureOff) {
     L.push('Turn recording is OFF for this project — nothing about your conversations is being saved.');
   } else {
-    L.push('To produce these numbers, each turn\'s prompt and the memory context CORE gave you are saved locally on this machine — never sent anywhere, deleted after 30 days. Turn it off with CORE_TURN_CAPTURE=0, or "turn_capture": false in this project\'s workspace.json.');
+    L.push('To produce these numbers, each turn\'s prompt and the memory context CORE gave you are saved locally on this machine — never sent anywhere, kept until you purge it. Turn it off with CORE_TURN_CAPTURE=0, or "turn_capture": false in this project\'s workspace.json.');
   }
   L.push('');
 

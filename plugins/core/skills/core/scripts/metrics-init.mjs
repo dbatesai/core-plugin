@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writeSignedFile, readSignedFileAt, metricsStorageAllowed } from './project-state.mjs';
+import { writeSignedFile, readSignedFileAt, metricsStorageAllowed, readRegisteredRoots, stateDir, detectStateHarness } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -107,10 +107,14 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   // A pin that already points at an existing external folder (one a migration carried in, or an
   // earlier scaffold chose) keeps pointing there: recomputing would leave the payloads written
   // so far at the old place while every reader and writer moved to the new one.
-  const kept = keptExternalPin({ operationalMetaDir, projectDir, home });
-  if (kept) {
-    storagePath = kept;
-    detection = { ...detection, path: kept, reason: 'existing-external-pin-kept' };
+  const pin = keptExternalPin({ operationalMetaDir, projectDir, home, env });
+  let heldLegacyFolder = null;
+  if (pin && pin.path) {
+    storagePath = pin.path;
+    detection = { ...detection, path: pin.path, reason: 'existing-external-pin-kept' };
+  } else if (pin && pin.held) {
+    heldLegacyFolder = pin.held;
+    detection = { ...detection, reason: `${detection.reason}; legacy folder ${pin.held.folder} held: also named by ${pin.held.also_named_by.join(', ')}` };
   }
 
   const scaffoldLogLine = formatScaffoldLog({
@@ -200,6 +204,7 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
 
   return {
     ok: true,
+    held_legacy_folder: heldLegacyFolder,
     storagePath,
     operationalMetaDir,
     detection,
@@ -207,8 +212,13 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   };
 }
 
-/** The folder a signed pin names, when it is an allowed external folder, exists, and no other project claimed it. */
-function keptExternalPin({ operationalMetaDir, projectDir, home }) {
+/**
+ * The folder a signed pin names, when it is an allowed external folder that exists and no other
+ * project claimed. Returns { path }, { held } when another registered project's signed pin names
+ * the same unclaimed folder (the old bytes may belong to either, and scaffold order is no
+ * evidence of ownership, so nobody takes it), or null.
+ */
+function keptExternalPin({ operationalMetaDir, projectDir, home, env }) {
   if (process.env.CORE_METRICS_FORCE_PROJECT_LOCAL === '1') return null;
   // Only a pin this install signed is kept, and only inside the folders metrics may live in.
   const pinned = (readSignedFileAt({ dir: operationalMetaDir, name: 'storage-path.txt', coreDir: join(home, '.core') }) || '').trim();
@@ -216,9 +226,26 @@ function keptExternalPin({ operationalMetaDir, projectDir, home }) {
   try { if (!statSync(pinned).isDirectory()) return null; } catch { return null; }
   try {
     const owner = readFileSync(join(pinned, '.project-root'), 'utf8').trim();
-    if (owner !== projectDir) return null;
-  } catch { /* unclaimed: it stays with the project whose pin names it */ }
-  return pinned;
+    return owner === projectDir ? { path: pinned } : null;
+  } catch { /* unclaimed: fall through */ }
+  const also = otherProjectsNaming(pinned, { projectDir, home, env });
+  return also.length ? { held: { folder: pinned, also_named_by: also } } : { path: pinned };
+}
+
+function otherProjectsNaming(folder, { projectDir, home, env }) {
+  const coreDir = join(home, '.core');
+  const harness = detectStateHarness(env);
+  const out = [];
+  let roots;
+  try { roots = readRegisteredRoots({ coreDir }); } catch { return out; }
+  for (const root of roots) {
+    if (root === projectDir) continue;
+    try {
+      const s = stateDir({ root, harness, kind: 'hot', coreDir });
+      if (s && (readSignedFileAt({ dir: join(s.dir, 'metrics'), name: 'storage-path.txt', coreDir }) || '').trim() === folder) out.push(root);
+    } catch { /* an unreadable project cannot vouch for a claim */ }
+  }
+  return out;
 }
 
 const APPDATA_OWNER_FILE = '.project-root';

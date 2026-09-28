@@ -42,12 +42,12 @@ import { projectRootFor, detectStateHarness, readManifest, updateManifest } from
  * Workspaces stamped below this see the notice again; a wording polish that
  * changes nothing about what is captured does not earn a bump.
  */
-export const NOTICE_VERSION = 3;
+export const NOTICE_VERSION = 4;
 
 export const NOTICE_TEXT = [
   "One thing worth knowing since this is a brand-new project: CORE keeps a local, on-this-machine log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically, it stays on this machine, and none of it goes anywhere else.",
   "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `.core/<harness>/workspace.json`.",
-  "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved on this machine (never exported, auto-deleted after 30 days) so retrieval quality can be graded honestly after the fact — the same 30-day deletion covers the classified turn log the recognition classifier writes. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `.core/<harness>/workspace.json`; you can also purge everything it has saved at any time.",
+  "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved on this machine (never exported, and kept until you purge it) so retrieval quality can be graded honestly after the fact — the classified turn log the recognition classifier writes is kept the same way. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `.core/<harness>/workspace.json`; you can also purge everything it has saved at any time.",
 ].join('\n\n');
 
 /**
