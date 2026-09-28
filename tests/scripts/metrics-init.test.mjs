@@ -1,5 +1,5 @@
 import { operationalMetricsDir, resolveStoragePath, metricsEnabled, storagePinInvalid } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { writePinSigned, readPinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
@@ -422,6 +422,53 @@ test('a project detected as needing the AppData redirect but never scaffolded re
       const notRedirected = mkdtempSync(join(tmpdir(), 'metrics-neverscaffolded-plain-'));
       assert.equal(storagePinInvalid(notRedirected, { env: {} }), false, 'an ordinary project with no redirect signal reads clean with no scaffold at all');
       rmSync(notRedirected, { recursive: true, force: true });
+    } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
+test('a marker write failure during an external scaffold fails the scaffold closed, the same as a pin write failure', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-markerfail-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-markerfail-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try {
+      // Make the durable state's would-be marker file path unwritable: a directory in its place,
+      // one level up so mkdirSync(recursive) collides.
+      const coreDir = join(home, '.core');
+      const durable = stateDir({ root: projectDir, harness: 'claude-code', coreDir, forWrite: true });
+      mkdirSync(join(durable.dir, 'metrics-ever-external.txt'), { recursive: true });   // a dir where a file must go
+      const r = initMetrics({ projectDir, env: { CORE_HARNESS: 'claude-code' } });
+      assert.equal(r.ok, false, 'the scaffold does not report success with no marker behind it');
+      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      assert.equal(existsSync(join(meta, 'storage-path.txt')), false, 'no pin was left pointing at an external folder with no marker');
+    } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
+test('a valid external pin from before the marker existed gets one backfilled on read, so a later total loss is still caught', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-backfill-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'metrics-backfill-proj-'));
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try {
+      initMetrics({ projectDir, env: {} });
+      const coreDir = join(home, '.core');
+      const durable = stateDir({ root: projectDir, harness: 'claude-code', coreDir, forWrite: true });
+      rmSync(join(durable.dir, 'metrics-ever-external.txt'), { force: true });
+      rmSync(join(durable.dir, 'metrics-ever-external.txt.mac'), { force: true });
+      assert.equal(readSignedFileAt({ dir: durable.dir, name: 'metrics-ever-external.txt', coreDir }), null, 'no marker yet, as if from before it existed');
+
+      assert.equal(storagePinInvalid(projectDir, { env: {} }), false, 'the pin is currently valid');
+      assert.notEqual(readSignedFileAt({ dir: durable.dir, name: 'metrics-ever-external.txt', coreDir }), null, 'reading a valid pin backfilled the marker');
+
+      const meta = operationalMetricsDir(projectDir, { home, env: {} });
+      rmSync(join(meta, 'storage-path.txt'), { force: true });
+      rmSync(join(meta, 'storage-path.txt.mac'), { force: true });
+      assert.equal(storagePinInvalid(projectDir, { env: {} }), true, 'losing the pin afterward is still caught, via the backfilled marker');
     } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
   });
 });

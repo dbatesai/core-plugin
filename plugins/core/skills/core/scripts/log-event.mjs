@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER, detectStoragePath } from './metrics-init.mjs';
+import { markMetricsEverExternal } from './project-state.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder, readSignedFileAt } from './project-state.mjs';
 
 /**
@@ -104,6 +105,18 @@ export function storagePinInvalid(projectDir, { home = homedir(), env = process.
   // files looks like, and the folder it named cannot be recovered from what remains.
   const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
   if (!(pinned && metricsStorageAllowed(pinned, { projectDir, home }))) return true;
+  if (pinned !== join(projectDir, '_metrics')) {
+    // A valid external pin found with no marker behind it: an install from before the marker
+    // existed, or a producer that failed to write one. Backfill it now, while the pin is still
+    // known-good, so a later loss of the pin is still caught. Best-effort: a read path never fails
+    // a project over write access to its own state.
+    try {
+      const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core') });
+      if (durable && readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir: join(home, '.core') }) === null) {
+        markMetricsEverExternal({ projectDir, harness: detectStateHarness(env), home, coreDir: join(home, '.core'), folder: pinned });
+      }
+    } catch { /* best-effort backfill; the pin itself is still valid right now */ }
+  }
   // An AppData folder nobody claimed that another project's signed pin also names is not this
   // project's to write to; if that cannot be ruled out, capture stays off.
   if (containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned) && !existsSync(join(pinned, '.project-root'))) {

@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, writeSignedFile, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical, stateDir, detectStateHarness } from './project-state.mjs';
+import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, writeSignedFile, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical, stateDir, detectStateHarness, markMetricsEverExternal } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -170,10 +170,16 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
       // A durable marker, outside the hot metrics dir the pin itself lives in, so that losing the
       // pin's two files together still leaves evidence this project was ever redirected externally
       // — storagePinInvalid reads it to refuse rather than silently read an empty project-local folder.
+      // Part of what "successfully scaffolded" means, not a side note: if this throws, it propagates
+      // to the same fail-closed path a pin-write failure takes, rather than reporting success with
+      // no marker behind it — and unlike a pin-write failure, the pin itself was already written, so
+      // it's rolled back here rather than left pointing at an external folder with no marker behind it.
       try {
-        const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: env.CORE_HARNESS || detectStateHarness(env), coreDir: join(home, '.core'), forWrite: true });
-        if (durable) writeSignedFile({ dir: durable.dir, name: EXTERNAL_MARKER, body: JSON.stringify({ folder: storagePath }), coreDir: join(home, '.core') });
-      } catch { /* best-effort: the pin itself is still the primary record */ }
+        markMetricsEverExternal({ projectDir, harness: env.CORE_HARNESS || detectStateHarness(env), home, coreDir: join(home, '.core'), folder: storagePath });
+      } catch (markerErr) {
+        for (const f of ['storage-path.txt', 'storage-path.txt.mac']) rmSync(join(operationalMetaDir, f), { force: true });
+        throw markerErr;
+      }
     }
     // The hold is retired only once the new pin is written and reads back as this folder; if the
     // write failed the record stays, so the next scaffold can still reattach.
@@ -274,6 +280,8 @@ function keptExternalPin({ operationalMetaDir, projectDir, home, env }) {
 // Same name as METRICS_OWNER_FILE in project-state.mjs; kept literal here because this module and
 // project-state load in a cycle and a module-level read of its exports would hit a not-yet-set binding.
 const APPDATA_OWNER_FILE = '.project-root';
+// Same name as METRICS_EXTERNAL_MARKER in project-state.mjs; kept literal here for the same reason
+// as APPDATA_OWNER_FILE above (an import-cycle binding trap).
 export const EXTERNAL_MARKER = 'metrics-ever-external.txt';
 
 /**

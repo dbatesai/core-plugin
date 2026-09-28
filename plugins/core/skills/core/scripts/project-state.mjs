@@ -688,6 +688,21 @@ export function readHeldSigned({ dir, coreDir = defaultCoreDir() }) {
 }
 
 export const METRICS_OWNER_FILE = '.project-root';
+export const METRICS_EXTERNAL_MARKER = 'metrics-ever-external.txt';
+
+/**
+ * Record, durably and outside the metrics dir the pin itself lives in, that a project's metrics
+ * were ever redirected externally. Every producer of an external pin (the scaffold, the migration
+ * that carries one over) calls this; `storagePinInvalid` reads it back when the pin is lost. Throws
+ * on failure — the caller decides whether that failure is fatal to the operation writing the pin.
+ */
+export function markMetricsEverExternal({ projectDir, harness, home, coreDir = defaultCoreDir(), folder }) {
+  const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir }), harness, coreDir, forWrite: true });
+  if (!durable) throw new Error('no durable state for this project');
+  writeSignedFile({ dir: durable.dir, name: METRICS_EXTERNAL_MARKER, body: JSON.stringify({ folder }), coreDir });
+}
+
+
 
 /**
  * The other registered projects, on this machine and readable by this install, whose signed

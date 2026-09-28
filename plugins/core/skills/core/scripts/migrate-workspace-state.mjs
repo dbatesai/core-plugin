@@ -51,7 +51,7 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, defaultCoreDir, stateDir, updateManifest, detectStateHarness, assertHarnessName, resolveProjectRoot,
-  writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder, registryEntryPath,
+  writeSignedFile, writePinSigned, writeHeldSigned, readSignedFile, duringMigration, MIGRATING_MARKER, metricsStorageAllowed, otherProjectsNamingFolder, registryEntryPath, markMetricsEverExternal,
 } from './project-state.mjs';
 import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
@@ -368,6 +368,7 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
     const receiptFile = join(durable.dir, RECEIPT);
     let copies = [];
     let metricsHeld = null;
+    let metricsMarkerFailed = null;
     const markerFile = join(durable.dir, MIGRATING_MARKER);
     if (existsSync(receiptFile)) {
       // A receipt that claims success but does not match the disk is never trusted and
@@ -450,6 +451,14 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
           const otherProjects = otherProjectsNamingFolder(pinned, { projectDir: real, home: homeDir, env: { CORE_HARNESS: harness } });
           if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir }) && !legacyPeers.length && !otherProjects.length) {
             writePinSigned({ dir: dirname(pinFile), path: pinned, root: real, coreDir });
+            // Same durable marker a fresh scaffold writes, so losing this carried pin later is caught
+            // the same way. Attempted, not swallowed: a failure here does not undo an otherwise
+            // successful migration, but it is named in the result rather than hidden.
+            try {
+              markMetricsEverExternal({ projectDir: real, harness, home: homeDir, coreDir, folder: pinned });
+            } catch (e) {
+              metricsMarkerFailed = { folder: pinned, err: String(e && e.message) };
+            }
           } else if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir })) {
             // Ambiguous: left unsigned, and recorded so the scaffold and the readiness summary can say so.
             metricsHeld = { folder: pinned, also_named_by: [...legacyPeers.map((e) => e.path), ...otherProjects] };
@@ -512,7 +521,7 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
     return {
       status: copies === null ? 'already-migrated' : 'migrated',
       root: real, harness, live: live ? live.workspace_id : null, superseded: dups.map((e) => e.workspace_id),
-      files: copies ? copies.length : 0, released, ...(metricsHeld ? { metrics_held: metricsHeld } : {}),
+      files: copies ? copies.length : 0, released, ...(metricsHeld ? { metrics_held: metricsHeld } : {}), ...(metricsMarkerFailed ? { metrics_marker_failed: metricsMarkerFailed } : {}),
     };
   } finally {
     releaseFileLock(lockFile, lock.nonce);
