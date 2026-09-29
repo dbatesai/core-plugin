@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.0] — 2026-09-29
+
 ### Added
 
 - **A memory-visibility check that puts nothing into memory.** The `memory-visible-in-agent-context` capability reads Claude Code's own session transcript, which records every file the harness attached to context at session start, and looks for the MEMORY.md entry and its injected size. PASS means the harness loaded the file. It doesn't show that the agent used it; the memory-accessed check measures use. It reports DEGRADED when MEMORY.md exists but no attachment was recorded, NOT-YET when there is no MEMORY.md, and UNKNOWN when the transcript can't be read or the harness isn't Claude Code. Codex has no equivalent record, so the check reports UNKNOWN there rather than guessing. Paths are compared without regard to separator style, and case-insensitively on Windows.
 
 ### Changed
 
+- **A project's CORE state now lives inside the project itself, not in a hidden folder elsewhere on the machine.** Before, everything CORE tracked about a project — its bootstrap record, its metrics, its captured turns, its registration — lived under a machine-wide folder outside the project entirely. On first use after upgrading, each project's state is moved automatically into a `.core/` folder inside the project, one time, with nothing deleted: a project's prior state is set aside, not discarded, and the move can be inspected and repeated safely if it's interrupted. This is a structural change, not something to turn on. Most of the entries below are the hardening work that came out of it — real edge cases in the move itself and in metrics capture, which depends on knowing exactly where a project's state lives: an interrupted copy, two projects whose old data pointed at the same folder, a project that moved or was renamed, and a folder move failing partway through.
 - **Maintenance no longer deletes turn-capture rows or the classified turn log on a schedule.** Both used to drop day-files older than 30 days on every maintenance run. They are now kept until the user asks: `maintenance-run.mjs --purge-turn-capture` (or `turn-capture.mjs --purge`) still removes the evidence stream on request. Stores that grew unattended for months will keep growing; there is no size-based replacement yet.
 
 ### Fixed
