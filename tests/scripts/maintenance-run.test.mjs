@@ -181,26 +181,17 @@ function plantTurnCapture(root, dateName) {
   return file;
 }
 
-test('maintenance retention: dry-run reports old turn-capture files but deletes nothing', () => {
-  const root = makeProject();
-  const home = testHome(root);
-  writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
-  const oldFile = plantTurnCapture(root, '2020-01-01');
-  const res = runMaintenance(root, { apply: false, now: '2026-06-28T00:00:00Z', home });
-  assert.ok(res.notes.some((n) => /turn-capture retention \(dry-run\).*would be deleted/.test(n)), 'dry-run surfaces the pending deletion');
-  assert.ok(existsSync(oldFile), 'dry-run deletes nothing');
-});
-
-test('maintenance retention: apply deletes old turn-capture rows, keeps recent, narrates it', () => {
+test('maintenance never deletes turn-capture rows on its own, old or recent, dry-run or apply', () => {
   const root = makeProject();
   const home = testHome(root);
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
   const oldFile = plantTurnCapture(root, '2020-01-01');
   const recentFile = plantTurnCapture(root, '2099-01-01');
-  const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
-  assert.ok(!existsSync(oldFile), 'old turn-capture row deleted');
-  assert.ok(existsSync(recentFile), 'recent turn-capture row kept');
-  assert.ok(res.notes.some((n) => /turn-capture retention: deleted 1 row file/.test(n)), 'the deletion is narrated with a proof count');
+  for (const apply of [false, true]) {
+    const res = runMaintenance(root, { apply, now: '2026-06-28T00:00:00Z', home });
+    assert.ok(existsSync(oldFile) && existsSync(recentFile), `apply=${apply}: rows survive`);
+    assert.ok(!res.ranOps.includes('turn-capture-retention'), 'no retention op runs');
+  }
 });
 
 test('--purge-turn-capture CLI removes the whole stream dir and nothing else', () => {

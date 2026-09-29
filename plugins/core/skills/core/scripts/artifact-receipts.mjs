@@ -9,7 +9,7 @@
  *   - The GENERATION receipt (the preflight manifest, written by the
  *     generator before consent) records what was generated and offered —
  *     never what went up. This module owns where it lands
- *     (`~/.core/workspaces/<workspace_id>/artifact-receipts/`, or the flagged
+ *     (`<project>/.core/<harness>/artifact-receipts/`, or the flagged
  *     `~/.core/artifact-receipts/` fallback when no workspace.json exists).
  *   - The PUBLISH receipt (`--record-publish`) is written after the consent/
  *     publish step resolves and records the actual outcome — declined,
@@ -28,7 +28,8 @@ import { readFileSync, existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs'
 import { join, resolve, basename, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { isSafeWorkspaceId, containedPath } from './trusted-home.mjs';
+import { containedPath } from './trusted-home.mjs';
+import { projectRootFor, detectStateHarness, updateManifest, stateDir } from './project-state.mjs';
 
 export const PUBLISH_RECEIPT_SCHEMA_VERSION = '1.0.0';
 export const PUBLISH_STATUSES = ['declined', 'failed', 'published-private'];
@@ -78,35 +79,32 @@ export function validateGenerationReceipt(gen, genPath) {
 
 // ---------- generation-receipt location ----------
 
-/**
- * The workspace id from the project's own workspace.json. It is
- * project-controlled, so an id that does not name a single directory segment is
- * treated as absent — the receipt lands in the flagged fallback rather than at a
- * path the project chose.
- */
-export function readWorkspaceId(projectDir) {
-  try {
-    const ws = JSON.parse(readFileSync(join(resolve(projectDir), 'workspace.json'), 'utf8'));
-    return isSafeWorkspaceId(ws.workspace_id) ? ws.workspace_id : null;
-  } catch { return null; }
-}
-
 export function sanitizeTimestamp(iso) {
   // Windows filenames cannot carry ':'; keep the ISO instant readable.
   return String(iso).replace(/[:.]/g, '-');
 }
 
 /**
- * Where a generation receipt for this project/instant lands. `workspaceId`
- * null means no workspace.json — the audit trail is kept anyway, in the
- * flagged fallback location the caller must surface (`receipt_fallback`).
+ * Where a generation receipt for this project/instant lands: the project's
+ * per-harness state (`.core/<harness>/artifact-receipts/`, trust-gated by its
+ * stamp). When that state cannot be written — a refused `.core` — the receipt
+ * lands in the flagged fallback `~/.core/artifact-receipts/` instead, and
+ * `projectId` is null so the caller surfaces `receipt_fallback`.
  */
-export function generationReceiptLocation({ home, projectDir, generatedAt }) {
-  const workspaceId = readWorkspaceId(projectDir);
-  const receiptDir = workspaceId
-    ? join(home, '.core', 'workspaces', workspaceId, 'artifact-receipts')
-    : join(home, '.core', 'artifact-receipts');
-  return { workspaceId, receiptDir, receiptPath: join(receiptDir, `${sanitizeTimestamp(generatedAt)}.json`) };
+export function generationReceiptLocation({ home, projectDir, generatedAt, env = process.env }) {
+  const coreDir = join(home, '.core');
+  let projectId = null;
+  let receiptDir;
+  try {
+    const root = projectRootFor(projectDir, { home, coreDir });
+    const harness = detectStateHarness(env);
+    projectId = updateManifest({ root, harness, coreDir }).project_id;
+    receiptDir = join(stateDir({ root, harness, kind: 'durable', coreDir, forWrite: true }).dir, 'artifact-receipts');
+  } catch {
+    projectId = null;
+    receiptDir = join(coreDir, 'artifact-receipts');
+  }
+  return { projectId, receiptDir, receiptPath: join(receiptDir, `${sanitizeTimestamp(generatedAt)}.json`) };
 }
 
 // ---------- artifact + receipt as one transaction ----------

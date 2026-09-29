@@ -5,12 +5,14 @@
  * session's capability rows so drift and regression can be detected across
  * sessions (analyze-capability-drift.mjs is the consumer).
  *
- * Storage: ~/.core/workspaces/<id>/capability-history.jsonl
+ * Storage: the project's per-harness state, `<project>/.core/<harness>/capability-history.jsonl`
+ *   (or ~/.core/local/<slug>/<harness>/ for a synced, read-only or another install's project),
+ *   with a project fallback at `<project>/_metrics/capability-history/<harness>.jsonl`.
  *   One JSON object per line:
- *   { observed_at, runner_version, schema_version, workspace_id,
+ *   { observed_at, runner_version, schema_version, harness,
  *     session_id, row_content_hash, row }
  *
- * STORAGE: JSONL + advisory lock, NOT Maildir. The single-writer-per-workspace
+ * STORAGE: JSONL + advisory lock, NOT Maildir. The single-writer-per-project-and-harness
  * assumption is guarded by an advisory lock with stale recovery, and a
  * two-writer test fixture proves no lost history.
  *
@@ -25,6 +27,7 @@ import {
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import { stateDir, assertHarnessName } from './project-state.mjs';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { acquireFileLock, releaseFileLock } from './file-lock.mjs';
@@ -40,31 +43,30 @@ export const STALE_LOCK_MS = 30000;           // a lock older than 30s is presum
 const EVIDENCE_FILE_MODE = 0o600;
 const EVIDENCE_DIR_MODE = 0o700;
 
-function historyPath(workspaceId, home = homedir()) {
-  return join(home, '.core', 'workspaces', workspaceId, 'capability-history.jsonl');
+function projectHistoryPath(project, harness) {
+  return join(project, '_metrics', 'capability-history', `${assertHarnessName(harness)}.jsonl`);
 }
 
-function lockPath(workspaceId, home = homedir()) {
-  return join(home, '.core', 'workspaces', workspaceId, 'capability-history.lock');
+function projectLockPath(project, harness) {
+  return join(project, '_metrics', 'capability-history', `${assertHarnessName(harness)}.lock`);
 }
 
-function projectHistoryPath(project, workspaceId) {
-  return join(project, '_metrics', 'capability-history', `${workspaceId}.jsonl`);
-}
-
-function projectLockPath(project, workspaceId) {
-  return join(project, '_metrics', 'capability-history', `${workspaceId}.lock`);
-}
-
-function resolveStorePaths(workspaceId, opts = {}) {
+/**
+ * Where a history lives. `target` is { root, harness }. With opts.project the
+ * project-local fallback store is used. Returns null for a read when no
+ * trustworthy state exists yet.
+ */
+function resolveStorePaths(target, opts = {}, { forWrite = false } = {}) {
+  const { root, harness } = target || {};
+  assertHarnessName(harness);
   if (opts.project) {
-    return {
-      file: projectHistoryPath(opts.project, workspaceId),
-      lock: projectLockPath(opts.project, workspaceId),
-    };
+    return { file: projectHistoryPath(opts.project, harness), lock: projectLockPath(opts.project, harness) };
   }
+  if (!root) throw new Error('capability-history: target.root is required');
   const home = opts.home || homedir();
-  return { file: historyPath(workspaceId, home), lock: lockPath(workspaceId, home) };
+  const s = stateDir({ root, harness, kind: 'hot', coreDir: join(home, '.core'), forWrite });
+  if (!s) return null;
+  return { file: join(s.dir, 'capability-history.jsonl'), lock: join(s.dir, 'capability-history.lock') };
 }
 
 /**
@@ -155,16 +157,16 @@ export function applyRetention(lines, { byteCap = BYTE_CAP, perCapability = RETE
 }
 
 /**
- * Append capability rows to the workspace history file under an advisory lock.
- * @param {string} workspaceId
+ * Append capability rows to the project's history file under an advisory lock.
+ * @param {{root: string, harness: string}} target
  * @param {object[]} rows — capability rows (each carries capability_id, identity_status, evidence, etc.)
  * @param {object} meta — { runner_version, schema_version, session_id }
  * @param {object} opts — { home, now } for testability
  * @returns {{ appended: number, truncated: number, path: string }}
  */
-export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
+export function appendRows(target, rows, meta = {}, opts = {}) {
   const now = opts.now || (() => new Date().toISOString());
-  const { file, lock } = resolveStorePaths(workspaceId, opts);
+  const { file, lock } = resolveStorePaths(target, opts, { forWrite: true });
   const dir = dirname(file);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: EVIDENCE_DIR_MODE });
   try { chmodSync(dir, EVIDENCE_DIR_MODE); } catch { /* pre-existing dir, other owner */ }
@@ -176,7 +178,7 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
       observed_at: observedAt,
       runner_version: meta.runner_version ?? null,
       schema_version: meta.schema_version ?? null,
-      workspace_id: workspaceId,
+      harness: target.harness,
       session_id: meta.session_id ?? null,
       row_content_hash: canonicalRowHash(row),
       row,
@@ -200,17 +202,18 @@ export function appendRows(workspaceId, rows, meta = {}, opts = {}) {
 }
 
 /**
- * Read all history entries for a workspace (parsed). Returns [] if absent.
+ * Read all history entries for a project and harness (parsed). Returns [] if absent.
  *
  * Unreadable rows ride back as `.rejected` on the returned array. Dropping them
  * silently makes a partly-corrupt history indistinguishable from a shorter clean one,
  * and drift analysis reads that difference as a capability changing.
  */
-export function readHistory(workspaceId, opts = {}) {
-  const { file } = resolveStorePaths(workspaceId, opts);
+export function readHistory(target, opts = {}) {
+  const paths = resolveStorePaths(target, opts);
   const entries = [];
   let rejected = 0;
-  if (!existsSync(file)) return Object.assign(entries, { rejected });
+  if (!paths || !existsSync(paths.file)) return Object.assign(entries, { rejected });
+  const { file } = paths;
   for (const line of readFileSync(file, 'utf8').split('\n')) {
     if (!line.trim()) continue;
     let parsed;
@@ -220,4 +223,4 @@ export function readHistory(workspaceId, opts = {}) {
   return Object.assign(entries, { rejected });
 }
 
-export { historyPath, lockPath, projectHistoryPath, projectLockPath };
+export { projectHistoryPath, projectLockPath, resolveStorePaths };

@@ -40,7 +40,7 @@ The receipt trail. Every identity classification carries the observations that l
 ```yaml
 observed_at:            # ISO 8601 timestamp (e.g. "2026-05-27T13:00:00Z")
 harness:                # claude-code | codex | unknown
-workspace_id:           # string from <cwd>/workspace.json, or null
+workspace_id:           # the project's manifest project_id, or null
 cwd:                    # process.cwd() at probe time
 env_signals:            # object: env var name → resolved value (or null if unset)
                         #   Include at minimum: CLAUDE_PLUGIN_ROOT, CODEX_PLUGIN_ROOT,

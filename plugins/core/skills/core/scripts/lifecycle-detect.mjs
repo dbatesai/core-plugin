@@ -111,23 +111,41 @@ export function readSessionInventory(projectDir) {
   return null;
 }
 
+/** Absolute paths of every unit file under `_memories/`, dated subfolders
+ *  (`observations/<YYYY-MM>/`) included. Directories are excluded by name —
+ *  `archive`, `_`-prefixed (_lib, _validation, ...) and dot directories — the
+ *  same rule the ranking walk uses; generated `INDEX-*` files are excluded too.
+ *  A store with no `_memories/` yet has no units. Any other directory that will
+ *  not list is returned as a path itself, so classification reports it
+ *  `read-only` and the units under it count as unknown. */
+export function unitPaths(memoriesDir) {
+  const out = [];
+  const walk = (dir) => {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch (e) {
+      if (!(dir === memoriesDir && e && e.code === 'ENOENT')) out.push(dir);
+      return;
+    }
+    for (const ent of entries) {
+      if (ent.isDirectory()) {
+        if (ent.name === 'archive' || ent.name.startsWith('_') || ent.name.startsWith('.')) continue;
+        walk(join(dir, ent.name));
+      } else if (ent.name.endsWith('.md') && !ent.name.startsWith('INDEX-')) {
+        out.push(join(dir, ent.name));
+      }
+    }
+  };
+  walk(memoriesDir);
+  return out;
+}
+
 /** Absolute paths of the user-sensitive files that exist right now: PROJECT.md
- *  plus every top-level `_memories/*.md` unit (archive/, _lib/, and index files
- *  excluded — those aren't the human-authored surfaces the boundary protects). */
+ *  plus every unit `unitPaths` finds. */
 export function inventoryPaths(projectDir) {
   const root = resolve(projectDir);
-  const out = [];
   const pm = join(root, 'PROJECT.md');
-  if (existsSync(pm)) out.push(pm);
-  const mem = join(root, '_memories');
-  let names;
-  try { names = readdirSync(mem); } catch { names = []; }
-  for (const name of names) {
-    if (!name.endsWith('.md')) continue;
-    if (name.startsWith('INDEX-')) continue; // generated index, not human-authored
-    out.push(join(mem, name));
-  }
-  return out;
+  return [...(existsSync(pm) ? [pm] : []), ...unitPaths(join(root, '_memories'))];
 }
 
 /** Record (overwrite) the session-start inventory. Diagnostic snapshot only. */
@@ -223,7 +241,7 @@ export function classifyFileLifecycle(projectDir, absPath, { kind = 'project', s
 }
 
 /**
- * detectStore — classify PROJECT.md and every top-level unit against the
+ * detectStore — classify PROJECT.md and every unit against the
  * pre-write cache baseline, grouped for the caller. `needs_attention` collects
  * everything that must NOT be written over blind: pending-edit, malformed,
  * read-only, missing, and EVERY no-baseline file (no timing exemption).
@@ -237,12 +255,8 @@ export function detectStore(projectDir, { sessionInventory } = {}) {
   const pm = join(root, 'PROJECT.md');
   if (existsSync(pm)) files.push(classifyFileLifecycle(root, pm, { kind: 'project', sessionInventory: inv, cache }));
 
-  const mem = join(root, '_memories');
-  let names;
-  try { names = readdirSync(mem); } catch { names = []; }
-  for (const name of names) {
-    if (!name.endsWith('.md') || name.startsWith('INDEX-')) continue;
-    files.push(classifyFileLifecycle(root, join(mem, name), { kind: 'unit', sessionInventory: inv, cache }));
+  for (const path of unitPaths(join(root, '_memories'))) {
+    files.push(classifyFileLifecycle(root, path, { kind: 'unit', sessionInventory: inv, cache }));
   }
 
   const byClass = {};
@@ -421,5 +435,6 @@ function main(argv) {
 }
 
 if (isCliEntry(import.meta.url)) {
-  process.exit(main(process.argv.slice(2)));
+  // exitCode, not exit(): exit() drops whatever a piped stdout has not flushed.
+  process.exitCode = main(process.argv.slice(2));
 }

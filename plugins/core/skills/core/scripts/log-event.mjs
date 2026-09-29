@@ -23,8 +23,11 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
-import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
+import { captureDisabledMarkerCandidates, EXTERNAL_MARKER, detectStoragePath } from './metrics-init.mjs';
+import { markMetricsEverExternal } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder, readSignedFileAt } from './project-state.mjs';
 
 /**
  * Fail-closed capture gate. metrics-init.mjs writes a typed
@@ -33,10 +36,9 @@ import { captureDisabledMarkerCandidates } from './metrics-init.mjs';
  * into the synced project folder the OneDrive redirect exists to avoid.
  * Returns the marker path when capture is disabled, null otherwise.
  */
-export function captureDisabledMarkerPath(projectDir, { workspaceId, home = homedir() } = {}) {
+export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = process.env } = {}) {
   if (!projectDir) return null;
-  const ws = workspaceId || resolveWorkspaceId(projectDir);
-  const operationalMetaDir = join(home, '.core', 'workspaces', ws, 'metrics');
+  const operationalMetaDir = trustedMetricsDir(projectDir, { home, env });
   for (const candidate of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
     try { if (existsSync(candidate)) return candidate; } catch { /* unreadable location — keep checking */ }
   }
@@ -47,9 +49,9 @@ export function captureDisabledMarkerPath(projectDir, { workspaceId, home = home
  * Resolve where the metrics storage lives — honors what `metrics-init.mjs`
  * pinned at scaffold time per matrix (+g.5) + (+m).
  *
- * Reads `~/.core/workspaces/<workspaceId>/metrics/storage-path.txt` if the
- * workspace has been scaffolded. Falls back to `<projectDir>/_metrics/` if
- * the pin file is absent (scaffold not run yet, or workspace id unknown).
+ * Reads the signed `storage-path.txt` from the project's trusted metrics state if the
+ * project has been scaffolded. Falls back to `<projectDir>/_metrics/` if
+ * the pin file is absent or the state is untrusted (scaffold not run yet).
  *
  * Without this, writers would hardcode a project-local path and bypass
  * (g.5)'s AppData redirect on Windows+OneDrive.
@@ -59,19 +61,72 @@ export function captureDisabledMarkerPath(projectDir, { workspaceId, home = home
  * capture producers never reach this fallback in that state. The fallback here
  * serves the legitimate pre-scaffold default and read-side path resolution.
  */
-export function resolveStoragePath(projectDir, { workspaceId } = {}) {
-  if (workspaceId) {
-    const pinFile = join(homedir(), '.core', 'workspaces', workspaceId, 'metrics', 'storage-path.txt');
-    if (existsSync(pinFile)) {
-      try {
-        const pinned = readFileSync(pinFile, 'utf8').trim();
-        if (pinned) return pinned;
-      } catch {
-        // Fall through to default
-      }
-    }
+export function resolveStoragePath(projectDir, { home = homedir(), env = process.env } = {}) {
+  const meta = trustedMetricsDir(projectDir, { home, env });
+  if (meta) {
+    // The pin decides where every prompt and context row is written, so it is read only if this
+    // install signed it and it names the project's own _metrics/ or the AppData redirect.
+    const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
+    if (pinned && metricsStorageAllowed(pinned, { projectDir, home })) return pinned;
   }
   return join(projectDir, '_metrics');
+}
+
+/**
+ * True when the project has a storage pin that no longer verifies: unsigned or tampered, or
+ * naming somewhere metrics may not live or a folder another project owns. Capture stays off
+ * until the next scaffold writes a fresh signed pin. Falling back to `<project>/_metrics` here
+ * would quietly resume capture in the synced folder the redirect exists to avoid.
+ */
+export function storagePinInvalid(projectDir, { home = homedir(), env = process.env } = {}) {
+  const meta = trustedMetricsDir(projectDir, { home, env });
+  const bodyExists = !!meta && existsSync(join(meta, 'storage-path.txt'));
+  const macExists = !!meta && existsSync(join(meta, 'storage-path.txt.mac'));
+  if (!bodyExists && !macExists) {
+    // No pin sits where one would be — no metrics state at all yet, or state exists with neither
+    // file in it. A durable marker (kept outside the metrics dir, written the one time an external
+    // pin was created) can still say this project was redirected before; losing both pin files at
+    // once should not silently resume capture into the empty project-local folder.
+    try {
+      const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core') });
+      if (durable && readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir: join(home, '.core') }) !== null) return true;
+    } catch { /* no durable state yet: this really is a project that was never redirected */ }
+    // No pin, no marker — but a project's path alone can say it needs the redirect (a synced
+    // OneDrive folder on Windows), before it has ever been scaffolded. The very first capture can
+    // land before startup's scaffold call runs. Refuse rather than let it land in that synced
+    // folder even once; the scaffold, once it runs, both fixes this and clears it going forward.
+    try {
+      if (detectStoragePath({ projectDir, home }).path !== join(projectDir, '_metrics')) return true;
+    } catch { /* detection itself failing is not grounds to refuse a project with no other signal */ }
+    return false;
+  }
+  // A signature with no body, or a body with no signature (checked below via readPinSigned, which
+  // needs both files to verify), is not a clean absence — it is what a partial loss of the pin's two
+  // files looks like, and the folder it named cannot be recovered from what remains.
+  const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
+  if (!(pinned && metricsStorageAllowed(pinned, { projectDir, home }))) return true;
+  if (pinned !== join(projectDir, '_metrics')) {
+    // A valid external pin found with no marker behind it: an install from before the marker
+    // existed, or a producer that failed to write one. Backfill it now, while the pin is still
+    // known-good, so a later loss of the pin is still caught. Not best-effort any more: a pin
+    // whose marker cannot be persisted is exactly the state the marker exists to prevent reading
+    // as safely established, so a write failure here refuses too, the same as everywhere else the
+    // marker is written. A durable state directory that genuinely does not exist yet (nothing has
+    // ever written to it) is a different, narrower case: nothing has failed, so it is not refused
+    // here on its own.
+    try {
+      const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core'), forWrite: true });
+      if (durable && readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir: join(home, '.core') }) === null) {
+        markMetricsEverExternal({ projectDir, harness: detectStateHarness(env), home, coreDir: join(home, '.core'), folder: pinned });
+      }
+    } catch { return true; }
+  }
+  // An AppData folder nobody claimed that another project's signed pin also names is not this
+  // project's to write to; if that cannot be ruled out, capture stays off.
+  if (containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned) && !existsSync(join(pinned, '.project-root'))) {
+    try { return otherProjectsNamingFolder(pinned, { projectDir, home, env }).length > 0; } catch { return true; }
+  }
+  return false;
 }
 
 export function todayUTC() {
@@ -79,26 +134,30 @@ export function todayUTC() {
 }
 
 /**
- * Resolve the workspace id for a project from its <project>/workspace.json
- * pointer. Falls back to the project basename slug when the pointer is absent.
- * Layer-2/3 metrics derivatives (classified, detectors, rollups) live under the
- * operational-meta dir keyed by this id (spec §17.6).
+ * Operational-meta metrics dir for a project (spec §17.6): the derived,
+ * regeneratable side of the split — classified/, detectors/, rollups/, etc.
+ * It lives in the project's per-harness state (`.core/<harness>/metrics`), or
+ * under ~/.core/local/ when the project is synced, read-only, or another
+ * install's. Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
+ * Creates the directory (stamping new state) — use trustedMetricsDir for a pure read.
  */
-export function resolveWorkspaceId(projectDir) {
-  try {
-    const p = JSON.parse(readFileSync(join(projectDir, 'workspace.json'), 'utf8'));
-    if (p && p.workspace_id) return p.workspace_id;
-  } catch { /* fall through */ }
-  return (projectDir.split(/[\\/]/).pop() || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+export function operationalMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {
+  const coreDir = join(home, '.core');
+  const root = projectRootFor(projectDir, { home, coreDir });
+  const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir, forWrite: true });
+  const dir = join(s.dir, 'metrics');
+  mkdirSync(dir, { recursive: true });
+  return dir;
 }
 
-/**
- * Operational-meta metrics dir for a workspace (spec §17.6): the derived,
- * regeneratable side of the split — classified/, detectors/, rollups/, etc.
- * Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
- */
-export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
-  return join(home, '.core', 'workspaces', workspaceId, 'metrics');
+/** The metrics dir when trustworthy state already exists for this project; null otherwise. Never writes. */
+export function trustedMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {
+  try {
+    const coreDir = join(home, '.core');
+    const root = projectRootFor(projectDir, { home, coreDir });
+    const s = stateDir({ root, harness: harness || detectStateHarness(env), kind: 'hot', coreDir });
+    return s ? join(s.dir, 'metrics') : null;
+  } catch { return null; }
 }
 
 /**
@@ -119,21 +178,35 @@ export function operationalMetricsDir(workspaceId, { home = homedir() } = {}) {
  *      opt-in — re-enabling is fixing the pin (re-run metrics-init), not
  *      overriding the marker.
  *   3. `CORE_METRICS_ENABLED` env true  (1/true/yes/on)  → ON.
- *   4. `<project>/workspace.json` `"metrics_enabled": false` → OFF — per-workspace opt-out.
- *   5. `<project>/workspace.json` `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
- *   6. default → ON.
+ *   4. the project's trusted manifest (`.core/<harness>/workspace.json`) `"metrics_enabled": false` → OFF — per-project opt-out.
+ *   5. the same manifest `"metrics_enabled": true`  → ON — explicit opt-in (redundant with the default).
+ *      A manifest whose stamp does not verify (planted by a clone) is not read.
+ *   6. this harness's manifest says `"metrics_enabled": false` but doesn't verify → OFF,
+ *      or a `workspace.json` at the project root says so → OFF.
+ *      It may be committed by the repo's owner, so it is untrusted, and an untrusted
+ *      source can only ever switch capture off, never on.
+ *   7. default → ON.
  */
-export function metricsEnabled({ project, env = process.env } = {}) {
+export function metricsEnabled({ project, env = process.env, home = homedir() } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
-  if (project && captureDisabledMarkerPath(project)) return false; // fail-closed pin failure beats opt-in
+  if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in
+  if (project && storagePinInvalid(project, { home, env })) return false; // a pin that stops verifying never falls back to project-local
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
+    let m = null;
     try {
-      const p = JSON.parse(readFileSync(join(project, 'workspace.json'), 'utf8'));
-      if (p && p.metrics_enabled === false) return false; // per-workspace opt-out
-      if (p && p.metrics_enabled === true) return true;   // per-workspace opt-in (explicit)
-    } catch { /* fall through */ }
+      const coreDir = join(home, '.core');
+      m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
+    } catch { m = null; }
+    if (m && m.metrics_enabled === false) return false; // per-project opt-out
+    if (m && m.metrics_enabled === true) return true;   // per-project opt-in (explicit)
+    const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
+    if (!m && manifestOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
+    try {
+      const rootManifest = JSON.parse(readFileSync(join(root, 'workspace.json'), 'utf8'));
+      if (rootManifest && rootManifest.metrics_enabled === false) return false;
+    } catch { /* absent or unreadable: no opt-out */ }
   }
   return true; // default-ON: instrument by default; opt out via env or workspace flag
 }

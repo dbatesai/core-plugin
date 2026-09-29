@@ -387,6 +387,13 @@
       "surface": "shipped"
     },
     {
+      "name": "memory-visible-in-agent-context-probe",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/capability/memory-visible-in-agent-context-probe.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "metrics-check",
       "kind": "script",
       "harness": "shared",
@@ -457,6 +464,13 @@
       "surface": "shipped"
     },
     {
+      "name": "migrate-workspace-state",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/migrate-workspace-state.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "orphan-detector",
       "kind": "script",
       "harness": "shared",
@@ -489,6 +503,13 @@
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/project-slug.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "project-state",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/project-state.mjs",
       "surface": "shipped"
     },
     {
@@ -622,13 +643,6 @@
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/validate.mjs",
-      "surface": "shipped"
-    },
-    {
-      "name": "workspace-fork-check",
-      "kind": "script",
-      "harness": "shared",
-      "path": "skills/core/scripts/workspace-fork-check.mjs",
       "surface": "shipped"
     },
     {

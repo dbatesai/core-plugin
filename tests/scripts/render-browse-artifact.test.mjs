@@ -21,6 +21,9 @@ import { join, dirname, basename, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { symlinkSync, realpathSync } from 'node:fs';
 
+// Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
+process.env.CORE_HARNESS ||= 'claude-code';
+
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const {
@@ -59,7 +62,7 @@ const rtest = (name, fn) => test(name, TREE_CLEAN ? fn : () => { assert.fail(DIR
 const stubMetrics = async () => ({ report: 'STUB METRICS REPORT (four evidence classes)', mechanics: { status: 'WORKING' } });
 
 function fixtureProject({ workspace = true } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'browse-artifact-'));
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-artifact-')));
   const mem = join(root, '_memories');
   mkdirSync(join(mem, 'archive'), { recursive: true });
   writeFileSync(join(mem, 'dc-1-alpha.md'),
@@ -73,11 +76,10 @@ function fixtureProject({ workspace = true } = {}) {
   writeFileSync(join(mem, 'archive', 'old-note.md'),
     '---\nid: old-note\ntype: observation\nstatus: archived\ntopics: [beta]\n---\n\n# Archived note\n\nArchived body.\n');
   writeFileSync(join(mem, 'INDEX.md'), '# scaffolding — must never be embedded');
-  if (workspace) {
-    writeFileSync(join(root, 'workspace.json'), JSON.stringify({ workspace_id: 'browse-test-ws' }));
-  }
   const home = join(root, 'home');
-  mkdirSync(home, { recursive: true });
+  mkdirSync(join(home, '.core'), { recursive: true });
+  // A registered project keeps its receipts in its own .core/<harness>/.
+  if (workspace) writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: root }]));
   return { root, mem, home };
 }
 
@@ -216,28 +218,42 @@ rtest('preflight manifest matches the embedded content and the actual bytes on d
 
 // ---------- receipt ----------
 
-rtest('writes a local receipt under the workspace with content identical to the manifest', async () => {
+rtest('writes a local receipt in the project state with content identical to the manifest', async () => {
   const { root, home } = fixtureProject();
   try {
     const { manifest, receiptWritten } = await generate(root, home);
     assert.equal(receiptWritten, true);
     assert.equal(manifest.receipt_fallback, false);
-    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'workspaces', 'browse-test-ws', 'artifact-receipts')),
-      'receipt lands in the workspace artifact-receipts dir');
+    assert.match(manifest.project_id, /^[0-9a-f]{32}$/, 'the project id rides the manifest');
+    assert.ok(manifest.receipt_path.startsWith(join(realpathSync(root), '.core')),
+      'receipt lands in the project\'s own .core/<harness>/artifact-receipts');
     const receipt = JSON.parse(readFileSync(manifest.receipt_path, 'utf8'));
     assert.deepEqual(receipt, manifest, 'receipt content == manifest content');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-rtest('no workspace.json → receipt still written to the flagged fallback location', async () => {
-  const { root, home } = fixtureProject({ workspace: false });
+rtest('refused project state (a symlinked .core) → receipt still written to the flagged fallback location', { skip: process.platform === 'win32' }, async () => {
+  const { root, home } = fixtureProject();
+  const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-elsewhere-')));
   try {
+    symlinkSync(elsewhere, join(root, '.core'));
     const { manifest, receiptWritten } = await generate(root, home);
     assert.equal(receiptWritten, true);
     assert.equal(manifest.receipt_fallback, true);
-    assert.equal(manifest.workspace_id, null);
+    assert.equal(manifest.project_id, null);
     assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'artifact-receipts')));
     assert.ok(existsSync(manifest.receipt_path));
+    assert.deepEqual(readdirSync(elsewhere), [], 'nothing written through the symlink');
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(elsewhere, { recursive: true, force: true }); }
+});
+
+rtest('an unregistered folder keeps its receipt on this machine, never inside the folder', async () => {
+  const { root, home } = fixtureProject({ workspace: false });
+  try {
+    const { manifest } = await generate(root, home);
+    assert.equal(manifest.receipt_fallback, false);
+    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'local')), 'receipt under ~/.core/local');
+    assert.equal(existsSync(join(root, '.core')), false, 'no .core/ planted in an unregistered folder');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -470,7 +486,7 @@ test('falsifier: in a CLEAN git checkout the emitted source SHA equals git rev-p
 
 test('installed tree (no .git): stamped manifest identity used; no SHA at all: fail closed, nothing rendered', async () => {
   // Copy the whole plugin tree (plugins/core) outside any git repo — tmpdir.
-  const pluginCopy = mkdtempSync(join(tmpdir(), 'browse-plugin-copy-'));
+  const pluginCopy = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-plugin-copy-')));
   const { root, home } = fixtureProject();
   const cli = join(pluginCopy, 'skills', 'core', 'scripts', 'render-browse-artifact.mjs');
   const manifestPath = join(pluginCopy, '.claude-plugin', 'plugin.json');
@@ -587,7 +603,7 @@ test('--record-revocation stamps revoked_at and preserves a manually-authored re
   // Fixture mirrors the shape of the real hand-written first publish receipt
   // (2026-07-22T22-41-34-360Z.publish.json) including its extra fields —
   // schema compatibility means the manual record stays a valid citizen.
-  const dir = mkdtempSync(join(tmpdir(), 'browse-revoke-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-revoke-')));
   const p = join(dir, '2026-07-22T22-41-34-360Z.publish.json');
   try {
     writeFileSync(p, JSON.stringify({
@@ -645,7 +661,7 @@ rtest('CLI: stdout is exactly one JSON manifest with the stable shape', () => {
       { encoding: 'utf8' });
     assert.equal(res.status, 0, res.stderr);
     const manifest = JSON.parse(res.stdout);
-    for (const key of ['kind', 'schema_version', 'generated_at', 'producer', 'project', 'workspace_id',
+    for (const key of ['kind', 'schema_version', 'generated_at', 'producer', 'project', 'project_id',
       'snapshot_id', 'scope', 'unit_count', 'active_count', 'supplemental_count',
       'excluded_by_topic_count', 'total_bytes', 'metrics_included', 'out_path',
       'receipt_path', 'receipt_fallback', 'sensitivity_warning']) {
@@ -663,25 +679,28 @@ rtest('CLI: stdout is exactly one JSON manifest with the stable shape', () => {
 
 const { generationReceiptLocation } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
 
-test('a project-controlled workspace id cannot redirect the receipt out of the operational root', () => {
-  const home = mkdtempSync(join(tmpdir(), 'receipt-home-'));
-  const project = mkdtempSync(join(tmpdir(), 'receipt-project-'));
-  const attempt = ['..', '..', '..', 'tmp', 'stolen'].join('/');
-  writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: attempt }));
+test('a planted .core cannot redirect the receipt out of the operational root', { skip: process.platform === 'win32' }, () => {
+  const home = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-home-')));
+  const project = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-project-')));
+  const stolen = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-stolen-')));
+  try {
+    mkdirSync(join(home, '.core'), { recursive: true });
+    writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
+    symlinkSync(stolen, join(project, '.core'));
+    const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
+    assert.equal(loc.projectId, null, 'refused state yields no project id');
+    assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),
+      'it falls back to the flagged location, never to a project-chosen path');
+    assert.ok(loc.receiptPath.startsWith(join(home, '.core') + sep), 'and the receipt stays under the operational root');
+    assert.deepEqual(readdirSync(stolen), [], 'nothing lands in the symlink target');
 
-  const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z' });
-  assert.equal(loc.workspaceId, null, 'a traversal id is not a workspace id');
-  assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),
-    'it falls back to the flagged location, never to a project-chosen path');
-  assert.ok(loc.receiptPath.startsWith(join(home, '.core') + sep), 'and the receipt stays under the operational root');
-
-  writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'legit-id' }));
-  const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z' });
-  assert.equal(ok.workspaceId, 'legit-id');
-  assert.equal(ok.receiptDir, join(home, '.core', 'workspaces', 'legit-id', 'artifact-receipts'));
-
-  rmSync(home, { recursive: true, force: true });
-  rmSync(project, { recursive: true, force: true });
+    rmSync(join(project, '.core'));
+    const ok = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
+    assert.match(ok.projectId, /^[0-9a-f]{32}$/);
+    assert.equal(ok.receiptDir, join(realpathSync(project), '.core', 'claude-code', 'artifact-receipts'));
+  } finally {
+    for (const d of [home, project, stolen]) rmSync(d, { recursive: true, force: true });
+  }
 });
 
 // ============================================================
@@ -693,7 +712,7 @@ const { publishArtifactWithReceipt, resolveArtifactDestination, artifactContentD
   await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
 
 function publishFixture() {
-  const dir = mkdtempSync(join(tmpdir(), 'publish-tx-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'publish-tx-')));
   const outPath = join(dir, 'out', 'page.html');
   const receiptDir = join(dir, 'receipts');
   const html = '<h1>page</h1>';
@@ -740,7 +759,7 @@ test('the happy path writes both and binds the receipt to the exact bytes', () =
 });
 
 test('output containment is judged on the real path, not the spelling', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'out-contain-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'out-contain-')));
   const store = join(dir, 'project', '_memories');
   mkdirSync(store, { recursive: true });
   const outside = join(dir, 'elsewhere');
@@ -766,7 +785,7 @@ test('output containment is judged on the real path, not the spelling', () => {
 });
 
 test('a truncated unit is named as unreadable, never embedded as a blank one', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'structural-loss-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'structural-loss-')));
   const mem = join(dir, '_memories');
   mkdirSync(join(mem, 'archive'), { recursive: true });
   writeFileSync(join(mem, 'good.md'),
@@ -792,7 +811,7 @@ test('a truncated unit is named as unreadable, never embedded as a blank one', (
 // ============================================================
 
 test('collectUnits carries every frontmatter field as properties — not just the curated badge subset', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'properties-'));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'properties-')));
   const mem = join(dir, '_memories');
   mkdirSync(mem, { recursive: true });
   writeFileSync(join(mem, 'dc-1-props.md'),

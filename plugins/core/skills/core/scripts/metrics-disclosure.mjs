@@ -9,18 +9,19 @@
  * that any of this happens.
  *
  * This script is the structural fix, not a prose reminder. It fires once, ever,
- * per workspace, the first time a workspace is scaffolded — mirroring the
- * fork-check pattern in `protocols/startup.md` (ship the mechanism as a script the
- * agent runs and echoes verbatim; don't rely on the agent remembering to say it).
+ * per project and harness, the first time the project is scaffolded (ship the
+ * mechanism as a script the agent runs and echoes verbatim; don't rely on the
+ * agent remembering to say it).
  *
- * "Have we shown this before" lives in the workspace manifest
- * (`~/.core/workspaces/<id>/workspace.json`, field `metrics_disclosure_shown`) —
- * the flag travels with the workspace, not the session, so it's safe to call this
- * check on every bootstrap: shown once, silent every time after.
+ * "Have we shown this before" lives in the project's per-harness manifest
+ * (`<project>/.core/<harness>/workspace.json`, field `metrics_disclosure_shown`).
+ * The manifest is read only when its stamp verifies, so a flag planted by a cloned
+ * repo never suppresses the notice. It's safe to call this check on every
+ * bootstrap: shown once, silent every time after.
  *
  * CLI usage:
- *   node metrics-disclosure.mjs check <workspace-id>
- *   → first call for a workspace id: prints the notice text and marks it shown.
+ *   node metrics-disclosure.mjs check [<project-dir>]
+ *   → first call for a project: prints the notice text and marks it shown.
  *   → every call after: prints ALREADY-SHOWN and writes nothing.
  *
  * Library usage:
@@ -31,53 +32,51 @@
  * and reports the reason rather than crashing the bootstrap.
  */
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { projectRootFor, detectStateHarness, readManifest, updateManifest } from './project-state.mjs';
 
 /**
  * Bump whenever the notice describes something materially new being stored.
  * Workspaces stamped below this see the notice again; a wording polish that
  * changes nothing about what is captured does not earn a bump.
  */
-export const NOTICE_VERSION = 3;
+export const NOTICE_VERSION = 4;
 
 export const NOTICE_TEXT = [
   "One thing worth knowing since this is a brand-new project: CORE keeps a local, on-this-machine log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically, it stays on this machine, and none of it goes anywhere else.",
-  "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `workspace.json`.",
-  "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved on this machine (never exported, auto-deleted after 30 days) so retrieval quality can be graded honestly after the fact — the same 30-day deletion covers the classified turn log the recognition classifier writes. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `workspace.json`; you can also purge everything it has saved at any time.",
+  "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `.core/<harness>/workspace.json`.",
+  "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved on this machine (never exported, and kept until you purge it) so retrieval quality can be graded honestly after the fact — the classified turn log the recognition classifier writes is kept the same way. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `.core/<harness>/workspace.json`; you can also purge everything it has saved at any time.",
 ].join('\n\n');
 
 /**
  * Check-and-mark. Idempotent and safe to call on every bootstrap — only the
- * first call for a given workspace id (ever) returns the notice text.
+ * first call for a given project and harness (ever) returns the notice text.
  *
  * @param {object} args
- * @param {string} args.workspaceId
+ * @param {string} args.projectDir
+ * @param {string} [args.home] test seam; defaults to the OS home
+ * @param {object} [args.env]
  * @returns {{ ok: boolean, shown: boolean, alreadyShown: boolean, noticeText: string|null, reason?: string }}
  */
-export function checkMetricsDisclosure({ workspaceId }) {
-  if (!workspaceId) {
-    return { ok: false, shown: false, alreadyShown: false, noticeText: null, reason: 'missing-workspace-id' };
+export function checkMetricsDisclosure({ projectDir, home = homedir(), env = process.env } = {}) {
+  if (!projectDir) {
+    return { ok: false, shown: false, alreadyShown: false, noticeText: null, reason: 'missing-project-dir' };
+  }
+  const coreDir = join(home, '.core');
+  let root, harness;
+  try {
+    root = projectRootFor(projectDir, { home, coreDir });
+    harness = detectStateHarness(env);
+  } catch (err) {
+    return { ok: false, shown: true, alreadyShown: false, noticeText: NOTICE_TEXT, reason: `project-unresolved: ${err.message}` };
   }
 
-  const manifestDir = join(homedir(), '.core', 'workspaces', workspaceId);
-  const manifestPath = join(manifestDir, 'workspace.json');
+  // Untrusted or absent state reads as null: the notice shows.
+  const manifest = readManifest({ root, harness, coreDir }) || {};
 
-  let manifest = {};
-  if (existsSync(manifestPath)) {
-    try {
-      manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    } catch (err) {
-      // Unparseable manifest: don't silently skip disclosure over an unrelated
-      // corruption issue, but don't pretend we can safely merge-write either.
-      return { ok: false, shown: false, alreadyShown: false, noticeText: null, reason: `manifest-unparseable: ${err.message}` };
-    }
-  }
-
-  // Versioned: a workspace that saw an older notice is shown the current one
+  // Versioned: a project that saw an older notice is shown the current one
   // when the wording changes materially. A bare boolean would strand everyone
   // who was told about a narrower version of what gets stored.
   if (manifest.metrics_disclosure_shown === true
@@ -85,12 +84,8 @@ export function checkMetricsDisclosure({ workspaceId }) {
     return { ok: true, shown: false, alreadyShown: true, noticeText: null };
   }
 
-  manifest.metrics_disclosure_shown = true;
-  manifest.metrics_disclosure_version = NOTICE_VERSION;
-
   try {
-    mkdirSync(manifestDir, { recursive: true });
-    atomicWriteFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+    updateManifest({ root, harness, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION } });
   } catch (err) {
     // Fail toward showing the notice this session even though we couldn't persist
     // the flag — a repeated notice (rare write failure) is a far smaller defect
@@ -105,12 +100,12 @@ export function checkMetricsDisclosure({ workspaceId }) {
 // canonicalizer never resolved symlinks, so a symlinked invocation was a
 // silent no-op. exitCode + natural exit so piped output always flushes.
 if (isCliEntry(import.meta.url)) {
-  const [subcommand, workspaceId] = process.argv.slice(2);
-  if (subcommand !== 'check' || !workspaceId) {
-    console.error('usage: node metrics-disclosure.mjs check <workspace-id>');
+  const [subcommand, projectArg] = process.argv.slice(2);
+  if (subcommand !== 'check') {
+    console.error('usage: node metrics-disclosure.mjs check [<project-dir>]');
     process.exitCode = 1;
   } else {
-    const result = checkMetricsDisclosure({ workspaceId });
+    const result = checkMetricsDisclosure({ projectDir: projectArg || process.cwd() });
     if (result.alreadyShown) {
       console.log('ALREADY-SHOWN');
     } else if (result.noticeText) {

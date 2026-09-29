@@ -19,7 +19,7 @@
  *   1. `CORE_METRICS_ENABLED` off → OFF (master kill switch; capture nests
  *      inside the metrics gate).
  *   2. `CORE_TURN_CAPTURE` env false → OFF (its own hard switch).
- *   3. project-root `workspace.json` `"turn_capture": false` → OFF. Unlike
+ *   3. the project's trusted manifest (`.core/<harness>/workspace.json`) `"turn_capture": false` → OFF. Unlike
  *      rich-context's opt-IN (machine-local only, so a sensitive enable could
  *      never travel with a copied project), an opt-OUT travelling with a copied
  *      project is privacy-safe — the flag lives with the project on purpose.
@@ -31,7 +31,7 @@
  *   - dir 0700 / files 0600, asserted on create and re-asserted per append;
  *   - one exclusion lock shared by append/retention/purge, a STABLE SIBLING
  *     outside the purged dir (`<base>/.turn-capture.lock`);
- *   - 30-day retention (maintenance cadence) + explicit `--purge`;
+ *   - kept until an explicit `--purge` (no scheduled deletion);
  *   - exporter isolation: `metrics-package.mjs` has no read path here, guarded
  *     by a planted-canary tripwire test.
  *
@@ -45,8 +45,10 @@
 
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, resolveWorkspaceId, metricsEnabled } from './log-event.mjs';
+import { resolveStoragePath, metricsEnabled, storagePinInvalid } from './log-event.mjs';
+import { projectRootFor, detectStateHarness, readManifest } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
@@ -92,32 +94,42 @@ const CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
  * Precedence (first match wins):
  *   1. aggregate metrics OFF (env/workspace metrics gate) → OFF.
  *   2. env `CORE_TURN_CAPTURE` false (0/false/no/off) → OFF; true → ON.
- *   3. project-root `workspace.json` `"turn_capture": false` → OFF.
+ *   3. the project's trusted manifest (`.core/<harness>/workspace.json`), or the project-root
+ *      `workspace.json`, says `"turn_capture": false` → OFF.
  *   4. default → ON.
  */
-export function turnCaptureEnabled({ project, env = process.env } = {}) {
-  if (!metricsEnabled({ project, env })) return false;
+export function turnCaptureEnabled({ project, env = process.env, home = homedir() } = {}) {
+  if (!metricsEnabled({ project, env, home })) return false;
   const flag = (env.CORE_TURN_CAPTURE || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false;
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
+    let m = null;
     try {
-      const p = JSON.parse(readFileSync(join(project, 'workspace.json'), 'utf8'));
-      if (p && p.turn_capture === false) return false;
-    } catch { /* no pointer / unparseable → default */ }
+      const coreDir = join(home, '.core');
+      m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
+    } catch { m = null; }
+    if (m && m.turn_capture === false) return false;
+    // A project-root workspace.json can still say "off" (an older or copied project). Like
+    // metrics_enabled, it only ever switches capture off, and it keeps doing so until the
+    // signed manifest carries the value.
+    try {
+      const rootManifest = JSON.parse(readFileSync(join(projectRootFor(project, { home, coreDir: join(home, '.core') }), 'workspace.json'), 'utf8'));
+      if (rootManifest && rootManifest.turn_capture === false) return false;
+    } catch { /* absent or unreadable: no opt-out */ }
   }
   return true;
 }
 
 /** Absolute dir for this project's evidence stream. */
-export function turnCaptureDir(projectDir, { workspaceId } = {}) {
-  return join(resolveStoragePath(projectDir, { workspaceId }), TURN_CAPTURE_DIRNAME);
+export function turnCaptureDir(projectDir) {
+  return join(resolveStoragePath(projectDir), TURN_CAPTURE_DIRNAME);
 }
 
 /** The ONE exclusion lock shared by append, retention, purge, and the health
  * counter — a stable sibling OUTSIDE the purged dir. */
-export function turnCaptureLockPath(projectDir, { workspaceId } = {}) {
-  return join(resolveStoragePath(projectDir, { workspaceId }), '.turn-capture.lock');
+export function turnCaptureLockPath(projectDir) {
+  return join(resolveStoragePath(projectDir), '.turn-capture.lock');
 }
 
 function hardenPath(target, mode) {
@@ -239,9 +251,9 @@ export function computeStoreSignature(storeDir) {
 // read-modify-write: two simultaneous processes can lose one increment.
 // ponytail: benign race on a health counter; move under its own lock if
 // tripwire precision ever needs exact counts.
-function bumpHealth(projectDir, wsId, { failed, reason, ts }) {
+function bumpHealth(projectDir, { failed, reason, ts }) {
   try {
-    const base = resolveStoragePath(projectDir, { workspaceId: wsId });
+    const base = resolveStoragePath(projectDir);
     mkdirSync(base, { recursive: true });
     const file = join(base, HEALTH_FILENAME);
     let health = { attempts: 0, failures: 0, consecutive_failures: 0, last_failure_reason: null, last_failure_ts: null };
@@ -264,8 +276,8 @@ function bumpHealth(projectDir, wsId, { failed, reason, ts }) {
 }
 
 /** Read the capture-health counters. Missing → zeros. */
-export function readCaptureHealth(projectDir, { workspaceId } = {}) {
-  const file = join(resolveStoragePath(projectDir, { workspaceId }), HEALTH_FILENAME);
+export function readCaptureHealth(projectDir) {
+  const file = join(resolveStoragePath(projectDir), HEALTH_FILENAME);
   const zero = { attempts: 0, failures: 0, consecutive_failures: 0, last_failure_reason: null, last_failure_ts: null };
   try { return { ...zero, ...JSON.parse(readFileSync(file, 'utf8')) }; } catch { return zero; }
 }
@@ -276,13 +288,12 @@ export function readCaptureHealth(projectDir, { workspaceId } = {}) {
  *
  * @returns {{ written: boolean, reason?: string, path?: string }}
  */
-export function captureTurnEvidence(projectDir, input, { workspaceId, now, env = process.env } = {}) {
+export function captureTurnEvidence(projectDir, input, { now, env = process.env } = {}) {
   try {
     if (!existsSync(projectDir)) return { written: false, reason: 'project-dir-missing' };
     if (!turnCaptureEnabled({ project: projectDir, env })) {
       return { written: false, reason: 'disabled' };
     }
-    const wsId = workspaceId || resolveWorkspaceId(projectDir);
     let row;
     try { row = normalizeTurnEvidenceRow(input); }
     catch (e) {
@@ -290,15 +301,15 @@ export function captureTurnEvidence(projectDir, input, { workspaceId, now, env =
       // supplying a required field fails every turn. Counting it keeps the
       // failure-streak wire able to see it. An opt-out returns above this and
       // is never counted — declining to record is not a broken recorder.
-      bumpHealth(projectDir, wsId, { failed: true, reason: `invalid-row: ${e.message}`, ts: new Date().toISOString() });
+      bumpHealth(projectDir, { failed: true, reason: `invalid-row: ${e.message}`, ts: new Date().toISOString() });
       return { written: false, reason: `invalid-row: ${e.message}` };
     }
     const record = { ts: now || new Date().toISOString(), ...row };
-    const dir = turnCaptureDir(projectDir, { workspaceId: wsId });
+    const dir = turnCaptureDir(projectDir);
     const file = join(dir, `${todayUTC(now)}.jsonl`);
     let appendError = null;
     try {
-      withFileLock(turnCaptureLockPath(projectDir, { workspaceId: wsId }), () => {
+      withFileLock(turnCaptureLockPath(projectDir), () => {
         // mkdir + append + hardening inside the shared lock: a concurrent
         // purge can't race between mkdir and append, and owner-only modes are
         // re-asserted every write.
@@ -323,7 +334,7 @@ export function captureTurnEvidence(projectDir, input, { workspaceId, now, env =
     } catch (e) {
       appendError = e; // lock acquisition failed — still an attempt, still recorded
     }
-    bumpHealth(projectDir, wsId, {
+    bumpHealth(projectDir, {
       failed: Boolean(appendError),
       reason: appendError ? String(appendError.message) : null,
       ts: record.ts,
@@ -340,8 +351,8 @@ export function captureTurnEvidence(projectDir, input, { workspaceId, now, env =
 // ---------- read-side ----------
 
 /** List `<date>.jsonl` files in the stream dir, oldest first. */
-export function listTurnCaptureFiles(projectDir, { workspaceId } = {}) {
-  const dir = turnCaptureDir(projectDir, { workspaceId });
+export function listTurnCaptureFiles(projectDir) {
+  const dir = turnCaptureDir(projectDir);
   if (!existsSync(dir)) return [];
   let names = [];
   try { names = readdirSync(dir); } catch { return []; }
@@ -355,10 +366,14 @@ export function listTurnCaptureFiles(projectDir, { workspaceId } = {}) {
  * Cheap census for the /metrics mechanics line: whether the stream is on and
  * how much is captured. Row count is a line count (no per-row parse).
  */
-export function turnCaptureStats(projectDir, { workspaceId, env = process.env } = {}) {
-  const wsId = workspaceId || resolveWorkspaceId(projectDir);
+export function turnCaptureStats(projectDir, { env = process.env } = {}) {
+  // With a pin that no longer verifies, the stream's real folder is unknown, and reading the
+  // project-local fallback would report zero rows for rows that exist elsewhere.
+  if (storagePinInvalid(projectDir, { env })) {
+    return { enabled: false, days: null, rows: null, health: null, dir: null, reason: 'pin-unverified' };
+  }
   const enabled = turnCaptureEnabled({ project: projectDir, env });
-  const files = listTurnCaptureFiles(projectDir, { workspaceId: wsId });
+  const files = listTurnCaptureFiles(projectDir);
   let rows = 0;
   for (const { file } of files) {
     try {
@@ -369,8 +384,8 @@ export function turnCaptureStats(projectDir, { workspaceId, env = process.env } 
     enabled,
     days: files.length,
     rows,
-    health: readCaptureHealth(projectDir, { workspaceId: wsId }),
-    dir: turnCaptureDir(projectDir, { workspaceId: wsId }),
+    health: readCaptureHealth(projectDir),
+    dir: turnCaptureDir(projectDir),
   };
 }
 
@@ -398,8 +413,8 @@ function assertInsideTurnCapture(targetFile, dir) {
  * captured material. The lock is deliberately NOT in scope: it holds no
  * captured content and is what serializes the purge itself.
  */
-export function turnCapturePurgeScope(projectDir, { workspaceId } = {}) {
-  const base = resolveStoragePath(projectDir, { workspaceId });
+export function turnCapturePurgeScope(projectDir) {
+  const base = resolveStoragePath(projectDir);
   return [
     { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true },
     { id: 'health', path: join(base, HEALTH_FILENAME), tree: false },
@@ -430,10 +445,11 @@ export function runTurnCaptureRetention(projectDir, {
   windowDays = TURN_CAPTURE_RETENTION_DAYS,
   apply = true,
   now = new Date().toISOString(),
-  workspaceId,
 } = {}) {
-  const wsId = workspaceId || resolveWorkspaceId(projectDir);
-  const dir = turnCaptureDir(projectDir, { workspaceId: wsId });
+  if (storagePinInvalid(projectDir)) {
+    return { ran: false, reason: 'pin-unverified', cutoff: null, windowDays, candidates: [], deleted: [], kept: [], verified: false };
+  }
+  const dir = turnCaptureDir(projectDir);
   const base = { windowDays, candidates: [], deleted: [], kept: [], verified: true };
   if (!validWindow(windowDays)) {
     return { ran: false, reason: 'invalid-window', cutoff: null, ...base, verified: false };
@@ -442,7 +458,7 @@ export function runTurnCaptureRetention(projectDir, {
 
   const cutoffMs = new Date(now).getTime() - windowDays * 86400000;
   const cutoff = new Date(cutoffMs).toISOString().slice(0, 10);
-  for (const { date, file } of listTurnCaptureFiles(projectDir, { workspaceId: wsId })) {
+  for (const { date, file } of listTurnCaptureFiles(projectDir)) {
     const fileMs = new Date(`${date}T23:59:59Z`).getTime();
     if (fileMs >= cutoffMs) { base.kept.push(file); continue; }
     base.candidates.push(file);
@@ -451,7 +467,7 @@ export function runTurnCaptureRetention(projectDir, {
   if (!apply) return { ran: true, cutoff, ...base };
 
   try {
-    withFileLock(turnCaptureLockPath(projectDir, { workspaceId: wsId }), () => {
+    withFileLock(turnCaptureLockPath(projectDir), () => {
       for (const file of base.candidates) {
         try {
           assertInsideTurnCapture(file, dir);
@@ -477,11 +493,15 @@ export function runTurnCaptureRetention(projectDir, {
  * that could not be removed is reported with its reason and the overall result
  * is not `purged`. Partial success is never narrated as success.
  */
-export function purgeTurnCapture(projectDir, { apply = true, workspaceId } = {}) {
-  const wsId = workspaceId || resolveWorkspaceId(projectDir);
-  const dir = turnCaptureDir(projectDir, { workspaceId: wsId });
-  const base = resolveStoragePath(projectDir, { workspaceId: wsId });
-  const entries = turnCapturePurgeScope(projectDir, { workspaceId: wsId });
+export function purgeTurnCapture(projectDir, { apply = true } = {}) {
+  // Refuse rather than purge the wrong folder and call it done: with a pin that no longer verifies,
+  // the captured rows may sit somewhere other than the project-local fallback this would target.
+  if (storagePinInvalid(projectDir)) {
+    return { purged: false, reason: 'pin-unverified', message: 'the metrics storage pin does not verify, so the capture folder cannot be located; run metrics-init for this project first', dir: null, existed: null, scope: [] };
+  }
+  const dir = turnCaptureDir(projectDir);
+  const base = resolveStoragePath(projectDir);
+  const entries = turnCapturePurgeScope(projectDir);
   try {
     for (const entry of entries) assertPurgeEntry(entry, base);
   } catch (e) {
@@ -495,7 +515,7 @@ export function purgeTurnCapture(projectDir, { apply = true, workspaceId } = {})
   }
 
   try {
-    withFileLock(turnCaptureLockPath(projectDir, { workspaceId: wsId }), () => {
+    withFileLock(turnCaptureLockPath(projectDir), () => {
       for (const entry of scope) {
         try {
           rmSync(entry.path, { recursive: entry.tree, force: true });

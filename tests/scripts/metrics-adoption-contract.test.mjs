@@ -1,19 +1,36 @@
+import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { metricsEnabled, logEvent } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { computePrecision } from '../../plugins/core/skills/core/scripts/calibrate-classifier.mjs';
+
+// Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
+process.env.CORE_HARNESS ||= 'claude-code';
+
+// Opt-outs live in the project's trusted per-harness manifest. The manifest for an
+// unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
+// redirected for this file's process.
+const TEST_HOME = mkdtempSync(join(tmpdir(), 'optout-home-'));
+process.env.HOME = TEST_HOME;
+process.env.USERPROFILE = TEST_HOME;
+process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
+function writeManifestFlags(project, fields) {
+  updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
+}
+
 
 // The BBLens metrics-adoption contract (validity-dimension spec §"BBLens field-contract"
 // + memory-extension-contracts §6). These invariants are what an overlay relies on when
 // it adopts CORE's instrumented-memory system for real prod metrics. A change that breaks
 // any of them breaks BBLens adoption — so they get an explicit, named test.
 
-function scratch(workspaceJson) {
+function scratch(flags) {
   const dir = mkdtempSync(join(tmpdir(), 'metrics-contract-'));
-  if (workspaceJson !== undefined) writeFileSync(join(dir, 'workspace.json'), JSON.stringify(workspaceJson));
+  const { workspace_id: _id, ...rest } = flags || {};
+  if (Object.keys(rest).length) writeManifestFlags(dir, rest);
   return dir;
 }
 
@@ -25,19 +42,19 @@ function scratch(workspaceJson) {
 
 test('capture gate defaults ON with no env and no workspace flag', () => {
   const dir = scratch({ workspace_id: 'x' });
-  try { assert.equal(metricsEnabled({ project: dir, env: {} }), true); }
+  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), true); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('a workspace opts OUT via workspace.json metrics_enabled:false', () => {
+test('a project opts OUT via its manifest metrics_enabled:false', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: false });
-  try { assert.equal(metricsEnabled({ project: dir, env: {} }), false); }
+  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), false); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('workspace.json metrics_enabled:true stays ON (explicit opt-in, harmless under default-on)', () => {
+test('manifest metrics_enabled:true stays ON (explicit opt-in, harmless under default-on)', () => {
   const dir = scratch({ workspace_id: 'x', metrics_enabled: true });
-  try { assert.equal(metricsEnabled({ project: dir, env: {} }), true); }
+  try { assert.equal(metricsEnabled({ project: dir, env: { CORE_HARNESS: 'claude-code' } }), true); }
   finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

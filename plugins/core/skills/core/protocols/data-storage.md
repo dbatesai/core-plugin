@@ -14,7 +14,9 @@ Three surfaces, three responsibilities. Don't mix them.
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed by convention so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
-- **Agent operational meta** — `~/.core/` — your operational layer across projects. `agent-profile.md` is your cross-project home (legacy installs: `dm-profile.md` until the startup migration renames it). `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
+- **Project operational state** — `<project>/.core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. In a synced folder (OneDrive, iCloud Drive, Dropbox, Google Drive) the append-heavy and lock-bearing files live under `~/.core/local/` instead, as does the state of a read-only folder or of another install's project. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
+
+- **Agent operational meta** — `~/.core/` — only what serves every project. `agent-profile.md` is your cross-project home (legacy installs: `dm-profile.md` until the startup migration renames it). `projects.json` lists the registered project roots. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache for cross-project files. `install-secret` and `install-id` sign project state. None of this holds project facts.
 
 - **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
 
@@ -31,7 +33,7 @@ When sources conflict, this is the order CORE resolves:
 1. **Direct user instruction in the current session** — overrides everything else.
 2. **User-edited `<project>/PROJECT.md`** — the user's curation surface; anti-resurrection rule applies.
 3. **Canonical units in `<project>/_memories/`** — project facts of record.
-4. **CORE operational meta in `~/.core/`** — runtime state only; not project fact authority.
+4. **CORE operational state in `<project>/.core/` and `~/.core/`** — runtime state only; not project fact authority.
 5. **Harness-local recall** — Claude Code `MEMORY.md`, Codex memories at `~/.codex/memories/`, and equivalents in future harnesses. Hints only; must verify against the unit store before acting.
 
 See `dc-86-harness-local-memory-recall` for the principle behind levels 4 and 5 — the four-surface model that makes the divergence between Claude's autonomous-write and Codex's explicit-save-only memory models safe.
@@ -320,7 +322,7 @@ Metrics capture is physically two separate streams, and they are never mixed:
 | **Closed-schema metrics** | `retrieval-log.jsonl` / `outcome-log.jsonl` and the derived rollups — counts, tiers, verdicts, identities. No prompts, no diffs, no unit bodies, no paths, no raw errors. | **ON**, opt-out via `metrics_enabled: false` or `CORE_METRICS_ENABLED=0`. | `metrics-package.mjs` reads this and anonymizes it into the shareable package. |
 | **Turn-capture evidence** | `<metrics-storage-base>/turn-capture/<date>.jsonl` — one row per turn: the user's prompt (64 KiB byte-cap), the combined delivered context-pack text (16 KiB cap), per-unit ids+scores, the top-20 rejected candidates with scores, a store signature for drift detection, and producer identity. This is what the hindsight judge grades later — it exists so retrieval quality is judgeable after the fact. Files are owner-only (dir `0700`, rows `0600`, best-effort where the FS supports it). For local grading and human/agent debugging only; no model inference runs over it. | **ON**. Opt-outs: `CORE_TURN_CAPTURE=0` (env), `turn_capture: false` in the project-root `workspace.json` (an opt-OUT travelling with a copied project is privacy-safe), or the master `CORE_METRICS_ENABLED=0`. | **None.** `metrics-package.mjs` has no import path or read path into `turn-capture/`; a permanent canary tripwire test asserts the built package bytes never contain a planted evidence string. |
 
-The evidence stream is the materially more sensitive one, so it carries **always-visible state** (`/metrics` renders the ON line with the exact disclosure and off-switches, or the OFF line confirming an opt-out took effect), **independent disable** (its own flag; toggling it never touches the numbers stream), **30-day retention** (runs inside `maintenance-run.mjs` with dry-run + deletion proof), and **purge on explicit ask** (`maintenance-run.mjs --purge-turn-capture`, or `turn-capture.mjs --purge`). All evidence-stream deletion is scoped by path assertion to `<metrics-storage-base>/turn-capture/` only — it can never target a user memory unit or `PROJECT.md`. **One exclusion lock** at a stable sibling path OUTSIDE the purged directory (`<metrics-storage-base>/.turn-capture.lock`) is shared by append, retention deletion, and purge, so a purge can never unlink the lock out from under a mid-flight writer and the three ops can never race. A health counter (`<metrics-storage-base>/turn-capture-health.json`, a sibling on purpose) records every attempt including ones where the stream itself couldn't be created — a silently dying flight recorder is the exact failure the capture-health tripwire watches. The single writer is `scripts/turn-capture.mjs`; the one wired seam is `retrieve-context-hook.mjs`, writing the evidence row in the same run as the numbers row, joined by `retrieval_id`; a capture outcome (including failures) rides the hook's terminal operational receipt as a closed `turn_capture` status code, never as raw content.
+The evidence stream is the materially more sensitive one, so it carries **always-visible state** (`/metrics` renders the ON line with the exact disclosure and off-switches, or the OFF line confirming an opt-out took effect), **independent disable** (its own flag; toggling it never touches the numbers stream), **no scheduled deletion** (rows are kept until the user asks), and **purge on explicit ask** (`maintenance-run.mjs --purge-turn-capture`, or `turn-capture.mjs --purge`). All evidence-stream deletion, which only ever happens on that explicit ask, is scoped by path assertion to `<metrics-storage-base>/turn-capture/` only — it can never target a user memory unit or `PROJECT.md`. **One exclusion lock** at a stable sibling path OUTSIDE the purged directory (`<metrics-storage-base>/.turn-capture.lock`) is shared by append, retention deletion, and purge, so a purge can never unlink the lock out from under a mid-flight writer and the three ops can never race. A health counter (`<metrics-storage-base>/turn-capture-health.json`, a sibling on purpose) records every attempt including ones where the stream itself couldn't be created — a silently dying flight recorder is the exact failure the capture-health tripwire watches. The single writer is `scripts/turn-capture.mjs`; the one wired seam is `retrieve-context-hook.mjs`, writing the evidence row in the same run as the numbers row, joined by `retrieval_id`; a capture outcome (including failures) rides the hook's terminal operational receipt as a closed `turn_capture` status code, never as raw content.
 
 ---
 
@@ -356,17 +358,17 @@ Memory decisions are yours. Capturing an observation, graduating it, superseding
 
 When the user tells you directly ("remember X", "forget Y", "pin this", "save as a decision"), do exactly that without re-asking.
 
-**Ask the user only for a critical decision you can't make.** Both conditions must hold.
+**Ask the user only for a critical decision you can't make.** Both conditions must hold, and the bar sits high on purpose: told directly to use your own judgment, you're usually right, so asking is the exception this list carves out, not a default you fall back on when a call merely feels uncomfortable.
 
 A decision is **critical** when it would:
 
 - override or archive something the user wrote, or retire a fact they explicitly kept or restored (their authorship outranks your judgment — the user-control invariant);
 - bring back something the user removed (anti-resurrection);
 - record a decision, commitment, owner or deadline as made by the user or anyone else when the evidence doesn't show they made it;
-- settle a contradiction between sources on a fact that changes what someone does (a date, an owner, a commitment, a decision);
-- change a structural pattern or a default the user hasn't endorsed (data topology, identity, protocol migration, invariants, global defaults).
+- settle a contradiction between sources on a fact that **materially** changes what someone does (a date, an owner, a commitment, a decision) — not any contradiction, only one where guessing wrong would actually mislead someone;
+- change a structural pattern or a default the user hasn't endorsed (data topology, identity, protocol migration, invariants, global defaults) **and** the change is hard to unwind — most memory writes aren't: the store never deletes, so a wrong supersession call is corrected by the next one, not lost. Reserve this bullet for the rare change that isn't cheaply reversible that way.
 
-You **can't make** it when you've looked (the retrieval ladder, the sources the units cite, the user's own words in the transcript) and the evidence still doesn't settle it. If the evidence does settle it, decide, even when the decision is on the list above, and put the evidence in the unit body.
+You **can't make** it when you've looked (the retrieval ladder, the sources the units cite, the user's own words in the transcript) and the evidence still doesn't settle it. If the evidence does settle it, decide, even when the decision is on the list above, and put the evidence in the unit body. When genuinely torn, decide and narrate the reasoning rather than asking — a visible, reversible call beats an interruption.
 
 When you do ask: one question, in plain words, with your best guess and why. Keep working on everything else while you wait. Record the question as an open-question unit so it outlives the session (the deferral ladder in SKILL.md §"Persist on hard questions" takes it from there).
 
@@ -452,17 +454,19 @@ Belt-and-suspenders for tracked files: cache is primary, `git diff` is the fallb
 
 Multiple agents can run startup and `/finalize` at the same time. The rules, per file:
 
-- **`index.json` — NEVER hand-edit. All mutation goes through `scripts/index-registry.mjs`**
-  (`add` / `update` / `remove` via CLI or module import). The script does the full
-  read-decide-write under the nonce-CAS lock in `scripts/file-lock.mjs`, so concurrent
-  registrations and updates all survive. A freehand read-modify-write of `index.json` is a
-  protocol violation — it races the lock and silently drops other agents' writes. Reading
-  `index.json` directly stays fine (reads are safe; writes are the hazard).
-- **`last_active` is not a registry field.** Stamp it with
-  `index-registry.mjs touch <workspace-id>` — it writes the per-workspace single-owner file
-  `~/.core/workspaces/<id>/last-active`. Read it per-workspace first; the `last_active` field
-  still present in old `index.json` entries is a tolerant read fallback for one release, and
-  nothing writes it.
+- **`projects.json` — NEVER hand-edit. All mutation goes through `scripts/index-registry.mjs`**
+  (`register` via CLI or module import). The script does the full read-decide-write under the
+  nonce-CAS lock in `scripts/file-lock.mjs`, so concurrent registrations all survive. A
+  freehand read-modify-write is a protocol violation — it races the lock and silently drops
+  other agents' writes. It's also the auto-close trust anchor, which is why only a startup the
+  user ran may add to it. The legacy `index.json` is read-only apart from the migration's
+  marks, written through the same lock.
+- **Per-project records are single-owner files in the project's state.** `index-registry.mjs
+  touch` writes `last-active`, `bootstrap` writes `last-bootstrap.json`, `manifest --set-json`
+  merges into the manifest — each under `<project>/.core/<harness>/`, needing no registry lock.
+- **`~/.core/migration-manifest.json`** is shared by every project and harness; the
+  migration writes it only under `~/.core/migration-manifest.lock`, after the project's close
+  lock.
 - **Edit-detection state-cache is per-project** (see §Edit detection above): the project-local
   cache DOES have a shared write within a project — `decorate-graph.mjs`, `hot-section.mjs`,
   and `maintenance-run.mjs` can all stamp it in the same window — so `stampFiles`/`stampFile`
@@ -475,8 +479,8 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
 - **Lock order (deadlock prevention):** a per-project lock (e.g. the close pass's
   `_close.lock`) is always taken BEFORE any global `~/.core/` lock, never after.
 - A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace —
-  `~/.core/<wrapper>/` — and must not write `index.json`, `state-cache.json`, `agent-profile.md`,
-  or `topics.md`.
+  `~/.core/<wrapper>/` — and must not write `projects.json`, `index.json`, `state-cache.json`,
+  `agent-profile.md`, or `topics.md`.
 
 Accepted residual, named: a crashed writer's lock stalls registry writes for the stale window
 (10–30 min) — availability, not data loss. And if `~/.core` lands on a virtualized/synced path
@@ -664,20 +668,33 @@ Three rings, one read at runtime.
 ├── _sessions/                     ← per-session agent logs (CORE-created)
 ├── _outputs/                      ← swarm synthesis, deliverables (CORE-created)
 ├── docs/                          ← architecture, explainers (user surface)
-└── .claude/                       ← harness config + scripts
+├── .claude/                       ← harness config + scripts
+└── .core/                         ← CORE operational state (self-ignored: `.gitignore` = `*`)
+    └── <harness>/                 ← one per harness: claude-code, codex, …
+        ├── stamp                  ← provenance: HMAC of (path, harness, install id)
+        ├── workspace.json         ← manifest: project_id, agent_name, disclosure flags, opt-outs
+        ├── workspace.json.mac     ← content MAC; a missing or wrong one reads the manifest as absent
+        ├── last-active
+        ├── last-bootstrap.json    ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
+        ├── last-bootstrap.json.mac
+        ├── capability-history.jsonl
+        ├── metrics/               ← derived metrics, calibration pool, rollups
+        ├── artifact-receipts/
+        ├── drafts/
+        └── superseded/            ← state set aside (unverified, copied, migrated duplicates, legacy-<date> drift)
 ```
 
 **Agent operational ring** — `~/.core/`
 
 ```
 ~/.core/
-├── agent-profile.md                  ← cross-project personality, portfolio observations
-├── index.json                     ← global workspace registry
+├── agent-profile.md               ← cross-project personality, portfolio observations
+├── projects.json                  ← registered project roots (auto-close trust anchor)
+├── install-secret, install-id     ← sign and identify this install's project state
 ├── topics.md                      ← controlled vocabulary
-├── state-cache.json               ← edit-detection hashes
-├── workspaces/<id>/               ← per-workspace operational meta
-│   ├── workspace.json
-│   └── last-bootstrap.json        ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
+├── state-cache.json               ← edit-detection hashes for cross-project files
+├── local/<root-slug>/<harness>/   ← project state that must stay on this disk (synced, read-only, or another install's)
+├── index.json, workspaces/<id>/   ← legacy layout; read by the migration, never written for new projects
 ├── research/                      ← cross-project knowledge library
 └── <wrapper>/                     ← co-installed wrapper sub-namespace (writes only here — never the shared files above)
 ```

@@ -47,7 +47,7 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, resolveWorkspaceId } from './log-event.mjs';
+import { resolveStoragePath } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
 import { listTurnCaptureFiles, computeStoreSignature, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 import { buildRetrievalTrace } from './retrieve-context.mjs';
@@ -60,12 +60,12 @@ export const JUDGE_VERSION = '1.0.0';
 // Conservative-LOW bar (see header): essentially "no lexical signal at all".
 export const DEFAULT_GAP_FLOOR = 0.5;
 
-export function judgmentLogPath(projectDir, { workspaceId } = {}) {
-  return join(resolveStoragePath(projectDir, { workspaceId }), JUDGMENT_LOG_FILENAME);
+export function judgmentLogPath(projectDir) {
+  return join(resolveStoragePath(projectDir), JUDGMENT_LOG_FILENAME);
 }
 
-function judgmentLockPath(projectDir, { workspaceId } = {}) {
-  return join(resolveStoragePath(projectDir, { workspaceId }), '.judgment.lock');
+function judgmentLockPath(projectDir) {
+  return join(resolveStoragePath(projectDir), '.judgment.lock');
 }
 
 function readJsonl(file) {
@@ -100,18 +100,17 @@ export function gradeTurn({ deliveredIds, ranking, gapFloor }) {
  * Judge up to `limit` unjudged evidence rows. Returns
  * { judged, skipped, verdicts: {<verdict>: count} }.
  */
-export function judgeUnjudgedTurns(projectDir, { limit = 50, gapFloor, workspaceId, now, env = process.env } = {}) {
-  const wsId = workspaceId || resolveWorkspaceId(projectDir);
+export function judgeUnjudgedTurns(projectDir, { limit = 50, gapFloor, now, env = process.env } = {}) {
   const floor = typeof gapFloor === 'number' ? gapFloor
     : Number.isFinite(Number(env.CORE_JUDGE_GAP_FLOOR)) && env.CORE_JUDGE_GAP_FLOOR !== undefined && env.CORE_JUDGE_GAP_FLOOR !== ''
       ? Number(env.CORE_JUDGE_GAP_FLOOR) : DEFAULT_GAP_FLOOR;
 
-  const logFile = judgmentLogPath(projectDir, { workspaceId: wsId });
+  const logFile = judgmentLogPath(projectDir);
   const judgedIds = new Set(readJsonl(logFile).map((r) => r.retrieval_id).filter(Boolean));
 
   // Oldest-first so history fills forward deterministically.
   const evidence = [];
-  for (const { file } of listTurnCaptureFiles(projectDir, { workspaceId: wsId })) {
+  for (const { file } of listTurnCaptureFiles(projectDir)) {
     evidence.push(...readJsonl(file));
   }
 
@@ -167,8 +166,8 @@ export function judgeUnjudgedTurns(projectDir, { limit = 50, gapFloor, workspace
 
   if (rows.length) {
     try {
-      withFileLock(judgmentLockPath(projectDir, { workspaceId: wsId }), () => {
-        mkdirSync(resolveStoragePath(projectDir, { workspaceId: wsId }), { recursive: true });
+      withFileLock(judgmentLockPath(projectDir), () => {
+        mkdirSync(resolveStoragePath(projectDir), { recursive: true });
         appendFileSync(logFile, rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
         // Judgments name the units a real conversation retrieved: owner-only,
         // re-asserted every append. Best-effort — not every filesystem chmods.

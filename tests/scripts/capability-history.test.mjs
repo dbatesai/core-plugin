@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, utimesSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, utimesSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,13 @@ test('appendRows writes the history file via the shared atomic writer (no orphan
 
 function tmpHome() {
   return mkdtempSync(join(tmpdir(), 'caphist-'));
+}
+
+// A project root inside the temp home; its state lands in <root>/.core/claude-code/.
+function tgt(home, name) {
+  const root = join(home, `proj-${name}`);
+  mkdirSync(root, { recursive: true });
+  return { root, harness: 'claude-code' };
 }
 
 function sampleRow(overrides = {}) {
@@ -62,12 +69,12 @@ test('canonicalRowHash: different status → different hash', () => {
 test('appendRows: first write creates file with one entry', () => {
   const home = tmpHome();
   try {
-    const res = appendRows('ws1', [sampleRow()], { runner_version: '2.7.0' }, { home });
+    const res = appendRows(tgt(home, 'ws1'), [sampleRow()], { runner_version: '2.7.0' }, { home });
     assert.equal(res.appended, 1);
     assert.ok(existsSync(res.path));
-    const hist = readHistory('ws1', { home });
+    const hist = readHistory(tgt(home, 'ws1'), { home });
     assert.equal(hist.length, 1);
-    assert.equal(hist[0].workspace_id, 'ws1');
+    assert.equal(hist[0].harness, 'claude-code');
     assert.equal(hist[0].runner_version, '2.7.0');
     assert.ok(hist[0].row_content_hash);
   } finally { rmSync(home, { recursive: true, force: true }); }
@@ -76,12 +83,12 @@ test('appendRows: first write creates file with one entry', () => {
 test('appendRows/readHistory: project-local store supports sandboxed capability history', () => {
   const project = mkdtempSync(join(tmpdir(), 'caphist-project-'));
   try {
-    const res = appendRows('ws-project', [sampleRow()], { session_id: 's1' }, { project });
-    assert.match(res.path, /_metrics[/\\]capability-history[/\\]ws-project\.jsonl$/); // [/\\]: path.join emits backslashes on Windows
+    const res = appendRows({ root: project, harness: 'claude-code' }, [sampleRow()], { session_id: 's1' }, { project });
+    assert.match(res.path, /_metrics[/\\]capability-history[/\\]claude-code\.jsonl$/); // [/\\]: path.join emits backslashes on Windows
     assert.ok(existsSync(res.path), 'project-local history file created');
-    const hist = readHistory('ws-project', { project });
+    const hist = readHistory({ root: project, harness: 'claude-code' }, { project });
     assert.equal(hist.length, 1);
-    assert.equal(hist[0].workspace_id, 'ws-project');
+    assert.equal(hist[0].harness, 'claude-code');
     assert.equal(hist[0].session_id, 's1');
   } finally { rmSync(project, { recursive: true, force: true }); }
 });
@@ -89,9 +96,9 @@ test('appendRows/readHistory: project-local store supports sandboxed capability 
 test('appendRows: second write appends without overwriting', () => {
   const home = tmpHome();
   try {
-    appendRows('ws1', [sampleRow()], {}, { home });
-    appendRows('ws1', [sampleRow({ identity_status: 'DEGRADED' })], {}, { home });
-    const hist = readHistory('ws1', { home });
+    appendRows(tgt(home, 'ws1'), [sampleRow()], {}, { home });
+    appendRows(tgt(home, 'ws1'), [sampleRow({ identity_status: 'DEGRADED' })], {}, { home });
+    const hist = readHistory(tgt(home, 'ws1'), { home });
     assert.equal(hist.length, 2);
     assert.equal(hist[0].row.identity_status, 'PASS');
     assert.equal(hist[1].row.identity_status, 'DEGRADED');
@@ -101,9 +108,9 @@ test('appendRows: second write appends without overwriting', () => {
 test('appendRows: content hash stable across sessions for identical row', () => {
   const home = tmpHome();
   try {
-    appendRows('ws1', [sampleRow()], { session_id: 's1' }, { home });
-    appendRows('ws1', [sampleRow()], { session_id: 's2' }, { home });
-    const hist = readHistory('ws1', { home });
+    appendRows(tgt(home, 'ws1'), [sampleRow()], { session_id: 's1' }, { home });
+    appendRows(tgt(home, 'ws1'), [sampleRow()], { session_id: 's2' }, { home });
+    const hist = readHistory(tgt(home, 'ws1'), { home });
     assert.equal(hist[0].row_content_hash, hist[1].row_content_hash,
       'identical row in two sessions → same content hash (drift detection relies on this)');
   } finally { rmSync(home, { recursive: true, force: true }); }
@@ -150,9 +157,9 @@ test('appendRows: retention truncates when cap exceeded', () => {
     // Write enough large rows to exceed a small cap
     const bigRow = sampleRow({ evidence: [{ source: 's', value: 'x'.repeat(500) }] });
     for (let i = 0; i < 50; i++) {
-      appendRows('ws1', [bigRow], {}, { home, retentionOpts: { byteCap: 2000, perCapability: 3 } });
+      appendRows(tgt(home, 'ws1'), [bigRow], {}, { home, retentionOpts: { byteCap: 2000, perCapability: 3 } });
     }
-    const hist = readHistory('ws1', { home });
+    const hist = readHistory(tgt(home, 'ws1'), { home });
     assert.ok(hist.length <= 3, `retention should cap at 3, got ${hist.length}`);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -275,10 +282,10 @@ test('appendRows: sequential writes under lock lose no history (two-writer proof
     // Simulate two writers appending; lock serializes them.
     // (Node test is single-threaded, but this proves the read-modify-write
     //  under lock preserves prior entries — the lost-update scenario.)
-    appendRows('ws1', [sampleRow({ identity_status: 'PASS' })], { session_id: 'w1' }, { home });
-    appendRows('ws1', [sampleRow({ identity_status: 'DEGRADED' })], { session_id: 'w2' }, { home });
-    appendRows('ws1', [sampleRow({ identity_status: 'NOT-YET' })], { session_id: 'w3' }, { home });
-    const hist = readHistory('ws1', { home });
+    appendRows(tgt(home, 'ws1'), [sampleRow({ identity_status: 'PASS' })], { session_id: 'w1' }, { home });
+    appendRows(tgt(home, 'ws1'), [sampleRow({ identity_status: 'DEGRADED' })], { session_id: 'w2' }, { home });
+    appendRows(tgt(home, 'ws1'), [sampleRow({ identity_status: 'NOT-YET' })], { session_id: 'w3' }, { home });
+    const hist = readHistory(tgt(home, 'ws1'), { home });
     assert.equal(hist.length, 3, 'all three writes preserved — no lost update');
     assert.deepEqual(hist.map(h => h.session_id), ['w1', 'w2', 'w3']);
   } finally { rmSync(home, { recursive: true, force: true }); }
@@ -289,7 +296,7 @@ test('appendRows: sequential writes under lock lose no history (two-writer proof
 test('history file and directory are owner-only', { skip: process.platform === 'win32' ? 'POSIX mode bits are not enforceable on Windows' : false }, () => {
   const home = mkdtempSync(join(tmpdir(), 'ch-mode-'));
   try {
-    const r = appendRows('w-mode', [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
+    const r = appendRows(tgt(home, 'w-mode'), [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
     assert.equal(statSync(r.path).mode & 0o777, 0o600, 'capability evidence is not world-readable');
     assert.equal(statSync(dirname(r.path)).mode & 0o777, 0o700);
   } finally { rmSync(home, { recursive: true, force: true }); }
@@ -298,9 +305,9 @@ test('history file and directory are owner-only', { skip: process.platform === '
 test('readHistory reports how many persisted rows were unreadable', () => {
   const home = mkdtempSync(join(tmpdir(), 'ch-corrupt-'));
   try {
-    const r = appendRows('w-corrupt', [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
+    const r = appendRows(tgt(home, 'w-corrupt'), [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
     writeFileSync(r.path, `${readFileSync(r.path, 'utf8')}{ not json\nalso not json\n`);
-    const rows = readHistory('w-corrupt', { home });
+    const rows = readHistory(tgt(home, 'w-corrupt'), { home });
     assert.equal(rows.length, 1, 'the readable row still comes back');
     assert.equal(rows.rejected, 2, 'the unreadable ones are counted, not silently gone');
   } finally { rmSync(home, { recursive: true, force: true }); }
@@ -309,7 +316,7 @@ test('readHistory reports how many persisted rows were unreadable', () => {
 test('a clean history reports zero rejected', () => {
   const home = mkdtempSync(join(tmpdir(), 'ch-clean-'));
   try {
-    appendRows('w-clean', [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
-    assert.equal(readHistory('w-clean', { home }).rejected, 0);
+    appendRows(tgt(home, 'w-clean'), [{ capability_id: 'a', identity_status: 'PASS' }], { session_id: 's1' }, { home });
+    assert.equal(readHistory(tgt(home, 'w-clean'), { home }).rejected, 0);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
