@@ -189,7 +189,7 @@ test('CLAUDE_CODE_SESSION_ID env is used when no explicit sessionId is passed', 
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('no file matches the session id → documented mtime fallback', () => {
+test('no file matches the session id → documented mtime fallback, flagged as a session mismatch', () => {
   const home = mkdtempSync(join(tmpdir(), 'rt-fb-'));
   try {
     const cwd = '/work/Proj';
@@ -200,10 +200,26 @@ test('no file matches the session id → documented mtime fallback', () => {
     const r = resolveTranscript('claude-code', { cwd, home, sessionId: 'sess-gone', env: {} });
     assert.equal(r.path, only, 'falls back rather than failing');
     assert.equal(r.resolution, 'mtime-fallback', 'fallback is labeled, never silent');
+    assert.equal(r.sessionMismatch, true, 'a session WAS sought and not found — the fallback file belongs to someone else');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test('readTranscript stamps meta.transcript_resolution', () => {
+test('mtime fallback with no session ever sought is not flagged as a mismatch', () => {
+  // Nobody asked for a specific session — the fallback here is the documented default
+  // behavior, not standing in for a request that couldn't be satisfied.
+  const home = mkdtempSync(join(tmpdir(), 'rt-fb-nosid-'));
+  try {
+    const cwd = '/work/Proj';
+    const dir = join(home, '.claude', 'projects', cwd.replace(/\//g, '-'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'sess-only.jsonl'), '{}\n');
+    const r = resolveTranscript('claude-code', { cwd, home, sessionId: null, env: {} });
+    assert.equal(r.resolution, 'mtime-fallback');
+    assert.equal(r.sessionMismatch, false);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('readTranscript stamps meta.transcript_resolution and meta.session_mismatch', () => {
   const home = mkdtempSync(join(tmpdir(), 'rt-meta-'));
   try {
     const cwd = '/work/Proj';
@@ -213,8 +229,10 @@ test('readTranscript stamps meta.transcript_resolution', () => {
     const r = readTranscript({ harness: 'claude-code', cwd, home, sessionId: 'sess-m', env: {} });
     assert.equal(r.available, true);
     assert.equal(r.meta.transcript_resolution, 'session-id');
+    assert.equal(r.meta.session_mismatch, false, 'an exact match is not a mismatch');
     const fb = readTranscript({ harness: 'claude-code', cwd, home, sessionId: 'nope', env: {} });
     assert.equal(fb.meta.transcript_resolution, 'mtime-fallback');
+    assert.equal(fb.meta.session_mismatch, true, 'the requested session id was not found — the file returned belongs to a different session');
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

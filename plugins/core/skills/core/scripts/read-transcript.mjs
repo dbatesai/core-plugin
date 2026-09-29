@@ -73,12 +73,16 @@ export function resolveTranscript(harness, { cwd = process.cwd(), home = homedir
     const sid = sessionId || env.CLAUDE_CODE_SESSION_ID || null;
     if (sid) {
       const exact = join(dir, `${sid}.jsonl`);
-      if (existsSync(exact)) return { path: exact, resolution: 'session-id', reason: null };
+      if (existsSync(exact)) return { path: exact, resolution: 'session-id', reason: null, sessionMismatch: false };
     }
     const latest = latestFile(dir, (f) => f.endsWith('.jsonl'));
+    // A session id WAS sought (explicit or env) but its own transcript wasn't found: the
+    // file mtime-fallback hands back belongs to some OTHER session in this project, not
+    // the one that was asked for. That distinction has to survive past this function —
+    // a consumer proving something about "this session" cannot treat it as a match.
     return latest
-      ? { path: latest, resolution: 'mtime-fallback', reason: null }
-      : { path: null, resolution: null, reason: 'no-project-transcript' };
+      ? { path: latest, resolution: 'mtime-fallback', reason: null, sessionMismatch: Boolean(sid) }
+      : { path: null, resolution: null, reason: 'no-project-transcript', sessionMismatch: false };
   }
   if (harness === 'codex') {
     // rollout-*.jsonl nested under YYYY/MM/DD — walk the sessions tree, then keep only
@@ -92,12 +96,12 @@ export function resolveTranscript(harness, { cwd = process.cwd(), home = homedir
     for (const c of candidates) {
       const identity = readCodexIdentity(c.path);
       if (!identity || canonicalPath(identity.cwd) !== want) continue;
-      if (sid && identity.id === sid) return { path: c.path, resolution: 'session-id', reason: null };
+      if (sid && identity.id === sid) return { path: c.path, resolution: 'session-id', reason: null, sessionMismatch: false };
       if (!newestForProject) newestForProject = c.path;
     }
     return newestForProject
-      ? { path: newestForProject, resolution: 'mtime-fallback', reason: null }
-      : { path: null, resolution: null, reason: 'no-project-transcript' };
+      ? { path: newestForProject, resolution: 'mtime-fallback', reason: null, sessionMismatch: Boolean(sid) }
+      : { path: null, resolution: null, reason: 'no-project-transcript', sessionMismatch: false };
   }
   return { path: null, resolution: null, reason: 'unsupported-harness' };
 }
@@ -267,14 +271,16 @@ export function readTranscript({ harness, cwd = process.cwd(), home = homedir(),
     codex_tool_extraction: harness === 'codex' ? 'implemented' : 'n/a',
     transcript_resolution: null,
     transcript_unavailable_reason: null,
+    session_mismatch: false,
   };
   const unavailable = (path, reason) => {
     meta.transcript_unavailable_reason = reason;
     return { harness, path, available: false, reason, events: [], meta };
   };
   if (!SUPPORTED_HARNESSES.has(harness)) return unavailable(null, 'unsupported-harness');
-  const { path, resolution, reason } = resolveTranscript(harness, { cwd, home, override, sessionId, env });
+  const { path, resolution, reason, sessionMismatch } = resolveTranscript(harness, { cwd, home, override, sessionId, env });
   meta.transcript_resolution = resolution;
+  meta.session_mismatch = Boolean(sessionMismatch);
   if (!path || !existsSync(path)) return unavailable(path, reason || 'no-project-transcript');
   let content;
   try { content = readFileSync(path, 'utf8'); } catch { return unavailable(path, 'unreadable'); }
