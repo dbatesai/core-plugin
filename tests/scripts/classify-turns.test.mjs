@@ -163,6 +163,27 @@ test('runClassification classifies the session passed in, not the newest transcr
   }
 });
 
+test('runClassification refuses a session mismatch instead of filing another session\'s turns under this one', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ct-mismatch-'));
+  const project = mkdtempSync(join(tmpdir(), 'ct-mismatch-proj-'));
+  try {
+    const dir = join(home, '.claude', 'projects', mapProjectPathToSlug(project));
+    mkdirSync(dir, { recursive: true });
+    const turn = (u, a) => [
+      JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: u }] } }),
+      JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: a }] } }),
+    ].join('\n') + '\n';
+    // No sess-mine.jsonl exists at all — only an unrelated session's transcript.
+    writeFileSync(join(dir, 'sess-other.jsonl'), turn('secret', 'this belongs to a different session'));
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', env: {} });
+    assert.equal(r.status, 'UNAVAILABLE', 'refuses rather than classifying the wrong session\'s turns');
+    assert.equal(r.records, undefined, 'no records at all — nothing was written');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('each classified record is stamped with proxy_version', () => {
   const home = mkdtempSync(join(tmpdir(), 'ct-pv-'));
   const project = mkdtempSync(join(tmpdir(), 'ct-pvp-'));

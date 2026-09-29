@@ -335,6 +335,26 @@ test('runAnticipationGap dedupes terms within a single turn', () => {
   });
 });
 
+test('runDetectors refuses a session mismatch instead of tagging findings with the wrong session', () => {
+  const home = mkdtempSync(join(tmpdir(), 'md-mismatch-'));
+  const project = mkdtempSync(join(tmpdir(), 'md-mismatch-proj-'));
+  try {
+    mkdirSync(join(project, '_memories'), { recursive: true });
+    writeFileSync(join(project, '_memories', 'dc-64-retrieval-ladder.md'), '---\ntype: decision\n---\n# ladder\n');
+    const slugDir = join(home, '.claude', 'projects', project.replace(/[/.\\:]/g, '-'));
+    mkdirSync(slugDir, { recursive: true });
+    // No sess-mine.jsonl exists — only an unrelated session's transcript.
+    writeFileSync(join(slugDir, 'sess-other.jsonl'),
+      JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: 'tell me about the retrieval plan' }] } }) + '\n');
+    const r = runDetectors({ project, harness: 'claude-code', home, sessionId: 'sess-mine', workspaceId: 'md-mismatch-ws', env: {} });
+    assert.equal(r.status, 'UNAVAILABLE', 'refuses rather than tagging another session\'s findings as this one\'s');
+    assert.equal(r.records, undefined, 'no records at all — nothing was written');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('anticipation-gap records are stamped provisional + low severity at the source', () => {
   const home = mkdtempSync(join(tmpdir(), 'md-prov-'));
   const project = mkdtempSync(join(tmpdir(), 'md-proj-'));

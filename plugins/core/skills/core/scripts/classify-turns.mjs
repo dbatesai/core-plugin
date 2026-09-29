@@ -272,6 +272,13 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   if (!t.available) {
     return { status: 'UNAVAILABLE', reason: 'transcript unavailable', provisional: true };
   }
+  // A file was found, but it's the mtime fallback standing in for a session id that had
+  // no transcript of its own — text that belongs to a DIFFERENT session. Writing it into
+  // the classified store tagged with the requested session's id would misattribute one
+  // session's captured turns as another's. Refuse, same as no transcript at all.
+  if (t.meta.session_mismatch) {
+    return { status: 'UNAVAILABLE', reason: 'the requested session has no transcript of its own — the resolver fell back to a different session, whose turns cannot be filed under this one', provisional: true };
+  }
   const ctx = buildPredicates(project, { events: t.events });
   const classified = classifyTurns(t.events, ctx);
   const sid = resolveSessionId({ explicit: sessionId });

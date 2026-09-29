@@ -591,17 +591,23 @@ function main(argv) {
         return 0;
       }
       const transcriptOverride = typeof f.transcript === 'string' ? f.transcript : null;
-      const { available, events, path: transcriptPath } = readTranscript({
+      const { available, events, path: transcriptPath, meta } = readTranscript({
         harness: 'claude-code', cwd: store, override: transcriptOverride, sessionId,
       });
-      const { startedAt, endedAt } = extractTimestampRange(transcriptPath);
+      // A file WAS found, but it's the mtime fallback standing in for a session id that
+      // had no transcript of its own — some OTHER session's events. Recording them as
+      // this session's close receipt would misattribute what happened in the session
+      // being closed, permanently. Treat exactly like "no transcript": empty events,
+      // partial coverage — never trust a mismatched session's data into a receipt.
+      const usable = available && !meta.session_mismatch;
+      const { startedAt, endedAt } = extractTimestampRange(usable ? transcriptPath : null);
       let gitHead = null;
       const g = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(store), encoding: 'utf8' });
       if (g.status === 0 && typeof g.stdout === 'string') gitHead = g.stdout.trim();
 
       const receipt = runDeterministicClose(store, {
-        sessionId, harness: 'claude-code', events, startedAt, endedAt, gitHead,
-        coverage: available ? 'full' : 'partial',
+        sessionId, harness: 'claude-code', events: usable ? events : [], startedAt, endedAt, gitHead,
+        coverage: usable ? 'full' : 'partial',
       });
       process.stdout.write(json ? JSON.stringify({ ok: true, receipt }) + '\n' : `close ${receipt.status}: ${sessionId}\n`);
       return 0;

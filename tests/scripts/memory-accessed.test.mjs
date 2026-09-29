@@ -1,7 +1,7 @@
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyAccess, probe } from '../../plugins/core/skills/core/scripts/capability/memory-accessed-probe.mjs';
@@ -41,6 +41,15 @@ test('classifyAccess NOT-YET: no CORE store present', () => {
 test('classifyAccess UNKNOWN: transcript unavailable (no false "not accessed")', () => {
   const r = classifyAccess({ harness: 'claude-code', transcriptAvailable: false, toolExtractionPending: false, events: [], coreStorePresent: true });
   assert.equal(r.identity_status, 'UNKNOWN');
+});
+
+test('classifyAccess UNKNOWN: a session mismatch is never PASS, even with a PASS-shaped CORE access present', () => {
+  const r = classifyAccess({
+    harness: 'claude-code', transcriptAvailable: true, sessionMismatch: true, toolExtractionPending: false,
+    events: [toolEv('grep -r foo _memories/')], coreStorePresent: true,
+  });
+  assert.equal(r.identity_status, 'UNKNOWN');
+  assert.match(r.reason, /fell back to a different session/);
 });
 
 test('classifyAccess UNKNOWN: tool extraction unavailable — refuses false negative', () => {
@@ -90,6 +99,22 @@ test('probe: Codex harness → DEGRADED when extraction works but no CORE access
     const row = await probe({ harness: 'codex', cwd: dir, transcriptPath: tpath, coreStorePresent: true });
     assert.equal(row.identity_status, 'DEGRADED', 'store present, tools observed, none reached CORE → store-selection signal');
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('probe: UNKNOWN, not PASS, when the requested session has no transcript and a different session\'s CORE-store access is found instead', async () => {
+  // Reproduces the reviewed fixture: only old-session.jsonl exists with a _memories/ tool
+  // access; CLAUDE_CODE_SESSION_ID names a session with no transcript of its own.
+  const home = mkdtempSync(join(tmpdir(), 'ma-mismatch-home-'));
+  try {
+    const cwd = '/work/ProjMismatchAccess';
+    const dir = join(home, '.claude', 'projects', '-work-ProjMismatchAccess');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'old-session.jsonl'), JSON.stringify({
+      message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Grep', input: { pattern: 'x', path: '_memories/' } }] },
+    }), { flag: 'w' });
+    const row = await probe({ harness: 'claude-code', cwd, home, sessionId: 'current-session', coreStorePresent: true });
+    assert.equal(row.identity_status, 'UNKNOWN', 'a mismatched session must never read as PASS');
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 // --- path false-positives must not count as access ---

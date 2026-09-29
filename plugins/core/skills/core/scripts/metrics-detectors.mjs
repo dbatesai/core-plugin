@@ -379,6 +379,13 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
   }
   const t = readTranscript({ harness, cwd: cwd || project, home, sessionId, env });
   if (!t.available) return { status: 'UNAVAILABLE', reason: 'transcript unavailable' };
+  // A file was found, but it's the mtime fallback standing in for a session id that had
+  // no transcript of its own — some OTHER session's events. Detector findings written
+  // from it and tagged with the requested session's id would misattribute where a
+  // stale-context or citation finding actually happened. Refuse, same as no transcript.
+  if (t.meta.session_mismatch) {
+    return { status: 'UNAVAILABLE', reason: 'the requested session has no transcript of its own — the resolver fell back to a different session, whose events cannot be tagged as this one\'s' };
+  }
 
   const memoriesDir = join(project, '_memories');
   const index = buildUnitIndex(memoriesDir);

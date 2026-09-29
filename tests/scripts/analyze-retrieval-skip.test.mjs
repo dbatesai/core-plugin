@@ -62,6 +62,16 @@ test('CLEAN: a Read of PROJECT.md before the answer clears the turn', () => {
   assert.equal(classifyRetrievalSkips({ events, terms: TERMS }).status, 'CLEAN');
 });
 
+test('UNKNOWN on a session mismatch, even with a real skip present — the other session\'s ordering cannot judge this one', () => {
+  const events = [
+    userT(1, 'what does IGM mean for this project?'),
+    asstT(2, 'IGM is the intention/goal/measure frame...'),
+  ];
+  const r = classifyRetrievalSkips({ events, terms: TERMS, sessionMismatch: true });
+  assert.equal(r.status, 'UNKNOWN');
+  assert.deepEqual(r.skips, [], 'no skip finding is reported on borrowed evidence');
+});
+
 test('no false positive: user turn with no project term is not memory-dependent', () => {
   const events = [userT(1, 'can you fix this typo?'), asstT(2, 'done')];
   const r = classifyRetrievalSkips({ events, terms: TERMS });
