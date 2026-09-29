@@ -926,7 +926,7 @@ test('migration signs a carried metrics pin only when it names a place metrics m
   }
 });
 
-test('a marker write failure during migration blocks completion, not just an immediate read: no receipt, no release, state fenced, and a later run completes it', { skip: isWin || isRoot }, () => {
+test('a marker write failure during migration blocks completion, not just an immediate read: no receipt, no release, state fenced, and a later run completes it', () => {
   const { s, p, table } = migrationFixture();
   const inProject = join(p, '.core', H);
   try {
@@ -934,11 +934,12 @@ test('a marker write failure during migration blocks completion, not just an imm
     mkdirSync(pinned, { recursive: true });
     writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), pinned);
     // Obstruct the marker's target file before migration runs: a directory in its place makes the
-    // marker's atomic write fail with EISDIR. Leaving the pin signed with no marker (an earlier,
-    // insufficient fix) only protects the very next read — a LATER total pin loss falls through to
-    // "never redirected" and reads clean, since no marker was ever actually persisted to catch it.
-    // So the migration does not complete at all: same class of failure as an unreadable legacy
-    // folder or a symlink, elsewhere in this function.
+    // marker's atomic rename onto it fail (EISDIR on POSIX, EPERM on NTFS — the assertions below
+    // check status/code, not the platform-specific error). Leaving the pin signed with no marker
+    // (an earlier, insufficient fix) only protects the very next read — a LATER total pin loss falls
+    // through to "never redirected" and reads clean, since no marker was ever actually persisted to
+    // catch it. So the migration does not complete at all: same class of failure as an unreadable
+    // legacy folder or a symlink, elsewhere in this function.
     const durable = stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).dir;
     mkdirSync(join(durable, 'metrics-ever-external.txt'), { recursive: true });
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table });
