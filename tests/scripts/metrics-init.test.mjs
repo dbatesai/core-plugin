@@ -1,5 +1,5 @@
 import { operationalMetricsDir, resolveStoragePath, metricsEnabled, storagePinInvalid } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt, metricsStorageAllowed, localRootKey, localStateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
@@ -88,6 +88,56 @@ test('detectStoragePath returns the default project-local path when the path has
       rmSync(projectDir, { recursive: true, force: true });
     }
   });
+});
+
+test('detectStoragePath redirects off a synced folder on non-Windows — iCloud, Dropbox, Google Drive', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-synced-home-'));
+    // Real mkdirSync so isSyncedPath's component-by-component check runs against an
+    // actual path, not a string that only looks synced.
+    const icloud = join(home, 'Library', 'CloudStorage', 'iCloud Drive', 'Projects', 'app');
+    const dropbox = join(home, 'Dropbox', 'Projects', 'app');
+    const googleDrive = join(home, 'Google Drive', 'Projects', 'app');
+    const plain = join(home, 'Documents', 'Projects', 'app');
+    for (const dir of [icloud, dropbox, googleDrive, plain]) mkdirSync(dir, { recursive: true });
+    try {
+      for (const projectDir of [icloud, dropbox, googleDrive]) {
+        const detection = detectStoragePath({ projectDir, home });
+        assert.notEqual(detection.path, join(projectDir, '_metrics'), `${projectDir} should redirect, not land under the synced project folder`);
+        assert.match(detection.reason, /synced-folder-detected-redirect-local/);
+        assert.ok(detection.path.startsWith(join(home, '.core', 'local-metrics')), 'redirected path lands under the local-metrics namespace, not the shared per-harness state tree');
+        assert.ok(!detection.path.startsWith(projectDir), 'redirected path is never nested inside the synced project folder itself');
+      }
+      // The non-synced control still resolves project-local, same as before this fix.
+      const control = detectStoragePath({ projectDir: plain, home });
+      assert.equal(control.path, join(plain, '_metrics'));
+      assert.match(control.reason, /project-local/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+test('metricsStorageAllowed accepts the local-metrics redirect target, and does not accept the shared per-harness state tree', () => {
+  const home = mkdtempSync(join(tmpdir(), 'metrics-allowed-home-'));
+  const projectDir = join(home, 'Library', 'CloudStorage', 'iCloud Drive', 'Projects', 'app');
+  mkdirSync(projectDir, { recursive: true });
+  try {
+    // containedPath requires the root to exist on disk (it's checked once the storage dir
+    // has already been scaffolded, same as the real read-back path in log-event.mjs) —
+    // mkdirSync mirrors what initMetrics would already have created by then.
+    const redirected = join(home, '.core', 'local-metrics', localRootKey(projectDir));
+    mkdirSync(redirected, { recursive: true });
+    assert.equal(metricsStorageAllowed(redirected, { projectDir, home }), true, 'the actual redirect target detectStoragePath computes must be an allowed pin');
+    // A pin pointed at the shared harness-state tree instead (same project, wrong
+    // namespace) is refused — that tree has no .project-root owner file to catch a
+    // collision, so it never gets treated as valid metrics storage.
+    const harnessStateDir = localStateDir({ root: projectDir, harness: 'claude-code', coreDir: join(home, '.core') });
+    mkdirSync(harnessStateDir, { recursive: true });
+    assert.equal(metricsStorageAllowed(harnessStateDir, { projectDir, home }), false, 'a pin naming the per-harness state tree is not allowed metrics storage');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('projectPathContainsOneDriveSubstring is true for OneDrive paths and false otherwise', () => {

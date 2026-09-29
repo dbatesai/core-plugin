@@ -171,7 +171,7 @@ export function assertHarnessName(harness) {
  * the key one-to-one, because the slug maps `.`, `-`, `/` and `:` all to `-` and two
  * different projects (`a.b`, `a-b`) would otherwise share one folder and one metrics pin.
  */
-function localRootKey(root) {
+export function localRootKey(root) {
   const real = canonical(root);
   return `${mapProjectPathToSlug(real)}-${createHash('sha256').update(real).digest('hex').slice(0, 12)}`;
 }
@@ -663,7 +663,13 @@ export function readPinSigned({ dir, root, coreDir = defaultCoreDir() }) {
 export function metricsStorageAllowed(pinned, { projectDir, home }) {
   if (typeof pinned !== 'string' || !isAbsolute(pinned)) return false;
   if (containedPath(join(projectDir, '_metrics'), pinned)) return true;
-  if (!containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned)) return false;
+  // Windows+OneDrive redirect, and the non-Windows synced-folder redirect (iCloud Drive,
+  // macOS CloudStorage mounts, Dropbox, Google Drive) — a distinct namespace from
+  // `.core/local/<...>/<harness>/`, deliberately: that tree holds per-harness session
+  // state, and containing on it here would let a metrics pin be satisfied by pointing at
+  // another project's state folder, which has no `.project-root` owner file to catch it.
+  if (!containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned)
+    && !containedPath(join(home, '.core', 'local-metrics'), pinned)) return false;
   try {
     const owner = readFileSync(join(pinned, METRICS_OWNER_FILE), 'utf8').trim();
     if (owner && canonical(owner) !== canonical(projectDir)) return false;

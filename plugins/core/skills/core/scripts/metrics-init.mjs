@@ -2,9 +2,16 @@
  * metrics-init.mjs — storage scaffold for the metrics & observability layer
  *
  * What it does:
- *   - Default storage: `<project>/_metrics/` on Mac, Linux, Windows-no-OneDrive.
+ *   - Default storage: `<project>/_metrics/` when the project isn't under a sync client.
  *   - Windows-with-OneDrive: redirect to `~/AppData/Local/core-metrics/<workspace-id>/`.
- *   - Detection: methods (a) path-substring + (c) OneDrive .ini-settings-parse.
+ *   - Mac/Linux under a sync client (iCloud Drive, macOS CloudStorage mounts, Dropbox,
+ *     Google Drive — the same `isSyncedPath` check project-state.mjs uses for hot state):
+ *     redirect to `~/.core/local/<root-slug>-<hash>/metrics/`. Without this, captured
+ *     turn/prompt text under `_metrics/` would ride whatever sync provider watches the
+ *     project folder — the same exposure the OneDrive redirect exists to avoid, just on a
+ *     different platform.
+ *   - Detection: methods (a) path-substring + (c) OneDrive .ini-settings-parse on Windows;
+ *     `isSyncedPath` substring match on every other platform.
  *   - Per-scaffold forensic log line written to operational meta.
  *   - Stub README left at project location when storage is redirected.
  *   - Idempotent: re-runs leave existing content alone, just ensure structure.
@@ -29,7 +36,7 @@ import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
 import { operationalMetricsDir } from './log-event.mjs';
-import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical, detectStateHarness, markMetricsEverExternal } from './project-state.mjs';
+import { writePinSigned, readPinSigned, writeHeldSigned, readHeldSigned, metricsStorageAllowed, otherProjectsNamingFolder, projectRootFor, canonical, detectStateHarness, markMetricsEverExternal, isSyncedPath, localRootKey } from './project-state.mjs';
 
 // Typed fail-closed marker. When the storage pin cannot be written, capture is
 // DISABLED for this workspace — never silently redirected back into the synced
@@ -325,11 +332,25 @@ export function detectStoragePath({ projectDir, home = homedir() }) {
     };
   }
 
-  // Non-Windows is always project-local
+  // Non-Windows: project-local unless the project root itself is under a sync client
+  // (iCloud Drive, macOS CloudStorage mounts, Dropbox, Google Drive) — the same
+  // `isSyncedPath` check project-state.mjs uses to keep hot state off synced folders.
+  // Captured turn/prompt text is the same kind of hot payload; it gets the same redirect,
+  // to `~/.core/local-metrics/<root-slug>-<hash>/` (localRootKey gives the one-to-one
+  // slug) — a namespace kept separate from `.core/local/<...>/<harness>/`, which holds
+  // per-harness session state, so metricsStorageAllowed's containment check can't be
+  // satisfied by pointing a metrics pin at some other project's state folder instead.
   if (platform() !== 'win32') {
+    if (isSyncedPath(projectDir)) {
+      return {
+        path: join(home, '.core', 'local-metrics', localRootKey(projectDir)),
+        methods: { synced: true },
+        reason: 'non-windows-synced-folder-detected-redirect-local',
+      };
+    }
     return {
       path: join(projectDir, '_metrics'),
-      methods: { os: 'non-windows' },
+      methods: { os: 'non-windows', synced: false },
       reason: 'non-windows-default-project-local',
     };
   }
