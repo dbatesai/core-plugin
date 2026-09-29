@@ -53,7 +53,7 @@ Required checks, stated because they are conditions, not habits (condition 3):
 
 ## Step 4 — record the outcome (every consent decision leaves a record)
 
-Two receipts, two different claims. The receipt written at generation time (`~/.core/workspaces/<workspace-id>/artifact-receipts/<timestamp>.json`) is the **preflight-generation receipt**: it records what was generated and offered for publish — it is **never** a record of what went up, because it is written before consent. If the script reported it failed to write, surface that and do not publish until one lands.
+Two receipts, two different claims. The receipt written at generation time (`<project>/.core/<harness>/artifact-receipts/<timestamp>.json`) is the **preflight-generation receipt**: it records what was generated and offered for publish — it is **never** a record of what went up, because it is written before consent. If the script reported it failed to write, surface that and do not publish until one lands.
 
 After the publish step resolves — published, **declined by the user, or failed** — you MUST record the outcome as a **publish receipt** (condition 4's actual audit trail):
 
@@ -83,7 +83,7 @@ Keeps the published page current while the session runs: the platform already up
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" --write-live-state \
-  ~/.core/workspaces/<workspace-id>/memory-view-live.json \
+  <project>/.core/<harness>/memory-view-live.json \
   --artifact-url <hosted URL from the publish receipt> \
   --scope <active|all-including-archive> [--exclude-topic <t>]... \
   --baseline-snapshot <snapshot_id from the publish receipt> \
@@ -96,7 +96,7 @@ The record carries `artifact_url`, `scope`, `excluded_topics`, `grant_basis`, `b
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" <project-dir> \
-  --live-state ~/.core/workspaces/<workspace-id>/memory-view-live.json
+  --live-state <project>/.core/<harness>/memory-view-live.json
 ```
 
 The watcher reads `baseline_snapshot`, `scope`, `excluded_topics`, and `retry_at` from the record and compares the **same-scoped, same-exclusions** snapshot id the renderer receipts — an `all-including-archive` view is compared over active + archive bytes, an active view over active bytes only, so an archive-only edit wakes an archive-including view and never an active one. Topic exclusions participate in that identity: it covers exactly the population the page embeds, so an edit wholly inside an excluded topic does **not** wake the loop (the page's bytes could not change), while any edit to a kept unit does. A record the watcher cannot honor — missing, corrupt, or wrong-schema at an explicitly passed `--live-state` path — is a configuration error: the watcher refuses to arm (exit 1, named reason on stderr) rather than silently arming with defaults that could reset scope or lose a deferred publish.

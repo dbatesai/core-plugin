@@ -132,7 +132,7 @@ blast-radius policy (MAJOR/MINOR on the plugin version) and called out in `CHANG
   and the strip-on-graduation rule for `mode` / `judgment-needed`.
 - **Metrics event passthrough** — unknown event fields and `query_shape` values are never
   rejected by capture.
-- **`~/.core/workspaces/<id>/` layout** for the files named in `protocols/data-storage.md`.
+- **`<project>/.core/<harness>/` layout** for the files named in `protocols/data-storage.md`, resolved through `scripts/project-state.mjs` (`stateDir`, `readManifest`, `updateManifest`). The earlier `~/.core/workspaces/<id>/` layout is read only by the migration.
 - **Unknown-frontmatter preservation** — CORE tooling never strips fields it doesn't know.
 
 What is internal and may change without notice: script internals and exports not named above,

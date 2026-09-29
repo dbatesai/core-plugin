@@ -24,7 +24,6 @@ import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { buildIndex as buildUnitIndex } from './generate-unit-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { hashText, stampFiles } from './state-cache.mjs';
-import { resolveWorkspaceId } from './log-event.mjs';
 import { purgeTurnCapture } from './turn-capture.mjs';
 import { resolveStoragePath } from './log-event.mjs';
 import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
@@ -143,7 +142,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // boundary discipline as every deletion op here. Remove this block in v3.15.0.
   if (apply) {
     try {
-      const base = resolveStoragePath(root, { workspaceId: resolveWorkspaceId(root) });
+      const base = resolveStoragePath(root);
       const legacyDir = join(base, 'rich-context');
       const legacyLock = join(base, '.rich-context.lock');
       if (existsSync(legacyDir)) {
@@ -286,7 +285,7 @@ async function main(argv) {
   // directory-name assertion so it can only ever remove
   // <storage-base>/turn-capture/. Respects --dry-run.
   if (argv.includes('--purge-turn-capture')) {
-    const res = purgeTurnCapture(projectPath, { apply: !dryRun, workspaceId: resolveWorkspaceId(projectPath) });
+    const res = purgeTurnCapture(projectPath, { apply: !dryRun });
     if (json) process.stdout.write(JSON.stringify(res) + '\n');
     else if (res.purged) process.stdout.write(`Purged the turn-capture evidence stream: ${res.dir}\n`);
     else if (res.reason === 'dry-run') process.stdout.write(`Would purge the turn-capture evidence stream: ${res.dir}\n`);

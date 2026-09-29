@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -152,7 +153,7 @@ test('runClassification classifies the session passed in, not the newest transcr
     // A newer session already started: THREE turns. mtime-latest would pick this.
     writeFileSync(join(dir, 'sess-newer.jsonl'),
       turn('a', 'r1.') + turn('b', 'r2.') + turn('c', 'r3.'));
-    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', workspaceId: 'ct-test-ws', env: {} });
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-mine', env: {} });
     assert.equal(r.status, 'OK');
     assert.equal(r.transcript_resolution, 'session-id');
     assert.equal(r.total, 1, 'classified the 1-turn session, not the 3-turn newer one');
@@ -173,14 +174,14 @@ test('each classified record is stamped with proxy_version', () => {
       JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: a }] } }),
     ].join('\n') + '\n';
     writeFileSync(join(dir, 'sess-pv.jsonl'), turn('hello', 'The answer is 42.'));
-    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-pv', workspaceId: 'ct-pv-ws', today: '2026-06-01', env: {} });
+    const r = runClassification({ project, harness: 'claude-code', home, sessionId: 'sess-pv', today: '2026-06-01', env: {} });
     assert.equal(r.status, 'OK');
     assert.ok(r.records.length >= 1);
     assert.equal(r.records[0].proxy_version, PROXY_VERSION, 'record carries the proxy version so calibration can invalidate across a proxy change');
     assert.equal(r.records[0].harness, 'claude-code', 'calibration never pools anonymous harness rows');
     assert.equal(r.records[0].turn_evidence.user_text, 'hello');
     assert.equal(r.records[0].turn_evidence.assistant_text, 'The answer is 42.');
-    const classifiedFile = join(home, '.core', 'workspaces', 'ct-pv-ws', 'metrics', 'classified', '2026-06-01.jsonl');
+    const classifiedFile = join(operationalMetricsDir(project, { home: home }), 'classified', '2026-06-01.jsonl');
     // Windows: chmod cannot express owner-only (only toggles read-only), so
     // mode stays 0o666 regardless -- structurally unsatisfiable there, not a
     // regression.
@@ -234,15 +235,15 @@ test('classified-store retention: date files older than the window are deleted, 
   const { runClassifiedRetention } = await import('../../plugins/core/skills/core/scripts/classify-turns.mjs');
   const home = mkdtempSync(join(tmpdir(), 'classified-retention-'));
   try {
-    const dir = join(home, '.core', 'workspaces', 'ws-x', 'metrics', 'classified');
+    const dir = join(operationalMetricsDir('.', { home }), 'classified');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '2026-01-01.jsonl'), '{"state":"ok"}\n');
     writeFileSync(join(dir, '2026-07-27.jsonl'), '{"state":"ok"}\n');
 
-    const bad = runClassifiedRetention('.', { workspaceId: 'ws-x', home, windowDays: -5, now: new Date('2026-07-28T00:00:00Z') });
+    const bad = runClassifiedRetention('.', { home, windowDays: -5, now: new Date('2026-07-28T00:00:00Z') });
     assert.equal(bad.ran, false, 'a non-positive window must refuse before naming candidates');
 
-    const r = runClassifiedRetention('.', { workspaceId: 'ws-x', home, windowDays: 30, now: new Date('2026-07-28T00:00:00Z') });
+    const r = runClassifiedRetention('.', { home, windowDays: 30, now: new Date('2026-07-28T00:00:00Z') });
     assert.ok(r.ran);
     assert.ok(!existsSync(join(dir, '2026-01-01.jsonl')), 'the stale file is deleted');
     assert.ok(existsSync(join(dir, '2026-07-27.jsonl')), 'the in-window file stays');

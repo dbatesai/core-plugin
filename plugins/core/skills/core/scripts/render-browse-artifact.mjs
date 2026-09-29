@@ -13,7 +13,7 @@
  *     warning — for the agent to show the user BEFORE any publish.
  *   - Condition 4 (audit trail): TWO receipts, distinct in kind. The
  *     preflight-GENERATION receipt (this manifest, written before consent)
- *     lands under `~/.core/workspaces/<workspace_id>/artifact-receipts/` and
+ *     lands under `<project>/.core/<harness>/artifact-receipts/` and
  *     records what was generated and offered — never what went up. The
  *     POST-PUBLISH receipt (`--record-publish`) is written after the consent/
  *     publish step resolves and records the actual outcome — declined,
@@ -1527,8 +1527,8 @@ export async function renderBrowseArtifact(projectDir, {
     },
   });
 
-  // No workspace.json → the flagged fallback location; the audit trail is kept anyway.
-  const { workspaceId, receiptDir, receiptPath } = generationReceiptLocation({
+  // Unwritable project state → the flagged fallback location; the audit trail is kept anyway.
+  const { projectId, receiptDir, receiptPath } = generationReceiptLocation({
     // The receipt is the audit trail; its root comes from the OS-account home
     // unless a caller names one explicitly (test isolation, --home).
     home: home || requireTrustedHome(), projectDir: root, generatedAt,
@@ -1540,7 +1540,7 @@ export async function renderBrowseArtifact(projectDir, {
     generated_at: generatedAt,
     producer,
     project: root,
-    workspace_id: workspaceId,
+    project_id: projectId,
     snapshot_id: collected.snapshotId,
     scope: { mode: scope, excluded_topics: excludeTopics.slice() },
     unit_count: collected.units.length,
@@ -1564,7 +1564,7 @@ export async function renderBrowseArtifact(projectDir, {
     metrics_as_of: metrics.available ? metrics.as_of : null,
     out_path: outAbs,
     receipt_path: receiptPath,
-    receipt_fallback: workspaceId === null,
+    receipt_fallback: projectId === null,
     sensitivity_warning: SENSITIVITY_WARNING,
   };
 

@@ -73,6 +73,7 @@ import { loadEvents as loadRetrievalEvents, buildReport as buildRetrievalQuality
 import { turnCaptureStats } from './turn-capture.mjs';
 import { latestScorecards, scorecardLogPath } from './scorecard.mjs';
 import { evaluateTripwires } from './metrics-tripwires.mjs';
+import { trustedMetricsDir } from './log-event.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -437,7 +438,7 @@ export function computeRows(out) {
       trust: TRUST.DIRECT,
       noGauge: true,
       value: tc.enabled
-        ? `ON — each turn's prompt and the delivered memory context are saved locally so retrieval quality can be graded later (never exported, auto-deleted after 30 days): ${tc.rows || 0} row(s) / ${tc.days || 0} day(s), ${health.failures || 0} of ${health.attempts || 0} writes failed. Turn off with CORE_TURN_CAPTURE=0 or "turn_capture": false in this project's workspace.json (CORE_METRICS_ENABLED=0 turns off all local capture).`
+        ? `ON — each turn's prompt and the delivered memory context are saved locally so retrieval quality can be graded later (never exported, kept until you purge it): ${tc.rows || 0} row(s) / ${tc.days || 0} day(s), ${health.failures || 0} of ${health.attempts || 0} writes failed. Turn off with CORE_TURN_CAPTURE=0 or "turn_capture": false in this project's workspace.json (CORE_METRICS_ENABLED=0 turns off all local capture).`
         : 'OFF — turn capture is disabled for this project, so hindsight grading of retrieval quality has no evidence to work from.',
     });
   }
@@ -805,12 +806,12 @@ ${body}
     // recognition / trend signal state — a MEASUREMENT-READINESS fact, so it
     // lives in the readiness class, matching the render's classification.
     try {
-      const wsId = JSON.parse(readFileSync(join(cwd, 'workspace.json'), 'utf8')).workspace_id;
-      const sig = join(home, '.core/workspaces', wsId, 'metrics/orient-signal.txt');
-      if (existsSync(sig)) {
+      const meta = trustedMetricsDir(cwd, { home });
+      const sig = meta && join(meta, 'orient-signal.txt');
+      if (sig && existsSync(sig)) {
         out.readiness.recognition_signal = { text: readFileSync(sig, 'utf8').trim(), age_hours: Math.round((Date.now() - statSync(sig).mtimeMs) / 3.6e6) };
       }
-    } catch { /* no workspace pointer — skip */ }
+    } catch { /* no project state yet — skip */ }
 
     // memory-processing recency
     try {
@@ -985,7 +986,7 @@ export function renderAnswerView({ project, cards, tripwires, capture, evidence 
   if (captureOff) {
     L.push('Turn recording is OFF for this project — nothing about your conversations is being saved.');
   } else {
-    L.push('To produce these numbers, each turn\'s prompt and the memory context CORE gave you are saved locally on this machine — never sent anywhere, deleted after 30 days. Turn it off with CORE_TURN_CAPTURE=0, or "turn_capture": false in this project\'s workspace.json.');
+    L.push('To produce these numbers, each turn\'s prompt and the memory context CORE gave you are saved locally on this machine — never sent anywhere, kept until you purge it. Turn it off with CORE_TURN_CAPTURE=0, or "turn_capture": false in this project\'s workspace.json.');
   }
   L.push('');
 

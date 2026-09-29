@@ -189,12 +189,12 @@ test('loadCapabilityHistory: includes project-local fallback rows', () => {
   const home = mkdtempSync(join(tmpdir(), 'capdrift-home-'));
   const project = mkdtempSync(join(tmpdir(), 'capdrift-project-'));
   try {
-    appendRows('ws-fallback', [
+    appendRows({ root: project, harness: 'claude-code' }, [
       { capability_id: 'plugin-root-resolution', identity_status: 'PASS', evidence: [] },
     ], { session_id: 's1' }, { project });
-    const history = loadCapabilityHistory('ws-fallback', project, { home });
+    const history = loadCapabilityHistory({ root: project, harness: 'claude-code' }, project, { home });
     assert.equal(history.length, 1);
-    assert.equal(history[0].workspace_id, 'ws-fallback');
+    assert.equal(history[0].harness, 'claude-code');
     assert.equal(history[0].session_id, 's1');
     assert.equal(history[0].row.capability_id, 'plugin-root-resolution');
   } finally {
@@ -208,14 +208,14 @@ test('loadCapabilityHistory dedups the same observation present in both stores',
   const project = mkdtempSync(join(tmpdir(), 'capdrift-project-'));
   try {
     // Same observation (same session + pinned timestamp + capability + content) written to
-    // BOTH the home store and the project store. Pre-fix, loadCapabilityHistory concatenated
+    // BOTH the project state store and the project _metrics fallback store. Pre-fix, loadCapabilityHistory concatenated
     // them and double-counted; it must now collapse to one.
     const meta = { session_id: 's1' };
     const fixedNow = () => '2026-01-01T00:00:00Z';
     const row = { capability_id: 'plugin-root-resolution', identity_status: 'PASS', evidence: [] };
-    appendRows('ws-dup', [row], meta, { home, now: fixedNow });
-    appendRows('ws-dup', [row], meta, { project, now: fixedNow });
-    const history = loadCapabilityHistory('ws-dup', project, { home });
+    appendRows({ root: project, harness: 'claude-code' }, [row], meta, { home, now: fixedNow });
+    appendRows({ root: project, harness: 'claude-code' }, [row], meta, { project, now: fixedNow });
+    const history = loadCapabilityHistory({ root: project, harness: 'claude-code' }, project, { home });
     assert.equal(history.length, 1, 'the duplicated observation collapses to a single entry');
     assert.equal(history[0].row.capability_id, 'plugin-root-resolution');
   } finally {

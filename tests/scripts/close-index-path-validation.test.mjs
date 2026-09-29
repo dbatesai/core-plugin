@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { resolveIndexPath } from '../../plugins/core/skills/core/scripts/close-pass.mjs';
 
-const DEFAULT = join(homedir(), '.core', 'index.json');
+const DEFAULT = join(homedir(), '.core', 'projects.json');
 
-// isRegisteredWorkspace reads its registry path from CORE_CLOSE_INDEX, and Claude
+// isRegisteredWorkspace reads its registry from CORE_CLOSE_INDEX's directory, and Claude
 // Code forwards a trusted project's .claude/settings.json env into hook
 // subprocesses. So a hostile-but-trusted repo could point the workspace-trust
 // check at its own fake index. Honor CORE_CLOSE_INDEX only when it resolves

@@ -1,3 +1,4 @@
+import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -5,6 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { classifyAccess, probe } from '../../plugins/core/skills/core/scripts/capability/memory-accessed-probe.mjs';
 import { runStartup } from '../../plugins/core/skills/core/scripts/capability-probe.mjs';
+
+// Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
+process.env.CORE_HARNESS ||= 'claude-code';
 
 const toolEv = (text) => ({ idx: 0, kind: 'tool', name: 'Bash', text });
 
@@ -132,18 +136,19 @@ test('probe row carries env_signals with the full standard key set', async () =>
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('probe reads workspace_id from <cwd>/workspace.json', async () => {
+test('probe reads workspace_id from the project manifest project_id', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
+  const home = mkdtempSync(join(tmpdir(), 'ma-home-'));
   try {
-    writeFileSync(join(dir, 'workspace.json'), JSON.stringify({ workspace_id: 'core-framework' }));
+    updateManifest({ root: dir, harness: 'claude-code', coreDir: join(home, '.core'), fields: { project_id: 'core-framework' } });
     const tpath = join(dir, 'session.jsonl');
     writeFileSync(tpath, JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }));
-    const row = await probe({ harness: 'claude-code', cwd: dir, transcriptPath: tpath, coreStorePresent: true });
+    const row = await probe({ harness: 'claude-code', cwd: dir, home, transcriptPath: tpath, coreStorePresent: true });
     assert.equal(row.workspace_id, 'core-framework');
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(dir, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }); }
 });
 
-test('probe row has workspace_id key even when no workspace.json present (null, not missing)', async () => {
+test('probe row has workspace_id key even when no manifest is present (null, not missing)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   try {
     const tpath = join(dir, 'session.jsonl');

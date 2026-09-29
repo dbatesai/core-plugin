@@ -1,3 +1,4 @@
+import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
@@ -176,7 +177,7 @@ test('share artifact projects local daily telemetry to weekly-only blocks and re
     mkdirSync(secondWeek, { recursive: true });
     writeFileSync(join(secondWeek, 'retrieval-log.jsonl'), `${JSON.stringify({ kind: 'retrieval', tier_reached: 1, dip_back_count: 0 })}\n`);
     writeFileSync(join(secondWeek, 'hygiene-log.jsonl'), `${JSON.stringify({ kind: 'maintenance-run' })}\n`);
-    const classified = join(home, '.core', 'workspaces', 'fixture-ws-alpha', 'metrics', 'classified');
+    const classified = join(operationalMetricsDir(project, { home, env: {} }), 'classified');
     mkdirSync(classified, { recursive: true });
     // Current-instrument stamps: the cohort gate only
     // aggregates rows produced by the running (schema, classifier, proxy).
@@ -401,7 +402,9 @@ test('workspace recognition dedupes replayed classified rows before counting, an
   const root = mkdtempSync(join(tmpdir(), 'mp-dedupe-'));
   try {
     const home = join(root, 'home');
-    const clsDir = join(home, '.core', 'workspaces', 'ws-dedupe', 'metrics', 'classified');
+    const proj = join(root, 'proj-ws-dedupe');
+    mkdirSync(proj, { recursive: true });
+    const clsDir = join(operationalMetricsDir(proj, { home, env: {} }), 'classified');
     mkdirSync(clsDir, { recursive: true });
     const ident = (over = {}) => ({
       schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
@@ -423,7 +426,7 @@ test('workspace recognition dedupes replayed classified rows before counting, an
       ident({ turn_idx: 3, state: 'tier-0-win' }), // turn3: contradiction ...
       ident({ turn_idx: 3, state: 'rec-fail-tier-0' }), // ... excluded, counted as a conflict
     ]));
-    const w = workspaceMetrics(home, 'ws-dedupe');
+    const w = workspaceMetrics(home, proj);
     assert.equal(w.recognition.available, true);
     const totalTurns = Object.values(w.recognition.days).reduce((n, d) => n + d.turns, 0);
     assert.equal(totalTurns, 3, 'replays collapse; turn3 is a conflict (excluded); 3 aggregateable turns remain');
@@ -449,7 +452,9 @@ test("workspace recognition: the mixed-instrument falsifier — an old-instrumen
   const root = mkdtempSync(join(tmpdir(), 'mp-cohort-'));
   try {
     const home = join(root, 'home');
-    const clsDir = join(home, '.core', 'workspaces', 'ws-cohort', 'metrics', 'classified');
+    const proj = join(root, 'proj-ws-cohort');
+    mkdirSync(proj, { recursive: true });
+    const clsDir = join(operationalMetricsDir(proj, { home, env: {} }), 'classified');
     mkdirSync(clsDir, { recursive: true });
     const ident = (over = {}) => ({
       schema_version: '1.0.0', classifier_version: '0.3.0', proxy_version: 2,
@@ -460,7 +465,7 @@ test("workspace recognition: the mixed-instrument falsifier — an old-instrumen
       JSON.stringify(ident({ turn_idx: 0, classifier_version: '0.2.0', state: 'tier-0-win' })),
       JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
     ].join('\n') + '\n');
-    const w = workspaceMetrics(home, 'ws-cohort');
+    const w = workspaceMetrics(home, proj);
     assert.equal(w.recognition.available, true);
     assert.equal(w.recognition.days['2026-07-08'].turns, 1, 'only the current-cohort row counts');
     assert.deepEqual(w.recognition.days['2026-07-08'].states, { 'rec-fail-tier-0': 1 });
@@ -476,14 +481,16 @@ test('ACCEPTANCE (package availability): an old-only store reports UNAVAILABLE-w
   const root = mkdtempSync(join(tmpdir(), 'mp-oldonly-'));
   try {
     const home = join(root, 'home');
-    const clsDir = join(home, '.core', 'workspaces', 'ws-oldonly', 'metrics', 'classified');
+    const proj = join(root, 'proj-ws-oldonly');
+    mkdirSync(proj, { recursive: true });
+    const clsDir = join(operationalMetricsDir(proj, { home, env: {} }), 'classified');
     mkdirSync(clsDir, { recursive: true });
     // Every row is a retired 0.2.0 instrument — nothing in the current cohort.
     writeFileSync(join(clsDir, '2026-07-08.jsonl'), [
       JSON.stringify({ schema_version: '1.0.0', classifier_version: '0.2.0', proxy_version: 2, harness: 'claude-code', session_id: 'sess-old', turn_idx: 0, state: 'tier-0-win' }),
       JSON.stringify({ schema_version: '1.0.0', classifier_version: '0.2.0', proxy_version: 2, harness: 'claude-code', session_id: 'sess-old', turn_idx: 1, state: 'rec-fail-tier-0' }),
     ].join('\n') + '\n');
-    const w = workspaceMetrics(home, 'ws-oldonly');
+    const w = workspaceMetrics(home, proj);
     assert.equal(w.recognition.available, false, 'no aggregateable cohort rows ⇒ unavailable, not available-with-zero-turns');
     assert.match(w.recognition.reason, /no in-cohort classified rows/);
     assert.deepEqual(w.recognition.days, {}, 'no day carries a phantom turns:0 entry');

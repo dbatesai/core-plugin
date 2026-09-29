@@ -35,7 +35,7 @@ import { readFileSync, readdirSync, appendFileSync, mkdirSync, chmodSync, exists
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readTranscript } from './read-transcript.mjs';
-import { todayUTC, resolveSessionId, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { todayUTC, resolveSessionId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 // Version stamp for classification BEHAVIOR. Any behavior-affecting change
@@ -262,10 +262,10 @@ function unitHeadTerms(path) {
 
 function safeRead(p) { try { return readFileSync(p, 'utf8'); } catch { return ''; } }
 
-export function runClassification({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, workspaceId, env }) {
+export function runClassification({ project, harness = 'claude-code', cwd, home = homedir(), sessionId, today, env }) {
   // Capture gate (spec §18, metrics policy): default-on, opt-out. Captures nothing
   // — reads no transcript content, writes no records — when the user has opted out.
-  if (!metricsEnabled({ project, env })) {
+  if (!metricsEnabled({ project, env, home })) {
     return { status: 'DISABLED', reason: 'metrics opted out (CORE_METRICS_ENABLED=0 or workspace.json metrics_enabled:false)', provisional: true };
   }
   const t = readTranscript({ harness, cwd: cwd || project, home, sessionId, env });
@@ -276,7 +276,6 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   const classified = classifyTurns(t.events, ctx);
   const sid = resolveSessionId({ explicit: sessionId });
   const date = today || todayUTC();
-  const wid = workspaceId || resolveWorkspaceId(project);
   const records = classified.map((c) => ({
     schema_version: CLASSIFIED_SCHEMA_VERSION,
     classifier_version: CLASSIFIER_VERSION,
@@ -291,13 +290,13 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   }));
   // Write to the operational-meta classified store (derived, regeneratable; §17.6).
   try {
-    const dir = join(operationalMetricsDir(wid, { home }), 'classified');
+    const dir = join(operationalMetricsDir(project, { home, env }), 'classified');
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${date}.jsonl`);
     for (const r of records) appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 });
     chmodSync(file, 0o600);
   } catch { /* best-effort */ }
-  return { status: 'OK', provisional: true, workspace_id: wid, transcript_resolution: t.meta.transcript_resolution, ...summarize(classified), records };
+  return { status: 'OK', provisional: true, transcript_resolution: t.meta.transcript_resolution, ...summarize(classified), records };
 }
 
 
@@ -309,12 +308,11 @@ export const CLASSIFIED_RETENTION_DAYS = 30;
  * carries turn text, so it gets the same retention bound the capture stream
  * has. The window is validated before any deletion arithmetic runs.
  */
-export function runClassifiedRetention(projectDir, { workspaceId, home, windowDays = CLASSIFIED_RETENTION_DAYS, now = new Date() } = {}) {
+export function runClassifiedRetention(projectDir, { home = homedir(), env = process.env, windowDays = CLASSIFIED_RETENTION_DAYS, now = new Date() } = {}) {
   if (!Number.isInteger(windowDays) || windowDays <= 0) {
     return { ran: false, reason: 'invalid-window', windowDays };
   }
-  const wid = workspaceId || resolveWorkspaceId(projectDir);
-  const dir = join(operationalMetricsDir(wid, { home }), 'classified');
+  const dir = join(operationalMetricsDir(projectDir, { home, env }), 'classified');
   if (!existsSync(dir)) return { ran: true, deleted: [], kept: [], windowDays };
   const cutoff = new Date(now.getTime() - windowDays * 24 * 60 * 60 * 1000);
   const cutoffDay = cutoff.toISOString().slice(0, 10);

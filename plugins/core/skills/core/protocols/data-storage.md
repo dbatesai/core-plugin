@@ -14,7 +14,9 @@ Three surfaces, three responsibilities. Don't mix them.
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed by convention so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
-- **Agent operational meta** — `~/.core/` — your operational layer across projects. `agent-profile.md` is your cross-project home (legacy installs: `dm-profile.md` until the startup migration renames it). `workspaces/<id>/` holds workspace-scoped meta. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache. None of this holds project facts.
+- **Project operational state** — `<project>/.core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. In a synced folder (OneDrive, iCloud Drive, Dropbox, Google Drive) the append-heavy and lock-bearing files live under `~/.core/local/` instead, as does the state of a read-only folder or of another install's project. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
+
+- **Agent operational meta** — `~/.core/` — only what serves every project. `agent-profile.md` is your cross-project home (legacy installs: `dm-profile.md` until the startup migration renames it). `projects.json` lists the registered project roots. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache for cross-project files. `install-secret` and `install-id` sign project state. None of this holds project facts.
 
 - **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
 
@@ -31,7 +33,7 @@ When sources conflict, this is the order CORE resolves:
 1. **Direct user instruction in the current session** — overrides everything else.
 2. **User-edited `<project>/PROJECT.md`** — the user's curation surface; anti-resurrection rule applies.
 3. **Canonical units in `<project>/_memories/`** — project facts of record.
-4. **CORE operational meta in `~/.core/`** — runtime state only; not project fact authority.
+4. **CORE operational state in `<project>/.core/` and `~/.core/`** — runtime state only; not project fact authority.
 5. **Harness-local recall** — Claude Code `MEMORY.md`, Codex memories at `~/.codex/memories/`, and equivalents in future harnesses. Hints only; must verify against the unit store before acting.
 
 See `dc-86-harness-local-memory-recall` for the principle behind levels 4 and 5 — the four-surface model that makes the divergence between Claude's autonomous-write and Codex's explicit-save-only memory models safe.
@@ -452,17 +454,19 @@ Belt-and-suspenders for tracked files: cache is primary, `git diff` is the fallb
 
 Multiple agents can run startup and `/finalize` at the same time. The rules, per file:
 
-- **`index.json` — NEVER hand-edit. All mutation goes through `scripts/index-registry.mjs`**
-  (`add` / `update` / `remove` via CLI or module import). The script does the full
-  read-decide-write under the nonce-CAS lock in `scripts/file-lock.mjs`, so concurrent
-  registrations and updates all survive. A freehand read-modify-write of `index.json` is a
-  protocol violation — it races the lock and silently drops other agents' writes. Reading
-  `index.json` directly stays fine (reads are safe; writes are the hazard).
-- **`last_active` is not a registry field.** Stamp it with
-  `index-registry.mjs touch <workspace-id>` — it writes the per-workspace single-owner file
-  `~/.core/workspaces/<id>/last-active`. Read it per-workspace first; the `last_active` field
-  still present in old `index.json` entries is a tolerant read fallback for one release, and
-  nothing writes it.
+- **`projects.json` — NEVER hand-edit. All mutation goes through `scripts/index-registry.mjs`**
+  (`register` via CLI or module import). The script does the full read-decide-write under the
+  nonce-CAS lock in `scripts/file-lock.mjs`, so concurrent registrations all survive. A
+  freehand read-modify-write is a protocol violation — it races the lock and silently drops
+  other agents' writes. It's also the auto-close trust anchor, which is why only a startup the
+  user ran may add to it. The legacy `index.json` is read-only apart from the migration's
+  marks, written through the same lock.
+- **Per-project records are single-owner files in the project's state.** `index-registry.mjs
+  touch` writes `last-active`, `bootstrap` writes `last-bootstrap.json`, `manifest --set-json`
+  merges into the manifest — each under `<project>/.core/<harness>/`, needing no registry lock.
+- **`~/.core/migration-manifest.json`** is shared by every project and harness; the
+  migration writes it only under `~/.core/migration-manifest.lock`, after the project's close
+  lock.
 - **Edit-detection state-cache is per-project** (see §Edit detection above): the project-local
   cache DOES have a shared write within a project — `decorate-graph.mjs`, `hot-section.mjs`,
   and `maintenance-run.mjs` can all stamp it in the same window — so `stampFiles`/`stampFile`
@@ -475,8 +479,8 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
 - **Lock order (deadlock prevention):** a per-project lock (e.g. the close pass's
   `_close.lock`) is always taken BEFORE any global `~/.core/` lock, never after.
 - A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace —
-  `~/.core/<wrapper>/` — and must not write `index.json`, `state-cache.json`, `agent-profile.md`,
-  or `topics.md`.
+  `~/.core/<wrapper>/` — and must not write `projects.json`, `index.json`, `state-cache.json`,
+  `agent-profile.md`, or `topics.md`.
 
 Accepted residual, named: a crashed writer's lock stalls registry writes for the stale window
 (10–30 min) — availability, not data loss. And if `~/.core` lands on a virtualized/synced path
@@ -664,20 +668,33 @@ Three rings, one read at runtime.
 ├── _sessions/                     ← per-session agent logs (CORE-created)
 ├── _outputs/                      ← swarm synthesis, deliverables (CORE-created)
 ├── docs/                          ← architecture, explainers (user surface)
-└── .claude/                       ← harness config + scripts
+├── .claude/                       ← harness config + scripts
+└── .core/                         ← CORE operational state (self-ignored: `.gitignore` = `*`)
+    └── <harness>/                 ← one per harness: claude-code, codex, …
+        ├── stamp                  ← provenance: HMAC of (path, harness, install id)
+        ├── workspace.json         ← manifest: project_id, agent_name, disclosure flags, opt-outs
+        ├── workspace.json.mac     ← content MAC; a missing or wrong one reads the manifest as absent
+        ├── last-active
+        ├── last-bootstrap.json    ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
+        ├── last-bootstrap.json.mac
+        ├── capability-history.jsonl
+        ├── metrics/               ← derived metrics, calibration pool, rollups
+        ├── artifact-receipts/
+        ├── drafts/
+        └── superseded/            ← state set aside (unverified, copied, migrated duplicates, legacy-<date> drift)
 ```
 
 **Agent operational ring** — `~/.core/`
 
 ```
 ~/.core/
-├── agent-profile.md                  ← cross-project personality, portfolio observations
-├── index.json                     ← global workspace registry
+├── agent-profile.md               ← cross-project personality, portfolio observations
+├── projects.json                  ← registered project roots (auto-close trust anchor)
+├── install-secret, install-id     ← sign and identify this install's project state
 ├── topics.md                      ← controlled vocabulary
-├── state-cache.json               ← edit-detection hashes
-├── workspaces/<id>/               ← per-workspace operational meta
-│   ├── workspace.json
-│   └── last-bootstrap.json        ← session_started_at + bootstrap_completed_at; SKILL.md off-switch
+├── state-cache.json               ← edit-detection hashes for cross-project files
+├── local/<root-slug>/<harness>/   ← project state that must stay on this disk (synced, read-only, or another install's)
+├── index.json, workspaces/<id>/   ← legacy layout; read by the migration, never written for new projects
 ├── research/                      ← cross-project knowledge library
 └── <wrapper>/                     ← co-installed wrapper sub-namespace (writes only here — never the shared files above)
 ```

@@ -21,7 +21,7 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { todayUTC, resolveWorkspaceId, operationalMetricsDir, metricsEnabled } from './log-event.mjs';
+import { todayUTC, operationalMetricsDir, trustedMetricsDir, metricsEnabled } from './log-event.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { cohortClassifiedByDay, formatDedupeNote, formatCoverageGapNote } from './metrics-dedupe.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -125,13 +125,12 @@ function trailingAvg(dedupedDays, today, state, days = 7) {
   return rates.reduce((a, b) => a + b, 0) / rates.length;
 }
 
-export function buildRollup({ project, today, home = homedir(), workspaceId, env }) {
-  if (!metricsEnabled({ project, env })) {
+export function buildRollup({ project, today, home = homedir(), env }) {
+  if (!metricsEnabled({ project, env, home })) {
     return { date: today || todayUTC(), disabled: true, distribution: {}, headline: null, trailing_avg: null, provisional: true, signal: 'metrics disabled (opt-in not set)' };
   }
   const date = today || todayUTC();
-  const wid = workspaceId || resolveWorkspaceId(project);
-  const metaDir = operationalMetricsDir(wid, { home });
+  const metaDir = operationalMetricsDir(project, { home, env });
   const classifiedDir = join(metaDir, 'classified');
 
   // Read-side replay dedupe + instrument-cohort gate (metrics-dedupe.mjs):
@@ -175,7 +174,7 @@ export function buildRollup({ project, today, home = homedir(), workspaceId, env
   }
 
   return {
-    date, workspace_id: wid, distribution: dist, headline, trailing_avg: avg,
+    date, distribution: dist, headline, trailing_avg: avg,
     provisional, calibrated: calState.is_calibrated, dedupe,
     cohort, coverage_gap: coverageGap,
     day_attribution: DAY_ATTRIBUTION, day_attribution_note: DAY_ATTRIBUTION_NOTE,
@@ -212,9 +211,10 @@ export function writeRollup(r) {
 }
 
 /** What the startup readiness pass reads — the pre-computed one-line signal. */
-export function readOrientSignal(project, { home = homedir(), workspaceId } = {}) {
-  const wid = workspaceId || resolveWorkspaceId(project);
-  const f = join(operationalMetricsDir(wid, { home }), 'orient-signal.txt');
+export function readOrientSignal(project, { home = homedir(), env = process.env } = {}) {
+  const meta = trustedMetricsDir(project, { home, env });
+  if (!meta) return null;
+  const f = join(meta, 'orient-signal.txt');
   try { return readFileSync(f, 'utf8').trim(); } catch { return null; }
 }
 

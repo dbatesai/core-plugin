@@ -1,3 +1,4 @@
+import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
@@ -21,18 +22,28 @@ import {
   TURN_CAPTURE_FILE_MODE,
 } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
 
-const IS_WIN = platform() === 'win32';
-const WS_ID = 'tc-fixture';
+// Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
+process.env.CORE_HARNESS ||= 'claude-code';
 
-/** Project fixture. The opt-out flag lives in the PROJECT-ROOT workspace.json
- * (an opt-OUT travelling with a copied project is privacy-safe — the
- * inverse of rich-context's machine-local opt-in reasoning). */
+// Opt-outs live in the project's trusted per-harness manifest. The manifest for an
+// unregistered test folder lives under the (temp) home's ~/.core/local, so HOME is
+// redirected for this file's process.
+const TEST_HOME = mkdtempSync(join(tmpdir(), 'optout-home-'));
+process.env.HOME = TEST_HOME;
+process.env.USERPROFILE = TEST_HOME;
+process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
+function writeManifestFlags(project, fields) {
+  updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
+}
+
+
+const IS_WIN = platform() === 'win32';
+
+/** Project fixture. The opt-out flag lives in the project's per-harness manifest. */
 function makeProject(root, { turnCaptureFlag } = {}) {
   const project = join(root, 'proj');
   mkdirSync(join(project, '_memories'), { recursive: true });
-  const ptr = { workspace_id: WS_ID };
-  if (turnCaptureFlag !== undefined) ptr.turn_capture = turnCaptureFlag;
-  writeFileSync(join(project, 'workspace.json'), JSON.stringify(ptr));
+  if (turnCaptureFlag !== undefined) writeManifestFlags(project, { turn_capture: turnCaptureFlag });
   return project;
 }
 
@@ -88,7 +99,7 @@ test('CORE_TURN_CAPTURE=0 disables; row not written', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('project workspace.json turn_capture:false disables', () => {
+test('project manifest turn_capture:false disables', () => {
   const root = mkdtempSync(join(tmpdir(), 'tc-ws-off-'));
   try {
     const project = makeProject(root, { turnCaptureFlag: false });

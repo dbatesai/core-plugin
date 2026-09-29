@@ -4,25 +4,25 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildRollup, writeRollup, readOrientSignal } from '../../plugins/core/skills/core/scripts/metrics-rollup.mjs';
-import { metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { metricsEnabled, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 
 test('a calibrated workspace with no turns must not mislabel the signal PROVISIONAL', () => {
   withClassified({}, ({ home, project }) => {
-    const metaDir = join(home, '.core', 'workspaces', WID, 'metrics');
+    const metaDir = operationalMetricsDir(project, { home: home });
     writeFileSync(join(metaDir, 'calibration-state.json'),
       JSON.stringify({ is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION }));
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, true, 'calibration state read as calibrated');
     assert.doesNotMatch(r.signal, /PROVISIONAL/, 'the no-turns signal must not claim provisional once calibrated');
   });
 });
 
-const WID = 'ws-rollup';
 
 function withClassified(byDate, fn) {
   const home = mkdtempSync(join(tmpdir(), 'rollup-home-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-proj-'));
-  const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+  const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
   mkdirSync(dir, { recursive: true });
   for (const [date, states] of Object.entries(byDate)) {
     // Rows carry the CURRENT instrument stamps: the cohort gate
@@ -42,7 +42,7 @@ test('buildRollup computes the headline rec-fail-tier-0 rate for today', () => {
   withClassified({
     '2026-06-02': ['tier-0-win', 'tier-0-win', 'rec-fail-tier-0', 'tier-1-3-win'],
   }, ({ home, project }) => {
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.headline.n, 1);
     assert.equal(r.headline.total, 4);
     assert.equal(r.distribution['tier-0-win'], 2);
@@ -57,14 +57,14 @@ test('buildRollup marks an upward trend vs the trailing 7-day average', () => {
     '2026-06-01': ['tier-0-win', 'tier-0-win'],
     '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'],
   }, ({ home, project }) => {
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.match(r.signal, /↑/, 'rising rec-fail rate gets the up marker');
   });
 });
 
 test('buildRollup handles an empty day without inventing a distribution', () => {
   withClassified({}, ({ home, project }) => {
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.headline, null);
     assert.match(r.signal, /no classified turns/);
   });
@@ -74,11 +74,11 @@ test('writeRollup writes the daily md + the orient-signal.txt that readOrientSig
   withClassified({
     '2026-06-02': ['rec-fail-tier-0', 'tier-0-win', 'tier-0-win'],
   }, ({ home, project }) => {
-    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } }));
     const daily = join(r.metaDir, 'rollups', 'daily', '2026-06-02.md');
     assert.ok(existsSync(daily), 'daily rollup md written');
     assert.match(readFileSync(daily, 'utf8'), /PROVISIONAL/);
-    const signal = readOrientSignal(project, { home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const signal = readOrientSignal(project, { home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.match(signal, /rec-fail-tier-0/);
     assert.match(signal, /PROVISIONAL/);
   });
@@ -86,7 +86,7 @@ test('writeRollup writes the daily md + the orient-signal.txt that readOrientSig
 
 test('readOrientSignal returns null when no signal has been written', () => {
   withClassified({}, ({ home, project }) => {
-    assert.equal(readOrientSignal(project, { home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }), null);
+    assert.equal(readOrientSignal(project, { home, env: { CORE_METRICS_ENABLED: '1' } }), null);
   });
 });
 
@@ -94,16 +94,16 @@ test('readOrientSignal returns null when no signal has been written', () => {
 
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from '../../plugins/core/skills/core/scripts/classify-turns.mjs';
 
-function writeCalState(home, state) {
-  const dir = join(home, '.core', 'workspaces', WID, 'metrics');
+function writeCalState(home, project, state) {
+  const dir = operationalMetricsDir(project, { home: home });
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'calibration-state.json'), JSON.stringify(state) + '\n');
 }
 
 test('rollup drops PROVISIONAL when calibration is cleared at the current classifier version', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION, overall_precision: 0.82 });
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    writeCalState(home, project, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION, overall_precision: 0.82 });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, true);
     assert.doesNotMatch(r.signal, /PROVISIONAL/, 'calibrated signal drops the tag');
   });
@@ -111,8 +111,8 @@ test('rollup drops PROVISIONAL when calibration is cleared at the current classi
 
 test('rollup keeps PROVISIONAL when calibration was run against a stale classifier version', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    writeCalState(home, { is_calibrated: true, classifier_version: '0.0.1-old', overall_precision: 0.99 });
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    writeCalState(home, project, { is_calibrated: true, classifier_version: '0.0.1-old', overall_precision: 0.99 });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, false, 'version mismatch ⇒ treat as uncalibrated');
     assert.match(r.signal, /PROVISIONAL/, 'stale-version calibration cannot clear the tag');
   });
@@ -120,8 +120,8 @@ test('rollup keeps PROVISIONAL when calibration was run against a stale classifi
 
 test('rollup keeps PROVISIONAL when calibration was run against a stale proxy version', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION - 1 });
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    writeCalState(home, project, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION - 1 });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, false);
     assert.match(r.signal, /PROVISIONAL/);
   });
@@ -133,11 +133,11 @@ test('ACCEPTANCE (exact-triple calibration): a calibration bound to a DIFFERENT 
   // the tag for the current 1.0.0 cohort. The distinct classified_schema_version
   // leg now binds calibration to the exact instrument triple.
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
-    writeCalState(home, {
+    writeCalState(home, project, {
       is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION,
       classified_schema_version: '9.9.9', overall_precision: 0.99,
     });
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.equal(r.calibrated, false, 'classified-schema mismatch ⇒ treat as uncalibrated');
     assert.match(r.signal, /PROVISIONAL/, 'a calibration against a different row schema cannot clear the tag');
   });
@@ -156,23 +156,24 @@ test('metricsEnabled honors explicit env opt-out, and env wins over a workspace 
   assert.equal(metricsEnabled({ env: { CORE_METRICS_ENABLED: 'off' } }), false);
 });
 
-test('metricsEnabled opt-in via workspace.json metrics_enabled flag', () => {
+test('metricsEnabled opt-in via the project manifest metrics_enabled flag', () => {
   const project = mkdtempSync(join(tmpdir(), 'mw-'));
+  const home = mkdtempSync(join(tmpdir(), 'mw-home-'));
   try {
-    writeFileSync(join(project, 'workspace.json'), JSON.stringify({ workspace_id: 'w', metrics_enabled: true }));
-    assert.equal(metricsEnabled({ project, env: {} }), true);
-    // explicit env-off overrides the workspace flag
-    assert.equal(metricsEnabled({ project, env: { CORE_METRICS_ENABLED: 'false' } }), false);
-  } finally { rmSync(project, { recursive: true, force: true }); }
+    updateManifest({ root: project, harness: 'claude-code', coreDir: join(home, '.core'), fields: { metrics_enabled: true } });
+    assert.equal(metricsEnabled({ project, home, env: {} }), true);
+    // explicit env-off overrides the manifest flag
+    assert.equal(metricsEnabled({ project, home, env: { CORE_METRICS_ENABLED: 'false' } }), false);
+  } finally { rmSync(project, { recursive: true, force: true }); rmSync(home, { recursive: true, force: true }); }
 });
 
 test('a disabled workspace produces no rollup artifacts', () => {
   withClassified({ '2026-06-02': ['rec-fail-tier-0', 'tier-0-win'] }, ({ home, project }) => {
     // The default is ON, so opt out explicitly to exercise the disabled path.
     const env = { CORE_METRICS_ENABLED: '0' };
-    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env }));
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, env }));
     assert.equal(r.disabled, true);
-    assert.equal(readOrientSignal(project, { home, workspaceId: WID }), null, 'no signal written when opted out');
+    assert.equal(readOrientSignal(project, { home }), null, 'no signal written when opted out');
   });
 });
 
@@ -180,12 +181,11 @@ test('detector output (anticipation-gap) can never reach the headline signal', (
   const home = mkdtempSync(join(tmpdir(), 'mr-det-'));
   const project = mkdtempSync(join(tmpdir(), 'mr-proj-'));
   try {
-    const wid = 'mr-det-ws';
-    const detDir = join(home, '.core', 'workspaces', wid, 'metrics', 'detectors');
+    const detDir = join(operationalMetricsDir(project, { home: home }), 'detectors');
     mkdirSync(detDir, { recursive: true });
     writeFileSync(join(detDir, '2026-06-09.jsonl'),
       JSON.stringify({ detector: 'anticipation-gap', provisional: true, severity: 'low', terms: ['x'] }) + '\n');
-    const r = buildRollup({ project, today: '2026-06-09', home, workspaceId: wid });
+    const r = buildRollup({ project, today: '2026-06-09', home });
     assert.match(r.signal, /no classified turns/, 'rollup reads classified/ only — heuristics never grade the headline');
     assert.deepEqual(r.distribution, {});
   } finally {
@@ -209,7 +209,7 @@ test('replay dedupe: a session processed twice in one day yields the same rollup
   const home = mkdtempSync(join(tmpdir(), 'rollup-replay-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-replay-proj-'));
   try {
-    const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+    const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
     mkdirSync(dir, { recursive: true });
     const once = [
       ident({ turn_idx: 0, state: 'rec-fail-tier-0' }),
@@ -219,9 +219,9 @@ test('replay dedupe: a session processed twice in one day yields the same rollup
     ];
     const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
     writeFileSync(join(dir, '2026-06-02.jsonl'), lines(once));
-    const clean = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const clean = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     writeFileSync(join(dir, '2026-06-02.jsonl'), lines([...once, ...once])); // replay: same session appended again
-    const replayed = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const replayed = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     assert.deepEqual(replayed.distribution, clean.distribution, 'state distribution stable under replay');
     assert.deepEqual(replayed.headline, clean.headline, 'headline rate stable under replay');
     assert.equal(replayed.dedupe.replays_dropped, 4);
@@ -237,7 +237,7 @@ test('ACCEPTANCE (rollup): a same-instrument contradiction is EXCLUDED from the 
   const home = mkdtempSync(join(tmpdir(), 'rollup-conflict-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-conflict-proj-'));
   try {
-    const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+    const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '2026-06-02.jsonl'), [
       // turn 0: an old-instrument row (0.2.0) → out of cohort, coverage gap.
@@ -248,7 +248,7 @@ test('ACCEPTANCE (rollup): a same-instrument contradiction is EXCLUDED from the 
       JSON.stringify(ident({ turn_idx: 1, state: 'tier-1-3-win' })),
       JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
     ].join('\n') + '\n');
-    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } }));
     assert.equal(r.headline.total, 1, 'only the one non-conflicting current-cohort turn is in the denominator');
     assert.deepEqual(r.distribution, { 'rec-fail-tier-0': 1 }, 'the conflicting turn is not in the distribution');
     assert.equal(r.dedupe.superseded_dropped, 0, 'no cross-instrument supersession');
@@ -275,7 +275,7 @@ test("mixed-instrument falsifier: calibrated-true must not aggregate a 0.2.0-era
   const home = mkdtempSync(join(tmpdir(), 'rollup-cohort-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-cohort-proj-'));
   try {
-    const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+    const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '2026-06-02.jsonl'), [
       // 0.2.0-only row: different turn, NO newer counterpart — survives dedupe.
@@ -283,8 +283,8 @@ test("mixed-instrument falsifier: calibrated-true must not aggregate a 0.2.0-era
       // Current-instrument row.
       JSON.stringify(ident({ turn_idx: 1, state: 'rec-fail-tier-0' })),
     ].join('\n') + '\n');
-    writeCalState(home, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION, overall_precision: 0.82 });
-    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    writeCalState(home, project, { is_calibrated: true, classifier_version: CLASSIFIER_VERSION, proxy_version: PROXY_VERSION, classified_schema_version: CLASSIFIED_SCHEMA_VERSION, overall_precision: 0.82 });
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } }));
     assert.equal(r.calibrated, true, 'calibration itself reads true at the current version');
     assert.equal(r.headline.total, 1, 'ONLY the current-cohort row aggregates — never both instruments');
     assert.deepEqual(r.distribution, { 'rec-fail-tier-0': 1 }, 'the 0.2.0 judgment is not in the distribution');
@@ -302,7 +302,7 @@ test("mixed-instrument falsifier: calibrated-true must not aggregate a 0.2.0-era
 
 test('cohort gate: a fully current-instrument store reports a zero gap, honestly', () => {
   withClassified({ '2026-06-02': ['tier-0-win', 'rec-fail-tier-0'] }, ({ home, project }) => {
-    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } }));
     assert.equal(r.coverage_gap.rows_excluded, 0);
     assert.doesNotMatch(r.signal, /outside cohort/, 'no gap tag when there is no gap');
     const md = readFileSync(join(r.metaDir, 'rollups', 'daily', '2026-06-02.md'), 'utf8');
@@ -312,7 +312,7 @@ test('cohort gate: a fully current-instrument store reports a zero gap, honestly
 
 test('cross-date attribution policy (immutable observation day) is explicit in the JSON and the daily markdown', () => {
   withClassified({ '2026-06-02': ['tier-0-win'] }, ({ home, project }) => {
-    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } }));
+    const r = writeRollup(buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } }));
     assert.equal(r.day_attribution, 'observation-day');
     assert.match(r.day_attribution_note, /earliest\/original observation day/);
     assert.match(r.day_attribution_note, /turns today.*user turns first observed that day/);
@@ -333,10 +333,10 @@ test('ACCEPTANCE (order-independence): a same-day contradiction is excluded unde
     const home = mkdtempSync(join(tmpdir(), 'rollup-order-'));
     const project = mkdtempSync(join(tmpdir(), 'rollup-order-proj-'));
     try {
-      const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+      const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, '2026-06-02.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
-      return buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+      return buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     } finally {
       rmSync(home, { recursive: true, force: true });
       rmSync(project, { recursive: true, force: true });
@@ -353,7 +353,7 @@ test('ACCEPTANCE (rollup): a cross-date replay attributes to the EARLIEST observ
   const home = mkdtempSync(join(tmpdir(), 'rollup-xdate-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-xdate-proj-'));
   try {
-    const dir = join(home, '.core', 'workspaces', WID, 'metrics', 'classified');
+    const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
     mkdirSync(dir, { recursive: true });
     const sess = [ident({ turn_idx: 0, state: 'tier-0-win' }), ident({ turn_idx: 1, state: 'tier-0-win' })];
     const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
@@ -362,7 +362,7 @@ test('ACCEPTANCE (rollup): a cross-date replay attributes to the EARLIEST observ
     writeFileSync(join(dir, '2026-06-01.jsonl'), lines(sess));
     writeFileSync(join(dir, '2026-06-02.jsonl'),
       lines([...sess, ident({ session_id: 'sess-fresh', turn_idx: 0, state: 'rec-fail-tier-0' })]));
-    const r = buildRollup({ project, today: '2026-06-02', home, workspaceId: WID, env: { CORE_METRICS_ENABLED: '1' } });
+    const r = buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
     // The replayed turns stay on their earliest day (06-01); today (06-02) counts
     // ONLY the turn first observed today.
     assert.equal(r.headline.total, 1, 'today = the 1 fresh turn only; replayed turns stay on 06-01');

@@ -32,7 +32,7 @@ import {
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { todayUTC, resolveWorkspaceId, operationalMetricsDir } from './log-event.mjs';
+import { todayUTC, operationalMetricsDir } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -66,7 +66,7 @@ export const CANONICAL_STATES = [
 ];
 
 // ============================================================
-// Calibration state (persisted to ~/.core/workspaces/<id>/metrics/)
+// Calibration state (persisted to the project's .core/<harness>/metrics/)
 // ============================================================
 
 export function emptyCalibrationState() {
@@ -509,10 +509,9 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
  * How close is the calibration pool to the minimum? Useful for the agent to know
  * when to launch the labeling pass.
  */
-export function readinessReport({ project, home = homedir(), workspaceId }) {
+export function readinessReport({ project, home = homedir(), env = process.env }) {
   const minLabeled = resolveMinLabeled(project);
-  const wid = workspaceId || resolveWorkspaceId(project);
-  const metaDir = operationalMetricsDir(wid, { home });
+  const metaDir = operationalMetricsDir(project, { home, env });
   const classifiedDir = join(metaDir, 'classified');
   const state = readCalibrationState(metaDir);
   const turns = collectClassifiedTurns(classifiedDir, minLabeled + 50);
@@ -558,8 +557,7 @@ if (isCliEntry(import.meta.url)) {
   }
 
   if (has('export-worksheet')) {
-    const wid = resolveWorkspaceId(project);
-    const metaDir = operationalMetricsDir(wid);
+    const metaDir = operationalMetricsDir(project);
     const classifiedDir = join(metaDir, 'classified');
     const calibrationDir = join(project, '_metrics', 'calibration');
     const count = parseInt(opt('count') || '200', 10);
@@ -574,8 +572,7 @@ if (isCliEntry(import.meta.url)) {
   if (has('import-labels')) {
     const worksheetFile = opt('import-labels');
     if (!worksheetFile) { process.stdout.write('calibrate-classifier: --import-labels requires a file path\n'); process.exit(1); }
-    const wid = resolveWorkspaceId(project);
-    const metaDir = operationalMetricsDir(wid);
+    const metaDir = operationalMetricsDir(project);
     const r = importLabels({ worksheetFile, metaDir, minLabeled: resolveMinLabeled(project) });
     if (argv.includes('--json')) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(r.status === 'OK' ? 0 : 1); }
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
