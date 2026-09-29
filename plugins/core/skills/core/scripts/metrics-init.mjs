@@ -6,12 +6,14 @@
  *   - Windows-with-OneDrive: redirect to `~/AppData/Local/core-metrics/<workspace-id>/`.
  *   - Mac/Linux under a sync client (iCloud Drive, macOS CloudStorage mounts, Dropbox,
  *     Google Drive — the same `isSyncedPath` check project-state.mjs uses for hot state):
- *     redirect to `~/.core/local/<root-slug>-<hash>/metrics/`. Without this, captured
+ *     redirect to `~/.core/local-metrics/<root-slug>-<hash>/`. Without this, captured
  *     turn/prompt text under `_metrics/` would ride whatever sync provider watches the
  *     project folder — the same exposure the OneDrive redirect exists to avoid, just on a
  *     different platform.
- *   - Detection: methods (a) path-substring + (c) OneDrive .ini-settings-parse on Windows;
- *     `isSyncedPath` substring match on every other platform.
+ *   - Detection runs against the CANONICAL project root (symlinks/Windows junctions
+ *     resolved), not whatever spelling the caller passed — an alias into a synced folder
+ *     must classify the same way the real path does. Methods: (a) path-substring + (c)
+ *     OneDrive .ini-settings-parse on Windows; `isSyncedPath` substring match elsewhere.
  *   - Per-scaffold forensic log line written to operational meta.
  *   - Stub README left at project location when storage is redirected.
  *   - Idempotent: re-runs leave existing content alone, just ensure structure.
@@ -228,7 +230,10 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   try {
     mkdirSync(storagePath, { recursive: true });
     if (storagePath !== join(projectDir, '_metrics') && !existsSync(join(storagePath, APPDATA_OWNER_FILE))) {
-      writeFileSync(join(storagePath, APPDATA_OWNER_FILE), projectDir + '\n');
+      // Canonical, not raw: appDataStorePath's read-back compares this file's contents
+      // against a canonical path too (a junction/alias spelling and the real path must
+      // agree on ownership, or the redirect folder itself splits by spelling).
+      writeFileSync(join(storagePath, APPDATA_OWNER_FILE), canonical(projectDir) + '\n');
     }
   } catch (err) {
     return { ok: false, reason: 'cannot-create-storage-dir', err: err.message, scaffoldLogLine };
@@ -315,7 +320,16 @@ function pathHash(p) { return createHash('sha256').update(p).digest('hex').slice
  * as a user escape hatch.
  */
 export function detectStoragePath({ projectDir, home = homedir() }) {
-  const appDataPath = appDataStorePath(projectDir, home);
+  // Detection runs against the canonical root, not whatever spelling the caller passed in —
+  // a symlink or Windows junction alias (e.g. a project reached both as `Documents/Projects/x`
+  // and, through a junction, as `OneDrive/Documents/Projects/x`) must classify the same way
+  // either way. On Windows this also normalizes to the backslash spelling the OneDrive .ini
+  // settings scan (method c) and the substring check (method a) both expect — a forward-slash
+  // `projectDir` (as Git Bash and CORE's own script calls pass) never matched either check
+  // against a real OneDrive path before this, so only the substring check on an already-
+  // OneDrive-spelled path was ever doing anything.
+  const real = canonical(projectDir);
+  const appDataPath = appDataStorePath(real, home);
   if (process.env.CORE_METRICS_FORCE_PROJECT_LOCAL === '1') {
     return {
       path: join(projectDir, '_metrics'),
@@ -341,9 +355,9 @@ export function detectStoragePath({ projectDir, home = homedir() }) {
   // per-harness session state, so metricsStorageAllowed's containment check can't be
   // satisfied by pointing a metrics pin at some other project's state folder instead.
   if (platform() !== 'win32') {
-    if (isSyncedPath(projectDir)) {
+    if (isSyncedPath(real)) {
       return {
-        path: join(home, '.core', 'local-metrics', localRootKey(projectDir)),
+        path: join(home, '.core', 'local-metrics', localRootKey(real)),
         methods: { synced: true },
         reason: 'non-windows-synced-folder-detected-redirect-local',
       };
@@ -356,8 +370,8 @@ export function detectStoragePath({ projectDir, home = homedir() }) {
   }
 
   // Windows checks methods (a) and (c) only; method (b) is not implemented.
-  const methodA = projectPathContainsOneDriveSubstring(projectDir);
-  const methodC = projectInOneDriveSyncSettings(projectDir);
+  const methodA = projectPathContainsOneDriveSubstring(real);
+  const methodC = projectInOneDriveSyncSettings(real);
 
   if (methodA || methodC) {
     return {

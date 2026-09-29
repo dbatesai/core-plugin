@@ -1,5 +1,5 @@
 import { operationalMetricsDir, resolveStoragePath, metricsEnabled, storagePinInvalid } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt, metricsStorageAllowed, localRootKey, localStateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt, metricsStorageAllowed, localRootKey, localStateDir, canonical } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
@@ -7,13 +7,14 @@ import { registerProject } from '../../plugins/core/skills/core/scripts/index-re
 // the project's metrics state never touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   initMetrics,
   detectStoragePath,
   projectPathContainsOneDriveSubstring,
+  projectInOneDriveSyncSettings,
 } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 
 // detectStoragePath honors these as escape hatches — make sure ambient shell
@@ -118,6 +119,49 @@ test('detectStoragePath redirects off a synced folder on non-Windows — iCloud,
   });
 });
 
+test('detectStoragePath classifies a symlink alias by its real target, not the alias spelling — the junction-bypass class reported on a real Windows install', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-alias-home-'));
+    const dropboxTarget = join(home, 'Dropbox', 'Projects', 'app');
+    mkdirSync(dropboxTarget, { recursive: true });
+    // The alias sits OUTSIDE any name isSyncedPath recognizes — none of its own path
+    // components say "Dropbox" — exactly the Windows junction shape reported live
+    // (`Documents/Projects/core-windows` symlinked into `OneDrive/Documents/Projects/core-windows`):
+    // detection has to resolve through it to see the real, synced location.
+    const aliasParent = join(home, 'Documents', 'Projects');
+    mkdirSync(aliasParent, { recursive: true });
+    const alias = join(aliasParent, 'app');
+    symlinkSync(dropboxTarget, alias, 'dir');
+    try {
+      const detection = detectStoragePath({ projectDir: alias, home });
+      assert.match(detection.reason, /synced-folder-detected-redirect-local/, 'the alias spelling alone gives no hint of Dropbox; only the real target does');
+      assert.ok(detection.path.startsWith(join(home, '.core', 'local-metrics')));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+test('projectInOneDriveSyncSettings only matches a backslash-spelled projectDir against the (backslash-spelled) ini content — the gap a forward-slash caller falls through', () => {
+  const settingsRoot = mkdtempSync(join(tmpdir(), 'onedrive-settings-'));
+  const personal = join(settingsRoot, 'Personal');
+  mkdirSync(personal, { recursive: true });
+  const oneDriveRoot = 'C:\\Users\\david\\OneDrive';
+  writeFileSync(join(personal, 'account.ini'), Buffer.from(`libraryScope=${oneDriveRoot}\\Documents\r\n`, 'utf16le'));
+  try {
+    const backslashProject = `${oneDriveRoot}\\Documents\\Projects\\app`;
+    const forwardSlashProject = 'C:/Users/david/OneDrive/Documents/Projects/app';
+    assert.equal(projectInOneDriveSyncSettings(backslashProject, settingsRoot), true, 'the spelling the .ini actually uses is matched');
+    // Characterizes the exact gap reported from a real Windows install: the same logical
+    // path, forward-slash spelled (what Git Bash and CORE's own script calls pass), is not
+    // recognized — canonical() resolving to the backslash spelling before this function is
+    // ever called (detectStoragePath's fix) is what closes it, not a change to this function.
+    assert.equal(projectInOneDriveSyncSettings(forwardSlashProject, settingsRoot), false, 'forward-slash spelling of the identical path is not recognized on its own');
+  } finally {
+    rmSync(settingsRoot, { recursive: true, force: true });
+  }
+});
+
 test('metricsStorageAllowed accepts the local-metrics redirect target, and does not accept the shared per-harness state tree', () => {
   const home = mkdtempSync(join(tmpdir(), 'metrics-allowed-home-'));
   const projectDir = join(home, 'Library', 'CloudStorage', 'iCloud Drive', 'Projects', 'app');
@@ -195,7 +239,11 @@ test('B scaffolding first cannot take A\'s unclaimed legacy folder; A keeps it t
       assert.notEqual(rb.storagePath, legacy, 'B is not handed A\'s bytes');
       const ra = initMetrics({ projectDir: A, env: {} });
       assert.equal(ra.storagePath, legacy, 'A keeps the folder its own pin names');
-      assert.equal(readFileSync(join(legacy, '.project-root'), 'utf8').trim(), A, 'and claims it');
+      // Canonical, not raw: detectStoragePath now classifies (and appDataStorePath's owner
+      // check now reads/writes) against the canonical root, so the owner file agrees with
+      // that — matters on macOS, where mkdtempSync under tmpdir() returns a /var/folders/...
+      // spelling that realpath resolves to /private/var/folders/....
+      assert.equal(readFileSync(join(legacy, '.project-root'), 'utf8').trim(), canonical(A), 'and claims it');
       assert.equal(readFileSync(join(legacy, 'evidence.jsonl'), 'utf8'), '{"a":1}\n');
     } finally { for (const d of [home, A, B]) rmSync(d, { recursive: true, force: true }); }
   });
