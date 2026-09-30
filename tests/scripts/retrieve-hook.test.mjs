@@ -527,8 +527,12 @@ test('a cloned repo with a planted _memories/ is NOT injected: a folder authoriz
     const other = mkdtempSync(join(tmpdir(), 'rh-other-'));
     const out = runHook('widget decision', { ...registryEnvFor(other) }, root);
     assert.equal(out, '', 'nothing is injected for an unregistered folder');
-    const r = runHookProcess('widget decision', { ...registryEnvFor(other) }, root);
+    const logFile = isolatedHooksLog();
+    const r = runHookProcess('widget decision', { ...registryEnvFor(other), CORE_HOOKS_LOG_FILE: logFile }, root);
     assert.equal(r.status, 0, 'and the hook still exits 0');
+    const row = JSON.parse(rf(logFile, 'utf8').trim().split('\n').pop());
+    assert.equal(row.action, 'skip', 'an unregistered folder is an expected skip, not a failure');
+    assert.equal(row.reason, 'not-registered-workspace', 'and the receipt names why (a reason outside the closed vocabulary would be coerced to a failed pipeline-error)');
     rmSync(other, { recursive: true, force: true });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
