@@ -271,8 +271,8 @@ export async function main() {
       // hindsight judge later grades — the numbers row records THAT retrieval
       // happened; this records enough to judge whether it was RIGHT.
       //
-      // LOCAL ONLY: lands under the metrics storage base (0700/0600, 30-day
-      // retention, purge command); metrics-package.mjs has no read path into
+      // LOCAL ONLY: lands under the metrics storage base (0700/0600, kept until
+      // explicit purge); metrics-package.mjs has no read path into
       // it (canary tripwire test). Fail-open: a capture failure never blocks
       // the turn — it lands in the stream's health counter (Link 5 watches
       // that) and its closed status rides the terminal receipt. Gated INSIDE
