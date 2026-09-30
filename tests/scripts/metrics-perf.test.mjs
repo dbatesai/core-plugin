@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { captureTurnEvidence } from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
 import { judgeUnjudgedTurns } from '../../plugins/core/skills/core/scripts/hindsight-judge.mjs';
@@ -37,8 +38,8 @@ function cleanEnv() {
   return env;
 }
 
-// Median of the probe's write+rename on an idle developer machine (about 0.15ms on APFS).
-const IDLE_PROBE_MS = 0.3;
+// Median of the probe's write+rename on an idle developer machine (about 0.12ms on APFS).
+const IDLE_PROBE_MS = 0.12;
 // No amount of contention excuses a median past this: a capture that costs 120ms is a
 // regression. Measured full-suite medians on Windows (the slowest host) run 87-97ms, so it
 // sits just above them and below the 120ms regression the gate must catch.
@@ -99,10 +100,15 @@ test('perf: captureTurnEvidence adds <25ms median over 30 iterations (500ms hard
     // a scanner in %TEMP%) every file operation slows by the same factor, so the budget scales
     // by how much slower a fixed set of small file writes is right now, capped at 8x: a real
     // regression is far past 8x, contention is not.
+    // Contention in a parallel suite is mostly CPU, so the probe does CPU work (a hash and a
+    // JSON round trip) as well as a small write and rename: it slows down when capture does.
     const probe = [];
+    const blob = Buffer.alloc(32 * 1024, 7);
     for (let i = 0; i < 30; i++) {
       const f = join(root, `probe-${i}`);
       const t0 = performance.now();
+      createHash('sha256').update(blob).digest('hex');
+      JSON.parse(JSON.stringify(row(i)));
       writeFileSync(f, 'x'.repeat(256));
       renameSync(f, `${f}.done`);
       probe.push(performance.now() - t0);
