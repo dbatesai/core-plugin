@@ -38,7 +38,9 @@ function cleanEnv() {
   return env;
 }
 
-// Median of the probe's write+rename on an idle developer machine (about 0.12ms on APFS).
+// Median of the probe's hash+JSON+write+rename on an idle developer machine (about 0.12ms on
+// APFS). On Windows the same probe reads about 2ms even when idle (Defender, NTFS metadata), so
+// there the scale sits at its 8x cap and the absolute ceiling below is what gates.
 const IDLE_PROBE_MS = 0.12;
 // No amount of contention excuses a median past this: a capture that costs 120ms is a
 // regression. Measured full-suite medians on Windows (the slowest host) run 87-97ms, so it
@@ -73,7 +75,7 @@ const row = (i) => ({
   producer_version: 'v', producer_sha: 'sha',
 });
 
-test('perf: captureTurnEvidence adds <25ms median over 30 iterations (500ms hard ceiling)', (t) => {
+test('perf: captureTurnEvidence median stays under 25ms idle (scaled by contention, never past the 110ms ceiling; 500ms worst-sample ceiling)', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'perf-cap-'));
   try {
     const project = makeStore(root, 5);
