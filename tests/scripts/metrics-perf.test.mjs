@@ -39,6 +39,25 @@ function cleanEnv() {
 
 // Median of the probe's write+rename on an idle developer machine (about 0.15ms on APFS).
 const IDLE_PROBE_MS = 0.3;
+// No amount of contention excuses a median past this: a capture that costs 120ms is a
+// regression. Measured full-suite medians on Windows (the slowest host) run 87-97ms, so it
+// sits just above them and below the 120ms regression the gate must catch.
+const CAPTURE_CEILING_MS = 110;
+
+// The per-host budget: 25ms on an idle machine, scaled by measured file-op contention (capped
+// at 8x), and never past the absolute ceiling.
+function captureBudget(probeMedianMs) {
+  const contention = Math.min(8, Math.max(1, probeMedianMs / IDLE_PROBE_MS));
+  return { contention, budget: Math.min(25 * contention, CAPTURE_CEILING_MS) };
+}
+
+test('perf gate: at maximum measured contention the budget still rejects a 120ms capture', () => {
+  const { contention, budget } = captureBudget(1000); // absurdly slow probe: the 8x cap applies
+  assert.equal(contention, 8);
+  assert.ok(budget < 120, `the effective budget ${budget}ms must stay below the 120ms regression`);
+  assert.ok(!(120 < budget), 'so a 120ms median fails even at the maximum scale');
+  assert.equal(captureBudget(0.01).budget, 25, 'an idle host keeps the plain 25ms budget');
+});
 
 const row = (i) => ({
   retrieval_id: `r-perf-${i}`,
@@ -53,7 +72,7 @@ const row = (i) => ({
   producer_version: 'v', producer_sha: 'sha',
 });
 
-test('perf: captureTurnEvidence adds <25ms median over 30 iterations (500ms hard ceiling)', () => {
+test('perf: captureTurnEvidence adds <25ms median over 30 iterations (500ms hard ceiling)', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'perf-cap-'));
   try {
     const project = makeStore(root, 5);
@@ -89,9 +108,10 @@ test('perf: captureTurnEvidence adds <25ms median over 30 iterations (500ms hard
       probe.push(performance.now() - t0);
     }
     probe.sort((a, b) => a - b);
-    const contention = Math.min(8, Math.max(1, probe[Math.floor(probe.length / 2)] / IDLE_PROBE_MS));
-    const budget = 25 * contention;
-    assert.ok(median < budget, `capture median ${median.toFixed(2)}ms exceeds the ${budget.toFixed(0)}ms budget (25ms x ${contention.toFixed(1)} contention; samples: ${samples.map((s) => s.toFixed(1)).join(',')})`);
+    const probeMedian = probe[Math.floor(probe.length / 2)];
+    const { contention, budget } = captureBudget(probeMedian);
+    t.diagnostic(`capture median ${median.toFixed(2)}ms; contention x${contention.toFixed(2)} (probe median ${probeMedian.toFixed(3)}ms); effective budget ${budget.toFixed(1)}ms`);
+    assert.ok(median < budget, `capture median ${median.toFixed(2)}ms exceeds the ${budget.toFixed(0)}ms budget (25ms x ${contention.toFixed(1)} contention, ceiling ${CAPTURE_CEILING_MS}ms; samples: ${samples.map((s) => s.toFixed(1)).join(',')})`);
     assert.ok(worst < 500, `capture worst sample ${worst.toFixed(2)}ms exceeds the 500ms hard ceiling (samples: ${samples.map((s) => s.toFixed(1)).join(',')})`);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

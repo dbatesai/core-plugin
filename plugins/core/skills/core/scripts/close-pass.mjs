@@ -48,6 +48,7 @@ import { acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.m
 import { logHookEvent } from '../hooks/hook-log.mjs';
 import { readTranscript, resolveTranscript } from './read-transcript.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { computeSourceSignature } from './generate-summary-index.mjs';
 
 // A lock older than this with no live owner is stale and supersedable. Generous
 // enough for a manual close that renders and summarizes before finishing.
@@ -137,8 +138,11 @@ export function recordOp(store, { op, status = 'done', note = null, now = new Da
   return marker;
 }
 
-export function finishClose(store, { sessionId = null, status = 'closed', now = new Date().toISOString() } = {}) {
+export function finishClose(store, { sessionId = null, status = 'closed', storeSignature = null, now = new Date().toISOString() } = {}) {
   const marker = readJson(markerPath(store)) || { ops: {} };
+  // The signature of the store AS THE CLOSE LEFT IT: detectCloseState compares the live store
+  // against this, so a unit changed after the close re-owes the store-derived ops.
+  if (storeSignature != null) marker.store_signature = storeSignature;
   marker.status = status; // 'closed' = finalize succeeded; 'failed' = finished but /finalize failed → detectCloseState re-owes
   marker.completed_at = now;
   if (sessionId) marker.session_id = sessionId;
@@ -544,6 +548,11 @@ function parseFlags(argv) {
   return out;
 }
 
+// null when the store cannot be read: detection then falls back to the marker alone.
+function liveSignature(store) {
+  try { return computeSourceSignature(store); } catch { return null; }
+}
+
 function main(argv) {
   if (argv.includes('--self-test')) return selfTest();
   const sub = argv[0];
@@ -556,7 +565,7 @@ function main(argv) {
 
   switch (sub) {
     case 'detect': {
-      const det = detectCloseState(store, { allOps: ops });
+      const det = detectCloseState(store, { allOps: ops, storeSignature: liveSignature(store) });
       process.stdout.write(json ? JSON.stringify(det) + '\n' : `${det.state}${det.owed?.length ? ' owed=' + det.owed.join(',') : ''}\n`);
       return 0;
     }
@@ -571,7 +580,7 @@ function main(argv) {
       return 0;
     }
     case 'finish': {
-      const fin = finishClose(store, { sessionId: f.session || null });
+      const fin = finishClose(store, { sessionId: f.session || null, storeSignature: liveSignature(store) });
       if (fin.release && fin.release.released === false && fin.release.reason === 'release-failed') {
         process.stdout.write(`close marked closed; LOCK RELEASE FAILED (${fin.release.error}) — run 'release' once the cause clears\n`);
         return 1;

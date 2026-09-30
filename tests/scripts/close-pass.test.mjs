@@ -328,3 +328,23 @@ test('a failed required op refuses certification; a complete record certifies', 
     finishClose(store, { sessionId: 's-good' });
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
+
+test('CLI detect: a unit changed after a clean close re-owes the store-derived op; an untouched store stays closed', () => {
+  const store = freshStore();
+  try {
+    const OPS = 'material-capture,render-project-md';
+    writeFileSync(join(store, '_memories', 'dc-1-first.md'), '---\nid: dc-1-first\ntype: decision\nstatus: active\n---\n\nFirst.\n');
+    assert.equal(runCli(['begin', store, '--ops', OPS, '--session', 's1']).status, 0);
+    for (const op of OPS.split(',')) assert.equal(runCli(['record', store, '--op', op]).status, 0);
+    assert.equal(runCli(['finish', store, '--session', 's1']).status, 0);
+
+    const closed = JSON.parse(runCli(['detect', store, '--ops', OPS, '--json']).stdout);
+    assert.equal(closed.state, 'closed', 'nothing changed since the close');
+
+    writeFileSync(join(store, '_memories', 'dc-2-second.md'), '---\nid: dc-2-second\ntype: decision\nstatus: active\n---\n\nAdded after the close.\n');
+    const owed = JSON.parse(runCli(['detect', store, '--ops', OPS, '--json']).stdout);
+    assert.equal(owed.state, 'owed', 'a session that changed the store after the last close is owed a close');
+    assert.equal(owed.reason, 'store-changed');
+    assert.deepEqual(owed.owed, ['render-project-md']);
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
