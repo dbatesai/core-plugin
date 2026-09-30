@@ -48,7 +48,7 @@ import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, storagePinInvalid, operationalMetricsDir } from './log-event.mjs';
-import { projectRootFor, detectStateHarness, readManifest } from './project-state.mjs';
+import { projectRootFor, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
@@ -113,6 +113,10 @@ export function turnCaptureEnabled({ project, env = process.env, home = homedir(
       m = readManifest({ root: projectRootFor(project, { home, coreDir }), harness: detectStateHarness(env), coreDir });
     } catch { m = null; }
     if (m && m.turn_capture === false) return false;
+    try {
+      const root = projectRootFor(project, { home, coreDir: join(home, '.core') });
+      if (!m && manifestTurnCaptureOptsOutUnverified({ root, harness: detectStateHarness(env) })) return false;
+    } catch { /* unresolvable project: no unverified opt-out to honor */ }
     // A project-root workspace.json can still say "off" (an older or copied project). Like
     // metrics_enabled, it only ever switches capture off, and it keeps doing so until the
     // signed manifest carries the value.

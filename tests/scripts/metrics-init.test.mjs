@@ -103,16 +103,39 @@ test('detectStoragePath redirects off a synced folder on non-Windows — iCloud,
     for (const dir of [icloud, dropbox, googleDrive, plain]) mkdirSync(dir, { recursive: true });
     try {
       for (const projectDir of [icloud, dropbox, googleDrive]) {
-        const detection = detectStoragePath({ projectDir, home });
+        const detection = detectStoragePath({ projectDir, home, platformName: 'linux' });
         assert.notEqual(detection.path, join(projectDir, '_metrics'), `${projectDir} should redirect, not land under the synced project folder`);
         assert.match(detection.reason, /synced-folder-detected-redirect-local/);
         assert.ok(detection.path.startsWith(join(home, '.core', 'local-metrics')), 'redirected path lands under the local-metrics namespace, not the shared per-harness state tree');
         assert.ok(!detection.path.startsWith(projectDir), 'redirected path is never nested inside the synced project folder itself');
       }
       // The non-synced control still resolves project-local, same as before this fix.
-      const control = detectStoragePath({ projectDir: plain, home });
+      const control = detectStoragePath({ projectDir: plain, home, platformName: 'linux' });
       assert.equal(control.path, join(plain, '_metrics'));
       assert.match(control.reason, /project-local/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+test('detectStoragePath on Windows redirects Dropbox, Google Drive and iCloud Drive folders to AppData, the way it does OneDrive', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-win-synced-home-'));
+    try {
+      for (const sub of ['Dropbox', 'Google Drive', 'iCloudDrive']) {
+        const projectDir = join(home, sub, 'Projects', 'app');
+        mkdirSync(projectDir, { recursive: true });
+        const detection = detectStoragePath({ projectDir, home, platformName: 'win32' });
+        assert.match(detection.reason, /windows-synced-folder-detected-redirect-appdata/, `${sub} must not stay project-local`);
+        assert.ok(detection.path.startsWith(join(home, 'AppData', 'Local', 'core-metrics')), 'redirect target is the AppData store');
+        assert.ok(!detection.path.startsWith(projectDir), 'never nested inside the synced folder');
+      }
+      const plain = join(home, 'Documents', 'Projects', 'app');
+      mkdirSync(plain, { recursive: true });
+      const control = detectStoragePath({ projectDir: plain, home, platformName: 'win32' });
+      assert.equal(control.path, join(plain, '_metrics'));
+      assert.match(control.reason, /windows-no-onedrive-project-local/);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -131,9 +154,10 @@ test('detectStoragePath classifies a symlink alias by its real target, not the a
     const aliasParent = join(home, 'Documents', 'Projects');
     mkdirSync(aliasParent, { recursive: true });
     const alias = join(aliasParent, 'app');
-    symlinkSync(dropboxTarget, alias, 'dir');
+    // A junction needs no privilege on Windows; a directory symlink there needs Developer Mode.
+    symlinkSync(dropboxTarget, alias, process.platform === 'win32' ? 'junction' : 'dir');
     try {
-      const detection = detectStoragePath({ projectDir: alias, home });
+      const detection = detectStoragePath({ projectDir: alias, home, platformName: 'linux' });
       assert.match(detection.reason, /synced-folder-detected-redirect-local/, 'the alias spelling alone gives no hint of Dropbox; only the real target does');
       assert.ok(detection.path.startsWith(join(home, '.core', 'local-metrics')));
     } finally {

@@ -174,6 +174,14 @@ test('setFrontmatterField inserts a new field after updated, preserving edges', 
   assert.match(next, /# dc-x/, 'body intact');
 });
 
+test('setFrontmatterField leaves `$` sequences in other frontmatter untouched', () => {
+  const text = unitFile({ id: 'dc-x', status: 'retired', created: '2026-01-01' })
+    .replace(/^(id: dc-x)$/m, () => 'id: dc-x\ntitle: cost is $$5 and $&');
+  const next = setFrontmatterField(text, 't_invalid', '2026-03-01');
+  assert.match(next, /title: cost is \$\$5 and \$&\n/, 'the title keeps its dollar signs verbatim');
+  assert.equal((next.match(/^---$/gm) || []).length, 2, 'frontmatter delimiters not duplicated or spliced');
+});
+
 test('setFrontmatterField replaces an existing field in place', () => {
   const text = unitFile({ id: 'dc-x', status: 'retired', created: '2026-01-01', tInvalid: '2026-02-02' });
   const next = setFrontmatterField(text, 't_invalid', '2026-09-09');

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { mapProjectPathToSlug } from '../../plugins/core/skills/core/scripts/project-slug.mjs';
 import {
-  classifyRetrievalSkips, buildProjectTerms, formatReport, parseSkipArgs,
+  classifyRetrievalSkips, buildProjectTerms, formatReport, parseSkipArgs, analyzeRetrievalSkip,
 } from '../../plugins/core/skills/core/scripts/analyze-retrieval-skip.mjs';
 
 test('a space-form flag value is not mistaken for the project root', () => {
@@ -219,4 +220,27 @@ test('an access after the answer does not clear the turn it followed', () => {
     terms,
   });
   assert.equal(r.status, 'SKIPS-FOUND');
+});
+
+test('analyzeRetrievalSkip abstains when the requested session has no transcript, instead of judging another session\'s', () => {
+  const home = mkdtempSync(join(tmpdir(), 'ars-mismatch-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'ars-mismatch-proj-'));
+  try {
+    mkdirSync(join(project, '_memories'), { recursive: true });
+    writeFileSync(join(project, 'PROJECT.md'), '# P\n\nThe zebra-migration decision is settled.\n');
+    const dir = join(home, '.claude', 'projects', mapProjectPathToSlug(project));
+    mkdirSync(dir, { recursive: true });
+    const turn = (u, a) => [
+      JSON.stringify({ message: { role: 'user', content: [{ type: 'text', text: u }] } }),
+      JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: a }] } }),
+    ].join('\n') + '\n';
+    // Only an unrelated session's transcript exists.
+    writeFileSync(join(dir, 'sess-other.jsonl'), turn('what did we decide about the zebra-migration?', 'We decided to do it.'));
+    const r = analyzeRetrievalSkip({ projectRoot: project, harness: 'claude-code', home, sessionId: 'sess-mine', env: {} });
+    assert.equal(r.status, 'UNKNOWN', 'a session with no transcript of its own is unknown, not judged on someone else\'s turns');
+    assert.deepEqual(r.skips, [], 'no skips reported from the wrong session');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  }
 });

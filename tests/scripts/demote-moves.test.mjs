@@ -380,3 +380,15 @@ test("demoteMoves: one old item no longer masks other over-floor items still ove
     assert.equal((project.match(/→ see `PROJECT-ARCHIVE/g) || []).length, 2, 'two stubs left');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('alreadyArchived matches whole lines only: a bullet that prefixes a longer archived line is not archived', async () => {
+  const { alreadyArchived } = await import('../../plugins/core/skills/core/scripts/demote-moves.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'already-archived-'));
+  try {
+    const archive = join(dir, 'archive.md');
+    writeFileSync(archive, '### 2026-09-01\n\n- [ ] Ship the release notes and the changelog\n\n');
+    assert.equal(alreadyArchived(archive, { rawLines: ['- [ ] Ship the release notes'] }), false,
+      'a prefix of an archived line must still be archived, not silently dropped from PROJECT.md');
+    assert.equal(alreadyArchived(archive, { rawLines: ['- [ ] Ship the release notes and the changelog'] }), true);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

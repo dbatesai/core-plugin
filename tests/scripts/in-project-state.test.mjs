@@ -576,6 +576,24 @@ test('a manifest whose MAC breaks keeps its opt-out: capture stays off, before a
   } finally { s.cleanup(); }
 });
 
+test('a manifest whose MAC breaks keeps its turn-capture opt-out too, before and after the next write', async () => {
+  const { turnCaptureEnabled } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'TurnOptOut');
+    registerProject(s.coreDir, p);
+    const env = { CORE_HARNESS: 'claude-code' };
+    updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { turn_capture: false } });
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false);
+    const file = join(p, '.core', 'claude-code', 'workspace.json');
+    writeFileSync(file, readFileSync(file, 'utf8').replace('"harness"', '"harness_x": 1, "harness"'));
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'unverified manifest still opts out');
+    updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { agent_name: 'x' } });
+    assert.equal(readManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir }).turn_capture, false, 'opt-out carried past the set-aside');
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false);
+  } finally { s.cleanup(); }
+});
+
 // ---------- migration holds: what a receipt may claim, and what half-copied state may do ----------
 
 const RECEIPT_NAME = 'migrated-from.json';

@@ -19,6 +19,11 @@ test('mapProjectPathToSlug: converts / and . to - (Claude projects-folder encodi
   );
 });
 
+test('mapProjectPathToSlug: underscores convert too (observed: CORE/_outputs is CORE--outputs on disk)', () => {
+  assert.equal(mapProjectPathToSlug('/Users/dbates/Documents/Projects/CORE/_outputs'),
+    '-Users-dbates-Documents-Projects-CORE--outputs');
+});
+
 test('mapProjectPathToSlug: plain path (no dots) unchanged in shape', () => {
   assert.equal(mapProjectPathToSlug('/Users/dbates/Documents/Projects/CORE'),
     '-Users-dbates-Documents-Projects-CORE');

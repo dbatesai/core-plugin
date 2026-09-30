@@ -321,10 +321,21 @@ function appendToArchiveMoves(archivePath, block) {
 // leaves the bullets archived but still on the agenda, and a retry would
 // append a duplicate archive block. Skip any bullet whose exact raw lines are
 // already in the archive; the retry still stubs it out of PROJECT.md.
+function containsWholeLines(text, needle) {
+  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) {
+    const end = i + needle.length;
+    const startsLine = i === 0 || text[i - 1] === '\n';
+    const endsLine = end === text.length || text[end] === '\n' || text[end] === '\r';
+    if (startsLine && endsLine) return true;
+  }
+  return false;
+}
+
 export function alreadyArchived(archivePath, bullet) {
   let text;
   try { text = readFileSync(archivePath, 'utf8'); } catch { return false; }
-  return text.includes(bullet.rawLines.join('\n'));
+  // Whole lines only: a bullet that is a prefix of a longer archived line is not archived.
+  return containsWholeLines(text, bullet.rawLines.join('\n'));
 }
 
 // ---------- Public API ----------

@@ -241,6 +241,15 @@ export function stratifiedSample(turns, count) {
   return out.slice(0, count);
 }
 
+/**
+ * Where the labeling worksheet is written. The worksheet holds raw user and assistant turn
+ * text, so it lives beside the classified rows it was drawn from (the project's hot state,
+ * which stays off synced folders), never in the project's own `_metrics/`.
+ */
+export function worksheetDir(project, opts = {}) {
+  return join(operationalMetricsDir(project, opts), 'calibration');
+}
+
 /** Write a labeling worksheet for a set of classified turns. Returns the file path. */
 export function exportWorksheet({ project: _project, harness, classifiedDir, calibrationDir, today, count = 200, minLabeled = MIN_LABELED }) {
   const pool = collectClassifiedTurns(classifiedDir);
@@ -559,7 +568,7 @@ if (isCliEntry(import.meta.url)) {
   if (has('export-worksheet')) {
     const metaDir = operationalMetricsDir(project);
     const classifiedDir = join(metaDir, 'classified');
-    const calibrationDir = join(project, '_metrics', 'calibration');
+    const calibrationDir = worksheetDir(project);
     const count = parseInt(opt('count') || '200', 10);
     const r = exportWorksheet({ project, harness, classifiedDir, calibrationDir, count, minLabeled: resolveMinLabeled(project) });
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }

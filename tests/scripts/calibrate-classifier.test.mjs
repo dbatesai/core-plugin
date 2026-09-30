@@ -465,3 +465,14 @@ test('importLabels refuses to clear at a caller-supplied lower threshold', () =>
     assert.equal(r.min_labeled, MIN_LABELED, 'the enforced floor is recorded');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('worksheetDir keeps raw turn text in the project hot state, not the project _metrics folder', async () => {
+  const { worksheetDir } = await import('../../plugins/core/skills/core/scripts/calibrate-classifier.mjs');
+  const home = mkdtempSync(join(tmpdir(), 'cal-ws-home-'));
+  const project = mkdtempSync(join(tmpdir(), 'cal-ws-proj-'));
+  try {
+    const dir = worksheetDir(project, { home, env: { CORE_HARNESS: 'claude-code' } });
+    assert.ok(!dir.startsWith(join(project, '_metrics')), `worksheet dir ${dir} must not sit in the project's _metrics folder`);
+    assert.ok(dir.endsWith(join('metrics', 'calibration')), 'beside the classified rows');
+  } finally { rmSync(home, { recursive: true, force: true }); rmSync(project, { recursive: true, force: true }); }
+});

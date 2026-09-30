@@ -319,7 +319,7 @@ function pathHash(p) { return createHash('sha256').update(p).digest('hex').slice
  * Decide where storage lives for this project. Honors CORE_METRICS_FORCE_PROJECT_LOCAL=1
  * as a user escape hatch.
  */
-export function detectStoragePath({ projectDir, home = homedir() }) {
+export function detectStoragePath({ projectDir, home = homedir(), platformName = platform() }) {
   // Detection runs against the canonical root, not whatever spelling the caller passed in —
   // a symlink or Windows junction alias (e.g. a project reached both as `Documents/Projects/x`
   // and, through a junction, as `OneDrive/Documents/Projects/x`) must classify the same way
@@ -354,7 +354,7 @@ export function detectStoragePath({ projectDir, home = homedir() }) {
   // slug) — a namespace kept separate from `.core/local/<...>/<harness>/`, which holds
   // per-harness session state, so metricsStorageAllowed's containment check can't be
   // satisfied by pointing a metrics pin at some other project's state folder instead.
-  if (platform() !== 'win32') {
+  if (platformName !== 'win32') {
     if (isSyncedPath(real)) {
       return {
         path: join(home, '.core', 'local-metrics', localRootKey(real)),
@@ -378,6 +378,17 @@ export function detectStoragePath({ projectDir, home = homedir() }) {
       path: appDataPath,
       methods: { a: methodA, c: methodC, b: 'not-implemented' },
       reason: 'windows-onedrive-detected-redirect-appdata',
+    };
+  }
+
+  // Dropbox, Google Drive and iCloud Drive sync Windows folders too; the same
+  // `isSyncedPath` check the non-Windows branch uses catches them, and they get the same
+  // AppData redirect OneDrive gets.
+  if (isSyncedPath(real)) {
+    return {
+      path: appDataPath,
+      methods: { a: methodA, c: methodC, synced: true },
+      reason: 'windows-synced-folder-detected-redirect-appdata',
     };
   }
 

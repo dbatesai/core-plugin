@@ -146,12 +146,12 @@ export function classifyRegistration(dir, { home = defaultHome(), coreDir } = {}
 
 // ---------- where state goes ----------
 
-/** Path under a sync client: OneDrive, iCloud Drive, macOS CloudStorage mounts, Dropbox, Google Drive. */
+/** Path under a sync client: OneDrive, iCloud Drive (macOS mounts and the Windows `iCloudDrive` folder), Dropbox, Google Drive. */
 export function isSyncedPath(p) {
   const norm = String(p).replace(/\\/g, '/');
   if (projectPathContainsOneDriveSubstring(norm)) return true;
   if (norm.includes('/Library/Mobile Documents/') || norm.includes('/Library/CloudStorage/')) return true;
-  return norm.split('/').some((c) => c === 'Dropbox' || c.startsWith('Dropbox (') || c === 'Google Drive');
+  return norm.split('/').some((c) => c === 'Dropbox' || c.startsWith('Dropbox (') || c === 'Google Drive' || c === 'iCloudDrive');
 }
 
 function isWritableDir(p) {
@@ -767,7 +767,7 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
       const text = readSignedFile({ root, harness, name: MANIFEST, coreDir });
       if (text === null) {
         // An untrusted manifest can only make capture safer: its opt-out survives the set-aside.
-        if (untrustedOptOut(file)) current = { metrics_enabled: false };
+        current = untrustedOptOuts(file);
         renameSync(file, `${file}.unverified-${isoStamp()}`);
       } else {
         // An unparseable manifest is surfaced, never silently replaced.
@@ -784,9 +784,18 @@ export function updateManifest({ root, harness, coreDir = defaultCoreDir(), fiel
   });
 }
 
-function untrustedOptOut(file) {
-  try { return JSON.parse(readFileSync(file, 'utf8')).metrics_enabled === false; } catch { return false; }
+// Which capture switches an unverified manifest turns off. Untrusted content may only ever
+// make capture safer, so each opt-out it carries survives the set-aside.
+function untrustedOptOuts(file) {
+  const out = {};
+  try {
+    const m = JSON.parse(readFileSync(file, 'utf8'));
+    if (m.metrics_enabled === false) out.metrics_enabled = false;
+    if (m.turn_capture === false) out.turn_capture = false;
+  } catch { /* unreadable: no opt-out to carry */ }
+  return out;
 }
+function untrustedOptOut(file) { return untrustedOptOuts(file).metrics_enabled === false; }
 
 /**
  * True when this harness's manifest says metrics_enabled:false but doesn't verify.
@@ -794,6 +803,11 @@ function untrustedOptOut(file) {
  */
 export function manifestOptsOutUnverified({ root, harness }) {
   return untrustedOptOut(join(canonical(root), STATE_DIRNAME, harness, MANIFEST));
+}
+
+/** Same rule for the turn-capture switch: an unverified manifest may switch it off, never on. */
+export function manifestTurnCaptureOptsOutUnverified({ root, harness }) {
+  return untrustedOptOuts(join(canonical(root), STATE_DIRNAME, harness, MANIFEST)).turn_capture === false;
 }
 
 // ---------- the bootstrap record (last-bootstrap.json) ----------
