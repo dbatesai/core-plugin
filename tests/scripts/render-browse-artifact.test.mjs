@@ -20,6 +20,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { symlinkSync, realpathSync } from 'node:fs';
+// A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
+const DIR_LINK = process.platform === 'win32' ? 'junction' : 'dir';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
 process.env.CORE_HARNESS ||= 'claude-code';
@@ -232,11 +234,11 @@ rtest('writes a local receipt in the project state with content identical to the
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-rtest('refused project state (a symlinked .core) → receipt still written to the flagged fallback location', { skip: process.platform === 'win32' }, async () => {
+rtest('refused project state (a symlinked .core) → receipt still written to the flagged fallback location', async () => {
   const { root, home } = fixtureProject();
   const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-elsewhere-')));
   try {
-    symlinkSync(elsewhere, join(root, '.core'));
+    symlinkSync(elsewhere, join(root, '.core'), DIR_LINK);
     const { manifest, receiptWritten } = await generate(root, home);
     assert.equal(receiptWritten, true);
     assert.equal(manifest.receipt_fallback, true);
@@ -679,14 +681,14 @@ rtest('CLI: stdout is exactly one JSON manifest with the stable shape', () => {
 
 const { generationReceiptLocation } = await import(pathToFileURL(join(SCRIPTS, 'artifact-receipts.mjs')).href);
 
-test('a planted .core cannot redirect the receipt out of the operational root', { skip: process.platform === 'win32' }, () => {
+test('a planted .core cannot redirect the receipt out of the operational root', () => {
   const home = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-home-')));
   const project = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-project-')));
   const stolen = realpathSync.native(mkdtempSync(join(tmpdir(), 'receipt-stolen-')));
   try {
     mkdirSync(join(home, '.core'), { recursive: true });
     writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
-    symlinkSync(stolen, join(project, '.core'));
+    symlinkSync(stolen, join(project, '.core'), DIR_LINK);
     const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
     assert.equal(loc.projectId, null, 'refused state yields no project id');
     assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),

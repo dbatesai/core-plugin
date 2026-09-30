@@ -11,6 +11,8 @@ import {
   resolveProjectRoot, classifyRegistration, projectStateDir, ensureStateDir, isSyncedPath,
   writeStamp, classifyStamp, ensureInstallIdentity, stampHmac, assertHarnessName, localStateDir,
 } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+// A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
+const DIR_LINK = process.platform === 'win32' ? 'junction' : 'dir';
 
 const isWin = process.platform === 'win32';
 const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
@@ -266,13 +268,13 @@ test('a missing or malformed stamp is planted', () => {
   } finally { s.cleanup(); }
 });
 
-test('a symlinked .core is refused on read and on write', { skip: isWin }, () => {
+test('a symlinked .core is refused on read and on write', () => {
   const s = sandbox();
   try {
     const target = mk(s.base, 'secret-dir');
     mkdirSync(join(target, 'claude-code'));
     const p = mk(s.base, 'clone');
-    symlinkSync(target, join(p, '.core'));
+    symlinkSync(target, join(p, '.core'), DIR_LINK);
     register(s.coreDir, [p]);
     assert.deepEqual(classifyStamp({ root: p, harness: 'claude-code', coreDir: s.coreDir }), { status: 'refused', reason: 'symlink' });
     assert.throws(() => ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir }), /symlink/);

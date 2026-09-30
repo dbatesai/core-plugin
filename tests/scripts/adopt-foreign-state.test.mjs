@@ -16,6 +16,8 @@ import {
 } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { checkMetricsDisclosure } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 import { metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
+// A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
+const DIR_LINK = process.platform === 'win32' ? 'junction' : 'dir';
 
 const SCRIPTS = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/', import.meta.url));
 const HOOKS = fileURLToPath(new URL('../../plugins/core/skills/core/hooks/', import.meta.url));
@@ -229,14 +231,14 @@ test('no hook or background script adopts: only project-state and the registry C
   assert.deepEqual(offenders, []);
 });
 
-test('a symlinked .core is never an adoption candidate', { skip: process.platform === 'win32' }, () => {
+test('a symlinked .core is never an adoption candidate', () => {
   const s = sandbox();
   try {
     const { coreB, restored } = restoredProject(s);
     const elsewhere = join(s.base, 'Elsewhere');
     cpSync(join(restored, '.core'), elsewhere, { recursive: true });
     rmSync(join(restored, '.core'), { recursive: true, force: true });
-    symlinkSync(elsewhere, join(restored, '.core'));
+    symlinkSync(elsewhere, join(restored, '.core'), DIR_LINK);
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null);
   } finally { s.cleanup(); }
 });
