@@ -9,7 +9,7 @@
  * that create paths here MUST register an after() cleanup (see
  * isolatedHooksLog() call sites for the pattern).
  */
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -57,4 +57,21 @@ export function linkFixtureUnderTrustedRoot(fixturePath) {
   const link = join(trustedTestTmpRoot(), `fixt-${randomUUID()}`);
   symlinkSync(fixturePath, link, 'dir');
   return link;
+}
+
+/**
+ * Registers `projectPath` in a throwaway registry under the trusted root and returns the env
+ * entry that points a hook subprocess at it (CORE_CLOSE_INDEX is honored only inside ~/.core).
+ * The per-turn retrieval hook injects memory only for a registered project, so a hook test
+ * that wants retrieval must register its store this way. The registry dir is removed when
+ * the test process exits.
+ */
+const _registryDirs = [];
+process.on('exit', () => { for (const d of _registryDirs) { try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } } });
+export function registryEnvFor(...projectPaths) {
+  const dir = mkdtempSync(join(trustedTestTmpRoot(), 'registry-'));
+  _registryDirs.push(dir);
+  const file = join(dir, 'projects.json');
+  writeFileSync(file, JSON.stringify(projectPaths.map((path) => ({ path }))));
+  return { CORE_CLOSE_INDEX: file };
 }

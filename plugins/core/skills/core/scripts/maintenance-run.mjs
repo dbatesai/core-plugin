@@ -3,7 +3,7 @@
  *
  * The mechanical half of memory upkeep, separated from the judgment half (graduation,
  * retire calls) that stays in /process-memory. Runs the cheap deterministic ops —
- * index regeneration, summary-index freshness, ghost-duplicate cleanup, PROJECT.md
+ * index regeneration, summary-index freshness, ghost-duplicate reporting, PROJECT.md
  * cap check — gated on a durable signature so it only does work when the units actually
  * changed since last run. Records what ran in <store>/_memories/_maintenance-state.json
  * (the cadence ledger), and returns a narration string so the run is VISIBLE, never
@@ -18,7 +18,7 @@
  * CLI: node maintenance-run.mjs <projectPath> [--json] [--dry-run]
  */
 
-import { readFileSync, existsSync, statSync, readdirSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { buildIndex as buildUnitIndex } from './generate-unit-index.mjs';
@@ -36,26 +36,24 @@ import { isCliEntry } from './cli-entry.mjs';
 // Matches compact-project.mjs SOFT_TARGET_BYTES — the soft cap PROJECT.md should stay under.
 export const PROJECT_SOFT_CAP_BYTES = 70000;
 
-// Remove `<name> 2.md` cloud-sync conflict duplicates that exactly match their original.
-// (Mirrors /process-memory Step 2.5; verification-before-delete is load-bearing — never
-// remove a ghost whose content differs from the original.)
-function cleanGhosts(memoriesDir, apply) {
-  const removed = [];
+// Find `<name> 2.md` cloud-sync conflict duplicates that exactly match their original.
+// REPORT ONLY: CORE never deletes user data unattended. A person removes a duplicate, or
+// a later explicit, bounded command does (path assertions and a receipt). A duplicate that
+// differs from its original is a real divergence and is not listed here at all.
+function findGhostDuplicates(memoriesDir) {
+  const found = [];
   let entries;
-  try { entries = readdirSync(memoriesDir); } catch { return removed; }
+  try { entries = readdirSync(memoriesDir); } catch { return found; }
   for (const name of entries) {
     if (!/ 2\.md$/.test(name)) continue;
     const ghost = join(memoriesDir, name);
     const original = join(memoriesDir, name.replace(/ 2\.md$/, '.md'));
     if (!existsSync(original)) continue; // a genuinely different file, not a dup — leave it
     try {
-      if (readFileSync(ghost, 'utf8') === readFileSync(original, 'utf8')) {
-        if (apply) rmSync(ghost);
-        removed.push(name);
-      }
+      if (readFileSync(ghost, 'utf8') === readFileSync(original, 'utf8')) found.push(name);
     } catch { /* unreadable — leave for human */ }
   }
-  return removed;
+  return found;
 }
 
 /**
@@ -76,13 +74,15 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   const ranOps = [];
   const notes = [];
 
-  // 1. Ghost cleanup — always (cheap). A removal changes the store, so it forces a regen.
-  const ghosts = cleanGhosts(mem, apply);
-  if (ghosts.length) ranOps.push('ghost-cleanup');
+  // 1. Ghost duplicates — always (cheap). Reported, never removed.
+  const ghosts = findGhostDuplicates(mem);
+  if (ghosts.length) {
+    notes.push(`${ghosts.length} byte-identical cloud-sync duplicate${ghosts.length === 1 ? '' : 's'} in _memories/ (for example "${ghosts[0]}"); nothing was deleted, they are yours to remove`);
+  }
 
   // 2. Index + summary regeneration — only when the unit set changed since last run.
   const sig = computeSourceSignature(root);
-  const unitsChanged = ledger.last_sig !== sig || ghosts.length > 0;
+  const unitsChanged = ledger.last_sig !== sig;
   if (unitsChanged) {
     if (apply) {
       // Stamp the state cache for every generated file this pass actually
@@ -136,22 +136,18 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // classified turn log: CORE never deletes data on a schedule. Removal
   // is explicit only — `--purge-turn-capture` below, or `turn-capture.mjs --purge`.
 
-  // 3.6 One-release sweep: remove any leftover rich-context stream directory
-  // left by the retired opt-in capture mechanism (turn-capture is the live
-  // capture layer). The dirname is asserted before deletion, same
-  // boundary discipline as every deletion op here. Remove this block in v3.15.0.
+  // 3.6 A leftover rich-context stream directory from the retired opt-in capture mechanism
+  // (turn-capture is the live capture layer) is reported, never removed: CORE does not delete
+  // data unattended. Remove this block, and the folder, in a release that adds the explicit
+  // bounded removal command.
   if (apply) {
     try {
-      const base = resolveStoragePath(root);
-      const legacyDir = join(base, 'rich-context');
-      const legacyLock = join(base, '.rich-context.lock');
+      const legacyDir = join(resolveStoragePath(root), 'rich-context');
       if (existsSync(legacyDir)) {
-        rmSync(legacyDir, { recursive: true, force: true });
-        rmSync(legacyLock, { force: true });
-        notes.push('removed the retired rich-context stream (superseded by turn-capture)');
+        notes.push(`a retired rich-context stream remains at ${legacyDir} (superseded by turn-capture); nothing was deleted, it is yours to remove`);
       }
     } catch (e) {
-      notes.push(`rich-context legacy sweep skipped (${String(e && e.message).slice(0, 60)})`);
+      notes.push(`rich-context legacy check skipped (${String(e && e.message).slice(0, 60)})`);
     }
   }
 
@@ -222,8 +218,6 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
     ops[op] = { last_run: now, run_count: (prev.run_count || 0) + 1 };
   }
   const newLedger = { last_run: now, last_sig: sig, ops };
-  // Recompute sig AFTER ghost removal so the stored signature matches the on-disk store.
-  if (ranOps.includes('ghost-cleanup')) newLedger.last_sig = computeSourceSignature(root);
   if (apply) atomicWriteFileSync(ledgerPath, JSON.stringify(newLedger, null, 2) + '\n');
 
   const narration = composeNarration(ranOps, notes);
@@ -235,7 +229,6 @@ function composeNarration(ranOps, notes) {
   if (!ranOps.length) parts.push('Memory already current — no unit changes since last maintenance.');
   else {
     const friendly = [];
-    if (ranOps.includes('ghost-cleanup')) friendly.push('cleaned cloud-sync ghost duplicates');
     if (ranOps.includes('decisions-index')) friendly.push('regenerated indexes + summary index');
     parts.push('Kept memory current: ' + friendly.join('; ') + '.');
   }

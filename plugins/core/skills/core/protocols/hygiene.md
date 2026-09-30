@@ -109,7 +109,7 @@ The dual log is intentional. The run log is what the user reads during the sessi
 
 ## Mechanical maintenance — the cadence ledger
 
-The *mechanical* half of upkeep — index regeneration (decisions, risks, summary), ghost-duplicate cleanup, PROJECT.md cap check — is consolidated in `scripts/maintenance-run.mjs` and separated from the *judgment* half (graduation, retire calls) that stays in `/process-memory`. `/process-memory` and the startup backstop both invoke it:
+The *mechanical* half of upkeep — index regeneration (decisions, risks, summary), ghost-duplicate reporting (never deletion), PROJECT.md cap check — is consolidated in `scripts/maintenance-run.mjs` and separated from the *judgment* half (graduation, retire calls) that stays in `/process-memory`. `/process-memory` and the startup backstop both invoke it:
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" <project>

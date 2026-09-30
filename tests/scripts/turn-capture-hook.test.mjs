@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK = join(ROOT, 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
@@ -42,6 +42,7 @@ function runHook(prompt, env, cwd) {
       CORE_METRICS_ENABLED: '1',
       CORE_TURN_CAPTURE: '',
       CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
+      ...registryEnvFor(cwd),
       ...env,
     },
     encoding: 'utf8',
@@ -183,6 +184,7 @@ test('DEFAULT-ON through the real hook: a clean environment still captures', () 
   const env = { ...process.env };
   for (const k of Object.keys(env)) if (k.startsWith('CORE_')) delete env[k];
   env.CORE_HOOKS_LOG_FILE = isolatedHooksLog();
+  env.CORE_CLOSE_INDEX = registryEnvFor(store).CORE_CLOSE_INDEX; // registration is a trust input, not a CORE_ tuning switch
   execFileSync('node', [HOOK], {
     input: JSON.stringify({ prompt: 'omega speedmaster on sale', cwd: store, session_id: 'tc-clean-env' }),
     env, encoding: 'utf8',

@@ -82,16 +82,17 @@ test('a changed unit re-triggers regeneration', () => {
   assert.strictEqual(ledger.ops['decisions-index'].run_count, 2);
 });
 
-test('ghost duplicates are cleaned, and the run is reported', () => {
+test('an identical cloud-sync duplicate is reported and left in place, never deleted', () => {
   const root = makeProject();
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
-  // Exact-duplicate ghost.
   const orig = readFileSync(join(root, '_memories', 'dc-1-foo.md'), 'utf8');
-  writeFileSync(join(root, '_memories', 'dc-1-foo 2.md'), orig);
+  const dup = join(root, '_memories', 'dc-1-foo 2.md');
+  writeFileSync(dup, orig);
   const res = runMaintenance(root, { now: '2026-06-28T00:00:00Z' });
-  assert.ok(!existsSync(join(root, '_memories', 'dc-1-foo 2.md')), 'identical ghost removed');
-  assert.ok(res.ranOps.includes('ghost-cleanup'));
-  assert.match(res.narration, /ghost/);
+  assert.ok(existsSync(dup), 'the duplicate is still there: CORE never deletes user data unattended');
+  assert.equal(readFileSync(dup, 'utf8'), orig);
+  assert.ok(res.notes.some((n) => /1 byte-identical cloud-sync duplicate.*dc-1-foo 2\.md.*nothing was deleted/.test(n)), 'and it is named in the report');
+  assert.ok(!res.ranOps.includes('ghost-cleanup'), 'reporting is not a cleanup op');
 });
 
 test('a differing ghost is NOT removed (verification-before-delete)', () => {
@@ -282,7 +283,7 @@ test('auto-author trigger: a stale round emits one narrated note and stamps the 
     'weekly cap suppresses a repeat trigger');
 });
 
-test('legacy sweep: a leftover rich-context stream from the retired mechanism is removed on apply', () => {
+test('legacy check: a leftover rich-context stream is reported and left in place, never deleted', () => {
   const root = makeProject();
   const home = testHome(root);
   writeUnit(root, 'dc-1-foo', { type: 'decision', title: 'A decision', mtime: 1000 });
@@ -290,8 +291,8 @@ test('legacy sweep: a leftover rich-context stream from the retired mechanism is
   mkdirSync(legacyDir, { recursive: true });
   writeFileSync(join(legacyDir, '2026-07-01.jsonl'), '{"kind":"rich-context"}\n');
   const res = runMaintenance(root, { apply: true, now: '2026-06-28T00:00:00Z', home });
-  assert.ok(!existsSync(legacyDir), 'retired stream dir removed');
-  assert.ok(res.notes.some((n) => /removed the retired rich-context stream/.test(n)), 'the sweep is narrated');
+  assert.ok(existsSync(join(legacyDir, '2026-07-01.jsonl')), 'the retired stream is untouched');
+  assert.ok(res.notes.some((n) => /retired rich-context stream remains at .*nothing was deleted/.test(n)), 'and it is reported');
 });
 
 // ── self-test auto-regrade wired into the CLI cadence (holistic-redesign §3d) ──

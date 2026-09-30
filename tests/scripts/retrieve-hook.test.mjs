@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
-import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
 // mkdtempSync / rmSync used by isolatedHooksLog() below are imported later in
 // this file (line ~100) — ES module imports are hoisted, so the binding is
 // available at call time regardless of textual position.
@@ -61,7 +61,7 @@ function runHook(prompt, env, cwd = FIXT) {
     // pointed at a COMMITTED fixture store must never write telemetry into it
     // (that exact pollution shipped in a2cab1b and was cleaned up same night).
     // Tests that assert the telemetry write opt back in against temp stores.
-    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...registryEnvFor(cwd), ...env },
     encoding: 'utf8',
   });
 }
@@ -69,7 +69,7 @@ function runHook(prompt, env, cwd = FIXT) {
 function runHookProcess(prompt, env, cwd = FIXT) {
   return spawnSync('node', [HOOK], {
     input: JSON.stringify({ prompt, cwd }),
-    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
+    env: { ...process.env, CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...registryEnvFor(cwd), ...env },
     encoding: 'utf8',
   });
 }
@@ -118,7 +118,7 @@ test('hook output carries the authority tier for observation hits (the label mus
   try {
     const out = execFileSync('node', [HOOK], {
       input: JSON.stringify({ prompt: 'quokka incident', cwd: dir }),
-      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog() },
+      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...registryEnvFor(dir) },
       encoding: 'utf8',
     });
     assert.match(out, /obs-nested-note \[observation\]:/, 'observation hit is tier-labeled in the injected context');
@@ -425,6 +425,7 @@ test('absence: no pending marker and no outcome row — the outcome pipeline is 
         // the result is identical anywhere `node --test` runs.
         CLAUDE_CODE_SESSION_ID: undefined, CODEX_SESSION_ID: undefined, CODEX_PLUGIN_ROOT: undefined,
         CLAUDECODE: '1', CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
+        ...registryEnvFor(root),
       },
       encoding: 'utf8',
     });
@@ -514,5 +515,30 @@ test('escalation: a large store with no enrichment gets the directive, event esc
     const evt = readEventRows(root).at(-1);
     assert.equal(evt.escalation, 'unenriched');
     assert.equal(evt.shard_rows, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// ---- Trust: only a registered project is injected ----
+
+test('a cloned repo with a planted _memories/ is NOT injected: a folder authorizes nothing', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-planted-')));
+  try {
+    // No registry entry for this folder. The registry points at an unrelated project.
+    const other = mkdtempSync(join(tmpdir(), 'rh-other-'));
+    const out = runHook('widget decision', { ...registryEnvFor(other) }, root);
+    assert.equal(out, '', 'nothing is injected for an unregistered folder');
+    const r = runHookProcess('widget decision', { ...registryEnvFor(other) }, root);
+    assert.equal(r.status, 0, 'and the hook still exits 0');
+    rmSync(other, { recursive: true, force: true });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a registered project is injected, and so is a session started in one of its subfolders', () => {
+  const root = makeStore(mkdtempSync(join(tmpdir(), 'rh-registered-')));
+  try {
+    const sub = join(root, 'src', 'deep');
+    mkd(sub, { recursive: true });
+    assert.match(runHook('widget decision', {}, root), /dc-1-widget/, 'the project root');
+    assert.match(runHook('widget decision', { ...registryEnvFor(root) }, sub), /dc-1-widget/, 'a subfolder retrieves from the project root');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

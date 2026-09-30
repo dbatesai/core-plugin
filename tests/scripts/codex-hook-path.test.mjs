@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
 
 // Codex-shaped product-path tests (UserPromptSubmit). These exercise the Codex
 // wrapper entry file exactly as hooks-codex.json invokes it — real subprocess
@@ -44,6 +44,7 @@ function runRetrieveHook(prompt, env) {
       ...process.env,
       CLAUDECODE: undefined, CLAUDE_CODE_SESSION_ID: undefined, CODEX_SESSION_ID: undefined, CODEX_PLUGIN_ROOT: undefined,
       CORE_METRICS_ENABLED: '1', CORE_HOOKS_LOG_FILE: isolatedHooksLog(),
+      ...registryEnvFor(...[env.payload && env.payload.cwd].filter(Boolean)),
       ...env,
     },
     encoding: 'utf8',

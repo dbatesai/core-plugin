@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync
 import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
 import {
   runPackage, loadOrCreateSalt, makeSeal, storeCensus, retrievalStats,
   buildLeakPatterns, leakScanDir, verifyZipMagic, zipStaging, workspaceMetrics, selfTestStats,
@@ -249,7 +249,7 @@ test('per-turn hook emits the canonical retrieval event from the product path', 
     const res = spawnSync(process.execPath, [hook], {
       encoding: 'utf8',
       input: JSON.stringify({ prompt: 'linked decision risk', cwd: project }),
-      env: { ...process.env, CORE_RETRIEVAL_STORE: project, CORE_HOOKS_LOG_FILE: hooksLog },
+      env: { ...process.env, CORE_RETRIEVAL_STORE: project, CORE_HOOKS_LOG_FILE: hooksLog, ...registryEnvFor(project) },
     });
     assert.equal(res.status, 0, `hook exits clean: ${res.stderr}`);
     const logs = readdirSync(join(project, '_sessions'));

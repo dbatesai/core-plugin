@@ -95,9 +95,9 @@ For each file in `_memories/observations/<YYYY-MM>/` not yet reviewed this sessi
 
 ---
 
-## Step 2.5 — Cloud-sync ghost cleanup: folded into Step 4
+## Step 2.5 — Cloud-sync ghost reporting: folded into Step 4
 
-macOS sync engines (iCloud Drive, OneDrive, Dropbox) preserve concurrent-write conflicts by creating `<filename> 2.md` (with leading space) duplicates in `_memories/`. `maintenance-run.mjs` (Step 4, below) already walks for these, verifies byte-identity to the un-suffixed original, and removes only exact duplicates. No separate pass here — see Step 4's narration for the count. If `maintenance-run` surfaces a ghost that *differs* from its original (a real sync-preserved divergence), surface it to the user; never delete an unverified ghost.
+macOS sync engines (iCloud Drive, OneDrive, Dropbox) preserve concurrent-write conflicts by creating `<filename> 2.md` (with leading space) duplicates in `_memories/`. `maintenance-run.mjs` (Step 4, below) already walks for these, verifies byte-identity to the un-suffixed original, and reports exact duplicates. It never deletes them: CORE does not remove user data unattended, so the user removes a reported duplicate. No separate pass here — see Step 4's narration for the count. If `maintenance-run` surfaces a ghost that *differs* from its original (a real sync-preserved divergence), surface it to the user; never delete an unverified ghost.
 
 ---
 
@@ -133,7 +133,7 @@ After fixing what you can, re-run the validator and report the new counts.
 
 ## Step 4 — Run mechanical maintenance
 
-Run the consolidated mechanical pass. It regenerates both indexes + the summary index, cleans ghost duplicates, and checks the PROJECT.md cap — signature-gated (no-op when units are unchanged) and recorded in the cadence ledger (`_memories/_maintenance-state.json`):
+Run the consolidated mechanical pass. It regenerates both indexes + the summary index, reports ghost duplicates, and checks the PROJECT.md cap — signature-gated (no-op when units are unchanged) and recorded in the cadence ledger (`_memories/_maintenance-state.json`):
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/maintenance-run.mjs" "<project>"
