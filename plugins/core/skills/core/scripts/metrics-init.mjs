@@ -347,15 +347,6 @@ export function detectStoragePath({ projectDir, home = homedir(), platformName =
 }
 
 /**
- * Method (a): project root path components contain `OneDrive` or `OneDrive - <Org>`.
- * Cheap; catches the common 95% of OneDrive Documents-redirection setups.
- */
-export function projectPathContainsOneDriveSubstring(projectDir) {
-  const components = projectDir.split(/[\\/]/);
-  return components.some((c) => c === 'OneDrive' || c.startsWith('OneDrive - '));
-}
-
-/**
  * Write a README at <project>/_metrics/README.md pointing the user
  * at the actual storage location when redirected.
  */

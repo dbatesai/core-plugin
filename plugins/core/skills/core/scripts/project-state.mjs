@@ -5,7 +5,7 @@
  * Layout: <project-root>/.core/<harness>/, with a `*` .gitignore written into
  * .core/ before anything else. ~/.core keeps only cross-project files plus
  * projects.json (the registered roots) and local/ (state that must not sit in the
- * project: synced folders' hot files, read-only roots, another install's project).
+ * project: read-only roots, another install's project).
  *
  * The project root is the nearest ancestor of the working directory that is
  * registered. The walk stops at any folder carrying its own `.git` (directory or
@@ -30,7 +30,6 @@ import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { mapProjectPathToSlug } from './project-slug.mjs';
-import { projectPathContainsOneDriveSubstring } from './metrics-init.mjs';
 import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 import { registerProject } from './index-registry.mjs';
 
@@ -146,14 +145,6 @@ export function classifyRegistration(dir, { home = defaultHome(), coreDir } = {}
 
 // ---------- where state goes ----------
 
-/** Path under a sync client: OneDrive, iCloud Drive (macOS mounts and the Windows `iCloudDrive` folder), Dropbox, Google Drive. */
-export function isSyncedPath(p) {
-  const norm = String(p).replace(/\\/g, '/');
-  if (projectPathContainsOneDriveSubstring(norm)) return true;
-  if (norm.includes('/Library/Mobile Documents/') || norm.includes('/Library/CloudStorage/')) return true;
-  return norm.split('/').some((c) => c === 'Dropbox' || c.startsWith('Dropbox (') || c === 'Google Drive' || c === 'iCloudDrive');
-}
-
 function isWritableDir(p) {
   try { accessSync(p, fsConstants.W_OK); return true; } catch { return false; }
 }
@@ -182,9 +173,8 @@ export function localStateDir({ root, harness, coreDir = defaultCoreDir() }) {
 
 /**
  * The directory a kind of state belongs in. Does not create anything.
- * kind 'durable' (manifest, stamp, drafts) stays in the project unless the root
- * is not writable; kind 'hot' (append logs, metrics, locks) also moves to local/
- * when the root is under a sync client.
+ * Both kinds, 'durable' (manifest, stamp, drafts) and 'hot' (append logs, metrics,
+ * locks), stay in the project, synced folder or not, unless the root is not writable.
  * A root that is not registered (~/.core/projects.json, or the legacy index.json)
  * never gets in-project state: its state lives under ~/.core/local/.
  * Returns { dir, location: 'project' | 'local', reason }.
@@ -206,9 +196,6 @@ export function projectStateDir({ root, harness, kind = 'durable', coreDir = def
   }
   if (!isWritableDir(real)) {
     return { dir: localStateDir({ root: real, harness, coreDir }), location: 'local', reason: 'root-not-writable' };
-  }
-  if (kind === 'hot' && isSyncedPath(real)) {
-    return { dir: localStateDir({ root: real, harness, coreDir }), location: 'local', reason: 'synced-folder' };
   }
   return { dir: join(real, STATE_DIRNAME, harness), location: 'project', reason: 'in-project' };
 }
@@ -442,16 +429,6 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
   assertHarnessName(harness);
   const real = canonical(root);
   const target = projectStateDir({ root: real, harness, kind, coreDir });
-  if (target.location === 'local' && target.reason === 'synced-folder' && !migrationDepth
-      && existsSync(join(real, STATE_DIRNAME, harness, MIGRATING_MARKER))) {
-    // A synced project's hot state already lives on this machine, so the project-side
-    // marker is the only thing that says a migration is filling it. Same fence as the
-    // project case: reads see nothing, writes go to a scratch folder beside it.
-    if (!forWrite) return null;
-    const scratch = join(target.dir, '.migrating-scratch');
-    mkdirSync(scratch, { recursive: true });
-    return { dir: scratch, location: 'local', status: 'migrating', trusted: true };
-  }
   if (target.location === 'local') {
     if (forWrite) mkdirSync(target.dir, { recursive: true });
     else if (!existsSync(target.dir)) return null;
@@ -663,13 +640,8 @@ export function readPinSigned({ dir, root, coreDir = defaultCoreDir() }) {
 export function metricsStorageAllowed(pinned, { projectDir, home }) {
   if (typeof pinned !== 'string' || !isAbsolute(pinned)) return false;
   if (containedPath(join(projectDir, '_metrics'), pinned)) return true;
-  // Windows+OneDrive redirect, and the non-Windows synced-folder redirect (iCloud Drive,
-  // macOS CloudStorage mounts, Dropbox, Google Drive) — a distinct namespace from
-  // `.core/local/<...>/<harness>/`, deliberately: that tree holds per-harness session
-  // state, and containing on it here would let a metrics pin be satisfied by pointing at
-  // another project's state folder, which has no `.project-root` owner file to catch it.
-  if (!containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned)
-    && !containedPath(join(home, '.core', 'local-metrics'), pinned)) return false;
+  // An older Windows OneDrive redirect left some projects' metrics in AppData; their pins stay valid.
+  if (!containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned)) return false;
   try {
     const owner = readFileSync(join(pinned, METRICS_OWNER_FILE), 'utf8').trim();
     if (owner && canonical(owner) !== canonical(projectDir)) return false;

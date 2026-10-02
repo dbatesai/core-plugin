@@ -246,8 +246,8 @@ export function stratifiedSample(turns, count) {
 
 /**
  * Where the labeling worksheet is written. The worksheet holds raw user and assistant turn
- * text, so it lives beside the classified rows it was drawn from (the project's hot state,
- * which stays off synced folders), never in the project's own `_metrics/`.
+ * text, so it lives beside the classified rows it was drawn from (the project's hot state),
+ * never in the project's own `_metrics/`.
  */
 export function worksheetDir(project, opts = {}) {
   return join(operationalMetricsDir(project, opts), 'calibration');

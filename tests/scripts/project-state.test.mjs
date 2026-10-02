@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
-  resolveProjectRoot, classifyRegistration, projectStateDir, ensureStateDir, isSyncedPath,
+  resolveProjectRoot, classifyRegistration, projectStateDir, ensureStateDir,
   writeStamp, classifyStamp, ensureInstallIdentity, stampHmac, assertHarnessName, localStateDir,
 } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 // A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
@@ -159,29 +159,18 @@ test('ensureStateDir writes .core/.gitignore ("*") and puts state under .core/<h
   } finally { s.cleanup(); }
 });
 
-test('hot state under a sync client goes to ~/.core/local; durable state stays in the project', () => {
+test('hot and durable state both stay in the project, synced folder or not', () => {
   const s = sandbox();
   try {
-    const p = mk(s.home, 'Library', 'CloudStorage', 'Dropbox', 'P');
+    const p = mk(s.home, 'Library', 'CloudStorage', 'OneDrive-Org', 'P');
     register(s.coreDir, [p]);
-    const hot = projectStateDir({ root: p, harness: 'codex', kind: 'hot', coreDir: s.coreDir });
-    assert.equal(hot.location, 'local');
-    assert.equal(hot.reason, 'synced-folder');
-    assert.equal(hot.dir, localStateDir({ root: p, harness: 'codex', coreDir: s.coreDir }));
-    assert.equal(projectStateDir({ root: p, harness: 'codex', kind: 'durable', coreDir: s.coreDir }).location, 'project');
+    for (const kind of ['hot', 'durable']) {
+      const out = projectStateDir({ root: p, harness: 'codex', kind, coreDir: s.coreDir });
+      assert.equal(out.location, 'project', kind);
+      assert.equal(out.dir, join(p, '.core', 'codex'), kind);
+    }
   } finally { s.cleanup(); }
 });
-
-test('isSyncedPath recognizes OneDrive (either separator), iCloud, CloudStorage, Dropbox, Google Drive', () => {
-  assert.ok(isSyncedPath('C:\\Users\\u\\OneDrive - Contoso\\Projects\\P'));
-  assert.ok(isSyncedPath('/Users/u/Library/Mobile Documents/com~apple~CloudDocs/P'));
-  assert.ok(isSyncedPath('/Users/u/Library/CloudStorage/GoogleDrive-u/My Drive/P'));
-  assert.ok(isSyncedPath('/Users/u/Dropbox (Personal)/P'));
-  assert.ok(isSyncedPath('/Users/u/Google Drive/P'));
-  assert.ok(!isSyncedPath('/Users/u/Documents/Projects/P'));
-  assert.ok(!isSyncedPath('/Users/u/Documents/OneDriveNotes/P'));
-});
-
 test('a read-only project root keeps all its state in ~/.core/local', { skip: isWin || isRoot }, () => {
   const s = sandbox();
   const p = mk(s.home, 'Projects', 'RO');

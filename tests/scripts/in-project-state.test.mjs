@@ -777,7 +777,7 @@ test('drift after an interrupted run never appends the same tail twice, whether 
   } finally { s.cleanup(); }
 });
 
-test('a synced project\'s hot state is fenced by the migration marker, like its durable state', () => {
+test('a synced project\'s hot state lives in the project and is fenced by the migration marker like any project', () => {
   const s = sandbox();
   try {
     const p = s.mk('Dropbox', 'Projects', 'Synced');
@@ -787,9 +787,10 @@ test('a synced project\'s hot state is fenced by the migration marker, like its 
     assert.equal(stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }), null, 'a reader sees nothing');
     const w = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true });
     assert.equal(w.status, 'migrating');
-    assert.ok(w.dir.endsWith('.migrating-scratch'), 'a writer is diverted from the state the migration is filling');
     rmSync(join(dir, '.migrating'));
-    assert.notEqual(stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).status, 'migrating');
+    const after = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true });
+    assert.notEqual(after.status, 'migrating');
+    assert.equal(after.location, 'project', 'once the migration is done, a synced project\'s hot state is in the project');
   } finally { s.cleanup(); }
 });
 

@@ -1,5 +1,5 @@
 import { operationalMetricsDir, resolveStoragePath, metricsEnabled, storagePinInvalid } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt, metricsStorageAllowed, localRootKey, localStateDir, canonical } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt, metricsStorageAllowed, localStateDir, canonical } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os';
 import {
   initMetrics,
   detectStoragePath,
-  projectPathContainsOneDriveSubstring,
 } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 
 // detectStoragePath honors these as escape hatches — make sure ambient shell
@@ -132,40 +131,6 @@ test('detectStoragePath on Windows keeps captured turns in the project folder, O
   });
 });
 
-test('metricsStorageAllowed accepts the local-metrics redirect target, and does not accept the shared per-harness state tree', () => {
-  const home = mkdtempSync(join(tmpdir(), 'metrics-allowed-home-'));
-  const projectDir = join(home, 'Library', 'CloudStorage', 'iCloud Drive', 'Projects', 'app');
-  mkdirSync(projectDir, { recursive: true });
-  try {
-    // containedPath requires the root to exist on disk (it's checked once the storage dir
-    // has already been scaffolded, same as the real read-back path in log-event.mjs) —
-    // mkdirSync mirrors what initMetrics would already have created by then.
-    const redirected = join(home, '.core', 'local-metrics', localRootKey(projectDir));
-    mkdirSync(redirected, { recursive: true });
-    assert.equal(metricsStorageAllowed(redirected, { projectDir, home }), true, 'the actual redirect target detectStoragePath computes must be an allowed pin');
-    // A pin pointed at the shared harness-state tree instead (same project, wrong
-    // namespace) is refused — that tree has no .project-root owner file to catch a
-    // collision, so it never gets treated as valid metrics storage.
-    const harnessStateDir = localStateDir({ root: projectDir, harness: 'claude-code', coreDir: join(home, '.core') });
-    mkdirSync(harnessStateDir, { recursive: true });
-    assert.equal(metricsStorageAllowed(harnessStateDir, { projectDir, home }), false, 'a pin naming the per-harness state tree is not allowed metrics storage');
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test('projectPathContainsOneDriveSubstring is true for OneDrive paths and false otherwise', () => {
-  assert.equal(projectPathContainsOneDriveSubstring('C:\\Users\\david\\OneDrive\\Projects\\app'), true);
-  assert.equal(projectPathContainsOneDriveSubstring('C:\\Users\\david\\OneDrive - Contoso\\Projects\\app'), true);
-  assert.equal(projectPathContainsOneDriveSubstring('/Users/david/OneDrive/Projects/app'), true);
-  assert.equal(projectPathContainsOneDriveSubstring('/Users/david/Documents/Projects/app'), false);
-  // Characterized: the "substring" check is a whole-path-component match, so a
-  // component merely containing the word does not trip it.
-  assert.equal(projectPathContainsOneDriveSubstring('/Users/david/OneDrive-backup-archive/app'), false);
-});
-
-function signedPin(meta, home, path, project) { const coreDir = join(home, '.core'); writePinSigned({ dir: meta, path, root: projectRootFor(project, { home, coreDir }), coreDir }); }
-
 test('the AppData metrics folder is one-to-one, and an unclaimed legacy folder is never taken by whichever project scaffolds first', () => {
   withCleanEnv(() => {
     const home = mkdtempSync(join(tmpdir(), 'metrics-appdata-'));
@@ -218,6 +183,8 @@ test('B scaffolding first cannot take A\'s unclaimed legacy folder; A keeps it t
     } finally { for (const d of [home, A, B]) rmSync(d, { recursive: true, force: true }); }
   });
 });
+
+function signedPin(meta, home, path, project) { const coreDir = join(home, '.core'); writePinSigned({ dir: meta, path, root: projectRootFor(project, { home, coreDir }), coreDir }); }
 
 test('a pin that already names an existing external folder survives the scaffold; a missing, foreign-claimed or forced-local one is recomputed', () => {
   withCleanEnv(() => {
