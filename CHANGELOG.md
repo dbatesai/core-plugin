@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.19.1] — 2026-10-02
+
 ### Security
 
 - **The automatic close honors the capture switches, the storage pin, git and purge.** With metrics or turn capture off, the automatic close used to store the first 300 bytes of the opening prompt in its summary and receipt. It also wrote inside a synced project whose storage pin was invalid, left its files visible to `git add -A`, and the explicit purge didn't remove them. The close now uses the same capture gate as turn capture, so with capture off it keeps lifecycle counts and no prompt or file text. It routes through the verified storage pin, keeps its files out of git, and an explicit purge removes the files it generated while preserving manual, historical, edited and linked ones.
