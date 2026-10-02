@@ -1,5 +1,14 @@
 # Memory extension contracts
 
+**Contents**
+
+- [The extension boundary — what's open, what's closed](#the-extension-boundary--whats-open-whats-closed)
+- [1. Bi-temporal validity](#1-bi-temporal-validity)
+- [2. Source population hook — the `world-time-policy` registration field](#2-source-population-hook--the-world-time-policy-registration-field)
+- [3. Metrics layer extension — capture passthrough + additive detectors](#3-metrics-layer-extension--capture-passthrough--additive-detectors)
+- [Stability contract for wrappers](#stability-contract-for-wrappers)
+- [The one-line version](#the-one-line-version)
+
 How an overlay (a downstream wrapper like a delivery-specific install) extends CORE's
 memory and metrics layers **without a core change**. This is the core-vs-extension separation made
 concrete for the additive-memory layers (Phase 4) and the observability layer (Phases 0–3):

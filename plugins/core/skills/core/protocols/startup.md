@@ -1,5 +1,23 @@
 # Startup
 
+**Contents**
+
+- [Voice](#voice)
+- [First-time setup](#first-time-setup)
+- [Identity load](#identity-load)
+- [Workspace resolution and routing](#workspace-resolution-and-routing)
+- [Load — returning workspace](#load--returning-workspace)
+- [Startup catch-up — recover an owed close for the exact session](#startup-catch-up--recover-an-owed-close-for-the-exact-session)
+- [Load — cold-start migration](#load--cold-start-migration)
+- [Session agenda](#session-agenda)
+- [Reconcile between-session activity](#reconcile-between-session-activity)
+- [Elapsed-time signals](#elapsed-time-signals)
+- [Memory processing nudge](#memory-processing-nudge)
+- [Hot-section synthesis pass](#hot-section-synthesis-pass)
+- [Compose the readiness summary](#compose-the-readiness-summary)
+- [Bootstrap dedup](#bootstrap-dedup)
+- [Long sessions — write the early summary stub](#long-sessions--write-the-early-summary-stub)
+
 ## Voice
 
 Plain person voice — same standard as SKILL.md §Voice. The readiness summary is the user's first impression each session. Don't recite. Talk.

@@ -1,5 +1,41 @@
 # Source-Registration Framework
 
+**Contents**
+
+- [What this is](#what-this-is)
+- [1. Source-registration schema](#1-source-registration-schema)
+  - [Where registrations live](#where-registrations-live)
+  - [Required fields](#required-fields)
+  - [Optional fields](#optional-fields)
+  - [What CORE does NOT ship](#what-core-does-not-ship)
+- [2. Observation schema before graduation](#2-observation-schema-before-graduation)
+  - [Before graduation](#before-graduation)
+  - [Why this is the interface (and the harvester isn't)](#why-this-is-the-interface-and-the-harvester-isnt)
+- [3. Intake protocol](#3-intake-protocol)
+  - [Steps](#steps)
+  - [Re-intake](#re-intake)
+  - [Who runs the intake](#who-runs-the-intake)
+- [4. Landing destinations](#4-landing-destinations)
+  - [The two destinations](#the-two-destinations)
+  - [Landing format in `inbox.md`](#landing-format-in-inboxmd)
+  - [The graduation pass](#the-graduation-pass)
+- [5. Annotation frameworks (source-agnostic restatement of the observation-filter design)](#5-annotation-frameworks-source-agnostic-restatement-of-the-observation-filter-design)
+  - [Confidence-level](#confidence-level)
+  - [Stability-class](#stability-class)
+  - [Authority anchoring](#authority-anchoring)
+- [6. Orchestration-skill contract](#6-orchestration-skill-contract)
+  - [Required behaviors](#required-behaviors)
+  - [Prohibited behaviors](#prohibited-behaviors)
+  - [Three-filter pipeline as contract, not implementation](#three-filter-pipeline-as-contract-not-implementation)
+- [7. Monitoring contract](#7-monitoring-contract)
+  - [Location](#location)
+  - [Format](#format)
+  - [Creation](#creation)
+  - [Rotation](#rotation)
+  - [Read protocol](#read-protocol)
+- [What CORE ships alongside this framework](#what-core-ships-alongside-this-framework)
+- [Generalization guarantee](#generalization-guarantee)
+
 CORE's contract for how an external data source becomes part of a project's intelligence. CORE provides the framework; installations (per-organization wrappers, per-user configurations, or any layer above CORE) provide the source-specific implementation.
 
 This document is source-agnostic throughout. It does not name Asana, Confluence, Teams, OneDrive, or any specific tool. Every concept here makes sense regardless of which sources an installation happens to support.

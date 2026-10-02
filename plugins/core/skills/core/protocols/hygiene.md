@@ -1,5 +1,40 @@
 # Memory Hygiene
 
+**Contents**
+
+- [Voice](#voice)
+- [The three verbs](#the-three-verbs)
+  - [Archive — move out of default retrieval, keep retrievable on demand](#archive--move-out-of-default-retrieval-keep-retrievable-on-demand)
+  - [Retire — declare no longer current truth; keep the trace](#retire--declare-no-longer-current-truth-keep-the-trace)
+  - [Cold-store — fully out-of-band; only deep historical queries reach](#cold-store--fully-out-of-band-only-deep-historical-queries-reach)
+- [Scope — what hygiene covers](#scope--what-hygiene-covers)
+- [When the mechanism fires](#when-the-mechanism-fires)
+  - [Mid-session batching](#mid-session-batching)
+  - [Render-collision handling](#render-collision-handling)
+- [Audit trail](#audit-trail)
+- [Mechanical maintenance — the cadence ledger](#mechanical-maintenance--the-cadence-ledger)
+  - [Autonomous maintenance — gated, not built](#autonomous-maintenance--gated-not-built)
+- [Reversal — every operation is reversible](#reversal--every-operation-is-reversible)
+- [Failure modes](#failure-modes)
+- [Graduation surfaces here](#graduation-surfaces-here)
+- [Wikilink promotion](#wikilink-promotion)
+- [On-demand project setup — governance-hierarchy capture](#on-demand-project-setup--governance-hierarchy-capture)
+- [Continuous self-evaluation](#continuous-self-evaluation)
+  - [Retrieval-quality surfacing — always at hygiene passes](#retrieval-quality-surfacing--always-at-hygiene-passes)
+  - [What to watch](#what-to-watch)
+  - [Structural adjustment options (in order of cost)](#structural-adjustment-options-in-order-of-cost)
+- [Self-evolution — session-end learning](#self-evolution--session-end-learning)
+  - [Universal self-improvement (architectural invariant)](#universal-self-improvement-architectural-invariant)
+  - [Trip-wire escalation for infrastructure](#trip-wire-escalation-for-infrastructure)
+  - [Harness-local recall (every session)](#harness-local-recall-every-session)
+  - [Session-end self-evolution](#session-end-self-evolution)
+  - [Analysis-protocol effectiveness narrative](#analysis-protocol-effectiveness-narrative)
+  - [Analysis-protocol effectiveness report](#analysis-protocol-effectiveness-report)
+  - [Self-improvement risk tiers](#self-improvement-risk-tiers)
+  - [Where the deeper sub-protocols live — and which one is retired](#where-the-deeper-sub-protocols-live--and-which-one-is-retired)
+- [Dream cycle absorption](#dream-cycle-absorption)
+- [DECISIONS.md graduation — the pattern](#decisionsmd-graduation--the-pattern)
+
 ## Voice
 
 Plain person voice — same standard as SKILL.md §Voice. Specific note for this file: hygiene operations are operational, not ceremonial. Resist words like "ritual" or "comprehensive pass" — say what the operation does in plain terms.

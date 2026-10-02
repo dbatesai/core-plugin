@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: Close the session — capture what must survive, write the resume summary, certify this exact session's close receipt
+description: Close the session — capture what must survive, write the resume summary, certify this exact session's close receipt. Use when the user runs /finalize or asks to close or wrap up the current session.
 user-invocable: true
 ---
 

@@ -1,5 +1,25 @@
 # CORE roles
 
+**Contents**
+
+- [The generative principle](#the-generative-principle)
+- [The composition template](#the-composition-template)
+- [Surprise personas are the rule, not the exception](#surprise-personas-are-the-rule-not-the-exception)
+- [The discipline that pairs with discretion](#the-discipline-that-pairs-with-discretion)
+- [Lenses](#lenses)
+  - [Generator](#generator)
+  - [Critic](#critic)
+  - [Synthesizer](#synthesizer)
+  - [Researcher](#researcher)
+  - [Quality Sentinel](#quality-sentinel)
+  - [Monitor](#monitor)
+- [Structural positions](#structural-positions)
+  - [Editor](#editor)
+  - [Validator](#validator)
+  - [Guard](#guard)
+  - [Fact-Checker](#fact-checker)
+- [Saved compositions](#saved-compositions)
+
 Composition is the primary practice. The roles below are worked examples — six lenses CORE has found useful and four structural positions where the role's value is its function more than its perspective. You're not picking from a closed menu; you're composing the right cast for the task, and these are the shapes that show up most.
 
 Every spawned agent's prompt is composed from three layers: the base protocol (`agents/base-protocol.md`, injected into every agent), the role below (or one you compose), and the agent's identity (cognitive traits + analytical lens + blind spots, named per execution).

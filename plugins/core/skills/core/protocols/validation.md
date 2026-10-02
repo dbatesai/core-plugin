@@ -1,5 +1,18 @@
 # Validation
 
+**Contents**
+
+- [Voice](#voice)
+- [What the regime tests](#what-the-regime-tests)
+- [Test corpus format](#test-corpus-format)
+- [Runner](#runner)
+- [Thresholds](#thresholds)
+- [Output](#output)
+- [Cadence](#cadence)
+- [Failure handling](#failure-handling)
+- [User's subjective read](#users-subjective-read)
+- [Extending the corpus](#extending-the-corpus)
+
 ## Voice
 
 Plain person voice — same standard as SKILL.md §Voice.

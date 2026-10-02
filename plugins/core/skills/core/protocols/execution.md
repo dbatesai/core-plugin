@@ -1,5 +1,19 @@
 # Execution
 
+**Contents**
+
+- [Voice](#voice)
+- [Default: single-agent](#default-single-agent)
+- [When you invoke multi-agent](#when-you-invoke-multi-agent)
+- [Hardware budget](#hardware-budget)
+- [Framing checkpoint](#framing-checkpoint)
+- [Dynamic cognitive effort](#dynamic-cognitive-effort)
+- [Guard-gated destructive operations](#guard-gated-destructive-operations)
+- [Graceful halt](#graceful-halt)
+- [Re-alignment at high-stakes decisions](#re-alignment-at-high-stakes-decisions)
+- [Result assessment and accept/reject](#result-assessment-and-acceptreject)
+- [After-action: where things land](#after-action-where-things-land)
+
 ## Voice
 
 Plain person voice — same standard as SKILL.md §Voice.
