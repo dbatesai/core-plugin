@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **The automatic close honors the capture switches, the storage pin, git and purge.** With metrics or turn capture off, the automatic close used to store the first 300 bytes of the opening prompt in its summary and receipt. It also wrote inside a synced project whose storage pin was invalid, left its files visible to `git add -A`, and the explicit purge didn't remove them. The close now uses the same capture gate as turn capture, so with capture off it keeps lifecycle counts and no prompt or file text. It routes through the verified storage pin, keeps its files out of git, and an explicit purge removes the files it generated while preserving manual, historical, edited and linked ones.
+- **Metrics capture moves off cloud-synced folders on every platform.** Before, capture moved off a synced project folder only on Windows, and only for OneDrive. A project inside iCloud Drive, a macOS CloudStorage mount, Dropbox or Google Drive kept its captured prompts in the synced folder, which contradicted the "never exported" disclosure. Each of these is now detected and redirected, Windows junctions and aliases into a synced folder are caught too, and a Windows path with backslashes is matched.
+- **The disclosed purge now covers the classified turn log.** `purgeTurnCapture` removed the turn-capture stream but not the classified log, which stores full turn text. Since nothing deletes that log on a schedule any more, the "you can purge everything" promise was false. Purge now removes it as well, bounds-checked against its own folder.
+- **Per-turn retrieval injects context only for registered projects.** A folder's own `_memories/` no longer authorizes injection. The hook resolves the working directory to a registered project and retrieves from that project's root, so a store planted in an unregistered folder injects nothing. The skip is recorded as `not-registered-workspace`.
+
+### Changed
+
+- **`maintenance-run` never deletes.** Byte-identical cloud-sync duplicates and the retired rich-context stream are reported, never removed, and docs that promised cleanup now say report.
+- **With metrics off, maintenance writes no metrics.** The scorecard log and the self-test state were still written with metrics off. Those writes are now gated, including at the scorecard writer.
+- **`generate-harness-md.mjs` won't overwrite a hand-written `CLAUDE.md` or `AGENTS.md`.** A file without the generated marker is refused unless `--replace-existing` is given, and the write is atomic.
+- **The calibration export won't overwrite a worksheet that carries labels.** A second export on the same day used to reset the labels. It now refuses when the existing worksheet has annotation work or can't be read, unless `--replace-existing` is given.
+- **Skill prose follows the skill-authoring guidance.** The 15 reference files over 100 lines open with a contents list, the metrics and memory-view descriptions are under 1,024 characters, and `/finalize` says when to use it.
+
+### Fixed
+
+- **The memory checks can no longer pass on another session's transcript.** When a requested session had no transcript of its own, the reader fell back to the newest transcript in the project. The memory-visibility and memory-accessed checks then reported PASS or DEGRADED from another session's evidence. Every consumer of the reader now treats a session mismatch as UNKNOWN. Injected sizes are counted in UTF-8 bytes.
+- **The close lock can't be released by the wrong session.** A finish with no session used to fall through to the operator force-release and remove a live owner's lock. Four further cases are fixed:
+  - A young lock that can't be read has an unknown owner, so finish refuses and the lock survives.
+  - A stale lock left by a named owner no longer blocks the startup catch-up.
+  - A begin that lands while a no-lock finish is writing is refused, and none of its state is released.
+  - A whitespace session id counts as no session in both the check and the release.
+- **A store changed after the last close owes its maintenance again.** Close begin, finish and detect carry the store's signature, so detection compares the live store with the one the close left.
+- **Retrieval reports an incomplete search instead of a healthy store.** A unit file that couldn't be read used to drop out of the index, the partial index replaced the complete cache, and retrieval health stayed clean. Read, stat and traversal errors now reach the index, the health report and the context pack. A complete cache is never replaced by a partial one, and the pack leads with a search-incomplete warning.
+- **The memory index strips leftover canary lines only after its ownership guards pass.** A refused run used to change the file anyway.
+- **A failed append to the classified turn log is reported.** It returns `WRITE_FAILED` with the count written and exits 1.
+- **Nine smaller defects from the 3.19.0 review are fixed, each with a mutation-checked test:**
+  - A refused state-cache stamp no longer reports success.
+  - The `turn_capture` opt-out survives an unverified manifest being set aside.
+  - Project slugs map underscores to hyphens, as Claude Code does on disk.
+  - Frontmatter values containing `$` patterns are written literally.
+  - The demote passes match archived bullets by whole line.
+  - The calibration worksheet, which holds raw turn text, goes to the machine-local metrics folder instead of the project's `_metrics/`.
+  - `configure-project` passes the harness to startup under the key startup reads.
+  - The marketplace description no longer lists an empty command name.
+  - The retrieval-skip analysis has a test that fails when the session-mismatch argument is removed.
+- **Windows paths:**
+  - The instruction-chain walk stops at the drive root.
+  - `containedPath` compares on-disk spellings, so a case variant or a filesystem root isn't refused.
+  - The `.core` symlink refusal tests run on Windows through a junction instead of skipping.
+  - The close-privacy tests pass their preload as a file URL.
+- **The capture-latency test is reliable under load.** The 25 ms capture budget scales with measured CPU and file contention, up to 8×, with an absolute 110 ms ceiling. An injected 120 ms capture still fails it.
+- **Tests now fail under the failures they name.** The close-hook guard tests require the exact skip receipt and a positive control that reaches the spawn boundary, and the torn-row test no longer swallows its own assertion.
+
 ## [3.19.0] — 2026-09-29
 
 ### Added
