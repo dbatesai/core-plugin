@@ -33,7 +33,7 @@ function fixture(t, suffix = 'project') {
     { timestamp: '2026-10-01T00:01:00Z', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Edit', input: { file_path: pathSentinel } }] } },
     { timestamp: '2026-10-01T00:02:00Z', message: { role: 'assistant', content: [{ type: 'text', text: sentinel }] } },
   ].map(x => JSON.stringify(x)).join('\n') + '\n');
-  const run = (args, extra = {}) => spawnSync(process.execPath, ['--import', isolate, ...args], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const run = (args, extra = {}) => spawnSync(process.execPath, ['--import', pathToFileURL(isolate).href, ...args], { env: { ...env, ...extra }, encoding: 'utf8' });
   const evaluate = (body, extra) => {
     const child = run(['--input-type=module', '-e', body], extra);
     assert.equal(child.status, 0, child.stderr || child.stdout);
@@ -235,20 +235,26 @@ test('purge boundaries: orphan marked summary, same-session manual receipt, malf
   for (let i=0;i<keep.length;i++) assert.equal(readFileSync(keep[i],'utf8'),before[i]);
 });
 
-test('writer and purge refuse linked generated directories; linked files are preserved', { skip: process.platform === 'win32' ? 'symlink creation may require elevated Windows privileges' : false }, t => {
+test('writer and purge refuse a linked generated directory', t => {
   const f = fixture(t);
   const outside = join(f.root, 'outside');
   mkdirSync(outside);
   const close = join(f.project, '_metrics', 'close');
   mkdirSync(dirname(close), { recursive: true });
-  symlinkSync(outside, close, 'dir');
+  // A junction needs no privilege on Windows and is the realistic plant there.
+  symlinkSync(outside, close, process.platform === 'win32' ? 'junction' : 'dir');
   const denied = f.run([join(scripts, 'close-pass.mjs'), 'process-request', f.project, '--session', session]);
   assert.notEqual(denied.status, 0);
   assert.deepEqual(readdirSync(outside), [], 'no payload outside selected close root');
   const purge = f.run([join(scripts, 'turn-capture.mjs'), f.project, '--purge', '--apply']);
   assert.equal(purge.status, 2, purge.stderr);
   assert.equal(JSON.parse(purge.stdout).purged, false);
-  rmSync(close);
+});
+
+test('purge preserves a linked file in a generated directory', { skip: process.platform === 'win32' ? 'file symlink creation may require elevated Windows privileges' : false }, t => {
+  const f = fixture(t);
+  const outside = join(f.root, 'outside');
+  mkdirSync(outside);
   const { receipt } = f.close();
   const preserved = join(outside, 'human.md');
   writeFileSync(preserved, readFileSync(receipt.summary_path, 'utf8'));
