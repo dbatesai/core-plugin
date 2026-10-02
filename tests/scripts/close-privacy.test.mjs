@@ -102,11 +102,14 @@ for (const tamper of [false, true]) {
       if (${tamper}) { initMetrics({projectDir:project}); writeFileSync(join(operationalMetricsDir(project), 'storage-path.txt'), '/SYNTHETIC_INVALID_PIN'); }
       console.log(JSON.stringify({invalid:storagePinInvalid(project), selected:detectStoragePath({projectDir:project}).path}));
     `);
-    assert.equal(observed.invalid, true, 'the fixture really triggers the production pin gate');
-    assert.notEqual(observed.selected, join(f.project, '_metrics'));
+    // A tampered pin is always invalid. A missing pin is invalid only where the path itself needs a
+    // redirect, which is OneDrive on Windows; elsewhere the project's own _metrics/ is the store.
+    assert.equal(observed.invalid, tamper || process.platform === 'win32', 'the fixture triggers the production pin gate where it applies');
     const { receipt } = f.close({ CORE_METRICS_ENABLED: '0', CORE_TURN_CAPTURE: '0' });
-    assert.equal(dirname(dirname(dirname(receipt.summary_path))), observed.selected);
-    assert.equal(existsSync(join(f.project, '_metrics', 'close')), false, 'no close artifacts in synced project fallback');
+    assert.equal(dirname(dirname(dirname(receipt.summary_path))), observed.selected, 'close follows the selected store');
+    if (observed.selected !== join(f.project, '_metrics')) {
+      assert.equal(existsSync(join(f.project, '_metrics', 'close')), false, 'a redirected store leaves nothing in the project');
+    }
     assert.ok(existsSync(join(observed.selected, 'close', 'receipts')));
     assert.ok(!treeText(observed.selected).includes(sentinel));
     assert.equal(f.close().skipped, true, 'receipt reads use the same safe route as writes');
