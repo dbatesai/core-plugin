@@ -140,7 +140,16 @@ export function recordOp(store, { op, status = 'done', note = null, now = new Da
 }
 
 export function finishClose(store, { sessionId = null, status = 'closed', storeSignature = null, now = new Date().toISOString() } = {}) {
+  const owner = typeof sessionId === 'string' && sessionId.trim() ? sessionId : null;
   const marker = readJson(markerPath(store)) || { ops: {} };
+  const { lock } = inspectLock(store);
+  // A live lock belongs to whoever began: finish must name that owner before it
+  // writes the marker or releases anything. A close begun without a session is
+  // finished without one. With no lock there is nothing to take from anyone, which
+  // is the startup catch-up finishing a close whose owner is gone.
+  if (lock && ((lock.session_id ?? null) !== owner || (marker.session_id ?? null) !== owner)) {
+    return { ok: false, reason: 'owner-mismatch' };
+  }
   // The signature of the store AS THE CLOSE LEFT IT: detectCloseState compares the live store
   // against this, so a unit changed after the close re-owes the store-derived ops.
   if (storeSignature != null) marker.store_signature = storeSignature;
@@ -602,6 +611,10 @@ function main(argv) {
     }
     case 'finish': {
       const fin = finishClose(store, { sessionId: f.session || null, storeSignature: liveSignature(store) });
+      if (fin.ok === false) {
+        process.stderr.write(`finish refused: ${fin.reason}; supply the matching --session owner, or use explicit release for recovery\n`);
+        return 2;
+      }
       if (fin.release && fin.release.released === false && fin.release.reason === 'release-failed') {
         process.stdout.write(`close marked closed; LOCK RELEASE FAILED (${fin.release.error}) — run 'release' once the cause clears\n`);
         return 1;
