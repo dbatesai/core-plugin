@@ -31,7 +31,7 @@ HOOKS="$PKG/skills/core/hooks"
 pass=0; fail=0
 ok()   { echo "  PASS  $1"; pass=$((pass+1)); }
 bad()  { echo "  FAIL  $1"; fail=$((fail+1)); }
-cleanup() { rm -rf "$SCRATCH"; }
+cleanup() { rm -rf "$SCRATCH" ${REGDIR:+"$REGDIR"}; }
 trap cleanup EXIT
 
 echo "== Build the packaged artifact (git archive HEAD:plugins/core — committed files only) =="
@@ -60,7 +60,11 @@ OUT="$(CLAUDE_PLUGIN_ROOT="$PKG" CORE_HOOKS_LOG_FILE=/dev/null HOME="$EVIL" USER
 if echo "$OUT" | grep -q '`/core`' && ! echo "$OUT" | grep -q '/evil:entry'; then ok "attacker skill rejected, fell back to /core"; else bad "AUTHORITY BYPASS: $OUT"; fi
 
 echo "== UserPromptSubmit hook: retrieval from the packaged path, tier label reaches output =="
-OUT="$(printf '{"prompt":"quokka incident","cwd":"%s"}' "$STORE" | CLAUDE_PLUGIN_ROOT="$PKG" CORE_RETRIEVAL_STORE="$STORE" node "$HOOKS/retrieve-context-hook.mjs" 2>/dev/null)"
+# Retrieval injects only for a registered project. Register the scratch store in a scratch registry;
+# the registry override is honored only under ~/.core, so it lives in the same test area the suite uses.
+REGDIR="$(mkdir -p "$HOME/.core/.test-tmp" && mktemp -d "$HOME/.core/.test-tmp/smoke-registry-XXXX")"
+REGISTRY="$REGDIR/projects.json"; printf '[{"path":"%s"}]' "$STORE" > "$REGISTRY"
+OUT="$(printf '{"prompt":"quokka incident","cwd":"%s"}' "$STORE" | CLAUDE_PLUGIN_ROOT="$PKG" CORE_RETRIEVAL_STORE="$STORE" CORE_CLOSE_INDEX="$REGISTRY" node "$HOOKS/retrieve-context-hook.mjs" 2>/dev/null)"
 echo "$OUT" | grep -q 'obs-nested-note' && ok "nested unit retrieved from the packaged artifact" || bad "nested unit not retrieved from the packaged artifact (got: $OUT)"
 echo "$OUT" | grep -q 'obs-nested-note \[observation\]' && ok "authority tier reaches the injected context" || bad "tier label stripped (got: $OUT)"
 
