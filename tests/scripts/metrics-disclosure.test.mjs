@@ -119,11 +119,13 @@ test('a signed but unparseable manifest is never clobbered, and the notice still
   });
 });
 
-test('the notice text names both opt-out mechanisms and the local-only claim', () => {
+test('the notice text names both opt-out mechanisms and where the log lives', () => {
   assert.match(NOTICE_TEXT, /CORE_METRICS_ENABLED=0/, 'names the env-var opt-out');
   assert.match(NOTICE_TEXT, /metrics_enabled:\s*false/, 'names the manifest opt-out');
   assert.match(NOTICE_TEXT, /\.core\/<harness>\/workspace\.json/, 'names the config file where it really lives');
-  assert.match(NOTICE_TEXT, /this machine/i, 'states the local-only claim in plain terms');
+  assert.match(NOTICE_TEXT, /lives in this project's folder/, 'says where the log lives');
+  assert.match(NOTICE_TEXT, /syncs with it/, 'says a synced project folder syncs the log too');
+  assert.doesNotMatch(NOTICE_TEXT, /this machine/i, 'no claim the log stays on this machine');
 });
 
 test('CLI: first run prints the notice text; second run prints ALREADY-SHOWN', { skip: platform() === 'win32' ? 'shell redirection differs on Windows CI' : false }, () => {
