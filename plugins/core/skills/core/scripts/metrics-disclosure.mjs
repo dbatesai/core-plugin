@@ -43,7 +43,7 @@ import { resolveStoragePath } from './log-event.mjs';
  * Workspaces stamped below this see the notice again; a wording polish that
  * changes nothing about what is captured does not earn a bump.
  */
-export const NOTICE_VERSION = 5;
+export const NOTICE_VERSION = 6;
 
 export const NOTICE_TEXT = [
   "One thing worth knowing since this is a brand-new project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",

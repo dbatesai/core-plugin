@@ -188,3 +188,20 @@ test('a project whose pin still names an external folder is told where its log r
     assert.equal(result.noticeText, NOTICE_TEXT, 'a project-local log gets the plain notice');
   });
 });
+
+test('a project that saw the version-5 notice without its location line gets the corrected notice once, then silence', async () => {
+  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  sandbox(({ home, coreDir, project }) => {
+    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: 5 } });
+    const saved = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try { assert.equal(initMetrics({ projectDir: project, home, env: ENV }).ok, true); }
+    finally { if (saved === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = saved; }
+    const first = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(first.shown, true);
+    assert.match(first.noticeText, /kept outside the project folder/);
+    const second = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(second.alreadyShown, true);
+    assert.equal(second.noticeText, null);
+  });
+});

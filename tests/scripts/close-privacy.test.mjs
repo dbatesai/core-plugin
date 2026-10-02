@@ -102,9 +102,9 @@ for (const tamper of [false, true]) {
       if (${tamper}) { initMetrics({projectDir:project}); writeFileSync(join(operationalMetricsDir(project), 'storage-path.txt'), '/SYNTHETIC_INVALID_PIN'); }
       console.log(JSON.stringify({invalid:storagePinInvalid(project), selected:detectStoragePath({projectDir:project}).path}));
     `);
-    // A tampered pin is always invalid. A missing pin is invalid only where the path itself needs a
-    // redirect, which is OneDrive on Windows; elsewhere the project's own _metrics/ is the store.
-    assert.equal(observed.invalid, tamper || process.platform === 'win32', 'the fixture triggers the production pin gate where it applies');
+    // A tampered pin is invalid; a missing pin on a fresh project is not, because the project's own
+    // _metrics/ is the store on every platform.
+    assert.equal(observed.invalid, tamper, 'the fixture triggers the production pin gate where it applies');
     const { receipt } = f.close({ CORE_METRICS_ENABLED: '0', CORE_TURN_CAPTURE: '0' });
     assert.equal(dirname(dirname(dirname(receipt.summary_path))), observed.selected, 'close follows the selected store');
     if (observed.selected !== join(f.project, '_metrics')) {
