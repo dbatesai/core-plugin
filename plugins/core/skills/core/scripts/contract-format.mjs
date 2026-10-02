@@ -17,8 +17,10 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { atomicWriteFileSync } from './fs-atomic.mjs';
 
 export const SCHEMA_VERSION = '1.0';
+const GENERATOR_MARKER = 'GENERATED FROM CONTRACT — DO NOT EDIT BY HAND';
 export const GENERATOR_VERSION = 'v3.0.0';
 export const ADAPTER_VERSION = 'v3.0.0';
 export const KNOWN_HARNESSES = ['claude-code', 'codex'];
@@ -151,7 +153,7 @@ export function computeProvenance({ contract, overrides = {} }) {
 export function withProvenance(body, provenance) {
   const header = [
     '<!--',
-    'GENERATED FROM CONTRACT — DO NOT EDIT BY HAND',
+    GENERATOR_MARKER,
     `contract_path: ${provenance.contract_path}`,
     `contract_hash: ${provenance.contract_hash}`,
     `generator_version: ${provenance.generator_version}`,
@@ -165,7 +167,7 @@ export function withProvenance(body, provenance) {
 }
 
 // Shared generator body used by each generate-<harness>-md.mjs wrapper.
-export async function generateForHarness({ harness, contractPath, outputPath, overridePath = null, mode = 'dry-run' }) {
+export async function generateForHarness({ harness, contractPath, outputPath, overridePath = null, mode = 'dry-run', replaceExisting = false }) {
   const contract = parseContract(contractPath);
   const overrides = parseOverrides(overridePath);
   const warnings = [...contract.warnings];
@@ -192,8 +194,15 @@ export async function generateForHarness({ harness, contractPath, outputPath, ov
     return { drift: existing !== full, fatal: fatal.length > 0, fatalErrors: fatal, warnings };
   }
   if (mode === 'write') {
-    const { writeFileSync } = await import('node:fs');
-    writeFileSync(outputPath, full);
+    // Ownership belongs at the shared writer, not just in configure-project.
+    // Only absence is safe to ignore: an unreadable existing surface must fail closed.
+    let existing = null;
+    try { existing = readFileSync(outputPath, 'utf8'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (existing !== null && !existing.includes(GENERATOR_MARKER) && replaceExisting !== true) {
+      throw Object.assign(new Error(`refusing to overwrite hand-authored output: ${outputPath} (use --replace-existing only to intentionally replace it)`), { code: 'EEXIST' });
+    }
+    atomicWriteFileSync(outputPath, full);
     return { written: outputPath, fatal: fatal.length > 0, fatalErrors: fatal, warnings };
   }
   return { wouldWrite: full, fatal: fatal.length > 0, fatalErrors: fatal, warnings };
