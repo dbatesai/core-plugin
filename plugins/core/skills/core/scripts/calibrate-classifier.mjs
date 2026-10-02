@@ -21,7 +21,10 @@
  *
  * CLI:
  *   node calibrate-classifier.mjs <project> --check
- *   node calibrate-classifier.mjs <project> --export-worksheet [--count N]
+ *   node calibrate-classifier.mjs <project> --export-worksheet [--count N] [--replace-existing]
+ *
+ * Same-day exports refresh only unlabeled worksheets. --replace-existing explicitly
+ * discards existing labels and creates a new worksheet/prediction pair.
  *   node calibrate-classifier.mjs <project> --import-labels <labeled.jsonl>
  */
 
@@ -250,8 +253,23 @@ export function worksheetDir(project, opts = {}) {
   return join(operationalMetricsDir(project, opts), 'calibration');
 }
 
-/** Write a labeling worksheet for a set of classified turns. Returns the file path. */
-export function exportWorksheet({ project: _project, harness, classifiedDir, calibrationDir, today, count = 200, minLabeled = MIN_LABELED }) {
+// A partially labeled worksheet is already human work, even before gold_state is set.
+// Include the older singular labeler spelling used by the labeling guide.
+const ANNOTATION_FIELDS = ['gold_state', 'labelers', 'labeler', 'adjudicated_by', 'confidence'];
+function worksheetHasLabels(text) {
+  return text.split('\n').filter((line) => line.trim()).some((line) => {
+    const row = JSON.parse(line);
+    if (!row || typeof row !== 'object' || Array.isArray(row)) throw new Error('Invalid worksheet row');
+    return ANNOTATION_FIELDS.some((field) => {
+      const value = row[field];
+      return value !== undefined && value !== null && value !== ''
+        && (!Array.isArray(value) || value.length > 0);
+    });
+  });
+}
+
+/** Write a labeling worksheet; replacing existing labels requires replaceExisting: true. */
+export function exportWorksheet({ project: _project, harness, classifiedDir, calibrationDir, today, count = 200, minLabeled = MIN_LABELED, replaceExisting = false }) {
   const pool = collectClassifiedTurns(classifiedDir);
   if (!pool.length) return { status: 'EMPTY', message: 'No classified turns yet — accumulate real sessions first.' };
   const availableHarnesses = [...new Set(pool.map((t) => t.harness).filter(Boolean))];
@@ -278,6 +296,31 @@ export function exportWorksheet({ project: _project, harness, classifiedDir, cal
   const jsonlPath = join(calibrationDir, `${base}.jsonl`);
   const mdPath = join(calibrationDir, `${base}.md`);
   const predictionsPath = join(calibrationDir, `${base}.predictions.json`);
+  // Check before changing ANY companion: rotating predictions alone would invalidate
+  // the existing worksheet's blind commitments. Read/parse failures are not permission
+  // to erase a worksheet whose annotation state we cannot establish.
+  if (replaceExisting !== true) {
+    let existing = null;
+    try { existing = readFileSync(jsonlPath, 'utf8'); }
+    catch (error) {
+      if (error.code !== 'ENOENT') return {
+        status: 'ERROR', error_code: 'worksheet-unreadable', jsonl_path: jsonlPath,
+        message: `Cannot inspect existing worksheet ${jsonlPath}; refusing to overwrite it.`,
+      };
+    }
+    if (existing !== null) {
+      let hasLabels;
+      try { hasLabels = worksheetHasLabels(existing); }
+      catch { return {
+        status: 'ERROR', error_code: 'worksheet-unreadable', jsonl_path: jsonlPath,
+        message: `Cannot parse existing worksheet ${jsonlPath}; refusing to overwrite it.`,
+      }; }
+      if (hasLabels) return {
+        status: 'ERROR', error_code: 'worksheet-has-labels', jsonl_path: jsonlPath,
+        message: `Existing worksheet ${jsonlPath} contains labels or annotation work; use --replace-existing only to intentionally discard it.`,
+      };
+    }
+  }
   const nonce = randomBytes(32).toString('hex');
 
   // Write JSONL (machine-readable, for import-labels). Build the whole file and
@@ -570,7 +613,7 @@ if (isCliEntry(import.meta.url)) {
     const classifiedDir = join(metaDir, 'classified');
     const calibrationDir = worksheetDir(project);
     const count = parseInt(opt('count') || '200', 10);
-    const r = exportWorksheet({ project, harness, classifiedDir, calibrationDir, count, minLabeled: resolveMinLabeled(project) });
+    const r = exportWorksheet({ project, harness, classifiedDir, calibrationDir, count, minLabeled: resolveMinLabeled(project), replaceExisting: has('replace-existing') });
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
     process.stdout.write(`calibrate-classifier: worksheet written — ${r.sample_count} turns from pool of ${r.pool_count}\n`);
     process.stdout.write(`  JSONL: ${r.jsonl_path}\n`);
@@ -589,6 +632,6 @@ if (isCliEntry(import.meta.url)) {
     process.exit(0);
   }
 
-  process.stdout.write('calibrate-classifier: --check | --export-worksheet [--count N] | --import-labels <file>\n');
+  process.stdout.write('calibrate-classifier: --check | --export-worksheet [--count N] [--replace-existing] | --import-labels <file>\n');
   process.exit(1);
 }
