@@ -36,6 +36,7 @@ import { isCliEntry } from './cli-entry.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { projectRootFor, detectStateHarness, readManifest, updateManifest } from './project-state.mjs';
+import { resolveStoragePath } from './log-event.mjs';
 
 /**
  * Bump whenever the notice describes something materially new being stored.
@@ -60,6 +61,18 @@ export const NOTICE_TEXT = [
  * @param {object} [args.env]
  * @returns {{ ok: boolean, shown: boolean, alreadyShown: boolean, noticeText: string|null, reason?: string }}
  */
+/**
+ * The notice says the log lives in the project's folder. A project whose signed pin still names
+ * an older external folder (an earlier Windows OneDrive redirect to AppData) gets a line saying
+ * where its log really is, so the notice is never wrong about the location.
+ */
+export function noticeTextFor(projectDir, { home = homedir(), env = process.env } = {}) {
+  let where = null;
+  try { where = resolveStoragePath(projectDir, { home, env }); } catch { /* unknown: base text */ }
+  if (!where || where === join(projectDir, '_metrics')) return NOTICE_TEXT;
+  return `${NOTICE_TEXT}\n\nFor this project the log is kept outside the project folder, at \`${where}\`, because an earlier version of CORE put it there. It stays there until it's moved; nothing is deleted.`;
+}
+
 export function checkMetricsDisclosure({ projectDir, home = homedir(), env = process.env } = {}) {
   if (!projectDir) {
     return { ok: false, shown: false, alreadyShown: false, noticeText: null, reason: 'missing-project-dir' };
@@ -70,7 +83,7 @@ export function checkMetricsDisclosure({ projectDir, home = homedir(), env = pro
     root = projectRootFor(projectDir, { home, coreDir });
     harness = detectStateHarness(env);
   } catch (err) {
-    return { ok: false, shown: true, alreadyShown: false, noticeText: NOTICE_TEXT, reason: `project-unresolved: ${err.message}` };
+    return { ok: false, shown: true, alreadyShown: false, noticeText: noticeTextFor(projectDir, { home, env }), reason: `project-unresolved: ${err.message}` };
   }
 
   // Untrusted or absent state reads as null: the notice shows.
@@ -90,10 +103,10 @@ export function checkMetricsDisclosure({ projectDir, home = homedir(), env = pro
     // Fail toward showing the notice this session even though we couldn't persist
     // the flag — a repeated notice (rare write failure) is a far smaller defect
     // than a disclosure that silently never happens.
-    return { ok: false, shown: true, alreadyShown: false, noticeText: NOTICE_TEXT, reason: `manifest-write-failed: ${err.message}` };
+    return { ok: false, shown: true, alreadyShown: false, noticeText: noticeTextFor(projectDir, { home, env }), reason: `manifest-write-failed: ${err.message}` };
   }
 
-  return { ok: true, shown: true, alreadyShown: false, noticeText: NOTICE_TEXT };
+  return { ok: true, shown: true, alreadyShown: false, noticeText: noticeTextFor(projectDir, { home, env }) };
 }
 
 // Shared spelling-robust entry guard (cli-entry.mjs) — the previous local

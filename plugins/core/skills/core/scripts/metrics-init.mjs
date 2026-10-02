@@ -2,14 +2,10 @@
  * metrics-init.mjs — storage scaffold for the metrics & observability layer
  *
  * What it does:
- *   - Default storage: `<project>/_metrics/` when the project isn't under a sync client.
- *   - Windows-with-OneDrive: redirect to `~/AppData/Local/core-metrics/<workspace-id>/`.
- *   - Everywhere else, including Mac/Linux projects inside iCloud Drive, OneDrive,
- *     Dropbox or Google Drive: `<project>/_metrics/`, so captured turns stay with the
- *     project and sync wherever the project syncs.
- *   - Detection runs against the CANONICAL project root (symlinks/Windows junctions
- *     resolved), so an alias into a OneDrive folder classifies the same way the real path
- *     does. Methods: (a) path-substring + (c) OneDrive .ini-settings-parse, Windows only.
+ *   - Storage: `<project>/_metrics/` on every platform, including projects inside OneDrive,
+ *     iCloud Drive, Dropbox or Google Drive, so captured turns stay with the project and
+ *     sync wherever the project syncs. A project whose signed pin already names an external
+ *     folder (an earlier Windows OneDrive redirect to AppData) keeps that folder.
  *   - Per-scaffold forensic log line written to operational meta.
  *   - Stub README left at project location when storage is redirected.
  *   - Idempotent: re-runs leave existing content alone, just ensure structure.
@@ -26,7 +22,7 @@
  * non-fatal — metrics capture degrades, the session continues.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { isCliEntry } from './cli-entry.mjs';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
@@ -342,30 +338,11 @@ export function detectStoragePath({ projectDir, home = homedir(), platformName =
     };
   }
 
-  if (platformName !== 'win32') {
-    return {
-      path: join(projectDir, '_metrics'),
-      methods: { os: 'non-windows' },
-      reason: 'non-windows-default-project-local',
-    };
-  }
-
-  // Windows checks methods (a) and (c) only; method (b) is not implemented.
-  const methodA = projectPathContainsOneDriveSubstring(real);
-  const methodC = projectInOneDriveSyncSettings(real);
-
-  if (methodA || methodC) {
-    return {
-      path: appDataPath,
-      methods: { a: methodA, c: methodC, b: 'not-implemented' },
-      reason: 'windows-onedrive-detected-redirect-appdata',
-    };
-  }
-
+  // Captured turns live with the project on every platform, synced folder or not.
   return {
     path: join(projectDir, '_metrics'),
-    methods: { a: methodA, c: methodC, b: 'dropped-per-rm-turn-12' },
-    reason: 'windows-no-onedrive-project-local',
+    methods: { os: platformName },
+    reason: 'project-local',
   };
 }
 
@@ -376,81 +353,6 @@ export function detectStoragePath({ projectDir, home = homedir(), platformName =
 export function projectPathContainsOneDriveSubstring(projectDir) {
   const components = projectDir.split(/[\\/]/);
   return components.some((c) => c === 'OneDrive' || c.startsWith('OneDrive - '));
-}
-
-/**
- * Method (c): scan OneDrive settings files for the OneDrive root presence.
- *
- * OneDrive account metadata on Windows 11 (build 10.0.26200 and compatible):
- *   - The settings files use the `.ini` extension, NOT `.dat`.
- *   - The hex-prefixed `<account-id>.ini` file contains the OneDrive root path
- *     (e.g., `C:\Users\<user>\OneDrive`) in its `libraryScope` line.
- *   - File content is UTF-16LE with no BOM (Windows convention for these binary blobs);
- *     reading as UTF-8 produces null-byte-interleaved garbage and substring search fails.
- *   - OneDrive Business accounts live in sibling `Business1`, `Business2`, ... directories
- *     under `~/AppData/Local/Microsoft/OneDrive/settings/` with the same naming convention.
- *
- * What this method detects: "this user has OneDrive configured" — combined with method (a)
- * (project path string contains `OneDrive`), the two-method check is more robust than
- * either signal alone.
- */
-export function projectInOneDriveSyncSettings(projectDir, _settingsRootOverride = null) {
-  const oneDriveSettingsRoot = _settingsRootOverride
-    || join(homedir(), 'AppData', 'Local', 'Microsoft', 'OneDrive', 'settings');
-  if (!existsSync(oneDriveSettingsRoot)) return false;
-
-  // Scan Personal + any Business<N> account directories
-  let accountDirs = [];
-  try {
-    accountDirs = readdirSync(oneDriveSettingsRoot)
-      .filter((d) => d === 'Personal' || /^Business\d+$/.test(d))
-      .map((d) => join(oneDriveSettingsRoot, d));
-  } catch {
-    return false;
-  }
-
-  for (const accountDir of accountDirs) {
-    let iniFiles = [];
-    try {
-      // .ini files, not .dat
-      iniFiles = readdirSync(accountDir).filter((f) => f.endsWith('.ini'));
-    } catch {
-      continue;
-    }
-
-    for (const f of iniFiles) {
-      let content;
-      try {
-        content = readFileSync(join(accountDir, f));
-      } catch {
-        continue;
-      }
-      // UTF-16LE (Windows convention, no BOM on these files)
-      const text16 = content.toString('utf16le');
-
-      // Exact match: the .ini happens to name the project path verbatim
-      if (text16.includes(projectDir)) return true;
-
-      // Root-prefix match: the .ini names the OneDrive root (libraryScope case);
-      // project lives under that root. Extract Windows OneDrive paths from the
-      // file content and check if any is a prefix of projectDir.
-      //
-      // Matches `C:\Users\<user>\OneDrive` and `C:\Users\<user>\OneDrive - <Org>`
-      // (org name can contain spaces, letters, digits, hyphens).
-      //
-      // The trailing-terminator lookahead requires the match to end at a path
-      // separator, quote, whitespace, or end-of-string. Rejects false-positives
-      // like `OneDrive-backup-archive`.
-      const oneDrivePathRe = /[A-Za-z]:\\Users\\[^\\"]+\\OneDrive(?: - [^\\"]+)?(?=[\\"/\s]|$)/g;
-      const matches = text16.match(oneDrivePathRe) || [];
-      for (const root of matches) {
-        if (projectDir === root || projectDir.startsWith(root + '\\') || projectDir.startsWith(root + '/')) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
 }
 
 /**

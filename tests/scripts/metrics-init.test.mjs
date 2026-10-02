@@ -14,7 +14,6 @@ import {
   initMetrics,
   detectStoragePath,
   projectPathContainsOneDriveSubstring,
-  projectInOneDriveSyncSettings,
 } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 
 // detectStoragePath honors these as escape hatches — make sure ambient shell
@@ -116,60 +115,21 @@ test('detectStoragePath keeps captured turns in the project folder on non-Window
   });
 });
 
-test('detectStoragePath on Windows redirects only OneDrive; Dropbox, Google Drive and iCloud Drive stay in the project folder', () => {
+test('detectStoragePath on Windows keeps captured turns in the project folder, OneDrive included', () => {
   withCleanEnv(() => {
     const home = mkdtempSync(join(tmpdir(), 'metrics-win-synced-home-'));
     try {
-      for (const sub of ['Dropbox', 'Google Drive', 'iCloudDrive', 'Documents']) {
+      for (const sub of ['OneDrive', 'OneDrive - Contoso', 'Dropbox', 'Google Drive', 'iCloudDrive', 'Documents']) {
         const projectDir = join(home, sub, 'Projects', 'app');
         mkdirSync(projectDir, { recursive: true });
         const detection = detectStoragePath({ projectDir, home, platformName: 'win32' });
         assert.equal(detection.path, join(projectDir, '_metrics'), `${sub} stays with the project`);
-        assert.match(detection.reason, /windows-no-onedrive-project-local/);
+        assert.match(detection.reason, /project-local/);
       }
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
   });
-});
-
-test('detectStoragePath on Windows classifies a junction alias into OneDrive by its real target', () => {
-  withCleanEnv(() => {
-    const home = mkdtempSync(join(tmpdir(), 'metrics-alias-home-'));
-    const target = join(home, 'OneDrive', 'Documents', 'Projects', 'app');
-    mkdirSync(target, { recursive: true });
-    // The alias spelling has no OneDrive component; only resolving it reveals the synced folder.
-    const aliasParent = join(home, 'Documents', 'Projects');
-    mkdirSync(aliasParent, { recursive: true });
-    const alias = join(aliasParent, 'app');
-    symlinkSync(target, alias, process.platform === 'win32' ? 'junction' : 'dir');
-    try {
-      const detection = detectStoragePath({ projectDir: alias, home, platformName: 'win32' });
-      assert.match(detection.reason, /windows-onedrive-detected-redirect-appdata/);
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-});
-
-test('projectInOneDriveSyncSettings only matches a backslash-spelled projectDir against the (backslash-spelled) ini content — the gap a forward-slash caller falls through', () => {
-  const settingsRoot = mkdtempSync(join(tmpdir(), 'onedrive-settings-'));
-  const personal = join(settingsRoot, 'Personal');
-  mkdirSync(personal, { recursive: true });
-  const oneDriveRoot = 'C:\\Users\\david\\OneDrive';
-  writeFileSync(join(personal, 'account.ini'), Buffer.from(`libraryScope=${oneDriveRoot}\\Documents\r\n`, 'utf16le'));
-  try {
-    const backslashProject = `${oneDriveRoot}\\Documents\\Projects\\app`;
-    const forwardSlashProject = 'C:/Users/david/OneDrive/Documents/Projects/app';
-    assert.equal(projectInOneDriveSyncSettings(backslashProject, settingsRoot), true, 'the spelling the .ini actually uses is matched');
-    // Characterizes the exact gap reported from a real Windows install: the same logical
-    // path, forward-slash spelled (what Git Bash and CORE's own script calls pass), is not
-    // recognized — canonical() resolving to the backslash spelling before this function is
-    // ever called (detectStoragePath's fix) is what closes it, not a change to this function.
-    assert.equal(projectInOneDriveSyncSettings(forwardSlashProject, settingsRoot), false, 'forward-slash spelling of the identical path is not recognized on its own');
-  } finally {
-    rmSync(settingsRoot, { recursive: true, force: true });
-  }
 });
 
 test('metricsStorageAllowed accepts the local-metrics redirect target, and does not accept the shared per-harness state tree', () => {
