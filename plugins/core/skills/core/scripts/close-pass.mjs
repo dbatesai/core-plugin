@@ -141,23 +141,37 @@ export function recordOp(store, { op, status = 'done', note = null, now = new Da
 
 export function finishClose(store, { sessionId = null, status = 'closed', storeSignature = null, now = new Date().toISOString() } = {}) {
   const owner = typeof sessionId === 'string' && sessionId.trim() ? sessionId : null;
-  const marker = readJson(markerPath(store)) || { ops: {} };
-  const { lock } = inspectLock(store);
-  // A live lock belongs to whoever began: finish must name that owner before it
-  // writes the marker or releases anything. A close begun without a session is
-  // finished without one. With no lock there is nothing to take from anyone, which
-  // is the startup catch-up finishing a close whose owner is gone.
-  if (lock && ((lock.session_id ?? null) !== owner || (marker.session_id ?? null) !== owner)) {
-    return { ok: false, reason: 'owner-mismatch' };
+  const seen = inspectLock(store);
+  let marker;
+  let claim = null;
+  if (seen.held) {
+    // A live lock belongs to whoever began. One that cannot be read has an unknown
+    // owner, which is not the same as no owner. Otherwise finish must name the owner
+    // on both surfaces before it writes the marker or releases anything; a close
+    // begun without a session is finished without one.
+    if (!seen.lock) return { ok: false, reason: 'lock-unreadable' };
+    marker = readJson(markerPath(store)) || { ops: {} };
+    if ((seen.lock.session_id ?? null) !== owner || (marker.session_id ?? null) !== owner) {
+      return { ok: false, reason: 'owner-mismatch' };
+    }
+  } else {
+    // No live owner: the lock is absent or stale, which is the startup catch-up
+    // finishing a close whose owner is gone. Take the lock for the marker write, so a
+    // begin that lands meanwhile is refused here and is never overwritten or released.
+    claim = acquireLock(store, { sessionId: owner, now: Date.parse(now) || Date.now() });
+    if (!claim.ok) return { ok: false, reason: claim.reason === 'held' ? 'owner-mismatch' : claim.reason };
+    marker = readJson(markerPath(store)) || { ops: {} };
   }
   // The signature of the store AS THE CLOSE LEFT IT: detectCloseState compares the live store
   // against this, so a unit changed after the close re-owes the store-derived ops.
   if (storeSignature != null) marker.store_signature = storeSignature;
   marker.status = status; // 'closed' = finalize succeeded; 'failed' = finished but /finalize failed → detectCloseState re-owes
   marker.completed_at = now;
-  if (sessionId) marker.session_id = sessionId;
+  if (owner) marker.session_id = owner;
   atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
-  const release = releaseLock(store, { sessionId });
+  const release = claim
+    ? releaseFileLock(lockPath(store), claim.nonce)
+    : releaseLock(store, { sessionId: owner });
   // Fail closed on a real release failure: a swallowed permission/I/O error
   // would leave a live lock silently blocking every future close while this
   // close reports success. Record it ON the marker so detection
