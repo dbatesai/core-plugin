@@ -25,7 +25,7 @@ import { buildIndex as buildUnitIndex } from './generate-unit-index.mjs';
 import { generateSummaryIndex, computeSourceSignature } from './generate-summary-index.mjs';
 import { hashText, stampFiles } from './state-cache.mjs';
 import { purgeTurnCapture } from './turn-capture.mjs';
-import { resolveStoragePath } from './log-event.mjs';
+import { resolveStoragePath, metricsEnabled } from './log-event.mjs';
 import { shouldComputeScorecard, computeScorecard, appendScorecard } from './scorecard.mjs';
 import { judgeUnjudgedTurns } from './hindsight-judge.mjs';
 import { TRIPWIRE_THRESHOLDS } from './metrics-tripwires.mjs';
@@ -58,10 +58,10 @@ function findGhostDuplicates(memoriesDir) {
 
 /**
  * @param {string} projectPath
- * @param {{ apply?: boolean, now?: string, home?: string }} opts
+ * @param {{ apply?: boolean, now?: string, home?: string, env?: object }} opts
  * @returns {{ ranOps: string[], notes: string[], unitsChanged: boolean, narration: string }}
  */
-export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString(), home } = {}) {
+export function runMaintenance(projectPath, { apply = true, now = new Date().toISOString(), home, env = process.env } = {}) {
   const root = resolve(projectPath);
   const mem = join(root, '_memories');
   const ledgerPath = join(mem, '_maintenance-state.json');
@@ -154,9 +154,12 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // 3.65 Hindsight judge (v3.14.0 Link 2): grade up to 50 unjudged evidence
   // rows against the full-prompt ranking — mechanical grade, bounded,
   // idempotent. Runs BEFORE the scorecard op so fresh verdicts pin same-pass.
-  if (apply) {
+  // The global metrics opt-out covers derived metrics and automatic self-tests
+  // too. Keep ordinary memory indexes and their cadence ledger independent.
+  const maintainMetrics = apply && metricsEnabled({ project: root, home, env });
+  if (maintainMetrics) {
     try {
-      const jr = judgeUnjudgedTurns(root, { limit: 50, now });
+      const jr = judgeUnjudgedTurns(root, { limit: 50, now, env });
       if (jr.judged > 0) {
         ranOps.push('hindsight-judge');
         const counts = Object.entries(jr.verdicts).map(([v, c]) => `${c} ${v}`).join(', ');
@@ -173,13 +176,13 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // row when a judgment or self-test result postdates the last pinned card.
   // Gated by shouldComputeScorecard (no new inputs → silent skip); failure
   // never blocks the pass.
-  if (apply) {
+  if (maintainMetrics) {
     try {
       if (shouldComputeScorecard(root)) {
         // Thresholds stamped from the live single source so a threshold
         // change is visible in scorecard history (visible-goalposts rule).
         const card = computeScorecard(root, { now, thresholds: TRIPWIRE_THRESHOLDS });
-        const pinRes = appendScorecard(root, card);
+        const pinRes = appendScorecard(root, card, { home, env });
         if (pinRes.written) {
           ranOps.push('scorecard-computation');
           notes.push(`scorecard pinned: ${card.hindsight.judged_turns} judged turn(s), self-test headline ${card.self_test.headline ?? 'n/a'}`);
@@ -199,7 +202,7 @@ export function runMaintenance(projectPath, { apply = true, now = new Date().toI
   // /metrics pass. The weekly hard cap lives inside the assessment and is
   // stamped when the trigger fires, so a repeat pass inside the cap stays
   // silent.
-  if (apply) {
+  if (maintainMetrics) {
     try {
       const staleness = shouldAuthorFreshRound(root, { now });
       if (staleness.due) {
@@ -248,7 +251,7 @@ function composeNarration(ranOps, notes) {
 // append, not a report). Never null-returns without a reason: no registered
 // round is a normal, silent no-op (nothing to regrade yet).
 async function autoRegradeSelfTest(projectPath, { dryRun }) {
-  if (dryRun) return null;
+  if (dryRun || !metricsEnabled({ project: projectPath })) return null;
   try {
     const record = await regradeNewestRound(projectPath);
     if (!record) return null;
