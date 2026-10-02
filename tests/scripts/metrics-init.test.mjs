@@ -1,5 +1,5 @@
 import { operationalMetricsDir, resolveStoragePath, metricsEnabled, storagePinInvalid } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt, metricsStorageAllowed, localStateDir, canonical } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt, canonical } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
@@ -7,7 +7,7 @@ import { registerProject } from '../../plugins/core/skills/core/scripts/index-re
 // the project's metrics state never touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {

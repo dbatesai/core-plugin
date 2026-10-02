@@ -169,11 +169,9 @@ test('a project whose pin still names an external folder is told where its log r
     updateManifest({ root: project, harness: HARNESS, coreDir, fields: { schema_version: 'v2' } });
     const saved = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
     process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1'; // stands in for an earlier Windows OneDrive redirect
-    let external;
     try {
       const r = initMetrics({ projectDir: project, home, env: ENV });
       assert.equal(r.ok, true, JSON.stringify(r));
-      external = r.storagePath || r.path;
     } finally {
       if (saved === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = saved;
     }

@@ -9,7 +9,7 @@ import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import {
   resolveProjectRoot, classifyRegistration, projectStateDir, ensureStateDir,
-  writeStamp, classifyStamp, ensureInstallIdentity, stampHmac, assertHarnessName, localStateDir,
+  writeStamp, classifyStamp, ensureInstallIdentity, stampHmac, assertHarnessName,
 } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 // A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
 const DIR_LINK = process.platform === 'win32' ? 'junction' : 'dir';

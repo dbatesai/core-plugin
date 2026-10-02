@@ -44,7 +44,7 @@ test('workspace ids name one directory segment; traversal shapes are rejected', 
 });
 
 test('containedPath: a prefix-sharing sibling directory cannot spoof containment', () => {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), 'core-contain-')));
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'core-contain-')));
   const root = join(base, 'user');
   const sibling = join(base, 'user2');
   mkdirSync(root); mkdirSync(sibling);
@@ -59,7 +59,7 @@ test('containedPath: a prefix-sharing sibling directory cannot spoof containment
 });
 
 test('containedPath / regularFileWithin: a symlink is judged by its real target', () => {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), 'core-contain-link-')));
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'core-contain-link-')));
   const root = join(base, 'store');
   const outside = join(base, 'outside');
   mkdirSync(root); mkdirSync(outside);
