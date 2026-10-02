@@ -364,7 +364,7 @@ test('purge covers the whole declared scope — nested files, interrupted writes
       assert.equal(entry.removed, true, `${entry.id} removed`);
       assert.equal(existsSync(entry.path), false, `${entry.path} gone`);
     }
-    assert.deepEqual(res.scope.map((e) => e.id).sort(), ['classified', 'health', 'judgments', 'stream']);
+    assert.deepEqual(res.scope.map((e) => e.id).sort(), ['classified', 'close-receipts', 'close-summaries', 'health', 'judgments', 'stream']);
     assert.equal(existsSync(join(dir, 'nested', 'overlay.jsonl')), false);
     assert.equal(existsSync(join(dir, '2026-07-20.jsonl.tmp')), false);
     assert.equal(existsSync(join(base, 'turn-capture-health.json')), false);

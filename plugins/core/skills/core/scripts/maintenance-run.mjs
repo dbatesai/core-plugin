@@ -275,12 +275,11 @@ async function main(argv) {
   // a routine run). The confirmation contract is prose-level — the
   // SKILL/protocol require an explicit user ask before this is invoked; the
   // flag does the mechanical part only, behind turn-capture.mjs's
-  // directory-name assertion so it can only ever remove
-  // <storage-base>/turn-capture/. Respects --dry-run.
+  // declared scope and marker-bounded close selection. Respects --dry-run;
   if (argv.includes('--purge-turn-capture')) {
     const res = purgeTurnCapture(projectPath, { apply: !dryRun });
     if (json) process.stdout.write(JSON.stringify(res) + '\n');
-    else if (res.purged) process.stdout.write(`Purged the turn-capture evidence stream: ${res.dir}\n`);
+    else if (res.purged) process.stdout.write(`Purged the turn-capture evidence stream and eligible generated close files: ${res.dir}\nManual, edited, and unmarked historical close files were preserved; use --json for the per-scope report.\n`);
     else if (res.reason === 'dry-run') process.stdout.write(`Would purge the turn-capture evidence stream: ${res.dir}\n`);
     else process.stdout.write(`Turn-capture purge did not run: ${res.reason} (${res.dir})\n`);
     return res.purged || res.reason === 'dry-run' ? 0 : 2;

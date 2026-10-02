@@ -457,11 +457,12 @@ test('with a pin that does not verify, purge and stats refuse with pin-unverifie
       writeFileSync(rows, '{"row":1}\n{"row":2}\n');
       signedPin(meta, home, store, projectDir);
       assert.equal(turnCaptureStats(projectDir, { env: {} }).rows, 2, 'with a good pin the stream is found');
-      assert.equal(purgeTurnCapture(projectDir, { apply: false }).existed, true);
+      // Purge defaults to the trusted OS home; this fixture injects its synthetic home explicitly.
+      assert.equal(purgeTurnCapture(projectDir, { apply: false, home }).existed, true);
 
       writeFileSync(join(meta, 'storage-path.txt'), join(projectDir, '_metrics'));   // tamper only the pin
-      const dry = purgeTurnCapture(projectDir, { apply: false });
-      const real = purgeTurnCapture(projectDir, { apply: true });
+      const dry = purgeTurnCapture(projectDir, { apply: false, home });
+      const real = purgeTurnCapture(projectDir, { apply: true, home });
       const stats = turnCaptureStats(projectDir, { env: {} });
       for (const r of [dry, real]) {
         assert.equal(r.purged, false);
@@ -472,7 +473,7 @@ test('with a pin that does not verify, purge and stats refuse with pin-unverifie
       assert.equal(readFileSync(rows, 'utf8'), '{"row":1}\n{"row":2}\n', 'nothing was deleted');
 
       signedPin(meta, home, store, projectDir);
-      assert.equal(purgeTurnCapture(projectDir, { apply: false }).existed, true, 'once the pin is repaired the stream is located again');
+      assert.equal(purgeTurnCapture(projectDir, { apply: false, home }).existed, true, 'once the pin is repaired the stream is located again');
     } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
   });
 });

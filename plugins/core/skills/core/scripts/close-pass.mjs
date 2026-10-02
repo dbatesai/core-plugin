@@ -37,14 +37,15 @@ import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, renameSync, ex
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveStoragePath } from './log-event.mjs';
+import { closeStorageRoot, prepareCloseStorageRoot, prepareCloseDirectory, assertCloseSummaryWritable, markCloseSummary, markCloseReceipt } from './close-artifacts.mjs';
+import { turnCaptureEnabled } from './turn-capture.mjs';
 import { buildCloseRecord, renderCloseSummary } from './close-payload.mjs';
-import { trustedHome } from './trusted-home.mjs';
+import { trustedHome, requireTrustedHome } from './trusted-home.mjs';
 import { readRegisteredRoots, resolveProjectRoot } from './project-state.mjs';
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
+import { acquireFileLock, releaseFileLock, inspectFileLock, withFileLock } from './file-lock.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
 import { readTranscript, resolveTranscript } from './read-transcript.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -260,10 +261,8 @@ export function sessionKey(sessionId) {
 }
 
 /** Resolve the receipt directory. `opts.storageRoot` keeps tests hermetic. */
-function receiptDir(store, { storageRoot = null } = {}) {
-  const root = storageRoot
-    || resolveStoragePath(resolve(store));
-  return join(root, 'close', 'receipts');
+function receiptDir(store, opts = {}) {
+  return join(closeStorageRoot(store, opts), 'close', 'receipts');
 }
 
 export function receiptPath(store, sessionId, opts = {}) {
@@ -300,12 +299,19 @@ export function readCloseReceipt(store, sessionId, opts = {}) {
 
 /** Write a session's receipt atomically, owner-only. */
 export function writeCloseReceipt(store, receipt, opts = {}) {
+  const storageRoot = closeStorageRoot(store, opts);
+  prepareCloseStorageRoot(storageRoot);
+  return withFileLock(join(storageRoot, '.turn-capture.lock'), () =>
+    writeCloseReceiptUnlocked(store, receipt, { ...opts, storageRoot }));
+}
+
+function writeCloseReceiptUnlocked(store, receipt, opts) {
   if (!receipt || typeof receipt !== 'object') {
     throw new TypeError('close-pass: receipt must be an object');
   }
   const sessionId = receipt.session_id;
   const p = receiptPath(store, sessionId, opts);
-  mkdirSync(receiptDir(store, opts), { recursive: true });
+  prepareCloseDirectory(receiptDir(store, opts));
   // Prior-receipt evidence rules: an UNREADABLE prior receipt refuses the
   // write outright — the bytes may be intact evidence we could not read, and
   // no preservation is possible without reading. A CORRUPT prior receipt may
@@ -369,33 +375,48 @@ export function runDeterministicClose(store, {
   gitHead = null,
   now = new Date().toISOString(),
 } = {}, opts = {}) {
-  const record = buildCloseRecord({
-    sessionId, harness, events, startedAt, endedAt, coverage, gitHead,
+  // Resolve independently of the capture gate: an explicit OFF short-circuits
+  // metricsEnabled, but must never short-circuit the invalid-pin routing check.
+  const home = opts.home || requireTrustedHome();
+  const storageRoot = closeStorageRoot(store, { ...opts, home });
+  opts = { ...opts, storageRoot, home };
+  const summaryDir = join(storageRoot, 'close', 'summaries');
+  prepareCloseStorageRoot(storageRoot);
+  return withFileLock(join(storageRoot, '.turn-capture.lock'), () => {
+    prepareCloseDirectory(summaryDir);
+    prepareCloseDirectory(receiptDir(store, opts));
+    // The CLI's optimistic dedup can race a manual certification. Recheck under
+    // the same lock used by receipt writes and explicit capture purge.
+    const prior = readCloseReceipt(store, sessionId, opts);
+    if (prior && CERTIFIED_STATUSES.has(prior.status)) return prior;
+    const captureContent = turnCaptureEnabled({ project: resolve(store), home, env: opts.env || process.env });
+    const record = buildCloseRecord({
+      sessionId, harness, events, startedAt, endedAt, coverage, gitHead, captureContent,
+    });
+    const summary = markCloseSummary(renderCloseSummary(record));
+
+    const summaryFile = join(summaryDir, `${sessionKey(sessionId)}.md`);
+    assertCloseSummaryWritable(summaryFile);
+    atomicWriteFileSync(summaryFile, summary);
+    chmodSync(summaryFile, 0o600);
+
+    const receipt = markCloseReceipt({
+      session_id: sessionId,
+      status: coverage === 'full' ? 'recorded' : 'partial',
+      harness,
+      closed_at: now,
+      ops: { capture: 'done', summary: 'done', 'project-state': 'skipped' },
+      summary_path: summaryFile,
+      summary_sha256: createHash('sha256').update(summary, 'utf8').digest('hex'),
+      model_calls: 0,
+      record,
+    });
+    const wrote = writeCloseReceiptUnlocked(store, receipt, opts);
+    if (!wrote.written) {
+      return { ...receipt, status: 'failed', write_refused: wrote.reason };
+    }
+    return receipt;
   });
-  const summary = renderCloseSummary(record);
-
-  const summaryDir = join(receiptDir(store, opts), '..', 'summaries');
-  mkdirSync(summaryDir, { recursive: true });
-  const summaryFile = join(summaryDir, `${sessionKey(sessionId)}.md`);
-  atomicWriteFileSync(summaryFile, summary);
-  chmodSync(summaryFile, 0o600);
-
-  const receipt = {
-    session_id: sessionId,
-    status: coverage === 'full' ? 'recorded' : 'partial',
-    harness,
-    closed_at: now,
-    ops: { capture: 'done', summary: 'done', 'project-state': 'skipped' },
-    summary_path: summaryFile,
-    summary_sha256: createHash('sha256').update(summary, 'utf8').digest('hex'),
-    model_calls: 0,
-    record,
-  };
-  const wrote = writeCloseReceipt(store, receipt, opts);
-  if (!wrote.written) {
-    return { ...receipt, status: 'failed', write_refused: wrote.reason };
-  }
-  return receipt;
 }
 
 /** First and last `timestamp` field seen across a transcript's JSONL lines, or nulls if unreadable. */

@@ -50,6 +50,8 @@ import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, storagePinInvalid, operationalMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
 // reader misread rows.
@@ -397,8 +399,8 @@ export function turnCaptureStats(projectDir, { env = process.env } = {}) {
 }
 
 // ---------- deletion ops (retention + purge) ----------
-// BOUNDARY: every deletion is scoped to CORE's OWN capture files under
-// `<storage-base>/turn-capture/`. Path assertions refuse anything else.
+// BOUNDARY: retention only touches dated turn-capture rows. Explicit purge
+// uses the declared scope below, with marker/integrity selection for close files.
 
 function assertInsideTurnCapture(targetFile, dir) {
   if (basename(dir) !== TURN_CAPTURE_DIRNAME) {
@@ -417,10 +419,12 @@ function assertInsideTurnCapture(targetFile, dir) {
  * every purge report names. `stream` is removed whole (nested dirs, interrupted
  * partial writes, and the self-exclusion .gitignore go with it); `health` and
  * `judgments` are the supplement and the derivative that describe the same
- * captured material. The lock is deliberately NOT in scope: it holds no
+ * captured material. Close scopes remove only intact automatic-writer-marked
+ * files, preserving manual/edited/history files and the containing directories.
+ * The lock is deliberately NOT in scope: it holds no
  * captured content and is what serializes the purge itself.
  */
-export function turnCapturePurgeScope(projectDir, { home = homedir(), env = process.env } = {}) {
+export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(), env = process.env } = {}) {
   const base = resolveStoragePath(projectDir, { home, env });
   // classify-turns.mjs writes full user/assistant text and tool events to a SEPARATE
   // store (the project's own operational-meta dir, never externally redirected — the
@@ -428,11 +432,14 @@ export function turnCapturePurgeScope(projectDir, { home = homedir(), env = proc
   // has to reach it too, or "purge everything saved" is false: nothing else deletes it
   // now that classified retention is no longer run on a schedule.
   const classifiedBase = operationalMetricsDir(projectDir, { home, env });
+  const closeBase = join(closeStorageRoot(projectDir, { home, env }), 'close');
   return [
     { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true, base },
     { id: 'health', path: join(base, HEALTH_FILENAME), tree: false, base },
     { id: 'judgments', path: join(base, JUDGMENT_LOG_FILENAME), tree: false, base },
     { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase },
+    { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase },
+    { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase },
   ];
 }
 
@@ -440,7 +447,7 @@ export function turnCapturePurgeScope(projectDir, { home = homedir(), env = proc
 // to be a direct child of its OWN declared base (not necessarily the same base
 // every entry shares — classified lives under a different store than the rest).
 function assertPurgeEntry(entry) {
-  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME, classified: CLASSIFIED_DIRNAME }[entry.id];
+  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME, classified: CLASSIFIED_DIRNAME, 'close-summaries': 'summaries', 'close-receipts': 'receipts' }[entry.id];
   if (!expected || basename(entry.path) !== expected || dirname(entry.path) !== entry.base) {
     throw new Error(`refusing purge: '${entry.path}' is not <storage-base>/${expected || entry.id}`);
   }
@@ -508,13 +515,13 @@ export function runTurnCaptureRetention(projectDir, {
  * that could not be removed is reported with its reason and the overall result
  * is not `purged`. Partial success is never narrated as success.
  */
-export function purgeTurnCapture(projectDir, { apply = true, home = homedir(), env = process.env } = {}) {
+export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env } = {}) {
   // Refuse rather than purge the wrong folder and call it done: with a pin that no longer verifies,
   // the captured rows may sit somewhere other than the project-local fallback this would target.
   if (storagePinInvalid(projectDir, { home, env })) {
     return { purged: false, reason: 'pin-unverified', message: 'the metrics storage pin does not verify, so the capture folder cannot be located; run metrics-init for this project first', dir: null, existed: null, scope: [] };
   }
-  const dir = turnCaptureDir(projectDir);
+  const dir = join(resolveStoragePath(projectDir, { home, env }), TURN_CAPTURE_DIRNAME);
   const entries = turnCapturePurgeScope(projectDir, { home, env });
   try {
     for (const entry of entries) assertPurgeEntry(entry);
@@ -525,13 +532,22 @@ export function purgeTurnCapture(projectDir, { apply = true, home = homedir(), e
   const scope = entries.map((entry) => ({ ...entry, existed: existsSync(entry.path), removed: false }));
   const existed = scope.some((entry) => entry.existed);
   if (!apply) {
+    for (const entry of scope.filter(e => e.generatedClose)) {
+      try { Object.assign(entry, purgeGeneratedCloseDirectory(entry.path)); }
+      catch (e) { entry.reason = String(e.message).slice(0, 120); }
+    }
     return { purged: false, reason: 'dry-run', dir, existed, scope };
   }
 
   try {
-    withFileLock(turnCaptureLockPath(projectDir), () => {
+    withFileLock(join(resolveStoragePath(projectDir, { home, env }), '.turn-capture.lock'), () => {
       for (const entry of scope) {
         try {
+          if (entry.generatedClose) {
+            Object.assign(entry, purgeGeneratedCloseDirectory(entry.path, { apply: true }));
+            entry.removed = true; // selected generated files, NOT the directory or kept files
+            continue;
+          }
           rmSync(entry.path, { recursive: entry.tree, force: true });
           if (existsSync(entry.path)) entry.reason = 'still-present-after-delete';
           else entry.removed = true;
