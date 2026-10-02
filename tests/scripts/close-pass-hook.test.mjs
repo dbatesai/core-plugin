@@ -1,11 +1,11 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { join, dirname } from 'node:path';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'hooks', 'close-pass-hook.mjs');
@@ -36,20 +36,45 @@ after(() => { for (const d of _isolatedLogDirs) rmSync(d, { recursive: true, for
 // in-process call for the lifetime of this file.
 process.env.CORE_HOOKS_LOG_FILE = isolatedHooksLog();
 
-// Run the hook with a SessionEnd payload. Returns {out, code}. The hook always exits 0
-// (fail-open), and in every case tested here a guard returns BEFORE the claude spawn, so
-// no child process is launched — the test never depends on `claude` being on PATH.
+// Run the real hook entry and record its exact skip receipt. Stub only the
+// child spawn boundary, so the registered positive control proves every prior
+// gate was reached without launching a detached writer into a removed fixture.
 function runHook(payload, env = {}) {
+  const log = isolatedHooksLog();
+  const probe = join(dirname(log), 'spawn-probe.mjs');
+  const spawned = join(dirname(log), 'spawned.json');
+  writeFileSync(probe, `
+    import cp from 'node:child_process';
+    import { writeFileSync } from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
+    cp.spawn = (command, args) => {
+      writeFileSync(${JSON.stringify(spawned)}, JSON.stringify({ command, args }));
+      return { unref() {} };
+    };
+    syncBuiltinESMExports();
+  `);
+  let out = '', code = 0;
   try {
-    const out = execFileSync('node', [HOOK], {
+    out = execFileSync('node', ['--import', pathToFileURL(probe).href, HOOK], {
       input: JSON.stringify(payload),
-      env: { ...process.env, CORE_HOOKS_LOG_FILE: isolatedHooksLog(), ...env },
+      env: { ...process.env, CORE_CLOSE_PASS_ACTIVE: '0', CORE_AUTO_CLOSE: '1', CORE_HOOKS_LOG_FILE: log, ...env },
       encoding: 'utf8',
     });
-    return { out, code: 0 };
-  } catch (e) {
-    return { out: String(e.stdout || ''), code: e.status };
-  }
+  } catch (e) { out = String(e.stdout || ''); code = e.status; }
+  const events = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+  return { out, code, events, spawned: existsSync(spawned) ? JSON.parse(readFileSync(spawned, 'utf8')) : null };
+}
+
+function registeredFixture(t) {
+  const store = mkdtempSync(join(tmpdir(), 'close-hook-registered-'));
+  t.after(() => rmSync(store, { recursive: true, force: true }));
+  mkdirSync(join(store, '_memories'), { recursive: true });
+  writeFileSync(join(store, 'workspace.json'), '{"workspace_id":"registered-control"}');
+  return {
+    store,
+    payload: { cwd: store, session_id: 'registered-session', reason: 'other' },
+    env: registryEnvFor(store),
+  };
 }
 
 // A CORE workspace dir that has closed cleanly with nothing owed → no close is owed,
@@ -67,32 +92,31 @@ function freshClosedStore() {
   return store;
 }
 
-test('recursion guard: CORE_CLOSE_PASS_ACTIVE=1 → no-op, no spawn', () => {
-  const store = mkdtempSync(join(tmpdir(), 'close-hook-test-'));
-  mkdirSync(join(store, '_memories'), { recursive: true });
-  const { out, code } = runHook({ cwd: store, reason: 'other', transcript_path: '/x' },
-    { CORE_CLOSE_PASS_ACTIVE: '1' });
-  assert.equal(code, 0);
-  assert.equal(out.trim(), '', 'recursion guard must produce no output and not spawn');
-  rmSync(store, { recursive: true, force: true });
+test('registered positive control reaches the deterministic close spawn boundary', t => {
+  const f = registeredFixture(t);
+  const result = runHook(f.payload, f.env);
+  assert.equal(result.code, 0);
+  assert.equal(result.spawned?.command, 'node');
+  assert.ok(result.spawned.args.includes('process-request'));
+  assert.ok(result.spawned.args.includes('registered-session'));
+  assert.ok(result.events.some(e => e.hook === 'session-end' && e.action === 'spawn'));
 });
 
-test('kill switch: CORE_AUTO_CLOSE=0 → no-op', () => {
-  const store = mkdtempSync(join(tmpdir(), 'close-hook-test-'));
-  mkdirSync(join(store, '_memories'), { recursive: true });
-  const { code } = runHook({ cwd: store, reason: 'other', transcript_path: '/x' },
-    { CORE_AUTO_CLOSE: '0' });
-  assert.equal(code, 0, 'kill switch halts the hook cleanly');
-  rmSync(store, { recursive: true, force: true });
-});
-
-test('skip reason: resume is a suspension, not a real end → no-op', () => {
-  const store = mkdtempSync(join(tmpdir(), 'close-hook-test-'));
-  mkdirSync(join(store, '_memories'), { recursive: true });
-  const { code } = runHook({ cwd: store, reason: 'resume', transcript_path: '/x' });
-  assert.equal(code, 0, 'resume must be skipped');
-  rmSync(store, { recursive: true, force: true });
-});
+for (const [name, override, reason, payloadChange] of [
+  ['recursion guard', { CORE_CLOSE_PASS_ACTIVE: '1' }, 'recursion-guard', {}],
+  ['kill switch', { CORE_AUTO_CLOSE: '0' }, 'kill-switch', {}],
+  ['resume filter', {}, 'session-reason=resume', { reason: 'resume' }],
+]) {
+  test(`${name}: registered, owed session has exact skip receipt and no spawn`, t => {
+    const f = registeredFixture(t);
+    const result = runHook({ ...f.payload, ...payloadChange }, { ...f.env, ...override });
+    assert.equal(result.code, 0);
+    assert.equal(result.out.trim(), '');
+    assert.equal(result.spawned, null, 'guard must prevent the child spawn');
+    assert.ok(result.events.some(e => e.hook === 'session-end' && e.action === 'skip' && e.reason === reason),
+      `expected exact ${reason} receipt, got ${JSON.stringify(result.events)}`);
+  });
+}
 
 test('not a CORE workspace: no workspace.json or _memories → no-op', () => {
   const store = mkdtempSync(join(tmpdir(), 'close-hook-test-'));

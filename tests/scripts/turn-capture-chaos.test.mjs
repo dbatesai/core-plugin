@@ -103,12 +103,18 @@ test('chaos: purge racing a live writer never tears a row or crashes either side
     assert.equal(code, 0, 'writer survived the purges (fail-open, no crash)');
     // Whatever survived on disk must be well-formed.
     const dir = join(project, '_metrics', 'turn-capture');
-    try {
-      for (const f of readdirSync(dir).filter((n) => n.endsWith('.jsonl'))) {
-        for (const line of readFileSync(join(dir, f), 'utf8').split('\n')) {
-          if (line.trim()) assert.doesNotThrow(() => JSON.parse(line), `torn line after purge race in ${f}`);
-        }
+    let files;
+    try { files = readdirSync(dir); }
+    catch (error) {
+      // Only an absent directory is a valid fully-purged result. Assertions,
+      // malformed rows and other I/O failures must fail this safety oracle.
+      if (error.code !== 'ENOENT') throw error;
+      files = [];
+    }
+    for (const f of files.filter((n) => n.endsWith('.jsonl'))) {
+      for (const line of readFileSync(join(dir, f), 'utf8').split('\n')) {
+        if (line.trim()) assert.doesNotThrow(() => JSON.parse(line), `torn line after purge race in ${f}`);
       }
-    } catch { /* dir fully purged — also a valid outcome */ }
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
