@@ -157,6 +157,59 @@ test('source mode: harness manifests stamping different commits fail', () => {
   }
 });
 
+// A fix lands after the bump and the stamp moves forward to it.
+function repoWithLaterStamp({ fixInsidePackage = false } = {}) {
+  const { repo, release } = repoAtReleasePoint();
+  if (fixInsidePackage) writeFileSync(join(repo, SHIPPED_REL), '# skill\nfix after the bump\n');
+  else writeFileSync(join(repo, 'README.md'), 'test-only fix after the bump\n');
+  const fix = commit(repo, 'fix after the bump');
+  stampSource(repo, { version: '1.1.0', build: '20260102.1', sourceSha: fix });
+  commit(repo, 're-stamp to the fix');
+  return { repo, release, fix };
+}
+
+test('source mode: a stamp moved forward to a later commit that packages the same bytes is release-fresh', () => {
+  const { repo } = repoWithLaterStamp();
+  try {
+    const { code, out } = run(['--source', repo]);
+    assert.equal(code, 0, `a test-only fix after the bump must not fail the gate, got exit ${code}:\n${out}`);
+    assert.match(out, /release-fresh/);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('source mode: a stamp moved forward to a commit that changed the packaged bytes fails', () => {
+  const { repo } = repoWithLaterStamp({ fixInsidePackage: true });
+  try {
+    const { code, out } = run(['--source', repo]);
+    assert.equal(code, 1, `a stamp naming different packaged bytes must fail, got exit ${code}:\n${out}`);
+    assert.match(out, /packaging the release's bytes/);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('source mode: a stamp naming a commit that is not on the way to the ref fails even when its bytes match', () => {
+  const { repo, release } = repoAtReleasePoint();
+  try {
+    git(repo, ['checkout', '-q', '-b', 'side', release]);
+    writeFileSync(join(repo, 'README.md'), 'side branch\n');
+    const side = commit(repo, 'side branch commit, same packaged bytes');
+    git(repo, ['checkout', '-q', 'main']);
+    stampSource(repo, { version: '1.1.0', build: '20260102.1', sourceSha: side });
+    commit(repo, 'stamp names a commit from another branch');
+    const { code, out } = run(['--source', repo]);
+    assert.equal(code, 1, `got exit ${code}:\n${out}`);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});
+
+test('source mode: after a moved-forward stamp, a later change inside the package is stale, not fresh', () => {
+  const { repo } = repoWithLaterStamp();
+  try {
+    writeFileSync(join(repo, SHIPPED_REL), '# skill\ndevelopment continues\n');
+    commit(repo, 'ordinary development commit inside the packaged tree');
+    const { code } = run(['--source', repo]);
+    assert.equal(code, 3);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
+});
+
 test('installed mode: a cache matching the expected candidate passes', () => {
   const root = mkdtempSync(join(tmpdir(), 'installed-match-'));
   try {

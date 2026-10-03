@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The release-identity gate accepts a stamp moved forward to a later commit that packages the same bytes.** A fix after the version bump (a test-only change) used to force a stamp that the gate rejected, because it demanded the bump commit's parent. The stamp may now name a later commit on the way to the merge commit when that commit's packaged files match the release commit's, ignoring the `source_sha` lines. It still refuses a stamp that names changed shipped bytes or a commit off the release's history, and a later change inside the package is still reported as stale.
 - **Skill prose now says what the code does.** Retention and capture disclosures separate local event capture from the exporter's allowlist and no longer promise that opting out writes nothing; a file with no baseline is refused rather than assumed to be CORE's; the close is described as bounded. Authorization and risk review are separate: a Guard check comes before a write, not after it, and only the user can restore what they removed. Retrieval and priority terms match the code: `pinned` sets a floor or override in `priority.mjs`, the index label `canonical` is a different thing, and a pin gives no product-ranking boost. Concise evidence output, routing and naming repairs, and the folder-rename flow now copies, verifies content hashes and keeps the source until removal is authorized (equal file counts never suffice).
 
 ## [3.19.1] — 2026-10-02
