@@ -44,14 +44,14 @@
  */
 
 import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
-import { projectRootFor, projectStateDir, localStateDir, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
+import { projectRootFor, projectStateDir, localStateDir, stateHarnesses, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
-import { requireTrustedHome, containedPath } from './trusted-home.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
 // reader misread rows.
@@ -451,26 +451,55 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
   // project folder is unregistered or not writable. Checked again at deletion time.
   const root = projectRootFor(projectDir, { home, coreDir });
   const inProject = [projectDir];
-  const inProjectOrLocal = [projectDir, dirname(localStateDir({ root, harness: detectStateHarness(env), coreDir }))];
+  const inProjectOrLocal = (harness = detectStateHarness(env)) => [projectDir, dirname(localStateDir({ root, harness, coreDir }))];
+  // The classified log of every other harness with trusted state for this project is the same
+  // captured data and is purged too; state that can't be read is reported by metricsHistoryHeld.
+  const running = detectStateHarness(env);
+  let others = [];
+  try { others = stateHarnesses({ root, coreDir }).filter((h) => h !== running); } catch { /* reported as held */ }
+  const otherClassified = [];
+  for (const harness of others) {
+    const meta = trustedMetricsDir(projectDir, { home, env, harness });
+    if (meta) otherClassified.push({ id: 'classified', harness, path: join(meta, CLASSIFIED_DIRNAME), tree: true, base: meta, within: inProjectOrLocal(harness) });
+  }
   return [
     { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true, base, within: inProject },
     { id: 'health', path: join(base, HEALTH_FILENAME), tree: false, base, within: inProject },
     { id: 'judgments', path: join(base, JUDGMENT_LOG_FILENAME), tree: false, base, within: inProject },
-    { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase, within: inProjectOrLocal },
+    { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase, within: inProjectOrLocal() },
+    ...otherClassified,
     { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase, within: inProject },
     { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase, within: inProject },
   ];
 }
 
-// Checked at the moment of deletion, so a link swapped in after planning is caught: the entry's
-// folder must physically resolve inside one of its allowed roots, and the entry must not be a link.
-// A lexical name check alone proves no physical boundary.
+// The allowed roots are pinned when the purge is planned (their real path and file identity), and
+// each entry is checked against the pins at the moment of deletion: a root replaced or relinked
+// after planning cannot carry its authority to a new place, the entry's folder must resolve inside
+// a pinned root, and the entry must not be a link. Limit: the interval between this check and the
+// removal itself is not closed; CORE does not defend against a same-user process racing the
+// filesystem inside it (the same boundary the close artifacts state).
+function pinRoots(roots) {
+  return roots.map((r) => {
+    try { const real = realpathSync.native(r); const st = statSync(real); return { root: r, real, dev: st.dev, ino: st.ino }; }
+    catch { return null; }
+  });
+}
+
 function assertPhysicallyWithin(entry) {
   let real;
   try { real = realpathSync.native(entry.base); } catch (e) { if (e.code === 'ENOENT') return; throw e; }
-  if (!entry.within.some((r) => containedPath(r, real) === real)) {
-    throw new Error(`refusing purge: ${entry.base} resolves to ${real}, outside ${entry.within.join(' and ')}`);
-  }
+  const inside = entry.pins.some((pin) => {
+    if (!pin) return false;
+    let now;
+    try { now = realpathSync.native(pin.root); } catch { return false; }
+    if (now !== pin.real) return false;
+    const st = statSync(pin.real);
+    if (st.dev !== pin.dev || st.ino !== pin.ino) return false;
+    const rel = relative(pin.real, real);
+    return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel));
+  });
+  if (!inside) throw new Error(`refusing purge: ${entry.base} resolves to ${real}, not inside the folders pinned when the purge was planned`);
   let st = null;
   try { st = lstatSync(entry.path); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   if (st && st.isSymbolicLink()) throw new Error(`refusing purge: ${entry.path} is a link`);
@@ -547,22 +576,29 @@ export function runTurnCaptureRetention(projectDir, {
  */
 export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env, beforeEntryDelete } = {}) {
   const dir = join(resolveStoragePath(projectDir, { home, env }), TURN_CAPTURE_DIRNAME);
+  // What this purge cannot cover is worked out first, read-only, and carried in every result,
+  // including a failed one: a false status alone does not say what is still owed.
+  let heldHistory;
+  try { heldHistory = metricsHistoryHeld(projectDir, { home, env }); }
+  catch (e) { heldHistory = [{ what: projectDir, reason: `whether earlier rows exist could not be worked out (${String(e && (e.code || e.message)).slice(0, 80)})` }]; }
   let entries;
   try {
     entries = turnCapturePurgeScope(projectDir, { home, env });
     for (const entry of entries) assertPurgeEntry(entry);
   } catch (e) {
-    return { purged: false, reason: String(e && e.message), dir, existed: existsSync(dir), scope: [] };
+    return { purged: false, reason: String(e && e.message), dir, existed: existsSync(dir), scope: [], held_history: heldHistory };
   }
 
-  const scope = entries.map((entry) => ({ ...entry, existed: existsSync(entry.path), removed: false }));
+  const pinned = new Map();
+  for (const entry of entries) for (const r of entry.within) if (!pinned.has(r)) pinned.set(r, pinRoots([r])[0]);
+  const scope = entries.map((entry) => ({ ...entry, pins: entry.within.map((r) => pinned.get(r)), existed: existsSync(entry.path), removed: false }));
   const existed = scope.some((entry) => entry.existed);
   if (!apply) {
     for (const entry of scope.filter(e => e.generatedClose)) {
       try { Object.assign(entry, purgeGeneratedCloseDirectory(entry.path)); }
       catch (e) { entry.reason = String(e.message).slice(0, 120); }
     }
-    return { purged: false, reason: 'dry-run', dir, existed, scope, held_history: metricsHistoryHeld(projectDir, { home, env }) };
+    return { purged: false, reason: 'dry-run', dir, existed, scope, held_history: heldHistory };
   }
 
   try {
@@ -586,7 +622,7 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
       }
     });
   } catch (e) {
-    return { purged: false, reason: `purge-lock-unavailable: ${String(e && e.message).slice(0, 120)}`, dir, existed, scope };
+    return { purged: false, reason: `purge-lock-unavailable: ${String(e && e.message).slice(0, 120)}`, dir, existed, scope, held_history: heldHistory };
   }
 
   const obstructed = scope.filter((entry) => !entry.removed);
@@ -594,12 +630,11 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
     return {
       purged: false,
       reason: `purge incomplete: ${obstructed.map((entry) => `${entry.id} (${entry.reason})`).join('; ')}`,
-      dir, existed, scope,
+      dir, existed, scope, held_history: heldHistory,
     };
   }
   // Earlier rows outside the project are never deleted here: they are named, with the reason, and
   // the purge does not count itself complete while they exist.
-  const heldHistory = metricsHistoryHeld(projectDir, { home, env });
   if (heldHistory.length) {
     return {
       purged: false,

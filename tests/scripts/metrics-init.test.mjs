@@ -9,9 +9,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { symlinkSync, readdirSync } from 'node:fs';
+import { symlinkSync, readdirSync, renameSync } from 'node:fs';
 import { symlinkCapable } from './trusted-test-tmp.mjs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   initMetrics,
@@ -335,6 +335,18 @@ function denyRead(file) {
   else chmodSync(file, 0o000);
   try { readFileSync(file); return false; } catch (e) { return e.code === 'EACCES' || e.code === 'EPERM'; }
 }
+// Deny listing a folder: chmod on POSIX, an ACL "(RD)" deny on Windows.
+function denyList(dir) {
+  if (process.platform === 'win32') execFileSync('icacls', [dir, '/deny', `${process.env.USERNAME}:(RD)`], { stdio: 'ignore' });
+  else chmodSync(dir, 0o000);
+  try { readdirSync(dir); return false; } catch (e) { return e.code === 'EACCES' || e.code === 'EPERM'; }
+}
+function restoreList(dir) {
+  try {
+    if (process.platform === 'win32') execFileSync('icacls', [dir, '/remove:d', process.env.USERNAME], { stdio: 'ignore' });
+    else chmodSync(dir, 0o755);
+  } catch { /* already restored */ }
+}
 function restoreRead(file) {
   try {
     if (process.platform === 'win32') execFileSync('icacls', [file, '/remove:d', process.env.USERNAME], { stdio: 'ignore' });
@@ -491,9 +503,9 @@ for (const when of ['before planning', 'after planning']) {
         let swapped = when === 'before planning';
         const r = purgeTurnCapture(projectDir, { apply: true, home, env: E, beforeEntryDelete: (entry) => {
           if (swapped || entry.id !== 'stream') return;
-          swapped = true;
           rmSync(metrics, { recursive: true, force: true });
           symlinkSync(outside, metrics, linkType);
+          swapped = true;
         } });
         assert.equal(swapped, true);
         assert.equal(r.purged, false);
@@ -521,22 +533,21 @@ test('a harness state folder that is a link is reported, not skipped as absent',
   });
 });
 
-test('a state folder that cannot be listed is reported as unknown, not as no history', async (t) => {
-  const { metricsHistoryHeld } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+test('a state folder that cannot be listed is reported as unknown, in the helper and in the purge result', async (t) => {
   const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const { metricsHistoryHeld } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   let skipped = false;
   withProject(({ home, projectDir }) => {
     registerProject(join(home, '.core'), projectDir);
     operationalMetricsDir(projectDir, { home, env: E });
     const core = join(projectDir, '.core');
-    if (process.platform === 'win32') { skipped = true; return; }
-    chmodSync(core, 0o000);
     try {
-      try { readdirSync(core); skipped = true; return; } catch (e) { if (e.code !== 'EACCES') { skipped = true; return; } }
+      if (!denyList(core)) { skipped = true; return; }
+      assert.match(metricsHistoryHeld(projectDir, { home, env: E }).map((h) => h.reason).join(' '), /could not be listed/);
       const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
       assert.equal(r.purged, false);
-      assert.match(metricsHistoryHeld(projectDir, { home, env: E }).map((h) => h.reason).join(' '), /could not be listed/);
-    } finally { chmodSync(core, 0o755); }
+      assert.match((r.held_history || []).map((h) => h.reason).join(' '), /could not be listed/, 'the purge result carries the unknown, even when it fails for another reason');
+    } finally { restoreList(core); }
   });
   if (skipped) t.skip('the platform does not deny the listing');
 });
@@ -556,3 +567,71 @@ for (const [label, registry] of [
     });
   });
 }
+
+// Allowed roots are pinned at planning: a project root, or this project's local fallback folder,
+// replaced with a link to another project after planning cannot carry the purge there.
+for (const swap of ['project root', 'local fallback folder']) {
+  test(`purge does not follow a ${swap} replaced with a link to another project after planning`, { skip: (process.platform !== 'win32' && !symlinkCapable()) || (swap === 'local fallback folder' && process.platform === 'win32') ? 'needs symlinks, and a read-only root that POSIX can express' : false }, async () => {
+    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+    const { classifyTurnsDirFor } = { classifyTurnsDirFor: (p, home) => join(operationalMetricsDir(p, { home, env: E }), 'classified') };
+    withProject(({ home, dirs: [A, B] }) => {
+      const coreDir = join(home, '.core');
+      registerProject(coreDir, A);
+      registerProject(coreDir, B);
+      const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+      const rows = {};
+      for (const p of [A, B]) {
+        mkdirSync(join(p, '_metrics', 'turn-capture'), { recursive: true });
+        rows[p] = { stream: join(p, '_metrics', 'turn-capture', '2026-10-03.jsonl') };
+        writeFileSync(rows[p].stream, `{"project":"${p === A ? 'A' : 'B'}"}\n`);
+        if (swap === 'local fallback folder') chmodSync(p, 0o555);
+        const cls = classifyTurnsDirFor(p, home);
+        mkdirSync(cls, { recursive: true });
+        rows[p].classified = join(cls, '2026-10-03.jsonl');
+        writeFileSync(rows[p].classified, '{"user_text":"synthetic"}\n');
+      }
+      let swapped = false;
+      try {
+        const r = purgeTurnCapture(A, { apply: true, home, env: E, beforeEntryDelete: (entry) => {
+          if (swapped) return;
+          if (swap === 'project root' && entry.id === 'stream') {
+            renameSync(A, A + '.aside');
+            symlinkSync(B, A, linkType);
+            swapped = true;
+          }
+          if (swap === 'local fallback folder' && entry.id === 'classified') {
+            const localA = dirname(dirname(entry.base));
+            const localB = dirname(dirname(dirname(dirname(rows[B].classified))));
+            renameSync(localA, localA + '.aside');
+            symlinkSync(localB, localA, linkType);
+            swapped = true;
+          }
+        } });
+        assert.equal(swapped, true, 'the swap ran after planning');
+        assert.equal(r.purged, false);
+        assert.equal(readFileSync(rows[B].stream, 'utf8'), '{"project":"B"}\n', "B's stream row stays");
+        assert.equal(existsSync(rows[B].classified), true, "B's classified row stays");
+      } finally {
+        for (const p of [A, B, A + '.aside']) { try { chmodSync(p, 0o755); } catch { /* not there */ } }
+      }
+    }, { projects: 2 });
+  });
+}
+
+test("a purge removes this project's classified log under every harness with trusted state", async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    registerProject(join(home, '.core'), projectDir);
+    const files = [];
+    for (const harness of ['claude-code', 'codex']) {
+      const cls = join(operationalMetricsDir(projectDir, { home, harness }), 'classified');
+      mkdirSync(cls, { recursive: true });
+      const f = join(cls, '2026-10-03.jsonl');
+      writeFileSync(f, '{"user_text":"synthetic"}\n');
+      files.push(f);
+    }
+    const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(r.purged, true, r.reason);
+    for (const f of files) assert.equal(existsSync(f), false, `purged: ${f}`);
+  });
+});
