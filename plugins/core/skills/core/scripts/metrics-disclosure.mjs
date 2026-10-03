@@ -71,7 +71,7 @@ export const NOTICE_TEXT = [
  */
 export function noticeTextFor(projectDir, { home = homedir(), env = process.env } = {}) {
   let history = [];
-  try { history = metricsHistoryFolders(projectDir, { home, env }); } catch { /* unknown: base text */ }
+  try { history = metricsHistoryFolders(projectDir, { home, env }).filter((h) => !h.foreign); } catch { /* unknown: base text */ }
   if (!history.length) return NOTICE_TEXT;
   const where = history.map((h) => `\`${h.folder}\``).join(' and ');
   return `${NOTICE_TEXT}\n\nEarlier rows from before this version are kept outside the project folder, at ${where}. Nothing new is written there, and CORE never deletes or moves it on its own. An explicit purge removes it only when it is provably this project's; if it can't be proven, the purge leaves it and says so.`;
@@ -93,7 +93,7 @@ export function checkMetricsDisclosure({ projectDir, home = homedir(), env = pro
   // Untrusted or absent state reads as null: the notice shows.
   const manifest = readManifest({ root, harness, coreDir }) || {};
   let hasHistory = false;
-  try { hasHistory = metricsHistoryFolders(projectDir, { home, env }).length > 0; } catch { /* no history known */ }
+  try { hasHistory = metricsHistoryFolders(projectDir, { home, env }).some((h) => !h.foreign); } catch { /* no history known */ }
   const version = hasHistory ? HISTORY_NOTICE_VERSION : NOTICE_VERSION;
 
   // Versioned: a project that saw an older notice is shown the current one

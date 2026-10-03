@@ -686,24 +686,35 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
  * The other registered projects, on this machine and readable by this install, whose signed
  * pin (or signed hold record) names `folder`. A hold record keeps the answer the same whichever
  * project scaffolds first.
+ *
+ * With `strict`, anything that keeps the answer from being complete throws instead of being
+ * skipped: an unreadable registry, a project whose state cannot be resolved, or a record file
+ * that exists but cannot be read. A destructive caller uses strict so that "no other project
+ * names this folder" is never the product of not being able to look.
  */
-export function otherProjectsNamingFolder(folder, { projectDir, home, env }) {
+export function otherProjectsNamingFolder(folder, { projectDir, home, env, strict = false }) {
   const coreDir = join(home, '.core');
   const harness = detectStateHarness(env);
   const out = [];
   const self = canonical(projectDir);
   let roots;
-  try { roots = readRegisteredRoots({ coreDir }); } catch { return out; }
+  try { roots = readRegisteredRoots({ coreDir }); } catch (e) { if (strict) throw e; return out; }
   for (const root of roots) {
     if (root === self) continue;
     try {
       const s = stateDir({ root, harness, kind: 'hot', coreDir });
       if (!s) continue;
       const metricsDir = join(s.dir, 'metrics');
+      if (strict) {
+        for (const name of ['storage-path.txt', 'held-legacy-folder.txt']) {
+          const file = join(metricsDir, name);
+          if (existsSync(file)) accessSync(file, fsConstants.R_OK);
+        }
+      }
       const named = readPinSigned({ dir: metricsDir, root, coreDir }) === folder
         || readHeldSigned({ dir: metricsDir, coreDir })?.folder === folder;
       if (named) out.push(root);
-    } catch { /* an unreadable project cannot vouch for a claim */ }
+    } catch (e) { if (strict) throw e; /* an unreadable project cannot vouch for a claim */ }
   }
   return out;
 }

@@ -529,8 +529,9 @@ export function runTurnCaptureRetention(projectDir, {
  */
 export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env } = {}) {
   const dir = join(resolveStoragePath(projectDir, { home, env }), TURN_CAPTURE_DIRNAME);
-  const entries = turnCapturePurgeScope(projectDir, { home, env });
+  let entries;
   try {
+    entries = turnCapturePurgeScope(projectDir, { home, env });
     for (const entry of entries) assertPurgeEntry(entry);
   } catch (e) {
     return { purged: false, reason: String(e && e.message), dir, existed: existsSync(dir), scope: [] };

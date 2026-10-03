@@ -7,8 +7,8 @@ import { registerProject } from '../../plugins/core/skills/core/scripts/index-re
 // the project's metrics state never touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   initMetrics,
@@ -183,7 +183,7 @@ test('a lost, tampered or foreign pin never turns capture off or sends it anywhe
   }, { projects: 2 });
 });
 
-test('history is found only where metrics may live and the folder is not another project\'s', () => {
+test('history is found only where metrics may live; a folder another project claims is named but never purgeable', () => {
   withProject(({ home, projectDir, dirs: [, B] }) => {
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     const outside = mkdtempSync(join(tmpdir(), 'metrics-hist-outside-'));
@@ -194,7 +194,9 @@ test('history is found only where metrics may live and the folder is not another
       mkdirSync(claimed, { recursive: true });
       writeFileSync(join(claimed, '.project-root'), B + '\n');
       signedPin(meta, home, claimed, projectDir);
-      assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [], 'claimed by another project: not history');
+      assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }),
+        [{ folder: claimed, purgeable: false, reason: 'another project claims this folder', foreign: true }],
+        'claimed by another project: named, never purgeable, and marked foreign');
       signedPin(meta, home, appData(home, 'gone'), projectDir);
       assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [], 'missing folder: nothing to name');
     } finally { rmSync(outside, { recursive: true, force: true }); }
@@ -212,7 +214,7 @@ test('two projects whose records name the same unclaimed folder both see it as h
     signedPin(operationalMetricsDir(A, { home, env: E }), home, shared, A);
     signedPin(operationalMetricsDir(B, { home, env: E }), home, shared, B);
     for (const p of [A, B]) {
-      assert.deepEqual(metricsHistoryFolders(p, { home, env: E }), [{ folder: shared, purgeable: false }]);
+      assert.deepEqual(metricsHistoryFolders(p, { home, env: E }), [{ folder: shared, purgeable: false, reason: "another project's records also name this folder" }]);
       assert.equal(initMetrics({ projectDir: p, env: E }).storagePath, join(p, '_metrics'));
     }
     assert.equal(readFileSync(join(shared, 'evidence.jsonl'), 'utf8'), '{"who":"unknown"}\n');
@@ -225,7 +227,7 @@ test('a held-folder record names history, and it is purgeable only once the proj
     const held = appData(home, 'held');
     mkdirSync(held, { recursive: true });
     writeHeldSigned({ dir: meta, folder: held, alsoNamedBy: ['/some/peer'], coreDir: join(home, '.core') });
-    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: held, purgeable: false }]);
+    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: held, purgeable: false, reason: 'an earlier migration held this folder as possibly shared, and no project has claimed it' }]);
     writeFileSync(join(held, '.project-root'), canonicalPath(projectDir) + '\n');
     assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: held, purgeable: true }]);
   });
@@ -339,5 +341,72 @@ test('the status command reports project rows and history rows separately', asyn
     const status = JSON.parse(out.stdout);
     assert.equal(status.rows, 0);
     assert.deepEqual(status.history.map((h) => h.rows), [2]);
+  });
+});
+
+// Paired ownership controls through the real purge: each case is one fixture change away from
+// the owned positive control, and only provable ownership may remove a row.
+for (const [label, setup, expect] of [
+  ['the folder\'s ownership record names this project', (ctx) => writeFileSync(ctx.ownerFile, canonicalPath(ctx.A) + '\n'), { purged: true }],
+  ['the folder\'s ownership record names another registered project', (ctx) => writeFileSync(ctx.ownerFile, canonicalPath(ctx.B) + '\n'), { purged: false, reason: /another project claims this folder/ }],
+  ['the folder\'s ownership record cannot be read', (ctx) => {
+    writeFileSync(ctx.ownerFile, canonicalPath(ctx.B) + '\n');
+    chmodSync(ctx.ownerFile, 0o000);
+    try { readFileSync(ctx.ownerFile); return 'skip'; } catch (e) { if (e.code !== 'EACCES') return 'skip'; }
+  }, { purged: false, reason: /ownership record cannot be read/ }],
+  ['another registered project\'s signed record names the same folder', (ctx) => signedPin(operationalMetricsDir(ctx.B, { home: ctx.home, env: E }), ctx.home, ctx.folder, ctx.B), { purged: false, reason: /another project's records also name/ }],
+  ['another registered project\'s record cannot be read', (ctx) => {
+    const peerPin = join(operationalMetricsDir(ctx.B, { home: ctx.home, env: E }), 'storage-path.txt');
+    signedPin(dirname(peerPin), ctx.home, appData(ctx.home, 'elsewhere'), ctx.B);
+    chmodSync(peerPin, 0o000);
+    ctx.restore = peerPin;
+    try { readFileSync(peerPin); return 'skip'; } catch (e) { if (e.code !== 'EACCES') return 'skip'; }
+  }, { purged: false, reason: /not every other project on this machine could be checked/ }],
+  ['the project registry cannot be read', (ctx) => writeFileSync(join(ctx.home, '.core', 'projects.json'), '{ not json'), { purged: false, unnamed: true, reason: /JSON|could not be read/ }],
+]) {
+  test(`purge ownership control: ${label}`, { skip: process.platform === 'win32' && /(ownership record|record) cannot be read$/.test(label) ? 'chmod does not deny reads under Windows ACLs' : false }, async (t) => {
+    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+    const { metricsHistoryFolders: history } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+    let skipped = false;
+    withProject(({ home, dirs: [A, B] }) => {
+      const coreDir = join(home, '.core');
+      registerProject(coreDir, A);
+      registerProject(coreDir, B);
+      const folder = appData(home, 'legacy');
+      mkdirSync(join(folder, 'turn-capture'), { recursive: true });
+      const row = join(folder, 'turn-capture', '2026-09-28.jsonl');
+      writeFileSync(row, '{"synthetic":1}\n');
+      signedPin(operationalMetricsDir(A, { home, env: E }), home, folder, A);
+      const ownerFile = join(folder, '.project-root');
+      const ctx = { home, A, B, folder, ownerFile };
+      try {
+        if (setup(ctx) === 'skip') { skipped = true; return; }
+        assert.equal(history(A, { home, env: E }).length, expect.unnamed ? 0 : 1, 'the folder is named as history whenever the records can be read');
+        const r = purgeTurnCapture(A, { apply: true, home, env: E });
+        assert.equal(r.purged, expect.purged, JSON.stringify(r.held_history));
+        if (expect.purged) {
+          assert.equal(existsSync(row), false, 'provably owned: the row is removed');
+        } else {
+          assert.equal(existsSync(row), true, 'not provably owned: the row stays');
+          assert.match(r.reason, expect.reason);
+          if (!expect.unnamed) assert.equal(r.held_history.length, 1, 'and the purge names what it left');
+        }
+      } finally {
+        for (const f of [ownerFile, ctx.restore]) { try { if (f) chmodSync(f, 0o644); } catch { /* not created in this case */ } }
+      }
+    }, { projects: 2 });
+    if (skipped) t.skip('the platform does not deny the read (running as root or under ACLs)');
+  });
+}
+
+test('when the records of older folders cannot be read at all, the held list says so instead of coming back empty', async () => {
+  const { metricsHistoryHeld } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  withProject(({ home, projectDir }) => {
+    registerProject(join(home, '.core'), projectDir);
+    assert.deepEqual(metricsHistoryHeld(projectDir, { home, env: E }), [], 'readable records, no history: nothing held');
+    writeFileSync(join(home, '.core', 'projects.json'), '{ not json');
+    const held = metricsHistoryHeld(projectDir, { home, env: E });
+    assert.equal(held.length, 1);
+    assert.match(held[0].reason, /could not be read/);
   });
 });

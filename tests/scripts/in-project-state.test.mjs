@@ -1037,7 +1037,7 @@ test('an ambiguous legacy metrics folder is recorded by the migration as history
     const opts = { home: s.home, env: { CORE_HARNESS: H } };
     const init = initMetrics({ projectDir: p, ...opts });
     assert.equal(init.storagePath, join(p, '_metrics'), 'writes go to the project');
-    assert.deepEqual(metricsHistoryFolders(p, opts), [{ folder: shared, purgeable: false }], 'named as history, not purgeable while ambiguous');
+    assert.deepEqual(metricsHistoryFolders(p, opts).map((h) => [h.folder, h.purgeable]), [[shared, false]], 'named as history, not purgeable while ambiguous');
     writeFileSync(join(shared, '.project-root'), p + '\n');
     assert.equal(initMetrics({ projectDir: p, ...opts }).storagePath, join(p, '_metrics'), 'claiming the folder does not route writes to it');
     assert.deepEqual(metricsHistoryFolders(p, opts), [{ folder: shared, purgeable: true }]);

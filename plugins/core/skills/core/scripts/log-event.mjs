@@ -22,10 +22,11 @@
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
+import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, metricsStorageAllowed, otherProjectsNamingFolder, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, otherProjectsNamingFolder, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
 
 /**
  * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
@@ -51,18 +52,46 @@ export function resolveStoragePath(projectDir) {
 }
 
 /**
+ * Who a history folder's `.project-root` says owns it: `absent` (no file), `self`, `other`, or
+ * `unreadable` (the file exists but cannot be read, or says nothing). Only `absent` and `self`
+ * leave room for this project to remove the folder's rows.
+ */
+function historyFolderOwner(folder, projectDir) {
+  let text;
+  try { text = readFileSync(join(folder, METRICS_OWNER_FILE), 'utf8').trim(); }
+  catch (e) { return e && e.code === 'ENOENT' ? 'absent' : 'unreadable'; }
+  if (!text) return 'unreadable';
+  return canonicalPath(text) === canonicalPath(projectDir) ? 'self' : 'other';
+}
+
+/**
  * The folders outside the project that earlier versions wrote this project's captured rows to
  * (a Windows OneDrive redirect to AppData), read-only history now. Found from the project's
- * signed records: the storage pin, the held-folder record, and the ever-external marker. A
- * folder is `purgeable` only when it is unambiguously this project's: not named by another
- * project and not claimed by one. Records that do not verify name nothing.
+ * signed records: the storage pin, the held-folder record, and the ever-external marker. Records
+ * that do not verify name nothing here (`metricsHistoryHeld` reports them).
  *
- * @returns {{folder: string, purgeable: boolean}[]}
+ * Each folder is `purgeable` only when it is provably this project's: its ownership record is
+ * absent or names this project and can be read, every other registered project could be checked
+ * and none names it, and an earlier hold (ambiguous at migration) has been resolved by a claim.
+ * Otherwise `reason` says why not. `foreign` marks a folder another project claims; the notice
+ * does not call those rows this project's.
+ *
+ * @returns {{folder: string, purgeable: boolean, reason?: string, foreign?: boolean}[]}
  */
 export function metricsHistoryFolders(projectDir, { home = homedir(), env = process.env } = {}) {
+  return historyDiscovery(projectDir, { home, env }).folders;
+}
+
+/**
+ * The history folders plus whether discovery itself could run. `error` is set when the project's
+ * records of older folders could not be read at all (an unreadable registry or state), which is
+ * different from a project that simply has none.
+ */
+function historyDiscovery(projectDir, { home, env }) {
   const coreDir = join(home, '.core');
   const own = join(projectDir, '_metrics');
   const named = [];
+  let error = null;
   try {
     const root = projectRootFor(projectDir, { home, coreDir });
     const meta = trustedMetricsDir(projectDir, { home, env });
@@ -77,18 +106,30 @@ export function metricsHistoryFolders(projectDir, { home = homedir(), env = proc
     if (marker) {
       try { const f = JSON.parse(marker).folder; if (typeof f === 'string') named.push({ folder: f, ambiguous: false }); } catch { /* not a marker this code wrote */ }
     }
-  } catch { /* no readable state: no history to name */ }
+  } catch (e) { error = e; }
+  const appData = join(home, 'AppData', 'Local', 'core-metrics');
   const out = [];
   for (const { folder, ambiguous } of named) {
-    if (folder === own || out.some((o) => o.folder === folder)) continue;
-    if (!metricsStorageAllowed(folder, { projectDir, home }) || !existsSync(folder)) continue;
-    let claimed = false;
-    try { claimed = canonicalPath(readFileSync(join(folder, METRICS_OWNER_FILE), 'utf8').trim()) === canonicalPath(projectDir); } catch { /* unclaimed */ }
-    let shared = true;
-    try { shared = otherProjectsNamingFolder(folder, { projectDir, home, env }).length > 0; } catch { /* cannot rule it out */ }
-    out.push({ folder, purgeable: !shared && (claimed || !ambiguous) });
+    if (typeof folder !== 'string' || !isAbsolute(folder) || containedPath(own, folder)) continue;
+    const prior = out.find((o) => o.folder === folder);
+    if (prior) { if (!ambiguous) prior.ambiguous = false; continue; }
+    // Only the old Windows redirect location was ever a metrics home outside the project.
+    if (!containedPath(appData, folder) || !existsSync(folder)) continue;
+    out.push({ folder, ambiguous });
   }
-  return out;
+  const folders = out.map(({ folder, ambiguous }) => {
+    const owner = historyFolderOwner(folder, projectDir);
+    let peers = null;
+    try { peers = otherProjectsNamingFolder(folder, { projectDir, home, env, strict: true }); } catch { /* could not check every project */ }
+    let reason = null;
+    if (owner === 'other') reason = 'another project claims this folder';
+    else if (owner === 'unreadable') reason = "the folder's ownership record cannot be read, so whose rows these are cannot be proven";
+    else if (peers === null) reason = 'not every other project on this machine could be checked, so another may name this folder';
+    else if (peers.length) reason = "another project's records also name this folder";
+    else if (ambiguous && owner !== 'self') reason = 'an earlier migration held this folder as possibly shared, and no project has claimed it';
+    return { folder, purgeable: !reason, ...(reason ? { reason } : {}), ...(owner === 'other' ? { foreign: true } : {}) };
+  });
+  return { folders, error };
 }
 
 /**
@@ -101,9 +142,12 @@ export function metricsHistoryFolders(projectDir, { home = homedir(), env = proc
  */
 export function metricsHistoryHeld(projectDir, { home = homedir(), env = process.env } = {}) {
   const coreDir = join(home, '.core');
-  const held = metricsHistoryFolders(projectDir, { home, env })
-    .filter((h) => !h.purgeable)
-    .map((h) => ({ what: h.folder, reason: 'another project names or may own this folder, or ownership cannot be proven' }));
+  const { folders, error } = historyDiscovery(projectDir, { home, env });
+  const held = folders.filter((h) => !h.purgeable).map((h) => ({ what: h.folder, reason: h.reason }));
+  if (error) {
+    held.push({ what: projectDir, reason: `this project's records of older external folders could not be read (${String(error.code || error.message).slice(0, 80)}), so whether any exist is unknown` });
+    return held;
+  }
   try {
     const root = projectRootFor(projectDir, { home, coreDir });
     const meta = trustedMetricsDir(projectDir, { home, env });
