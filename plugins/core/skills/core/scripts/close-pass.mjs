@@ -167,6 +167,12 @@ export function finishClose(store, { sessionId = null, status = 'closed', storeS
   if (storeSignature != null) marker.store_signature = storeSignature;
   marker.status = status; // 'closed' = finalize succeeded; 'failed' = finished but /finalize failed → detectCloseState re-owes
   marker.completed_at = now;
+  // Finishing another session's record under this session's name carries none of its ops: they
+  // were that session's work, so this session's stay owed.
+  if (owner && (marker.session_id ?? null) !== owner) {
+    marker.previous_session_id = marker.session_id ?? null;
+    marker.ops = {};
+  }
   if (owner) marker.session_id = owner;
   atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
   const release = claim
@@ -376,7 +382,9 @@ function writeCloseReceiptUnlocked(store, receipt, opts) {
   // be replaced only AFTER its bytes are successfully quarantined; a
   // quarantine failure (including a name collision) refuses rather than
   // overwriting.
-  const prior = readCloseReceiptState(store, sessionId, opts);
+  // Read in the writer's own harness scope: another harness's receipt reads as corrupt here, so it
+  // is quarantined (kept) rather than overwritten.
+  const prior = readCloseReceiptState(store, sessionId, { ...opts, harness: receipt.harness || undefined });
   if (prior.status === 'unreadable') {
     return { written: false, reason: 'prior-receipt-unreadable', error: prior.error, path: p };
   }
@@ -587,24 +595,32 @@ export const CLOSE_OPS = [
  * project-bound transcript. Refuses to synthesize an identity: an unresolvable
  * session returns { ok:false, reason:'unresolved' } and writes nothing.
  */
+/**
+ * The current session's native id, from the newest transcript bound to this project (the way
+ * /finalize's begin and certify both name it). `{sessionId: null}` when there is none.
+ */
+export function resolveCurrentSession(store, { home = null } = {}) {
+  try {
+    let canon;
+    try { canon = realpathSync(store); } catch { canon = resolve(store); }
+    const resolveOpts = { cwd: canon };
+    if (home) resolveOpts.home = home;
+    const t = resolveTranscript(CLOSE_HARNESS, resolveOpts);
+    const transcriptPath = t && t.path ? t.path : null;
+    const base = transcriptPath ? transcriptPath.split(/[\\/]/).pop() : null;
+    return { sessionId: base && base.endsWith('.jsonl') ? base.slice(0, -'.jsonl'.length) : null, transcriptPath };
+  } catch (e) {
+    return { sessionId: null, transcriptPath: null, error: String(e && e.message || e).slice(0, 120) };
+  }
+}
+
 export function certifyManualClose(store, { sessionId = null, summaryPath = null, home = null, now = new Date().toISOString() } = {}, opts = {}) {
   let sid = sessionId;
   let transcriptPath = null;
   if (!sid) {
-    try {
-      let canon;
-      try { canon = realpathSync(store); } catch { canon = resolve(store); }
-      const resolveOpts = { cwd: canon };
-      if (home) resolveOpts.home = home;
-      const t = resolveTranscript('claude-code', resolveOpts);
-      transcriptPath = t && t.path ? t.path : null;
-      if (transcriptPath) {
-        const base = transcriptPath.split(/[\\/]/).pop();
-        if (base && base.endsWith('.jsonl')) sid = base.slice(0, -'.jsonl'.length);
-      }
-    } catch (e) {
-      return { ok: false, reason: 'unresolved', detail: String(e && e.message || e).slice(0, 120) };
-    }
+    const r = resolveCurrentSession(store, { home });
+    if (r.error) return { ok: false, reason: 'unresolved', detail: r.error };
+    sid = r.sessionId; transcriptPath = r.transcriptPath;
   }
   if (!sid) return { ok: false, reason: 'unresolved' };
 
@@ -616,6 +632,11 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
   // an explicitly recorded judgment — before a closed receipt can exist. A
   // failed or missing required op refuses; the session stays owed.
   const marker = readJson(markerPath(store)) || { ops: {} };
+  // The op record is evidence only for the session it was begun for: an older session's record,
+  // or one begun without a session, does not close this one.
+  if ((marker.session_id ?? null) !== sid) {
+    return { ok: false, reason: 'marker-session-mismatch', session_id: sid, marker_session_id: marker.session_id ?? null };
+  }
   const ops = marker.ops || {};
   const incomplete = CLOSE_OPS.filter((op) => !isOpSatisfied(op, ops[op]));
   if (incomplete.length) {
@@ -676,7 +697,8 @@ function main(argv) {
       return 0;
     }
     case 'begin': {
-      const r = beginClose(store, { sessionId: f.session || null, ops });
+      // Without --session, begin names the session the way certify will, so the op record is bound to it.
+      const r = beginClose(store, { sessionId: f.session || resolveCurrentSession(store).sessionId || null, ops });
       process.stdout.write(json ? JSON.stringify(r) + '\n' : (r.ok ? 'lock acquired; close in-progress\n' : `lock ${r.reason}; another close is running\n`));
       return r.ok ? 0 : 1;
     }
@@ -739,6 +761,8 @@ function main(argv) {
       if (!r.ok) {
         if (r.reason === 'required-ops-incomplete') {
           process.stdout.write(`REQUIRED-OPS-INCOMPLETE: ${(r.incomplete || []).join(', ')} — record or legitimately skip them, then certify\n`);
+        } else if (r.reason === 'marker-session-mismatch') {
+          process.stdout.write(`MARKER-SESSION-MISMATCH: the recorded ops belong to ${r.marker_session_id || 'no session'}, not ${r.session_id}; begin a close for this session and record its ops, then certify\n`);
         } else if (r.reason === 'unresolved') {
           process.stdout.write('UNRESOLVED: no session identity could be established; pass --session <id>\n');
         } else {

@@ -23,7 +23,7 @@ node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs begin <project> --session <
   --ops material-capture,render-project-md,session-summary,memory-refresh
 ```
 
-If `begin` refuses ("lock held"), another close is running — stop and say so. Record each op below as you complete it (`close-pass.mjs record <project> --op <op> --status done|skipped|failed`); the per-op trail is what makes a crashed close recoverable.
+Without `--session`, `begin` names the session from the newest project-bound transcript, the same way `certify` does, so the op record belongs to this session. If `begin` refuses ("lock held"), another close is running — stop and say so. Record each op below as you complete it (`close-pass.mjs record <project> --op <op> --status done|skipped|failed`); the per-op trail is what makes a crashed close recoverable.
 
 ## Step 2 — Material capture (from the active context, once)
 
@@ -89,7 +89,7 @@ Certify this exact session's close receipt — this is what stops the SessionEnd
 node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs certify <project> --summary <summary-path>
 ```
 
-`certify` resolves the current session's native id from the newest project-bound transcript and writes the `closed` receipt. If it prints `UNRESOLVED`, pass `--session <id>` explicitly if you know it; otherwise say so — the automatic close will record the session's lifecycle evidence instead, and nothing is lost.
+`certify` resolves the current session's native id from the newest project-bound transcript and writes the `closed` receipt. It counts only ops recorded for this same session: if it prints `MARKER-SESSION-MISMATCH`, the recorded ops belong to another session, so begin again for this one and record its ops. If it prints `UNRESOLVED`, pass `--session <id>` explicitly if you know it; otherwise say so — the automatic close will record the session's lifecycle evidence instead, and nothing is lost.
 
 Then finish the marker and release the lock:
 

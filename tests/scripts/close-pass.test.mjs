@@ -482,3 +482,77 @@ test('when another harness\'s receipt cannot be set aside, the close stays owed 
 function receiptPathSummary(rPath) {
   return join(dirname(dirname(rPath)), 'summaries', rPath.split(/[\\/]/).pop().replace(/\.json$/, '.md'));
 }
+
+// Manual certification counts only ops recorded for the same session, and keeps another
+// harness's receipt instead of overwriting it.
+test('manual certification: exact-session op record, no relabeled carry-over, other-harness receipt kept', async () => {
+  const cp = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const { readFileSync, existsSync } = await import('node:fs');
+  const store = freshStore();
+  try {
+    const opts = { storageRoot: join(store, '_metrics') };
+    const complete = (sid) => {
+      assert.equal(cp.beginClose(store, { sessionId: sid, ops: cp.CLOSE_OPS }).ok, true);
+      for (const op of cp.CLOSE_OPS) cp.recordOp(store, { op });
+      cp.finishClose(store, { sessionId: sid });
+    };
+    // Positives: the matching complete record certifies; a matching incomplete one does not.
+    complete('match');
+    assert.equal(cp.certifyManualClose(store, { sessionId: 'match' }, opts).ok, true);
+    cp.beginClose(store, { sessionId: 'thin', ops: cp.CLOSE_OPS });
+    for (const op of cp.CLOSE_OPS.filter((o) => o !== 'material-capture')) cp.recordOp(store, { op });
+    cp.finishClose(store, { sessionId: 'thin' });
+    assert.equal(cp.certifyManualClose(store, { sessionId: 'thin' }, opts).reason, 'required-ops-incomplete');
+
+    // An older session's complete record does not close the current one.
+    complete('older');
+    const stale = cp.certifyManualClose(store, { sessionId: 'current' }, opts);
+    assert.equal(stale.reason, 'marker-session-mismatch');
+    assert.equal(existsSync(receiptPath(store, 'current', opts)), false, 'no receipt written');
+
+    // Finishing it under the current session's name carries none of its ops.
+    const fin = cp.finishClose(store, { sessionId: 'current' });
+    assert.equal(fin.session_id, 'current');
+    assert.equal(fin.previous_session_id, 'older');
+    assert.equal(cp.certifyManualClose(store, { sessionId: 'current' }, opts).reason, 'required-ops-incomplete');
+    assert.equal(existsSync(receiptPath(store, 'current', opts)), false, 'still no receipt');
+
+    // Catch-up finishing an older session's close without naming a session keeps its ops.
+    cp.beginClose(store, { sessionId: 'crashed', ops: cp.CLOSE_OPS });
+    for (const op of cp.CLOSE_OPS) cp.recordOp(store, { op });
+    cp.releaseLock(store, { sessionId: 'crashed' });
+    const caught = cp.finishClose(store, {});
+    assert.equal(caught.session_id, 'crashed');
+    assert.equal(Object.keys(caught.ops).length, cp.CLOSE_OPS.length);
+
+    // A genuine Codex receipt at the same session id survives a Claude Code certification.
+    cp.runDeterministicClose(store, { sessionId: 'shared', harness: 'codex', events: [] }, opts);
+    const codexBytes = readFileSync(receiptPath(store, 'shared', opts), 'utf8');
+    complete('shared');
+    const cert = cp.certifyManualClose(store, { sessionId: 'shared' }, opts);
+    assert.equal(cert.ok, true, JSON.stringify(cert));
+    const dir = dirname(receiptPath(store, 'shared', opts));
+    const kept = readdirSync(dir).filter((n) => n.startsWith(`${cp.sessionKey('shared')}.json.`)).map((n) => readFileSync(join(dir, n), 'utf8'));
+    assert.deepEqual(kept, [codexBytes], 'the Codex receipt is kept byte for byte');
+    assert.equal(JSON.parse(readFileSync(receiptPath(store, 'shared', opts), 'utf8')).harness, 'claude-code');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('begin without --session names the session from the project-bound transcript, as certify does', async () => {
+  const store = freshStore();
+  const home = mkdtempSync(join(tmpdir(), 'begin-home-'));
+  try {
+    const { mapProjectPathToSlug } = await import('../../plugins/core/skills/core/scripts/project-slug.mjs');
+    const { realpathSync, readFileSync } = await import('node:fs');
+    const tdir = join(home, '.claude', 'projects', mapProjectPathToSlug(realpathSync(store)));
+    mkdirSync(tdir, { recursive: true });
+    writeFileSync(join(tdir, 'sess-begin-5.jsonl'), '{"type":"user"}\n');
+    const r = spawnSync(process.execPath, [SCRIPT, 'begin', store, '--ops', CLOSE_OPS.join(',')], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } });
+    assert.equal(r.status, 0, r.stderr);
+    const marker = JSON.parse(readFileSync(join(store, '_memories', '_close-marker.json'), 'utf8'));
+    assert.equal(marker.session_id, 'sess-begin-5');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
