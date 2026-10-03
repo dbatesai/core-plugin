@@ -936,18 +936,15 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   const localTurnOptOut = localManifest?.turn_capture === false;
   const harnessDir = join(real, STATE_DIRNAME, harness);
   const manifestFile = join(harnessDir, MANIFEST);
-  const bootstrapFile = join(harnessDir, BOOTSTRAP);
 
   let manifest = null;
   if (existsSync(manifestFile)) {
     try { manifest = JSON.parse(readFileSync(manifestFile, 'utf8')); } catch { manifest = null; }
     if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) { setAsideUnparseable(manifestFile); manifest = null; }
   }
-  let bootstrapBody = null;
-  if (existsSync(bootstrapFile)) {
-    bootstrapBody = readFileSync(bootstrapFile, 'utf8');
-    try { JSON.parse(bootstrapBody); } catch { setAsideUnparseable(bootstrapFile); bootstrapBody = null; }
-  }
+  // The bootstrap record is completion evidence, and another install's record proves nothing
+  // about this one: it is never carried or re-signed. Left unsigned where it is, it reads as
+  // absent, so the first session here runs startup in full.
 
   writeStamp({ root: real, harness, coreDir });
   if (manifest) {
@@ -966,11 +963,6 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   } else if (localOptOut || localTurnOptOut) {
     withFileLock(`${manifestFile}.lock`, () => {
       writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify({ ...(localOptOut ? { metrics_enabled: false } : {}), ...(localTurnOptOut ? { turn_capture: false } : {}), harness }, null, 2) + '\n', coreDir });
-    });
-  }
-  if (bootstrapBody !== null) {
-    withFileLock(`${bootstrapFile}.lock`, () => {
-      writeSignedFile({ dir: harnessDir, name: BOOTSTRAP, body: bootstrapBody, coreDir, mode: 0o600 });
     });
   }
   const registered = registerProject(coreDir, real, { home: dirname(canonical(coreDir)), confirmNew: true });
