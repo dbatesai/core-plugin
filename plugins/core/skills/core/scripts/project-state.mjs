@@ -720,25 +720,68 @@ export function stateHarnesses({ root, coreDir = defaultCoreDir(), include = [] 
 }
 
 /**
- * The external folders a project's records name for one harness: the signed storage pin and held
- * record in its hot metrics state, and the signed ever-external marker in its durable state.
- * Records that do not verify name nothing here; `metricsHistoryHeld` reports them.
+ * Every place this project's state for one harness can be, whichever one routing picks today: the
+ * project folder (`<root>/.core/<harness>`) and the machine-local fallback
+ * (`~/.core/local/<project>/<harness>`). Registration and root writability move routing between
+ * them, and the one not chosen can still hold records and rows. Read-only: nothing is created,
+ * adopted or set aside. A place that exists but can't be trusted as this project's is a problem,
+ * not an absence: project state whose stamp doesn't verify, or a fallback folder that is a link
+ * or resolves somewhere other than its own spot under `~/.core/local`.
+ *
+ * @returns {{ locations: {kind: 'project'|'local', dir: string, keyDir?: string}[], problems: {what: string, reason: string}[] }}
+ */
+export function stateLocations({ root, harness, coreDir = defaultCoreDir() }) {
+  assertHarnessName(harness);
+  const real = canonical(root);
+  const locations = [];
+  const problems = [];
+  const projectDir = join(real, STATE_DIRNAME, harness);
+  if (existsSync(projectDir) || isSymlink(projectDir)) {
+    const { status } = classifyStamp({ root: real, harness, coreDir });
+    if (existsSync(join(projectDir, MIGRATING_MARKER))) problems.push({ what: projectDir, reason: `this project's ${harness} state cannot be read as its own (migration in progress)` });
+    else if (status === 'verified' || status === 'moved') locations.push({ kind: 'project', dir: projectDir });
+    else if (status !== 'absent') problems.push({ what: projectDir, reason: `this project's ${harness} state cannot be read as its own (${status})` });
+  }
+  const localRoot = join(coreDir, 'local');
+  const keyDir = join(localRoot, localRootKey(real));
+  const localDir = join(keyDir, harness);
+  if (existsSync(keyDir) || isSymlink(keyDir)) {
+    let expected = null;
+    try { expected = join(realpathSync.native(localRoot), localRootKey(real)); } catch { /* no local root */ }
+    let actual = null;
+    try { actual = realpathSync.native(keyDir); } catch { /* dangling */ }
+    if (isSymlink(keyDir) || !expected || actual !== expected) {
+      problems.push({ what: keyDir, reason: "this project's machine-local state folder is a link or resolves outside its own place, so it cannot be read as this project's" });
+    } else if (isSymlink(localDir)) {
+      problems.push({ what: localDir, reason: `this project's machine-local ${harness} state is a link, so it cannot be read as this project's` });
+    } else if (existsSync(localDir)) {
+      locations.push({ kind: 'local', dir: localDir, keyDir });
+    }
+  }
+  return { locations, problems };
+}
+
+function isSymlink(p) {
+  try { return lstatSync(p).isSymbolicLink(); } catch { return false; }
+}
+
+/**
+ * The external folders a project's records name for one harness, read from every place its state
+ * can be (`stateLocations`): the signed storage pin and held record under `metrics/`, and the
+ * signed ever-external marker. Records that do not verify name nothing here; `metricsHistoryHeld`
+ * reports them.
  *
  * @returns {{folder: string, ambiguous: boolean}[]}
  */
 export function historyRecordFolders({ root, harness, coreDir = defaultCoreDir() }) {
   const out = [];
-  const hot = stateDir({ root, harness, kind: 'hot', coreDir });
-  const durable = stateDir({ root, harness, coreDir });
-  const meta = hot ? join(hot.dir, 'metrics') : null;
-  if (meta) {
+  for (const { dir } of stateLocations({ root, harness, coreDir }).locations) {
+    const meta = join(dir, 'metrics');
     const pin = readPinSigned({ dir: meta, root, coreDir });
     if (pin) out.push({ folder: pin, ambiguous: false });
     const held = readHeldSigned({ dir: meta, coreDir });
     if (held) out.push({ folder: held.folder, ambiguous: true });
-  }
-  if (durable) {
-    const raw = readSignedFileAt({ dir: durable.dir, name: METRICS_EXTERNAL_MARKER, coreDir });
+    const raw = readSignedFileAt({ dir, name: METRICS_EXTERNAL_MARKER, coreDir });
     if (raw !== null) {
       try { const f = JSON.parse(raw).folder; if (typeof f === 'string') out.push({ folder: f, ambiguous: false }); } catch { /* not a marker this code wrote */ }
     }

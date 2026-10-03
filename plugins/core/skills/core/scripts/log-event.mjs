@@ -26,7 +26,7 @@ import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnesses, registryShapeProblem, classifyStamp, MIGRATING_MARKER, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnesses, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
 
 /**
  * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
@@ -123,12 +123,16 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
   let harnesses;
   try { harnesses = stateHarnesses({ root, coreDir, include: [detectStateHarness(env)] }); }
   catch (e) { return [{ what: join(root, '.core'), reason: `this project's state folders could not be listed (${String(e.code || e.message).slice(0, 80)}), so whether it has records of older external folders is unknown` }]; }
+  // Every place each harness's state can be, not only the one routing picks today: a place that
+  // can't be read as this project's hides any record in it, so it is held.
+  const places = [];
   for (const harness of harnesses) {
-    let status;
-    try { ({ status } = classifyStamp({ root, harness, coreDir })); } catch (e) { status = `unreadable: ${e.code || e.message}`; }
-    const migrating = existsSync(join(root, '.core', harness, MIGRATING_MARKER));
-    if (migrating || !['absent', 'verified', 'moved'].includes(status)) {
-      held.push({ what: join(root, '.core', harness), reason: `this project's ${harness} state cannot be read as its own (${migrating ? 'migration in progress' : status}), so any record of an older external folder in it is hidden; nothing was moved` });
+    try {
+      const { locations, problems } = stateLocations({ root, harness, coreDir });
+      for (const p of problems) held.push({ what: p.what, reason: `${p.reason}, so any record of an older external folder in it is hidden; nothing was moved` });
+      places.push(...locations);
+    } catch (e) {
+      held.push({ what: join(root, '.core', harness), reason: `this project's ${harness} state could not be read (${String(e.code || e.message).slice(0, 80)})` });
     }
   }
   if (held.length) return held;
@@ -142,20 +146,15 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
     held.push({ what: projectDir, reason: `this project's records of older external folders could not be read (${String(error.code || error.message).slice(0, 80)}), so whether any exist is unknown` });
     return held;
   }
-  for (const harness of harnesses) {
-    try {
-      const meta = (() => { const s = stateDir({ root, harness, kind: 'hot', coreDir }); return s ? join(s.dir, 'metrics') : null; })();
-      const durable = stateDir({ root, harness, coreDir });
-      const unverified = (dir, name, verifies) => {
-        if (!dir || !(existsSync(join(dir, name)) || existsSync(join(dir, `${name}.mac`)))) return;
-        if (!verifies()) held.push({ what: join(dir, name), reason: 'a record of an older external folder exists but does not verify, so the folder it names cannot be found' });
-      };
-      unverified(meta, 'storage-path.txt', () => readPinSigned({ dir: meta, root, coreDir }) !== null);
-      unverified(meta, 'held-legacy-folder.txt', () => readHeldSigned({ dir: meta, coreDir }) !== null);
-      unverified(durable && durable.dir, EXTERNAL_MARKER, () => readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir }) !== null);
-    } catch (e) {
-      held.push({ what: join(root, '.core', harness), reason: `this project's ${harness} state could not be read (${String(e.code || e.message).slice(0, 80)})` });
-    }
+  for (const { dir } of places) {
+    const meta = join(dir, 'metrics');
+    const unverified = (d, name, verifies) => {
+      if (!(existsSync(join(d, name)) || existsSync(join(d, `${name}.mac`)))) return;
+      if (!verifies()) held.push({ what: join(d, name), reason: 'a record of an older external folder exists but does not verify, so the folder it names cannot be found' });
+    };
+    unverified(meta, 'storage-path.txt', () => readPinSigned({ dir: meta, root, coreDir }) !== null);
+    unverified(meta, 'held-legacy-folder.txt', () => readHeldSigned({ dir: meta, coreDir }) !== null);
+    unverified(dir, EXTERNAL_MARKER, () => readSignedFileAt({ dir, name: EXTERNAL_MARKER, coreDir }) !== null);
   }
   return held;
 }

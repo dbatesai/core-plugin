@@ -48,7 +48,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
-import { projectRootFor, projectStateDir, localStateDir, stateHarnesses, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
+import { projectRootFor, projectStateDir, localStateDir, stateHarnesses, stateLocations, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
@@ -452,15 +452,23 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
   const root = projectRootFor(projectDir, { home, coreDir });
   const inProject = [projectDir];
   const inProjectOrLocal = (harness = detectStateHarness(env)) => [projectDir, dirname(localStateDir({ root, harness, coreDir }))];
-  // The classified log of every other harness with trusted state for this project is the same
-  // captured data and is purged too; state that can't be read is reported by metricsHistoryHeld.
+  // The classified log is the same captured data in every place a harness's state can be, routed
+  // there today or not (the project folder and the machine-local fallback); each one this project
+  // can read as its own is purged. Places it can't are reported by metricsHistoryHeld.
   const running = detectStateHarness(env);
-  let others = [];
-  try { others = stateHarnesses({ root, coreDir }).filter((h) => h !== running); } catch { /* reported as held */ }
   const otherClassified = [];
-  for (const harness of others) {
-    const meta = trustedMetricsDir(projectDir, { home, env, harness });
-    if (meta) otherClassified.push({ id: 'classified', harness, path: join(meta, CLASSIFIED_DIRNAME), tree: true, base: meta, within: inProjectOrLocal(harness) });
+  const seen = new Set([join(classifiedBase, CLASSIFIED_DIRNAME)]);
+  let harnesses = [running];
+  try { harnesses = stateHarnesses({ root, coreDir, include: [running] }); } catch { /* reported as held */ }
+  for (const harness of harnesses) {
+    let locations = [];
+    try { ({ locations } = stateLocations({ root, harness, coreDir })); } catch { /* reported as held */ }
+    for (const loc of locations) {
+      const path = join(loc.dir, 'metrics', CLASSIFIED_DIRNAME);
+      if (seen.has(path) || !existsSync(path)) continue;
+      seen.add(path);
+      otherClassified.push({ id: 'classified', harness, path, tree: true, base: join(loc.dir, 'metrics'), within: loc.kind === 'project' ? inProject : [loc.keyDir] });
+    }
   }
   return [
     { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true, base, within: inProject },
@@ -479,9 +487,18 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
 // a pinned root, and the entry must not be a link. Limit: the interval between this check and the
 // removal itself is not closed; CORE does not defend against a same-user process racing the
 // filesystem inside it (the same boundary the close artifacts state).
-function pinRoots(roots) {
+function pinRoots(roots, coreDir) {
+  const localRoot = join(coreDir, 'local');
   return roots.map((r) => {
-    try { const real = realpathSync.native(r); const st = statSync(real); return { root: r, real, dev: st.dev, ino: st.ino }; }
+    try {
+      // A machine-local fallback folder is this project's only at its own spot under ~/.core/local:
+      // a link there, or one that resolves elsewhere, is not pinned, so nothing inside it is purged.
+      if (dirname(r) === localRoot) {
+        if (lstatSync(r).isSymbolicLink()) return null;
+        if (realpathSync.native(r) !== join(realpathSync.native(localRoot), basename(r))) return null;
+      }
+      const real = realpathSync.native(r); const st = statSync(real); return { root: r, real, dev: st.dev, ino: st.ino };
+    }
     catch { return null; }
   });
 }
@@ -590,7 +607,7 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
   }
 
   const pinned = new Map();
-  for (const entry of entries) for (const r of entry.within) if (!pinned.has(r)) pinned.set(r, pinRoots([r])[0]);
+  for (const entry of entries) for (const r of entry.within) if (!pinned.has(r)) pinned.set(r, pinRoots([r], join(home, '.core'))[0]);
   const scope = entries.map((entry) => ({ ...entry, pins: entry.within.map((r) => pinned.get(r)), existed: existsSync(entry.path), removed: false }));
   const existed = scope.some((entry) => entry.existed);
   if (!apply) {

@@ -635,3 +635,83 @@ test("a purge removes this project's classified log under every harness with tru
     for (const f of files) assert.equal(existsSync(f), false, `purged: ${f}`);
   });
 });
+
+// History discovery and the classified purge read every place a harness's state can be, not just
+// the one routed to today.
+const POSIX_RO = process.platform === 'win32' || process.getuid?.() === 0 ? 'needs a read-only root that POSIX can express' : false;
+
+test('a pin written while the project was unregistered still names its folder after the project is registered', async () => {
+  const { localStateDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    const coreDir = join(home, '.core');
+    const meta = operationalMetricsDir(projectDir, { home, env: E });
+    assert.equal(meta, join(localStateDir({ root: projectRootFor(projectDir, { home, coreDir }), harness: 'claude-code', coreDir }), 'metrics'));
+    const old = appData(home, 'p1'); mkdirSync(old, { recursive: true });
+    signedPin(meta, home, old, projectDir);
+    registerProject(coreDir, projectDir);
+    assert.notEqual(operationalMetricsDir(projectDir, { home, env: E }), meta, 'routing moved to the project');
+    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }).map((f) => f.folder), [old]);
+    const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(r.purged, false);
+    assert.ok(r.held_history.some((h) => h.what === old), JSON.stringify(r.held_history));
+    assert.equal(existsSync(old), true, 'the old folder is left alone');
+  });
+});
+
+test('a pin in the project folder still names its folder when the root turns read-only and routing falls back', { skip: POSIX_RO }, async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    registerProject(join(home, '.core'), projectDir);
+    const meta = operationalMetricsDir(projectDir, { home, env: E });
+    assert.doesNotMatch(meta, /[\\/]local[\\/]/, 'state starts in the project folder');
+    const old = appData(home, 'p1'); mkdirSync(old, { recursive: true });
+    signedPin(meta, home, old, projectDir);
+    chmodSync(projectDir, 0o555);
+    try {
+      assert.notEqual(operationalMetricsDir(projectDir, { home, env: E }), meta, 'routing fell back');
+      assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }).map((f) => f.folder), [old]);
+      const r = purgeTurnCapture(projectDir, { apply: false, home, env: E });
+      assert.ok(r.held_history.some((h) => h.what === old), JSON.stringify(r.held_history));
+    } finally { chmodSync(projectDir, 0o755); }
+  });
+});
+
+test('a purge removes classified rows in the project folder and the local fallback when the registry is reset', async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    const coreDir = join(home, '.core');
+    registerProject(coreDir, projectDir);
+    const write = () => {
+      const cls = join(operationalMetricsDir(projectDir, { home, env: E }), 'classified');
+      mkdirSync(cls, { recursive: true });
+      const f = join(cls, '2026-10-03.jsonl'); writeFileSync(f, '{"user_text":"synthetic"}\n'); return f;
+    };
+    const inProject = write();
+    writeFileSync(join(coreDir, 'projects.json'), '[]\n');
+    const local = write();
+    assert.notEqual(inProject, local, 'the two rows are in different places');
+    const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(r.purged, true, r.reason);
+    assert.equal(existsSync(inProject), false, 'project-folder row purged');
+    assert.equal(existsSync(local), false, 'local row purged');
+  });
+});
+
+test("a local state folder linked to another project's before the purge is not this project's to purge", { skip: process.platform !== 'win32' && !symlinkCapable() ? 'needs symlinks' : false }, async () => {
+  const { localStateDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, dirs: [A, B] }) => {
+    const coreDir = join(home, '.core');
+    const clsB = join(operationalMetricsDir(B, { home, env: E }), 'classified');
+    mkdirSync(clsB, { recursive: true });
+    const rowB = join(clsB, '2026-10-03.jsonl'); writeFileSync(rowB, '{"user_text":"B"}\n');
+    const keyOf = (p) => dirname(localStateDir({ root: projectRootFor(p, { home, coreDir }), harness: 'claude-code', coreDir }));
+    mkdirSync(dirname(keyOf(A)), { recursive: true });
+    symlinkSync(keyOf(B), keyOf(A), process.platform === 'win32' ? 'junction' : 'dir');
+    const r = purgeTurnCapture(A, { apply: true, home, env: E });
+    assert.equal(r.purged, false);
+    assert.equal(readFileSync(rowB, 'utf8'), '{"user_text":"B"}\n', "B's row stays");
+    assert.match(JSON.stringify(r.held_history), /link or resolves outside/);
+  }, { projects: 2 });
+});
