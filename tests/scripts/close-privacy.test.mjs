@@ -275,7 +275,7 @@ test('shared lock blocks close and explicit purge; manual terminal receipt wins 
       try { runDeterministicClose(project,{sessionId:'locked',events:[]}); } catch(e) {closeBlocked=e.code==='LOCK_HELD';}
       purgeBlocked=!purgeTurnCapture(project,{apply:true}).purged;
     });
-    writeCloseReceipt(project,{session_id:'manual-wins',status:'closed',summary_path:null});
+    writeCloseReceipt(project,{session_id:'manual-wins',status:'closed',harness:'claude-code',closed_at:'2026-10-03T00:00:00Z',summary_path:null});
     const prior=runDeterministicClose(project,{sessionId:'manual-wins',events:[{kind:'text',role:'user',text:${JSON.stringify(sentinel)}}]});
     console.log(JSON.stringify({closeBlocked,purgeBlocked,prior}));
   `);

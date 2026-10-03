@@ -296,7 +296,7 @@ test('a corrupt receipt is reported corrupt and its bytes survive replacement', 
     const state = readCloseReceiptState(store, 's-corrupt', opts);
     assert.equal(state.status, 'corrupt', 'a torn receipt is corrupt, not absent');
 
-    writeCloseReceipt(store, { session_id: 's-corrupt', status: 'recorded' }, opts);
+    writeCloseReceipt(store, { session_id: 's-corrupt', status: 'recorded', harness: 'claude-code', record: {} }, opts);
     const dir = join(root, 'close', 'receipts');
     const quarantined = readdirSync(dir).filter((n) => n.includes('.corrupt-'));
     assert.equal(quarantined.length, 1, 'the corrupt bytes are quarantined beside the fresh receipt');
@@ -346,5 +346,51 @@ test('CLI detect: a unit changed after a clean close re-owes the store-derived o
     assert.equal(owed.state, 'owed', 'a session that changed the store after the last close is owed a close');
     assert.equal(owed.reason, 'store-changed');
     assert.deepEqual(owed.owed, ['render-project-md']);
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+// A receipt at a session's filename is evidence only when its payload names that session, its
+// status carries the evidence it claims, and, when it names a project, it names this one.
+test('terminal-receipt controls: only matching, well-formed evidence suppresses an owed close', () => {
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    const auto = (sid, status) => ({ session_id: sid, status, harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z', record: { ended_at: '2026-10-03T00:00:00Z' } });
+    const put = (sid, body) => writeFileSync(receiptPath(store, sid, opts), JSON.stringify(body));
+
+    put('full', auto('full', 'recorded'));
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'full' }, opts), false, 'a full automatic close suppresses a duplicate');
+    put('partial', auto('partial', 'partial'));
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'partial' }, opts), true, 'a partial close stays owed');
+    put('manual', { session_id: 'manual', status: 'closed', harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z', summary_path: null });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'manual' }, opts), false, 'a manual certification suppresses');
+
+    put('mine', auto('someone-else', 'recorded'));
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'mine' }, opts), true, "another session's receipt at this filename is not evidence");
+    assert.equal(readCloseReceiptState(store, 'mine', opts).problem, 'session-mismatch');
+
+    put('bare', { status: 'closed' });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'bare' }, opts), true, 'a status with nothing behind it is not evidence');
+    put('cert-thin', { session_id: 'cert-thin', status: 'closed' });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'cert-thin' }, opts), true, 'a certification without its harness and time is not evidence');
+    put('thin', { session_id: 'thin', status: 'recorded' });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'thin' }, opts), true, 'an automatic status without its record is not evidence');
+
+    put('copied', { ...auto('copied', 'recorded'), root: '/some/other/project' });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'copied' }, opts), true, "a receipt naming another project is not this project's evidence");
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('a receipt the deterministic close writes names its project and reads back as valid', async () => {
+  const { runDeterministicClose } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const { canonical } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const store = freshStore();
+  try {
+    const opts = { storageRoot: join(store, '_metrics') };
+    const r = runDeterministicClose(store, { sessionId: 'det', events: [] }, opts);
+    assert.equal(r.root, canonical(store));
+    assert.equal(readCloseReceiptState(store, 'det', opts).status, 'valid');
   } finally { rmSync(store, { recursive: true, force: true }); }
 });

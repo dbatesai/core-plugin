@@ -41,7 +41,7 @@ import { closeStorageRoot, prepareCloseStorageRoot, prepareCloseDirectory, asser
 import { turnCaptureEnabled } from './turn-capture.mjs';
 import { buildCloseRecord, renderCloseSummary } from './close-payload.mjs';
 import { trustedHome, requireTrustedHome } from './trusted-home.mjs';
-import { readRegisteredRoots, resolveProjectRoot } from './project-state.mjs';
+import { readRegisteredRoots, resolveProjectRoot, canonical } from './project-state.mjs';
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
@@ -306,13 +306,36 @@ export function readCloseReceiptState(store, sessionId, opts = {}) {
     if (e && e.code === 'ENOENT') return { status: 'absent', receipt: null };
     return { status: 'unreadable', receipt: null, error: String(e && e.message || e).slice(0, 160) };
   }
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return { status: 'valid', receipt: parsed };
-    return { status: 'corrupt', receipt: null };
-  } catch {
-    return { status: 'corrupt', receipt: null };
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { return { status: 'corrupt', receipt: null }; }
+  const problem = receiptShapeProblem(parsed, { sessionId, store });
+  // A receipt that names another session or project, or lacks the evidence its status claims, is
+  // not evidence for this session: it reads as corrupt, so the session stays owed and the next
+  // write quarantines (never deletes) it.
+  if (problem) return { status: 'corrupt', receipt: null, problem };
+  return { status: 'valid', receipt: parsed };
+}
+
+/**
+ * Why a parsed receipt is not valid evidence for this exact session and project, or null. A
+ * filename keyed by the session is not identity: the payload must name the same session. A status
+ * alone is not evidence: an automatic `recorded` or `partial` receipt must carry its record and
+ * harness, and a manual `closed` certification its harness and time. A receipt that names
+ * its project must name this one; older receipts that predate the field are read as before.
+ */
+function receiptShapeProblem(parsed, { sessionId, store }) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 'not-an-object';
+  if (parsed.session_id !== sessionId) return 'session-mismatch';
+  if (typeof parsed.status !== 'string') return 'no-status';
+  if (parsed.root !== undefined && parsed.root !== canonical(resolve(store))) return 'root-mismatch';
+  if (parsed.status === 'recorded' || parsed.status === 'partial') {
+    // The writer mark is not required: receipts written before it existed, and receipts a later
+    // backfill stamped, are legitimate. The record and harness are.
+    if (!parsed.record || typeof parsed.record !== 'object' || !('harness' in parsed)) return 'automatic-evidence-missing';
+  } else if (parsed.status === 'closed') {
+    if (typeof parsed.harness !== 'string' || typeof parsed.closed_at !== 'string') return 'certification-evidence-missing';
   }
+  return null;
 }
 
 /** Convenience read: the valid receipt or null. State-sensitive callers use readCloseReceiptState. */
@@ -426,6 +449,7 @@ export function runDeterministicClose(store, {
     const receipt = markCloseReceipt({
       session_id: sessionId,
       status: coverage === 'full' ? 'recorded' : 'partial',
+      root: canonical(resolve(store)),
       harness,
       closed_at: now,
       ops: { capture: 'done', summary: 'done', 'project-state': 'skipped' },
@@ -564,6 +588,7 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
   const receipt = {
     session_id: sid,
     status: 'closed',
+    root: canonical(resolve(store)),
     harness: 'claude-code',
     closed_at: now,
     summary_path: summaryPath || null,
