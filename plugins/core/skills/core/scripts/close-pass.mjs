@@ -308,7 +308,7 @@ export function readCloseReceiptState(store, sessionId, opts = {}) {
   }
   let parsed;
   try { parsed = JSON.parse(raw); } catch { return { status: 'corrupt', receipt: null }; }
-  const problem = receiptShapeProblem(parsed, { sessionId, store });
+  const problem = receiptShapeProblem(parsed, { sessionId, store, harness: opts.harness });
   // A receipt that names another session or project, or lacks the evidence its status claims, is
   // not evidence for this session: it reads as corrupt, so the session stays owed and the next
   // write quarantines (never deletes) it.
@@ -321,10 +321,13 @@ export function readCloseReceiptState(store, sessionId, opts = {}) {
  * filename keyed by the session is not identity: the payload must name the same session. A status
  * alone is not evidence: an automatic receipt must carry the writer's record for the same session
  * (and, to count as recorded, a record saying full coverage), and a manual `closed` certification
- * a usable harness and time. A receipt that names
- * its project must name this one; older receipts that predate the field are read as before.
+ * a usable harness and time. The outer and inner harness must agree, and a caller that names the
+ * harness it closes for (`opts.harness`) accepts only that harness's evidence. A receipt that
+ * names its project must name this one; older receipts that predate the root field are read as
+ * before (they cover only their exact session id, and enrolling a copied or restored project
+ * starts its obligations fresh rather than reading carried receipts).
  */
-function receiptShapeProblem(parsed, { sessionId, store }) {
+function receiptShapeProblem(parsed, { sessionId, store, harness }) {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 'not-an-object';
   if (parsed.session_id !== sessionId) return 'session-mismatch';
   if (typeof parsed.status !== 'string') return 'no-status';
@@ -338,10 +341,12 @@ function receiptShapeProblem(parsed, { sessionId, store }) {
     if (!rec || typeof rec !== 'object' || Array.isArray(rec) || rec.schema !== 'core.close-record/1') return 'automatic-evidence-missing';
     if (typeof parsed.harness !== 'string' || !parsed.harness) return 'automatic-evidence-missing';
     if (rec.session_id !== sessionId) return 'record-session-mismatch';
+    if (rec.harness !== parsed.harness) return 'record-harness-mismatch';
     if (parsed.status === 'recorded' && (rec.status !== 'recorded' || rec.coverage !== 'full')) return 'record-not-full-coverage';
   } else if (parsed.status === 'closed') {
     if (typeof parsed.harness !== 'string' || !parsed.harness || typeof parsed.closed_at !== 'string' || Number.isNaN(Date.parse(parsed.closed_at))) return 'certification-evidence-missing';
   }
+  if (harness && parsed.harness !== harness) return 'harness-mismatch';
   return null;
 }
 
@@ -399,8 +404,11 @@ function writeCloseReceiptUnlocked(store, receipt, opts) {
  * not consulted: it cannot name a session, so reading it here would silently
  * degrade the dedup back to per-project and reintroduce the duplicate close.
  */
-export function shouldEnqueueClose(store, { sessionId } = {}, opts = {}) {
-  const receipt = readCloseReceipt(store, sessionId, opts);
+// The automatic close and manual certification run on Claude Code's session-end door and transcripts.
+const CLOSE_HARNESS = 'claude-code';
+
+export function shouldEnqueueClose(store, { sessionId, harness = CLOSE_HARNESS } = {}, opts = {}) {
+  const receipt = readCloseReceipt(store, sessionId, { ...opts, harness });
   if (!receipt) return true;
   return !CERTIFIED_STATUSES.has(receipt.status);
 }
@@ -440,7 +448,7 @@ export function runDeterministicClose(store, {
     prepareCloseDirectory(receiptDir(store, opts));
     // The CLI's optimistic dedup can race a manual certification. Recheck under
     // the same lock used by receipt writes and explicit capture purge.
-    const prior = readCloseReceipt(store, sessionId, opts);
+    const prior = readCloseReceipt(store, sessionId, { ...opts, harness });
     if (prior && CERTIFIED_STATUSES.has(prior.status)) return prior;
     const captureContent = turnCaptureEnabled({ project: resolve(store), home, env: opts.env || process.env });
     const record = buildCloseRecord({
@@ -578,7 +586,7 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
   }
   if (!sid) return { ok: false, reason: 'unresolved' };
 
-  const existing = readCloseReceipt(store, sid, opts);
+  const existing = readCloseReceipt(store, sid, { ...opts, harness: CLOSE_HARNESS });
   if (existing && existing.status === 'closed') return { ok: true, already: true, session_id: sid };
 
   // Certification is DERIVED from the op record, never asserted by the caller:
@@ -596,7 +604,7 @@ export function certifyManualClose(store, { sessionId = null, summaryPath = null
     session_id: sid,
     status: 'closed',
     root: canonical(resolve(store)),
-    harness: 'claude-code',
+    harness: CLOSE_HARNESS,
     closed_at: now,
     summary_path: summaryPath || null,
     transcript_path: transcriptPath,

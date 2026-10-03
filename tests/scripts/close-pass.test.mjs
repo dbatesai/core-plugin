@@ -296,7 +296,7 @@ test('a corrupt receipt is reported corrupt and its bytes survive replacement', 
     const state = readCloseReceiptState(store, 's-corrupt', opts);
     assert.equal(state.status, 'corrupt', 'a torn receipt is corrupt, not absent');
 
-    writeCloseReceipt(store, { session_id: 's-corrupt', status: 'recorded', harness: 'claude-code', record: { schema: 'core.close-record/1', session_id: 's-corrupt', status: 'recorded', coverage: 'full' } }, opts);
+    writeCloseReceipt(store, { session_id: 's-corrupt', status: 'recorded', harness: 'claude-code', record: { schema: 'core.close-record/1', session_id: 's-corrupt', harness: 'claude-code', status: 'recorded', coverage: 'full' } }, opts);
     const dir = join(root, 'close', 'receipts');
     const quarantined = readdirSync(dir).filter((n) => n.includes('.corrupt-'));
     assert.equal(quarantined.length, 1, 'the corrupt bytes are quarantined beside the fresh receipt');
@@ -357,7 +357,7 @@ test('terminal-receipt controls: only matching, well-formed evidence suppresses 
     const root = join(store, '_metrics');
     mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
     const opts = { storageRoot: root };
-    const auto = (sid, status) => ({ session_id: sid, status, harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z', record: { schema: 'core.close-record/1', session_id: sid, status, coverage: status === 'recorded' ? 'full' : 'partial', ended_at: '2026-10-03T00:00:00Z' } });
+    const auto = (sid, status) => ({ session_id: sid, status, harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z', record: { schema: 'core.close-record/1', session_id: sid, harness: 'claude-code', status, coverage: status === 'recorded' ? 'full' : 'partial', ended_at: '2026-10-03T00:00:00Z' } });
     const put = (sid, body) => writeFileSync(receiptPath(store, sid, opts), JSON.stringify(body));
 
     put('full', auto('full', 'recorded'));
@@ -391,6 +391,19 @@ test('terminal-receipt controls: only matching, well-formed evidence suppresses 
     assert.equal(shouldEnqueueClose(store, { sessionId: 'emptycert' }, opts), true, 'empty certification fields are not evidence');
     put('copied', { ...auto('copied', 'recorded'), root: '/some/other/project' });
     assert.equal(shouldEnqueueClose(store, { sessionId: 'copied' }, opts), true, "a receipt naming another project is not this project's evidence");
+
+    // Harness scope: outer and inner must agree, and the closing harness accepts only its own.
+    const codex = (sid) => ({ ...auto(sid, 'recorded'), harness: 'codex', record: { ...auto(sid, 'recorded').record, harness: 'codex' } });
+    put('outer-codex', { ...auto('outer-codex', 'recorded'), harness: 'codex' });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'outer-codex' }, opts), true, 'outer Codex over an inner Claude record stays owed');
+    assert.equal(readCloseReceiptState(store, 'outer-codex', opts).problem, 'record-harness-mismatch');
+    put('inner-codex', { ...auto('inner-codex', 'recorded'), record: { ...auto('inner-codex', 'recorded').record, harness: 'codex' } });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'inner-codex' }, opts), true, 'an inner Codex record under an outer Claude label stays owed');
+    put('all-codex', codex('all-codex'));
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'all-codex' }, opts), true, "Codex evidence does not close a Claude Code session");
+    assert.equal(readCloseReceiptState(store, 'all-codex', { ...opts, harness: 'claude-code' }).problem, 'harness-mismatch');
+    put('cert-codex', { session_id: 'cert-codex', status: 'closed', harness: 'codex', closed_at: '2026-10-03T00:00:00Z' });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'cert-codex' }, opts), true, "a Codex certification does not close a Claude Code session");
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
 
@@ -403,5 +416,22 @@ test('a receipt the deterministic close writes names its project and reads back 
     const r = runDeterministicClose(store, { sessionId: 'det', harness: 'claude-code', events: [] }, opts);
     assert.equal(r.root, canonical(store));
     assert.equal(readCloseReceiptState(store, 'det', opts).status, 'valid');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('the under-lock runner and the manual shortcut do not reuse another harness\'s evidence', async () => {
+  const { runDeterministicClose, certifyManualClose } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const store = freshStore();
+  try {
+    const root = join(store, '_metrics');
+    mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
+    const opts = { storageRoot: root };
+    const rec = (sid) => ({ schema: 'core.close-record/1', session_id: sid, harness: 'codex', status: 'recorded', coverage: 'full' });
+    writeFileSync(receiptPath(store, 'run', opts), JSON.stringify({ session_id: 'run', status: 'recorded', harness: 'codex', record: rec('run') }));
+    const r = runDeterministicClose(store, { sessionId: 'run', harness: 'claude-code', events: [] }, opts);
+    assert.equal(r.harness, 'claude-code', 'the runner wrote its own evidence instead of returning Codex evidence');
+    writeFileSync(receiptPath(store, 'man', opts), JSON.stringify({ session_id: 'man', status: 'closed', harness: 'codex', closed_at: '2026-10-03T00:00:00Z' }));
+    const m = certifyManualClose(store, { sessionId: 'man' }, opts);
+    assert.notEqual(m.already, true, "a Codex certification is not this harness's existing close");
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
