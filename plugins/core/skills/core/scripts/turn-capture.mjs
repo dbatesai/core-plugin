@@ -47,7 +47,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdir
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, metricsEnabled, storagePinInvalid, operationalMetricsDir } from './log-event.mjs';
+import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, operationalMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
@@ -361,7 +361,10 @@ export function captureTurnEvidence(projectDir, input, { now, env = process.env 
 
 /** List `<date>.jsonl` files in the stream dir, oldest first. */
 export function listTurnCaptureFiles(projectDir) {
-  const dir = turnCaptureDir(projectDir);
+  return dateFilesIn(turnCaptureDir(projectDir));
+}
+
+function dateFilesIn(dir) {
   if (!existsSync(dir)) return [];
   let names = [];
   try { names = readdirSync(dir); } catch { return []; }
@@ -371,30 +374,35 @@ export function listTurnCaptureFiles(projectDir) {
     .map((n) => ({ date: n.slice(0, 10), file: join(dir, n) }));
 }
 
-/**
- * Cheap census for the /metrics mechanics line: whether the stream is on and
- * how much is captured. Row count is a line count (no per-row parse).
- */
-export function turnCaptureStats(projectDir, { env = process.env } = {}) {
-  // With a pin that no longer verifies, the stream's real folder is unknown, and reading the
-  // project-local fallback would report zero rows for rows that exist elsewhere.
-  if (storagePinInvalid(projectDir, { env })) {
-    return { enabled: false, days: null, rows: null, health: null, dir: null, reason: 'pin-unverified' };
-  }
-  const enabled = turnCaptureEnabled({ project: projectDir, env });
-  const files = listTurnCaptureFiles(projectDir);
+// Row count is a line count (no per-row parse); an unreadable file contributes no rows.
+function countRows(files) {
   let rows = 0;
   for (const { file } of files) {
     try {
       for (const line of readFileSync(file, 'utf8').split('\n')) if (line.trim()) rows++;
     } catch { /* unreadable file contributes no rows */ }
   }
+  return rows;
+}
+
+/**
+ * Cheap census for the /metrics mechanics line: whether the stream is on and
+ * how much is captured. Row count is a line count (no per-row parse).
+ */
+export function turnCaptureStats(projectDir, { env = process.env } = {}) {
+  const enabled = turnCaptureEnabled({ project: projectDir, env });
+  const files = listTurnCaptureFiles(projectDir);
+  const history = metricsHistoryFolders(projectDir, { env }).map(({ folder }) => {
+    const found = dateFilesIn(join(folder, TURN_CAPTURE_DIRNAME));
+    return { dir: join(folder, TURN_CAPTURE_DIRNAME), days: found.length, rows: countRows(found) };
+  });
   return {
     enabled,
     days: files.length,
-    rows,
+    rows: countRows(files),
     health: readCaptureHealth(projectDir),
     dir: turnCaptureDir(projectDir),
+    history,
   };
 }
 
@@ -440,6 +448,13 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
     { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase },
     { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase },
     { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase },
+    // An older external folder is history, but the purge promise covers it: only the folders that are
+    // unambiguously this project's, and only the same three captured-material entries.
+    ...metricsHistoryFolders(projectDir, { home, env }).filter((h) => h.purgeable).flatMap(({ folder }) => [
+      { id: 'history-stream', path: join(folder, TURN_CAPTURE_DIRNAME), tree: true, base: folder },
+      { id: 'history-health', path: join(folder, HEALTH_FILENAME), tree: false, base: folder },
+      { id: 'history-judgments', path: join(folder, JUDGMENT_LOG_FILENAME), tree: false, base: folder },
+    ]),
   ];
 }
 
@@ -447,7 +462,7 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
 // to be a direct child of its OWN declared base (not necessarily the same base
 // every entry shares — classified lives under a different store than the rest).
 function assertPurgeEntry(entry) {
-  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME, classified: CLASSIFIED_DIRNAME, 'close-summaries': 'summaries', 'close-receipts': 'receipts' }[entry.id];
+  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME, classified: CLASSIFIED_DIRNAME, 'close-summaries': 'summaries', 'close-receipts': 'receipts', 'history-stream': TURN_CAPTURE_DIRNAME, 'history-health': HEALTH_FILENAME, 'history-judgments': JUDGMENT_LOG_FILENAME }[entry.id];
   if (!expected || basename(entry.path) !== expected || dirname(entry.path) !== entry.base) {
     throw new Error(`refusing purge: '${entry.path}' is not <storage-base>/${expected || entry.id}`);
   }
@@ -468,9 +483,6 @@ export function runTurnCaptureRetention(projectDir, {
   apply = true,
   now = new Date().toISOString(),
 } = {}) {
-  if (storagePinInvalid(projectDir)) {
-    return { ran: false, reason: 'pin-unverified', cutoff: null, windowDays, candidates: [], deleted: [], kept: [], verified: false };
-  }
   const dir = turnCaptureDir(projectDir);
   const base = { windowDays, candidates: [], deleted: [], kept: [], verified: true };
   if (!validWindow(windowDays)) {
@@ -516,11 +528,6 @@ export function runTurnCaptureRetention(projectDir, {
  * is not `purged`. Partial success is never narrated as success.
  */
 export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env } = {}) {
-  // Refuse rather than purge the wrong folder and call it done: with a pin that no longer verifies,
-  // the captured rows may sit somewhere other than the project-local fallback this would target.
-  if (storagePinInvalid(projectDir, { home, env })) {
-    return { purged: false, reason: 'pin-unverified', message: 'the metrics storage pin does not verify, so the capture folder cannot be located; run metrics-init for this project first', dir: null, existed: null, scope: [] };
-  }
   const dir = join(resolveStoragePath(projectDir, { home, env }), TURN_CAPTURE_DIRNAME);
   const entries = turnCapturePurgeScope(projectDir, { home, env });
   try {

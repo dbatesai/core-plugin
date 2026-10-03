@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Captured turns never split across folders on a Windows OneDrive project that an earlier version redirected to AppData.** After upgrading to 3.19.1 such a project wrote to the project folder until its first `/core`, then, once the migration carried its old pin over, back to AppData, leaving the log in pieces while the notice named whichever folder the pin said. Every new row, scorecard and health file now goes to `<project>/_metrics/`, whatever any pin says. A folder an earlier version used outside the project is read-only history: nothing writes to it, moves it or deletes it. The notice names it once, `/metrics` reports its rows separately, and the explicit purge covers it when it is unambiguously the project's. A lost or tampered pin no longer turns capture off, and `_metrics/` carries a `.gitignore` for its generated files. The `CORE_METRICS_FORCE_PROJECT_LOCAL` and `CORE_METRICS_FORCE_APPDATA_FALLBACK` switches, the pin-write fail-closed path and the held-folder reattach are gone: nothing routes by a pin now.
+
 ## [3.19.1] — 2026-10-02
 
 ### Security

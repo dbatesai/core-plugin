@@ -670,8 +670,8 @@ export const METRICS_EXTERNAL_MARKER = 'metrics-ever-external.txt';
 
 /**
  * Record, durably and outside the metrics dir the pin itself lives in, that a project's metrics
- * were ever redirected externally. Every producer of an external pin (the scaffold, the migration
- * that carries one over) calls this; `storagePinInvalid` reads it back when the pin is lost. Throws
+ * were ever redirected externally. The producer of an external pin (the migration
+ * that carries one over) calls this; `metricsHistoryFolders` reads it back to name the folder. Throws
  * on failure — the caller decides whether that failure is fatal to the operation writing the pin.
  */
 export function markMetricsEverExternal({ projectDir, harness, home, coreDir = defaultCoreDir(), folder }) {

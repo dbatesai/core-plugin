@@ -426,7 +426,7 @@ Then append this session's snapshot to the capability history — the per-sessio
 node "${CORE_ROOT}/skills/core/scripts/record-capability-snapshot.mjs" --cwd <root> || true
 ```
 
-**Scaffold the metrics store (never fatal, failure VISIBLE).** Once the project root is resolved, scaffold `_metrics/` so the observability substrate has somewhere to write — the capture streams resolve their storage path from the pin file this writes, and on Windows+OneDrive this is what redirects payloads off the synced path. Idempotent and never fatal — but a scaffold failure is never discarded: when the storage pin can't be written, the script fails CLOSED (capture disabled, typed `capture-disabled.json` marker, loud `CORE-METRICS-PIN-FAILED` stderr line) rather than silently putting capture back into the synced project folder.
+**Scaffold the metrics store (never fatal, failure VISIBLE).** Once the project root is resolved, scaffold `_metrics/` so the observability substrate has somewhere to write. Captured turns live in the project's own `_metrics/` on every platform, synced folder or not; a folder an earlier version used outside the project is read-only history that the metrics notice and the purge name. Idempotent and never fatal — but a scaffold failure is never discarded.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
@@ -434,9 +434,7 @@ node "${CORE_ROOT}/skills/core/scripts/metrics-init.mjs" <project> >/dev/null \
   || echo "CORE-METRICS-INIT-FAILED: metrics scaffold did not complete — capture is degraded or disabled this session (details on stderr above)"
 ```
 
-A `CORE-METRICS-LEGACY-FOLDER-HELD: <folder> …` line on stderr means an old metrics folder is named by more than one project, so it was given to none of them and left untouched; say so in one plain sentence, naming the folder, and that a person must decide whose it is. Claiming it means writing that project's root into a `.project-root` file inside the folder; the next scaffold then points that project's capture back at the folder, prints `CORE-METRICS-LEGACY-FOLDER-REATTACHED` (say so in one line), and retires the hold. Whatever that project captured in its own folder in the meantime stays there and is not merged into the old one. A migration that hit the same case says so in a `metrics_held` field of its JSON.
-
-Only stdout (the JSON result) is discarded — stderr stays visible by contract. If the `CORE-METRICS-INIT-FAILED` marker (or a `CORE-METRICS-PIN-FAILED` stderr line) appears, put one plain-voice line in the readiness summary saying metrics capture is off and why; never report a healthy capture state over a failed scaffold.
+Only stdout (the JSON result) is discarded — stderr stays visible by contract. If the `CORE-METRICS-INIT-FAILED` marker appears, put one plain-voice line in the readiness summary saying metrics capture is off and why; never report a healthy capture state over a failed scaffold.
 
 **Metrics tripwires (v3.14.0 Link 5 — proactive degradation surfacing).** A cheap check over the PINNED scorecards and capture health — never a live recomputation. Run it right after the scaffold; echo each stdout line **verbatim** into the readiness summary (the lines are already written in plain language with the likely locus). No output → say nothing, per the readiness-only-escalations rule.
 

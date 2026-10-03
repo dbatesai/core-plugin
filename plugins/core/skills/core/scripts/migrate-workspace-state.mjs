@@ -450,17 +450,10 @@ function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = d
           const otherProjects = otherProjectsNamingFolder(pinned, { projectDir: real, home: homeDir, env: { CORE_HARNESS: harness } });
           if (metricsStorageAllowed(pinned, { projectDir: real, home: homeDir }) && !legacyPeers.length && !otherProjects.length) {
             writePinSigned({ dir: dirname(pinFile), path: pinned, root: real, coreDir });
-            // Same durable marker a fresh scaffold writes, so losing this carried pin later is caught
-            // the same way. Leaving the pin signed with no marker protects only the very next read
-            // (storagePinInvalid's backfill hits the same obstruction and refuses) — it does nothing
-            // for a LATER total pin loss, which is the whole reason the marker exists: with no marker
-            // ever persisted, a later loss falls through to "never redirected" and reads clean. So a
-            // failure here does not complete this migration at all. It throws the same class other
-            // unrecoverable mid-copy failures in this function throw (an unreadable legacy folder, a
-            // symlink): no completion receipt is written, the old state is not released, the
-            // `.migrating` marker stays in place, and a later run — once the obstruction is cleared —
-            // resumes and completes normally. The file copy already done on disk is untouched by this;
-            // only completion is withheld.
+            // Recorded as history: the signed pin and this durable marker let the purge and the notice
+            // name the folder. Neither routes writes; captured rows go to the project. A marker that
+            // cannot be persisted stops completion (no receipt, old state not released, `.migrating`
+            // stays) so a later run resumes once the obstruction is cleared.
             try {
               markMetricsEverExternal({ projectDir: real, harness, home: homeDir, coreDir, folder: pinned });
             } catch (e) {

@@ -25,8 +25,7 @@ function fixture(t, suffix = 'project') {
   const isolate = join(root, 'isolate.mjs');
   writeFileSync(isolate, `import os from 'node:os';\nimport {syncBuiltinESMExports} from 'node:module';\nconst original=os.userInfo;\nos.userInfo=(...args)=>({...original(...args),homedir:${JSON.stringify(home)}});\nsyncBuiltinESMExports();\n`);
   const env = { ...process.env, HOME: home, USERPROFILE: home, NODE_OPTIONS: '',
-    CORE_HARNESS: 'claude-code', CORE_METRICS_ENABLED: '1', CORE_TURN_CAPTURE: '1',
-    CORE_METRICS_FORCE_PROJECT_LOCAL: '', CORE_METRICS_FORCE_APPDATA_FALLBACK: '' };
+    CORE_HARNESS: 'claude-code', CORE_METRICS_ENABLED: '1', CORE_TURN_CAPTURE: '1' };
   const transcript = join(root, `${session}.jsonl`);
   writeFileSync(transcript, [
     { timestamp: '2026-10-01T00:00:00Z', message: { role: 'user', content: [{ type: 'text', text: sentinel }] } },
@@ -91,28 +90,23 @@ test('capture enabled control retains the bounded opening and file list', t => {
 });
 
 for (const tamper of [false, true]) {
-  test(`storage gate: synced ${tamper ? 'tampered' : 'missing'} pin routes only to selected local store`, t => {
+  test(`storage: a synced project with a ${tamper ? 'tampered' : 'missing'} pin keeps close artifacts in its own _metrics`, t => {
     const f = fixture(t, 'OneDrive/project');
-    const observed = f.evaluate(`
-      import { initMetrics, detectStoragePath } from ${JSON.stringify(scriptUrl('metrics-init.mjs'))};
-      import { storagePinInvalid, operationalMetricsDir } from ${JSON.stringify(scriptUrl('log-event.mjs'))};
+    f.evaluate(`
+      import { initMetrics } from ${JSON.stringify(scriptUrl('metrics-init.mjs'))};
+      import { operationalMetricsDir } from ${JSON.stringify(scriptUrl('log-event.mjs'))};
       import { writeFileSync } from 'node:fs';
       import { join } from 'node:path';
       const project=${JSON.stringify(f.project)};
       if (${tamper}) { initMetrics({projectDir:project}); writeFileSync(join(operationalMetricsDir(project), 'storage-path.txt'), '/SYNTHETIC_INVALID_PIN'); }
-      console.log(JSON.stringify({invalid:storagePinInvalid(project), selected:detectStoragePath({projectDir:project}).path}));
+      console.log('{}');
     `);
-    // A tampered pin is invalid; a missing pin on a fresh project is not, because the project's own
-    // _metrics/ is the store on every platform.
-    assert.equal(observed.invalid, tamper, 'the fixture triggers the production pin gate where it applies');
+    const store = join(f.project, '_metrics');
     const { receipt } = f.close({ CORE_METRICS_ENABLED: '0', CORE_TURN_CAPTURE: '0' });
-    assert.equal(dirname(dirname(dirname(receipt.summary_path))), observed.selected, 'close follows the selected store');
-    if (observed.selected !== join(f.project, '_metrics')) {
-      assert.equal(existsSync(join(f.project, '_metrics', 'close')), false, 'a redirected store leaves nothing in the project');
-    }
-    assert.ok(existsSync(join(observed.selected, 'close', 'receipts')));
-    assert.ok(!treeText(observed.selected).includes(sentinel));
-    assert.equal(f.close().skipped, true, 'receipt reads use the same safe route as writes');
+    assert.equal(dirname(dirname(dirname(receipt.summary_path))), store, 'close writes to the project store, pin or no pin');
+    assert.ok(existsSync(join(store, 'close', 'receipts')));
+    assert.ok(!treeText(store).includes(sentinel));
+    assert.equal(f.close().skipped, true, 'receipt reads use the same route as writes');
   });
 }
 
@@ -193,21 +187,21 @@ for (const edited of ['summary', 'receipt']) {
   });
 }
 
-test('capture and storage gates share the trusted OS home even when HOME differs', t => {
+test('capture gates share the trusted OS home even when HOME differs', t => {
   const f = fixture(t);
   f.evaluate(`
-    import { operationalMetricsDir, storagePinInvalid } from ${JSON.stringify(scriptUrl('log-event.mjs'))};
+    import { operationalMetricsDir, captureDisabledMarkerPath } from ${JSON.stringify(scriptUrl('log-event.mjs'))};
     import { mkdirSync, writeFileSync } from 'node:fs'; import {join} from 'node:path';
     const project=${JSON.stringify(f.project)};
     const meta=operationalMetricsDir(project); mkdirSync(meta,{recursive:true});
-    writeFileSync(join(meta,'storage-path.txt'),'/SYNTHETIC_INVALID_PIN');
-    if (!storagePinInvalid(project)) throw new Error('fixture pin must be invalid');
+    writeFileSync(join(meta,'capture-disabled.json'),'{"marker":"core-capture-disabled"}');
+    if (!captureDisabledMarkerPath(project)) throw new Error('fixture marker must switch capture off');
     console.log('{}');
   `);
   const spoofedHome = join(f.root, 'other-home');
   mkdirSync(spoofedHome);
   const { receipt } = f.close({ HOME: spoofedHome, USERPROFILE: spoofedHome });
-  assert.equal(receipt.record.opening_request, '', 'the real OS-home pin failure must disable close content');
+  assert.equal(receipt.record.opening_request, '', 'the real OS-home marker must disable close content');
   assert.deepEqual(receipt.record.files_touched, []);
 });
 
