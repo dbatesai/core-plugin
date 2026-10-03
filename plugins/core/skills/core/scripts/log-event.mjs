@@ -55,39 +55,22 @@ export function resolveStoragePath(projectDir) {
  * The folders outside the project that earlier versions wrote this project's captured rows to
  * (a Windows OneDrive redirect to AppData), read-only history now. Found from the project's
  * signed records under every harness that has state for it: the storage pin, the held record, and
- * the ever-external marker.
+ * the ever-external marker. CORE never deletes them: the notice names them, `/metrics` counts
+ * their rows, and an explicit purge lists them for the user to delete. `foreign` marks a folder
+ * whose `.project-root` names another project; the notice does not call those rows this project's.
  *
- * A folder is `purgeable` only on positive proof: its `.project-root` is readable and names this
- * project. Earlier scaffolds wrote that file when they created the folder, and the old pin rules
- * never let a project write into a folder another project had claimed, so a self-claim means the
- * rows are this project's. Deletion never rests on showing that no other project claims the
- * folder, because that negative cannot be proven completely. Otherwise `reason` says why not and
- * how to resolve it; `foreign` marks a folder another project claims, which the notice does not
- * call this project's.
- *
- * @returns {{folder: string, purgeable: boolean, reason?: string, foreign?: boolean}[]}
+ * @returns {{folder: string, foreign?: boolean}[]}
  */
 export function metricsHistoryFolders(projectDir, { home = homedir(), env = process.env } = {}) {
   return historyDiscovery(projectDir, { home, env }).folders;
 }
 
-/**
- * Who a history folder's `.project-root` says owns it: `absent` (no file), `self`, `other`, or
- * `unreadable` (the file exists but cannot be read, or says nothing).
- */
-function historyFolderOwner(folder, projectDir) {
+/** True when a history folder's `.project-root` is readable and names a different project. */
+function claimedByAnother(folder, projectDir) {
   let text;
-  try { text = readFileSync(join(folder, METRICS_OWNER_FILE), 'utf8').trim(); }
-  catch (e) { return e && e.code === 'ENOENT' ? 'absent' : 'unreadable'; }
-  if (!text) return 'unreadable';
-  return canonicalPath(text) === canonicalPath(projectDir) ? 'self' : 'other';
+  try { text = readFileSync(join(folder, METRICS_OWNER_FILE), 'utf8').trim(); } catch { return false; }
+  return !!text && canonicalPath(text) !== canonicalPath(projectDir);
 }
-
-const OWNER_REASONS = {
-  other: 'another project claims this folder',
-  unreadable: "the folder's ownership record cannot be read, so whose rows these are cannot be proven",
-  absent: "no ownership record in the folder names this project; to purge it, write this project's root into its .project-root",
-};
 
 /**
  * The history folders plus whether discovery itself could run. `error` is set when the project's
@@ -113,17 +96,14 @@ function historyDiscovery(projectDir, { home, env }) {
     seen.add(folder);
     // Only the old Windows redirect location was ever a metrics home outside the project.
     if (!containedPath(appData, folder) || !existsSync(folder)) continue;
-    const owner = historyFolderOwner(folder, projectDir);
-    folders.push(owner === 'self'
-      ? { folder, purgeable: true }
-      : { folder, purgeable: false, reason: OWNER_REASONS[owner], ...(owner === 'other' ? { foreign: true } : {}) });
+    folders.push(claimedByAnother(folder, projectDir) ? { folder, foreign: true } : { folder });
   }
   return { folders, error };
 }
 
 /**
- * What an explicit purge cannot honestly claim to have covered: history folders not provably this
- * project's; this project's own state under any harness when it exists but cannot be read as its
+ * What an explicit purge does not cover, named so it never reports itself complete over them:
+ * every older folder outside the project (CORE does not delete outside the project folder); this project's own state under any harness when it exists but cannot be read as its
  * own (unverified, another install's, a relocation awaiting an answer, or mid-migration), since
  * any record of an older folder in it is hidden; records that exist but do not verify; and a
  * discovery that could not run. A purge that leaves any of these reports it instead of "purged".
@@ -147,7 +127,11 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
   }
   if (held.length) return held;
   const { folders, error } = historyDiscovery(projectDir, { home, env });
-  for (const h of folders) if (!h.purgeable) held.push({ what: h.folder, reason: h.reason });
+  for (const h of folders) {
+    held.push({ what: h.folder, reason: h.foreign
+      ? 'earlier rows outside the project folder, in a folder another project claims; CORE does not delete outside the project'
+      : 'earlier rows outside the project folder; CORE does not delete outside the project, so delete this folder yourself if you want them gone' });
+  }
   if (error) {
     held.push({ what: projectDir, reason: `this project's records of older external folders could not be read (${String(error.code || error.message).slice(0, 80)}), so whether any exist is unknown` });
     return held;

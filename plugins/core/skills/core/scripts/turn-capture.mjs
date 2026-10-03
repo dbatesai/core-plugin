@@ -43,7 +43,7 @@
  * Ships with the plugin by convention; .mjs (Node.js) only.
  */
 
-import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
@@ -51,7 +51,7 @@ import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHisto
 import { projectRootFor, projectStateDir, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
-import { requireTrustedHome, containedPath } from './trusted-home.mjs';
+import { requireTrustedHome } from './trusted-home.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
 // reader misread rows.
@@ -453,17 +453,6 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
     { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase },
     { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase },
     { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase },
-    // An older external folder is history, but the purge promise covers it: only the folders that are
-    // provably this project's, and only the captured-material entries the project's own scope has.
-    ...metricsHistoryFolders(projectDir, { home, env }).filter((h) => h.purgeable).flatMap(({ folder }) => [
-      { id: 'history-stream', path: join(folder, TURN_CAPTURE_DIRNAME), tree: true, base: folder },
-      { id: 'history-health', path: join(folder, HEALTH_FILENAME), tree: false, base: folder },
-      { id: 'history-judgments', path: join(folder, JUDGMENT_LOG_FILENAME), tree: false, base: folder },
-      // Automatic close artifacts an earlier version wrote there, under the same marker, hash and
-      // manual-certification protections as the project's own.
-      { id: 'history-close-summaries', path: join(folder, 'close', 'summaries'), tree: false, generatedClose: true, base: join(folder, 'close') },
-      { id: 'history-close-receipts', path: join(folder, 'close', 'receipts'), tree: false, generatedClose: true, base: join(folder, 'close') },
-    ]),
   ];
 }
 
@@ -471,7 +460,7 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
 // to be a direct child of its OWN declared base (not necessarily the same base
 // every entry shares — classified lives under a different store than the rest).
 function assertPurgeEntry(entry) {
-  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME, classified: CLASSIFIED_DIRNAME, 'close-summaries': 'summaries', 'close-receipts': 'receipts', 'history-stream': TURN_CAPTURE_DIRNAME, 'history-health': HEALTH_FILENAME, 'history-judgments': JUDGMENT_LOG_FILENAME, 'history-close-summaries': 'summaries', 'history-close-receipts': 'receipts' }[entry.id];
+  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME, classified: CLASSIFIED_DIRNAME, 'close-summaries': 'summaries', 'close-receipts': 'receipts' }[entry.id];
   if (!expected || basename(entry.path) !== expected || dirname(entry.path) !== entry.base) {
     throw new Error(`refusing purge: '${entry.path}' is not <storage-base>/${expected || entry.id}`);
   }
@@ -530,26 +519,13 @@ export function runTurnCaptureRetention(projectDir, {
   return { ran: true, cutoff, ...base };
 }
 
-// A history folder sits outside the project, so it is re-checked at the moment of deletion, not
-// only when it was discovered: the folder must still resolve inside the old AppData metrics root,
-// neither it nor the entry may be a link, and a link found there is refused rather than followed.
-function assertHistoryEntryUnlinked(entry, home) {
-  const root = join(home, 'AppData', 'Local', 'core-metrics');
-  const folderStat = lstatSync(entry.base);
-  if (folderStat.isSymbolicLink() || !folderStat.isDirectory()) throw new Error(`refusing history purge: ${entry.base} is a link or not a folder`);
-  if (containedPath(root, entry.base) !== realpathSync.native(entry.base)) throw new Error(`refusing history purge: ${entry.base} does not resolve inside ${root}`);
-  let stat = null;
-  try { stat = lstatSync(entry.path); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-  if (stat && stat.isSymbolicLink()) throw new Error(`refusing history purge: ${entry.path} is a link`);
-}
-
 /**
  * Purge every entry in the declared scope. Each entry is bound-checked before
  * deletion and verified after it, and the result names ALL of them — an entry
  * that could not be removed is reported with its reason and the overall result
  * is not `purged`. Partial success is never narrated as success.
  */
-export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env, beforeEntryDelete } = {}) {
+export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env } = {}) {
   const dir = join(resolveStoragePath(projectDir, { home, env }), TURN_CAPTURE_DIRNAME);
   let entries;
   try {
@@ -573,14 +549,11 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
     withFileLock(join(resolveStoragePath(projectDir, { home, env }), '.turn-capture.lock'), () => {
       for (const entry of scope) {
         try {
-          // Test seam: lets a test change the filesystem after planning and before this entry's checks.
-          if (typeof beforeEntryDelete === 'function') beforeEntryDelete(entry);
           if (entry.generatedClose) {
             Object.assign(entry, purgeGeneratedCloseDirectory(entry.path, { apply: true }));
             entry.removed = true; // selected generated files, NOT the directory or kept files
             continue;
           }
-          if (entry.id.startsWith('history-')) assertHistoryEntryUnlinked(entry, home);
           rmSync(entry.path, { recursive: entry.tree, force: true });
           if (existsSync(entry.path)) entry.reason = 'still-present-after-delete';
           else entry.removed = true;
@@ -601,7 +574,8 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
       dir, existed, scope,
     };
   }
-  // Earlier rows outside the project that this purge could not cover are named, never counted as purged.
+  // Earlier rows outside the project are never deleted here: they are named, with the reason, and
+  // the purge does not count itself complete while they exist.
   const heldHistory = metricsHistoryHeld(projectDir, { home, env });
   if (heldHistory.length) {
     return {

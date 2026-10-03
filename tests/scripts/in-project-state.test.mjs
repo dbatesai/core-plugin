@@ -1012,7 +1012,7 @@ test('migration signs a carried metrics pin for neither project when a not-yet-m
   } finally { s.cleanup(); }
 });
 
-test('an ambiguous legacy metrics folder is recorded by the migration as history, never routed to, and purgeable only once the project claims it', async () => {
+test('an ambiguous legacy metrics folder is recorded by the migration as history and never routed to, claimed or not', async () => {
   const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
   const { metricsHistoryFolders } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const { s, p, table } = migrationFixture();
@@ -1037,10 +1037,10 @@ test('an ambiguous legacy metrics folder is recorded by the migration as history
     const opts = { home: s.home, env: { CORE_HARNESS: H } };
     const init = initMetrics({ projectDir: p, ...opts });
     assert.equal(init.storagePath, join(p, '_metrics'), 'writes go to the project');
-    assert.deepEqual(metricsHistoryFolders(p, opts).map((h) => [h.folder, h.purgeable]), [[shared, false]], 'named as history, not purgeable while ambiguous');
+    assert.deepEqual(metricsHistoryFolders(p, opts).map((h) => h.folder), [shared], 'named as history');
     writeFileSync(join(shared, '.project-root'), p + '\n');
     assert.equal(initMetrics({ projectDir: p, ...opts }).storagePath, join(p, '_metrics'), 'claiming the folder does not route writes to it');
-    assert.deepEqual(metricsHistoryFolders(p, opts), [{ folder: shared, purgeable: true }]);
+    assert.deepEqual(metricsHistoryFolders(p, opts).map((h) => h.folder), [shared], 'still history, never a route');
   } finally {
     if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
     s.cleanup();

@@ -9,9 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { symlinkSync, renameSync } from 'node:fs';
-import { symlinkCapable } from './trusted-test-tmp.mjs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   initMetrics,
@@ -158,7 +156,7 @@ test('a signed pin naming an AppData folder routes nothing: the scaffold and eve
     assert.equal(resolveStoragePath(projectDir), join(projectDir, '_metrics'));
     assert.equal(readFileSync(join(old, 'evidence.jsonl'), 'utf8'), '{"row":1}\n', 'history untouched');
     assert.equal(existsSync(join(old, '.project-root')), false, 'and not claimed by asking');
-    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: old, purgeable: false, reason: "no ownership record in the folder names this project; to purge it, write this project's root into its .project-root" }], 'it is named as history, held until claimed');
+    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: old }], 'it is named as history');
   });
 });
 
@@ -186,7 +184,7 @@ test('a lost, tampered or foreign pin never turns capture off or sends it anywhe
   }, { projects: 2 });
 });
 
-test('history is found only where metrics may live; a folder another project claims is named but never purgeable', () => {
+test('history is found only where metrics may live; a folder another project claims is named and marked foreign', () => {
   withProject(({ home, projectDir, dirs: [, B] }) => {
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     const outside = mkdtempSync(join(tmpdir(), 'metrics-hist-outside-'));
@@ -197,16 +195,15 @@ test('history is found only where metrics may live; a folder another project cla
       mkdirSync(claimed, { recursive: true });
       writeFileSync(join(claimed, '.project-root'), B + '\n');
       signedPin(meta, home, claimed, projectDir);
-      assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }),
-        [{ folder: claimed, purgeable: false, reason: 'another project claims this folder', foreign: true }],
-        'claimed by another project: named, never purgeable, and marked foreign');
+      assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: claimed, foreign: true }]);
       signedPin(meta, home, appData(home, 'gone'), projectDir);
       assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [], 'missing folder: nothing to name');
     } finally { rmSync(outside, { recursive: true, force: true }); }
   }, { projects: 2 });
 });
 
-test('two projects whose records name the same unclaimed folder both see it as history, and neither may purge it', () => {
+test('two projects whose records name the same folder both see it as history, and neither purge deletes it', async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
   withProject(({ home, dirs: [A, B] }) => {
     const coreDir = join(home, '.core');
     registerProject(coreDir, A);
@@ -217,22 +214,21 @@ test('two projects whose records name the same unclaimed folder both see it as h
     signedPin(operationalMetricsDir(A, { home, env: E }), home, shared, A);
     signedPin(operationalMetricsDir(B, { home, env: E }), home, shared, B);
     for (const p of [A, B]) {
-      assert.deepEqual(metricsHistoryFolders(p, { home, env: E }), [{ folder: shared, purgeable: false, reason: "no ownership record in the folder names this project; to purge it, write this project's root into its .project-root" }]);
+      assert.deepEqual(metricsHistoryFolders(p, { home, env: E }), [{ folder: shared }]);
       assert.equal(initMetrics({ projectDir: p, env: E }).storagePath, join(p, '_metrics'));
+      assert.equal(purgeTurnCapture(p, { apply: true, home, env: E }).purged, false);
     }
     assert.equal(readFileSync(join(shared, 'evidence.jsonl'), 'utf8'), '{"who":"unknown"}\n');
   }, { projects: 2 });
 });
 
-test('a held-folder record names history, and it is purgeable only once the project claims the folder', () => {
+test('a held-folder record names history', () => {
   withProject(({ home, projectDir }) => {
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     const held = appData(home, 'held');
     mkdirSync(held, { recursive: true });
     writeHeldSigned({ dir: meta, folder: held, alsoNamedBy: ['/some/peer'], coreDir: join(home, '.core') });
-    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: held, purgeable: false, reason: "no ownership record in the folder names this project; to purge it, write this project's root into its .project-root" }]);
-    writeFileSync(join(held, '.project-root'), canonicalPath(projectDir) + '\n');
-    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: held, purgeable: true }]);
+    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }), [{ folder: held }]);
   });
 });
 
@@ -255,14 +251,19 @@ test('a capture-disabled marker an earlier scaffold left is cleared by the next 
   });
 });
 
-test('stats report the project rows and the history rows separately, and purge reaches the history folder', async () => {
+test('stats report project and history rows separately; purge empties the project and never deletes outside it', async () => {
   const { purgeTurnCapture, turnCaptureStats } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const { markCloseSummary } = await import('../../plugins/core/skills/core/scripts/close-artifacts.mjs');
+  const { createHash } = await import('node:crypto');
   withProject(({ home, projectDir }) => {
     const old = appData(home, 'real-store');
     mkdirSync(join(old, 'turn-capture'), { recursive: true });
+    mkdirSync(join(old, 'close', 'summaries'), { recursive: true });
     const oldRows = join(old, 'turn-capture', '2026-09-28.jsonl');
     writeFileSync(oldRows, '{"row":1}\n{"row":2}\n');
     writeFileSync(join(old, 'turn-capture-health.json'), '{}\n');
+    const oldSummary = join(old, 'close', 'summaries', createHash('sha256').update('auto').digest('hex') + '.md');
+    writeFileSync(oldSummary, markCloseSummary('# synthetic automatic summary\n'));
     writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
     signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
     mkdirSync(join(projectDir, '_metrics', 'turn-capture'), { recursive: true });
@@ -273,38 +274,14 @@ test('stats report the project rows and the history rows separately, and purge r
     assert.equal(stats.rows, 1, 'project rows only');
     assert.deepEqual(stats.history.map((h) => [h.dir, h.days, h.rows]), [[join(old, 'turn-capture'), 1, 2]]);
 
-    const dry = purgeTurnCapture(projectDir, { apply: false, home, env: E });
-    assert.ok(dry.scope.some((e) => e.id === 'history-stream' && e.existed), 'the dry run names the history stream');
-    assert.equal(readFileSync(oldRows, 'utf8'), '{"row":1}\n{"row":2}\n', 'a dry run deletes nothing');
-
     const done = purgeTurnCapture(projectDir, { apply: true, home, env: E });
-    assert.equal(done.purged, true);
-    assert.equal(existsSync(oldRows), false, 'history rows purged');
-    assert.equal(existsSync(join(old, 'turn-capture-health.json')), false, 'history health purged');
     assert.equal(existsSync(newRows), false, 'project rows purged');
-    assert.equal(existsSync(old), true, 'the folder itself and anything else in it stay');
+    assert.equal(done.purged, false, 'not complete while earlier rows exist outside the project');
+    assert.equal(done.scope.some((e) => e.id.startsWith('history')), false, 'nothing outside the project is in scope');
+    assert.deepEqual(done.held_history.map((h) => h.what), [old]);
+    assert.match(done.held_history[0].reason, /delete this folder yourself/);
+    for (const f of [oldRows, join(old, 'turn-capture-health.json'), oldSummary]) assert.equal(existsSync(f), true, `kept: ${f}`);
   });
-});
-
-test('purge never touches a history folder that is ambiguous or another project\'s', async () => {
-  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
-  withProject(({ home, dirs: [A, B] }) => {
-    const coreDir = join(home, '.core');
-    registerProject(coreDir, A);
-    registerProject(coreDir, B);
-    const shared = appData(home, 'shared');
-    mkdirSync(join(shared, 'turn-capture'), { recursive: true });
-    const rows = join(shared, 'turn-capture', '2026-09-28.jsonl');
-    writeFileSync(rows, '{"row":1}\n');
-    signedPin(operationalMetricsDir(A, { home, env: E }), home, shared, A);
-    signedPin(operationalMetricsDir(B, { home, env: E }), home, shared, B);
-    const r = purgeTurnCapture(A, { apply: true, home, env: E });
-    assert.equal(r.scope.some((e) => e.id.startsWith('history-')), false);
-    assert.equal(r.purged, false, 'a folder that cannot be proven this project\'s is not counted as purged');
-    assert.deepEqual(r.held_history.map((h) => h.what), [shared]);
-    assert.match(r.reason, /history not purged/);
-    assert.equal(readFileSync(rows, 'utf8'), '{"row":1}\n');
-  }, { projects: 2 });
 });
 
 test('purge reports, rather than claims, a record of an older external folder that does not verify', async () => {
@@ -324,7 +301,7 @@ test('purge reports, rather than claims, a record of an older external folder th
   });
 });
 
-test('a purge with no history at all, or only provably-owned history, reports purged', async () => {
+test('a purge with no history at all reports purged', async () => {
   const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
   withProject(({ home, projectDir }) => {
     const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
@@ -363,67 +340,27 @@ function restoreRead(file) {
   } catch { /* not created in this case */ }
 }
 
-// Paired ownership controls through the real purge: each case is one fixture change away from
-// the owned positive control, and only provable ownership may remove a row.
-for (const [label, setup, expect] of [
-  ['the folder\'s ownership record names this project', (ctx) => writeFileSync(ctx.ownerFile, canonicalPath(ctx.A) + '\n'), { purged: true }],
-  ['the folder\'s ownership record names another registered project', (ctx) => writeFileSync(ctx.ownerFile, canonicalPath(ctx.B) + '\n'), { purged: false, reason: /another project claims this folder/ }],
-  ['the folder\'s ownership record cannot be read', (ctx) => {
-    writeFileSync(ctx.ownerFile, canonicalPath(ctx.B) + '\n');
-    ctx.denied.push(ctx.ownerFile);
-    if (!denyRead(ctx.ownerFile)) return 'skip';
-  }, { purged: false, reason: /ownership record cannot be read/ }],
-  ['another registered project\'s signed record names the same folder', (ctx) => signedPin(operationalMetricsDir(ctx.B, { home: ctx.home, env: E }), ctx.home, ctx.folder, ctx.B), { purged: false, reason: /no ownership record/ }],
-  ['another registered project\'s record cannot be read', (ctx) => {
-    const peerPin = join(operationalMetricsDir(ctx.B, { home: ctx.home, env: E }), 'storage-path.txt');
-    signedPin(dirname(peerPin), ctx.home, appData(ctx.home, 'elsewhere'), ctx.B);
-    ctx.denied.push(peerPin);
-    if (!denyRead(peerPin)) return 'skip';
-  }, { purged: false, reason: /no ownership record/ }],
-  ['another registered project\'s signature for a record naming the folder cannot be read', (ctx) => {
-    const peerMeta = operationalMetricsDir(ctx.B, { home: ctx.home, env: E });
-    signedPin(peerMeta, ctx.home, ctx.folder, ctx.B);
-    const mac = join(peerMeta, 'storage-path.txt.mac');
-    ctx.denied.push(mac);
-    if (!denyRead(mac)) return 'skip';
-  }, { purged: false, reason: /no ownership record/ }],
-  ['another registered project names the folder only by its ever-external marker', (ctx) => {
-    markMetricsEverExternal({ projectDir: ctx.B, harness: 'claude-code', home: ctx.home, coreDir: join(ctx.home, '.core'), folder: ctx.folder });
-  }, { purged: false, reason: /no ownership record/ }],
-  ['the project registry cannot be read', (ctx) => writeFileSync(join(ctx.home, '.core', 'projects.json'), '{ not json'), { purged: false, unnamed: true, reason: /JSON|could not be read/ }],
+// Whatever the folder's ownership record says, the purge never deletes outside the project; it
+// names the folder and why.
+for (const [label, claim, reason] of [
+  ['names this project', 'self', /delete this folder yourself/],
+  ['names another project', 'other', /another project claims/],
+  ['is absent', 'none', /delete this folder yourself/],
 ]) {
-  test(`purge ownership control: ${label}`, async (t) => {
+  test(`purge never deletes a history folder whose ownership record ${label}`, async () => {
     const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
-    const { metricsHistoryFolders: history } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
-    let skipped = false;
     withProject(({ home, dirs: [A, B] }) => {
-      const coreDir = join(home, '.core');
-      registerProject(coreDir, A);
-      registerProject(coreDir, B);
       const folder = appData(home, 'legacy');
       mkdirSync(join(folder, 'turn-capture'), { recursive: true });
       const row = join(folder, 'turn-capture', '2026-09-28.jsonl');
       writeFileSync(row, '{"synthetic":1}\n');
+      if (claim !== 'none') writeFileSync(join(folder, '.project-root'), canonicalPath(claim === 'self' ? A : B) + '\n');
       signedPin(operationalMetricsDir(A, { home, env: E }), home, folder, A);
-      const ownerFile = join(folder, '.project-root');
-      const ctx = { home, A, B, folder, ownerFile, denied: [] };
-      try {
-        if (setup(ctx) === 'skip') { skipped = true; return; }
-        assert.equal(history(A, { home, env: E }).length, expect.unnamed ? 0 : 1, 'the folder is named as history whenever the records can be read');
-        const r = purgeTurnCapture(A, { apply: true, home, env: E });
-        assert.equal(r.purged, expect.purged, JSON.stringify(r.held_history));
-        if (expect.purged) {
-          assert.equal(existsSync(row), false, 'provably owned: the row is removed');
-        } else {
-          assert.equal(existsSync(row), true, 'not provably owned: the row stays');
-          assert.match(r.reason, expect.reason);
-          if (!expect.unnamed) assert.equal(r.held_history.length, 1, 'and the purge names what it left');
-        }
-      } finally {
-        for (const f of ctx.denied) restoreRead(f);
-      }
+      const r = purgeTurnCapture(A, { apply: true, home, env: E });
+      assert.equal(r.purged, false);
+      assert.equal(existsSync(row), true, 'the row stays');
+      assert.match(r.held_history.map((h) => h.reason).join(' '), reason);
     }, { projects: 2 });
-    if (skipped) t.skip('the platform does not deny the read (running as root or under ACLs)');
   });
 }
 
@@ -436,38 +373,6 @@ test('when the records of older folders cannot be read at all, the held list say
     const held = metricsHistoryHeld(projectDir, { home, env: E });
     assert.equal(held.length, 1);
     assert.match(held[0].reason, /could not be read/);
-  });
-});
-
-test('purge reaches the automatic close artifacts in a provably owned history folder and keeps the human-authored ones', async () => {
-  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
-  const { markCloseSummary, markCloseReceipt } = await import('../../plugins/core/skills/core/scripts/close-artifacts.mjs');
-  const { createHash } = await import('node:crypto');
-  const sha = (t) => createHash('sha256').update(t, 'utf8').digest('hex');
-  withProject(({ home, projectDir }) => {
-    const old = appData(home, 'with-close');
-    const summaries = join(old, 'close', 'summaries');
-    const receipts = join(old, 'close', 'receipts');
-    mkdirSync(summaries, { recursive: true });
-    mkdirSync(receipts, { recursive: true });
-    writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
-    const autoSummary = join(summaries, sha('auto-session') + '.md');
-    writeFileSync(autoSummary, markCloseSummary('# synthetic automatic close summary\n'));
-    const humanSummary = join(summaries, sha('human-session') + '.md');
-    writeFileSync(humanSummary, '# a person wrote this\n');
-    const autoReceipt = join(receipts, sha('auto-receipt-session') + '.json');
-    writeFileSync(autoReceipt, JSON.stringify(markCloseReceipt({ session_id: 'auto-receipt-session', status: 'recorded' })));
-    signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
-
-    const dry = purgeTurnCapture(projectDir, { apply: false, home, env: E });
-    const hs = dry.scope.find((e) => e.id === 'history-close-summaries');
-    assert.deepEqual(hs.candidates, [autoSummary], 'the dry run names the old automatic summary');
-    const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
-    assert.equal(r.purged, true, r.reason);
-    assert.equal(existsSync(autoSummary), false, 'old automatic summary purged');
-    assert.equal(existsSync(autoReceipt), false, 'old automatic receipt purged');
-    assert.equal(existsSync(humanSummary), true, 'human-authored summary kept');
-    assert.ok(r.scope.find((e) => e.id === 'history-close-summaries').kept.some((k) => k.path === humanSummary), 'and reported as kept');
   });
 });
 
@@ -498,76 +403,6 @@ for (const apply of [false, true]) {
         assert.match(r.held_history.map((h) => h.reason).join(' '), /cannot be read as its own/);
       } finally { restoreRead(stamp); }
     });
-    if (skipped) t.skip('the platform does not deny the read');
-  });
-}
-
-// The swap happens through the purge's test seam, after planning and discovery have already seen a
-// real folder, so this exercises the deletion-time re-check, not discovery. Junctions on Windows
-// need no privilege, so only POSIX without symlink privilege skips.
-for (const swap of ['entry', 'folder', 'folder-inside-root']) {
-  test(`purge refuses a history ${swap} swapped for a link after discovery, and never follows it`, { skip: process.platform !== 'win32' && !symlinkCapable() ? 'symlink privilege unavailable' : false }, async () => {
-    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
-    withProject(({ home, projectDir }) => {
-      const old = appData(home, 'swapped');
-      mkdirSync(join(old, 'turn-capture'), { recursive: true });
-      writeFileSync(join(old, 'turn-capture', '2026-09-28.jsonl'), '{"synthetic":1}\n');
-      writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
-      signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
-      // 'folder-inside-root' points the link at another folder under the same AppData root (another
-      // project's history), which a containment check alone would accept.
-      const outside = swap === 'folder-inside-root' ? appData(home, 'another-projects-history') : mkdtempSync(join(tmpdir(), 'metrics-outside-target-'));
-      mkdirSync(outside, { recursive: true });
-      const linkType = process.platform === 'win32' ? 'junction' : 'dir';
-      try {
-        mkdirSync(join(outside, 'turn-capture'), { recursive: true });
-        const precious = join(outside, 'turn-capture', 'keep.jsonl');
-        writeFileSync(precious, '{"not":"captured"}\n');
-        let swapped = false;
-        const r = purgeTurnCapture(projectDir, { apply: true, home, env: E, beforeEntryDelete: (entry) => {
-          if (entry.id !== 'history-stream' || swapped) return;
-          swapped = true;
-          if (swap === 'entry') {
-            rmSync(entry.path, { recursive: true, force: true });
-            symlinkSync(join(outside, 'turn-capture'), entry.path, linkType);
-          } else {
-            renameSync(entry.base, entry.base + '.moved');
-            symlinkSync(outside, entry.base, linkType);
-          }
-        } });
-        assert.equal(swapped, true, 'the swap ran after planning');
-        assert.equal(r.purged, false);
-        assert.match(r.reason, /refusing history purge/);
-        assert.equal(readFileSync(precious, 'utf8'), '{"not":"captured"}\n', 'the link target is untouched');
-      } finally { rmSync(outside, { recursive: true, force: true }); }
-    });
-  });
-}
-
-// A peer whose state exists but cannot be verified (its stamp unreadable) is unknown, not absent.
-for (const deny of [false, true]) {
-  test(`purge with a peer that names the folder and whose stamp is ${deny ? 'unreadable' : 'readable'} holds the shared row`, async (t) => {
-    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
-    let skipped = false;
-    withProject(({ home, dirs: [A, B] }) => {
-      const coreDir = join(home, '.core');
-      registerProject(coreDir, A);
-      registerProject(coreDir, B);
-      const folder = appData(home, 'shared-peer-stamp');
-      mkdirSync(join(folder, 'turn-capture'), { recursive: true });
-      const row = join(folder, 'turn-capture', '2026-09-28.jsonl');
-      writeFileSync(row, '{"synthetic":1}\n');
-      signedPin(operationalMetricsDir(A, { home, env: E }), home, folder, A);
-      signedPin(operationalMetricsDir(B, { home, env: E }), home, folder, B);
-      const stamp = join(B, '.core', 'claude-code', 'stamp');
-      try {
-        if (deny && !denyRead(stamp)) { skipped = true; return; }
-        const r = purgeTurnCapture(A, { apply: true, home, env: E });
-        assert.equal(r.purged, false);
-        assert.equal(existsSync(row), true, 'the shared row stays');
-        assert.match(r.reason, /no ownership record/);
-      } finally { if (deny) restoreRead(stamp); }
-    }, { projects: 2 });
     if (skipped) t.skip('the platform does not deny the read');
   });
 }
@@ -619,7 +454,7 @@ for (const [label, fence] of [
   });
 }
 
-test('history recorded under another harness is found and purged by this one; held when not claimed', async () => {
+test('history recorded under another harness is found and listed by this one', async () => {
   const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
   withProject(({ home, projectDir }) => {
     registerProject(join(home, '.core'), projectDir);
@@ -629,12 +464,9 @@ test('history recorded under another harness is found and purged by this one; he
     writeFileSync(row, '{"synthetic":1}\n');
     signedPin(operationalMetricsDir(projectDir, { home, harness: 'codex' }), home, old, projectDir);
     assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }).map((h) => h.folder), [old], 'a Codex record is visible to a Claude Code purge');
-    let r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
-    assert.equal(r.purged, false, 'unclaimed: held');
+    const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(r.purged, false);
+    assert.deepEqual(r.held_history.map((h) => h.what), [old]);
     assert.equal(existsSync(row), true);
-    writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
-    r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
-    assert.equal(r.purged, true, r.reason);
-    assert.equal(existsSync(row), false, 'claimed: purged');
   });
 });
