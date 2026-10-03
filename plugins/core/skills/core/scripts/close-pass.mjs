@@ -450,13 +450,25 @@ export function runDeterministicClose(store, {
     // the same lock used by receipt writes and explicit capture purge.
     const prior = readCloseReceipt(store, sessionId, { ...opts, harness });
     if (prior && CERTIFIED_STATUSES.has(prior.status)) return prior;
+    // Evidence at this session's paths that this close won't reuse (another harness's, another
+    // project's, or malformed) is data to keep: its summary and receipt are set aside before
+    // anything is written, and if that fails, or the receipt can't be read, the close stays owed.
+    const summaryFile = join(summaryDir, `${sessionKey(sessionId)}.md`);
+    const existing = readCloseReceiptState(store, sessionId, opts);
+    const refuse = (reason) => ({ session_id: sessionId, status: 'failed', harness, write_refused: reason });
+    if (existing.status === 'unreadable') return refuse('prior-receipt-unreadable');
+    if (existing.status === 'corrupt' || (existing.status === 'valid' && existing.receipt.harness !== harness)) {
+      const aside = opts.setAside || setAside; // test seam: lets a test make the move fail
+      for (const p of [summaryFile, receiptPath(store, sessionId, opts)]) {
+        if (!aside(p)) return refuse('prior-evidence-not-preserved');
+      }
+    }
     const captureContent = turnCaptureEnabled({ project: resolve(store), home, env: opts.env || process.env });
     const record = buildCloseRecord({
       sessionId, harness, events, startedAt, endedAt, coverage, gitHead, captureContent,
     });
     const summary = markCloseSummary(renderCloseSummary(record));
 
-    const summaryFile = join(summaryDir, `${sessionKey(sessionId)}.md`);
     assertCloseSummaryWritable(summaryFile);
     atomicWriteFileSync(summaryFile, summary);
     chmodSync(summaryFile, 0o600);
@@ -479,6 +491,16 @@ export function runDeterministicClose(store, {
     }
     return receipt;
   });
+}
+
+/** Move a file aside under a unique name; true when it is gone from `p` or was never there. */
+function setAside(p) {
+  if (!existsSync(p)) return true;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const target = `${p}.set-aside-${Date.now()}-${attempt}-${Math.floor(Math.random() * 1e6)}`;
+    try { if (!existsSync(target)) { renameSync(p, target); return true; } } catch { /* try the next name */ }
+  }
+  return false;
 }
 
 /** First and last `timestamp` field seen across a transcript's JSONL lines, or nulls if unreadable. */

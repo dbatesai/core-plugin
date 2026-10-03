@@ -435,3 +435,50 @@ test('the under-lock runner and the manual shortcut do not reuse another harness
     assert.notEqual(m.already, true, "a Codex certification is not this harness's existing close");
   } finally { rmSync(store, { recursive: true, force: true }); }
 });
+
+// Evidence the runner won't reuse is kept, never overwritten: another harness's close at the same
+// session id is set aside (receipt and summary), and if it can't be, the close stays owed.
+test("a close for one harness keeps another harness's receipt and summary at the same session id", async () => {
+  const { runDeterministicClose, sessionKey } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const { readFileSync } = await import('node:fs');
+  const store = freshStore();
+  try {
+    const opts = { storageRoot: join(store, '_metrics') };
+    const codex = runDeterministicClose(store, { sessionId: 'same', harness: 'codex', events: [] }, opts);
+    const rPath = receiptPath(store, 'same', opts);
+    const sPath = codex.summary_path;
+    const before = { r: readFileSync(rPath, 'utf8'), s: readFileSync(sPath, 'utf8') };
+    const claude = runDeterministicClose(store, { sessionId: 'same', harness: 'claude-code', events: [] }, opts);
+    assert.equal(claude.harness, 'claude-code');
+    const kept = (dir, base) => readdirSync(dir).filter((n) => n.startsWith(`${base}.set-aside-`)).map((n) => readFileSync(join(dir, n), 'utf8'));
+    assert.deepEqual(kept(dirname(rPath), `${sessionKey('same')}.json`), [before.r], 'the Codex receipt is kept byte for byte');
+    assert.deepEqual(kept(dirname(sPath), `${sessionKey('same')}.md`), [before.s], 'the Codex summary is kept byte for byte');
+    // Same harness, already recorded: nothing is set aside or rewritten.
+    const again = runDeterministicClose(store, { sessionId: 'same', harness: 'claude-code', events: [] }, opts);
+    assert.equal(again.closed_at, claude.closed_at);
+    assert.equal(kept(dirname(rPath), `${sessionKey('same')}.json`).length, 1);
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('when another harness\'s receipt cannot be set aside, the close stays owed and nothing is overwritten', async () => {
+  const { runDeterministicClose } = await import('../../plugins/core/skills/core/scripts/close-pass.mjs');
+  const { readFileSync } = await import('node:fs');
+  const store = freshStore();
+  try {
+    const opts = { storageRoot: join(store, '_metrics') };
+    runDeterministicClose(store, { sessionId: 'same', harness: 'codex', events: [] }, opts);
+    const rPath = receiptPath(store, 'same', opts);
+    const before = readFileSync(rPath, 'utf8');
+    const sBefore = readFileSync(receiptPathSummary(rPath), 'utf8');
+    const r = runDeterministicClose(store, { sessionId: 'same', harness: 'claude-code', events: [] }, { ...opts, setAside: () => false });
+    assert.equal(r.status, 'failed');
+    assert.equal(r.write_refused, 'prior-evidence-not-preserved');
+    assert.equal(readFileSync(rPath, 'utf8'), before, 'the Codex receipt is untouched');
+    assert.equal(readFileSync(receiptPathSummary(rPath), 'utf8'), sBefore, 'the Codex summary is untouched');
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'same' }, opts), true, 'the Claude Code close stays owed');
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+function receiptPathSummary(rPath) {
+  return join(dirname(dirname(rPath)), 'summaries', rPath.split(/[\\/]/).pop().replace(/\.json$/, '.md'));
+}

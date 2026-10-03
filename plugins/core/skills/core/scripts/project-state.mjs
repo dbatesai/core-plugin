@@ -701,22 +701,28 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
 
 
 /**
- * Every harness that has state for this project, in the project or in its local fallback, plus
- * `include` (the running harness). Throws when a state folder exists but cannot be listed. Ownership questions span harnesses: a pin a Codex session wrote
- * names the same folder a Claude Code session would purge.
+ * The harnesses with state for this project, in the project's `.core/` and its machine-local
+ * fallback folder: the names found in every folder that could be listed, plus each folder that
+ * couldn't. A missing folder has no harnesses; one that can't be read is a problem, not an
+ * absence, and the names seen in the other one are still returned.
+ * @returns {{harnesses: string[], problems: {what: string, code: string}[]}}
  */
-export function stateHarnesses({ root, coreDir = defaultCoreDir(), include = [] }) {
+export function stateHarnessesPartial({ root, coreDir = defaultCoreDir(), include = [] }) {
   const names = new Set(include);
+  const problems = [];
   const real = canonical(root);
   for (const dir of [join(real, STATE_DIRNAME), join(coreDir, 'local', localRootKey(real))]) {
     let entries = [];
-    // A folder that isn't there has no harnesses; one that can't be read is unknown, so it throws.
-    try { entries = readdirSync(dir); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue; throw e; }
+    try { entries = readdirSync(dir); }
+    catch (e) {
+      if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) problems.push({ what: dir, code: (e && e.code) || 'error' });
+      continue;
+    }
     // Every harness-shaped entry counts, a link or a file included: classifying it (refused, for a
     // link) is how its state gets reported, and skipping it would read as no state at all.
     for (const name of entries) if (HARNESS_RE.test(name)) names.add(name);
   }
-  return [...names];
+  return { harnesses: [...names], problems };
 }
 
 /**

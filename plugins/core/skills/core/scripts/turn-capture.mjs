@@ -48,7 +48,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
-import { projectRootFor, projectStateDir, localStateDir, stateHarnesses, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
+import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
@@ -458,8 +458,7 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
   const running = detectStateHarness(env);
   const otherClassified = [];
   const seen = new Set([join(classifiedBase, CLASSIFIED_DIRNAME)]);
-  let harnesses = [running];
-  try { harnesses = stateHarnesses({ root, coreDir, include: [running] }); } catch { /* reported as held */ }
+  const { harnesses } = stateHarnessesPartial({ root, coreDir, include: [running] }); // listing problems are reported as held
   for (const harness of harnesses) {
     let locations = [];
     try { ({ locations } = stateLocations({ root, harness, coreDir })); } catch { /* reported as held */ }

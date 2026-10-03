@@ -864,3 +864,28 @@ test('one unknown state location does not hide a known history folder from the p
     assert.equal(readFileSync(join(old, 'row.jsonl'), 'utf8'), '{}\n');
   });
 });
+
+test("a state folder that can't be listed does not hide another harness's known history folder", async (t) => {
+  const { localStateDir } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  let skipped = false;
+  withProject(({ home, projectDir }) => {
+    const coreDir = join(home, '.core');
+    registerProject(coreDir, projectDir);
+    const metaCodex = operationalMetricsDir(projectDir, { home, harness: 'codex' });
+    const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
+    writePinSigned({ dir: metaCodex, path: old, root: projectRootFor(projectDir, { home, coreDir }), coreDir });
+    const keyDir = dirname(localStateDir({ root: projectRootFor(projectDir, { home, coreDir }), harness: 'codex', coreDir }));
+    mkdirSync(join(keyDir, 'claude-code'), { recursive: true });
+    try {
+      if (!denyList(keyDir)) { skipped = true; return; }
+      const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+      assert.equal(r.purged, false);
+      const whats = r.held_history.map((h) => h.what);
+      assert.ok(whats.includes(old), `the Codex-recorded folder is still named: ${JSON.stringify(r.held_history)}`);
+      assert.match(r.held_history.map((h) => h.reason).join(' '), /could not be listed|could not be looked at/);
+    } finally { restoreList(keyDir); }
+    assert.equal(readFileSync(join(old, 'row.jsonl'), 'utf8'), '{}\n');
+  });
+  if (skipped) t.skip('the platform does not deny the listing');
+});

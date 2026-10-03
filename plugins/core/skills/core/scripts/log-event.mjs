@@ -26,7 +26,7 @@ import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnesses, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';
 
 /**
@@ -95,8 +95,8 @@ function historyDiscovery(projectDir, { home, env }) {
   let error = null;
   try {
     const root = projectRootFor(projectDir, { home, coreDir });
-    let harnesses = [detectStateHarness(env)];
-    try { harnesses = stateHarnesses({ root, coreDir, include: harnesses }); } catch (e) { error = e; }
+    // Listing problems are reported by metricsHistoryHeld; the names that could be seen are read.
+    const { harnesses } = stateHarnessesPartial({ root, coreDir, include: [detectStateHarness(env)] });
     // One harness whose records can't be read does not discard what the others name.
     for (const harness of harnesses) {
       try { named.push(...historyRecordFolders({ root, harness, coreDir })); } catch (e) { error = error || e; }
@@ -149,9 +149,9 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
   if (registryProblem) {
     held.push({ what: join(coreDir, 'projects.json'), reason: `the project registry is malformed (${registryProblem}), so this project's records of older external folders cannot be trusted as complete` });
   }
-  let harnesses = [detectStateHarness(env)];
-  try { harnesses = stateHarnesses({ root, coreDir, include: harnesses }); }
-  catch (e) { held.push({ what: join(root, '.core'), reason: `this project's state folders could not be listed (${String(e.code || e.message).slice(0, 80)}), so whether it has records of older external folders is unknown` }); }
+  // A folder that can't be listed is reported, and every harness seen in the others is still read.
+  const { harnesses, problems: listing } = stateHarnessesPartial({ root, coreDir, include: [detectStateHarness(env)] });
+  for (const p of listing) held.push({ what: p.what, reason: `this project's state folders here could not be listed (${p.code}), so whether it has records of older external folders is unknown` });
   // Every place each harness's state can be, not only the one routing picks today: a place that
   // can't be read as this project's hides any record in it, so it is held.
   const places = [];
