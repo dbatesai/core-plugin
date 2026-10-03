@@ -21,7 +21,7 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
@@ -66,6 +66,15 @@ export function metricsHistoryFolders(projectDir, { home = homedir(), env = proc
   return historyDiscovery(projectDir, { home, env }).folders;
 }
 
+/** The error code of the first path that can't be resolved for a reason other than absence, or null. */
+function unresolvable(...paths) {
+  for (const p of paths) {
+    try { realpathSync.native(p); }
+    catch (e) { if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) return (e && e.code) || 'error'; }
+  }
+  return null;
+}
+
 /** True when a history folder's `.project-root` is readable and names a different project. */
 function claimedByAnother(folder, projectDir) {
   let text;
@@ -86,8 +95,11 @@ function historyDiscovery(projectDir, { home, env }) {
   let error = null;
   try {
     const root = projectRootFor(projectDir, { home, coreDir });
-    for (const harness of stateHarnesses({ root, coreDir, include: [detectStateHarness(env)] })) {
-      named.push(...historyRecordFolders({ root, harness, coreDir }));
+    let harnesses = [detectStateHarness(env)];
+    try { harnesses = stateHarnesses({ root, coreDir, include: harnesses }); } catch (e) { error = e; }
+    // One harness whose records can't be read does not discard what the others name.
+    for (const harness of harnesses) {
+      try { named.push(...historyRecordFolders({ root, harness, coreDir })); } catch (e) { error = error || e; }
     }
     const legacy = legacyMetricsPins(root, { coreDir, home });
     named.push(...legacy.folders);
@@ -100,7 +112,13 @@ function historyDiscovery(projectDir, { home, env }) {
     if (typeof folder !== 'string' || !isAbsolute(folder) || containedPath(own, folder) || seen.has(folder)) continue;
     seen.add(folder);
     // Only the old Windows redirect location was ever a metrics home outside the project.
-    if (!containedPath(appData, folder)) continue;
+    if (!containedPath(appData, folder)) {
+      // Not provably inside: outside, or a root or folder that can't be resolved. Only the second
+      // is unknown; a missing one is absent.
+      const blind = unresolvable(appData, folder);
+      if (blind) unknown.push({ what: folder, code: blind });
+      continue;
+    }
     const presence = pathPresence(folder);
     if (presence.state === 'unknown') { unknown.push({ what: folder, code: presence.code }); continue; }
     if (presence.state === 'absent') continue;
@@ -126,12 +144,14 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
   try { root = projectRootFor(projectDir, { home, coreDir }); }
   catch (e) { return [{ what: projectDir, reason: `this project's records of older external folders could not be read (${String(e.code || e.message).slice(0, 80)}), so whether any exist is unknown` }]; }
   const registryProblem = registryShapeProblem({ coreDir });
+  // Every problem and every known folder is reported together: one place that can't be read
+  // never hides what the others name.
   if (registryProblem) {
-    return [{ what: join(coreDir, 'projects.json'), reason: `the project registry is malformed (${registryProblem}), so this project's records of older external folders cannot be trusted as complete` }];
+    held.push({ what: join(coreDir, 'projects.json'), reason: `the project registry is malformed (${registryProblem}), so this project's records of older external folders cannot be trusted as complete` });
   }
-  let harnesses;
-  try { harnesses = stateHarnesses({ root, coreDir, include: [detectStateHarness(env)] }); }
-  catch (e) { return [{ what: join(root, '.core'), reason: `this project's state folders could not be listed (${String(e.code || e.message).slice(0, 80)}), so whether it has records of older external folders is unknown` }]; }
+  let harnesses = [detectStateHarness(env)];
+  try { harnesses = stateHarnesses({ root, coreDir, include: harnesses }); }
+  catch (e) { held.push({ what: join(root, '.core'), reason: `this project's state folders could not be listed (${String(e.code || e.message).slice(0, 80)}), so whether it has records of older external folders is unknown` }); }
   // Every place each harness's state can be, not only the one routing picks today: a place that
   // can't be read as this project's hides any record in it, so it is held.
   const places = [];
@@ -144,7 +164,6 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
       held.push({ what: join(root, '.core', harness), reason: `this project's ${harness} state could not be read (${String(e.code || e.message).slice(0, 80)})` });
     }
   }
-  if (held.length) return held;
   const { folders, unknown, error } = historyDiscovery(projectDir, { home, env });
   for (const h of folders) {
     held.push({ what: h.folder, reason: h.foreign
@@ -156,7 +175,6 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
   }
   if (error) {
     held.push({ what: projectDir, reason: `this project's records of older external folders could not be read (${String(error.code || error.message).slice(0, 80)}), so whether any exist is unknown` });
-    return held;
   }
   for (const { dir } of places) {
     const meta = join(dir, 'metrics');

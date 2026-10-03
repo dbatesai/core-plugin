@@ -719,16 +719,17 @@ test("a local state folder linked to another project's before the purge is not t
 // A path that can't be looked at is unknown, never absent: discovery holds it and the purge does
 // not call itself complete. A genuinely missing folder is absent and owes nothing.
 const AS_ROOT = process.getuid?.() === 0 ? 'root ignores permission denial' : false;
-// Deny all access to p (chmod on POSIX, an ACL full deny on Windows); true when a stat of `probe`
-// now fails the way the code under test must handle.
+// Deny all access to p (chmod on POSIX; on Windows an inherited ACL full deny, since a plain deny
+// on a folder leaves its children reachable by path); true when a stat of `probe` now fails the
+// way the code under test must handle.
 function denyAll(p, probe = p) {
-  if (process.platform === 'win32') execFileSync('icacls', [p, '/deny', `${process.env.USERNAME}:(F)`], { stdio: 'ignore' });
+  if (process.platform === 'win32') execFileSync('icacls', [p, '/deny', `${process.env.USERNAME}:(OI)(CI)(F)`], { stdio: 'ignore' });
   else chmodSync(p, 0o000);
   try { statSync(probe); return false; } catch (e) { return e.code === 'EACCES' || e.code === 'EPERM'; }
 }
 function restoreAll(p) {
   try {
-    if (process.platform === 'win32') execFileSync('icacls', [p, '/remove:d', process.env.USERNAME], { stdio: 'ignore' });
+    if (process.platform === 'win32') execFileSync('icacls', [p, '/remove:d', process.env.USERNAME, '/T'], { stdio: 'ignore' });
     else chmodSync(p, 0o755);
   } catch { /* already restored */ }
 }
@@ -775,18 +776,20 @@ test('a denied classified log in inactive project state is planned, so the purge
   });
 });
 
-test("a history folder whose parent is denied is held as unknown; one that is really gone owes nothing", { skip: AS_ROOT }, async (t) => {
+for (const [level, up] of [['parent', 1], ['containment root (AppData\\Local)', 2]]) {
+  test(`a history folder whose ${level} is denied is held as unknown; one that is really gone owes nothing`, { skip: AS_ROOT }, async (t) => {
   const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
   withProject(({ home, projectDir }) => {
     registerProject(join(home, '.core'), projectDir);
     const meta = operationalMetricsDir(projectDir, { home, env: E });
     const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
     signedPin(meta, home, old, projectDir);
+    const denied = up === 1 ? dirname(old) : dirname(dirname(old));
     let r;
     try {
-      if (!denyAll(dirname(old), old)) { t.skip('a stat inside a denied folder still succeeds here'); return; }
+      if (!denyAll(denied, old)) { t.skip('a stat inside a denied folder still succeeds here'); return; }
       r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
-    } finally { restoreAll(dirname(old)); }
+    } finally { restoreAll(denied); }
     assert.equal(r.purged, false);
     assert.ok(r.held_history.some((h) => h.what === old && /could not be read/.test(h.reason)), JSON.stringify(r.held_history));
     rmSync(old, { recursive: true });
@@ -794,6 +797,7 @@ test("a history folder whose parent is denied is held as unknown; one that is re
     assert.equal(gone.purged, true, gone.reason);
   });
 });
+}
 
 // Before the first /core migration, a project's pin is still in its legacy workspace.
 for (const alias of ['path', 'project_path']) {
@@ -840,5 +844,23 @@ test("a legacy workspace with no pin adds nothing, and after the real migration 
     assert.equal(m.status, 'migrated', JSON.stringify(m));
     assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }).map((f) => f.folder), [old]);
     assert.equal(purgeTurnCapture(projectDir, { apply: true, home, env: E }).purged, false);
+  });
+});
+
+test('one unknown state location does not hide a known history folder from the purge result', async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    registerProject(join(home, '.core'), projectDir);
+    const meta = operationalMetricsDir(projectDir, { home, env: E });
+    const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
+    signedPin(meta, home, old, projectDir);
+    const codex = join(projectDir, '.core', 'codex');
+    mkdirSync(codex, { recursive: true }); writeFileSync(join(codex, 'workspace.json'), '{}');
+    const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(r.purged, false);
+    const whats = r.held_history.map((h) => h.what);
+    assert.ok(whats.includes(old), `the known folder is named: ${JSON.stringify(whats)}`);
+    assert.ok(whats.some((w) => canonicalPath(w) === canonicalPath(codex)), `the unknown state is named: ${JSON.stringify(whats)}`);
+    assert.equal(readFileSync(join(old, 'row.jsonl'), 'utf8'), '{}\n');
   });
 });
