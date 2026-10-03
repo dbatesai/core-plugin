@@ -549,7 +549,7 @@ function assertHistoryEntryUnlinked(entry, home) {
  * that could not be removed is reported with its reason and the overall result
  * is not `purged`. Partial success is never narrated as success.
  */
-export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env } = {}) {
+export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env, beforeEntryDelete } = {}) {
   const dir = join(resolveStoragePath(projectDir, { home, env }), TURN_CAPTURE_DIRNAME);
   let entries;
   try {
@@ -573,6 +573,8 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
     withFileLock(join(resolveStoragePath(projectDir, { home, env }), '.turn-capture.lock'), () => {
       for (const entry of scope) {
         try {
+          // Test seam: lets a test change the filesystem after planning and before this entry's checks.
+          if (typeof beforeEntryDelete === 'function') beforeEntryDelete(entry);
           if (entry.generatedClose) {
             Object.assign(entry, purgeGeneratedCloseDirectory(entry.path, { apply: true }));
             entry.removed = true; // selected generated files, NOT the directory or kept files

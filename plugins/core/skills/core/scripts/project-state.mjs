@@ -688,7 +688,8 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
  * evidence set for both a project's own history and the check of whether another project names a
  * folder, so the two can never disagree about what counts.
  *
- * A record with neither its file nor its signature present names nothing. With `strict`, a record
+ * A record with neither its file nor its signature present names nothing. With `strict`, state
+ * that exists but does not verify throws before any record is read, and a record
  * that exists but does not verify throws, because an unknown record is not proof of absence. An
  * unreadable file or signature fails verification, so this needs no separate permission check
  * (`fs.access` would not evaluate Windows ACLs anyway).
@@ -697,6 +698,15 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
  */
 export function historyRecordFolders({ root, harness, coreDir = defaultCoreDir(), strict = false }) {
   const out = [];
+  // State that exists but cannot be trusted (an unreadable or forged stamp, a copy, a refused
+  // layout) resolves to no directory below, which would read as "no records". In strict mode that
+  // is unknown, not absent. Genuinely absent state stays a usable negative.
+  if (strict) {
+    const { status } = classifyStamp({ root, harness, coreDir });
+    if (status === 'planted' || status === 'copied' || status === 'refused') {
+      throw Object.assign(new Error(`state for ${root} exists but does not verify (${status})`), { code: 'STATE_UNVERIFIED' });
+    }
+  }
   const hot = stateDir({ root, harness, kind: 'hot', coreDir });
   const durable = stateDir({ root, harness, coreDir });
   const record = (dir, name, parse) => {

@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { symlinkSync } from 'node:fs';
+import { symlinkSync, renameSync } from 'node:fs';
 import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -501,22 +501,72 @@ for (const apply of [false, true]) {
   });
 }
 
-test('purge refuses a history entry that became a link after discovery, and never follows it', { skip: !symlinkCapable() ? 'symlink privilege unavailable' : false }, async () => {
-  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
-  withProject(({ home, projectDir }) => {
-    const old = appData(home, 'linked');
-    mkdirSync(old, { recursive: true });
-    writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
-    signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
-    const outside = mkdtempSync(join(tmpdir(), 'metrics-outside-target-'));
-    try {
-      const precious = join(outside, 'keep.jsonl');
-      writeFileSync(precious, '{"not":"captured"}\n');
-      symlinkSync(outside, join(old, 'turn-capture'), process.platform === 'win32' ? 'junction' : 'dir');
-      const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
-      assert.equal(r.purged, false);
-      assert.match(r.reason, /refusing history purge/);
-      assert.equal(readFileSync(precious, 'utf8'), '{"not":"captured"}\n', 'the link target is untouched');
-    } finally { rmSync(outside, { recursive: true, force: true }); }
+// The swap happens through the purge's test seam, after planning and discovery have already seen a
+// real folder, so this exercises the deletion-time re-check, not discovery. Junctions on Windows
+// need no privilege, so only POSIX without symlink privilege skips.
+for (const swap of ['entry', 'folder', 'folder-inside-root']) {
+  test(`purge refuses a history ${swap} swapped for a link after discovery, and never follows it`, { skip: process.platform !== 'win32' && !symlinkCapable() ? 'symlink privilege unavailable' : false }, async () => {
+    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+    withProject(({ home, projectDir }) => {
+      const old = appData(home, 'swapped');
+      mkdirSync(join(old, 'turn-capture'), { recursive: true });
+      writeFileSync(join(old, 'turn-capture', '2026-09-28.jsonl'), '{"synthetic":1}\n');
+      writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
+      signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
+      // 'folder-inside-root' points the link at another folder under the same AppData root (another
+      // project's history), which a containment check alone would accept.
+      const outside = swap === 'folder-inside-root' ? appData(home, 'another-projects-history') : mkdtempSync(join(tmpdir(), 'metrics-outside-target-'));
+      mkdirSync(outside, { recursive: true });
+      const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+      try {
+        mkdirSync(join(outside, 'turn-capture'), { recursive: true });
+        const precious = join(outside, 'turn-capture', 'keep.jsonl');
+        writeFileSync(precious, '{"not":"captured"}\n');
+        let swapped = false;
+        const r = purgeTurnCapture(projectDir, { apply: true, home, env: E, beforeEntryDelete: (entry) => {
+          if (entry.id !== 'history-stream' || swapped) return;
+          swapped = true;
+          if (swap === 'entry') {
+            rmSync(entry.path, { recursive: true, force: true });
+            symlinkSync(join(outside, 'turn-capture'), entry.path, linkType);
+          } else {
+            renameSync(entry.base, entry.base + '.moved');
+            symlinkSync(outside, entry.base, linkType);
+          }
+        } });
+        assert.equal(swapped, true, 'the swap ran after planning');
+        assert.equal(r.purged, false);
+        assert.match(r.reason, /refusing history purge/);
+        assert.equal(readFileSync(precious, 'utf8'), '{"not":"captured"}\n', 'the link target is untouched');
+      } finally { rmSync(outside, { recursive: true, force: true }); }
+    });
   });
-});
+}
+
+// A peer whose state exists but cannot be verified (its stamp unreadable) is unknown, not absent.
+for (const deny of [false, true]) {
+  test(`purge with a peer that names the folder and whose stamp is ${deny ? 'unreadable' : 'readable'} holds the shared row`, async (t) => {
+    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+    let skipped = false;
+    withProject(({ home, dirs: [A, B] }) => {
+      const coreDir = join(home, '.core');
+      registerProject(coreDir, A);
+      registerProject(coreDir, B);
+      const folder = appData(home, 'shared-peer-stamp');
+      mkdirSync(join(folder, 'turn-capture'), { recursive: true });
+      const row = join(folder, 'turn-capture', '2026-09-28.jsonl');
+      writeFileSync(row, '{"synthetic":1}\n');
+      signedPin(operationalMetricsDir(A, { home, env: E }), home, folder, A);
+      signedPin(operationalMetricsDir(B, { home, env: E }), home, folder, B);
+      const stamp = join(B, '.core', 'claude-code', 'stamp');
+      try {
+        if (deny && !denyRead(stamp)) { skipped = true; return; }
+        const r = purgeTurnCapture(A, { apply: true, home, env: E });
+        assert.equal(r.purged, false);
+        assert.equal(existsSync(row), true, 'the shared row stays');
+        assert.match(r.reason, deny ? /not every other project on this machine could be checked/ : /another project's records also name this folder/);
+      } finally { if (deny) restoreRead(stamp); }
+    }, { projects: 2 });
+    if (skipped) t.skip('the platform does not deny the read');
+  });
+}
