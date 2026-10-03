@@ -49,7 +49,7 @@ export const NOTICE_VERSION = 6;
 export const HISTORY_NOTICE_VERSION = 7;
 
 export const NOTICE_TEXT = [
-  "One thing worth knowing since this is a brand-new project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",
+  "One thing worth knowing about this project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",
   "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `.core/<harness>/workspace.json`.",
   "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved with the project (CORE never exports them, and they are kept until you purge them) so retrieval quality can be graded honestly after the fact — the classified turn log the recognition classifier writes is kept the same way. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `.core/<harness>/workspace.json`; you can also purge everything it has saved at any time.",
 ].join('\n\n');
@@ -74,7 +74,7 @@ export function noticeTextFor(projectDir, { home = homedir(), env = process.env 
   try { history = metricsHistoryFolders(projectDir, { home, env }); } catch { /* unknown: base text */ }
   if (!history.length) return NOTICE_TEXT;
   const where = history.map((h) => `\`${h.folder}\``).join(' and ');
-  return `${NOTICE_TEXT}\n\nEarlier rows from before this version are kept outside the project folder, at ${where}. Nothing new is written there, and nothing in it is deleted or moved.`;
+  return `${NOTICE_TEXT}\n\nEarlier rows from before this version are kept outside the project folder, at ${where}. Nothing new is written there, and CORE never deletes or moves it on its own. An explicit purge removes it only when it is provably this project's; if it can't be proven, the purge leaves it and says so.`;
 }
 
 export function checkMetricsDisclosure({ projectDir, home = homedir(), env = process.env } = {}) {

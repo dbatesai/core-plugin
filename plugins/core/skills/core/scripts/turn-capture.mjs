@@ -47,7 +47,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdir
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, operationalMetricsDir } from './log-event.mjs';
+import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, operationalMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
@@ -543,7 +543,7 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
       try { Object.assign(entry, purgeGeneratedCloseDirectory(entry.path)); }
       catch (e) { entry.reason = String(e.message).slice(0, 120); }
     }
-    return { purged: false, reason: 'dry-run', dir, existed, scope };
+    return { purged: false, reason: 'dry-run', dir, existed, scope, held_history: metricsHistoryHeld(projectDir, { home, env }) };
   }
 
   try {
@@ -575,7 +575,16 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
       dir, existed, scope,
     };
   }
-  return { purged: true, dir, existed, scope };
+  // Earlier rows outside the project that this purge could not cover are named, never counted as purged.
+  const heldHistory = metricsHistoryHeld(projectDir, { home, env });
+  if (heldHistory.length) {
+    return {
+      purged: false,
+      reason: `history not purged: ${heldHistory.map((h) => `${h.what} (${h.reason})`).join('; ')}`,
+      dir, existed, scope, held_history: heldHistory,
+    };
+  }
+  return { purged: true, dir, existed, scope, held_history: [] };
 }
 
 // ---------- CLI ----------

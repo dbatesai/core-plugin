@@ -294,8 +294,37 @@ test('purge never touches a history folder that is ambiguous or another project\
     signedPin(operationalMetricsDir(B, { home, env: E }), home, shared, B);
     const r = purgeTurnCapture(A, { apply: true, home, env: E });
     assert.equal(r.scope.some((e) => e.id.startsWith('history-')), false);
+    assert.equal(r.purged, false, 'a folder that cannot be proven this project\'s is not counted as purged');
+    assert.deepEqual(r.held_history.map((h) => h.what), [shared]);
+    assert.match(r.reason, /history not purged/);
     assert.equal(readFileSync(rows, 'utf8'), '{"row":1}\n');
   }, { projects: 2 });
+});
+
+test('purge reports, rather than claims, a record of an older external folder that does not verify', async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    const meta = operationalMetricsDir(projectDir, { home, env: E });
+    const old = appData(home, 'unverifiable');
+    mkdirSync(join(old, 'turn-capture'), { recursive: true });
+    writeFileSync(join(old, 'turn-capture', '2026-09-28.jsonl'), '{"row":1}\n');
+    writeFileSync(join(meta, 'storage-path.txt'), old);   // unsigned: the folder cannot be vouched for
+    const dry = purgeTurnCapture(projectDir, { apply: false, home, env: E });
+    assert.equal(dry.held_history.length, 1, 'the dry run names it');
+    const real = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(real.purged, false);
+    assert.match(real.held_history[0].reason, /does not verify/);
+    assert.equal(existsSync(join(old, 'turn-capture', '2026-09-28.jsonl')), true, 'and does not touch it');
+  });
+});
+
+test('a purge with no history at all, or only provably-owned history, reports purged', async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(r.purged, true);
+    assert.deepEqual(r.held_history, []);
+  });
 });
 
 test('the status command reports project rows and history rows separately', async () => {

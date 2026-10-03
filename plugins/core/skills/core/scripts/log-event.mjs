@@ -91,6 +91,34 @@ export function metricsHistoryFolders(projectDir, { home = homedir(), env = proc
   return out;
 }
 
+/**
+ * What an explicit purge cannot honestly claim to have covered: history folders that may belong to
+ * another project (or whose ownership cannot be proven), and records of an older external folder
+ * that exist but do not verify (unsigned, tampered, or written for another project), so the folder
+ * they named cannot be found. A purge that leaves any of these reports it instead of "purged".
+ *
+ * @returns {{what: string, reason: string}[]}
+ */
+export function metricsHistoryHeld(projectDir, { home = homedir(), env = process.env } = {}) {
+  const coreDir = join(home, '.core');
+  const held = metricsHistoryFolders(projectDir, { home, env })
+    .filter((h) => !h.purgeable)
+    .map((h) => ({ what: h.folder, reason: 'another project names or may own this folder, or ownership cannot be proven' }));
+  try {
+    const root = projectRootFor(projectDir, { home, coreDir });
+    const meta = trustedMetricsDir(projectDir, { home, env });
+    const durable = stateDir({ root, harness: detectStateHarness(env), coreDir });
+    const unverified = (dir, name, verifies) => {
+      if (!dir || !(existsSync(join(dir, name)) || existsSync(join(dir, `${name}.mac`)))) return;
+      if (!verifies()) held.push({ what: join(dir, name), reason: 'a record of an older external folder exists but does not verify, so the folder it names cannot be found' });
+    };
+    unverified(meta, 'storage-path.txt', () => readPinSigned({ dir: meta, root, coreDir }) !== null);
+    unverified(meta, 'held-legacy-folder.txt', () => readHeldSigned({ dir: meta, coreDir }) !== null);
+    unverified(durable && durable.dir, EXTERNAL_MARKER, () => readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir }) !== null);
+  } catch { /* no readable state: nothing further to name */ }
+  return held;
+}
+
 export function todayUTC() {
   return new Date().toISOString().slice(0, 10);
 }
