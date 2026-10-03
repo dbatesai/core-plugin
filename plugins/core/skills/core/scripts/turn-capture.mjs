@@ -43,15 +43,15 @@
  * Ships with the plugin by convention; .mjs (Node.js) only.
  */
 
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
-import { projectRootFor, projectStateDir, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
+import { projectRootFor, projectStateDir, localStateDir, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
 // reader misread rows.
@@ -446,14 +446,34 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
   const classifiedBase = trustedMetricsDir(projectDir, { home, env })
     || join(projectStateDir({ root: projectRootFor(projectDir, { home, coreDir }), harness: detectStateHarness(env), kind: 'hot', coreDir }).dir, 'metrics');
   const closeBase = join(closeStorageRoot(projectDir, { home, env }), 'close');
+  // Where each entry may physically be: the project folder, and for the classified log also this
+  // project's machine-local fallback state (`~/.core/local/<project>/`), which holds it when the
+  // project folder is unregistered or not writable. Checked again at deletion time.
+  const root = projectRootFor(projectDir, { home, coreDir });
+  const inProject = [projectDir];
+  const inProjectOrLocal = [projectDir, dirname(localStateDir({ root, harness: detectStateHarness(env), coreDir }))];
   return [
-    { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true, base },
-    { id: 'health', path: join(base, HEALTH_FILENAME), tree: false, base },
-    { id: 'judgments', path: join(base, JUDGMENT_LOG_FILENAME), tree: false, base },
-    { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase },
-    { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase },
-    { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase },
+    { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true, base, within: inProject },
+    { id: 'health', path: join(base, HEALTH_FILENAME), tree: false, base, within: inProject },
+    { id: 'judgments', path: join(base, JUDGMENT_LOG_FILENAME), tree: false, base, within: inProject },
+    { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase, within: inProjectOrLocal },
+    { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase, within: inProject },
+    { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase, within: inProject },
   ];
+}
+
+// Checked at the moment of deletion, so a link swapped in after planning is caught: the entry's
+// folder must physically resolve inside one of its allowed roots, and the entry must not be a link.
+// A lexical name check alone proves no physical boundary.
+function assertPhysicallyWithin(entry) {
+  let real;
+  try { real = realpathSync.native(entry.base); } catch (e) { if (e.code === 'ENOENT') return; throw e; }
+  if (!entry.within.some((r) => containedPath(r, real) === real)) {
+    throw new Error(`refusing purge: ${entry.base} resolves to ${real}, outside ${entry.within.join(' and ')}`);
+  }
+  let st = null;
+  try { st = lstatSync(entry.path); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (st && st.isSymbolicLink()) throw new Error(`refusing purge: ${entry.path} is a link`);
 }
 
 // A destructive bound is validated before it can delete anything: an entry has
@@ -525,7 +545,7 @@ export function runTurnCaptureRetention(projectDir, {
  * that could not be removed is reported with its reason and the overall result
  * is not `purged`. Partial success is never narrated as success.
  */
-export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env } = {}) {
+export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env, beforeEntryDelete } = {}) {
   const dir = join(resolveStoragePath(projectDir, { home, env }), TURN_CAPTURE_DIRNAME);
   let entries;
   try {
@@ -549,6 +569,9 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
     withFileLock(join(resolveStoragePath(projectDir, { home, env }), '.turn-capture.lock'), () => {
       for (const entry of scope) {
         try {
+          // Test seam: lets a test change the filesystem after planning, before this entry's checks.
+          if (typeof beforeEntryDelete === 'function') beforeEntryDelete(entry);
+          assertPhysicallyWithin(entry);
           if (entry.generatedClose) {
             Object.assign(entry, purgeGeneratedCloseDirectory(entry.path, { apply: true }));
             entry.removed = true; // selected generated files, NOT the directory or kept files

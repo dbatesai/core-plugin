@@ -9,6 +9,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { symlinkSync, readdirSync } from 'node:fs';
+import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -279,7 +281,7 @@ test('stats report project and history rows separately; purge empties the projec
     assert.equal(done.purged, false, 'not complete while earlier rows exist outside the project');
     assert.equal(done.scope.some((e) => e.id.startsWith('history')), false, 'nothing outside the project is in scope');
     assert.deepEqual(done.held_history.map((h) => h.what), [old]);
-    assert.match(done.held_history[0].reason, /delete this folder yourself/);
+    assert.match(done.held_history[0].reason, /whether to delete the folder is your call/);
     for (const f of [oldRows, join(old, 'turn-capture-health.json'), oldSummary]) assert.equal(existsSync(f), true, `kept: ${f}`);
   });
 });
@@ -343,9 +345,9 @@ function restoreRead(file) {
 // Whatever the folder's ownership record says, the purge never deletes outside the project; it
 // names the folder and why.
 for (const [label, claim, reason] of [
-  ['names this project', 'self', /delete this folder yourself/],
+  ['names this project', 'self', /whether to delete the folder is your call/],
   ['names another project', 'other', /another project claims/],
-  ['is absent', 'none', /delete this folder yourself/],
+  ['is absent', 'none', /whether to delete the folder is your call/],
 ]) {
   test(`purge never deletes a history folder whose ownership record ${label}`, async () => {
     const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
@@ -470,3 +472,87 @@ test('history recorded under another harness is found and listed by this one', a
     assert.equal(existsSync(row), true);
   });
 });
+
+// The purge's physical boundary: an entry whose folder resolves outside the project (a linked
+// _metrics, present before planning or swapped in after it) is refused, and its target untouched.
+for (const when of ['before planning', 'after planning']) {
+  test(`purge refuses a _metrics folder that links outside the project (${when})`, { skip: process.platform !== 'win32' && !symlinkCapable() ? 'symlink privilege unavailable' : false }, async () => {
+    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+    withProject(({ home, projectDir }) => {
+      const outside = mkdtempSync(join(tmpdir(), 'metrics-linked-base-'));
+      const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+      try {
+        mkdirSync(join(outside, 'turn-capture'), { recursive: true });
+        const precious = join(outside, 'turn-capture', '2026-09-28.jsonl');
+        writeFileSync(precious, '{"not":"this project"}\n');
+        const metrics = join(projectDir, '_metrics');
+        if (when === 'before planning') symlinkSync(outside, metrics, linkType);
+        else mkdirSync(join(metrics, 'turn-capture'), { recursive: true });
+        let swapped = when === 'before planning';
+        const r = purgeTurnCapture(projectDir, { apply: true, home, env: E, beforeEntryDelete: (entry) => {
+          if (swapped || entry.id !== 'stream') return;
+          swapped = true;
+          rmSync(metrics, { recursive: true, force: true });
+          symlinkSync(outside, metrics, linkType);
+        } });
+        assert.equal(swapped, true);
+        assert.equal(r.purged, false);
+        // Swapping _metrics also removes the lock file inside it, so the overall reason can be the
+        // lock release; the stream entry's own refusal is the boundary check.
+        assert.match(r.scope.find((e) => e.id === 'stream').reason || '', /refusing purge/);
+        assert.equal(readFileSync(precious, 'utf8'), '{"not":"this project"}\n', 'the outside folder is untouched');
+      } finally { rmSync(outside, { recursive: true, force: true }); }
+    });
+  });
+}
+
+test('a harness state folder that is a link is reported, not skipped as absent', { skip: process.platform !== 'win32' && !symlinkCapable() ? 'symlink privilege unavailable' : false }, async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    registerProject(join(home, '.core'), projectDir);
+    operationalMetricsDir(projectDir, { home, env: E });
+    const elsewhere = mkdtempSync(join(tmpdir(), 'metrics-linked-harness-'));
+    try {
+      symlinkSync(elsewhere, join(projectDir, '.core', 'codex'), process.platform === 'win32' ? 'junction' : 'dir');
+      const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+      assert.equal(r.purged, false);
+      assert.match(r.held_history.map((h) => h.reason).join(' '), /codex state cannot be read as its own \(refused\)/);
+    } finally { rmSync(elsewhere, { recursive: true, force: true }); }
+  });
+});
+
+test('a state folder that cannot be listed is reported as unknown, not as no history', async (t) => {
+  const { metricsHistoryHeld } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  let skipped = false;
+  withProject(({ home, projectDir }) => {
+    registerProject(join(home, '.core'), projectDir);
+    operationalMetricsDir(projectDir, { home, env: E });
+    const core = join(projectDir, '.core');
+    if (process.platform === 'win32') { skipped = true; return; }
+    chmodSync(core, 0o000);
+    try {
+      try { readdirSync(core); skipped = true; return; } catch (e) { if (e.code !== 'EACCES') { skipped = true; return; } }
+      const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+      assert.equal(r.purged, false);
+      assert.match(metricsHistoryHeld(projectDir, { home, env: E }).map((h) => h.reason).join(' '), /could not be listed/);
+    } finally { chmodSync(core, 0o755); }
+  });
+  if (skipped) t.skip('the platform does not deny the listing');
+});
+
+for (const [label, registry] of [
+  ['a JSON object instead of a list', () => '{"path":"/x"}'],
+  ['an entry without a usable path', (ctx) => JSON.stringify([{ path: ctx.projectDir }, { path: 42 }])],
+]) {
+  test(`a malformed registry (${label}) holds the purge instead of reporting it complete`, async () => {
+    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+    withProject(({ home, projectDir }) => {
+      registerProject(join(home, '.core'), projectDir);
+      writeFileSync(join(home, '.core', 'projects.json'), registry({ projectDir }));
+      const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+      assert.equal(r.purged, false);
+      assert.match(JSON.stringify(r), /registry is malformed|not a list|no usable path/);
+    });
+  });
+}

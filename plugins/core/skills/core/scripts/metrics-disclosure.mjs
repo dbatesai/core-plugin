@@ -74,7 +74,7 @@ export function noticeTextFor(projectDir, { home = homedir(), env = process.env 
   try { history = metricsHistoryFolders(projectDir, { home, env }).filter((h) => !h.foreign); } catch { /* unknown: base text */ }
   if (!history.length) return NOTICE_TEXT;
   const where = history.map((h) => `\`${h.folder}\``).join(' and ');
-  return `${NOTICE_TEXT}\n\nEarlier rows from before this version are kept outside the project folder, at ${where}. Nothing new is written there, and CORE never deletes or moves it: it is outside the project folder. An explicit purge removes everything in the project and names this folder so you can delete it yourself.`;
+  return `${NOTICE_TEXT}\n\nEarlier rows from before this version are kept outside the project folder, at ${where}. Nothing new is written there, and CORE never deletes or moves it: it is outside the project folder. An explicit purge removes the captured data in the project and names this folder; it may hold rows from more than one project, so deleting it is your decision.`;
 }
 
 export function checkMetricsDisclosure({ projectDir, home = homedir(), env = process.env } = {}) {

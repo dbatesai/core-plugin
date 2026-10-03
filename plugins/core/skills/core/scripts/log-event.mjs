@@ -26,7 +26,7 @@ import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnesses, classifyStamp, MIGRATING_MARKER, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnesses, registryShapeProblem, classifyStamp, MIGRATING_MARKER, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
 
 /**
  * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
@@ -116,7 +116,13 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
   let root;
   try { root = projectRootFor(projectDir, { home, coreDir }); }
   catch (e) { return [{ what: projectDir, reason: `this project's records of older external folders could not be read (${String(e.code || e.message).slice(0, 80)}), so whether any exist is unknown` }]; }
-  const harnesses = stateHarnesses({ root, coreDir, include: [detectStateHarness(env)] });
+  const registryProblem = registryShapeProblem({ coreDir });
+  if (registryProblem) {
+    return [{ what: join(coreDir, 'projects.json'), reason: `the project registry is malformed (${registryProblem}), so this project's records of older external folders cannot be trusted as complete` }];
+  }
+  let harnesses;
+  try { harnesses = stateHarnesses({ root, coreDir, include: [detectStateHarness(env)] }); }
+  catch (e) { return [{ what: join(root, '.core'), reason: `this project's state folders could not be listed (${String(e.code || e.message).slice(0, 80)}), so whether it has records of older external folders is unknown` }]; }
   for (const harness of harnesses) {
     let status;
     try { ({ status } = classifyStamp({ root, harness, coreDir })); } catch (e) { status = `unreadable: ${e.code || e.message}`; }
@@ -130,7 +136,7 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
   for (const h of folders) {
     held.push({ what: h.folder, reason: h.foreign
       ? 'earlier rows outside the project folder, in a folder another project claims; CORE does not delete outside the project'
-      : 'earlier rows outside the project folder; CORE does not delete outside the project, so delete this folder yourself if you want them gone' });
+      : "earlier rows named by this project's records, outside the project folder; CORE does not delete outside the project, and it cannot prove every row there is this project's, so whether to delete the folder is your call" });
   }
   if (error) {
     held.push({ what: projectDir, reason: `this project's records of older external folders could not be read (${String(error.code || error.message).slice(0, 80)}), so whether any exist is unknown` });

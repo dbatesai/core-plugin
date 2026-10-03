@@ -73,6 +73,24 @@ export function registryEntryPath(entry) {
   return (entry && (entry.path || entry.project_path)) || null;
 }
 
+/**
+ * Why the registry cannot be trusted as a complete list, or null when it can: a file that is not a
+ * JSON array, or an entry without a usable path. readRegisteredRoots skips such entries for
+ * everyday lookups; a caller that must know it saw every project uses this.
+ */
+export function registryShapeProblem({ coreDir = defaultCoreDir() } = {}) {
+  for (const name of ['projects.json', 'index.json']) {
+    const file = join(coreDir, name);
+    if (!existsSync(file)) continue;
+    let parsed;
+    try { parsed = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { return `${name} cannot be read (${e.code || 'not JSON'})`; }
+    if (!Array.isArray(parsed)) return `${name} is not a list`;
+    const bad = parsed.findIndex((e) => !e || typeof (name === 'projects.json' ? e.path : registryEntryPath(e)) !== 'string' || !(name === 'projects.json' ? e.path : registryEntryPath(e)));
+    if (bad !== -1) return `${name} entry ${bad} has no usable path`;
+  }
+  return null;
+}
+
 export function readRegisteredRoots({ coreDir = defaultCoreDir(), includeLegacyIndex = true } = {}) {
   const paths = readJsonArray(join(coreDir, 'projects.json')).map((e) => e && e.path);
   if (includeLegacyIndex) {
@@ -684,7 +702,7 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
 
 /**
  * Every harness that has state for this project, in the project or in its local fallback, plus
- * `include` (the running harness). Ownership questions span harnesses: a pin a Codex session wrote
+ * `include` (the running harness). Throws when a state folder exists but cannot be listed. Ownership questions span harnesses: a pin a Codex session wrote
  * names the same folder a Claude Code session would purge.
  */
 export function stateHarnesses({ root, coreDir = defaultCoreDir(), include = [] }) {
@@ -692,8 +710,11 @@ export function stateHarnesses({ root, coreDir = defaultCoreDir(), include = [] 
   const real = canonical(root);
   for (const dir of [join(real, STATE_DIRNAME), join(coreDir, 'local', localRootKey(real))]) {
     let entries = [];
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { /* none there */ }
-    for (const e of entries) if (e.isDirectory() && HARNESS_RE.test(e.name)) names.add(e.name);
+    // A folder that isn't there has no harnesses; one that can't be read is unknown, so it throws.
+    try { entries = readdirSync(dir); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue; throw e; }
+    // Every harness-shaped entry counts, a link or a file included: classifying it (refused, for a
+    // link) is how its state gets reported, and skipping it would read as no state at all.
+    for (const name of entries) if (HARNESS_RE.test(name)) names.add(name);
   }
   return [...names];
 }
