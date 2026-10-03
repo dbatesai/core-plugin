@@ -683,14 +683,58 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
 
 
 /**
- * The other registered projects, on this machine and readable by this install, whose signed
- * pin (or signed hold record) names `folder`. A hold record keeps the answer the same whichever
- * project scaffolds first.
+ * The external folders a project's own records name: the signed storage pin and held record in its
+ * hot metrics state, and the signed ever-external marker in its durable state. This is the one
+ * evidence set for both a project's own history and the check of whether another project names a
+ * folder, so the two can never disagree about what counts.
+ *
+ * A record with neither its file nor its signature present names nothing. With `strict`, a record
+ * that exists but does not verify throws, because an unknown record is not proof of absence. An
+ * unreadable file or signature fails verification, so this needs no separate permission check
+ * (`fs.access` would not evaluate Windows ACLs anyway).
+ *
+ * @returns {{folder: string, ambiguous: boolean}[]}
+ */
+export function historyRecordFolders({ root, harness, coreDir = defaultCoreDir(), strict = false }) {
+  const out = [];
+  const hot = stateDir({ root, harness, kind: 'hot', coreDir });
+  const durable = stateDir({ root, harness, coreDir });
+  const record = (dir, name, parse) => {
+    if (!dir) return;
+    const file = join(dir, name);
+    const present = [file, `${file}${MAC_SUFFIX}`].filter((f) => {
+      try { lstatSync(f); return true; } catch (e) { if (e && e.code === 'ENOENT') return false; if (strict) throw e; return false; }
+    });
+    if (!present.length) return;
+    const value = parse();
+    if (value) { out.push(value); return; }
+    if (strict) throw Object.assign(new Error(`${file} exists but does not verify`), { code: 'RECORD_UNVERIFIED' });
+  };
+  const meta = hot ? join(hot.dir, 'metrics') : null;
+  record(meta, 'storage-path.txt', () => {
+    const p = readPinSigned({ dir: meta, root, coreDir });
+    return p ? { folder: p, ambiguous: false } : null;
+  });
+  record(meta, 'held-legacy-folder.txt', () => {
+    const h = readHeldSigned({ dir: meta, coreDir });
+    return h ? { folder: h.folder, ambiguous: true } : null;
+  });
+  record(durable && durable.dir, METRICS_EXTERNAL_MARKER, () => {
+    const raw = readSignedFileAt({ dir: durable.dir, name: METRICS_EXTERNAL_MARKER, coreDir });
+    if (raw === null) return null;
+    try { const f = JSON.parse(raw).folder; return typeof f === 'string' ? { folder: f, ambiguous: false } : null; } catch { return null; }
+  });
+  return out;
+}
+
+/**
+ * The other registered projects, on this machine and readable by this install, whose records
+ * (pin, held record or ever-external marker, per `historyRecordFolders`) name `folder`.
  *
  * With `strict`, anything that keeps the answer from being complete throws instead of being
- * skipped: an unreadable registry, a project whose state cannot be resolved, or a record file
- * that exists but cannot be read. A destructive caller uses strict so that "no other project
- * names this folder" is never the product of not being able to look.
+ * skipped: an unreadable registry, a project whose state cannot be resolved, or a record that
+ * exists but cannot be read or verified. A destructive caller uses strict so that "no other
+ * project names this folder" is never the product of not being able to look.
  */
 export function otherProjectsNamingFolder(folder, { projectDir, home, env, strict = false }) {
   const coreDir = join(home, '.core');
@@ -702,18 +746,7 @@ export function otherProjectsNamingFolder(folder, { projectDir, home, env, stric
   for (const root of roots) {
     if (root === self) continue;
     try {
-      const s = stateDir({ root, harness, kind: 'hot', coreDir });
-      if (!s) continue;
-      const metricsDir = join(s.dir, 'metrics');
-      if (strict) {
-        for (const name of ['storage-path.txt', 'held-legacy-folder.txt']) {
-          const file = join(metricsDir, name);
-          if (existsSync(file)) accessSync(file, fsConstants.R_OK);
-        }
-      }
-      const named = readPinSigned({ dir: metricsDir, root, coreDir }) === folder
-        || readHeldSigned({ dir: metricsDir, coreDir })?.folder === folder;
-      if (named) out.push(root);
+      if (historyRecordFolders({ root, harness, coreDir, strict }).some((r) => r.folder === folder)) out.push(root);
     } catch (e) { if (strict) throw e; /* an unreadable project cannot vouch for a claim */ }
   }
   return out;

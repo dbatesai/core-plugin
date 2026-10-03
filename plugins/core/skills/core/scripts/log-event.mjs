@@ -26,7 +26,7 @@ import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, otherProjectsNamingFolder, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, otherProjectsNamingFolder, historyRecordFolders, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
 
 /**
  * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
@@ -94,18 +94,7 @@ function historyDiscovery(projectDir, { home, env }) {
   let error = null;
   try {
     const root = projectRootFor(projectDir, { home, coreDir });
-    const meta = trustedMetricsDir(projectDir, { home, env });
-    if (meta) {
-      const pin = readPinSigned({ dir: meta, root, coreDir });
-      if (pin) named.push({ folder: pin, ambiguous: false });
-      const held = readHeldSigned({ dir: meta, coreDir });
-      if (held) named.push({ folder: held.folder, ambiguous: true });
-    }
-    const durable = stateDir({ root, harness: detectStateHarness(env), coreDir });
-    const marker = durable ? readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir }) : null;
-    if (marker) {
-      try { const f = JSON.parse(marker).folder; if (typeof f === 'string') named.push({ folder: f, ambiguous: false }); } catch { /* not a marker this code wrote */ }
-    }
+    named.push(...historyRecordFolders({ root, harness: detectStateHarness(env), coreDir }));
   } catch (e) { error = e; }
   const appData = join(home, 'AppData', 'Local', 'core-metrics');
   const out = [];

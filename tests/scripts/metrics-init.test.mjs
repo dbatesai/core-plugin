@@ -8,6 +8,7 @@ import { registerProject } from '../../plugins/core/skills/core/scripts/index-re
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -344,6 +345,21 @@ test('the status command reports project rows and history rows separately', asyn
   });
 });
 
+// Deny this user read access to a file for a test, the way each platform enforces it: chmod on
+// POSIX, an ACL deny on Windows (where Node reports the denied read as EPERM and fs.access does
+// not evaluate ACLs). Returns false when the platform did not actually deny the read.
+function denyRead(file) {
+  if (process.platform === 'win32') execFileSync('icacls', [file, '/deny', `${process.env.USERNAME}:(R)`], { stdio: 'ignore' });
+  else chmodSync(file, 0o000);
+  try { readFileSync(file); return false; } catch (e) { return e.code === 'EACCES' || e.code === 'EPERM'; }
+}
+function restoreRead(file) {
+  try {
+    if (process.platform === 'win32') execFileSync('icacls', [file, '/remove:d', process.env.USERNAME], { stdio: 'ignore' });
+    else chmodSync(file, 0o644);
+  } catch { /* not created in this case */ }
+}
+
 // Paired ownership controls through the real purge: each case is one fixture change away from
 // the owned positive control, and only provable ownership may remove a row.
 for (const [label, setup, expect] of [
@@ -351,20 +367,29 @@ for (const [label, setup, expect] of [
   ['the folder\'s ownership record names another registered project', (ctx) => writeFileSync(ctx.ownerFile, canonicalPath(ctx.B) + '\n'), { purged: false, reason: /another project claims this folder/ }],
   ['the folder\'s ownership record cannot be read', (ctx) => {
     writeFileSync(ctx.ownerFile, canonicalPath(ctx.B) + '\n');
-    chmodSync(ctx.ownerFile, 0o000);
-    try { readFileSync(ctx.ownerFile); return 'skip'; } catch (e) { if (e.code !== 'EACCES') return 'skip'; }
+    ctx.denied.push(ctx.ownerFile);
+    if (!denyRead(ctx.ownerFile)) return 'skip';
   }, { purged: false, reason: /ownership record cannot be read/ }],
   ['another registered project\'s signed record names the same folder', (ctx) => signedPin(operationalMetricsDir(ctx.B, { home: ctx.home, env: E }), ctx.home, ctx.folder, ctx.B), { purged: false, reason: /another project's records also name/ }],
   ['another registered project\'s record cannot be read', (ctx) => {
     const peerPin = join(operationalMetricsDir(ctx.B, { home: ctx.home, env: E }), 'storage-path.txt');
     signedPin(dirname(peerPin), ctx.home, appData(ctx.home, 'elsewhere'), ctx.B);
-    chmodSync(peerPin, 0o000);
-    ctx.restore = peerPin;
-    try { readFileSync(peerPin); return 'skip'; } catch (e) { if (e.code !== 'EACCES') return 'skip'; }
+    ctx.denied.push(peerPin);
+    if (!denyRead(peerPin)) return 'skip';
   }, { purged: false, reason: /not every other project on this machine could be checked/ }],
+  ['another registered project\'s signature for a record naming the folder cannot be read', (ctx) => {
+    const peerMeta = operationalMetricsDir(ctx.B, { home: ctx.home, env: E });
+    signedPin(peerMeta, ctx.home, ctx.folder, ctx.B);
+    const mac = join(peerMeta, 'storage-path.txt.mac');
+    ctx.denied.push(mac);
+    if (!denyRead(mac)) return 'skip';
+  }, { purged: false, reason: /not every other project on this machine could be checked/ }],
+  ['another registered project names the folder only by its ever-external marker', (ctx) => {
+    markMetricsEverExternal({ projectDir: ctx.B, harness: 'claude-code', home: ctx.home, coreDir: join(ctx.home, '.core'), folder: ctx.folder });
+  }, { purged: false, reason: /another project's records also name this folder/ }],
   ['the project registry cannot be read', (ctx) => writeFileSync(join(ctx.home, '.core', 'projects.json'), '{ not json'), { purged: false, unnamed: true, reason: /JSON|could not be read/ }],
 ]) {
-  test(`purge ownership control: ${label}`, { skip: process.platform === 'win32' && /(ownership record|record) cannot be read$/.test(label) ? 'chmod does not deny reads under Windows ACLs' : false }, async (t) => {
+  test(`purge ownership control: ${label}`, async (t) => {
     const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
     const { metricsHistoryFolders: history } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
     let skipped = false;
@@ -378,7 +403,7 @@ for (const [label, setup, expect] of [
       writeFileSync(row, '{"synthetic":1}\n');
       signedPin(operationalMetricsDir(A, { home, env: E }), home, folder, A);
       const ownerFile = join(folder, '.project-root');
-      const ctx = { home, A, B, folder, ownerFile };
+      const ctx = { home, A, B, folder, ownerFile, denied: [] };
       try {
         if (setup(ctx) === 'skip') { skipped = true; return; }
         assert.equal(history(A, { home, env: E }).length, expect.unnamed ? 0 : 1, 'the folder is named as history whenever the records can be read');
@@ -392,7 +417,7 @@ for (const [label, setup, expect] of [
           if (!expect.unnamed) assert.equal(r.held_history.length, 1, 'and the purge names what it left');
         }
       } finally {
-        for (const f of [ownerFile, ctx.restore]) { try { if (f) chmodSync(f, 0o644); } catch { /* not created in this case */ } }
+        for (const f of ctx.denied) restoreRead(f);
       }
     }, { projects: 2 });
     if (skipped) t.skip('the platform does not deny the read (running as root or under ACLs)');
