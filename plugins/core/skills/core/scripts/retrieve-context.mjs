@@ -24,7 +24,7 @@
  * CLI: node retrieve-context.mjs <storePath> "<query>" [--top N]
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { statSync, readFileSync } from 'node:fs';
 import { resolve, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -33,6 +33,14 @@ import { bm25DocumentScores, bm25Scores, tokenize, STOPWORDS } from './bm25.mjs'
 import { isCliEntry } from './cli-entry.mjs';
 
 export const ENRICHMENT_WEIGHT = 0.6;
+
+// existsSync also returns false on EACCES. Only ENOENT proves a missing store;
+// other errors must reach captureStore so health and the pack report incomplete.
+function hasMemoryStore(root) {
+  try { statSync(join(root, '_memories')); return true; }
+  catch (error) { return error.code !== 'ENOENT'; }
+}
+
 
 // The tokenizer lives in bm25.mjs (avoids a retrieve-context ⇄ bm25 import
 // cycle). Re-exported here so existing importers keep working.
@@ -59,7 +67,7 @@ function scoreUnit(queryTokens, unit) {
  */
 export function lexicalRankedIds(query, storePath, { snapshot = null } = {}) {
   const root = resolve(storePath);
-  if (!snapshot && !existsSync(join(root, '_memories'))) return [];
+  if (!snapshot && !hasMemoryStore(root)) return [];
   const index = snapshot?.index || loadFreshIndex(root);
   const queryTokens = tokenize(query);
   return index.units
@@ -87,7 +95,7 @@ export function lexicalRankedIds(query, storePath, { snapshot = null } = {}) {
  */
 export function productRankedScores(query, storePath, preloadedIndex = null, snapshot = null) {
   const root = resolve(storePath);
-  if (!snapshot && !existsSync(join(root, '_memories'))) return [];
+  if (!snapshot && !hasMemoryStore(root)) return [];
   // The product ranking always owns a content-addressed capture when its caller
   // did not supply one. Enrichment is part of that identity and may not be read
   // from a different instant than bodies/edges.
@@ -197,29 +205,22 @@ let _lastBm25Error = null;
 
 /**
  * storeHealth — cheap, non-mutating health read for hook/UI surfaces. Reads the
- * CACHED index only (no regeneration; call after a retrieval so it's fresh) and
+ * request snapshot, or captures the live store without writing a cache, and
  * reports the degraded state a silent fallback would otherwise hide: duplicate-id
  * conflicts (an observation shadowing canonical truth) and the last BM25 failure.
  */
 export function storeHealth(storePath, { snapshot = null } = {}) {
-  // With a snapshot, health comes from the CAPTURED index — degraded/conflicts
-  // are fields the capture already carries (round-13 audit: the cached-file read
-  // below described a possibly-different store state than the snapshot's id).
-  if (snapshot?.index) {
-    return {
-      degraded: !!snapshot.index.degraded,
-      duplicate_conflicts: snapshot.index.duplicate_conflicts || [],
-      bm25_error: _lastBm25Error,
-    };
-  }
-  const root = resolve(storePath);
-  let degraded = false, conflicts = [];
-  try {
-    const raw = JSON.parse(readFileSync(join(root, '_memories', '_lib', 'unit-summaries.json'), 'utf8'));
-    degraded = !!raw.degraded;
-    conflicts = raw.duplicate_conflicts || [];
-  } catch { /* no cache yet — nothing to report */ }
-  return { degraded, duplicate_conflicts: conflicts, bm25_error: _lastBm25Error };
+  // A preserved complete cache cannot report the health of a partial live read.
+  // Prefer the caller's capture; standalone probes read without refreshing cache.
+  const snap = snapshot || loadSnapshot(storePath, { captureBodies: true, refreshCache: false });
+  const readErrors = snap.index.read_errors || snap.readErrors || [];
+  return {
+    degraded: !!snap.index.degraded || readErrors.length > 0,
+    incomplete: !!snap.index.incomplete || readErrors.length > 0,
+    read_errors: readErrors,
+    duplicate_conflicts: snap.index.duplicate_conflicts || [],
+    bm25_error: _lastBm25Error,
+  };
 }
 
 /**
@@ -309,7 +310,7 @@ export function retrieveContext(query, storePath, opts = {}) {
   // index would mkdir -p _memories/_lib and litter unit-summaries.json into an
   // unrelated repo. No store, no retrieval, no side effect. (A caller holding a
   // captured snapshot already proved the store existed at capture time.)
-  if (!opts.snapshot && !existsSync(join(root, '_memories'))) return [];
+  if (!opts.snapshot && !hasMemoryStore(root)) return [];
   return runRetrievalStages(query, root, opts).final;
 }
 
@@ -331,7 +332,7 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
   // and the trace must describe the CAPTURED state even if the live store
   // vanished afterward — an unconditional existsSync here returned `storeless`
   // for exactly the runs whose whole point was independence from live state.
-  if (!snapshot && !existsSync(join(root, '_memories'))) {
+  if (!snapshot && !hasMemoryStore(root)) {
     return { kind: 'retrieval-trace', local_only: true, store: root, storeless: true,
       query, snapshot_id: null, stages: null, pack: null, timing_ms: 0 };
   }
@@ -399,20 +400,33 @@ export function buildRetrievalTrace(query, storePath, { topN = 3, tierPolicy = '
  */
 export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = {}) {
   const accepted = [], excluded = [], warnings = [];
-  if (!hits || !hits.length) return { text: '', bytes: 0, accepted, excluded, warnings };
+  hits = hits || [];
+  let prefix = '';
+  if (health?.incomplete || health?.read_errors?.length) {
+    const warning = `⚠ CORE search incomplete: ${(health.read_errors || []).length} unreadable source(s); missing matches are unknown. Check source permissions and retry.\n`;
+    warnings.push(warning.trim());
+    // The incomplete-search warning must reach the reader; it is not a footer a
+    // long first hit can crowd out. If it cannot fit, deliver no hits.
+    if (Buffer.byteLength(warning, 'utf8') > byteCap) {
+      for (const h of hits) excluded.push({ id: h.id, tier: h.tier, score: h.score, reason: 'byte-cap' });
+      return { text: '', bytes: 0, accepted, excluded, warnings };
+    }
+    prefix = warning;
+  }
+  if (!hits.length) return { text: prefix, bytes: Buffer.byteLength(prefix, 'utf8'), accepted, excluded, warnings };
 
   const HEADER = 'Relevant stored context (CORE per-turn retrieval):\n';
   // The cap binds ABSOLUTELY. A cap smaller
   // than the header delivers an empty pack, every hit excluded, and the
   // constraint named in warnings — never bytes > byteCap in violation of the
   // pack's own contract.
-  if (Buffer.byteLength(HEADER, 'utf8') > byteCap) {
+  if (Buffer.byteLength(prefix + HEADER, 'utf8') > byteCap) {
     for (const h of hits) excluded.push({ id: h.id, tier: h.tier, score: h.score, reason: 'byte-cap' });
     warnings.push(`byteCap ${byteCap} is below the ${Buffer.byteLength(HEADER, 'utf8')}-byte pack header — nothing delivered`);
-    return { text: '', bytes: 0, accepted, excluded, warnings };
+    return { text: prefix, bytes: Buffer.byteLength(prefix, 'utf8'), accepted, excluded, warnings };
   }
 
-  let out = HEADER;
+  let out = prefix + HEADER;
   let capped = false;
   for (const h of hits) {
     const tierTag = h.tier === 'observation' ? ' [observation]' : '';
@@ -425,7 +439,7 @@ export function buildFinalContextPack(hits, { byteCap = 2048, health = null } = 
     out += line;
     accepted.push({ id: h.id, tier: h.tier, score: h.score });
   }
-  if (health && health.degraded) {
+  if (health && health.degraded && (health.duplicate_conflicts || []).length) {
     const warn = `⚠ CORE memory index degraded: ${(health.duplicate_conflicts || []).length} duplicate unit id(s) — run generate-summary-index for detail.\n`;
     if (Buffer.byteLength(out + warn, 'utf8') <= byteCap) {
       out += warn;
@@ -466,15 +480,17 @@ export function main(argv) {
   const storePath = args[0];
   const query = args[1] || '';
   if (!storePath) { process.stderr.write('usage: retrieve-context.mjs <storePath> "<query>" [--top N] [--pack]\n'); return 2; }
-  const hits = retrieveContext(query, storePath, { topN });
+  const trace = buildRetrievalTrace(query, storePath, { topN });
+  const hits = trace.stages?.final || [];
   if (pack) {
     // --pack emits the EXACT delivered bytes: same function, same cap,
     // same health input as the installed hook — so the CLI is a truthful probe of
     // what the agent would receive, not a debug approximation of it.
-    const built = buildFinalContextPack(hits, { health: storeHealth(storePath) });
+    const built = trace.pack || { text: '' };
     if (built.text) process.stdout.write(built.text);
     return 0;
   }
+  if (trace.health?.incomplete) process.stderr.write('CORE search incomplete: unreadable sources; missing matches are unknown.\n');
   // Default: human debug listing (scores visible). NOT a final-context surface —
   // use --pack for delivered bytes.
   for (const h of hits) process.stdout.write(`[${h.score.toFixed(1)}] ${h.id} — ${h.summary}\n`);

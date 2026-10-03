@@ -1,5 +1,21 @@
 # CORE Scripts
 
+**Contents**
+
+- [Why scripts ship in the plugin](#why-scripts-ship-in-the-plugin)
+- [Key scripts](#key-scripts)
+  - [`priority.mjs`](#prioritymjs)
+  - [`generate-unit-index.mjs`](#generate-unit-indexmjs)
+  - [`validate.mjs`](#validatemjs)
+  - [`graph-walk.mjs`](#graph-walkmjs)
+  - [`record-retrieval-event.mjs`](#record-retrieval-eventmjs)
+  - [`check-units.mjs`](#check-unitsmjs)
+- [What lives elsewhere](#what-lives-elsewhere)
+  - [Swarm log visualization](#swarm-log-visualization)
+- [Cloud-synced stores (OneDrive / iCloud Drive / Dropbox)](#cloud-synced-stores-onedrive--icloud-drive--dropbox)
+- [Adding new scripts](#adding-new-scripts)
+- [Proportionality note — the metrics layer at single-user scale](#proportionality-note--the-metrics-layer-at-single-user-scale)
+
 ## Why scripts ship in the plugin
 
 The plugin form factor exists specifically so CORE can ship prescriptive code for surfaces the inference model needs to rely on — deterministic computation, indexing, retrieval math, integrity checks, parse/validate operations, graph traversal. The skill-only era forced "100% markdown specs the LLM derives from each session." The plugin era escapes that constraint deliberately. The standing rule: **executable units stay in the plugin; project folders hold only data.**

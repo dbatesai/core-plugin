@@ -576,6 +576,24 @@ test('a manifest whose MAC breaks keeps its opt-out: capture stays off, before a
   } finally { s.cleanup(); }
 });
 
+test('a manifest whose MAC breaks keeps its turn-capture opt-out too, before and after the next write', async () => {
+  const { turnCaptureEnabled } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'TurnOptOut');
+    registerProject(s.coreDir, p);
+    const env = { CORE_HARNESS: 'claude-code' };
+    updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { turn_capture: false } });
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false);
+    const file = join(p, '.core', 'claude-code', 'workspace.json');
+    writeFileSync(file, readFileSync(file, 'utf8').replace('"harness"', '"harness_x": 1, "harness"'));
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false, 'unverified manifest still opts out');
+    updateManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir, fields: { agent_name: 'x' } });
+    assert.equal(readManifest({ root: p, harness: 'claude-code', coreDir: s.coreDir }).turn_capture, false, 'opt-out carried past the set-aside');
+    assert.equal(turnCaptureEnabled({ project: p, env, home: s.home }), false);
+  } finally { s.cleanup(); }
+});
+
 // ---------- migration holds: what a receipt may claim, and what half-copied state may do ----------
 
 const RECEIPT_NAME = 'migrated-from.json';
@@ -759,7 +777,7 @@ test('drift after an interrupted run never appends the same tail twice, whether 
   } finally { s.cleanup(); }
 });
 
-test('a synced project\'s hot state is fenced by the migration marker, like its durable state', () => {
+test('a synced project\'s hot state lives in the project and is fenced by the migration marker like any project', () => {
   const s = sandbox();
   try {
     const p = s.mk('Dropbox', 'Projects', 'Synced');
@@ -769,9 +787,10 @@ test('a synced project\'s hot state is fenced by the migration marker, like its 
     assert.equal(stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }), null, 'a reader sees nothing');
     const w = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true });
     assert.equal(w.status, 'migrating');
-    assert.ok(w.dir.endsWith('.migrating-scratch'), 'a writer is diverted from the state the migration is filling');
     rmSync(join(dir, '.migrating'));
-    assert.notEqual(stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }).status, 'migrating');
+    const after = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true });
+    assert.notEqual(after.status, 'migrating');
+    assert.equal(after.location, 'project', 'once the migration is done, a synced project\'s hot state is in the project');
   } finally { s.cleanup(); }
 });
 

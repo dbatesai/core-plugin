@@ -334,7 +334,7 @@ test('purge removes the stream dir and refuses anything else', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('purge covers the whole declared scope — nested files, interrupted writes, derived judgments, health counters', () => {
+test('purge covers the whole declared scope — nested files, interrupted writes, derived judgments, health counters, AND the classified turn log', () => {
   const root = mkdtempSync(join(tmpdir(), 'tc-purge-scope-'));
   try {
     const project = makeProject(root);
@@ -348,17 +348,29 @@ test('purge covers the whole declared scope — nested files, interrupted writes
     writeFileSync(join(base, 'judgment-log.jsonl'), '{"kind":"hindsight-judgment"}\n');
     assert.equal(existsSync(join(base, 'turn-capture-health.json')), true);
 
+    // classify-turns.mjs's own store: full user/assistant text, a separate sensitive
+    // stream the disclosed purge has to actually reach.
+    const classifiedDir = turnCapturePurgeScope(project).find((e) => e.id === 'classified').path;
+    mkdirSync(classifiedDir, { recursive: true });
+    writeFileSync(join(classifiedDir, '2026-07-20.jsonl'), '{"user_text":"secret prompt text"}\n');
+    // An unrelated file that shares the classified base but isn't the classified dir —
+    // must survive, proving the purge is bounded, not "clear the whole metrics folder".
+    const unrelatedMarker = join(dirname(classifiedDir), 'unrelated-marker.txt');
+    writeFileSync(unrelatedMarker, 'keep me');
+
     const res = purgeTurnCapture(project, { apply: true });
     assert.equal(res.purged, true);
     for (const entry of res.scope) {
       assert.equal(entry.removed, true, `${entry.id} removed`);
       assert.equal(existsSync(entry.path), false, `${entry.path} gone`);
     }
-    assert.deepEqual(res.scope.map((e) => e.id).sort(), ['health', 'judgments', 'stream']);
+    assert.deepEqual(res.scope.map((e) => e.id).sort(), ['classified', 'close-receipts', 'close-summaries', 'health', 'judgments', 'stream']);
     assert.equal(existsSync(join(dir, 'nested', 'overlay.jsonl')), false);
     assert.equal(existsSync(join(dir, '2026-07-20.jsonl.tmp')), false);
     assert.equal(existsSync(join(base, 'turn-capture-health.json')), false);
     assert.equal(existsSync(join(base, 'judgment-log.jsonl')), false);
+    assert.equal(existsSync(join(classifiedDir, '2026-07-20.jsonl')), false, 'the classified turn text is gone too');
+    assert.equal(existsSync(unrelatedMarker), true, 'an unrelated file in the same folder survives — the purge is bounded');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -400,16 +412,22 @@ test('retention refuses an invalid window BEFORE any deletion runs', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('every declared purge-scope path sits directly under the storage base', () => {
+test('every declared purge-scope path sits directly under its own declared storage base', () => {
   const root = mkdtempSync(join(tmpdir(), 'tc-purge-decl-'));
   try {
     const project = makeProject(root);
     const base = join(project, '_metrics');
     const scope = turnCapturePurgeScope(project);
-    assert.ok(scope.length >= 3);
+    assert.ok(scope.length >= 4);
     for (const entry of scope) {
-      assert.equal(dirname(entry.path), base, `${entry.id} is a direct child of the storage base`);
+      assert.equal(dirname(entry.path), entry.base, `${entry.id} is a direct child of its own declared base`);
     }
+    // The three turn-capture-stream entries share the project's own _metrics/ base;
+    // classified lives under a different one (the operational-meta dir), on purpose.
+    for (const id of ['stream', 'health', 'judgments']) {
+      assert.equal(scope.find((e) => e.id === id).base, base);
+    }
+    assert.notEqual(scope.find((e) => e.id === 'classified').base, base, 'classified is deliberately NOT under _metrics/');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

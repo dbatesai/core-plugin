@@ -18,7 +18,7 @@
  */
 import { userInfo } from 'node:os';
 import { lstatSync, realpathSync } from 'node:fs';
-import { resolve, join, dirname, basename, sep } from 'node:path';
+import { resolve, join, dirname, basename, sep, relative, isAbsolute } from 'node:path';
 
 export function trustedHome() {
   try { return userInfo().homedir || null; } catch { return null; }
@@ -77,12 +77,14 @@ export function assertSafeWorkspaceId(id) {
  */
 export function containedPath(root, candidate) {
   let realRoot;
-  try { realRoot = realpathSync(resolve(root)); } catch { return null; }
+  // `.native` returns the on-disk spelling, so a case-insensitive filesystem (NTFS, default
+  // macOS) compares the same folder spelled two ways as one.
+  try { realRoot = realpathSync.native(resolve(root)); } catch { return null; }
 
   let existing = resolve(candidate);
   const tail = [];
   for (;;) {
-    try { existing = realpathSync(existing); break; }
+    try { existing = realpathSync.native(existing); break; }
     catch {
       const parent = dirname(existing);
       if (parent === existing) return null; // walked past the filesystem root
@@ -91,7 +93,11 @@ export function containedPath(root, candidate) {
     }
   }
   const full = tail.length ? join(existing, ...tail) : existing;
-  if (full !== realRoot && !full.startsWith(realRoot + sep)) return null;
+  // relative() is separator- and case-aware for the platform, and handles a filesystem root
+  // (`/`, `C:\`) that `realRoot + sep` would double up.
+  const rel = relative(realRoot, full);
+  if (rel === '') return full;
+  if (rel === '..' || rel.startsWith('..' + sep) || isAbsolute(rel)) return null;
   return full;
 }
 

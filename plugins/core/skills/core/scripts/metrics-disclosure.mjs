@@ -36,18 +36,19 @@ import { isCliEntry } from './cli-entry.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { projectRootFor, detectStateHarness, readManifest, updateManifest } from './project-state.mjs';
+import { resolveStoragePath } from './log-event.mjs';
 
 /**
  * Bump whenever the notice describes something materially new being stored.
  * Workspaces stamped below this see the notice again; a wording polish that
  * changes nothing about what is captured does not earn a bump.
  */
-export const NOTICE_VERSION = 4;
+export const NOTICE_VERSION = 6;
 
 export const NOTICE_TEXT = [
-  "One thing worth knowing since this is a brand-new project: CORE keeps a local, on-this-machine log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically, it stays on this machine, and none of it goes anywhere else.",
+  "One thing worth knowing since this is a brand-new project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",
   "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `.core/<harness>/workspace.json`.",
-  "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved on this machine (never exported, and kept until you purge it) so retrieval quality can be graded honestly after the fact — the classified turn log the recognition classifier writes is kept the same way. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `.core/<harness>/workspace.json`; you can also purge everything it has saved at any time.",
+  "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved with the project (CORE never exports them, and they are kept until you purge them) so retrieval quality can be graded honestly after the fact — the classified turn log the recognition classifier writes is kept the same way. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `.core/<harness>/workspace.json`; you can also purge everything it has saved at any time.",
 ].join('\n\n');
 
 /**
@@ -60,6 +61,18 @@ export const NOTICE_TEXT = [
  * @param {object} [args.env]
  * @returns {{ ok: boolean, shown: boolean, alreadyShown: boolean, noticeText: string|null, reason?: string }}
  */
+/**
+ * The notice says the log lives in the project's folder. A project whose signed pin still names
+ * an older external folder (an earlier Windows OneDrive redirect to AppData) gets a line saying
+ * where its log really is, so the notice is never wrong about the location.
+ */
+export function noticeTextFor(projectDir, { home = homedir(), env = process.env } = {}) {
+  let where = null;
+  try { where = resolveStoragePath(projectDir, { home, env }); } catch { /* unknown: base text */ }
+  if (!where || where === join(projectDir, '_metrics')) return NOTICE_TEXT;
+  return `${NOTICE_TEXT}\n\nFor this project the log is kept outside the project folder, at \`${where}\`, because an earlier version of CORE put it there. It stays there until it's moved; nothing is deleted.`;
+}
+
 export function checkMetricsDisclosure({ projectDir, home = homedir(), env = process.env } = {}) {
   if (!projectDir) {
     return { ok: false, shown: false, alreadyShown: false, noticeText: null, reason: 'missing-project-dir' };
@@ -70,7 +83,7 @@ export function checkMetricsDisclosure({ projectDir, home = homedir(), env = pro
     root = projectRootFor(projectDir, { home, coreDir });
     harness = detectStateHarness(env);
   } catch (err) {
-    return { ok: false, shown: true, alreadyShown: false, noticeText: NOTICE_TEXT, reason: `project-unresolved: ${err.message}` };
+    return { ok: false, shown: true, alreadyShown: false, noticeText: noticeTextFor(projectDir, { home, env }), reason: `project-unresolved: ${err.message}` };
   }
 
   // Untrusted or absent state reads as null: the notice shows.
@@ -90,10 +103,10 @@ export function checkMetricsDisclosure({ projectDir, home = homedir(), env = pro
     // Fail toward showing the notice this session even though we couldn't persist
     // the flag — a repeated notice (rare write failure) is a far smaller defect
     // than a disclosure that silently never happens.
-    return { ok: false, shown: true, alreadyShown: false, noticeText: NOTICE_TEXT, reason: `manifest-write-failed: ${err.message}` };
+    return { ok: false, shown: true, alreadyShown: false, noticeText: noticeTextFor(projectDir, { home, env }), reason: `manifest-write-failed: ${err.message}` };
   }
 
-  return { ok: true, shown: true, alreadyShown: false, noticeText: NOTICE_TEXT };
+  return { ok: true, shown: true, alreadyShown: false, noticeText: noticeTextFor(projectDir, { home, env }) };
 }
 
 // Shared spelling-robust entry guard (cli-entry.mjs) — the previous local

@@ -95,6 +95,35 @@ test('stampFiles preserves corrupt cache bytes and reports the lost attribution'
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('stampFiles reports an unreadable cache as refused, never as stamped', () => {
+  const { root, project, home, cachePath } = setup();
+  try {
+    // A directory where the cache file should be: the read fails, the bytes are never seen.
+    mkdirSync(join(cachePath, 'blocker'), { recursive: true });
+    const outcome = stampFiles(project, [{ path: '/a.md', hash: hashText('a'), lastWrittenBy: 'decorate-graph' }],
+      { now: '2026-07-28T00:00:00Z', home });
+    assert.equal(outcome.stamped, false, 'a refused stamp must not read as success');
+    assert.equal(outcome.outcome, 'refused');
+    assert.match(outcome.reason, /cache-unreadable/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('stampFiles refuses to overwrite a corrupt cache it could not preserve', () => {
+  const { root, project, home, cachePath } = setup();
+  try {
+    mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
+    const corruptBytes = '{"files": {"/kept.md": {"last_written_by": "core"';
+    writeFileSync(cachePath, corruptBytes);
+    // Occupy the quarantine destination with a non-empty directory so the rename fails.
+    const now = '2026-07-28T00:00:00Z';
+    mkdirSync(join(`${cachePath}.corrupt-${now.replace(/[:.]/g, '-')}`, 'x'), { recursive: true });
+    const outcome = stampFiles(project, [{ path: '/a.md', hash: hashText('a'), lastWrittenBy: 'decorate-graph' }], { now, home });
+    assert.equal(outcome.stamped, false);
+    assert.equal(outcome.reason, 'corrupt-cache-not-preserved');
+    assert.equal(readFileSync(cachePath, 'utf8'), corruptBytes, 'the only copy of prior attribution is untouched');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('detectStore surfaces a corrupt baseline as UNKNOWN rather than a store of fresh files', async () => {
   const { root, project, cachePath } = setup();
   try {

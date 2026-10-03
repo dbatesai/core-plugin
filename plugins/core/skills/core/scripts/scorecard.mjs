@@ -28,19 +28,19 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath } from './log-event.mjs';
+import { resolveStoragePath, metricsEnabled } from './log-event.mjs';
 import { producerIdentity } from './producer-identity.mjs';
 import { readCaptureHealth, listTurnCaptureFiles, turnCaptureEnabled, JUDGMENT_LOG_FILENAME } from './turn-capture.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 export const SCORECARD_SCHEMA_VERSION = '1.0.0';
 
-export function scorecardLogPath(projectDir) {
-  return join(resolveStoragePath(projectDir), 'scorecard-log.jsonl');
+export function scorecardLogPath(projectDir, opts) {
+  return join(resolveStoragePath(projectDir, opts), 'scorecard-log.jsonl');
 }
 
-function scorecardLockPath(projectDir) {
-  return join(resolveStoragePath(projectDir), '.scorecard.lock');
+function scorecardLockPath(projectDir, opts) {
+  return join(resolveStoragePath(projectDir, opts), '.scorecard.lock');
 }
 
 function readJsonl(file) {
@@ -152,11 +152,14 @@ export function computeScorecard(projectDir, { now, thresholds = null } = {}) {
 }
 
 /** Append one scorecard row — append-only, under the stream's own lock. */
-export function appendScorecard(projectDir, card) {
-  const file = scorecardLogPath(projectDir);
-  const base = resolveStoragePath(projectDir);
+export function appendScorecard(projectDir, card, { home, env } = {}) {
+  // Enforce opt-out at the writer too, including direct --pin callers. The
+  // shared gate also refuses invalid storage pins before creating any files.
+  if (!metricsEnabled({ project: projectDir, home, env })) return { written: false, reason: 'metrics-disabled' };
+  const file = scorecardLogPath(projectDir, { home, env });
+  const base = resolveStoragePath(projectDir, { home, env });
   try {
-    withFileLock(scorecardLockPath(projectDir), () => {
+    withFileLock(scorecardLockPath(projectDir, { home, env }), () => {
       mkdirSync(base, { recursive: true });
       appendFileSync(file, JSON.stringify(card) + '\n');
       // Owner-only, re-asserted every append (the stream it summarizes is too).

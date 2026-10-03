@@ -1,5 +1,23 @@
 # Startup
 
+**Contents**
+
+- [Voice](#voice)
+- [First-time setup](#first-time-setup)
+- [Identity load](#identity-load)
+- [Workspace resolution and routing](#workspace-resolution-and-routing)
+- [Load — returning workspace](#load--returning-workspace)
+- [Startup catch-up — recover an owed close for the exact session](#startup-catch-up--recover-an-owed-close-for-the-exact-session)
+- [Load — cold-start migration](#load--cold-start-migration)
+- [Session agenda](#session-agenda)
+- [Reconcile between-session activity](#reconcile-between-session-activity)
+- [Elapsed-time signals](#elapsed-time-signals)
+- [Memory processing nudge](#memory-processing-nudge)
+- [Hot-section synthesis pass](#hot-section-synthesis-pass)
+- [Compose the readiness summary](#compose-the-readiness-summary)
+- [Bootstrap dedup](#bootstrap-dedup)
+- [Long sessions — write the early summary stub](#long-sessions--write-the-early-summary-stub)
+
 ## Voice
 
 Plain person voice — same standard as SKILL.md §Voice. The readiness summary is the user's first impression each session. Don't recite. Talk.
@@ -123,7 +141,7 @@ Echo any line after the first verbatim into the readiness summary, then add one 
 - `state-foreign` — another machine's state is in this synced or shared folder. It's left alone, and this machine's state for the project lives under `~/.core/local/`.
 - `state-ask` — the state names an old location that no longer exists, parent folder included. Ask: *"This project's CORE history says it used to be at <old path>. Did you move it here, or is this a new project?"* Then run `index-registry.mjs state --accept-move --root <root>` or `state --fresh --root <root>`.
 
-**State paths.** Never build a path under `<root>/.core/` by hand: a synced folder, a fenced migration or another install's state routes elsewhere. Ask the registry, guarded like every script call:
+**State paths.** Never build a path under `<root>/.core/` by hand: a read-only folder, a fenced migration or another install's state routes elsewhere. Ask the registry, guarded like every script call:
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
@@ -230,7 +248,7 @@ node "${CORE_ROOT}/skills/core/scripts/metrics-disclosure.mjs" check <root>
 
 That ordering is belt-and-suspenders, not the sole protection: `decorate-graph.mjs` and `hot-section.mjs` refuse the write in CODE, at the writer boundary, regardless of when or from where they're called. Each reads the pre-write state cache, classifies the file's human-authored region against its last established baseline, and — if that region already diverged (`outside-changed`, or `no-baseline` on a file that DOES have a prior cache entry) — refuses to touch or re-stamp it, reporting it under `needs_reconciliation` instead of silently absorbing it. So even a future caller that invokes either script out of order (a hook, another protocol path, a manual run) gets this protection automatically, without needing to know or honor this ordering.
 
-Both calls are idempotent and cheap — a no-op run on a fully-current store completes fast with zero rewrites, even on a several-hundred-unit store — so unconditional is the deliberate choice, not something to gate later. `decorate-graph.mjs` regenerates the `[[wikilink]]` block in every active unit. `maintenance-run.mjs` is the same "mechanical half of upkeep" `hygiene.md` and `/process-memory` Step 4 already use — it regenerates `INDEX-decisions.md`, `INDEX-risks.md`, and the summary index Tier 1 retrieval reads, cleans cloud-sync ghost duplicates, and checks the PROJECT.md cap, all signature-gated internally so nothing actually rewrites unless the unit set changed. Running it here means those indexes are never stale relative to the real unit store, regardless of what the last close did or didn't do. (`generate-memory-index.mjs` also matches the `generate-*-index.mjs` shape but targets a different surface entirely — the harness's cross-session auto-memory `MEMORY.md`, not this project's `_memories/INDEX-*.md` — and isn't wired into any close/hygiene pipeline today; it's out of scope here, not silently dropped.)
+Both calls are idempotent and cheap — a no-op run on a fully-current store completes fast with zero rewrites, even on a several-hundred-unit store — so unconditional is the deliberate choice, not something to gate later. `decorate-graph.mjs` regenerates the `[[wikilink]]` block in every active unit. `maintenance-run.mjs` is the same "mechanical half of upkeep" `hygiene.md` and `/process-memory` Step 4 already use — it regenerates `INDEX-decisions.md`, `INDEX-risks.md`, and the summary index Tier 1 retrieval reads, reports cloud-sync ghost duplicates (it never deletes them), and checks the PROJECT.md cap, all signature-gated internally so nothing actually rewrites unless the unit set changed. Running it here means those indexes are never stale relative to the real unit store, regardless of what the last close did or didn't do. (`generate-memory-index.mjs` also matches the `generate-*-index.mjs` shape but targets a different surface entirely — the harness's cross-session auto-memory `MEMORY.md`, not this project's `_memories/INDEX-*.md` — and isn't wired into any close/hygiene pipeline today; it's out of scope here, not silently dropped.)
 
 Both scripts stamp `last_written_by` (`decorate-graph`, `maintenance-run`) into the per-project state cache **in their own code**, in the same operation as the write, via the shared `state-cache.mjs` helper — the identical real-lock, code-level pattern `hot-section.mjs` already uses for PROJECT.md's hot section (see `data-storage.md` §Edit detection). There is nothing to reconcile by hand here.
 
@@ -436,7 +454,7 @@ node "${CORE_ROOT}/skills/core/scripts/check-context-integrity.mjs" \
   --project <project>/PROJECT.md --project-read-lines <lines-read> || true
 ```
 
-**Per-turn retrieval (default-ON, opt-out).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`, title ∪ body-BM25 over the recursive path-bearing index, one-hop edge expansion) over the incoming prompt and injects the top matches. It is **registered in the plugin manifest** (`hooks/hooks.json`, UserPromptSubmit) and ships **default-on**; opt out with `CORE_RETRIEVAL_HOOK=0` (mirrors the metrics opt-out). When the keyword result is empty or thin for a question, the hook also injects an escalation pack — the first two candidate shards as `id — summary` rows, capped at 32 KB — so the agent reasons over them in the same turn; `CORE_ESCALATION=0` turns that off (`references/retrieval.md` §Tier 3 has the trigger and the other switches). Known limit: lexical matching can still inject a topical-but-irrelevant unit on an abstract query the trigger doesn't catch — bounded (byte-capped, advisory, fail-open).
+**Per-turn retrieval (default-ON, opt-out).** Bootstrap loads context once; the per-turn retrieval hook keeps the most relevant stored units in front of the agent on *every* turn, not just at session start. The hook entry is `hooks/retrieve-context-hook.mjs` — it runs the deterministic retriever (`scripts/retrieve-context.mjs`, title ∪ body-BM25 over the recursive path-bearing index, one-hop edge expansion) over the incoming prompt and injects the top matches. It is **registered in the plugin manifest** (`hooks/hooks.json`, UserPromptSubmit) and ships **default-on**, and it injects only for a project registered in `~/.core` (a folder's own `_memories/` authorizes nothing, so a cloned repo's planted store is never injected; before the first `/core` registers the project, automatic retrieval stays off); opt out with `CORE_RETRIEVAL_HOOK=0` (mirrors the metrics opt-out). When the keyword result is empty or thin for a question, the hook also injects an escalation pack — the first two candidate shards as `id — summary` rows, capped at 32 KB — so the agent reasons over them in the same turn; `CORE_ESCALATION=0` turns that off (`references/retrieval.md` §Tier 3 has the trigger and the other switches). Known limit: lexical matching can still inject a topical-but-irrelevant unit on an abstract query the trigger doesn't catch — bounded (byte-capped, advisory, fail-open).
 
 Read the output. When **any row is non-PASS**, narrate in plain voice:
 

@@ -44,6 +44,14 @@ export function buildPrecedenceChain(cwd, home) {
   // these are logical surface paths the tests compare. posix.join normalizes (no '//'
   // at root), and Node's fs accepts forward slashes on Windows for the later existence check.
   const j = posix.join;
+  // A Windows path (`C:\Users\me`, as process.cwd() gives it) is walked with forward slashes;
+  // posix.dirname would otherwise see one unbroken segment and find no ancestors. Only a
+  // drive or UNC path is rewritten: on POSIX a backslash is a legal filename character.
+  const isWin = (p) => /^[A-Za-z]:[\\/]|^\\\\/.test(String(p));
+  const fwd = (p) => (isWin(p) ? String(p).replace(/\\/g, '/') : p);
+  const winCwd = isWin(cwd);
+  cwd = fwd(cwd);
+  home = fwd(home);
   const chain = [{ path: j(home, '.claude', 'CLAUDE.md'), scope: 'user-global' }];
   const ancestors = [];
   let dir = cwd;
@@ -53,7 +61,9 @@ export function buildPrecedenceChain(cwd, home) {
   for (let i = 0; i < 256; i++) {
     ancestors.push(dir);
     const parent = posix.dirname(dir);
-    if (parent === dir) break;
+    // A drive letter has no parent: posix.dirname('C:') is '.', which would resolve against
+    // whatever directory the process happens to be in.
+    if (parent === dir || (winCwd && parent === '.')) break;
     dir = parent;
   }
   ancestors.reverse(); // root → cwd (nearest-cwd last = highest precedence)

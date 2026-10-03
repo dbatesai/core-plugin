@@ -254,6 +254,36 @@ test('certify: auto-resolves the session from a real project-bound transcript (t
   }
 });
 
+test('process-request: a session mismatch never enters the permanent close receipt — partial coverage, no borrowed events', async () => {
+  const store = freshStore();
+  const home = mkdtempSync(join(tmpdir(), 'close-mismatch-home-'));
+  try {
+    const { mapProjectPathToSlug } = await import('../../plugins/core/skills/core/scripts/project-slug.mjs');
+    // resolveTranscript's claude-code branch slugs the literal cwd it's given — process-
+    // request passes `store` as-is (not realpath'd) — so the fixture has to match that
+    // exact literal string, not its realpath (on macOS /var/folders/... vs
+    // /private/var/folders/..., which silently misses the file entirely if mismatched).
+    const tdir = join(home, '.claude', 'projects', mapProjectPathToSlug(store));
+    mkdirSync(tdir, { recursive: true });
+    // No transcript for the session being closed — only an unrelated session's.
+    writeFileSync(join(tdir, 'sess-other.jsonl'), JSON.stringify({
+      message: { role: 'user', content: [{ type: 'text', text: 'this belongs to a DIFFERENT session and must never appear in the receipt' }] },
+    }) + '\n');
+    const res = runCli(['process-request', store, '--session', 'sess-mine', '--json'], { HOME: home, USERPROFILE: home });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+    const out = JSON.parse(res.stdout);
+    assert.equal(out.receipt.status, 'partial', 'coverage falls back to partial, never full, on a mismatch');
+    assert.equal(out.receipt.record.coverage, 'partial');
+    assert.equal(out.receipt.record.counts.events, 0, 'the other session\'s events never entered the record');
+    assert.equal(out.receipt.record.opening_request, '', 'the other session\'s user text never entered the receipt');
+    const receipt = readCloseReceipt(store, 'sess-mine');
+    assert.equal(receipt.status, 'partial', 'the persisted receipt on disk agrees');
+  } finally {
+    rmSync(store, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('a corrupt receipt is reported corrupt and its bytes survive replacement', () => {
   const store = freshStore();
   try {
@@ -296,5 +326,25 @@ test('a failed required op refuses certification; a complete record certifies', 
     const ok = certifyManualClose(store, { sessionId: 's-good', summaryPath: 'y.md' }, opts);
     assert.ok(ok.ok, 'done + an explicitly recorded skip certifies: ' + JSON.stringify(ok));
     finishClose(store, { sessionId: 's-good' });
+  } finally { rmSync(store, { recursive: true, force: true }); }
+});
+
+test('CLI detect: a unit changed after a clean close re-owes the store-derived op; an untouched store stays closed', () => {
+  const store = freshStore();
+  try {
+    const OPS = 'material-capture,render-project-md';
+    writeFileSync(join(store, '_memories', 'dc-1-first.md'), '---\nid: dc-1-first\ntype: decision\nstatus: active\n---\n\nFirst.\n');
+    assert.equal(runCli(['begin', store, '--ops', OPS, '--session', 's1']).status, 0);
+    for (const op of OPS.split(',')) assert.equal(runCli(['record', store, '--op', op]).status, 0);
+    assert.equal(runCli(['finish', store, '--session', 's1']).status, 0);
+
+    const closed = JSON.parse(runCli(['detect', store, '--ops', OPS, '--json']).stdout);
+    assert.equal(closed.state, 'closed', 'nothing changed since the close');
+
+    writeFileSync(join(store, '_memories', 'dc-2-second.md'), '---\nid: dc-2-second\ntype: decision\nstatus: active\n---\n\nAdded after the close.\n');
+    const owed = JSON.parse(runCli(['detect', store, '--ops', OPS, '--json']).stdout);
+    assert.equal(owed.state, 'owed', 'a session that changed the store after the last close is owed a close');
+    assert.equal(owed.reason, 'store-changed');
+    assert.deepEqual(owed.owed, ['render-project-md']);
   } finally { rmSync(store, { recursive: true, force: true }); }
 });

@@ -345,3 +345,13 @@ test('CLI: a hard-fail store -> exit 2', async () => {
     assert.equal(child.status, 2, `stdout: ${child.stdout}\nstderr: ${child.stderr}`);
   });
 });
+
+test('probeForHarness hands runStartup the harness under the key runStartup reads', async () => {
+  const { probeForHarness } = await import('../../plugins/core/skills/core/scripts/configure-project.mjs');
+  let seen = null;
+  const out = await probeForHarness({ harness: 'codex' }, { load: async () => ({ runStartup: async (opts) => { seen = opts; return { ok: true }; } }) });
+  assert.deepEqual(out, { ok: true });
+  assert.equal(seen.harness, 'codex', 'runStartup reads opts.harness — any other key probes the wrong harness');
+  const failed = await probeForHarness({ harness: 'codex' }, { load: async () => { throw new Error('boom'); } });
+  assert.deepEqual(failed, { error: 'boom' }, 'a probe-side failure never throws');
+});

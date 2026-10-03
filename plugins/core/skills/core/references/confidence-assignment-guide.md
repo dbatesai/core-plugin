@@ -1,5 +1,26 @@
 # Confidence-Assignment Guide
 
+**Contents**
+
+- [The framework](#the-framework)
+- [The patterns](#the-patterns)
+  - [Pattern 1 — State change with authoritative actor and timestamp](#pattern-1--state-change-with-authoritative-actor-and-timestamp)
+  - [Pattern 2 — Verbatim quote with attribution](#pattern-2--verbatim-quote-with-attribution)
+  - [Pattern 3 — Structured field value as record](#pattern-3--structured-field-value-as-record)
+  - [Pattern 4 — Free-text commitment extraction](#pattern-4--free-text-commitment-extraction)
+  - [Pattern 5 — Absence-detection](#pattern-5--absence-detection)
+  - [Pattern 6 — Cross-source pattern reconstruction](#pattern-6--cross-source-pattern-reconstruction)
+  - [Pattern 7 — Decoding from related signals](#pattern-7--decoding-from-related-signals)
+  - [Pattern 8 — Verbal relay](#pattern-8--verbal-relay)
+  - [Pattern 9 — Document-section assertion](#pattern-9--document-section-assertion)
+  - [Pattern 10 — Reading history as record](#pattern-10--reading-history-as-record)
+  - [Pattern 11 — Derived metric from sourced fields](#pattern-11--derived-metric-from-sourced-fields)
+  - [Pattern 12 — Degraded source fidelity](#pattern-12--degraded-source-fidelity)
+- [Edge cases and tiebreakers](#edge-cases-and-tiebreakers)
+- [The "name the inference" discipline](#the-name-the-inference-discipline)
+- [What this guide is not](#what-this-guide-is-not)
+- [Maintenance](#maintenance)
+
 Pattern catalog for assigning `confidence-level` to observations during extraction. Source-category-agnostic — the patterns describe structural signals any source might exhibit, not categories of sources (no "for task-trackers, X" or "for chat, Y" framing here).
 
 Used by extractors (per `source-registration-framework.md`) when writing observations. The extractor maps the source datum onto one or more patterns; the patterns prescribe the confidence-level.

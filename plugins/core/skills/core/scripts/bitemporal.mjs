@@ -217,7 +217,8 @@ export function setFrontmatterField(text, key, value) {
     if (anchor >= 0) lines.splice(anchor + 1, 0, `${key}: ${value}`);
     else lines.push(`${key}: ${value}`);
   }
-  return normalized.replace(m[0], `${open}${lines.join('\n')}${close}`);
+  // A function replacement: a string one would read `$$` and `$&` in the value as patterns.
+  return normalized.replace(m[0], () => `${open}${lines.join('\n')}${close}`);
 }
 
 /**

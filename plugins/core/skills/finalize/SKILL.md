@@ -1,6 +1,6 @@
 ---
 name: finalize
-description: Close the session — capture what must survive, write the resume summary, certify this exact session's close receipt
+description: Close the session — capture what must survive, write the resume summary, certify this exact session's close receipt. Use when the user runs /finalize or asks to close or wrap up the current session.
 user-invocable: true
 ---
 
@@ -107,7 +107,7 @@ Close in plain voice, naming anything skipped or failed:
 
 | Old close work | Where it runs now |
 |---|---|
-| Index regen, ghost cleanup, cap checks, decoration, demotion, compaction, validation, bitemporal stamps, boundary audit | `/process-memory` |
+| Index regen, ghost reporting, cap checks, decoration, demotion, compaction, validation, bitemporal stamps, boundary audit | `/process-memory` |
 | Back-fill of auto-closed sessions' memory processing | `/process-memory` (backfill-memory list/mark) |
 | Turn classification, rollups, detectors, calibration, retrieval-quality/skip analysis, capability drift | `/metrics` |
 | Session perspective critique (overconfidence, smuggling, contradiction) | `/refocus` |

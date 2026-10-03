@@ -1,5 +1,53 @@
 # Data Storage
 
+**Contents**
+
+- [Voice](#voice)
+- [What lives where](#what-lives-where)
+- [Authority ordering](#authority-ordering)
+- [Two tiers — observations and units](#two-tiers--observations-and-units)
+  - [Tier 1 — Observations](#tier-1--observations)
+  - [External-source observations — three-layer filtering](#external-source-observations--three-layer-filtering)
+  - [Tier 2 — Units](#tier-2--units)
+  - [The canonical flag](#the-canonical-flag)
+  - [Open-question units and the `by-when` field](#open-question-units-and-the-by-when-field)
+- [The committed edge types](#the-committed-edge-types)
+  - [Governed write-time enrichment](#governed-write-time-enrichment)
+- [Graduation — observation → unit](#graduation--observation--unit)
+  - [Triggers](#triggers)
+  - [Process](#process)
+  - [Dispatch gate — Sonnet vs Opus](#dispatch-gate--sonnet-vs-opus)
+  - [Graduation decides; it doesn't wait](#graduation-decides-it-doesnt-wait)
+  - [Anti-miss bias](#anti-miss-bias)
+- [Retrieval ladder](#retrieval-ladder)
+  - [Logging is always on](#logging-is-always-on)
+  - [Two capture streams, one exporter boundary](#two-capture-streams-one-exporter-boundary)
+- [Priority function](#priority-function)
+- [Deciding on memory writes](#deciding-on-memory-writes)
+  - [Push policy is per-user, per-repo](#push-policy-is-per-user-per-repo)
+- [PROJECT.md ↔ units rendering](#projectmd--units-rendering)
+  - [The anti-resurrection rule](#the-anti-resurrection-rule)
+  - [Authority over PROJECT.md sits with the user](#authority-over-projectmd-sits-with-the-user)
+- [Edit detection](#edit-detection)
+  - [Shared-write concurrency (the `~/.core/` write rules)](#shared-write-concurrency-the-core-write-rules)
+- [Topic vocabulary](#topic-vocabulary)
+- [Auto-creating people, topics, and deliverables on observation reference](#auto-creating-people-topics-and-deliverables-on-observation-reference)
+- [Conflict resolution](#conflict-resolution)
+  - [Harness-local recall says X, unit store says not-X](#harness-local-recall-says-x-unit-store-says-not-x)
+  - [Your render of a section disagrees with the user's most recent edit](#your-render-of-a-section-disagrees-with-the-users-most-recent-edit)
+  - [Queued autonomous render vs the user starting to edit the same section](#queued-autonomous-render-vs-the-user-starting-to-edit-the-same-section)
+  - [Two units make the same claim](#two-units-make-the-same-claim)
+  - [Retired content re-emerges in a conversation](#retired-content-re-emerges-in-a-conversation)
+  - [Cross-project drift (different projects, same fact, different framings)](#cross-project-drift-different-projects-same-fact-different-framings)
+  - [No-response-inference default](#no-response-inference-default)
+- [Harness-local recall integration](#harness-local-recall-integration)
+- [File locations and naming](#file-locations-and-naming)
+- [Make the placement choice visible](#make-the-placement-choice-visible)
+  - [Mechanical-write exemption](#mechanical-write-exemption)
+  - [Skill-product writes](#skill-product-writes)
+- [Where everything lives — quick reference](#where-everything-lives--quick-reference)
+- [What's not in the v2 architecture](#whats-not-in-the-v2-architecture)
+
 ## Voice
 
 Plain person voice — same standard as SKILL.md §Voice. Specific note for this file: it's reference material the agent re-reads often; resist the urge to load every concept with a label header.
@@ -14,7 +62,7 @@ Three surfaces, three responsibilities. Don't mix them.
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed by convention so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
-- **Project operational state** — `<project>/.core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. In a synced folder (OneDrive, iCloud Drive, Dropbox, Google Drive) the append-heavy and lock-bearing files live under `~/.core/local/` instead, as does the state of a read-only folder or of another install's project. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
+- **Project operational state** — `<project>/.core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. It stays in the project even when the folder syncs (OneDrive, iCloud Drive, Dropbox, Google Drive). Only the state of a read-only folder or of another install's project lives under `~/.core/local/` instead. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
 
 - **Agent operational meta** — `~/.core/` — only what serves every project. `agent-profile.md` is your cross-project home (legacy installs: `dm-profile.md` until the startup migration renames it). `projects.json` lists the registered project roots. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache for cross-project files. `install-secret` and `install-id` sign project state. None of this holds project facts.
 
@@ -322,7 +370,12 @@ Metrics capture is physically two separate streams, and they are never mixed:
 | **Closed-schema metrics** | `retrieval-log.jsonl` / `outcome-log.jsonl` and the derived rollups — counts, tiers, verdicts, identities. No prompts, no diffs, no unit bodies, no paths, no raw errors. | **ON**, opt-out via `metrics_enabled: false` or `CORE_METRICS_ENABLED=0`. | `metrics-package.mjs` reads this and anonymizes it into the shareable package. |
 | **Turn-capture evidence** | `<metrics-storage-base>/turn-capture/<date>.jsonl` — one row per turn: the user's prompt (64 KiB byte-cap), the combined delivered context-pack text (16 KiB cap), per-unit ids+scores, the top-20 rejected candidates with scores, a store signature for drift detection, and producer identity. This is what the hindsight judge grades later — it exists so retrieval quality is judgeable after the fact. Files are owner-only (dir `0700`, rows `0600`, best-effort where the FS supports it). For local grading and human/agent debugging only; no model inference runs over it. | **ON**. Opt-outs: `CORE_TURN_CAPTURE=0` (env), `turn_capture: false` in the project-root `workspace.json` (an opt-OUT travelling with a copied project is privacy-safe), or the master `CORE_METRICS_ENABLED=0`. | **None.** `metrics-package.mjs` has no import path or read path into `turn-capture/`; a permanent canary tripwire test asserts the built package bytes never contain a planted evidence string. |
 
-The evidence stream is the materially more sensitive one, so it carries **always-visible state** (`/metrics` renders the ON line with the exact disclosure and off-switches, or the OFF line confirming an opt-out took effect), **independent disable** (its own flag; toggling it never touches the numbers stream), **no scheduled deletion** (rows are kept until the user asks), and **purge on explicit ask** (`maintenance-run.mjs --purge-turn-capture`, or `turn-capture.mjs --purge`). All evidence-stream deletion, which only ever happens on that explicit ask, is scoped by path assertion to `<metrics-storage-base>/turn-capture/` only — it can never target a user memory unit or `PROJECT.md`. **One exclusion lock** at a stable sibling path OUTSIDE the purged directory (`<metrics-storage-base>/.turn-capture.lock`) is shared by append, retention deletion, and purge, so a purge can never unlink the lock out from under a mid-flight writer and the three ops can never race. A health counter (`<metrics-storage-base>/turn-capture-health.json`, a sibling on purpose) records every attempt including ones where the stream itself couldn't be created — a silently dying flight recorder is the exact failure the capture-health tripwire watches. The single writer is `scripts/turn-capture.mjs`; the one wired seam is `retrieve-context-hook.mjs`, writing the evidence row in the same run as the numbers row, joined by `retrieval_id`; a capture outcome (including failures) rides the hook's terminal operational receipt as a closed `turn_capture` status code, never as raw content.
+The evidence stream is the materially more sensitive one, so it carries **always-visible state** (`/metrics` renders the ON line with the exact disclosure and off-switches, or the OFF line confirming an opt-out took effect), **independent disable** (its own flag; toggling it never touches the numbers stream), **no scheduled deletion** (rows are kept until the user asks), and **purge on explicit ask** (`maintenance-run.mjs --purge-turn-capture`, or `turn-capture.mjs --purge`). The explicit purge reports its declared scope: the turn-capture directory, capture-health counters, derived judgment log, classified turn log, and intact writer-marked automatic-close summaries and receipts. Close files are selected individually, never by recursive deletion of the close directories; a user memory unit or `PROJECT.md` is never a close-purge target. **One exclusion lock** at a stable sibling path OUTSIDE the purged directory (`<metrics-storage-base>/.turn-capture.lock`) is shared by append, retention deletion, automatic close/receipt writes, and purge, so a purge can never unlink the lock out from under a mid-flight writer and the three ops can never race. A health counter (`<metrics-storage-base>/turn-capture-health.json`, a sibling on purpose) records every attempt including ones where the stream itself couldn't be created — a silently dying flight recorder is the exact failure the capture-health tripwire watches. The single writer is `scripts/turn-capture.mjs`; the one wired seam is `retrieve-context-hook.mjs`, writing the evidence row in the same run as the numbers row, joined by `retrieval_id`; a capture outcome (including failures) rides the hook's terminal operational receipt as a closed `turn_capture` status code, never as raw content.
+
+
+**Automatic close privacy.** `<metrics-storage-base>/close/{summaries,receipts}/` holds deterministic lifecycle records. Automatic close uses the same capture gate as turn capture: either `CORE_METRICS_ENABLED=0` or `CORE_TURN_CAPTURE=0` (and the workspace opt-outs) suppresses opening-request and tool-input file-path content while retaining identity, times, tool names, and counts. An invalid pin disables content and independently routes close output to the locally selected storage path, never the invalid-pin project fallback. Generated directories establish self-ignore rules before payload writes; this prevents ordinary Git staging of new untracked files, but cannot untrack previously committed files or prevent `git add -f`.
+
+The writer stamps new automatic summaries and receipts with `core.generated-close/1` plus an integrity hash. Explicit purge removes only direct hash-named regular files whose marker and hash still match. Manual certifications, manual summaries, edited generated files, pre-fix unmarked files, nested files, links, temporary files, and corrupt quarantines are retained and reported in the close scope's `kept` list. A manual receipt protects its same-session generated summary too. The purge does not follow a receipt's `summary_path`; it does not rewrite, migrate, or delete historical close material. `removed` on a close scope means its selected files were removed, not that the containing directory or `kept` files vanished. A dry run lists candidates without deleting them. If the storage pin is invalid, purge continues to refuse with `pin-unverified`; repair the pin before asking again. No close purge runs on a schedule or during normal close/startup. This change does not clean up existing retained prompt text.
 
 ---
 
@@ -368,7 +421,7 @@ A decision is **critical** when it would:
 - settle a contradiction between sources on a fact that **materially** changes what someone does (a date, an owner, a commitment, a decision) — not any contradiction, only one where guessing wrong would actually mislead someone;
 - change a structural pattern or a default the user hasn't endorsed (data topology, identity, protocol migration, invariants, global defaults) **and** the change is hard to unwind — most memory writes aren't: the store never deletes, so a wrong supersession call is corrected by the next one, not lost. Reserve this bullet for the rare change that isn't cheaply reversible that way.
 
-You **can't make** it when you've looked (the retrieval ladder, the sources the units cite, the user's own words in the transcript) and the evidence still doesn't settle it. If the evidence does settle it, decide, even when the decision is on the list above, and put the evidence in the unit body. When genuinely torn, decide and narrate the reasoning rather than asking — a visible, reversible call beats an interruption.
+You **can't make** it when you've looked (the retrieval ladder, the sources the units cite, the user's own words in the transcript) and the evidence still doesn't settle it. If the evidence does settle it, decide, even when the decision is on the list above, and put the evidence in the unit body. When the call is not critical and you're genuinely torn, decide and narrate the reasoning rather than asking — a visible, reversible call beats an interruption. A decision that is both critical and still unsettled after that evidence review is the one case you ask about.
 
 When you do ask: one question, in plain words, with your best guess and why. Keep working on everything else while you wait. Record the question as an open-question unit so it outlives the session (the deferral ladder in SKILL.md §"Persist on hard questions" takes it from there).
 

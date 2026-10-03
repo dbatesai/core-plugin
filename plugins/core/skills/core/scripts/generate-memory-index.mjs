@@ -237,18 +237,6 @@ export function main(argv) {
   try { readdirSync(memoriesDir); }
   catch { process.stderr.write(`error: _memories source dir not readable: ${memoriesDir}\n`); return 2; }
 
-  // CORE no longer writes a visibility-canary line. Remove any left in MEMORY.md: its
-  // echo-this-token shape reads as a prompt injection. Runs before the shared-file skip
-  // because the line is CORE's own wherever it sits.
-  if (!dryRun && existsSync(memoryMdPath)) {
-    const text = readFileSync(memoryMdPath, 'utf8');
-    const cleaned = stripCanaryLines(text);
-    if (cleaned !== text) {
-      atomicWriteFileSync(memoryMdPath, cleaned);
-      process.stderr.write(`Removed a leftover visibility-canary line from ${memoryMdPath}\n`);
-    }
-  }
-
   // A project inside a larger repository has no MEMORY.md of its own: the harness
   // injects the repository root's file, shared with every sibling project. A 15–30
   // unit priority block written there would crowd (or overflow) that shared index
@@ -288,11 +276,14 @@ export function main(argv) {
     return 2;
   }
   const oldText = readFileSync(memoryMdPath, 'utf8');
-  const existingDescriptions = parseExistingDescriptions(oldText);
+  // Canary removal is a write too: do it only after ownership/shared-file
+  // guards and input validation, in the same atomic write as the index.
+  const cleanedText = stripCanaryLines(oldText);
+  const existingDescriptions = parseExistingDescriptions(cleanedText);
   const newSection = renderPriorityBlock({
     memoriesDir, topN, today, existingDescriptions,
   });
-  const newText = spliceSection(oldText, newSection);
+  const newText = spliceSection(cleanedText, newSection);
 
   if (newText === oldText) {
     process.stderr.write(`No change: priority block already current (${topN} units, ${today.toISOString().slice(0, 10)})\n`);

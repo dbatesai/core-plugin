@@ -1,5 +1,24 @@
 # Multi-Agent Analysis
 
+**Contents**
+
+- [Voice](#voice)
+- [When to invoke](#when-to-invoke)
+- [Swarm sizing](#swarm-sizing)
+- [Anti-anchoring enforcement](#anti-anchoring-enforcement)
+- [Execution phases](#execution-phases)
+- [Authority gate — run at Phase 0, before spawning](#authority-gate--run-at-phase-0-before-spawning)
+- [Output shape](#output-shape)
+- [Persuasion log + mind changes](#persuasion-log--mind-changes)
+- [Monitor pattern](#monitor-pattern)
+- [Deep audit gate](#deep-audit-gate)
+- [External-audience test](#external-audience-test)
+- [Research mode](#research-mode)
+- [When NOT to invoke](#when-not-to-invoke)
+- [Briefing structure](#briefing-structure)
+- [Re-alignment before accepting](#re-alignment-before-accepting)
+- [After-action](#after-action)
+
 ## Voice
 
 Plain person voice — same standard as SKILL.md §Voice.

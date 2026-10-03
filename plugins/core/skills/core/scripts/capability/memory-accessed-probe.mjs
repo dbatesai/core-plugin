@@ -48,12 +48,18 @@ export const CORE_SURFACE_RE = /(?:^|[\s/\\"'])(?:_memories[/\\]|PROJECT\.md(?![
 const NATIVE_SURFACE_RE = /(?:\.codex[/\\]memories|(?:^|[\s/\\"'])MEMORY\.md(?![.\w]))/;
 
 /** Pure classifier over normalized transcript events. */
-export function classifyAccess({ harness: _harness, transcriptAvailable, toolExtractionPending, events, coreStorePresent }) {
+export function classifyAccess({ harness: _harness, transcriptAvailable, sessionMismatch, toolExtractionPending, events, coreStorePresent }) {
   if (!coreStorePresent) {
     return { identity_status: 'NOT-YET', reason: 'no CORE store at this project (no _memories/ or PROJECT.md) — nothing to access' };
   }
   if (!transcriptAvailable) {
     return { identity_status: 'UNKNOWN', reason: 'transcript unavailable — cannot observe access this session' };
+  }
+  // A session id was sought and its own transcript didn't exist; the resolver fell back
+  // to some OTHER session's file. Its tool events are real, but they are not evidence
+  // about the session being asked about — never claim access on someone else's evidence.
+  if (sessionMismatch) {
+    return { identity_status: 'UNKNOWN', reason: 'the requested session has no transcript of its own — the resolver fell back to a different session in this project, whose evidence cannot stand in for this one' };
   }
   if (toolExtractionPending) {
     // Tool events not extractable on this harness — refuse a false "not accessed".
@@ -105,13 +111,13 @@ export async function probe(opts = {}) {
   const harness = opts.harness || 'claude-code';
   const observed_at = new Date().toISOString();
 
-  const t = readTranscript({ harness, cwd, home, override: opts.transcriptPath });
+  const t = readTranscript({ harness, cwd, home, override: opts.transcriptPath, sessionId: opts.sessionId, env });
   const extraction = t.meta?.codex_tool_extraction;
   const toolExtractionPending = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
   const coreStorePresent = opts.coreStorePresent != null ? opts.coreStorePresent : coreStorePresentAt(cwd);
 
   const r = classifyAccess({
-    harness, transcriptAvailable: t.available, toolExtractionPending, events: t.events, coreStorePresent,
+    harness, transcriptAvailable: t.available, sessionMismatch: t.meta.session_mismatch, toolExtractionPending, events: t.events, coreStorePresent,
   });
   return buildRow({
     ...r, harness, transcriptAvailable: t.available, coreStorePresent, cwd, observed_at,

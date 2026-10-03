@@ -68,9 +68,17 @@ export function findAutoMemEntry(attachmentEvents, expectedPath) {
  * return status + reason. Separated from IO so it's unit-testable without touching
  * the filesystem or a real transcript.
  */
-export function classifyVisibility({ transcriptAvailable, autoMemEntry, fileExistsNow, currentContent }) {
+export function classifyVisibility({ transcriptAvailable, sessionMismatch, autoMemEntry, fileExistsNow, currentContent }) {
   if (!transcriptAvailable) {
     return { identity_status: 'UNKNOWN', reason: 'transcript unavailable — cannot observe injection this session' };
+  }
+  // A session identity was sought (an explicit id, or the harness's own env var) and its
+  // own transcript file didn't exist, so the resolver fell back to whatever transcript in
+  // this project happened to be newest — some OTHER session, not the one being asked
+  // about. Its AutoMem entry, if any, is evidence about that other session, not this one.
+  // Never PASS or DEGRADED on it; the honest answer is that this session is unobservable.
+  if (sessionMismatch) {
+    return { identity_status: 'UNKNOWN', reason: 'the requested session has no transcript of its own — the resolver fell back to a different session in this project, whose evidence cannot stand in for this one' };
   }
   if (!autoMemEntry) {
     if (!fileExistsNow) {
@@ -78,11 +86,13 @@ export function classifyVisibility({ transcriptAvailable, autoMemEntry, fileExis
     }
     return { identity_status: 'DEGRADED', reason: 'MEMORY.md exists but no AutoMem attachment record was observed in the transcript — injection not observed', injected_length: 0 };
   }
-  const injectedLen = typeof autoMemEntry.content === 'string' ? autoMemEntry.content.length : 0;
+  // .length is UTF-16 code units, not bytes; a non-ASCII transcript would otherwise be
+  // reported under a "bytes" label that isn't actually counting bytes.
+  const injectedLen = typeof autoMemEntry.content === 'string' ? Buffer.byteLength(autoMemEntry.content, 'utf8') : 0;
   if (injectedLen === 0) {
     return { identity_status: 'DEGRADED', reason: 'AutoMem attachment recorded but its content was empty', injected_length: 0 };
   }
-  const currentLen = typeof currentContent === 'string' ? currentContent.length : null;
+  const currentLen = typeof currentContent === 'string' ? Buffer.byteLength(currentContent, 'utf8') : null;
   // Drift is expected mid-session — the file keeps changing as memory gets written after
   // the moment it was injected. This is informational, not a failure signal.
   const driftNote = currentLen == null
@@ -123,7 +133,7 @@ export async function probe(opts = {}) {
   const t = readTranscript({ harness, cwd, home, override: opts.transcriptPath, sessionId: opts.sessionId, env: opts.env });
   const attachmentEvents = t.events.filter((e) => e.kind === 'attachment');
   const autoMemEntry = findAutoMemEntry(attachmentEvents, memPath);
-  const r = classifyVisibility({ transcriptAvailable: t.available, autoMemEntry, fileExistsNow, currentContent });
+  const r = classifyVisibility({ transcriptAvailable: t.available, sessionMismatch: t.meta.session_mismatch, autoMemEntry, fileExistsNow, currentContent });
 
   return buildRow({ ...r, harness, cwd, observed_at, memPath, transcriptAvailable: t.available });
 }

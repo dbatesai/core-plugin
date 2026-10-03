@@ -218,10 +218,21 @@ function ensureArchiveFile(projectDir) {
 // Crash-retry idempotency — mirror of alreadyArchived in
 // demote-moves.mjs. Archive append happens before the PROJECT.md write; a
 // crash between the two would otherwise duplicate the block on retry.
-function alreadyArchived(archivePath, bullet) {
+function containsWholeLines(text, needle) {
+  for (let i = text.indexOf(needle); i !== -1; i = text.indexOf(needle, i + 1)) {
+    const end = i + needle.length;
+    const startsLine = i === 0 || text[i - 1] === '\n';
+    const endsLine = end === text.length || text[end] === '\n' || text[end] === '\r';
+    if (startsLine && endsLine) return true;
+  }
+  return false;
+}
+
+export function alreadyArchived(archivePath, bullet) {
   let text;
   try { text = readFileSync(archivePath, 'utf8'); } catch { return false; }
-  return text.includes(bullet.rawLines.join('\n'));
+  // Whole lines only: a bullet that is a prefix of a longer archived line is not archived.
+  return containsWholeLines(text, bullet.rawLines.join('\n'));
 }
 
 function appendToArchiveState(archivePath, block) {

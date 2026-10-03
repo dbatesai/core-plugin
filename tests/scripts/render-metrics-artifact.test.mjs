@@ -26,6 +26,8 @@ import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+// A junction needs no privilege on Windows, and it is what an unprivileged process can plant there.
+const DIR_LINK = process.platform === 'win32' ? 'junction' : 'dir';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
@@ -706,12 +708,12 @@ test('ACCEPTANCE (receipt hardening): a declined/failed receipt can NEVER be mar
 
 // ---------- refused-state fallback ----------
 
-test('refused project state (a symlinked .core): receipt lands in the flagged fallback location', { skip: process.platform === 'win32' }, async () => {
+test('refused project state (a symlinked .core): receipt lands in the flagged fallback location', async () => {
   if (!TREE_CLEAN) assert.fail(DIRTY_TREE_REFUSAL);
   const { root, home } = fixtureProject();
   const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'metrics-elsewhere-')));
   try {
-    symlinkSync(elsewhere, join(root, '.core'));
+    symlinkSync(elsewhere, join(root, '.core'), DIR_LINK);
     const dataPath = join(root, 'metrics.json');
     writeFileSync(dataPath, JSON.stringify(canonicalMetrics()));
     const { manifest, receiptWritten } = await renderMetricsArtifact(root, { outPath: join(root, 'out', 'v.html'), jsonIn: dataPath, home });

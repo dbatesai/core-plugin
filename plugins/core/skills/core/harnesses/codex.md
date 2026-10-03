@@ -5,6 +5,27 @@ description: Concrete tool mapping for each abstract adapter verb when CORE runs
 
 # Harness adapter — Codex CLI
 
+**Contents**
+
+- [detect-harness](#detect-harness)
+- [spawn-subagent](#spawn-subagent)
+- [spawn-team](#spawn-team)
+- [send-message](#send-message)
+- [await-completion](#await-completion)
+- [plan-task](#plan-task)
+- [complete-task](#complete-task)
+- [notify-user](#notify-user)
+- [schedule](#schedule)
+- [automatic session start](#automatic-session-start)
+- [close-pass (self-managed session close)](#close-pass-self-managed-session-close)
+- [hook-register](#hook-register)
+- [read-auto-memory](#read-auto-memory)
+- [save-recall-note](#save-recall-note)
+- [configure-project](#configure-project)
+- [Notes](#notes)
+  - [Known RTK collisions on Codex](#known-rtk-collisions-on-codex)
+  - [`${CLAUDE_PLUGIN_ROOT}` is not set on Codex](#claude_plugin_root-is-not-set-on-codex)
+
 ## detect-harness
 
 Detect by:

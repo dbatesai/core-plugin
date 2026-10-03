@@ -1,5 +1,5 @@
 import { operationalMetricsDir, resolveStoragePath, metricsEnabled, storagePinInvalid } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { writePinSigned, readPinSigned, projectRootFor, stateDir, readSignedFileAt, canonical } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 // Behavioral companion to the metrics-init-wirein doc-guard: exercises the real
 // scaffold against temp dirs. HOME (and USERPROFILE for Windows) is redirected to
@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os';
 import {
   initMetrics,
   detectStoragePath,
-  projectPathContainsOneDriveSubstring,
 } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 
 // detectStoragePath honors these as escape hatches — make sure ambient shell
@@ -90,17 +89,47 @@ test('detectStoragePath returns the default project-local path when the path has
   });
 });
 
-test('projectPathContainsOneDriveSubstring is true for OneDrive paths and false otherwise', () => {
-  assert.equal(projectPathContainsOneDriveSubstring('C:\\Users\\david\\OneDrive\\Projects\\app'), true);
-  assert.equal(projectPathContainsOneDriveSubstring('C:\\Users\\david\\OneDrive - Contoso\\Projects\\app'), true);
-  assert.equal(projectPathContainsOneDriveSubstring('/Users/david/OneDrive/Projects/app'), true);
-  assert.equal(projectPathContainsOneDriveSubstring('/Users/david/Documents/Projects/app'), false);
-  // Characterized: the "substring" check is a whole-path-component match, so a
-  // component merely containing the word does not trip it.
-  assert.equal(projectPathContainsOneDriveSubstring('/Users/david/OneDrive-backup-archive/app'), false);
+test('detectStoragePath keeps captured turns in the project folder on non-Windows, synced or not', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-synced-home-'));
+    const dirs = [
+      join(home, 'Library', 'CloudStorage', 'OneDrive-Org', 'Projects', 'app'),
+      join(home, 'Library', 'CloudStorage', 'iCloud Drive', 'Projects', 'app'),
+      join(home, 'Dropbox', 'Projects', 'app'),
+      join(home, 'Google Drive', 'Projects', 'app'),
+      join(home, 'Documents', 'Projects', 'app'),
+    ];
+    for (const dir of dirs) mkdirSync(dir, { recursive: true });
+    try {
+      for (const projectDir of dirs) {
+        for (const platformName of ['darwin', 'linux']) {
+          const detection = detectStoragePath({ projectDir, home, platformName });
+          assert.equal(detection.path, join(projectDir, '_metrics'), `${projectDir} on ${platformName} stays with the project`);
+          assert.match(detection.reason, /project-local/);
+        }
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
 
-function signedPin(meta, home, path, project) { const coreDir = join(home, '.core'); writePinSigned({ dir: meta, path, root: projectRootFor(project, { home, coreDir }), coreDir }); }
+test('detectStoragePath on Windows keeps captured turns in the project folder, OneDrive included', () => {
+  withCleanEnv(() => {
+    const home = mkdtempSync(join(tmpdir(), 'metrics-win-synced-home-'));
+    try {
+      for (const sub of ['OneDrive', 'OneDrive - Contoso', 'Dropbox', 'Google Drive', 'iCloudDrive', 'Documents']) {
+        const projectDir = join(home, sub, 'Projects', 'app');
+        mkdirSync(projectDir, { recursive: true });
+        const detection = detectStoragePath({ projectDir, home, platformName: 'win32' });
+        assert.equal(detection.path, join(projectDir, '_metrics'), `${sub} stays with the project`);
+        assert.match(detection.reason, /project-local/);
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
 
 test('the AppData metrics folder is one-to-one, and an unclaimed legacy folder is never taken by whichever project scaffolds first', () => {
   withCleanEnv(() => {
@@ -145,11 +174,17 @@ test('B scaffolding first cannot take A\'s unclaimed legacy folder; A keeps it t
       assert.notEqual(rb.storagePath, legacy, 'B is not handed A\'s bytes');
       const ra = initMetrics({ projectDir: A, env: {} });
       assert.equal(ra.storagePath, legacy, 'A keeps the folder its own pin names');
-      assert.equal(readFileSync(join(legacy, '.project-root'), 'utf8').trim(), A, 'and claims it');
+      // Canonical, not raw: detectStoragePath now classifies (and appDataStorePath's owner
+      // check now reads/writes) against the canonical root, so the owner file agrees with
+      // that — matters on macOS, where mkdtempSync under tmpdir() returns a /var/folders/...
+      // spelling that realpath resolves to /private/var/folders/....
+      assert.equal(readFileSync(join(legacy, '.project-root'), 'utf8').trim(), canonical(A), 'and claims it');
       assert.equal(readFileSync(join(legacy, 'evidence.jsonl'), 'utf8'), '{"a":1}\n');
     } finally { for (const d of [home, A, B]) rmSync(d, { recursive: true, force: true }); }
   });
 });
+
+function signedPin(meta, home, path, project) { const coreDir = join(home, '.core'); writePinSigned({ dir: meta, path, root: projectRootFor(project, { home, coreDir }), coreDir }); }
 
 test('a pin that already names an existing external folder survives the scaffold; a missing, foreign-claimed or forced-local one is recomputed', () => {
   withCleanEnv(() => {
@@ -335,11 +370,12 @@ test('with a pin that does not verify, purge and stats refuse with pin-unverifie
       writeFileSync(rows, '{"row":1}\n{"row":2}\n');
       signedPin(meta, home, store, projectDir);
       assert.equal(turnCaptureStats(projectDir, { env: {} }).rows, 2, 'with a good pin the stream is found');
-      assert.equal(purgeTurnCapture(projectDir, { apply: false }).existed, true);
+      // Purge defaults to the trusted OS home; this fixture injects its synthetic home explicitly.
+      assert.equal(purgeTurnCapture(projectDir, { apply: false, home }).existed, true);
 
       writeFileSync(join(meta, 'storage-path.txt'), join(projectDir, '_metrics'));   // tamper only the pin
-      const dry = purgeTurnCapture(projectDir, { apply: false });
-      const real = purgeTurnCapture(projectDir, { apply: true });
+      const dry = purgeTurnCapture(projectDir, { apply: false, home });
+      const real = purgeTurnCapture(projectDir, { apply: true, home });
       const stats = turnCaptureStats(projectDir, { env: {} });
       for (const r of [dry, real]) {
         assert.equal(r.purged, false);
@@ -350,7 +386,7 @@ test('with a pin that does not verify, purge and stats refuse with pin-unverifie
       assert.equal(readFileSync(rows, 'utf8'), '{"row":1}\n{"row":2}\n', 'nothing was deleted');
 
       signedPin(meta, home, store, projectDir);
-      assert.equal(purgeTurnCapture(projectDir, { apply: false }).existed, true, 'once the pin is repaired the stream is located again');
+      assert.equal(purgeTurnCapture(projectDir, { apply: false, home }).existed, true, 'once the pin is repaired the stream is located again');
     } finally { for (const d of [home, projectDir]) rmSync(d, { recursive: true, force: true }); }
   });
 });

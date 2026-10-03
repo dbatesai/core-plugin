@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
-import { trustedTestTmpRoot } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const HOOK = join(ROOT, 'plugins', 'core', 'skills', 'core', 'hooks', 'retrieve-context-hook.mjs');
@@ -44,7 +44,7 @@ test('equivalence: hook subprocess output === pack function output, byte-exact, 
   const hooksLog = join(hooksLogDir, 'hooks-log.jsonl');
   const hookOut = execFileSync('node', [HOOK], {
     input: JSON.stringify({ prompt, cwd: FIXT }),
-    env: { ...process.env, CORE_RETRIEVAL_HOOK: '1', CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: hooksLog },
+    env: { ...process.env, CORE_RETRIEVAL_HOOK: '1', CORE_METRICS_ENABLED: '0', CORE_HOOKS_LOG_FILE: hooksLog, ...registryEnvFor(FIXT) },
     encoding: 'utf8',
   });
   const hits = retrieveContext(prompt, FIXT, { topN: 3 });

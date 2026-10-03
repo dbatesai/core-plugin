@@ -150,9 +150,12 @@ function turnTerms(text, terms) {
  * Walk normalized transcript events; flag memory-dependent user turns whose answer was
  * not preceded by any CORE-store tool access. Pure over its inputs.
  */
-export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = true, transcriptAvailable = true, toolVisibilityUnknown = false }) {
+export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = true, transcriptAvailable = true, sessionMismatch = false, toolVisibilityUnknown = false }) {
   if (!coreStorePresent) return { status: 'NO-STORE', reason: 'no CORE store (_memories/ or PROJECT.md) — nothing to skip', skips: [], memoryDependentTurns: [], firstCoreAccessIdx: null };
   if (!transcriptAvailable) return { status: 'UNKNOWN', reason: 'transcript unavailable — cannot judge retrieval ordering', skips: [], memoryDependentTurns: [], firstCoreAccessIdx: null };
+  // A session id was sought and its own transcript didn't exist; the fallback file
+  // belongs to a different session, so its turn ordering says nothing about this one.
+  if (sessionMismatch) return { status: 'UNKNOWN', reason: 'the requested session has no transcript of its own — the resolver fell back to a different session in this project, whose ordering cannot stand in for this one', skips: [], memoryDependentTurns: [], firstCoreAccessIdx: null };
   if (toolVisibilityUnknown) return { status: 'UNKNOWN', reason: 'tool records unreadable for this transcript (unrecognized extraction marker) — cannot observe store access, so cannot prove a skip', skips: [], memoryDependentTurns: [], firstCoreAccessIdx: null };
 
   const ordered = [...events].sort((a, b) => a.idx - b.idx);
@@ -182,9 +185,9 @@ export function classifyRetrievalSkips({ events = [], terms, coreStorePresent = 
 }
 
 /** Full pipeline: read transcript for the harness, build terms, classify. Fail-open. */
-export function analyzeRetrievalSkip({ projectRoot = process.cwd(), harness = 'claude-code', home = homedir(), transcriptPath = null } = {}) {
+export function analyzeRetrievalSkip({ projectRoot = process.cwd(), harness = 'claude-code', home = homedir(), env = process.env, sessionId = null, transcriptPath = null } = {}) {
   const coreStorePresent = existsSync(join(projectRoot, '_memories')) || existsSync(join(projectRoot, 'PROJECT.md'));
-  const t = readTranscript({ harness, cwd: projectRoot, home, override: transcriptPath });
+  const t = readTranscript({ harness, cwd: projectRoot, home, override: transcriptPath, sessionId, env });
   // The producer (read-transcript) emits 'implemented' (codex, tools extractable) or
   // 'n/a' (other harnesses). Any value that is neither known-good abstains, so a
   // future schema drift produces UNKNOWN instead of silently flooding false SKIPs.
@@ -192,7 +195,7 @@ export function analyzeRetrievalSkip({ projectRoot = process.cwd(), harness = 'c
   const toolVisibilityUnknown = extraction != null && extraction !== 'implemented' && extraction !== 'n/a';
   const terms = coreStorePresent ? buildProjectTerms(projectRoot) : new Set();
   const r = classifyRetrievalSkips({
-    events: t.events, terms, coreStorePresent, transcriptAvailable: t.available, toolVisibilityUnknown,
+    events: t.events, terms, coreStorePresent, transcriptAvailable: t.available, sessionMismatch: t.meta.session_mismatch, toolVisibilityUnknown,
   });
   return { schema_version: SCHEMA_VERSION, harness, coreStorePresent, transcriptAvailable: t.available, termsTracked: terms.size, ...r };
 }

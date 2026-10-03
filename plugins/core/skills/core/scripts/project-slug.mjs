@@ -3,7 +3,7 @@
  * project-slug.mjs — canonical project-path → identity-slug encoding.
  *
  * Claude Code maps a project cwd to ~/.claude/projects/<slug>/memory/MEMORY.md
- * where <slug> is the absolute path with path separators AND dots replaced by '-'.
+ * where <slug> is the absolute path with path separators, dots, drive colons AND underscores replaced by '-'.
  * Confirmed on a dotted corporate username: a home dir like `/Users/<first.last>`
  * encodes to `-Users-<first-last>-...` (the dot becomes a hyphen).
  *
@@ -27,7 +27,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 export function mapProjectPathToSlug(p) {
-  return String(p).replace(/[/\\.:]/g, '-');
+  return String(p).replace(/[/\\._:]/g, '-');
 }
 
 /**

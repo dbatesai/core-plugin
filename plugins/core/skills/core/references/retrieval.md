@@ -1,5 +1,18 @@
 # CORE Retrieval Protocol (v2.0)
 
+**Contents**
+
+- [The four tiers](#the-four-tiers)
+  - [Tier 0 — Already loaded](#tier-0--already-loaded)
+  - [Tier 1 — Lexical](#tier-1--lexical)
+  - [Tier 2 — Typed-edge walk](#tier-2--typed-edge-walk)
+    - [Score-gated termination](#score-gated-termination)
+    - [Walk termination summary](#walk-termination-summary)
+  - [Tier 3 — Reasoning escalation (shortlist first, subagent second)](#tier-3--reasoning-escalation-shortlist-first-subagent-second)
+- [Logging — always on](#logging--always-on)
+  - [Reading the corpus](#reading-the-corpus)
+- [Quick reference](#quick-reference)
+
 How the agent (and Explore subagents acting on its behalf) gets information from the project's memory into context, per the standing architecture: native tools first, a flat unit store, and the committed priority function.
 
 ---

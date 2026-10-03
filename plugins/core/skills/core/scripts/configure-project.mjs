@@ -312,12 +312,7 @@ export async function main(argv) {
 
   // Best-effort capability probe; never blocks. Imported lazily so a probe-side
   // failure can't stop the rest of the report.
-  const probe = async ({ harness: h }) => {
-    try {
-      const { runStartup } = await import('./capability-probe.mjs');
-      return await runStartup({ harnessOverride: h });
-    } catch (e) { return { error: e.message }; }
-  };
+  const probe = probeForHarness;
 
   const report = await configureProject({ projectPath, coreRoot, harness, apply, probe });
 
@@ -332,6 +327,18 @@ export async function main(argv) {
   if (report.scriptVisible.agentsMd.status === 'refused-hand-authored') return 3;
   const tier = report.scriptVisible.store.exitTier;
   return tier === 2 ? 2 : 0;
+}
+
+/**
+ * Best-effort capability probe for the harness being configured; never throws. Imported
+ * lazily so a probe-side failure can't stop the rest of the report. `runStartup` reads
+ * `opts.harness`, so that is the key the harness travels under.
+ */
+export async function probeForHarness({ harness: h }, { load = () => import('./capability-probe.mjs') } = {}) {
+  try {
+    const { runStartup } = await load();
+    return await runStartup({ harness: h });
+  } catch (e) { return { error: e.message }; }
 }
 
 if (isCliEntry(import.meta.url)) {

@@ -24,19 +24,23 @@
  *   CORE_RETRIEVAL_HOOK=0
  *
  * I/O contract: reads the UserPromptSubmit payload as JSON on stdin (uses `.prompt`;
- * store path from payload `.cwd`, else process.cwd() — deliberately no env-var
+ * working folder from payload `.cwd`, else process.cwd() — deliberately no env-var
  * store override: a path override is a trust boundary this hook cannot safely
- * enforce, so none exists).
+ * enforce, so none exists). Trust: the folder must be inside a project registered in
+ * ~/.core (a folder's own `_memories/` authorizes nothing, since a cloned repo can carry
+ * one); retrieval then reads that project's root. Before the first `/core` registers a
+ * project, automatic retrieval is off.
  * Output is byte-capped. Any error is swallowed to a clean exit 0 — a retrieval hook
  * must never block the user's turn.
  *
  * Ships with the plugin by design; the plugin ships .mjs only.
  */
 
-import { readFileSync, existsSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, statSync, realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
+import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { metricsEnabled } from '../scripts/log-event.mjs';
@@ -76,7 +80,7 @@ export function truncateUtf8(str, maxBytes) {
 // Closed vocabularies; an unknown code is coerced to failed/pipeline-error
 // rather than emitted (tests assert every path lands in-vocabulary).
 export const RETRIEVAL_ACTIONS = ['skip', 'delivered', 'failed'];
-export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed'];
+export const RETRIEVAL_REASONS = ['ok', 'retrieval-opt-out', 'empty-prompt', 'store-absent', 'not-registered-workspace', 'pipeline-error', 'store-unavailable', 'metrics-opt-out', 'no-hit', 'delivery-failed', 'event-write-failed', 'hook-log-write-failed'];
 
 export function receipt(action, reason, extra = {}) {
   const a = RETRIEVAL_ACTIONS.includes(action) ? action : 'failed';
@@ -116,7 +120,14 @@ export async function main() {
   const prompt = String(payload.prompt || '');
   if (!prompt.trim()) return receipt('skip', 'empty-prompt');
 
-  const store = payload.cwd || process.cwd();
+  // Trust: a folder's own `_memories/` authorizes nothing, because a cloned repo can carry
+  // one. Only a project registered in ~/.core is injected (the same anchor the SessionEnd
+  // close uses), and a session in one of its subfolders retrieves from the project root.
+  // Before the first `/core` registers a project, automatic retrieval stays off.
+  let cwd = resolve(payload.cwd || process.cwd());
+  try { cwd = realpathSync(cwd); } catch { /* keep resolved */ }
+  const store = resolveRegisteredRoot(cwd);
+  if (!store) return receipt('skip', 'not-registered-workspace', { cwd });
   if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { cwd: store });
   try {
     if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { cwd: store });
@@ -271,8 +282,8 @@ export async function main() {
       // hindsight judge later grades — the numbers row records THAT retrieval
       // happened; this records enough to judge whether it was RIGHT.
       //
-      // LOCAL ONLY: lands under the metrics storage base (0700/0600, 30-day
-      // retention, purge command); metrics-package.mjs has no read path into
+      // LOCAL ONLY: lands under the metrics storage base (0700/0600, kept until
+      // explicit purge); metrics-package.mjs has no read path into
       // it (canary tripwire test). Fail-open: a capture failure never blocks
       // the turn — it lands in the stream's health counter (Link 5 watches
       // that) and its closed status rides the terminal receipt. Gated INSIDE

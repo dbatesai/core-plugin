@@ -135,3 +135,19 @@ test('probe: detects ./.claude/CLAUDE.md and is honest about residual', async ()
     assert.match(row.capability_name, /partial/i, 'capability_name signals partial coverage, not full resolution');
   });
 });
+
+test('buildPrecedenceChain walks a Windows cwd to its drive root and never emits a bare relative path', () => {
+  for (const [cwd, home] of [['C:\\Users\\me\\proj', 'C:\\Users\\me'], ['C:/Users/me/proj', 'C:/Users/me']]) {
+    const paths = buildPrecedenceChain(cwd, home).map((c) => c.path);
+    for (const want of ['C:/CLAUDE.md', 'C:/Users/CLAUDE.md', 'C:/Users/me/CLAUDE.md', 'C:/Users/me/proj/CLAUDE.md']) {
+      assert.ok(paths.includes(want), `${cwd}: missing ancestor ${want}`);
+    }
+    assert.ok(paths.includes('C:/Users/me/.claude/CLAUDE.md'), 'user-global uses the same separators');
+    for (const p of paths) assert.match(p, /^[A-Za-z]:\//, `${cwd}: ${p} would resolve against the process cwd`);
+  }
+});
+
+test('buildPrecedenceChain leaves a POSIX path with a backslash in a folder name alone', () => {
+  const paths = buildPrecedenceChain('/work/a\\b', '/home/u').map((c) => c.path);
+  assert.ok(paths.includes('/work/a\\b/CLAUDE.md'), 'the backslash is part of the name on POSIX');
+});

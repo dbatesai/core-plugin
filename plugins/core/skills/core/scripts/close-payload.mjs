@@ -103,6 +103,7 @@ export function buildCloseRecord({
   events = [],
   coverage = 'full',
   gitHead = null,
+  captureContent = true,
 } = {}) {
   const list = Array.isArray(events) ? events : [];
   const cls = classifySession(list);
@@ -112,14 +113,14 @@ export function buildCloseRecord({
   for (const e of list) {
     if (e?.kind !== 'tool') continue;
     if (typeof e.name === 'string' && e.name && !tools.includes(e.name)) tools.push(e.name);
-    const p = extractPath(e.text);
+    const p = captureContent ? extractPath(e.text) : null;
     if (p && !files.includes(p)) files.push(p);
   }
 
   // The first user turn is the closest thing to an objective that can be read
   // off a transcript without inferring one. Bounded, and quoted as-is.
   const firstUser = list.find((e) => e?.kind === 'text' && e.role === 'user');
-  const opening = firstUser ? clipUtf8(firstUser.text, MAX_HEADLINE_BYTES) : '';
+  const opening = captureContent && firstUser ? clipUtf8(firstUser.text, MAX_HEADLINE_BYTES) : '';
 
   // Partial coverage can never certify a closed status — the record says what it
   // observed, and observing part of a session is not evidence the whole closed.
@@ -127,6 +128,7 @@ export function buildCloseRecord({
 
   return {
     schema: 'core.close-record/1',
+    capture_content: captureContent,
     session_id: typeof sessionId === 'string' ? sessionId : null,
     harness: typeof harness === 'string' ? harness : null,
     started_at: startedAt,

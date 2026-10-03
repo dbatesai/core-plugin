@@ -11,7 +11,10 @@
  *
  * CLI:
  *   node generate-harness-md.mjs --harness claude-code|codex --contract <CONTRACT.md>
- *        [--out <file>] [--override <file>] [--mode write|check|dry-run]
+ *        [--out <file>] [--override <file>] [--mode write|check|dry-run] [--replace-existing]
+ *
+ * Write mode refuses hand-authored output unless --replace-existing is explicit.
+ * Generated output refreshes atomically without that flag; check/dry-run never write.
  */
 
 import { existsSync } from 'node:fs';
@@ -35,7 +38,7 @@ export function harnessOrThrow(name) {
   return h;
 }
 
-export async function generate({ harness, contractPath, outputPath, overridePath = null, mode = 'dry-run' }) {
+export async function generate({ harness, contractPath, outputPath, overridePath = null, mode = 'dry-run', replaceExisting = false }) {
   const h = harnessOrThrow(harness);
   if (!contractPath || !existsSync(contractPath)) {
     if (h.missingContract === 'skip') return { skipped: true, reason: 'no-contract', contractPath: contractPath || null, harness };
@@ -44,7 +47,7 @@ export async function generate({ harness, contractPath, outputPath, overridePath
     throw Object.assign(new Error(`contract file not found: ${contractPath}`), { code: 'ENOENT' });
   }
   const out = outputPath || join(dirname(contractPath), h.output);
-  return generateForHarness({ harness, contractPath, outputPath: out, overridePath, mode });
+  return generateForHarness({ harness, contractPath, outputPath: out, overridePath, mode, replaceExisting });
 }
 
 if (isCliEntry(import.meta.url)) {
@@ -69,7 +72,13 @@ if (isCliEntry(import.meta.url)) {
       process.stderr.write(`generate-harness-md: contract file not found: ${String(contractPath).slice(0, 120)} (pass --contract <CONTRACT.md>)\n`);
       process.exit(2);
     }
-    const r = await generate({ harness, contractPath, outputPath: opt('out'), overridePath: opt('override'), mode });
+    let r;
+    try {
+      r = await generate({ harness, contractPath, outputPath: opt('out'), overridePath: opt('override'), mode, replaceExisting: args.includes('--replace-existing') });
+    } catch (error) {
+      process.stderr.write(`generate-harness-md: ${error.message}\n`);
+      process.exit(2);
+    }
     (r.warnings || []).forEach((w) => process.stderr.write(`(warn) ${w}\n`));
     if (mode === 'check') {
       (r.fatalErrors || []).forEach((e) => process.stderr.write(`(fatal) ${e}\n`));

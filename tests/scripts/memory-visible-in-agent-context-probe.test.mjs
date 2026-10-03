@@ -98,6 +98,24 @@ test('classifyVisibility: UNKNOWN when transcript unavailable — never a false 
   assert.equal(r.identity_status, 'UNKNOWN');
 });
 
+test('classifyVisibility: UNKNOWN on a session mismatch, even with a PASS-shaped AutoMem entry present', () => {
+  // The requested session had no transcript of its own; the resolver fell back to a
+  // different session in the same project. That session's AutoMem entry is real, but it
+  // is not evidence about the session being asked about — must never PASS or DEGRADED.
+  const r = classifyVisibility({
+    transcriptAvailable: true, sessionMismatch: true,
+    autoMemEntry: { content: 'this belongs to the OTHER session' }, fileExistsNow: true, currentContent: 'abc',
+  });
+  assert.equal(r.identity_status, 'UNKNOWN');
+  assert.match(r.reason, /fell back to a different session/);
+});
+
+test('classifyVisibility: byte length, not UTF-16 code-unit length, for non-ASCII content', () => {
+  const twoByteChar = 'é'; // 'é' — 1 UTF-16 code unit, 2 UTF-8 bytes
+  const r = classifyVisibility({ transcriptAvailable: true, autoMemEntry: { content: twoByteChar }, fileExistsNow: true, currentContent: twoByteChar });
+  assert.equal(r.injected_length, 2, 'byte length, not .length (which would read 1)');
+});
+
 // --- probe() integration against a temp filesystem + fixture transcript ---
 
 function withTempHome(fn) {
@@ -157,6 +175,47 @@ test('probe: UNKNOWN when transcript is unavailable', async () => {
     const cwd = '/work/ProjC';
     writeMemory(home, cwd, 'body');
     const row = await probe({ home, cwd, transcriptPath: join(home, 'nonexistent.jsonl') });
+    assert.equal(row.identity_status, 'UNKNOWN');
+  });
+});
+
+test('probe: UNKNOWN, not PASS, when the requested session has no transcript and a different session\'s file is found instead', async () => {
+  // Only a transcript for some OTHER, older session exists in the project directory. The
+  // probe is asked about a specific (current) session id that has
+  // no file of its own. Before the fix, resolveTranscript's mtime-fallback silently
+  // returned the old session's file, and the probe read its AutoMem entry as if it were
+  // evidence for the requested session — a false PASS.
+  await withTempHome(async (home) => {
+    const cwd = '/work/ProjMismatch';
+    const memPath = writeMemory(home, cwd, 'current body');
+    const projectDir = join(home, '.claude', 'projects', '-work-ProjMismatch');
+    writeFileSync(join(projectDir, 'old-session.jsonl'), JSON.stringify({
+      type: 'attachment',
+      attachment: { type: 'instructions', files: [{ path: memPath, type: 'AutoMem', content: 'current body' }] },
+    }));
+    // No file named current-session.jsonl exists here — only old-session.jsonl does.
+    const row = await probe({ home, cwd, sessionId: 'current-session' });
+    assert.equal(row.identity_status, 'UNKNOWN', 'a mismatched session must never read as PASS');
+  });
+});
+
+test('probe: PASS when the requested session id matches its own transcript exactly', async () => {
+  await withTempHome(async (home) => {
+    const cwd = '/work/ProjExactMatch';
+    const memPath = writeMemory(home, cwd, 'current body');
+    const projectDir = join(home, '.claude', 'projects', '-work-ProjExactMatch');
+    writeFileSync(join(projectDir, 'current-session.jsonl'), JSON.stringify({
+      type: 'attachment',
+      attachment: { type: 'instructions', files: [{ path: memPath, type: 'AutoMem', content: 'current body' }] },
+    }));
+    const row = await probe({ home, cwd, sessionId: 'current-session' });
+    assert.equal(row.identity_status, 'PASS', 'an exact session-id match is trustworthy evidence');
+  });
+});
+
+test('probe: UNKNOWN when no session id is sought at all and no project transcript exists', async () => {
+  await withTempHome(async (home) => {
+    const row = await probe({ home, cwd: '/work/ProjNoTranscriptAtAll', env: {} });
     assert.equal(row.identity_status, 'UNKNOWN');
   });
 });

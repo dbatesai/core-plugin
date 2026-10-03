@@ -157,6 +157,9 @@ export function validateIndexRecords(idx) {
 export function loadFreshIndex(storePath) {
   const root = resolve(storePath);
   const indexPath = join(root, '_memories', '_lib', 'unit-summaries.json');
+  // Validate from one honest capture: a signature-only walk drops I/O errors.
+  const current = captureStore(root, { refreshCache: false }).index;
+  if (current.incomplete) return current; // never trust or replace a complete cache with partial data
   if (existsSync(indexPath)) {
     try {
       const idx = JSON.parse(readFileSync(indexPath, 'utf8'));
@@ -168,8 +171,8 @@ export function loadFreshIndex(storePath) {
       // the cache is stale regardless of whether any byte has moved.
       const todayIso = new Date().toISOString().slice(0, 10);
       const timeStale = idx && idx.next_invalidation_at && todayIso >= idx.next_invalidation_at;
-      if (idx && !timeStale && idx.source_sig !== undefined &&
-          idx.source_sig === computeSourceSignature(root) &&
+      if (idx && !idx.incomplete && !(idx.read_errors || []).length && !timeStale && idx.source_sig !== undefined &&
+          idx.source_sig === current.source_sig &&
           // Every record validated — id/path shape, path containment, uniqueness.
           // A partially-broken cache is regenerated, never partially trusted.
           validateIndexRecords(idx)) {
@@ -177,7 +180,9 @@ export function loadFreshIndex(storePath) {
       }
     } catch { /* fall through to regenerate */ }
   }
-  return generateSummaryIndex(root);
+  mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
+  atomicWriteFileSync(indexPath, JSON.stringify(current, null, 2) + '\n');
+  return current;
 }
 
 /**
@@ -403,7 +408,9 @@ export function captureStore(storePath, { retainRaw = false, refreshCache = true
     generated: '',
     source_sig,
     next_invalidation_at: nextInvalidationAt, // forces a regenerate at this date even if bytes are unchanged
-    degraded: conflicts.length > 0,
+    degraded: conflicts.length > 0 || readErrors.length > 0,
+    incomplete: readErrors.length > 0,
+    read_errors: readErrors,
     duplicate_conflicts: conflicts,
     units,
   };
@@ -454,12 +461,12 @@ export function captureStore(storePath, { retainRaw = false, refreshCache = true
   // this capture. Best-effort: a read-only store still returns a valid capture.
   // Skipped entirely for refreshCache:false callers (the memory-view watcher),
   // whose contract is zero writes into the store.
-  if (refreshCache) {
+  if (refreshCache && !index.incomplete) {
     try {
       const libPath = join(memoriesDir, '_lib', 'unit-summaries.json');
       let cached = null;
       try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
-      if (!cached || cached.source_sig !== source_sig) {
+      if (!cached || cached.incomplete || (cached.read_errors || []).length || cached.source_sig !== source_sig) {
         mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
         atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
       }
@@ -478,7 +485,8 @@ export function generateSummaryIndex(storePath) {
   // One capture — the written index's source_sig describes the exact bytes its
   // records were derived from (never signature-walk the store a second time;
   // that reopens the multi-walk gap captureStore exists to close).
-  const out = captureStore(storePath).index;
+  const out = captureStore(storePath, { refreshCache: false }).index;
+  if (out.incomplete) return out;
   const libDir = join(resolve(storePath), '_memories', '_lib');
   try { mkdirSync(libDir, { recursive: true }); } catch { /* ignore */ }
   atomicWriteFileSync(join(libDir, 'unit-summaries.json'), JSON.stringify(out, null, 2) + '\n');
@@ -489,6 +497,10 @@ function main(argv) {
   const args = argv.filter(a => a !== '--store');
   const storePath = args[0] || '.';
   const res = generateSummaryIndex(storePath);
+  if (res.incomplete) {
+    console.error(`CORE search incomplete: ${res.read_errors.length} unreadable source(s); cache left unchanged.`);
+    return 1;
+  }
   console.log(`Wrote ${join(resolve(storePath), '_memories', '_lib', 'unit-summaries.json')} (${res.count} active units${res.degraded ? `; DEGRADED — ${res.duplicate_conflicts.length} duplicate-id conflict(s)` : ''})`);
   return res.degraded ? 1 : 0; // duplicate identity fails loudly, never silently
 }

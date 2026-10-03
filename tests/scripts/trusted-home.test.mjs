@@ -44,7 +44,7 @@ test('workspace ids name one directory segment; traversal shapes are rejected', 
 });
 
 test('containedPath: a prefix-sharing sibling directory cannot spoof containment', () => {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), 'core-contain-')));
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'core-contain-')));
   const root = join(base, 'user');
   const sibling = join(base, 'user2');
   mkdirSync(root); mkdirSync(sibling);
@@ -59,7 +59,7 @@ test('containedPath: a prefix-sharing sibling directory cannot spoof containment
 });
 
 test('containedPath / regularFileWithin: a symlink is judged by its real target', () => {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), 'core-contain-link-')));
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), 'core-contain-link-')));
   const root = join(base, 'store');
   const outside = join(base, 'outside');
   mkdirSync(root); mkdirSync(outside);
@@ -95,4 +95,21 @@ test('trusted-tree consumers fail closed when the account home is unavailable', 
   ]) {
     assert.throws(() => fn(noHome), (e) => e.code === 'NO_TRUSTED_HOME', `${name} must fail closed`);
   }
+});
+
+test('containedPath accepts a candidate under a filesystem root', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'contained-root-'));
+  const root = process.platform === 'win32' ? dir.slice(0, 3) : '/';
+  assert.ok(containedPath(root, dir), 'the root itself contains everything on its volume');
+});
+
+test('containedPath treats the same folder spelled in another case as inside on a case-insensitive filesystem', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'CaseContained-'));
+  mkdirSync(join(dir, 'Sub'));
+  const probe = join(dir.toLowerCase(), 'sub');
+  let insensitive = true;
+  try { realpathSync(probe); } catch { insensitive = false; }
+  if (!insensitive) return t.skip('case-sensitive filesystem: the two spellings are different folders');
+  assert.ok(containedPath(dir, probe), 'candidate spelled in lower case');
+  assert.ok(containedPath(dir.toLowerCase(), join(dir, 'Sub')), 'root spelled in lower case');
 });

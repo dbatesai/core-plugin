@@ -165,7 +165,7 @@ export function stampFiles(projectDir, entries, { now, home = null } = {}) {
   let stampOutcome = { stamped: true };
   try {
     mkdirSync(dirname(cachePath), { recursive: true });
-    withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
+    const lockResult = withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
       const cache = readProjectCache(projectDir);
       // A damaged baseline is preserved, never overwritten: the rebuild below
       // would otherwise turn unreadable prior attribution into a plausible
@@ -174,6 +174,16 @@ export function stampFiles(projectDir, entries, { now, home = null } = {}) {
       // reported as unknown, with the file kept for recovery.
       if (cache.status === CACHE_CORRUPT) {
         const quarantined = quarantineCache(cachePath, ts);
+        // Nothing preserved the damaged bytes: writing over them would destroy the only
+        // record of prior attribution, so refuse the stamp like an unreadable cache.
+        if (quarantined === null) {
+          return {
+            stamped: false,
+            outcome: 'refused',
+            recovery: 'recovery-required',
+            reason: 'corrupt-cache-not-preserved',
+          };
+        }
         stampOutcome = {
           stamped: true,
           outcome: 'prior-attribution-unknown',
@@ -202,6 +212,8 @@ export function stampFiles(projectDir, entries, { now, home = null } = {}) {
       }
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2) + '\n');
     }, { retries: 20, retryDelayMs: 50 });
+    // The callback's refusal is the stamp's outcome, not a success.
+    if (lockResult && lockResult.stamped === false) stampOutcome = lockResult;
   } catch (e) {
     stampOutcome = {
       stamped: false,

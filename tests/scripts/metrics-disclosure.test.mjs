@@ -119,11 +119,13 @@ test('a signed but unparseable manifest is never clobbered, and the notice still
   });
 });
 
-test('the notice text names both opt-out mechanisms and the local-only claim', () => {
+test('the notice text names both opt-out mechanisms and where the log lives', () => {
   assert.match(NOTICE_TEXT, /CORE_METRICS_ENABLED=0/, 'names the env-var opt-out');
   assert.match(NOTICE_TEXT, /metrics_enabled:\s*false/, 'names the manifest opt-out');
   assert.match(NOTICE_TEXT, /\.core\/<harness>\/workspace\.json/, 'names the config file where it really lives');
-  assert.match(NOTICE_TEXT, /this machine/i, 'states the local-only claim in plain terms');
+  assert.match(NOTICE_TEXT, /lives in this project's folder/, 'says where the log lives');
+  assert.match(NOTICE_TEXT, /syncs with it/, 'says a synced project folder syncs the log too');
+  assert.doesNotMatch(NOTICE_TEXT, /this machine/i, 'no claim the log stays on this machine');
 });
 
 test('CLI: first run prints the notice text; second run prints ALREADY-SHOWN', { skip: platform() === 'win32' ? 'shell redirection differs on Windows CI' : false }, () => {
@@ -158,5 +160,46 @@ test('a project stamped at the current notice version stays silent', () => {
     const res = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(res.shown, false);
     assert.equal(res.alreadyShown, true);
+  });
+});
+
+test('a project whose pin still names an external folder is told where its log really is', async () => {
+  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  sandbox(({ home, coreDir, project }) => {
+    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { schema_version: 'v2' } });
+    const saved = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1'; // stands in for an earlier Windows OneDrive redirect
+    try {
+      const r = initMetrics({ projectDir: project, home, env: ENV });
+      assert.equal(r.ok, true, JSON.stringify(r));
+    } finally {
+      if (saved === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = saved;
+    }
+    const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(result.shown, true);
+    assert.ok(result.noticeText.startsWith(NOTICE_TEXT));
+    assert.match(result.noticeText, /kept outside the project folder/);
+    assert.ok(result.noticeText.includes(join(home, 'AppData')), result.noticeText);
+  });
+  sandbox(({ home, project }) => {
+    const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(result.noticeText, NOTICE_TEXT, 'a project-local log gets the plain notice');
+  });
+});
+
+test('a project that saw the version-5 notice without its location line gets the corrected notice once, then silence', async () => {
+  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  sandbox(({ home, coreDir, project }) => {
+    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: 5 } });
+    const saved = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
+    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    try { assert.equal(initMetrics({ projectDir: project, home, env: ENV }).ok, true); }
+    finally { if (saved === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = saved; }
+    const first = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(first.shown, true);
+    assert.match(first.noticeText, /kept outside the project folder/);
+    const second = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
+    assert.equal(second.alreadyShown, true);
+    assert.equal(second.noticeText, null);
   });
 });

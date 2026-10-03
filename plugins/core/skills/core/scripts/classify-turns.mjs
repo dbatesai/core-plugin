@@ -272,6 +272,13 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
   if (!t.available) {
     return { status: 'UNAVAILABLE', reason: 'transcript unavailable', provisional: true };
   }
+  // A file was found, but it's the mtime fallback standing in for a session id that had
+  // no transcript of its own — text that belongs to a DIFFERENT session. Writing it into
+  // the classified store tagged with the requested session's id would misattribute one
+  // session's captured turns as another's. Refuse, same as no transcript at all.
+  if (t.meta.session_mismatch) {
+    return { status: 'UNAVAILABLE', reason: 'the requested session has no transcript of its own — the resolver fell back to a different session, whose turns cannot be filed under this one', provisional: true };
+  }
   const ctx = buildPredicates(project, { events: t.events });
   const classified = classifyTurns(t.events, ctx);
   const sid = resolveSessionId({ explicit: sessionId });
@@ -288,15 +295,27 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
     evidence: c.evidence,
     turn_evidence: c.turn_evidence,
   }));
+  const result = { provisional: true, transcript_resolution: t.meta.transcript_resolution, ...summarize(classified), records };
+  // Classification and persistence are separate outcomes. Count only completed
+  // appends, so an unwritable destination or partial batch cannot report OK.
+  // An empty transcript needs no write (and has no file to chmod).
+  if (!records.length) return { status: 'OK', written: true, written_records: 0, ...result };
+  let writtenRecords = 0;
   // Write to the operational-meta classified store (derived, regeneratable; §17.6).
   try {
     const dir = join(operationalMetricsDir(project, { home, env }), 'classified');
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${date}.jsonl`);
-    for (const r of records) appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 });
+    for (const r of records) {
+      appendFileSync(file, JSON.stringify(r) + '\n', { mode: 0o600 });
+      writtenRecords += 1;
+    }
     chmodSync(file, 0o600);
-  } catch { /* best-effort */ }
-  return { status: 'OK', provisional: true, transcript_resolution: t.meta.transcript_resolution, ...summarize(classified), records };
+  } catch (e) {
+    return { status: 'WRITE_FAILED', written: false, written_records: writtenRecords,
+      reason: 'classified-write-failed', error_code: e?.code || 'UNKNOWN', ...result };
+  }
+  return { status: 'OK', written: true, written_records: writtenRecords, ...result };
 }
 
 
@@ -343,11 +362,12 @@ if (isCliEntry(import.meta.url)) {
   if (argv.includes('--json')) process.stdout.write(JSON.stringify(r, null, 2) + '\n');
   else {
     process.stdout.write(`classify-turns [PROVISIONAL — not calibrated] ${r.status}\n`);
+    if (r.status === 'WRITE_FAILED') process.stdout.write(`  ${r.reason} (${r.error_code}); ${r.written_records}/${r.total} records appended\n`);
     if (r.distribution) {
       for (const [s, n] of Object.entries(r.distribution).sort((a, b) => b[1] - a[1])) {
         process.stdout.write(`  ${s}: ${n}\n`);
       }
     }
   }
-  process.exit(0);
+  process.exit(r.status === 'WRITE_FAILED' ? 1 : 0);
 }

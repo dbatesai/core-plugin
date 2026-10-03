@@ -184,6 +184,13 @@
       "surface": "shipped"
     },
     {
+      "name": "close-artifacts",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/close-artifacts.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "close-pass",
       "kind": "script",
       "harness": "shared",

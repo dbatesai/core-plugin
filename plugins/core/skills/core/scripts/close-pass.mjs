@@ -37,17 +37,19 @@ import { readFileSync, rmSync, mkdtempSync, mkdirSync, chmodSync, renameSync, ex
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveStoragePath } from './log-event.mjs';
+import { closeStorageRoot, prepareCloseStorageRoot, prepareCloseDirectory, assertCloseSummaryWritable, markCloseSummary, markCloseReceipt } from './close-artifacts.mjs';
+import { turnCaptureEnabled } from './turn-capture.mjs';
 import { buildCloseRecord, renderCloseSummary } from './close-payload.mjs';
-import { trustedHome } from './trusted-home.mjs';
+import { trustedHome, requireTrustedHome } from './trusted-home.mjs';
 import { readRegisteredRoots, resolveProjectRoot } from './project-state.mjs';
 import { realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
+import { acquireFileLock, releaseFileLock, inspectFileLock, withFileLock } from './file-lock.mjs';
 import { logHookEvent } from '../hooks/hook-log.mjs';
 import { readTranscript, resolveTranscript } from './read-transcript.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { computeSourceSignature } from './generate-summary-index.mjs';
 
 // A lock older than this with no live owner is stale and supersedable. Generous
 // enough for a manual close that renders and summarizes before finishing.
@@ -137,13 +139,39 @@ export function recordOp(store, { op, status = 'done', note = null, now = new Da
   return marker;
 }
 
-export function finishClose(store, { sessionId = null, status = 'closed', now = new Date().toISOString() } = {}) {
-  const marker = readJson(markerPath(store)) || { ops: {} };
+export function finishClose(store, { sessionId = null, status = 'closed', storeSignature = null, now = new Date().toISOString() } = {}) {
+  const owner = typeof sessionId === 'string' && sessionId.trim() ? sessionId : null;
+  const seen = inspectLock(store);
+  let marker;
+  let claim = null;
+  if (seen.held) {
+    // A live lock belongs to whoever began. One that cannot be read has an unknown
+    // owner, which is not the same as no owner. Otherwise finish must name the owner
+    // on both surfaces before it writes the marker or releases anything; a close
+    // begun without a session is finished without one.
+    if (!seen.lock) return { ok: false, reason: 'lock-unreadable' };
+    marker = readJson(markerPath(store)) || { ops: {} };
+    if ((seen.lock.session_id ?? null) !== owner || (marker.session_id ?? null) !== owner) {
+      return { ok: false, reason: 'owner-mismatch' };
+    }
+  } else {
+    // No live owner: the lock is absent or stale, which is the startup catch-up
+    // finishing a close whose owner is gone. Take the lock for the marker write, so a
+    // begin that lands meanwhile is refused here and is never overwritten or released.
+    claim = acquireLock(store, { sessionId: owner, now: Date.parse(now) || Date.now() });
+    if (!claim.ok) return { ok: false, reason: claim.reason === 'held' ? 'owner-mismatch' : claim.reason };
+    marker = readJson(markerPath(store)) || { ops: {} };
+  }
+  // The signature of the store AS THE CLOSE LEFT IT: detectCloseState compares the live store
+  // against this, so a unit changed after the close re-owes the store-derived ops.
+  if (storeSignature != null) marker.store_signature = storeSignature;
   marker.status = status; // 'closed' = finalize succeeded; 'failed' = finished but /finalize failed → detectCloseState re-owes
   marker.completed_at = now;
-  if (sessionId) marker.session_id = sessionId;
+  if (owner) marker.session_id = owner;
   atomicWriteFileSync(markerPath(store), JSON.stringify(marker, null, 2) + '\n');
-  const release = releaseLock(store, { sessionId });
+  const release = claim
+    ? releaseFileLock(lockPath(store), claim.nonce)
+    : releaseLock(store, { sessionId: owner });
   // Fail closed on a real release failure: a swallowed permission/I/O error
   // would leave a live lock silently blocking every future close while this
   // close reports success. Record it ON the marker so detection
@@ -256,10 +284,8 @@ export function sessionKey(sessionId) {
 }
 
 /** Resolve the receipt directory. `opts.storageRoot` keeps tests hermetic. */
-function receiptDir(store, { storageRoot = null } = {}) {
-  const root = storageRoot
-    || resolveStoragePath(resolve(store));
-  return join(root, 'close', 'receipts');
+function receiptDir(store, opts = {}) {
+  return join(closeStorageRoot(store, opts), 'close', 'receipts');
 }
 
 export function receiptPath(store, sessionId, opts = {}) {
@@ -296,12 +322,19 @@ export function readCloseReceipt(store, sessionId, opts = {}) {
 
 /** Write a session's receipt atomically, owner-only. */
 export function writeCloseReceipt(store, receipt, opts = {}) {
+  const storageRoot = closeStorageRoot(store, opts);
+  prepareCloseStorageRoot(storageRoot);
+  return withFileLock(join(storageRoot, '.turn-capture.lock'), () =>
+    writeCloseReceiptUnlocked(store, receipt, { ...opts, storageRoot }));
+}
+
+function writeCloseReceiptUnlocked(store, receipt, opts) {
   if (!receipt || typeof receipt !== 'object') {
     throw new TypeError('close-pass: receipt must be an object');
   }
   const sessionId = receipt.session_id;
   const p = receiptPath(store, sessionId, opts);
-  mkdirSync(receiptDir(store, opts), { recursive: true });
+  prepareCloseDirectory(receiptDir(store, opts));
   // Prior-receipt evidence rules: an UNREADABLE prior receipt refuses the
   // write outright — the bytes may be intact evidence we could not read, and
   // no preservation is possible without reading. A CORRUPT prior receipt may
@@ -365,33 +398,48 @@ export function runDeterministicClose(store, {
   gitHead = null,
   now = new Date().toISOString(),
 } = {}, opts = {}) {
-  const record = buildCloseRecord({
-    sessionId, harness, events, startedAt, endedAt, coverage, gitHead,
+  // Resolve independently of the capture gate: an explicit OFF short-circuits
+  // metricsEnabled, but must never short-circuit the invalid-pin routing check.
+  const home = opts.home || requireTrustedHome();
+  const storageRoot = closeStorageRoot(store, { ...opts, home });
+  opts = { ...opts, storageRoot, home };
+  const summaryDir = join(storageRoot, 'close', 'summaries');
+  prepareCloseStorageRoot(storageRoot);
+  return withFileLock(join(storageRoot, '.turn-capture.lock'), () => {
+    prepareCloseDirectory(summaryDir);
+    prepareCloseDirectory(receiptDir(store, opts));
+    // The CLI's optimistic dedup can race a manual certification. Recheck under
+    // the same lock used by receipt writes and explicit capture purge.
+    const prior = readCloseReceipt(store, sessionId, opts);
+    if (prior && CERTIFIED_STATUSES.has(prior.status)) return prior;
+    const captureContent = turnCaptureEnabled({ project: resolve(store), home, env: opts.env || process.env });
+    const record = buildCloseRecord({
+      sessionId, harness, events, startedAt, endedAt, coverage, gitHead, captureContent,
+    });
+    const summary = markCloseSummary(renderCloseSummary(record));
+
+    const summaryFile = join(summaryDir, `${sessionKey(sessionId)}.md`);
+    assertCloseSummaryWritable(summaryFile);
+    atomicWriteFileSync(summaryFile, summary);
+    chmodSync(summaryFile, 0o600);
+
+    const receipt = markCloseReceipt({
+      session_id: sessionId,
+      status: coverage === 'full' ? 'recorded' : 'partial',
+      harness,
+      closed_at: now,
+      ops: { capture: 'done', summary: 'done', 'project-state': 'skipped' },
+      summary_path: summaryFile,
+      summary_sha256: createHash('sha256').update(summary, 'utf8').digest('hex'),
+      model_calls: 0,
+      record,
+    });
+    const wrote = writeCloseReceiptUnlocked(store, receipt, opts);
+    if (!wrote.written) {
+      return { ...receipt, status: 'failed', write_refused: wrote.reason };
+    }
+    return receipt;
   });
-  const summary = renderCloseSummary(record);
-
-  const summaryDir = join(receiptDir(store, opts), '..', 'summaries');
-  mkdirSync(summaryDir, { recursive: true });
-  const summaryFile = join(summaryDir, `${sessionKey(sessionId)}.md`);
-  atomicWriteFileSync(summaryFile, summary);
-  chmodSync(summaryFile, 0o600);
-
-  const receipt = {
-    session_id: sessionId,
-    status: coverage === 'full' ? 'recorded' : 'partial',
-    harness,
-    closed_at: now,
-    ops: { capture: 'done', summary: 'done', 'project-state': 'skipped' },
-    summary_path: summaryFile,
-    summary_sha256: createHash('sha256').update(summary, 'utf8').digest('hex'),
-    model_calls: 0,
-    record,
-  };
-  const wrote = writeCloseReceipt(store, receipt, opts);
-  if (!wrote.written) {
-    return { ...receipt, status: 'failed', write_refused: wrote.reason };
-  }
-  return receipt;
 }
 
 /** First and last `timestamp` field seen across a transcript's JSONL lines, or nulls if unreadable. */
@@ -544,6 +592,11 @@ function parseFlags(argv) {
   return out;
 }
 
+// null when the store cannot be read: detection then falls back to the marker alone.
+function liveSignature(store) {
+  try { return computeSourceSignature(store); } catch { return null; }
+}
+
 function main(argv) {
   if (argv.includes('--self-test')) return selfTest();
   const sub = argv[0];
@@ -556,7 +609,7 @@ function main(argv) {
 
   switch (sub) {
     case 'detect': {
-      const det = detectCloseState(store, { allOps: ops });
+      const det = detectCloseState(store, { allOps: ops, storeSignature: liveSignature(store) });
       process.stdout.write(json ? JSON.stringify(det) + '\n' : `${det.state}${det.owed?.length ? ' owed=' + det.owed.join(',') : ''}\n`);
       return 0;
     }
@@ -571,7 +624,11 @@ function main(argv) {
       return 0;
     }
     case 'finish': {
-      const fin = finishClose(store, { sessionId: f.session || null });
+      const fin = finishClose(store, { sessionId: f.session || null, storeSignature: liveSignature(store) });
+      if (fin.ok === false) {
+        process.stderr.write(`finish refused: ${fin.reason}; supply the matching --session owner, or use explicit release for recovery\n`);
+        return 2;
+      }
       if (fin.release && fin.release.released === false && fin.release.reason === 'release-failed') {
         process.stdout.write(`close marked closed; LOCK RELEASE FAILED (${fin.release.error}) — run 'release' once the cause clears\n`);
         return 1;
@@ -591,17 +648,23 @@ function main(argv) {
         return 0;
       }
       const transcriptOverride = typeof f.transcript === 'string' ? f.transcript : null;
-      const { available, events, path: transcriptPath } = readTranscript({
+      const { available, events, path: transcriptPath, meta } = readTranscript({
         harness: 'claude-code', cwd: store, override: transcriptOverride, sessionId,
       });
-      const { startedAt, endedAt } = extractTimestampRange(transcriptPath);
+      // A file WAS found, but it's the mtime fallback standing in for a session id that
+      // had no transcript of its own — some OTHER session's events. Recording them as
+      // this session's close receipt would misattribute what happened in the session
+      // being closed, permanently. Treat exactly like "no transcript": empty events,
+      // partial coverage — never trust a mismatched session's data into a receipt.
+      const usable = available && !meta.session_mismatch;
+      const { startedAt, endedAt } = extractTimestampRange(usable ? transcriptPath : null);
       let gitHead = null;
       const g = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: resolve(store), encoding: 'utf8' });
       if (g.status === 0 && typeof g.stdout === 'string') gitHead = g.stdout.trim();
 
       const receipt = runDeterministicClose(store, {
-        sessionId, harness: 'claude-code', events, startedAt, endedAt, gitHead,
-        coverage: available ? 'full' : 'partial',
+        sessionId, harness: 'claude-code', events: usable ? events : [], startedAt, endedAt, gitHead,
+        coverage: usable ? 'full' : 'partial',
       });
       process.stdout.write(json ? JSON.stringify({ ok: true, receipt }) + '\n' : `close ${receipt.status}: ${sessionId}\n`);
       return 0;

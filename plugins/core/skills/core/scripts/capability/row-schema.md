@@ -1,5 +1,19 @@
 # Capability Row Schema
 
+**Contents**
+
+- [Identity quality (`identity_status`)](#identity-quality-identity_status)
+- [Mutation gating (`mutation_permitted`)](#mutation-gating-mutation_permitted)
+- [Evidence fields](#evidence-fields)
+  - [`evidence[]` shape](#evidence-shape)
+- [Capability identification](#capability-identification)
+- [Stability + refresh policy](#stability--refresh-policy)
+- [Schema version](#schema-version)
+- [Known consumers](#known-consumers)
+- [Producer expectations](#producer-expectations)
+- [Consumer expectations](#consumer-expectations)
+- [Relationship to the schema-consumer coupling doctrine](#relationship-to-the-schema-consumer-coupling-doctrine)
+
 The contract every capability row carries. Producers (`*-capability-probe.mjs` scripts) write to this shape; consumers (pre-action gates, startup readiness, drift detection in v2.7) read it. Per the schema-consumer coupling doctrine, this markdown IS the contract — consumers cite anchors here rather than re-deriving the field semantics.
 
 **Schema version:** 1.0.0 (additive minor bumps preserve backward compatibility; major bumps require coordinated consumer update)

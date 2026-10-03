@@ -310,7 +310,7 @@ export function main(argv = process.argv.slice(2)) {
       }
       case 'path': {
         // The one way prose and callers name a file in a project's state: this verb asks
-        // stateDir where it lives, so a synced folder, a fenced migration or another
+        // stateDir where it lives, so a read-only folder, a fenced migration or another
         // install's state routes the same way it does for every script.
         const kind = args.kind === 'hot' ? 'hot' : args.kind === 'durable' ? 'durable' : null;
         if (!kind) throw new Error('path needs --kind durable|hot');
