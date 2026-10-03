@@ -55,7 +55,7 @@ import {
 } from './project-state.mjs';
 import { acquireFileLock, releaseFileLock, withFileLock } from './file-lock.mjs';
 import { mutateIndex, mutateProjects } from './index-registry.mjs';
-import { assertSafeWorkspaceId, containedPath } from './trusted-home.mjs';
+import { assertSafeWorkspaceId, isSafeWorkspaceId, containedPath } from './trusted-home.mjs';
 
 // Bookkeeping, not data: a folder holding only these has nothing worth migrating.
 const BOOKKEEPING = [/^\.DS_Store$/, /^last-active$/, /^last-bootstrap\.json$/, /\.lock(\.g\d+)?(\.done)?$/, /^visibility-canary\.json$/];
@@ -106,6 +106,31 @@ function dataFiles(dir) {
     const base = f.split('/').pop();
     return !BOOKKEEPING.some((re) => re.test(base));
   });
+}
+
+/**
+ * Before its first migration a project's storage pin is still in its legacy workspace
+ * (unsigned), registered in `index.json` under `path` or `project_path`. Pure read, for history
+ * discovery: a pin can name a folder to report, never authorize anything. A pin that exists but
+ * can't be read is unknown, not absent.
+ * @returns {{folders: {folder: string, ambiguous: boolean}[], unknown: {what: string, code: string}[]}}
+ */
+export function legacyMetricsPins(root, { coreDir = defaultCoreDir(), home = join(coreDir, '..') } = {}) {
+  const out = { folders: [], unknown: [] };
+  const missing = (e) => e && (e.code === 'ENOENT' || e.code === 'ENOTDIR');
+  let index;
+  try { index = JSON.parse(readFileSync(join(coreDir, 'index.json'), 'utf8')); }
+  catch (e) { if (!missing(e)) out.unknown.push({ what: join(coreDir, 'index.json'), code: (e && e.code) || 'unparseable' }); return out; }
+  if (!Array.isArray(index)) return out; // registryShapeProblem reports it
+  for (const entry of index) {
+    const raw = registryEntryPath(entry);
+    const id = entry && entry.workspace_id;
+    if (typeof raw !== 'string' || !isSafeWorkspaceId(id) || canonical(expandHome(raw, home)) !== root) continue;
+    const pin = join(coreDir, 'workspaces', id, 'metrics', 'storage-path.txt');
+    try { const folder = readFileSync(pin, 'utf8').trim(); if (folder) out.folders.push({ folder, ambiguous: false }); }
+    catch (e) { if (!missing(e)) out.unknown.push({ what: pin, code: (e && e.code) || 'error' }); }
+  }
+  return out;
 }
 
 function expandHome(p, home) {

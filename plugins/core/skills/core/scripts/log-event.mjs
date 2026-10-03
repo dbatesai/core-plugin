@@ -26,7 +26,8 @@ import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnesses, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnesses, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
+import { legacyMetricsPins } from './migrate-workspace-state.mjs';
 
 /**
  * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
@@ -81,12 +82,16 @@ function historyDiscovery(projectDir, { home, env }) {
   const coreDir = join(home, '.core');
   const own = join(projectDir, '_metrics');
   const named = [];
+  const unknown = [];
   let error = null;
   try {
     const root = projectRootFor(projectDir, { home, coreDir });
     for (const harness of stateHarnesses({ root, coreDir, include: [detectStateHarness(env)] })) {
       named.push(...historyRecordFolders({ root, harness, coreDir }));
     }
+    const legacy = legacyMetricsPins(root, { coreDir, home });
+    named.push(...legacy.folders);
+    unknown.push(...legacy.unknown);
   } catch (e) { error = e; }
   const appData = join(home, 'AppData', 'Local', 'core-metrics');
   const seen = new Set();
@@ -95,11 +100,15 @@ function historyDiscovery(projectDir, { home, env }) {
     if (typeof folder !== 'string' || !isAbsolute(folder) || containedPath(own, folder) || seen.has(folder)) continue;
     seen.add(folder);
     // Only the old Windows redirect location was ever a metrics home outside the project.
-    if (!containedPath(appData, folder) || !existsSync(folder)) continue;
+    if (!containedPath(appData, folder)) continue;
+    const presence = pathPresence(folder);
+    if (presence.state === 'unknown') { unknown.push({ what: folder, code: presence.code }); continue; }
+    if (presence.state === 'absent') continue;
     folders.push(claimedByAnother(folder, projectDir) ? { folder, foreign: true } : { folder });
   }
-  return { folders, error };
+  return { folders, unknown, error };
 }
+
 
 /**
  * What an explicit purge does not cover, named so it never reports itself complete over them:
@@ -136,11 +145,14 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
     }
   }
   if (held.length) return held;
-  const { folders, error } = historyDiscovery(projectDir, { home, env });
+  const { folders, unknown, error } = historyDiscovery(projectDir, { home, env });
   for (const h of folders) {
     held.push({ what: h.folder, reason: h.foreign
       ? 'earlier rows outside the project folder, in a folder another project claims; CORE does not delete outside the project'
       : "earlier rows named by this project's records, outside the project folder; CORE does not delete outside the project, and it cannot prove every row there is this project's, so whether to delete the folder is your call" });
+  }
+  for (const u of unknown) {
+    held.push({ what: u.what, reason: `this could not be read (${u.code}), so whether it holds or names earlier rows is unknown` });
   }
   if (error) {
     held.push({ what: projectDir, reason: `this project's records of older external folders could not be read (${String(error.code || error.message).slice(0, 80)}), so whether any exist is unknown` });
@@ -149,7 +161,10 @@ export function metricsHistoryHeld(projectDir, { home = homedir(), env = process
   for (const { dir } of places) {
     const meta = join(dir, 'metrics');
     const unverified = (d, name, verifies) => {
-      if (!(existsSync(join(d, name)) || existsSync(join(d, `${name}.mac`)))) return;
+      const states = [join(d, name), join(d, `${name}.mac`)].map((p) => [p, pathPresence(p)]);
+      const blind = states.find(([, p]) => p.state === 'unknown');
+      if (blind) { held.push({ what: blind[0], reason: `a record of an older external folder could not be looked at (${blind[1].code}), so whether it names one is unknown` }); return; }
+      if (states.every(([, p]) => p.state === 'absent')) return;
       if (!verifies()) held.push({ what: join(d, name), reason: 'a record of an older external folder exists but does not verify, so the folder it names cannot be found' });
     };
     unverified(meta, 'storage-path.txt', () => readPinSigned({ dir: meta, root, coreDir }) !== null);

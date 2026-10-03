@@ -22,7 +22,7 @@
 
 import {
   appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
-  rmSync, writeFileSync, accessSync, constants as fsConstants,
+  rmSync, statSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
 import { dirname, join, resolve, sep, isAbsolute } from 'node:path';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -736,7 +736,13 @@ export function stateLocations({ root, harness, coreDir = defaultCoreDir() }) {
   const locations = [];
   const problems = [];
   const projectDir = join(real, STATE_DIRNAME, harness);
-  if (existsSync(projectDir) || isSymlink(projectDir)) {
+  const unreadable = (what) => {
+    const p = pathPresence(what);
+    if (p.state === 'unknown') problems.push({ what, reason: `this project's ${harness} state could not be looked at (${p.code})` });
+    return p.state === 'unknown';
+  };
+  if (unreadable(projectDir)) { /* reported */ }
+  else if (existsSync(projectDir) || isSymlink(projectDir)) {
     const { status } = classifyStamp({ root: real, harness, coreDir });
     if (existsSync(join(projectDir, MIGRATING_MARKER))) problems.push({ what: projectDir, reason: `this project's ${harness} state cannot be read as its own (migration in progress)` });
     else if (status === 'verified' || status === 'moved') locations.push({ kind: 'project', dir: projectDir });
@@ -745,7 +751,8 @@ export function stateLocations({ root, harness, coreDir = defaultCoreDir() }) {
   const localRoot = join(coreDir, 'local');
   const keyDir = join(localRoot, localRootKey(real));
   const localDir = join(keyDir, harness);
-  if (existsSync(keyDir) || isSymlink(keyDir)) {
+  if (unreadable(keyDir)) { /* reported */ }
+  else if (existsSync(keyDir) || isSymlink(keyDir)) {
     let expected = null;
     try { expected = join(realpathSync.native(localRoot), localRootKey(real)); } catch { /* no local root */ }
     let actual = null;
@@ -754,11 +761,25 @@ export function stateLocations({ root, harness, coreDir = defaultCoreDir() }) {
       problems.push({ what: keyDir, reason: "this project's machine-local state folder is a link or resolves outside its own place, so it cannot be read as this project's" });
     } else if (isSymlink(localDir)) {
       problems.push({ what: localDir, reason: `this project's machine-local ${harness} state is a link, so it cannot be read as this project's` });
-    } else if (existsSync(localDir)) {
+    } else if (unreadable(localDir)) { /* reported */ }
+    else if (existsSync(localDir)) {
       locations.push({ kind: 'local', dir: localDir, keyDir });
     }
   }
   return { locations, problems };
+}
+
+/**
+ * Whether a path is there, for callers that must not read "could not look" as "absent": only a
+ * missing path (ENOENT, ENOTDIR) is absent; any other failure (EACCES, EPERM) is unknown.
+ * @returns {{state: 'present'|'absent'|'unknown', code?: string}}
+ */
+export function pathPresence(p) {
+  try { statSync(p); return { state: 'present' }; }
+  catch (e) {
+    if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return { state: 'absent' };
+    return { state: 'unknown', code: (e && e.code) || 'error' };
+  }
 }
 
 function isSymlink(p) {

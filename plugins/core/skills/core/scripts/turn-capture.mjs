@@ -48,7 +48,7 @@ import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
 import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
-import { projectRootFor, projectStateDir, localStateDir, stateHarnesses, stateLocations, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
+import { projectRootFor, projectStateDir, localStateDir, stateHarnesses, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
@@ -465,7 +465,8 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
     try { ({ locations } = stateLocations({ root, harness, coreDir })); } catch { /* reported as held */ }
     for (const loc of locations) {
       const path = join(loc.dir, 'metrics', CLASSIFIED_DIRNAME);
-      if (seen.has(path) || !existsSync(path)) continue;
+      // Only a missing log is skipped: one that can't be looked at is planned, so its removal fails visibly.
+      if (seen.has(path) || pathPresence(path).state === 'absent') continue;
       seen.add(path);
       otherClassified.push({ id: 'classified', harness, path, tree: true, base: join(loc.dir, 'metrics'), within: loc.kind === 'project' ? inProject : [loc.keyDir] });
     }

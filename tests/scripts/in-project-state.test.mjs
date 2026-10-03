@@ -1074,7 +1074,7 @@ test('a legacy AppData pin routes no writes in either upgrade window, and the no
     assert.equal(row('one').written, true);
     assert.equal(projectRows(), 1);
     assert.equal(appDataRows(), 0);
-    assert.equal(noticeTextFor(p, { home: s.home, env }).includes(old), false, 'nothing is known about AppData yet, and the notice does not claim it');
+    assert.ok(noticeTextFor(p, { home: s.home, env }).includes(old), 'the unmigrated legacy pin is read as data, so the notice already names AppData as history');
 
     // Window 2: after the migration carries the pin over, and after a scaffold.
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');

@@ -7,7 +7,7 @@ import { registerProject } from '../../plugins/core/skills/core/scripts/index-re
 // the project's metrics state never touches the real ~/.core.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { symlinkSync, readdirSync, renameSync } from 'node:fs';
 import { symlinkCapable } from './trusted-test-tmp.mjs';
@@ -714,4 +714,131 @@ test("a local state folder linked to another project's before the purge is not t
     assert.equal(readFileSync(rowB, 'utf8'), '{"user_text":"B"}\n', "B's row stays");
     assert.match(JSON.stringify(r.held_history), /link or resolves outside/);
   }, { projects: 2 });
+});
+
+// A path that can't be looked at is unknown, never absent: discovery holds it and the purge does
+// not call itself complete. A genuinely missing folder is absent and owes nothing.
+const AS_ROOT = process.getuid?.() === 0 ? 'root ignores permission denial' : false;
+// Deny all access to p (chmod on POSIX, an ACL full deny on Windows); true when a stat of `probe`
+// now fails the way the code under test must handle.
+function denyAll(p, probe = p) {
+  if (process.platform === 'win32') execFileSync('icacls', [p, '/deny', `${process.env.USERNAME}:(F)`], { stdio: 'ignore' });
+  else chmodSync(p, 0o000);
+  try { statSync(probe); return false; } catch (e) { return e.code === 'EACCES' || e.code === 'EPERM'; }
+}
+function restoreAll(p) {
+  try {
+    if (process.platform === 'win32') execFileSync('icacls', [p, '/remove:d', process.env.USERNAME], { stdio: 'ignore' });
+    else chmodSync(p, 0o755);
+  } catch { /* already restored */ }
+}
+
+function registeredThenReset(home, projectDir) {
+  const coreDir = join(home, '.core');
+  registerProject(coreDir, projectDir);
+  const meta = operationalMetricsDir(projectDir, { home, env: E });
+  return { coreDir, meta, reset: () => { writeFileSync(join(coreDir, 'projects.json'), '[]\n'); operationalMetricsDir(projectDir, { home, env: E }); } };
+}
+
+test('a denied metrics folder in inactive project state is held, not read as having no records', { skip: AS_ROOT }, async (t) => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    const { meta, reset } = registeredThenReset(home, projectDir);
+    const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
+    signedPin(meta, home, old, projectDir);
+    reset();
+    try {
+      if (!denyAll(meta, join(meta, 'storage-path.txt'))) { t.skip('a stat inside a denied folder still succeeds here'); return; }
+      const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+      assert.equal(r.purged, false);
+      assert.ok(r.held_history.some((h) => h.what.startsWith(meta) && /EACCES|EPERM/.test(h.reason)), JSON.stringify(r.held_history));
+    } finally { restoreAll(meta); }
+    assert.equal(existsSync(join(old, 'row.jsonl')), true);
+  });
+});
+
+test('a denied classified log in inactive project state is planned, so the purge reports it unremoved', { skip: AS_ROOT }, async (t) => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    const { meta, reset } = registeredThenReset(home, projectDir);
+    const cls = join(meta, 'classified'); mkdirSync(cls, { recursive: true });
+    const row = join(cls, '2026-10-03.jsonl'); writeFileSync(row, '{"user_text":"synthetic"}\n');
+    reset();
+    let r;
+    try {
+      if (!denyAll(meta, cls)) { t.skip('a stat inside a denied folder still succeeds here'); return; }
+      r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    } finally { restoreAll(meta); }
+    assert.equal(r.purged, false);
+    assert.ok(r.scope.some((e) => e.id === 'classified' && e.path === cls && !e.removed), JSON.stringify(r.scope.map((e) => [e.id, e.path, e.removed])));
+    assert.equal(existsSync(row), true);
+  });
+});
+
+test("a history folder whose parent is denied is held as unknown; one that is really gone owes nothing", { skip: AS_ROOT }, async (t) => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    registerProject(join(home, '.core'), projectDir);
+    const meta = operationalMetricsDir(projectDir, { home, env: E });
+    const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
+    signedPin(meta, home, old, projectDir);
+    let r;
+    try {
+      if (!denyAll(dirname(old), old)) { t.skip('a stat inside a denied folder still succeeds here'); return; }
+      r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    } finally { restoreAll(dirname(old)); }
+    assert.equal(r.purged, false);
+    assert.ok(r.held_history.some((h) => h.what === old && /could not be read/.test(h.reason)), JSON.stringify(r.held_history));
+    rmSync(old, { recursive: true });
+    const gone = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(gone.purged, true, gone.reason);
+  });
+});
+
+// Before the first /core migration, a project's pin is still in its legacy workspace.
+for (const alias of ['path', 'project_path']) {
+  test(`an unmigrated legacy workspace's pin (index.json ${alias}) names its history folder`, async () => {
+    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+    withProject(({ home, projectDir }) => {
+      const coreDir = join(home, '.core');
+      const ws = join(coreDir, 'workspaces', 'ws1');
+      mkdirSync(join(ws, 'metrics'), { recursive: true });
+      writeFileSync(join(ws, 'workspace.json'), JSON.stringify({ workspace_id: 'ws1', harness: 'claude-code' }));
+      writeFileSync(join(coreDir, 'index.json'), JSON.stringify([{ workspace_id: 'ws1', harness: 'claude-code', [alias]: projectDir }]));
+      const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
+      writeFileSync(join(ws, 'metrics', 'storage-path.txt'), old + '\n');
+      assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }).map((f) => f.folder), [old]);
+      const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+      assert.equal(r.purged, false);
+      assert.ok(r.held_history.some((h) => h.what === old), JSON.stringify(r.held_history));
+      if (AS_ROOT) return;
+      if (!denyRead(join(ws, 'metrics', 'storage-path.txt'))) { restoreRead(join(ws, 'metrics', 'storage-path.txt')); assert.fail('the pin could not be denied'); }
+      try {
+        const denied = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+        assert.equal(denied.purged, false);
+        assert.ok(denied.held_history.some((h) => h.what.endsWith('storage-path.txt') && /EACCES|EPERM/.test(h.reason)), JSON.stringify(denied.held_history));
+      } finally { restoreRead(join(ws, 'metrics', 'storage-path.txt')); }
+    });
+  });
+}
+
+test("a legacy workspace with no pin adds nothing, and after the real migration the folder is still named", async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const { applyMigration } = await import('../../plugins/core/skills/core/scripts/migrate-workspace-state.mjs');
+  withProject(({ home, projectDir }) => {
+    const coreDir = join(home, '.core');
+    const ws = join(coreDir, 'workspaces', 'ws1');
+    mkdirSync(join(ws, 'metrics'), { recursive: true });
+    mkdirSync(join(projectDir, '_memories'), { recursive: true });
+    writeFileSync(join(ws, 'workspace.json'), JSON.stringify({ workspace_id: 'ws1', harness: 'claude-code' }));
+    writeFileSync(join(coreDir, 'index.json'), JSON.stringify([{ workspace_id: 'ws1', harness: 'claude-code', path: projectDir }]));
+    const none = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(none.purged, true, none.reason);
+    const old = appData(home, 'p1'); mkdirSync(old, { recursive: true }); writeFileSync(join(old, 'row.jsonl'), '{}\n');
+    writeFileSync(join(ws, 'metrics', 'storage-path.txt'), old + '\n');
+    const m = applyMigration({ root: projectDir, harness: 'claude-code', coreDir });
+    assert.equal(m.status, 'migrated', JSON.stringify(m));
+    assert.deepEqual(metricsHistoryFolders(projectDir, { home, env: E }).map((f) => f.folder), [old]);
+    assert.equal(purgeTurnCapture(projectDir, { apply: true, home, env: E }).purged, false);
+  });
 });
