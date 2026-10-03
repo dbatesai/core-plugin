@@ -449,11 +449,15 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
     { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase },
     { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase },
     // An older external folder is history, but the purge promise covers it: only the folders that are
-    // unambiguously this project's, and only the same three captured-material entries.
+    // provably this project's, and only the captured-material entries the project's own scope has.
     ...metricsHistoryFolders(projectDir, { home, env }).filter((h) => h.purgeable).flatMap(({ folder }) => [
       { id: 'history-stream', path: join(folder, TURN_CAPTURE_DIRNAME), tree: true, base: folder },
       { id: 'history-health', path: join(folder, HEALTH_FILENAME), tree: false, base: folder },
       { id: 'history-judgments', path: join(folder, JUDGMENT_LOG_FILENAME), tree: false, base: folder },
+      // Automatic close artifacts an earlier version wrote there, under the same marker, hash and
+      // manual-certification protections as the project's own.
+      { id: 'history-close-summaries', path: join(folder, 'close', 'summaries'), tree: false, generatedClose: true, base: join(folder, 'close') },
+      { id: 'history-close-receipts', path: join(folder, 'close', 'receipts'), tree: false, generatedClose: true, base: join(folder, 'close') },
     ]),
   ];
 }
@@ -462,7 +466,7 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
 // to be a direct child of its OWN declared base (not necessarily the same base
 // every entry shares — classified lives under a different store than the rest).
 function assertPurgeEntry(entry) {
-  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME, classified: CLASSIFIED_DIRNAME, 'close-summaries': 'summaries', 'close-receipts': 'receipts', 'history-stream': TURN_CAPTURE_DIRNAME, 'history-health': HEALTH_FILENAME, 'history-judgments': JUDGMENT_LOG_FILENAME }[entry.id];
+  const expected = { stream: TURN_CAPTURE_DIRNAME, health: HEALTH_FILENAME, judgments: JUDGMENT_LOG_FILENAME, classified: CLASSIFIED_DIRNAME, 'close-summaries': 'summaries', 'close-receipts': 'receipts', 'history-stream': TURN_CAPTURE_DIRNAME, 'history-health': HEALTH_FILENAME, 'history-judgments': JUDGMENT_LOG_FILENAME, 'history-close-summaries': 'summaries', 'history-close-receipts': 'receipts' }[entry.id];
   if (!expected || basename(entry.path) !== expected || dirname(entry.path) !== entry.base) {
     throw new Error(`refusing purge: '${entry.path}' is not <storage-base>/${expected || entry.id}`);
   }

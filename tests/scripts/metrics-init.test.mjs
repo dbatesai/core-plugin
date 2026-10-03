@@ -410,3 +410,35 @@ test('when the records of older folders cannot be read at all, the held list say
     assert.match(held[0].reason, /could not be read/);
   });
 });
+
+test('purge reaches the automatic close artifacts in a provably owned history folder and keeps the human-authored ones', async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const { markCloseSummary, markCloseReceipt } = await import('../../plugins/core/skills/core/scripts/close-artifacts.mjs');
+  const { createHash } = await import('node:crypto');
+  const sha = (t) => createHash('sha256').update(t, 'utf8').digest('hex');
+  withProject(({ home, projectDir }) => {
+    const old = appData(home, 'with-close');
+    const summaries = join(old, 'close', 'summaries');
+    const receipts = join(old, 'close', 'receipts');
+    mkdirSync(summaries, { recursive: true });
+    mkdirSync(receipts, { recursive: true });
+    writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
+    const autoSummary = join(summaries, sha('auto-session') + '.md');
+    writeFileSync(autoSummary, markCloseSummary('# synthetic automatic close summary\n'));
+    const humanSummary = join(summaries, sha('human-session') + '.md');
+    writeFileSync(humanSummary, '# a person wrote this\n');
+    const autoReceipt = join(receipts, sha('auto-receipt-session') + '.json');
+    writeFileSync(autoReceipt, JSON.stringify(markCloseReceipt({ session_id: 'auto-receipt-session', status: 'recorded' })));
+    signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
+
+    const dry = purgeTurnCapture(projectDir, { apply: false, home, env: E });
+    const hs = dry.scope.find((e) => e.id === 'history-close-summaries');
+    assert.deepEqual(hs.candidates, [autoSummary], 'the dry run names the old automatic summary');
+    const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+    assert.equal(r.purged, true, r.reason);
+    assert.equal(existsSync(autoSummary), false, 'old automatic summary purged');
+    assert.equal(existsSync(autoReceipt), false, 'old automatic receipt purged');
+    assert.equal(existsSync(humanSummary), true, 'human-authored summary kept');
+    assert.ok(r.scope.find((e) => e.id === 'history-close-summaries').kept.some((k) => k.path === humanSummary), 'and reported as kept');
+  });
+});
