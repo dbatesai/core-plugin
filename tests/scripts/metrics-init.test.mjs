@@ -9,6 +9,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { symlinkSync } from 'node:fs';
+import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -498,3 +500,23 @@ for (const apply of [false, true]) {
     if (skipped) t.skip('the platform does not deny the read');
   });
 }
+
+test('purge refuses a history entry that became a link after discovery, and never follows it', { skip: !symlinkCapable() ? 'symlink privilege unavailable' : false }, async () => {
+  const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    const old = appData(home, 'linked');
+    mkdirSync(old, { recursive: true });
+    writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
+    signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
+    const outside = mkdtempSync(join(tmpdir(), 'metrics-outside-target-'));
+    try {
+      const precious = join(outside, 'keep.jsonl');
+      writeFileSync(precious, '{"not":"captured"}\n');
+      symlinkSync(outside, join(old, 'turn-capture'), process.platform === 'win32' ? 'junction' : 'dir');
+      const r = purgeTurnCapture(projectDir, { apply: true, home, env: E });
+      assert.equal(r.purged, false);
+      assert.match(r.reason, /refusing history purge/);
+      assert.equal(readFileSync(precious, 'utf8'), '{"not":"captured"}\n', 'the link target is untouched');
+    } finally { rmSync(outside, { recursive: true, force: true }); }
+  });
+});

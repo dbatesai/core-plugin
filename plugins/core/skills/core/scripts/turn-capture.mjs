@@ -43,7 +43,7 @@
  * Ships with the plugin by convention; .mjs (Node.js) only.
  */
 
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
@@ -51,7 +51,7 @@ import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHisto
 import { projectRootFor, projectStateDir, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 
 // Bump ONLY when the row contract changes in a way that would make an older
 // reader misread rows.
@@ -530,6 +530,19 @@ export function runTurnCaptureRetention(projectDir, {
   return { ran: true, cutoff, ...base };
 }
 
+// A history folder sits outside the project, so it is re-checked at the moment of deletion, not
+// only when it was discovered: the folder must still resolve inside the old AppData metrics root,
+// neither it nor the entry may be a link, and a link found there is refused rather than followed.
+function assertHistoryEntryUnlinked(entry, home) {
+  const root = join(home, 'AppData', 'Local', 'core-metrics');
+  const folderStat = lstatSync(entry.base);
+  if (folderStat.isSymbolicLink() || !folderStat.isDirectory()) throw new Error(`refusing history purge: ${entry.base} is a link or not a folder`);
+  if (containedPath(root, entry.base) !== realpathSync.native(entry.base)) throw new Error(`refusing history purge: ${entry.base} does not resolve inside ${root}`);
+  let stat = null;
+  try { stat = lstatSync(entry.path); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (stat && stat.isSymbolicLink()) throw new Error(`refusing history purge: ${entry.path} is a link`);
+}
+
 /**
  * Purge every entry in the declared scope. Each entry is bound-checked before
  * deletion and verified after it, and the result names ALL of them — an entry
@@ -565,6 +578,7 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
             entry.removed = true; // selected generated files, NOT the directory or kept files
             continue;
           }
+          if (entry.id.startsWith('history-')) assertHistoryEntryUnlinked(entry, home);
           rmSync(entry.path, { recursive: entry.tree, force: true });
           if (existsSync(entry.path)) entry.reason = 'still-present-after-delete';
           else entry.removed = true;
