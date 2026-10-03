@@ -683,81 +683,71 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
 
 
 /**
- * The external folders a project's own records name: the signed storage pin and held record in its
- * hot metrics state, and the signed ever-external marker in its durable state. This is the one
- * evidence set for both a project's own history and the check of whether another project names a
- * folder, so the two can never disagree about what counts.
- *
- * A record with neither its file nor its signature present names nothing. With `strict`, state
- * that exists but does not verify throws before any record is read, and a record
- * that exists but does not verify throws, because an unknown record is not proof of absence. An
- * unreadable file or signature fails verification, so this needs no separate permission check
- * (`fs.access` would not evaluate Windows ACLs anyway).
+ * Every harness that has state for this project, in the project or in its local fallback, plus
+ * `include` (the running harness). Ownership questions span harnesses: a pin a Codex session wrote
+ * names the same folder a Claude Code session would purge.
+ */
+export function stateHarnesses({ root, coreDir = defaultCoreDir(), include = [] }) {
+  const names = new Set(include);
+  const real = canonical(root);
+  for (const dir of [join(real, STATE_DIRNAME), join(coreDir, 'local', localRootKey(real))]) {
+    let entries = [];
+    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { /* none there */ }
+    for (const e of entries) if (e.isDirectory() && HARNESS_RE.test(e.name)) names.add(e.name);
+  }
+  return [...names];
+}
+
+/**
+ * The external folders a project's records name for one harness: the signed storage pin and held
+ * record in its hot metrics state, and the signed ever-external marker in its durable state.
+ * Records that do not verify name nothing here; `metricsHistoryHeld` reports them.
  *
  * @returns {{folder: string, ambiguous: boolean}[]}
  */
-export function historyRecordFolders({ root, harness, coreDir = defaultCoreDir(), strict = false }) {
+export function historyRecordFolders({ root, harness, coreDir = defaultCoreDir() }) {
   const out = [];
-  // State that exists but cannot be trusted (an unreadable or forged stamp, a copy, a refused
-  // layout) resolves to no directory below, which would read as "no records". In strict mode that
-  // is unknown, not absent. Genuinely absent state stays a usable negative.
-  if (strict) {
-    const { status } = classifyStamp({ root, harness, coreDir });
-    if (status === 'planted' || status === 'copied' || status === 'refused') {
-      throw Object.assign(new Error(`state for ${root} exists but does not verify (${status})`), { code: 'STATE_UNVERIFIED' });
-    }
-  }
   const hot = stateDir({ root, harness, kind: 'hot', coreDir });
   const durable = stateDir({ root, harness, coreDir });
-  const record = (dir, name, parse) => {
-    if (!dir) return;
-    const file = join(dir, name);
-    const present = [file, `${file}${MAC_SUFFIX}`].filter((f) => {
-      try { lstatSync(f); return true; } catch (e) { if (e && e.code === 'ENOENT') return false; if (strict) throw e; return false; }
-    });
-    if (!present.length) return;
-    const value = parse();
-    if (value) { out.push(value); return; }
-    if (strict) throw Object.assign(new Error(`${file} exists but does not verify`), { code: 'RECORD_UNVERIFIED' });
-  };
   const meta = hot ? join(hot.dir, 'metrics') : null;
-  record(meta, 'storage-path.txt', () => {
-    const p = readPinSigned({ dir: meta, root, coreDir });
-    return p ? { folder: p, ambiguous: false } : null;
-  });
-  record(meta, 'held-legacy-folder.txt', () => {
-    const h = readHeldSigned({ dir: meta, coreDir });
-    return h ? { folder: h.folder, ambiguous: true } : null;
-  });
-  record(durable && durable.dir, METRICS_EXTERNAL_MARKER, () => {
+  if (meta) {
+    const pin = readPinSigned({ dir: meta, root, coreDir });
+    if (pin) out.push({ folder: pin, ambiguous: false });
+    const held = readHeldSigned({ dir: meta, coreDir });
+    if (held) out.push({ folder: held.folder, ambiguous: true });
+  }
+  if (durable) {
     const raw = readSignedFileAt({ dir: durable.dir, name: METRICS_EXTERNAL_MARKER, coreDir });
-    if (raw === null) return null;
-    try { const f = JSON.parse(raw).folder; return typeof f === 'string' ? { folder: f, ambiguous: false } : null; } catch { return null; }
-  });
+    if (raw !== null) {
+      try { const f = JSON.parse(raw).folder; if (typeof f === 'string') out.push({ folder: f, ambiguous: false }); } catch { /* not a marker this code wrote */ }
+    }
+  }
   return out;
 }
 
 /**
- * The other registered projects, on this machine and readable by this install, whose records
- * (pin, held record or ever-external marker, per `historyRecordFolders`) name `folder`.
- *
- * With `strict`, anything that keeps the answer from being complete throws instead of being
- * skipped: an unreadable registry, a project whose state cannot be resolved, or a record that
- * exists but cannot be read or verified. A destructive caller uses strict so that "no other
- * project names this folder" is never the product of not being able to look.
+ * The other registered projects, on this machine and readable by this install, whose signed
+ * pin (or signed hold record) names `folder`. A hold record keeps the answer the same whichever
+ * project scaffolds first. Advisory: the migration uses it to avoid signing a shared folder for
+ * either project. Nothing destructive relies on it, because an unreadable project is skipped.
  */
-export function otherProjectsNamingFolder(folder, { projectDir, home, env, strict = false }) {
+export function otherProjectsNamingFolder(folder, { projectDir, home, env }) {
   const coreDir = join(home, '.core');
   const harness = detectStateHarness(env);
   const out = [];
   const self = canonical(projectDir);
   let roots;
-  try { roots = readRegisteredRoots({ coreDir }); } catch (e) { if (strict) throw e; return out; }
+  try { roots = readRegisteredRoots({ coreDir }); } catch { return out; }
   for (const root of roots) {
     if (root === self) continue;
     try {
-      if (historyRecordFolders({ root, harness, coreDir, strict }).some((r) => r.folder === folder)) out.push(root);
-    } catch (e) { if (strict) throw e; /* an unreadable project cannot vouch for a claim */ }
+      const s = stateDir({ root, harness, kind: 'hot', coreDir });
+      if (!s) continue;
+      const metricsDir = join(s.dir, 'metrics');
+      const named = readPinSigned({ dir: metricsDir, root, coreDir }) === folder
+        || readHeldSigned({ dir: metricsDir, coreDir })?.folder === folder;
+      if (named) out.push(root);
+    } catch { /* an unreadable project cannot vouch for a claim */ }
   }
   return out;
 }
