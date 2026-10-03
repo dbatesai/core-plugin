@@ -47,7 +47,7 @@ import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdir
 import { basename, dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, operationalMetricsDir } from './log-event.mjs';
+import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
@@ -438,14 +438,17 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
   // store (the project's own operational-meta dir, never externally redirected — the
   // pin/AppData rules that apply to `base` above don't apply here). The disclosed purge
   // has to reach it too, or "purge everything saved" is false: nothing else deletes it
-  // now that classified retention is no longer run on a schedule.
-  const classifiedBase = operationalMetricsDir(projectDir, { home, env });
+  // now that classified retention is no longer run on a schedule. Planning a purge only reads
+  // state: a writing resolver would set aside state it cannot verify, moving the records the
+  // history check needs before it looks. No trusted state means no classified store to name;
+  // state that exists but does not verify is reported by metricsHistoryHeld.
+  const classifiedBase = trustedMetricsDir(projectDir, { home, env });
   const closeBase = join(closeStorageRoot(projectDir, { home, env }), 'close');
   return [
     { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true, base },
     { id: 'health', path: join(base, HEALTH_FILENAME), tree: false, base },
     { id: 'judgments', path: join(base, JUDGMENT_LOG_FILENAME), tree: false, base },
-    { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase },
+    ...(classifiedBase ? [{ id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase }] : []),
     { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase },
     { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase },
     // An older external folder is history, but the purge promise covers it: only the folders that are

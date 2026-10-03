@@ -26,7 +26,7 @@ import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, otherProjectsNamingFolder, historyRecordFolders, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, otherProjectsNamingFolder, historyRecordFolders, classifyStamp, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE } from './project-state.mjs';
 
 /**
  * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
@@ -131,6 +131,14 @@ function historyDiscovery(projectDir, { home, env }) {
  */
 export function metricsHistoryHeld(projectDir, { home = homedir(), env = process.env } = {}) {
   const coreDir = join(home, '.core');
+  // This project's own state must verify before its records can be read: state that exists but
+  // does not (an unreadable or foreign stamp) hides any record of an older folder, so it is held.
+  try {
+    const status = classifyStamp({ root: projectRootFor(projectDir, { home, coreDir }), harness: detectStateHarness(env), coreDir }).status;
+    if (['planted', 'copied', 'refused'].includes(status)) {
+      return [{ what: projectDir, reason: `this project's own state does not verify (${status}), so its records of older external folders cannot be read; nothing was moved` }];
+    }
+  } catch { /* the discovery below reports an unreadable registry or state */ }
   const { folders, error } = historyDiscovery(projectDir, { home, env });
   const held = folders.filter((h) => !h.purgeable).map((h) => ({ what: h.folder, reason: h.reason }));
   if (error) {

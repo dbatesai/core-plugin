@@ -467,3 +467,34 @@ test('purge reaches the automatic close artifacts in a provably owned history fo
     assert.ok(r.scope.find((e) => e.id === 'history-close-summaries').kept.some((k) => k.path === humanSummary), 'and reported as kept');
   });
 });
+
+// Planning a purge only reads state. With the project's own stamp unreadable, neither a dry run
+// nor a real purge may move the record of an older folder, and the result says why it held.
+for (const apply of [false, true]) {
+  test(`purge with this project's own stamp unreadable (${apply ? 'apply' : 'dry run'}) moves nothing and reports held`, async (t) => {
+    const { purgeTurnCapture } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+    let skipped = false;
+    withProject(({ home, projectDir }) => {
+      registerProject(join(home, '.core'), projectDir);
+      const old = appData(home, 'own-history');
+      mkdirSync(join(old, 'turn-capture'), { recursive: true });
+      const row = join(old, 'turn-capture', '2026-09-28.jsonl');
+      writeFileSync(row, '{"synthetic":1}\n');
+      writeFileSync(join(old, '.project-root'), canonicalPath(projectDir) + '\n');
+      const meta = operationalMetricsDir(projectDir, { home, env: E });
+      signedPin(meta, home, old, projectDir);
+      const pinFile = join(meta, 'storage-path.txt');
+      const stamp = join(projectDir, '.core', 'claude-code', 'stamp');
+      assert.ok(existsSync(stamp), 'fixture has a stamp');
+      if (!denyRead(stamp)) { skipped = true; restoreRead(stamp); return; }
+      try {
+        const r = purgeTurnCapture(projectDir, { apply, home, env: E });
+        assert.equal(existsSync(pinFile), true, 'the history record stays where it was');
+        assert.equal(existsSync(row), true, 'the old row stays');
+        assert.equal(r.purged, false);
+        assert.match(r.held_history.map((h) => h.reason).join(' '), /own state does not verify/);
+      } finally { restoreRead(stamp); }
+    });
+    if (skipped) t.skip('the platform does not deny the read');
+  });
+}
