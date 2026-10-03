@@ -319,8 +319,9 @@ export function readCloseReceiptState(store, sessionId, opts = {}) {
 /**
  * Why a parsed receipt is not valid evidence for this exact session and project, or null. A
  * filename keyed by the session is not identity: the payload must name the same session. A status
- * alone is not evidence: an automatic `recorded` or `partial` receipt must carry its record and
- * harness, and a manual `closed` certification its harness and time. A receipt that names
+ * alone is not evidence: an automatic receipt must carry the writer's record for the same session
+ * (and, to count as recorded, a record saying full coverage), and a manual `closed` certification
+ * a usable harness and time. A receipt that names
  * its project must name this one; older receipts that predate the field are read as before.
  */
 function receiptShapeProblem(parsed, { sessionId, store }) {
@@ -329,11 +330,17 @@ function receiptShapeProblem(parsed, { sessionId, store }) {
   if (typeof parsed.status !== 'string') return 'no-status';
   if (parsed.root !== undefined && parsed.root !== canonical(resolve(store))) return 'root-mismatch';
   if (parsed.status === 'recorded' || parsed.status === 'partial') {
-    // The writer mark is not required: receipts written before it existed, and receipts a later
-    // backfill stamped, are legitimate. The record and harness are.
-    if (!parsed.record || typeof parsed.record !== 'object' || !('harness' in parsed)) return 'automatic-evidence-missing';
+    // The automatic record is the evidence: it must be the writer's record for this same session,
+    // and an outer "recorded" counts only when the record itself says full coverage. Every shape
+    // the deterministic close has written carries these; the writer mark is not required, since
+    // older and backfill-stamped receipts lack it.
+    const rec = parsed.record;
+    if (!rec || typeof rec !== 'object' || Array.isArray(rec) || rec.schema !== 'core.close-record/1') return 'automatic-evidence-missing';
+    if (typeof parsed.harness !== 'string' || !parsed.harness) return 'automatic-evidence-missing';
+    if (rec.session_id !== sessionId) return 'record-session-mismatch';
+    if (parsed.status === 'recorded' && (rec.status !== 'recorded' || rec.coverage !== 'full')) return 'record-not-full-coverage';
   } else if (parsed.status === 'closed') {
-    if (typeof parsed.harness !== 'string' || typeof parsed.closed_at !== 'string') return 'certification-evidence-missing';
+    if (typeof parsed.harness !== 'string' || !parsed.harness || typeof parsed.closed_at !== 'string' || Number.isNaN(Date.parse(parsed.closed_at))) return 'certification-evidence-missing';
   }
   return null;
 }

@@ -296,7 +296,7 @@ test('a corrupt receipt is reported corrupt and its bytes survive replacement', 
     const state = readCloseReceiptState(store, 's-corrupt', opts);
     assert.equal(state.status, 'corrupt', 'a torn receipt is corrupt, not absent');
 
-    writeCloseReceipt(store, { session_id: 's-corrupt', status: 'recorded', harness: 'claude-code', record: {} }, opts);
+    writeCloseReceipt(store, { session_id: 's-corrupt', status: 'recorded', harness: 'claude-code', record: { schema: 'core.close-record/1', session_id: 's-corrupt', status: 'recorded', coverage: 'full' } }, opts);
     const dir = join(root, 'close', 'receipts');
     const quarantined = readdirSync(dir).filter((n) => n.includes('.corrupt-'));
     assert.equal(quarantined.length, 1, 'the corrupt bytes are quarantined beside the fresh receipt');
@@ -357,7 +357,7 @@ test('terminal-receipt controls: only matching, well-formed evidence suppresses 
     const root = join(store, '_metrics');
     mkdirSync(join(root, 'close', 'receipts'), { recursive: true });
     const opts = { storageRoot: root };
-    const auto = (sid, status) => ({ session_id: sid, status, harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z', record: { ended_at: '2026-10-03T00:00:00Z' } });
+    const auto = (sid, status) => ({ session_id: sid, status, harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z', record: { schema: 'core.close-record/1', session_id: sid, status, coverage: status === 'recorded' ? 'full' : 'partial', ended_at: '2026-10-03T00:00:00Z' } });
     const put = (sid, body) => writeFileSync(receiptPath(store, sid, opts), JSON.stringify(body));
 
     put('full', auto('full', 'recorded'));
@@ -378,6 +378,17 @@ test('terminal-receipt controls: only matching, well-formed evidence suppresses 
     put('thin', { session_id: 'thin', status: 'recorded' });
     assert.equal(shouldEnqueueClose(store, { sessionId: 'thin' }, opts), true, 'an automatic status without its record is not evidence');
 
+    put('arr', { ...auto('arr', 'recorded'), record: [] });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'arr' }, opts), true, 'an array is not a record');
+    put('nullh', { ...auto('nullh', 'recorded'), harness: null });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'nullh' }, opts), true, 'no usable harness');
+    put('relabeled', { ...auto('relabeled', 'partial'), status: 'recorded' });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'relabeled' }, opts), true, 'a partial record under an outer recorded label stays owed');
+    assert.equal(readCloseReceiptState(store, 'relabeled', opts).problem, 'record-not-full-coverage');
+    put('inner', { ...auto('inner', 'recorded'), record: { ...auto('inner', 'recorded').record, session_id: 'another' } });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'inner' }, opts), true, "a record for another session is not this session's evidence");
+    put('emptycert', { session_id: 'emptycert', status: 'closed', harness: '', closed_at: '' });
+    assert.equal(shouldEnqueueClose(store, { sessionId: 'emptycert' }, opts), true, 'empty certification fields are not evidence');
     put('copied', { ...auto('copied', 'recorded'), root: '/some/other/project' });
     assert.equal(shouldEnqueueClose(store, { sessionId: 'copied' }, opts), true, "a receipt naming another project is not this project's evidence");
   } finally { rmSync(store, { recursive: true, force: true }); }
@@ -389,7 +400,7 @@ test('a receipt the deterministic close writes names its project and reads back 
   const store = freshStore();
   try {
     const opts = { storageRoot: join(store, '_metrics') };
-    const r = runDeterministicClose(store, { sessionId: 'det', events: [] }, opts);
+    const r = runDeterministicClose(store, { sessionId: 'det', harness: 'claude-code', events: [] }, opts);
     assert.equal(r.root, canonical(store));
     assert.equal(readCloseReceiptState(store, 'det', opts).status, 'valid');
   } finally { rmSync(store, { recursive: true, force: true }); }

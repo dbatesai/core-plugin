@@ -30,7 +30,7 @@ function receipt(sessionId, status, extra = {}) {
   return {
     session_id: sessionId, status, harness: 'claude-code',
     closed_at: '2026-07-28T10:05:00Z',
-    record: { ended_at: '2026-07-28T10:00:00Z' },
+    record: { schema: 'core.close-record/1', session_id: sessionId, status, coverage: status === 'recorded' ? 'full' : 'partial', ended_at: '2026-07-28T10:00:00Z' },
     ...extra,
   };
 }
