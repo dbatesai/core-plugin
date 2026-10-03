@@ -103,12 +103,12 @@ Every claim carries the credibility of its source.
 
 ## Output schema
 
-The eight-section output shape (Result / Reasoning / Heaviest Factors / Persuasion Log / Mind Changes / Unanswered Questions / Lingering Concerns / Minority Views) lives in `schemas/output.md`. Read it there. Two things to remember in the moment: empty fields are diagnostic signals, not missing data — write "no inter-agent persuasion this pass" explicitly rather than skip Persuasion Log on solo work. And the Persuasion Log and Mind Changes fields carry the adversarial signal — defend them when challenged.
+The eight-section output shape (Result / Reasoning / Heaviest Factors / Persuasion Log / Mind Changes / Unanswered Questions / Lingering Concerns / Minority Views) lives in `schemas/output.md`. Read it there. All eight fields use citable source evidence, concise justifications, material alternatives, observable checks, and evidence-backed decision changes; do not request or emit internal reasoning traces. Two things to remember in the moment: empty fields are diagnostic signals, not missing data — write "no inter-agent persuasion this pass" explicitly rather than skip Persuasion Log on solo work. And the Persuasion Log and Mind Changes fields carry the adversarial signal — defend them when challenged.
 
 ## Discussion protocol (in swarm)
 
-- Summarize every `send-message` exchange so the user can see inter-agent dialogue.
-- Every inter-agent message goes to the screen where the user can read it. The user has to see the conversation between agents — that's the whole point.
+- Share concise, user-visible summaries of substantive inter-agent findings, cited evidence, checks, disagreements, and decisions.
+- Messages and summaries must not contain internal reasoning traces or private deliberation. Visibility means an auditable account of evidence and decisions, not a transcript of internal analysis.
 - When challenged, defend with evidence or explicitly update your position.
 - Quote specific claims when challenging other agents.
 - Reference concrete examples over abstract arguments.

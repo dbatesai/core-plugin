@@ -57,7 +57,7 @@ The project is already on v2 but has unprefixed CORE folders, or it's on the leg
 
 Announce the rename in plain voice. Example: *"This project has the legacy folder names. Renaming `handoffs/` → `_summaries/`, `sessions/` → `_sessions/`, `outputs/` → `_outputs/` before loading."* Or, for the `_handoffs/`-to-summary case: *"This project still has the legacy `_handoffs/` folder. Renaming to `_summaries/` before loading."*
 
-For each folder that exists, use `git mv` (or plain `mv` if not in a git tree). On cloud-sync-virtualized paths (OneDrive, Dropbox, iCloud Drive), `mv` can corrupt the sync state — use `cp -r <src> <dst>` then `rm -rf <src>` after verifying file counts match, same as `protocols/startup.md` Step 4:
+Before every folder rename, save the complete path/type/SHA-256 manifest and resolved roots described in `protocols/startup.md` Step 4, including for `git mv` or plain `mv`; retain it for interrupted-rename recovery. For each folder that exists, use `git mv` (or plain `mv` if not in a git tree). On cloud-sync-virtualized paths (OneDrive, Dropbox, iCloud Drive), `mv` can corrupt the sync state — use the copy-then-verify flow in `protocols/startup.md` Step 4: record relative paths, entry types, and SHA-256 content hashes before copying; independently verify destination equivalence and unchanged source bytes; keep the source until both verification and required removal authorization are satisfied. Equal file counts never suffice. Stop on unreadable entries, unsupported links/special files, copy errors, collisions, or concurrent change; do not merge by guess. Apply the same saved-manifest checks on re-entry. Folder mappings:
 - `handoffs/` → `_summaries/`
 - `summaries/` → `_summaries/`
 - `_handoffs/` (legacy) → `_summaries/`
@@ -72,4 +72,4 @@ Sweep `<project>/PROJECT.md` for forward-looking path references to the same fol
 
 Append a one-line entry to `<project>/IMPROVEMENT_LOG.md` recording the rename, if a project IMPROVEMENT_LOG exists.
 
-This is routine and idempotent — don't escalate to multi-agent, don't pause for approval. When done, re-enter `protocols/startup.md` §"Load — returning workspace".
+Run within the user's authorized migration scope and applicable harness policy. Verification does not waive required approval or the independent risk review for destructive source removal in `protocols/execution.md`. Keep the source while a required decision is pending. When the verified rename is complete, re-enter `protocols/startup.md` §"Load — returning workspace".

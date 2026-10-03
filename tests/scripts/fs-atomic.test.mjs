@@ -92,7 +92,8 @@ test('the folder-rename protocol carries the cloud-sync caveat (doc guard)', () 
   const proto = readFileSync(new URL('../../plugins/core/skills/core/protocols/startup-conditional-loads.md', import.meta.url), 'utf8');
   const section = proto.slice(proto.indexOf('## Load — folder rename only'));
   assert.match(section, /OneDrive/, 'the rename branch must warn about cloud-sync paths');
-  assert.match(section, /cp -r/, 'and name the safe alternative');
+  assert.match(section, /copy-then-verify/, 'and name the safe alternative');
+  assert.match(section, /SHA-256/, 'which verifies content, not file counts');
 });
 
 test('scripts/README.md documents the cloud-sync write caveats', () => {

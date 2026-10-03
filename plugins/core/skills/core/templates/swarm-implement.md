@@ -8,8 +8,8 @@ Execute code changes, write deliverables, or modify external systems. Implementa
 
 ### Single-File Changes
 
-- **1 Editor** + **1 Validator**
-- The lead agent plays Guard role for bounded, well-specified changes
+- **1 Editor** + **1 Validator** + **1 separate Guard**
+- The lead and executing agent cannot serve as their own Guard
 - Best for: applying a known change list to a single file
 
 ### Multi-File Changes
@@ -20,7 +20,7 @@ Execute code changes, write deliverables, or modify external systems. Implementa
 
 ## Guard
 
-REQUIRED for all write operations. The Guard reviews and approves any MCP tool calls, destructive operations, or external system modifications. For single-file bounded changes, the lead agent can serve as Guard. For multi-file or high-risk changes, a dedicated Guard agent is mandatory.
+REQUIRED for all implementation-swarm writes, including bounded single-file changes. The Guard independently reviews the exact proposed operation and parameters under `protocols/execution.md`; it is separate from the lead and executing agent. Its approval is a risk verdict, never user authorization or permission to override a denial. Both authorization and the required risk verdict must be satisfied before execution.
 
 ## Lead-agent intervention
 
@@ -40,7 +40,7 @@ Comprehensive change lists beat vague instructions. An ordered change list with 
 
 ### Phase 2: Implement
 
-Editors execute changes in parallel (if multi-file). Each editor works through their portion of the change manifest sequentially. Editors should announce progress on major milestones via `send-message`.
+Before any editor writes, verify authorization and obtain the separate Guard's risk verdict for the exact operation/parameters or the fully specified bounded write manifest. Only then do editors execute approved changes in parallel (if multi-file), each following their portion sequentially. Changed targets, parameters, or scope require renewed authorization as applicable and a fresh risk review. Editors should announce progress on major milestones via `send-message`.
 
 ### Phase 3: Completion Signal
 
@@ -54,13 +54,13 @@ The validator reads files ONLY after the completion signal arrives. It checks ev
 - Does the file parse/compile/render correctly?
 - Were any manifest items missed?
 
-### Phase 5: Guard Approval
+### Phase 5: Guard check for remaining operations
 
-For any MCP tool calls, destructive operations, or external system writes, the Guard reviews the specific operation, assesses risk, and either approves or blocks. The Guard has veto power. If the Guard blocks, the lead agent must resolve the concern before proceeding.
+The pre-write Guard check in Phase 2 must already have happened; this phase cannot approve earlier writes retroactively. Before any remaining commit, deliverable write, destructive operation, or external mutation, verify authorization and obtain the Guard's verdict for that exact operation. A prior edit review does not cover a different commit, push, or publication. If the Guard blocks, resolve the concern and obtain a fresh review before proceeding.
 
 ### Phase 6: Commit
 
-The lead agent commits the changes or delivers the final output. This includes:
+After the applicable authorization and independent risk checks, the lead agent commits the changes or delivers the final output. This includes:
 - Git commit (if code changes)
 - File persistence (if deliverables)
 - User notification with summary of what changed
@@ -81,7 +81,7 @@ Never rely on task status alone. Never rely on task dependencies alone. The `sen
 
 ## GAN Loop
 
-Minimal in implementation swarms. The loop is: implement, validate, approve. If validation fails, the editor fixes and re-signals. Do not apply review swarm adversarial patterns here -- multi-round generator-critic exchanges are over-engineered for deterministic execution. Save the adversarial energy for the review swarm that preceded this one.
+Minimal in implementation swarms. The loop is: authorize and risk-review, implement, validate. If validation fails, review the proposed fixup writes before the editor fixes and re-signals; do not treat validation failure as permission for unreviewed changes. Do not apply review swarm adversarial patterns here -- multi-round generator-critic exchanges are over-engineered for deterministic execution. Save the adversarial energy for the review swarm that preceded this one.
 
 ## Output
 

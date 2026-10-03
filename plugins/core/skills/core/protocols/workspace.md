@@ -22,7 +22,7 @@ Workspaces are always live. There are no "paused," "inactive," or "archived-in-p
 
 Infer activity from signals instead:
 
-- Recency of engagement (`last_active` on the manifest; the latest dated entry in PROJECT.md §State).
+- Recency of engagement (the `last-active` sibling file, read through `index-registry.mjs last-active --root <project>`; the latest dated entry in PROJECT.md §State).
 - Frequency of sessions.
 - Delivery pressure — read from §Moves and §Decisions & Risks, not from the workspace.
 - Open items — also from §Moves and §Decisions & Risks.

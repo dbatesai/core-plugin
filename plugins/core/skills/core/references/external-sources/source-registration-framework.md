@@ -57,9 +57,9 @@ The framework defines six pieces:
 
 The framework relies on three existing CORE mechanisms it does not redesign:
 
-- **Observation unit schema** (per `protocols/data-storage.md`) — the in-flight inbox block and the graduated unit are the same schema, distinguished by `status`: `draft` in the inbox, `active` once graduation moves it into the store.
-- **The three promotion modes** (A autonomous / B confirmed / C explicit) — the landing-destination rule.
-- **`inbox.md`** — the existing staging surface for non-autonomous observations.
+- **Observation contracts** (per `protocols/data-storage.md`) — an inbox draft is converted into a store-valid active unit; §2 lists the required field conversion.
+- **Landing destinations** — direct landing (no `mode`), inbox B (routine), and inbox C (open question), with the precedence in §4. These are routing labels, not automatic user-approval gates or permission grants.
+- **`inbox.md`** — the staging surface for observations awaiting graduation.
 
 ---
 
@@ -129,7 +129,7 @@ authority-unit-id: <id of the source-of-authority unit in _memories/>
 - `body-construction-policy` — prose guidance for the extractor on how to construct the observation body from this source's raw content. Distinct from archive-policy-overrides: body-construction-policy governs *write-time* body construction (what makes it into the body and how it's structured); archive-policy-overrides governs *downstream lifecycle* (retention, pruning). Examples: *"trim to key decision passages only; verbatim capture in ## Verbatim subsection per claim; do not ingest full source content into any single observation body"*; *"extract each commitment as a separate observation; do not summarize multiple commitments into one body."*
 - `world-time-policy` — prose telling the extractor how to derive the bi-temporal `t_valid` (world-time the fact became true) from this source's own metadata. CORE can't infer this generically — only the source knows when its underlying fact became true — so it's the overlay's hook into the bi-temporal dimension. Examples: *"use the message send-time"*; *"use the doc's effective-date field, fall back to created"*. Optional; absent it, `t_valid` rides the `created`-default (fine for sources whose record-time ≈ world-time, like a live conversation). The same extractor hook later carries provenance population. Full contract: `references/memory-extension-contracts.md`.
 - `archive-policy-overrides` — when standard graduation rules don't fit. Rare. Use only when the source's data has a fundamentally different lifecycle than typical observations.
-- `authority-unit-id` — id of the `source-of-authority` unit that the intake protocol created for this source. Written by the intake protocol at registration time. Provides the explicit round-trip: registration ↔ authority unit. Without this pointer, re-intake (when authority changes) has to find the prior unit by convention rather than by explicit link. On re-intake, the protocol creates a new authority unit superseding the prior, updates this field to the new unit's id, and updates the `authority` prose to match.
+- `authority-unit-id` — id of the `source-of-authority` unit that the intake protocol created for this source. Optional when reading an older registration; required on new intake and re-intake writes. Create/resolve the authority unit before writing the pointer, per `register-sources/SKILL.md`. Provides the explicit round-trip: registration ↔ authority unit. Without this pointer, re-intake (when authority changes) has to find the prior unit by convention rather than by explicit link. On re-intake, the protocol creates a new authority unit superseding the prior, updates this field to the new unit's id, and updates the `authority` prose to match.
 
 **Platform credentials are not a CORE field — they belong to the overlay.** Some platforms separate tenant identity from auth: a direct-tool API wants a stable constant (an Atlassian cloudId UUID, a Salesforce org domain, a ServiceNow instance URL), not the hostname a human would type. CORE's intake doesn't collect these — they're platform-specific, and CORE stays platform-agnostic. If a source's platform needs one, the installation's overlay is responsible for it: pre-seed the constant in the overlay's own opaque registration block (e.g. `connector_overrides`) at registration time, and document in the overlay what each platform requires. The failure this prevents is silent — without the constant, a refresh falls back to a degraded path (or fails auth) with no signal that the registration was wrong. CORE flags the concept here so overlay authors know to handle it; it does not define the field's shape.
 
@@ -155,7 +155,7 @@ Optional project-local `connector-map.json` shape (overlay-authored; CORE only r
 
 ## 2. Observation schema before graduation
 
-The observation unit schema (per `protocols/data-storage.md`) is the same schema before and after graduation. There is no separate "candidate" schema. What differs is where the block lives and which fields are populated.
+Inbox drafts and active store units share observation content and provenance, but have distinct validation contracts. Convert the draft before storing it; changing only `status` is not sufficient. `check-inbox.mjs` validates the in-flight shape, while `check-units.mjs` requires `id`, `type`, `status`, `created`, `updated`, and `topics` in the store.
 
 **The in-flight status is `draft`, and it is inbox-only.** `scripts/unit-vocab.mjs` names it once as `INBOX_DRAFT_STATUS`; `check-inbox.mjs` requires it on every inbox block and reports any other value. It is deliberately absent from the unit store's status vocabulary (`active`, `retired`, `archived`, `superseded`), so an observation written straight into `_memories/` still carrying it is a block that reached the store without graduating — `check-units.mjs` reports `status-value` and exits non-zero. Don't invent a second in-flight name.
 
@@ -190,11 +190,11 @@ topics: [<topic-tags, best-effort by extractor>]
 
 **Optional before graduation:** `proposed-stability-class`, `topics`, body subsections, additional edges.
 
-**Populated at graduation:** `status` flips from `draft` to `active`, `stability-class` ratified from `proposed-stability-class` if applicable, `topics` refined, additional edges (`cites`, `conflicts-with`, `refines`, `supersedes`) added based on graduation reasoning. Edge types come from `VALID_EDGE_TYPES` in `scripts/unit-vocab.mjs` and nowhere else — `conflicts-with` is the edge for a contradiction, `refines` for an elaboration that does not replace what it elaborates.
+**Convert before writing to the store (including direct landing):** preserve `id`, `type`, source identity, extraction time, and the body/provenance; set `status: active`, `created` and `updated` timestamps, and a curated `topics` array (`[]` when no topic is supported). For a graduated non-observation unit, curate `people` from `references-person` rather than copying raw mentions blindly. Keep source/extraction metadata as provenance; do not substitute `extracted-at` for the required store timestamps. Remove inbox-only `mode` and `judgment-needed` from active frontmatter, recording any resolved question and evidence in the body. At graduation, ratify `stability-class` from `proposed-stability-class` if applicable and add supported relationships as additional edges (`cites`, `conflicts-with`, `refines`, `supersedes`). This conversion does not change the confidence-at-graduation rule in §5. Edge types come from `VALID_EDGE_TYPES` in `scripts/unit-vocab.mjs` and nowhere else — `conflicts-with` is the edge for a contradiction, `refines` for an elaboration that does not replace what it elaborates.
 
 ### Why this is the interface (and the harvester isn't)
 
-This schema does the centralization work an intermediate "harvester" format would do. Any extractor — regardless of source — produces this shape. Any downstream consumer (graduation, retrieval, synthesis) reads this shape. The extractor is source-shaped (knows its source); the schema is source-agnostic. No intermediate process or format is needed because the schema does the job.
+This schema does the centralization work an intermediate "harvester" format would do. Any extractor — regardless of source — produces this shape. Graduation consumes the inbox shape; retrieval and synthesis consume the converted, store-valid shape. The extractor is source-shaped (knows its source); the schema is source-agnostic. No intermediate process or format is needed because the schema does the job.
 
 ---
 
@@ -232,7 +232,7 @@ The intake protocol is part of CORE's startup flow — the new-workspace branch 
 
 ## 4. Landing destinations
 
-When the extractor produces an observation, it lands in one of two places. An extractor is a script with no judgment, so the only question it answers is whether an observation is settled enough to go straight into memory or needs an agent to look at it first. The user is not in this path: the agent graduates inbox items with its own judgment and asks the user only for a critical decision it can't make (`protocols/data-storage.md` §"Deciding on memory writes").
+When the extractor produces an observation, it lands in one of two places. An extractor is a script with no judgment, so the only question it answers is whether an observation is settled enough to go straight into memory or needs an agent to look at it first. Within authorized scope, the agent graduates inbox items with its own judgment. Ask when a critical decision remains unsettled, or when an authorization/authorship boundary requires the user; restoring user-removed content is always user-only (`protocols/data-storage.md` §"Deciding on memory writes").
 
 ### The two destinations
 
@@ -242,8 +242,9 @@ Criteria for direct landing (all must hold):
 - `confidence-level: sourced`
 - No contradicting unit in existing memory (runtime check at write time)
 - Source-of-authority is settled for this source
+- No B or C condition below applies
 
-A `sourced` observation may carry `proposed-stability-class` and still land directly. The stability proposal sits unratified in the active unit; `/process-memory` ratifies it on the next pass. Holding direct landing for unratified stability proposals would push every structured-field finding from automation-provenance sources through inbox.md for no gain.
+**Routing precedence: C first, then B, then direct.** A sourced observation with `proposed-stability-class: durably-suspect` lands in B unless a C condition applies. A sourced observation with proposed `durably-correct` may land directly when all direct criteria hold; that proposal remains unratified until `/process-memory` reviews it. A nontrivial update/extension routes to B, and a contradiction or unsettled authority routes to C regardless of a sourced label.
 
 Promotion to a decision or risk is graduation's job, not the extractor's. "This observation could conceivably become a decision later" is not a reason to route it to the inbox.
 
@@ -263,13 +264,13 @@ mode: B | C
 judgment-needed: <prose, required when mode is C — the open question>
 ```
 
-`mode` saves graduation from re-deriving the extractor's routing. `judgment-needed` names the specific open question (e.g., *"contradicts dc-42-bgl-date on the BGL date — which is authoritative?"*; *"reconstruction from three chat threads; is the inferred decision real?"*). It is a question for the agent first: the agent answers it from the evidence when it can, and takes it to the user only when it's a critical decision the evidence can't settle.
+`mode` saves graduation from re-deriving the extractor's routing. `judgment-needed` names the specific open question (e.g., *"contradicts dc-42-bgl-date on the BGL date — which is authoritative?"*; *"reconstruction from three chat threads; is the inferred decision real?"*). It is a question for the agent first: the agent answers it from the evidence when it can, and takes it to the user when a critical decision remains unsettled or an authorization/authorship boundary requires the user. Restoring user-removed content is always user-only.
 
 Blocks land in chronological order, no sectioning required; installations may add structure if their volume warrants.
 
 ### The graduation pass
 
-`/process-memory` walks `inbox.md` and graduates every block with the agent's judgment: routine blocks are written as active units; `mode: C` blocks get their question answered from the evidence, with the answer recorded in the unit. Only a critical question the evidence can't settle goes to the user, and the block waits in the inbox until they answer. This is integrated with `/process-memory`'s existing observation-graduation logic.
+`/process-memory` walks `inbox.md` and graduates every block with the agent's judgment: routine blocks are written as active units; `mode: C` blocks get their question answered from the evidence, with the answer recorded in the unit. A critical question the evidence cannot settle, or a user-only authorization/authorship decision, goes to the user; the block waits in the inbox until they answer. Evidence cannot authorize restoration of user-removed content. This is integrated with `/process-memory`'s existing observation-graduation logic.
 
 Direct-landing observations don't pass through the inbox walk; they do pass through `/process-memory`'s other hygiene operations (validation, archival check, etc.).
 

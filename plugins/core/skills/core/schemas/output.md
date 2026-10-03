@@ -2,6 +2,8 @@
 
 The output structure every adversarial and generative agent returns, regardless of task type, team composition, or phase. No fields may be omitted — even when a field has nothing to report, the agent must explicitly state that (e.g., "No position changes during this execution"). The Quality Sentinel measures against standards rather than argues, so it returns the specialized variant at the bottom of this file instead.
 
+Every field describes citable source evidence and results: concise justification, material alternatives, observable checks, uncertainty, and decision changes supported by evidence. Do not request or reproduce hidden internal reasoning traces or private deliberation.
+
 The lead agent must process all eight fields when synthesizing results. Ignoring fields — particularly Persuasion Log, Mind Changes, Lingering Concerns, or Minority Views — defeats the adversarial quality signal CORE is designed to produce.
 
 ---
@@ -11,10 +13,10 @@ The lead agent must process all eight fields when synthesizing results. Ignoring
 | # | Field | Type | Description |
 |---|---|---|---|
 | 1 | **Result** | string | The deliverable, finding, or answer. The agent's primary output — should stand on its own. For synthesis outputs, annotate significant findings with confidence level (High/Medium/Low) derived from the Convergence Tracking table's Diversity Basis column. A finding supported by agents from different specialist domains and cognitive traits is stronger than one where agents shared a single analytical lens. |
-| 2 | **Reasoning** | string | How the agent arrived at the result. Show the work: evidence weighed, alternatives evaluated, analytical framework applied. NOT a restatement of the result. |
+| 2 | **Reasoning** | string | Concise justification grounded in cited evidence, alternatives materially considered, and observable checks with their results. Explain why the evidence supports the conclusion; do not disclose an internal reasoning trace. |
 | 3 | **Heaviest Factors** | array (3–5 items) | The factors that most influenced the result. Each entry: factor name + why it was decisive. Constrained to 3–5. Fewer than 3 means the analysis is too shallow; more than 5 means the agent hasn't prioritized. |
 | 4 | **Persuasion Log** | array | Record of position changes caused by other agents. Each entry: who persuaded, what claim they made, how the position shifted, from-to summary. If no changes: "No position changes during this execution" — explicit statement required, empty array is not acceptable. |
-| 5 | **Mind Changes** | array | Intra-agent reconsiderations — moments where the agent changed its own mind during execution, independent of other agents. Each entry: initial position, trigger (what caused reconsideration), revised position, optional confidence delta. |
+| 5 | **Mind Changes** | array | Evidence-backed decision changes independent of another agent's argument. Each entry: prior stated conclusion, new evidence or check result, revised conclusion, optional confidence delta. Report observable decision changes, not a reconstruction of private deliberation. |
 | 6 | **Unanswered Questions** | array | Questions the agent couldn't resolve. For each: the question, what data/access would answer it, how the answer might change the result. |
 | 7 | **Lingering Concerns** | array | The lead agent's own reservations about the result — positions the lead agent holds even after the swarm has reached consensus. The lead agent must not discard these — they travel with the output and inform future work. |
 | 8 | **Minority Views** | array | Named, attributed positions from specific agents that were heard, understood, and not incorporated into the consensus result. Each entry: agent name, the position held, and why it wasn't adopted. Distinct from Lingering Concerns (which are the lead agent's reservations). Do not conflate. If no minority positions exist: "No minority views during this execution" — explicit statement required, empty array is not acceptable. |
@@ -25,8 +27,8 @@ The lead agent must process all eight fields when synthesizing results. Ignoring
 
 Field 1 is what single-pass analysis produces. Fields 4–8 are where CORE's adversarial value concentrates:
 
-- **Persuasion Log** — Traceable chain of reasoning changes across agents. Shows exactly which argument changed which agent's mind and why. The most distinctive CORE innovation.
-- **Mind Changes** — Measures analytical depth. Persuasion Log tracks inter-agent influence; Mind Changes tracks intra-agent reasoning. Both are quality signals.
+- **Persuasion Log** — Concise record of which attributed claim and evidence changed a stated conclusion across agents; no internal deliberation trace.
+- **Mind Changes** — Records revised conclusions and the new evidence or checks that support them. Persuasion Log attributes another agent's contribution; Mind Changes records independently evidenced revisions.
 - **Unanswered Questions** — A gift to future sessions. Tells the next agent exactly where to dig.
 - **Lingering Concerns** — The lead agent's intellectual honesty. These are the lead agent's own reservations held even after full swarm analysis — not agent positions, not unresolved questions, but the lead agent's personal dissent or caution that stays on record.
 - **Minority Views** — Agent intellectual honesty. The named, attributed positions that lost the consensus vote but were substantive enough to record. The raw data already exists in session logs — this field surfaces it explicitly. Example: "Minority View (Sentinel): The migration approach is sound under current load but carries brittleness risk at 10× scale. Heard; not adopted because near-term timelines don't require it."
@@ -47,7 +49,7 @@ Field 1 is what single-pass analysis produces. Fields 4–8 are where CORE's adv
 ```
 Result: [The agent's primary deliverable — complete, stands on its own]
 
-Reasoning: [Analytical chain showing how the result was reached — evidence considered, alternatives evaluated, methodology applied]
+Reasoning: [Concise evidence-based justification, material alternatives, and observable checks with results; no internal reasoning trace]
 
 Heaviest Factors:
 1. [Factor] — [Why it was decisive]
@@ -55,11 +57,11 @@ Heaviest Factors:
 3. [Factor] — [Why it was decisive]
 
 Persuasion Log:
-- Persuaded by [Agent] on [claim]. Changed position from [X] to [Y] because [specific reasoning].
+- Persuaded by [Agent] on [claim]. Changed position from [X] to [Y] because [cited evidence or check result].
 - No other position changes during this execution.
 
 Mind Changes:
-- Initially assumed [X]. While analyzing [evidence], realized [Y]. Revised to [Z]. Confidence [increased/decreased] because [reasoning].
+- Prior stated conclusion: [X]. New evidence or check: [Y]. Revised conclusion: [Z]. Confidence [increased/decreased] because [specific evidence].
 
 Unanswered Questions:
 - [Question]. Would need [data/access] to resolve. Could change [aspect of result].

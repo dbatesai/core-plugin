@@ -46,7 +46,7 @@ Run the edit gate first — every PROJECT.md write is edit-gated, no exceptions:
 node ${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs <project> --json
 ```
 
-`pending-edit` → the user's edit wins: propagate it to source units, fire anti-resurrection for removals, and do not render over it this pass. `malformed` / `no-baseline` (unsafe) / `missing` / `read-only` → surface plainly, don't write. Only `clean` / `generated-only` (or safe first write) proceeds.
+`pending-edit` → the user's edit wins: propagate it to source units, fire anti-resurrection for removals, and do not render over it this pass. `malformed` / `no-baseline` / `missing` / `read-only` → surface plainly, don't write. A missing baseline always refuses; only `clean` / `generated-only` proceeds. See `protocols/startup.md` §"The authorship rule" for creation-time stamping and explicit legacy-store adoption; neither is an exception for a later writer.
 
 Render only when this session materially changed §State or §Moves — a session that changed neither records `render-project-md` as `skipped`. When it fires interactively, show the draft and let the user accept or edit (their edits become ground truth and propagate back to units). Then refresh the hot section (`hot-section.mjs candidates` → compose 5–7 plain lines → `hot-section.mjs apply --file`), skipping when the existing one still describes current truth.
 

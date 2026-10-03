@@ -1,6 +1,6 @@
 # CORE Memory Hygiene
 
-Memory hygiene is how CORE keeps its knowledge useful. Without it, the memory grows, contradictions accumulate, orphaned entries drain retrieval quality, and session logs pile up unchecked. Run it every 3–5 sessions, after any session that spawned 3+ agents, or when entries start visibly contradicting each other.
+Memory hygiene is how CORE keeps its knowledge useful. Without it, the memory grows, contradictions accumulate, orphaned entries drain retrieval quality, and session logs pile up unchecked. Run it at `/process-memory`, on an explicit hygiene request, or for the affected units after a meaningful change, following `protocols/hygiene.md` §"When the mechanism fires". `/finalize` runs no hygiene.
 
 Phase numbers in this file are the walk order for a full hygiene pass. The canonical mapping from the former dream-cycle phases to current mechanisms lives in `protocols/hygiene.md` §"Dream cycle absorption" — when the two files disagree on a phase number or scope, that table wins.
 

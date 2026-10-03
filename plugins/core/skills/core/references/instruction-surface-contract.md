@@ -39,7 +39,7 @@ Generated output is a pure function of the contract: `generated_at` is the contr
 
 1. **Migrate (draft):** `node migrate-to-contract.mjs --id <slug> --claude CLAUDE.md --codex AGENTS.md --last-revised <date> --write CONTRACT.md`. Shared lines → canonical, unique → harness-only. The output is a **DRAFT** — the migrator refuses to overwrite an existing `CONTRACT.md` without `--force`, and it never auto-adopts.
 2. **Review with the user.** The draft is a starting point; the user edits and accepts. Never silently replace a project's own instruction files — that's the user's authorship.
-3. **Generate:** `node generate-<harness>-md.mjs --contract CONTRACT.md --mode write` for each harness in `canonical_for`. Record the contract location in `workspace.json` `contract_path` only if it's nonstandard (default `<project>/CONTRACT.md` resolves automatically).
+3. **Generate:** `node generate-harness-md.mjs --harness <claude-code|codex> --contract CONTRACT.md --mode write` for each harness in `canonical_for`. Record the contract location in `workspace.json` `contract_path` only if it's nonstandard (default `<project>/CONTRACT.md` resolves automatically).
 4. **Enforce:** `/cut-release` pre-flight #13 runs `--mode check` for each harness when a `CONTRACT.md` exists; drift blocks the release. No contract = check skipped.
 
 ## Overrides
@@ -63,4 +63,4 @@ Net effect: a Codex user without a contract can end up with no instruction surfa
 
 `audit-memory-boundary.mjs` ships as a memory-authority audit (sampled, read-only) and runs in `/process-memory`. It reports native-only candidates and boundary stats; content-conflict detection is deliberately out of its scope — describe the candidate report as the whole product, never as a conflict scan.
 
-There is no separate instruction-surface adapter (inventorying arbitrary surfaces and planning CORE-block upserts across them): everything such an adapter would reach for is covered by the contract-generator path above (`generate-<harness>-md.mjs`), which actually writes. A wrapper author wanting a CORE-owned block injected into a harness surface uses that path.
+There is no separate instruction-surface adapter (inventorying arbitrary surfaces and planning CORE-block upserts across them): everything such an adapter would reach for is covered by the contract-generator path above (`generate-harness-md.mjs --harness <claude-code|codex>`), which actually writes. A wrapper author wanting a CORE-owned block injected into a harness surface uses that path.

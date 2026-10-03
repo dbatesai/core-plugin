@@ -79,11 +79,11 @@ Keeps the published page current while the session runs: the platform already up
 
 **Consent basis for the loop's republishes:** the per-republish consent basis is the standing-authorization mechanism this skill already documents in Step 2 — live mode is only available in standing-authorization mode, because an unattended loop cannot stop and ask. If this user has no standing authorization on record, say so and offer the normal one-shot flow instead; do not start the loop. The grant is **prospective and bounded**: it authorizes future republishes of this loop **only within the scope and exclusions recorded at start** (persisted in the loop-state record below, with the grant's basis in its `grant_basis` field) — it is never a blanket license for whatever the store comes to contain. **The boundary rule:** the user must stop live mode before sensitive or third-party content enters the store; and at every refresh, YOU re-check the same boundary — if you know another party's data or user-flagged sensitive content has entered the rendered scope, stop the loop and fall back to ask-first rather than republishing under the old grant. (This is your judgment at render time — the watcher never inspects content, and no classifier exists or should.) All of Step 2's language still binds every republish: narrated in the conversation where it happens, always-ask when another party's data or user-flagged sensitive content is involved, stop-and-record-declined if the user objects.
 
-**Start.** Run the existing Steps 1–4 once (generate → manifest/consent → publish private → `--record-publish`). Then write the **loop-state record** — one small JSON file that is the loop's single source of truth across every hop:
+**Start.** Run the existing Steps 1–4 once (generate → manifest/consent → publish private → `--record-publish`). Resolve the loop-state path through `node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" path --root <project> --kind hot --name memory-view-live.json`. Use the returned absolute path as `<live-state-path>` below and on every later read/write; do not construct `.core/<harness>/` yourself. Stop on resolver refusal or an unresolved path. Then write the **loop-state record** — one small JSON file that is the loop's single source of truth across every hop:
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" --write-live-state \
-  <project>/.core/<harness>/memory-view-live.json \
+  <live-state-path> \
   --artifact-url <hosted URL from the publish receipt> \
   --scope <active|all-including-archive> [--exclude-topic <t>]... \
   --baseline-snapshot <snapshot_id from the publish receipt> \
@@ -96,7 +96,7 @@ The record carries `artifact_url`, `scope`, `excluded_topics`, `grant_basis`, `b
 
 ```bash
 node "${CORE_ROOT}/skills/core/scripts/memory-view-watch.mjs" <project-dir> \
-  --live-state <project>/.core/<harness>/memory-view-live.json
+  --live-state <live-state-path>
 ```
 
 The watcher reads `baseline_snapshot`, `scope`, `excluded_topics`, and `retry_at` from the record and compares the **same-scoped, same-exclusions** snapshot id the renderer receipts — an `all-including-archive` view is compared over active + archive bytes, an active view over active bytes only, so an archive-only edit wakes an archive-including view and never an active one. Topic exclusions participate in that identity: it covers exactly the population the page embeds, so an edit wholly inside an excluded topic does **not** wake the loop (the page's bytes could not change), while any edit to a kept unit does. A record the watcher cannot honor — missing, corrupt, or wrong-schema at an explicitly passed `--live-state` path — is a configuration error: the watcher refuses to arm (exit 1, named reason on stderr) rather than silently arming with defaults that could reset scope or lose a deferred publish.

@@ -23,11 +23,11 @@
   - [Retrieval-quality surfacing — always at hygiene passes](#retrieval-quality-surfacing--always-at-hygiene-passes)
   - [What to watch](#what-to-watch)
   - [Structural adjustment options (in order of cost)](#structural-adjustment-options-in-order-of-cost)
-- [Self-evolution — session-end learning](#self-evolution--session-end-learning)
+- [Self-evolution — hygiene and post-analysis learning](#self-evolution--hygiene-and-post-analysis-learning)
   - [Universal self-improvement (architectural invariant)](#universal-self-improvement-architectural-invariant)
   - [Trip-wire escalation for infrastructure](#trip-wire-escalation-for-infrastructure)
   - [Harness-local recall (every session)](#harness-local-recall-every-session)
-  - [Session-end self-evolution](#session-end-self-evolution)
+  - [Hygiene self-evolution](#hygiene-self-evolution)
   - [Analysis-protocol effectiveness narrative](#analysis-protocol-effectiveness-narrative)
   - [Analysis-protocol effectiveness report](#analysis-protocol-effectiveness-report)
   - [Self-improvement risk tiers](#self-improvement-risk-tiers)
@@ -45,7 +45,7 @@ Memory hygiene is the single mechanism that keeps the memory architecture health
 
 It replaces the dream cycle. Every dream-cycle phase folded into one of the operations below.
 
-Read this before any cleanup pass, at session end (the self-evolution section at the bottom), and any time you notice the memory architecture drifting (stale units in retrieval, contradictions surfacing, indexes out of sync).
+Read this before any cleanup pass and any time you notice the memory architecture drifting (stale units in retrieval, contradictions surfacing, indexes out of sync).
 
 ---
 
@@ -55,7 +55,7 @@ These are the operational primitives. Each has a trigger, an action, and a retri
 
 ### Archive — move out of default retrieval, keep retrievable on demand
 
-**When to archive.** Priority score below threshold AND last-referenced age past threshold for the unit's source-type. Concretely, when `R · S < 0.05` and the unit hasn't been cited or read in 90 days, it's a candidate. (Decay rate at τ=60 means R·S < 0.05 at roughly 180 days plus weight 1.0, 90 days plus weight 0.5, 60 days plus weight 0.3.)
+**When to archive.** Priority score below threshold AND last-referenced age past threshold for the unit's source-type. Concretely, when `R · S < 0.05` and the unit hasn't been cited or read in 90 days, it's a candidate. (Decay rate at τ=60 means R·S < 0.05 at roughly 180 days at weight 1.0, 138 days at weight 0.5, 108 days at weight 0.3; the separate 90-day last-reference gate still applies.)
 
 **Action.** Move the unit file from `<project>/_memories/<prefix>-<slug>.md` to `<project>/_memories/archive/<prefix>-<slug>.md`. Frontmatter adds `archived: true` and `archived_at: <ISO timestamp>`. The original prefix stays — the flat layout holds for archive too.
 
@@ -71,7 +71,7 @@ These are the operational primitives. Each has a trigger, an action, and a retri
 
 **Retrieval impact.** Retired units don't appear in default retrieval. They're reachable by chasing a `supersedes` edge from the canonical successor, or by explicit "what was the predecessor of X" queries.
 
-**Anti-resurrection rule.** When a retired claim shows up again in a later render, you don't un-retire it on your own. Either the user explicitly un-retires it, or a successor unit captures the new framing without resurrecting the retired one.
+**Anti-resurrection rule.** When a retired claim shows up again in a later render, you don't un-retire it on your own. Only the user can authorize restoration of user-removed content. A successor may capture a genuinely different framing only if it does not reintroduce the removed claim; the retired unit stays retired.
 
 ### Cold-store — fully out-of-band; only deep historical queries reach
 
@@ -88,7 +88,7 @@ These are the operational primitives. Each has a trigger, an action, and a retri
 Hygiene is the canonical mechanism for all of these. If you find yourself building separate protocol pieces for any of them, fold back into hygiene:
 
 - Archive / retire / cold-store with priority-aware triggers.
-- Graduation (observations → units → canonical flag).
+- Graduation (observations → units); priority pins remain a separate user-controlled setting.
 - Contradiction reconciliation when incompatible claims surface — agent judgment via `conflicts-with` edges and supersession. No automated contradiction detector ships; nothing scans the store for conflicts on its own.
 - Wikilink promotion — durable `[[unit-id]]` body links become typed `cites` edges (see §"Wikilink promotion").
 - Index regeneration — `_memories/INDEX-decisions.md`, `_memories/INDEX-risks.md`, others (was dream-cycle Phase 3d).
@@ -180,7 +180,7 @@ Reversal is yours to do when it's a self-correction (you archived something and 
 | Mode | What goes wrong | Mitigation |
 |---|---|---|
 | Over-aggressive archive | High-value units get archived because their priority score under-counts something | Pin frontmatter (`pinned: floor` / `true` / `always`); priority-floor for pinned units; user-gated archive surface at `/process-memory` |
-| Resurrection of retired content | A retired unit's claim shows up again because similar conversation generates a similar observation | Anti-resurrection rule — retired units check source-of-truth match before any re-promotion; successor units carry the new framing without re-promoting the old |
+| Resurrection of retired content | A retired unit's claim shows up again because similar conversation generates a similar observation | Anti-resurrection rule — restoring user-removed content requires the user; successor units may carry a genuinely different framing only without restoring the removed claim |
 | Cold-store losing edges | An edge pointing at a cold-stored unit dangles | Cold-store keeps edges intact in the moved file; retrieval treats the cold-target as a placeholder so the link doesn't 404 |
 | Mid-session conflict with user edit | You're about to render a section the user just edited | Edit-detection surfaces the change; render pauses on the conflicted section; reconcile before re-rendering |
 | Render-vs-hygiene collision (same section) | Hygiene fires on a unit flowing into a section the agent is mid-rendering | Defer hygiene until the render commits; see "Render-collision handling" above |
@@ -264,9 +264,9 @@ These observations feed the structural adjustment options below — add an edge,
 
 ---
 
-## Self-evolution — session-end learning
+## Self-evolution — hygiene and post-analysis learning
 
-Read this at session end, when a hygiene pass runs, and when writing an analysis-protocol effectiveness report. The continuous self-evaluation loop above (what to watch, the structural adjustments) is the same loop; this is the rest of it.
+Read this when a hygiene pass runs or when writing an analysis-protocol effectiveness report. `/finalize` runs no hygiene and adds no self-evolution pass. The continuous self-evaluation loop above (what to watch, the structural adjustments) is the same loop; this is the rest of it.
 
 ### Universal self-improvement (architectural invariant)
 
@@ -287,27 +287,30 @@ One cycle of a trip-wire firing is a signal. Two consecutive cycles = propose a 
 
 ### Harness-local recall (every session)
 
-Harness-local recall — Claude Code's `MEMORY.md`, Codex's `~/.codex/memories/`, equivalents — is scratch cache, not authoritative state. By design it's surface 4 in the authority stack (see `protocols/data-storage.md §"Authority ordering"`). The harness writes Claude Code's `MEMORY.md` autonomously at `/finalize`; Codex memory is explicit-save only via the `save-recall-note` adapter verb in `harnesses/codex.md`. You treat the recall surface as a fast-access summary of what was learned, but on every bootstrap, it's re-verified against PROJECT.md (for project facts) and `agent-profile.md` (for cross-project patterns). If it disagrees with synthesis, synthesis wins.
+Harness-local recall — Claude Code's `MEMORY.md`, Codex's `~/.codex/memories/`, equivalents — is scratch cache, not authoritative state. By design it's level 5 in the authority stack (see `protocols/data-storage.md §"Authority ordering"`). The harness writes Claude Code's `MEMORY.md` autonomously at `/finalize`; Codex memory is explicit-save only via the `save-recall-note` adapter verb in `harnesses/codex.md`. You treat the recall surface as a fast-access summary of what was learned, but on every bootstrap, it's re-verified against PROJECT.md (for project facts) and `agent-profile.md` (for cross-project patterns). If it disagrees with synthesis, synthesis wins.
 
 Why scratch cache: the user's control over project knowledge runs through PROJECT.md. If harness recall were authoritative, the user could delete a fact from synthesis and you'd still "remember" it — breaking the user-control invariant. Recall's role is acceleration, not persistence.
 
-**Capture automatically after every session — harness-conditional:**
+**Bounded recall refresh at close — harness-conditional:**
 
-1. **Claude Code:** Save key cross-session insights to auto-memory (user, feedback, reference, project types) via `/finalize` Step 5's MEMORY.md refresh. Don't save project-specific facts as authoritative — those go to PROJECT.md or `_memories/`.
+1. **Claude Code:** Run only `/finalize` Step 5's MEMORY.md refresh from current synthesis. New material session outcomes belong in Step 2's bounded capture, not an additional self-improvement sweep. Don't save project-specific facts as authoritative recall — those go to PROJECT.md or `_memories/`.
 1. **Codex:** No auto-write. If a session surfaced workflow lessons worth keeping, surface them to the user with a one-line suggestion that names the pattern and lets the user decide whether to invoke explicit-save. The user's install configures the trigger phrases; CORE only names the candidate.
+
+**During hygiene or after the relevant multi-agent run, outside `/finalize`:**
+
 2. Save effective agent configurations from multi-agent runs to `~/.core/agents/<name>.md` for future reuse.
 3. Save effective analysis-protocol configurations by task type to `~/.core/task-configs/<type>.md`. Check this folder before composing a new swarm.
 4. Record strategy effectiveness per problem type.
 5. Sync cross-project learnings to `agent-profile.md` — user preferences, personality refinements, portfolio patterns. Never project-specific facts.
-6. Update PROJECT.md §Decisions & Risks, §Moves, §Notes, §People as the session-close step. The corresponding units get the matching frontmatter updates.
+6. Reconcile affected PROJECT.md sections and their source units during the hygiene pass. At `/finalize`, follow only its material-change gate for §State/§Moves and its bounded material-capture step.
 
 **Bootstrap invariant:** on the next session start, if the `read-auto-memory` surface carries a project-specific fact not present in PROJECT.md or `_memories/`, you treat the fact as deleted-by-user. On Claude Code, rebuild `MEMORY.md` from current synthesis. On Codex, surface the divergence rather than silently rewriting (explicit-save only). That's the structural enforcement of the user-control invariant.
 
-### Session-end self-evolution
+### Hygiene self-evolution
 
-1. Evaluate the session — what produced good work, what produced friction.
+1. During hygiene, evaluate the sessions being processed — what produced good work, what produced friction.
 2. Make concrete self-improvement recommendations. "Try X next session" beats "do better at Y."
-3. Write the improvement summary to the screen for the user at session close.
+3. Include useful improvements in the hygiene pass's report; no improvement report is required at session close.
 
 ### Analysis-protocol effectiveness narrative
 
@@ -338,7 +341,7 @@ You read recent effectiveness reports before composing a new analysis-protocol i
 
 | Risk Level | Examples | Approval Path |
 |---|---|---|
-| **Low** | Effectiveness score updates, strategy ranking adjustments, memory additions, minor optimizations | Apply autonomously. Report to user at session end. |
+| **Low** | Effectiveness score updates, strategy ranking adjustments, memory additions, minor optimizations | Apply within authorized scope. Report in the hygiene or post-analysis update. |
 | **Medium** | Composition rule changes, phase sequencing modifications, strategy ranking changes | Present to user with rationale and risks before applying. User approves, modifies, or rejects. |
 | **High** | Protocol modifications, behavioral shifts, execution flow changes, architectural decisions | Present to user with full risk analysis before applying. User approves, modifies, or rejects. |
 
@@ -364,7 +367,7 @@ Former dream cycle phases mapped to v2 hygiene:
 | Phase 3d: edge integrity sweep | Index regeneration + edge-reconciliation pass — `INDEX-*.md` regenerates, broken edges flagged |
 | Phase 3e: session-log auto-prune | Retired without replacement — no automated session-log cleanup ships; `_sessions/` grows until the user prunes it |
 | Phase 4: pattern synthesis | Graduation reasoning — same operation, named for what it actually is |
-| Phase 5: agent roster refresh | §"Self-evolution — session-end learning" above — effective agent configurations saved to `~/.core/agents/<name>.md`, driven by the effectiveness reports |
+| Phase 5: agent roster refresh | §"Self-evolution — hygiene and post-analysis learning" above — effective agent configurations saved to `~/.core/agents/<name>.md`, driven by the effectiveness reports |
 
 There's no separate dream-cycle ritual, and no retrospective file — a per-pass retrospective had no reader. What a hygiene pass learns lands where it gets read: durable lessons graduate into units, and the pass's own narration tells the user what happened.
 

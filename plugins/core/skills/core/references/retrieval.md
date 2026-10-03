@@ -29,9 +29,9 @@ At session start, `<project>/PROJECT.md` and `~/.core/agent-profile.md` are read
 
 ### Tier 1 — Lexical
 
-**Preferred: the shipped product retriever.** `retrieve-context.mjs` ranks every active unit — nested trees included — by title/topics overlap ∪ body BM25 (magnitudes preserved, per-arm normalized), then one-hop edge expansion; the per-turn hook injects its top matches automatically. For an explicit query: `node retrieve-context.mjs <store> "<query>" [--top N]`, or `node bm25.mjs <store> rank "<query>"` for the body arm alone. Every result carries its authority tier (canonical vs raw observation).
+**Preferred: the shipped product retriever.** `retrieve-context.mjs` ranks every active unit — nested trees included — by title/topics overlap ∪ body BM25 (magnitudes preserved, per-arm normalized), then one-hop edge expansion; the per-turn hook injects its top matches automatically. For an explicit query: `node retrieve-context.mjs <store> "<query>" [--top N]`, or `node bm25.mjs <store> rank "<query>"` for the body arm alone. Every result carries its authority tier: the wire label `canonical` denotes a non-observation, without independently verifying its graduation or truth, while `observation` denotes raw capture. Active observations are included. The shipped default tier policy is flat ranking; labels do not boost or exclude a tier. Treat raw captures as evidence to verify, not promoted facts. This is distinct from startup's store-candidate presence check and from the `pinned` priority setting; see `protocols/data-storage.md` §"The priority pin".
 
-**Manual fallback:** `Grep` over `<project>/_memories/` for keywords, topic tags, or frontmatter fields. Optionally `Glob` to narrow file lists. Read the matched files. Sub-second on directory trees of hundreds-to-thousands of units.
+**Manual fallback when the product script is unavailable:** `Grep` over `<project>/_memories/` for keywords, topic tags, or frontmatter fields. Preserve the active-only/archive/invalidity rules and authority labels yourself, and report that a manual fallback ran. Native recall is a separate startup/manual hint source, not an input to the product retriever; verify its claims against current project sources. Optionally `Glob` to narrow file lists. Read the matched files. Sub-second on directory trees of hundreds-to-thousands of units.
 
 **Standard patterns:**
 
@@ -189,8 +189,8 @@ Default window is 30 days. Output: tier distribution, top dip-back units (precis
 | Need | Tier | Tool |
 |---|---|---|
 | Fact from current session context | 0 | (already loaded) |
-| Fact stored in a known unit | 1 | `Grep` + `Read` |
+| Fact stored in a known unit | 1 | `retrieve-context.mjs` + `Read`; manual Grep fallback if unavailable |
 | Chain of related decisions | 2 | typed-edge walk + `Read` |
-| Conceptual / fuzzy question | 3 | Explore subagent — inline Grep+Read fallback when no subagent tool, logged `result: "degraded"` |
+| Conceptual / fuzzy question | 3 | Exhaustive bounded shards + Read, then Explore if unresolved; inline fallback when no subagent tool, logged `result: "degraded"` |
 | Walk terminated unexpectedly | — | Check R·S proxy; if < 0.3 the branch was pruned (correct behavior) |
 | Tier 3 fired more than once on similar queries | — | Trip-wire signal; memory hygiene will flag |
