@@ -615,15 +615,8 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(res) + '\n');
     return res.reason === 'invalid-window' ? 2 : 0;
   }
-  // default: status — enabled/effective state + volumes + health
-  const files = listTurnCaptureFiles(projectDir);
-  const stats = {
-    enabled: turnCaptureEnabled({ project: projectDir }),
-    days: files.length,
-    health: readCaptureHealth(projectDir),
-    dir: turnCaptureDir(projectDir),
-  };
-  process.stdout.write(JSON.stringify(stats) + '\n');
+  // default: status — enabled/effective state + volumes (project and history separately) + health
+  process.stdout.write(JSON.stringify(turnCaptureStats(projectDir)) + '\n');
   return 0;
 }
 

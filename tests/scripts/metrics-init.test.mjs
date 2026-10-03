@@ -294,3 +294,18 @@ test('purge never touches a history folder that is ambiguous or another project\
     assert.equal(readFileSync(rows, 'utf8'), '{"row":1}\n');
   }, { projects: 2 });
 });
+
+test('the status command reports project rows and history rows separately', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const script = join(process.cwd(), 'plugins/core/skills/core/scripts/turn-capture.mjs');
+  withProject(({ home, projectDir }) => {
+    const old = appData(home, 'status-store');
+    mkdirSync(join(old, 'turn-capture'), { recursive: true });
+    writeFileSync(join(old, 'turn-capture', '2026-09-28.jsonl'), '{"row":1}\n{"row":2}\n');
+    signedPin(operationalMetricsDir(projectDir, { home, env: E }), home, old, projectDir);
+    const out = spawnSync(process.execPath, [script, projectDir, '--status'], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, CORE_HARNESS: 'claude-code' } });
+    const status = JSON.parse(out.stdout);
+    assert.equal(status.rows, 0);
+    assert.deepEqual(status.history.map((h) => h.rows), [2]);
+  });
+});
