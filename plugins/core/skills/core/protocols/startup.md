@@ -282,6 +282,17 @@ node "${CORE_ROOT}/skills/core/scripts/close-pass.mjs" detect <project> \
 - **`owed`** (with the `owed=` list) — no marker, a crash mid-close, or a materially changed store since the close. Discharge only the listed ops (they map 1:1 to the `/finalize` steps), then `close-pass.mjs finish`. Sessions the automatic close preserved without memory processing are NOT recovered here — `backfill-memory.mjs list` names them and `/process-memory` works them. Narrate in one line (*"Last session's close didn't finish — wrote the owed resume summary before readiness."*).
 
 
+## Collab handoff — land owed collaboration outcomes
+
+When collab is installed, land the outcome of every closed collab this project joined, after the catch-up above (the same guard as every script call):
+
+```bash
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/core-collab-sync.mjs" <project> --readiness || true
+```
+
+Put its output in the readiness summary verbatim. It prints at most three lines, and nothing when collab is absent or every outcome has already landed. The participant is the project's persisted collab identity, looked up read-only by the manifest's `project_id`. It is never minted, and with none the step names the skip. On Claude Code, `hooks/collab-sync-hook.mjs` also runs this sync from every prompt (a loop tick included), at most every ten minutes and asynchronously, so a collab that closes after bootstrap lands without another `/core` and without the bootstrap dedup getting in the way. `CORE_COLLAB_SYNC=0` turns that hook off.
+
 ## Load — cold-start migration
 
 The project has substantive prior content but no v2 unit store. Run the nine steps below in order. Each step is load-bearing; don't demote any into "I'll handle that later in §Moves."

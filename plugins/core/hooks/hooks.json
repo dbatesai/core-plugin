@@ -16,6 +16,12 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/core/hooks/retrieve-context-hook.mjs\""
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/core/hooks/collab-sync-hook.mjs\"",
+            "async": true,
+            "timeout": 60
           }
         ]
       }

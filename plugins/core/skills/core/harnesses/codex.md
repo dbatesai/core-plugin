@@ -92,6 +92,10 @@ Read every "runs unconditionally, every session" line in `startup.md` as "runs u
 
 What Codex has instead, and its exact bound: the user runs `/finalize` explicitly, or the next session that begins with `/core` runs the catch-up path (`startup.md §"Startup catch-up"`) — `close-pass.mjs detect` finds an owed or partial close and discharges the remainder before readiness. The per-op marker, single-flight lock, and three-state detection are harness-agnostic and behave identically; only the trigger differs. Because that trigger is an explicit `/core`, a Codex session that never types it leaves the owed close undischarged for as long as the user keeps not typing it. Say that plainly rather than describing Codex close as equivalent-with-later-timing. Re-open this drop if a live Codex install validates a `SessionEnd`-equivalent hook that can spawn a detached process.
 
+## collab handoff sync
+
+On Claude Code an async `UserPromptSubmit` hook (`hooks/collab-sync-hook.mjs`) lands collab outcomes mid-session, at most every ten minutes. Codex has no validated equivalent, so Codex lands them only at the startup step (`startup.md §"Collab handoff"`). A collab that closes mid-session therefore waits for the next session that starts with `/core`. Nothing is lost: what is owed is recomputed from the collab ledger and the project's records every run. Re-open this drop if a live Codex install validates an async per-prompt hook.
+
 ## hook-register
 
 **DROPPED for pre-execution blocking** on Codex — pre-execution blocking semantics are not documented for this harness and have not been validated on a live install.

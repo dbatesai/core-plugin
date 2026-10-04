@@ -16,6 +16,13 @@
       "invocation": "automatic"
     },
     {
+      "name": "UserPromptSubmit:collab-sync-hook.mjs",
+      "kind": "hook",
+      "harness": "claude-code",
+      "status": "active",
+      "invocation": "automatic"
+    },
+    {
       "name": "UserPromptSubmit:retrieve-context-hook.mjs",
       "kind": "hook",
       "harness": "claude-code",
