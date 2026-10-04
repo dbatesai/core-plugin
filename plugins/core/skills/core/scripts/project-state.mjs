@@ -941,7 +941,7 @@ export function readBootstrap({ root, harness, coreDir = defaultCoreDir() }) {
 // ---------- adopting another install's state (a restore) ----------
 
 const DECLINED_ADOPT = 'declined-adopt';
-const ADOPTED_INSTALLS = 'adopted-installs';
+const ADOPTED_INSTALLS = 'adopted-sibling-stamps';
 
 function declinedAdoptFile({ root, coreDir }) {
   return join(coreDir, 'local', localRootKey(root), DECLINED_ADOPT);
@@ -957,7 +957,12 @@ function adoptedInstallsFile({ root, coreDir }) {
   return join(coreDir, 'local', localRootKey(root), ADOPTED_INSTALLS);
 }
 
-/** Install ids whose state this machine adopted for this root (one restore can carry several harnesses). */
+/**
+ * Stamps of the restore's other harnesses, recorded when its first harness was adopted: the
+ * sha256 of each sibling .core/<harness>/stamp exactly as it arrived. An install id inside a
+ * foreign stamp is self-asserted and copyable, so the second-harness offer is bound to these
+ * bytes instead: state planted after the first adoption never matches.
+ */
 function adoptedInstalls({ root, coreDir }) {
   try {
     return new Set(readFileSync(adoptedInstallsFile({ root, coreDir }), 'utf8').split('\n').map((l) => l.trim()).filter(Boolean));
@@ -1015,8 +1020,9 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
   // A registered root is offered only for another harness of an install this machine already
   // adopted here — the rest of the same restore. Any other foreign state on a registered root
   // (a synced folder another machine is writing) stays not-a-candidate.
-  if (registered && !adoptedInstalls({ root: real, coreDir }).has(stamp.install_id)) return null;
-  return { root: real, harness, oldPath: stamp.path, lastWritten: lastWrittenAt(harnessDir), stampHmac: stamp.hmac, installId: stamp.install_id };
+  const stampHash = createHash('sha256').update(readFileSync(join(harnessDir, 'stamp'))).digest('hex');
+  if (registered && !adoptedInstalls({ root: real, coreDir }).has(stampHash)) return null;
+  return { root: real, harness, oldPath: stamp.path, lastWritten: lastWrittenAt(harnessDir), stampHmac: stamp.hmac };
 }
 
 function setAsideUnparseable(file) {
@@ -1060,7 +1066,11 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   const manifestFile = join(harnessDir, MANIFEST);
 
   let manifest = null;
-  if (existsSync(manifestFile)) {
+  let manifestIsFile = false;
+  try { manifestIsFile = lstatSync(manifestFile).isFile(); } catch { /* absent */ }
+  // Only a regular file is read: a planted symlink must not pull another file's contents into
+  // the signed manifest. A non-file manifest is left untouched and named in not_archived.
+  if (manifestIsFile) {
     try { manifest = JSON.parse(readFileSync(manifestFile, 'utf8')); } catch { manifest = null; }
     if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) { setAsideUnparseable(manifestFile); manifest = null; }
   }
@@ -1068,12 +1078,29 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   // about this one: it is never carried or re-signed. Left unsigned where it is, it reads as
   // absent, so the first session here runs startup in full.
 
+  const wasRegistered = readRegisteredRoots({ coreDir: canonical(coreDir) }).has(real);
+  const siblingStamps = [];
+  for (const other of (() => { try { return readdirSync(join(real, STATE_DIRNAME)); } catch { return []; } })()) {
+    if (other === harness || !HARNESS_RE.test(other)) continue;
+    const f = join(real, STATE_DIRNAME, other, 'stamp');
+    try { if (lstatSync(join(real, STATE_DIRNAME, other)).isDirectory() && lstatSync(f).isFile()) siblingStamps.push(createHash('sha256').update(readFileSync(f)).digest('hex')); } catch { /* absent */ }
+  }
+
   // Keep the originals byte for byte, inert, before anything is re-signed: unknown fields and
   // the other install's stamp survive for diagnosis and future readers, never as authority.
-  const archive = join(harnessDir, 'superseded', `adopted-${isoStamp()}`);
+  // Only regular files are copied, and never through a linked superseded/ folder, so a planted
+  // symlink can neither pull another file's bytes into the project nor redirect the write.
+  const supersededDir = join(harnessDir, 'superseded');
+  try { if (!lstatSync(supersededDir).isDirectory()) return { status: 'held', reason: 'superseded-not-a-directory', oldPath: cand.oldPath }; } catch { /* absent: created below */ }
+  const archive = join(supersededDir, `adopted-${isoStamp()}`);
   mkdirSync(archive, { recursive: true });
+  const notArchived = [];
   for (const name of [MANIFEST, 'stamp']) {
-    if (existsSync(join(harnessDir, name))) writeFileSync(join(archive, name), readFileSync(join(harnessDir, name)));
+    const f = join(harnessDir, name);
+    let st = null;
+    try { st = lstatSync(f); } catch { continue; }
+    if (!st.isFile()) { notArchived.push(name); continue; }
+    writeFileSync(join(archive, name), readFileSync(f), { flag: 'wx' });
   }
   const notImported = [];
 
@@ -1101,14 +1128,19 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     });
   }
   const registered = registerProject(coreDir, real, { home: dirname(canonical(coreDir)), confirmNew: true });
-  if (cand.installId && !adoptedInstalls({ root: real, coreDir }).has(cand.installId)) {
-    const file = adoptedInstallsFile({ root: real, coreDir });
-    mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, cand.installId + '\n');
+  if (!wasRegistered) {
+    // first adoption of this restore: remember its sibling harnesses' stamps exactly as they arrived
+    const known = adoptedInstalls({ root: real, coreDir });
+    const fresh = siblingStamps.filter((h) => !known.has(h));
+    if (fresh.length) {
+      const file = adoptedInstallsFile({ root: real, coreDir });
+      mkdirSync(dirname(file), { recursive: true });
+      appendFileSync(file, fresh.map((h) => h + '\n').join(''));
+    }
   }
   return {
     status: 'adopted', oldPath: cand.oldPath, registration: registered,
     project_id: manifest?.project_id ?? null, agent_name: manifest?.agent_name ?? null,
-    archived: archive, not_imported: notImported,
+    archived: archive, not_archived: notArchived, not_imported: notImported,
   };
 }

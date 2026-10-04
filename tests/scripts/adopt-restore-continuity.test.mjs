@@ -3,7 +3,7 @@
 // harness be adopted after the first registers the root — and nothing else on a registered root.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, realpathSync, cpSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, realpathSync, cpSync, existsSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
@@ -99,5 +99,50 @@ test('a hostile manifest: controls unchanged, extra keys only in the archive, wr
     for (const k of ['agent_notes', 'created', 'name', 'session_log_refs', 'trusted_exec']) assert.equal(k in m, false, `${k} not in the signed manifest`);
     assert.equal(m.metrics_enabled, undefined, 'an opt-in never travels');
     assert.match(archived(restored, 'claude-code').toString(), /trusted_exec/, 'the original survives, inert, in the archive');
+  } finally { s.cleanup(); }
+});
+
+test('the second-harness offer is bound to the stamp that arrived with the restore, not to a copyable install id', () => {
+  const s = sandbox();
+  try {
+    const { coreB, restored } = restoredTwoHarness(s);
+    assert.equal(adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }).status, 'adopted');
+    // install A (same install id) writes fresh codex state elsewhere; it is planted over the restored codex state
+    const coreA = join(s.base, 'homeA', '.core');
+    const other = join(s.base, 'Other', 'Garden');
+    mkdirSync(other, { recursive: true });
+    registerProject(coreA, other);
+    updateManifest({ root: other, harness: 'codex', coreDir: coreA, fields: { agent_notes: 'planted later' } });
+    rmSync(join(restored, '.core', 'codex'), { recursive: true, force: true });
+    cpSync(join(other, '.core', 'codex'), join(restored, '.core', 'codex'), { recursive: true });
+    assert.equal(adoptionCandidate({ root: restored, harness: 'codex', coreDir: coreB }), null, 'same install id, different stamp bytes: not offered');
+  } finally { s.cleanup(); }
+});
+
+test('a symlinked manifest is not archived (named) and its target bytes never enter the project; a linked superseded/ holds adoption', () => {
+  const s = sandbox();
+  try {
+    const { coreB, restored } = restoredTwoHarness(s);
+    const secret = join(s.base, 'secret.json');
+    writeFileSync(secret, JSON.stringify({ agent_name: 'PRIVATE-KEY-MATERIAL', agent_notes: 'PRIVATE-KEY-MATERIAL', project_id: 'stolen' }));
+    const m = join(restored, '.core', 'claude-code', 'workspace.json');
+    rmSync(m); symlinkSync(secret, m);
+    const r = adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' });
+    assert.ok(r.not_archived.includes('workspace.json'), JSON.stringify(r));
+    const signed = readManifest({ root: restored, harness: 'claude-code', coreDir: coreB }) || {};
+    assert.doesNotMatch(JSON.stringify(signed), /PRIVATE-KEY-MATERIAL|stolen/, 'the link target never reaches the signed manifest');
+    const dir = join(restored, '.core', 'claude-code', 'superseded');
+    for (const sub of readdirSync(dir)) for (const f of readdirSync(join(dir, sub))) assert.doesNotMatch(readFileSync(join(dir, sub, f), 'utf8'), /PRIVATE-KEY-MATERIAL/);
+
+    const s2 = sandbox();
+    try {
+      const t = restoredTwoHarness(s2);
+      const outside = join(s2.base, 'outside');
+      mkdirSync(outside);
+      symlinkSync(outside, join(t.restored, '.core', 'codex', 'superseded'));
+      const r2 = adoptForeignState({ root: t.restored, harness: 'codex', coreDir: t.coreB, decision: 'yes' });
+      assert.equal(r2.status, 'held');
+      assert.deepEqual(readdirSync(outside), [], 'nothing written through the link');
+    } finally { s2.cleanup(); }
   } finally { s.cleanup(); }
 });
