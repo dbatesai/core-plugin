@@ -16,7 +16,10 @@
  * once EVERY harness registered for the path has migrated does it write MOVED.md
  * into the old folders, turn the root workspace.json pointer into a moved note
  * (left alone when git tracks it), and mark the index.json entries migrated —
- * an older install that still reads them keeps working until then.
+ * an older install that still reads them keeps working until then. A finished
+ * run is recorded in the project (signed, with fingerprints of the legacy registry and the
+ * classification table); while those match and the receipt still verifies, a startup returns
+ * from that record without taking the close lock or the shared manifest and registry locks.
  *
  * Lock order: the project's close lock, then the global manifest lock, then the
  * registry lock. Nothing is deleted.
@@ -368,7 +371,64 @@ export function applyMigration(opts = {}) {
   }
 }
 
-function applyMigrationInner({ root, harness = detectStateHarness(), coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date() } = {}) {
+// A finished migration is recorded in the project, signed, with fingerprints of everything that
+// could give it new work: the legacy registry and the classification table. While both match,
+// a startup returns from the record without taking the project's close lock or the shared
+// manifest and registry locks, so one project's startup never queues behind another's.
+const CHECK_RECORD = 'migration-check.json';
+const RECORDABLE = new Set(['migrated', 'already-migrated', 'nothing-to-migrate']);
+
+function migrationInputs({ coreDir, table }) {
+  let index;
+  try { index = createHash('sha256').update(readFileSync(join(coreDir, 'index.json'))).digest('hex'); }
+  catch (e) { if (e.code !== 'ENOENT') return null; index = 'absent'; }   // unreadable: never fast
+  return { index_sha256: index, table_sha256: createHash('sha256').update(JSON.stringify(table)).digest('hex') };
+}
+
+function currentMigrationCheck({ real, harness, coreDir, table }) {
+  if (existsSync(join(real, '.core', harness, MIGRATING_MARKER))) return null;
+  const raw = readSignedFile({ root: real, harness, name: CHECK_RECORD, coreDir });
+  if (raw === null) return null;
+  let rec;
+  try { rec = JSON.parse(raw); } catch { return null; }
+  const now = migrationInputs({ coreDir, table });
+  if (!now || !rec || rec.harness !== harness || rec.root !== real || !RECORDABLE.has(rec.status)) return null;
+  if (rec.index_sha256 !== now.index_sha256 || rec.table_sha256 !== now.table_sha256) return null;
+  // The receipt is re-checked every time, as the full path does: project-local reads, no lock.
+  if (rec.status !== 'nothing-to-migrate') {
+    const durable = stateDir({ root: real, harness, kind: 'durable', coreDir });
+    const hot = stateDir({ root: real, harness, kind: 'hot', coreDir });
+    if (!durable || !hot || !verifiedReceipt({ root: real, harness, coreDir, stateDirs: [durable.dir, hot.dir] }).ok) return null;
+  }
+  return { status: rec.status === 'nothing-to-migrate' ? 'nothing-to-migrate' : 'already-migrated', root: real, harness,
+    live: rec.live ?? null, superseded: rec.superseded || [], files: 0, released: rec.released ?? false, fast: true };
+}
+
+function recordMigrationCheck({ real, harness, coreDir, table, result, now }) {
+  if (!RECORDABLE.has(result.status) || result.metrics_held) return;
+  const inputs = migrationInputs({ coreDir, table });
+  if (!inputs) return;
+  try {
+    const durable = stateDir({ root: real, harness, kind: 'durable', coreDir, forWrite: true });
+    writeSignedFile({ dir: durable.dir, name: CHECK_RECORD, coreDir, body: JSON.stringify({
+      status: result.status, root: real, harness, live: result.live ?? null, superseded: result.superseded || [],
+      released: result.released ?? false, checked_at: now.toISOString(), ...inputs,
+    }, null, 2) + '\n' });
+  } catch { /* no record just means the next startup takes the full path */ }
+}
+
+function applyMigrationInner(opts = {}) {
+  const { root, harness = detectStateHarness(), coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date() } = opts;
+  assertHarnessName(harness);
+  const real = canonical(root);
+  const fast = currentMigrationCheck({ real, harness, coreDir, table });
+  if (fast) return fast;
+  const result = fullMigration({ root, harness, coreDir, table, now });
+  recordMigrationCheck({ real, harness, coreDir, table, result, now });
+  return result;
+}
+
+function fullMigration({ root, harness, coreDir, table, now }) {
   assertHarnessName(harness);
   const real = canonical(root);
   const iso = now.toISOString();

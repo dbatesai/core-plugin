@@ -102,7 +102,7 @@ It prints one JSON line with an `action`. `ask`, `adopt-ask` and `refuse` exit n
 
 Use `root` as `<root>` everywhere below.
 
-**Migrate legacy state.** Projects registered before state moved into the project keep it under `~/.core/workspaces/<id>/`. Run the migration for this project and harness every startup — it's a no-op once done:
+**Migrate legacy state.** Projects registered before state moved into the project keep it under `~/.core/workspaces/<id>/`. Run the migration for this project and harness every startup. Once it's done, the project keeps a signed record of that, and later startups return from the record without taking the project's close lock or the shared migration and registry locks (the status JSON then carries `"fast": true`):
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \

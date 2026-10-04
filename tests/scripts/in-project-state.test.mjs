@@ -1114,3 +1114,64 @@ test('registryEntryPath prefers path, falls back to project_path, and answers nu
   assert.equal(registryEntryPath({ workspace_id: 'w' }), null);
   assert.equal(registryEntryPath(null), null);
 });
+
+// A finished migration is recorded in the project; later startups read the record without any
+// lock, so one project's startup never waits behind another's on the shared manifest or registry.
+test('after a full migration, a startup returns from the project record without taking the close, manifest or registry lock', async () => {
+  const { s, p, table } = migrationFixture();
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  try {
+    assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table }).status, 'migrated');
+    const held = [join(p, '_memories', '_close.lock'), join(s.coreDir, 'migration-manifest.lock'), join(s.coreDir, 'index.lock')]
+      .map((f) => ({ f, l: acquireFileLock(f) }));
+    try {
+      assert.ok(held.every((h) => h.l.ok));
+      const t0 = Date.now();
+      const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
+      assert.deepEqual([r.status, r.fast, r.live], ['already-migrated', true, 'legacy']);
+      assert.ok(Date.now() - t0 < 2000, 'no wait on a held lock');
+    } finally { for (const h of held) releaseFileLock(h.f, h.l.nonce); }
+  } finally { s.cleanup(); }
+});
+
+test('a project with nothing to migrate is recorded too, and its next startup is lock-free', async () => {
+  const s = sandbox();
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  try {
+    const p = s.mk('Projects', 'Fresh');
+    writeFileSync(join(s.coreDir, 'index.json'), '[]');
+    assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir }).status, 'nothing-to-migrate');
+    const m = join(s.coreDir, 'migration-manifest.lock'); const l = acquireFileLock(m);
+    try { assert.deepEqual((({ status, fast }) => [status, fast])(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir })), ['nothing-to-migrate', true]); }
+    finally { releaseFileLock(m, l.nonce); }
+  } finally { s.cleanup(); }
+});
+
+test('the record is not used when anything that could give the migration new work changed', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
+    const again = () => applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
+    assert.equal(again().fast, true);
+    // a legacy workspace registered later for this path: the full path runs and copies it
+    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+    // (its harness comes from its own workspace.json, so only the registry changed, not the table)
+    index.push(legacyWorkspace(s, 'legacy-late', { path: p, files: { 'workspace.json': JSON.stringify({ workspace_id: 'legacy-late', harness: 'claude-code' }), 'late.md': 'late\n' } }));
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index, null, 2));
+    const late = again();
+    assert.equal(late.fast, undefined);
+    assert.ok(existsSync(join(p, '.core', 'claude-code', 'superseded', 'legacy-late', 'late.md')), 'the late workspace is copied');
+    assert.equal(again().fast, true, 'and the refreshed record is used after');
+    // a changed classification table
+    table.entries.extra = { harness: 'codex', evidence: 'fixture' };
+    assert.equal(again().fast, undefined);
+    // a record CORE did not sign
+    const rec = join(p, '.core', 'claude-code', 'migration-check.json');
+    writeFileSync(rec, readFileSync(rec, 'utf8').replace('"already-migrated"', '"nothing-to-migrate"'));
+    assert.equal(again().fast, undefined);
+    // an interrupted migration's marker
+    again();
+    writeFileSync(join(p, '.core', 'claude-code', '.migrating'), 'x\n');
+    assert.equal(again().fast, undefined);
+  } finally { s.cleanup(); }
+});
