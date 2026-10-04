@@ -71,7 +71,7 @@ function composeBlock({ id, source, confidence, receipt, title, bytes, now }) {
   return `${lines.join('\n')}\n${note}\n\n\`\`\`\n${bytes.toString('utf8').replace(/\n$/, '')}\n\`\`\`\n`;
 }
 
-export function landObservation(project, { id, source, bytes, sha, confidence = 'sourced', receipt = null, title = null, now = new Date().toISOString(), lockOpts = {} }) {
+export function landObservation(project, { id, source, bytes, sha, confidence = 'sourced', receipt = null, title = null, now = new Date().toISOString(), lockOpts = {}, fsOps = { writeFileSync, renameSync, rmSync } }) {
   if (!ID_RE.test(String(id))) return { status: 'refused:bad-id', id };
   if (!SOURCE_RE.test(String(source)) || !existsSync(join(project, '_sources', `${source}.yaml`))) return { status: 'refused:unregistered-source', id };
   if (!VALID_CONFIDENCE_LEVELS.has(confidence)) return { status: 'refused:bad-confidence', id };
@@ -123,9 +123,16 @@ export function landObservation(project, { id, source, bytes, sha, confidence = 
       const inbox = join(project, 'inbox.md');
       const old = existsSync(inbox) ? readFileSync(inbox, 'utf8') : '';
       const sep = !old ? '' : old.endsWith('\n\n') ? '' : old.endsWith('\n') ? '\n' : '\n\n';
+      // The old inbox stays in place until the rename; a failed write or rename removes the temp
+      // file and reports the failure, so the next run sees the old inbox and lands once.
       const tmp = join(project, `.inbox.md.tmp-${process.pid}-${Date.now()}`);
-      writeFileSync(tmp, old + sep + block);
-      renameSync(tmp, inbox);
+      try {
+        fsOps.writeFileSync(tmp, old + sep + block);
+        fsOps.renameSync(tmp, inbox);
+      } catch (e) {
+        try { fsOps.rmSync(tmp, { force: true }); } catch { /* the failure below is what matters */ }
+        return { status: 'pending:write-failed', id, detail: e.code || e.message };
+      }
       return { status: 'landed', id };
     }, { retries: 20, retryDelayMs: 100, ...lockOpts });
   } catch (e) {

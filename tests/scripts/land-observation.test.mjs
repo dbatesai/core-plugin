@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, renameSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -162,6 +162,31 @@ test('a receipt-bearing call is never satisfied by a same-id record without a co
   writeFileSync(join(dir2, '_memories', 'obs-collab-aaaaaaaaaaaaaaaa.md'), `---\nid: obs-collab-aaaaaaaaaaaaaaaa\nsource: collab\nquoted-sha256: ${sha256(OUT)}\nhandoff-origin-anchor: localhost:9\nhandoff-outcome-sha256: ${sha256(OUT)}\nhandoff-mapping: collab-outcome/1\n---\nbody\n`);
   assert.equal(landCollab(dir2).status, 'refused:receipt-missing', 'a partial receipt missing the full collab id');
   rmSync(dir, { recursive: true, force: true }); rmSync(dir2, { recursive: true, force: true });
+});
+
+test('a write or rename that fails leaves the old inbox intact and no temp file; the retry lands exactly once', () => {
+  for (const fault of ['write-partial', 'rename']) {
+    const dir = project();
+    writeFileSync(join(dir, 'inbox.md'), '---\nid: obs-earlier\ntype: observation\nstatus: draft\nsource: bblens\nextracted-at: 2026-10-01T00:00:00Z\nconfidence-level: sourced\nmode: B\n---\nearlier block "quoted"\n');
+    const before = inbox(dir);
+    const fsOps = {
+      writeFileSync: (p, data) => {
+        if (fault === 'write-partial') { writeFileSync(p, String(data).slice(0, 40)); const e = new Error('disk full'); e.code = 'ENOSPC'; throw e; }
+        writeFileSync(p, data);
+      },
+      renameSync: (a, b) => { if (fault === 'rename') { const e = new Error('crash at rename'); e.code = 'EIO'; throw e; } renameSync(a, b); },
+      rmSync,
+    };
+    const r = landCollab(dir, { fsOps });
+    assert.equal(r.status, 'pending:write-failed', fault);
+    assert.equal(inbox(dir), before, `${fault}: old inbox byte-identical`);
+    assert.deepEqual(readdirSync(dir).filter(f => f.startsWith('.inbox.md.tmp')), [], `${fault}: no temp file left`);
+    assert.equal(landCollab(dir).status, 'landed', `${fault}: retry lands`);
+    assert.equal(landCollab(dir).status, 'already-landed', `${fault}: once`);
+    assert.equal((inbox(dir).match(/^handoff-collab-id: /gm) || []).length, 1);
+    assert.ok(inbox(dir).startsWith(before.trimEnd()), `${fault}: the earlier block is preserved`);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('BBLens-shaped direct intake: every revision lands once, in any arrival order, and retries converge', () => {
