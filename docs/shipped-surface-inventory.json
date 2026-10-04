@@ -506,6 +506,13 @@
       "surface": "shipped"
     },
     {
+      "name": "project-only",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/project-only.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "project-slug",
       "kind": "script",
       "harness": "shared",

@@ -34,7 +34,9 @@ Use this section instead of everything below it when the user's task includes th
 In this mode CORE reads and writes inside the folder only. It never reads `~/.core`, the agent profile, the topics list, the harness's own memory or transcripts, and it never registers the folder. Run, with `<root>` set to the session's working folder:
 
 ```bash
-node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" startup --root <root> --harness <harness> --session <session id if known>
+[ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
+node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" startup --root <root> --harness <harness> --session <session id if known> \
+  || echo "CORE-PROJECT-ONLY-FAILED: CORE_ROOT is unresolved or the startup refused (see its JSON)"
 ```
 
 It prints one JSON line:
