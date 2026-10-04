@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = resolve(__dirname, '../../plugins/core/skills/core/scripts');
@@ -187,6 +188,39 @@ test('a write or rename that fails leaves the old inbox intact and no temp file;
     assert.ok(inbox(dir).startsWith(before.trimEnd()), `${fault}: the earlier block is preserved`);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('a held inbox or unit file is a named pending state, never an exception; the retry lands once', () => {
+  for (const target of ['inbox', 'unit']) {
+    const dir = project();
+    writeFileSync(join(dir, 'inbox.md'), '');
+    writeFileSync(join(dir, '_memories', 'note.md'), '---\nid: note\n---\nbody\n');
+    const held = target === 'inbox' ? join(dir, 'inbox.md') : join(dir, '_memories', 'note.md');
+    const fsOps = { readFileSync: (p, enc) => { if (p === held) { const e = new Error('resource busy'); e.code = 'EBUSY'; throw e; } return readFileSync(p, enc); } };
+    const r = landCollab(dir, { fsOps });
+    assert.equal(r.status, 'pending:read-failed', target);
+    assert.equal(r.detail, 'EBUSY');
+    assert.equal(inbox(dir), '', `${target}: inbox untouched`);
+    assert.deepEqual(readdirSync(dir).filter(f => f.startsWith('.inbox.md.tmp')), []);
+    assert.equal(landCollab(dir).status, 'landed', `${target}: retry lands`);
+    assert.equal(landCollab(dir).status, 'already-landed');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('win32: inbox.md held open with no sharing by another process → pending, old inbox intact, then lands once', { skip: process.platform !== 'win32' && 'needs a Windows sharing lock (run on win32)' }, async () => {
+  const dir = project();
+  writeFileSync(join(dir, 'inbox.md'), '');
+  const ready = join(dir, 'held.ready');
+  const ps = spawn('powershell', ['-NoProfile', '-Command', `$f=[System.IO.File]::Open('${join(dir, 'inbox.md')}','Open','Read','None'); New-Item -ItemType File '${ready}' | Out-Null; Start-Sleep 4; $f.Close()`]);
+  while (!existsSync(ready)) await new Promise(r => setTimeout(r, 50));
+  const r = landCollab(dir);
+  assert.match(r.status, /^pending:/);
+  await new Promise(r => ps.on('close', r));
+  assert.equal(inbox(dir), '');
+  assert.equal(landCollab(dir).status, 'landed');
+  assert.equal(landCollab(dir).status, 'already-landed');
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('BBLens-shaped direct intake: every revision lands once, in any arrival order, and retries converge', () => {

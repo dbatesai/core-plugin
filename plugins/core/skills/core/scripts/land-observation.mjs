@@ -10,7 +10,7 @@
  * the same `handoff-collab-id` (a handoff receipt) or, without a receipt, the same `id` with a
  * byte-identical block. A differing record under the same key is refused, not replaced.
  *
- * Outcomes: landed · already-landed · refused:<reason> · pending:lock-busy. A refusal writes
+ * Outcomes: landed · already-landed · refused:<reason> · pending:<reason>. A refusal writes
  * nothing. The write is a temp file renamed over inbox.md under the project intake lock, so a
  * crash leaves the old file or the new one, never a partial block.
  *
@@ -19,7 +19,7 @@
  *        [--receipt '{"collab_id":…,"origin_anchor":…,"outcome_sha256":…,"mapping":…}']  < bytes
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync as fsReadFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkInbox, parseInboxBlocks } from './check-inbox.mjs';
@@ -38,7 +38,7 @@ const fmKey = (f) => `handoff-${f.replace(/_/g, '-')}`;
 export const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 
 /** Every intake record the project holds: inbox blocks, then units anywhere under _memories/. */
-export function intakeRecords(project) {
+export function intakeRecords(project, readFileSync = fsReadFileSync) {
   const out = [];
   const inbox = join(project, 'inbox.md');
   if (existsSync(inbox)) for (const b of parseInboxBlocks(readFileSync(inbox, 'utf8'))) out.push({ where: 'inbox', fm: b.fm, body: b.body });
@@ -71,7 +71,8 @@ function composeBlock({ id, source, confidence, receipt, title, bytes, now }) {
   return `${lines.join('\n')}\n${note}\n\n\`\`\`\n${bytes.toString('utf8').replace(/\n$/, '')}\n\`\`\`\n`;
 }
 
-export function landObservation(project, { id, source, bytes, sha, confidence = 'sourced', receipt = null, title = null, now = new Date().toISOString(), lockOpts = {}, fsOps = { writeFileSync, renameSync, rmSync } }) {
+export function landObservation(project, { id, source, bytes, sha, confidence = 'sourced', receipt = null, title = null, now = new Date().toISOString(), lockOpts = {}, fsOps = {} }) {
+  const ops = { writeFileSync, renameSync, rmSync, readFileSync: fsReadFileSync, ...fsOps };
   if (!ID_RE.test(String(id))) return { status: 'refused:bad-id', id };
   if (!SOURCE_RE.test(String(source)) || !existsSync(join(project, '_sources', `${source}.yaml`))) return { status: 'refused:unregistered-source', id };
   if (!VALID_CONFIDENCE_LEVELS.has(confidence)) return { status: 'refused:bad-confidence', id };
@@ -100,7 +101,17 @@ export function landObservation(project, { id, source, bytes, sha, confidence = 
   mkdirSync(join(project, '_memories', '_lib'), { recursive: true });
   try {
     return withFileLock(lockPath, () => {
-      const records = intakeRecords(project);
+      // A file another process holds open (an editor, a sync client, a scanner: EBUSY/EPERM/EACCES
+      // on Windows) is a named pending state, never an exception out of intake.
+      let records, old;
+      const inbox = join(project, 'inbox.md');
+      try {
+        records = intakeRecords(project, ops.readFileSync);
+        old = existsSync(inbox) ? ops.readFileSync(inbox, 'utf8') : '';
+      } catch (e) {
+        if (!e.code) throw e;
+        return { status: 'pending:read-failed', id, detail: e.code };
+      }
       if (receipt) {
         const mine = records.filter(r => r.fm[fmKey('collab_id')] === receipt.collab_id);
         for (const r of mine) {
@@ -120,23 +131,22 @@ export function landObservation(project, { id, source, bytes, sha, confidence = 
       }
       if (sameId.length) return { status: 'already-landed', id, where: sameId.map(r => r.where) };
 
-      const inbox = join(project, 'inbox.md');
-      const old = existsSync(inbox) ? readFileSync(inbox, 'utf8') : '';
       const sep = !old ? '' : old.endsWith('\n\n') ? '' : old.endsWith('\n') ? '\n' : '\n\n';
       // The old inbox stays in place until the rename; a failed write or rename removes the temp
       // file and reports the failure, so the next run sees the old inbox and lands once.
       const tmp = join(project, `.inbox.md.tmp-${process.pid}-${Date.now()}`);
       try {
-        fsOps.writeFileSync(tmp, old + sep + block);
-        fsOps.renameSync(tmp, inbox);
+        ops.writeFileSync(tmp, old + sep + block);
+        ops.renameSync(tmp, inbox);
       } catch (e) {
-        try { fsOps.rmSync(tmp, { force: true }); } catch { /* the failure below is what matters */ }
+        try { ops.rmSync(tmp, { force: true }); } catch { /* the failure below is what matters */ }
         return { status: 'pending:write-failed', id, detail: e.code || e.message };
       }
       return { status: 'landed', id };
     }, { retries: 20, retryDelayMs: 100, ...lockOpts });
   } catch (e) {
     if (e.code === 'LOCK_HELD') return { status: 'pending:lock-busy', id };
+    if (e.code) return { status: 'pending:intake-error', id, detail: e.code };   // a filesystem fault at the lock
     throw e;
   }
 }
@@ -151,7 +161,7 @@ export function main(argv) {
   }
   let receipt = null;
   if (opt.receipt) { try { receipt = JSON.parse(opt.receipt); } catch { process.stdout.write(JSON.stringify({ status: 'refused:receipt-malformed', id: opt.id }) + '\n'); return 1; } }
-  const r = landObservation(project, { id: opt.id, source: opt.source, sha: opt.sha, confidence: opt.confidence, title: opt.title, receipt, bytes: readFileSync(0) });
+  const r = landObservation(project, { id: opt.id, source: opt.source, sha: opt.sha, confidence: opt.confidence, title: opt.title, receipt, bytes: fsReadFileSync(0) });
   process.stdout.write(JSON.stringify(r) + '\n');
   return r.status.startsWith('refused') ? 1 : 0;
 }

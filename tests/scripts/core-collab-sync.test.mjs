@@ -109,4 +109,19 @@ test('a tampered anchored event surfaces as a named refusal and lands nothing', 
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('one collab whose intake throws is a named pending item; the others still land and the run is logged', { skip }, async () => {
+  const dir = project();
+  const a = await round('faulta'); await a.close();
+  const b = await round('faultb'); await b.close();
+  const { landObservation } = await import(pathToFileURL(join(SCRIPTS, 'land-observation.mjs')).href);
+  const land = (p, o) => { if (o.title.includes('faulta')) { const e = new Error('busy'); e.code = 'EBUSY'; throw e; } return landObservation(p, o); };
+  const r = sync(dir, { land });
+  assert.equal(stateOf(r, 'sync-round-faulta'), 'pending:land-error');
+  assert.equal(stateOf(r, 'sync-round-faultb'), 'landed');
+  const log = readFileSync(join(dir, '_sessions', new Date().toISOString().slice(0, 10), 'handoff-log.jsonl'), 'utf8');
+  assert.match(log, /pending:land-error/);
+  assert.equal(stateOf(sync(dir), 'sync-round-faulta'), 'landed', 'the next run finishes it');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('cleanup', () => { rmSync(ROOT, { recursive: true, force: true }); });

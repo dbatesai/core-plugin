@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { isCliEntry } from './cli-entry.mjs';
 import { landObservation, sha256 } from './land-observation.mjs';
 
-export function syncCollab(project, { participant, collabCli = process.env.COLLAB_SCRIPTS_DIR, collabRoot = process.env.COLLAB_LOCAL_ROOT || join(homedir(), '.collab', 'local'), now = new Date().toISOString() } = {}) {
+export function syncCollab(project, { land = landObservation, participant, collabCli = process.env.COLLAB_SCRIPTS_DIR, collabRoot = process.env.COLLAB_LOCAL_ROOT || join(homedir(), '.collab', 'local'), now = new Date().toISOString() } = {}) {
   const outcomeCli = collabCli ? join(collabCli, 'collab-outcome.mjs') : null;
   if (!outcomeCli || !existsSync(outcomeCli)) return { status: 'skipped', reason: 'collab is not installed (no collab-outcome.mjs found)', items: [] };
   if (!participant) return { status: 'skipped', reason: 'no participant identity given', items: [] };
@@ -41,14 +41,21 @@ export function syncCollab(project, { participant, collabCli = process.env.COLLA
     if (report.status !== 'closed') { items.push({ collab: name, state: 'open', unanchored: report.unanchored }); continue; }
 
     const bytes = Buffer.from(report.outcome_bytes, 'utf8');
-    const landed = landObservation(project, {
+    let landed;
+    try {
+      landed = land(project, {
       id: `obs-collab-${report.collab_id.slice(0, 16)}`,
       source: 'collab',
       bytes, sha: sha256(bytes), now,
       // the slug comes from an unauthenticated event: display only its safe characters
       title: `Collab outcome: ${String(JSON.parse(report.outcome_bytes).slug ?? '').replace(/[^a-z0-9-]/gi, '').slice(0, 100) || '(unnamed)'}`,
       receipt: { collab_id: report.collab_id, origin_anchor: report.origin_anchor, outcome_sha256: report.outcome_sha256, mapping: report.mapping },
-    });
+      });
+    } catch (e) {
+      // one faulty item never suppresses the others or the log
+      items.push({ collab: name, state: 'pending:land-error', detail: e.code || String(e.message).slice(0, 200) });
+      continue;
+    }
     items.push({ collab: name, state: landed.status, id: landed.id, late: report.late });
   }
 
