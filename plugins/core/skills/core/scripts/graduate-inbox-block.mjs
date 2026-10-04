@@ -56,10 +56,13 @@ function locate(lines, id) {
   return null;
 }
 
-/** The unit file for an id in whichever observations/<month>/ holds it, else null. */
+/** The unit file for an id in whichever observations/<month>/ holds it, else null. A listing
+ *  failure other than absence is thrown, so an unreadable store never reads as "no unit yet". */
 function findUnit(project, id) {
   const root = join(project, '_memories', 'observations');
-  try { for (const m of readdirSync(root).sort().reverse()) { const p = join(root, m, `${id}.md`); if (existsSync(p)) return p; } } catch { /* none */ }
+  let months;
+  try { months = readdirSync(root); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+  for (const m of months.sort().reverse()) { const p = join(root, m, `${id}.md`); if (existsSync(p)) return p; }
   return null;
 }
 

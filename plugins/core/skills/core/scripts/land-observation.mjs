@@ -37,15 +37,21 @@ const fmKey = (f) => `handoff-${f.replace(/_/g, '-')}`;
 
 export const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 
-/** Every intake record the project holds: inbox blocks, then units anywhere under _memories/. */
-export function intakeRecords(project, readFileSync = fsReadFileSync) {
+/**
+ * Every intake record the project holds: inbox blocks, then units anywhere under _memories/.
+ * A directory that is genuinely absent holds nothing; any other listing failure is thrown, so an
+ * unreadable subtree is never read as "no prior receipt".
+ */
+export function intakeRecords(project, readFileSync = fsReadFileSync, listDir = readdirSync) {
   const out = [];
   const inbox = join(project, 'inbox.md');
   if (existsSync(inbox)) for (const b of parseInboxBlocks(readFileSync(inbox, 'utf8'))) out.push({ where: 'inbox', fm: b.fm, body: b.body });
   const stack = [join(project, '_memories')];
   while (stack.length) {
     const dir = stack.pop();
-    let entries; try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    let entries;
+    try { entries = listDir(dir, { withFileTypes: true }); }
+    catch (e) { if (e.code === 'ENOENT') continue; throw e; }
     for (const e of entries) {
       const p = join(dir, e.name);
       if (e.isDirectory()) { if (e.name !== '_validation') stack.push(p); }
@@ -72,7 +78,7 @@ function composeBlock({ id, source, confidence, receipt, title, bytes, now }) {
 }
 
 export function landObservation(project, { id, source, bytes, sha, confidence = 'sourced', receipt = null, title = null, now = new Date().toISOString(), lockOpts = {}, fsOps = {} }) {
-  const ops = { writeFileSync, renameSync, rmSync, readFileSync: fsReadFileSync, ...fsOps };
+  const ops = { writeFileSync, renameSync, rmSync, readFileSync: fsReadFileSync, readdirSync, ...fsOps };
   if (!ID_RE.test(String(id))) return { status: 'refused:bad-id', id };
   if (!SOURCE_RE.test(String(source)) || !existsSync(join(project, '_sources', `${source}.yaml`))) return { status: 'refused:unregistered-source', id };
   if (!VALID_CONFIDENCE_LEVELS.has(confidence)) return { status: 'refused:bad-confidence', id };
@@ -106,7 +112,7 @@ export function landObservation(project, { id, source, bytes, sha, confidence = 
       let records, old;
       const inbox = join(project, 'inbox.md');
       try {
-        records = intakeRecords(project, ops.readFileSync);
+        records = intakeRecords(project, ops.readFileSync, ops.readdirSync);
         old = existsSync(inbox) ? ops.readFileSync(inbox, 'utf8') : '';
       } catch (e) {
         if (!e.code) throw e;

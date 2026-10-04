@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, renameSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, renameSync, readdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -151,6 +151,62 @@ test('resume refuses an existing unit that is invalid or malformed; both files s
     assert.equal(inbox(dir), inboxBefore, `${name}: inbox obligation kept`);
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// After graduation the receipt lives only in a unit, so a store subtree that can't be listed must
+// never read as "no prior receipt": a changed anchor would otherwise land as a second decision.
+const graduated = () => {
+  const dir = project();
+  assert.equal(land(dir).status, 'landed');
+  assert.equal(graduateInboxBlock(dir, { id: ID, set: { topics: '[collab]' }, now: '2026-10-04T06:00:00Z' }).status, 'graduated');
+  assert.equal(inbox(dir).trim(), '');
+  return dir;
+};
+const moved = (dir) => landObservation(dir, { id: ID, source: 'collab', bytes: OUT, sha: sha256(OUT), receipt: { ...R, origin_anchor: 'localhost:10' } });
+const deny = (code) => (p, o) => { if (/observations[\\/]2026-10$/.test(p)) { const e = new Error(code); e.code = code; throw e; } return readdirSync(p, o); };
+
+test('a listing failure in the store keeps the inbox unchanged and is pending; the retry still finds the conflict', () => {
+  const dir = graduated();
+  assert.equal(moved(dir).status, 'refused:receipt-conflict');           // readable: the conflict is seen
+  for (const code of ['EACCES', 'EPERM', 'EBUSY', 'EIO']) {
+    const r = landObservation(dir, { id: ID, source: 'collab', bytes: OUT, sha: sha256(OUT), receipt: { ...R, origin_anchor: 'localhost:10' }, fsOps: { readdirSync: deny(code) } });
+    assert.deepEqual([r.status, r.detail], ['pending:read-failed', code]);
+    assert.equal(inbox(dir).trim(), '');
+  }
+  assert.equal(moved(dir).status, 'refused:receipt-conflict');           // released: still detected
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a real permission-denied month directory is pending, not a fresh landing', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'POSIX non-root only; the injected EPERM/EACCES case covers Windows' : false }, () => {
+  const dir = graduated();
+  const month = join(dir, '_memories', 'observations', '2026-10');
+  const unit = readFileSync(join(month, `${ID}.md`));
+  chmodSync(month, 0);
+  try {
+    assert.throws(() => readdirSync(month), e => e.code === 'EACCES');
+    assert.equal(moved(dir).status, 'pending:read-failed');
+    assert.equal(inbox(dir).trim(), '');
+  } finally { chmodSync(month, 0o755); }
+  assert.ok(readFileSync(join(month, `${ID}.md`)).equals(unit));
+  assert.equal(moved(dir).status, 'refused:receipt-conflict');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a genuinely absent store still permits the first intake', () => {
+  const dir = project();
+  rmSync(join(dir, '_memories'), { recursive: true, force: true });
+  assert.equal(land(dir).status, 'landed');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('graduation behind an unreadable observations folder is pending, never a false not-found', { skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'POSIX non-root only' : false }, () => {
+  const dir = graduated();
+  const obs = join(dir, '_memories', 'observations');
+  chmodSync(obs, 0);
+  try { assert.equal(graduateInboxBlock(dir, { id: ID }).status, 'pending:graduation-error'); }
+  finally { chmodSync(obs, 0o755); }
+  assert.equal(graduateInboxBlock(dir, { id: ID }).status, 'already-graduated');
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test('cleanup', () => { rmSync(HOME, { recursive: true, force: true }); });
