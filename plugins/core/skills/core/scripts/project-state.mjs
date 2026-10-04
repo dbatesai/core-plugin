@@ -1095,9 +1095,13 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   // the archived original instead of finding nothing to adopt.
   let plan = cand.resume || null;
   let manifest = null;
+  // A read error is not "no manifest": it holds the adoption so the same call can retry. Only a
+  // file that reads fine but isn't a JSON object counts as unparseable.
   const readJsonFile = (f) => {
-    try { if (!lstatSync(f).isFile()) return null; } catch { return null; }   // never through a link
-    try { const m = JSON.parse(readFileSync(f, 'utf8')); return m && typeof m === 'object' && !Array.isArray(m) ? m : null; } catch { return null; }
+    try { if (!lstatSync(f).isFile()) return { value: null }; } catch { return { value: null }; }   // never through a link
+    let text;
+    try { text = readFileSync(f, 'utf8'); } catch (e) { return { error: e.code || 'read-failed' }; }
+    try { const m = JSON.parse(text); return { value: m && typeof m === 'object' && !Array.isArray(m) ? m : null, parsed: true }; } catch { return { value: null, parsed: false }; }
   };
 
   if (!plan) {
@@ -1106,7 +1110,9 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     // Only a regular file is read: a planted symlink must not pull another file's contents into
     // the signed manifest. A non-file manifest is left untouched and named in not_archived.
     if (manifestIsFile) {
-      manifest = readJsonFile(manifestFile);
+      const got = readJsonFile(manifestFile);
+      if (got.error) return { status: 'held', reason: `manifest-unreadable:${got.error}`, oldPath: cand.oldPath };
+      manifest = got.value;
       if (!manifest) setAsideUnparseable(manifestFile);
     }
     // The bootstrap record is completion evidence, and another install's record proves nothing
@@ -1157,7 +1163,11 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     writeFileSync(tmp, JSON.stringify(plan) + '\n');
     renameSync(tmp, pendingFile);
   } else if (plan.manifestArchived) {
-    manifest = readJsonFile(join(plan.archive, MANIFEST));      // resume: the original, from the archive
+    // resume: the original, from the archive. It was archived, so it is required: anything short of
+    // a readable JSON object holds the adoption with the plan kept, never an empty completion.
+    const got = readJsonFile(join(plan.archive, MANIFEST));
+    if (!got.value) return { status: 'held', reason: `archived-original-unusable:${got.error || 'not-a-json-object'}`, oldPath: plan.oldPath, resumed: true };
+    manifest = got.value;
   }
 
   const notImported = [];

@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, realpathSync, cpSync, existsSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { registerProject } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import { readManifest, updateManifest, adoptionCandidate, adoptForeignState, localRootKey } from '../../plugins/core/skills/core/scripts/project-state.mjs';
@@ -195,5 +197,58 @@ test('planted adopted-* links under superseded/ are never written through; the a
     assert.equal(r.status, 'adopted');
     assert.deepEqual(readdirSync(outside), [], 'nothing written through a planted link');
     assert.ok(readFileSync(join(r.archived, 'workspace.json')).equals(originals['claude-code']), 'the original archived byte for byte');
+  } finally { s.cleanup(); }
+});
+
+test('a transient read error on the archived original holds the resume with its plan kept; the retry restores the notes', () => {
+  const s = sandbox();
+  try {
+    const { coreB, restored } = restoredTwoHarness(s);
+    const sidecar = join(restored, '.core', 'claude-code', 'workspace.json.mac');
+    rmSync(sidecar, { force: true }); mkdirSync(sidecar);
+    assert.throws(() => adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }));
+    rmSync(sidecar, { recursive: true });
+    const real = fs.readFileSync;
+    let failed = false;
+    fs.readFileSync = function (p, ...a) {
+      if (!failed && /[\\/]superseded[\\/]adopted-[^\\/]+[\\/]workspace\.json$/.test(String(p))) { failed = true; throw Object.assign(new Error('transient'), { code: 'EIO' }); }
+      return real.call(this, p, ...a);
+    };
+    syncBuiltinESMExports();
+    let r;
+    try { r = adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }); }
+    finally { fs.readFileSync = real; syncBuiltinESMExports(); }
+    assert.equal(failed, true, 'the fault fired');
+    assert.equal(r.status, 'held');
+    assert.match(r.reason, /^archived-original-unusable:EIO/);
+    assert.ok(adoptionCandidate({ root: restored, harness: 'claude-code', coreDir: coreB })?.resume, 'the plan is kept: still a resume');
+    const r2 = adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' });
+    assert.equal(r2.status, 'adopted');
+    assert.equal(r2.resumed, true);
+    assert.equal(readManifest({ root: restored, harness: 'claude-code', coreDir: coreB }).agent_notes, NOTES['claude-code']);
+    assert.equal(adoptionCandidate({ root: restored, harness: 'claude-code', coreDir: coreB }), null, 'only now is the plan removed');
+    assert.equal(adoptForeignState({ root: restored, harness: 'codex', coreDir: coreB, decision: 'yes' }).status, 'adopted');
+    assert.equal(readManifest({ root: restored, harness: 'codex', coreDir: coreB }).agent_notes, NOTES.codex);
+  } finally { s.cleanup(); }
+});
+
+test('a transient read error on the foreign manifest holds a fresh adoption without setting the manifest aside', () => {
+  const s = sandbox();
+  try {
+    const { coreB, restored } = restoredTwoHarness(s);
+    const real = fs.readFileSync;
+    let failed = false;
+    fs.readFileSync = function (p, ...a) {
+      if (!failed && /[\\/]\.core[\\/]claude-code[\\/]workspace\.json$/.test(String(p))) { failed = true; throw Object.assign(new Error('transient'), { code: 'EIO' }); }
+      return real.call(this, p, ...a);
+    };
+    syncBuiltinESMExports();
+    let r;
+    try { r = adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }); }
+    finally { fs.readFileSync = real; syncBuiltinESMExports(); }
+    assert.equal(r.status, 'held');
+    assert.ok(existsSync(join(restored, '.core', 'claude-code', 'workspace.json')), 'not set aside as unparseable');
+    assert.equal(adoptForeignState({ root: restored, harness: 'claude-code', coreDir: coreB, decision: 'yes' }).status, 'adopted');
+    assert.equal(readManifest({ root: restored, harness: 'claude-code', coreDir: coreB }).agent_notes, NOTES['claude-code']);
   } finally { s.cleanup(); }
 });
