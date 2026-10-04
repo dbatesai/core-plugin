@@ -226,6 +226,13 @@
       "surface": "shipped"
     },
     {
+      "name": "core-collab-sync",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/core-collab-sync.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "decorate-graph",
       "kind": "script",
       "harness": "shared",
@@ -349,6 +356,13 @@
       "kind": "script",
       "harness": "shared",
       "path": "skills/core/scripts/capability/instruction-surface-resolution-probe.mjs",
+      "surface": "shipped"
+    },
+    {
+      "name": "land-observation",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/land-observation.mjs",
       "surface": "shipped"
     },
     {

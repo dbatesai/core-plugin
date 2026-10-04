@@ -276,6 +276,18 @@ Direct-landing observations don't pass through the inbox walk; they do pass thro
 
 ---
 
+### Landing quoted bytes exactly once — `land-observation.mjs`
+
+An installation that delivers source bytes (a refresh item, a collaboration outcome) lands them with `scripts/land-observation.mjs` rather than writing `inbox.md` itself. It quotes the bytes verbatim in a fenced block under a draft frontmatter, checks the block against the same rules as `check-inbox.mjs`, and writes under the project intake lock by renaming a temp file over `inbox.md`, so a crash leaves the old file or the new one.
+
+- The source must be registered (`_sources/<source>.yaml`). The id is `obs-` plus lowercase letters, digits and dashes. The bytes are UTF-8, at most 256 KB, contain no bare `---` or fence line, and match the given SHA-256.
+- Acceptance is a parsed record, never a text match. A record carrying a handoff receipt (`handoff-collab-id`, `handoff-origin-anchor`, `handoff-outcome-sha256`, `handoff-mapping`) matches on the full collab id. Without a receipt, the match is on `id` plus `quoted-sha256`. A matching record anywhere in `inbox.md` or `_memories/` makes the call a no-op. A differing record under the same key is refused (`receipt-conflict`, `id-conflict`, `display-id-collision`), and nothing is written.
+- Outcomes: `landed`, `already-landed`, `refused:<reason>`, `pending:lock-busy`.
+
+**Graduating a block that carries `quoted-sha256` or `handoff-*` fields.** Keep those fields in the unit's frontmatter. Take the intake lock (`_memories/_lib/intake.lock`), write the unit first, and remove the inbox block second. A reader between the two steps sees the record twice, which still counts as one acceptance. A crash between them leaves both, and the next pass removes the inbox copy. It never yields zero.
+
+**Collaboration outcomes — `core-collab-sync.mjs`.** When collab is installed, `scripts/core-collab-sync.mjs` lands the outcome of each closed collab the project's participant joined. It reads collab only through collab's pure `collab-outcome.mjs` CLI, and does nothing (and says so) when collab is absent. What is owed is recomputed from the anchored ledger and the project's records on every run, so a crash leaves it visible and the next run finishes it. Each collab reports `landed`, `already-landed`, `open`, `not-joined`, or `refused:<reason>`, and every run appends to `_sessions/<date>/handoff-log.jsonl`.
+
 ## 5. Annotation frameworks (source-agnostic restatement of the observation-filter design)
 
 ### Confidence-level
