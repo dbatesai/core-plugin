@@ -41,6 +41,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
 import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
+import { takeNotice } from '../scripts/collab-notice.mjs';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { metricsEnabled } from '../scripts/log-event.mjs';
@@ -335,6 +336,9 @@ export async function main() {
   // honoring the effective `byteCap` (which can be smaller than the 2048
   // constant via CORE_RETRIEVAL_BYTE_CAP).
   const packText = trace.pack && trace.pack.text ? trace.pack.text : '';
+  // A collab handoff the background sync could not finish is shown once on the next turn.
+  const collabNotice = takeNotice(store);
+  if (collabNotice) process.stdout.write(`\n${collabNotice.join('\n')}\n`);
   if (packText) {
     process.stdout.write(packText);
   }

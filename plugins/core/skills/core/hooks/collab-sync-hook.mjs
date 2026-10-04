@@ -11,22 +11,24 @@
  * Guards, in order: kill switch CORE_COLLAB_SYNC=0; the cwd must resolve to a project registered
  * in ~/.core (a bare folder authorizes nothing); collab must be installed; the throttle stamp in
  * the project's hot state must be older than THROTTLE_MS. Fail-open: any error exits 0 and the
- * startup step or the next prompt retries. Claude Code only — Codex lands collab outcomes at its
- * /core startup step (harnesses/codex.md).
+ * startup step or the next prompt retries. Each run's readiness lines (pending, refused, a skip
+ * reason, an error) are kept as a notice that the next prompt's retrieval hook shows once.
+ * Claude Code only — Codex lands collab outcomes at its /core startup step (harnesses/codex.md).
  *
  * I/O: reads the UserPromptSubmit payload (.cwd) on stdin. Prints nothing. Always exits 0.
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
-import { syncCollab, findCollabScripts } from '../scripts/core-collab-sync.mjs';
+import { syncCollab, findCollabScripts, readinessLines } from '../scripts/core-collab-sync.mjs';
+import { writeNotice } from '../scripts/collab-notice.mjs';
 import { stateDir, detectStateHarness } from '../scripts/project-state.mjs';
 import { logHookEvent } from './hook-log.mjs';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
 
 export const THROTTLE_MS = 10 * 60 * 1000;
 
-export function runCollabSyncHook(payload, { env = process.env, now = Date.now(), sync = syncCollab, resolveRoot = resolveRegisteredRoot, findCollab = findCollabScripts, hotDir = (root) => stateDir({ root, harness: detectStateHarness(env), kind: 'hot', forWrite: true }).dir } = {}) {
+export function runCollabSyncHook(payload, { env = process.env, now = Date.now(), sync = syncCollab, resolveRoot = resolveRegisteredRoot, findCollab = findCollabScripts, hotDir = (root) => stateDir({ root, harness: detectStateHarness(env), kind: 'hot', forWrite: true }).dir, notice = (root, lines) => writeNotice(root, lines, { dir: hotDir(root) }) } = {}) {
   if (env.CORE_COLLAB_SYNC === '0') return { action: 'skip', reason: 'kill-switch' };
   const root = payload?.cwd ? resolveRoot(payload.cwd) : null;
   if (!root) return { action: 'skip', reason: 'unregistered' };
@@ -37,8 +39,12 @@ export function runCollabSyncHook(payload, { env = process.env, now = Date.now()
   if (existsSync(stamp)) { try { last = JSON.parse(readFileSync(stamp, 'utf8')).at || 0; } catch { /* treated as never */ } }
   if (now - last < THROTTLE_MS) return { action: 'skip', reason: 'throttled' };
   writeFileSync(stamp, JSON.stringify({ at: now }) + '\n');   // claim first, so concurrent prompts don't both run
-  const r = sync(root, { collabCli });
-  return { action: 'ran', status: r.status, items: r.items?.length ?? 0 };
+  let r;
+  try { r = sync(root, { collabCli }); }
+  catch (e) { r = { status: 'error', reason: e.code || String(e.message).slice(0, 120), items: [] }; }
+  // the states a reader needs are kept for the next foreground turn, not reduced to a count
+  try { notice(root, readinessLines(r)); } catch { /* the handoff log still has them */ }
+  return { action: 'ran', status: r.status, reason: r.reason, states: (r.items || []).map(i => i.state) };
 }
 
 function main() {

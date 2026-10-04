@@ -28,8 +28,10 @@ import { dirname, join, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isCliEntry } from './cli-entry.mjs';
 import { landObservation, sha256 } from './land-observation.mjs';
+import { detectStateHarness } from './project-state.mjs';
 
 const SPAWN_TIMEOUT_MS = 20000;
+export const TOTAL_BUDGET_MS = 45000;   // the whole run, under the hook's 60 s timeout
 
 /**
  * collab's scripts dir, from the Claude Code install record only. This picks code that the
@@ -38,17 +40,35 @@ const SPAWN_TIMEOUT_MS = 20000;
  * the resolved directory must sit inside that account's ~/.claude/plugins/. Null when absent.
  * A manual run can still name a scripts dir explicitly with --collab-cli.
  */
-export function findCollabScripts(_env = process.env, home = userInfo().homedir) {
+export function findCollabScripts(env = process.env, home = userInfo().homedir, harness = detectStateHarness(env)) {
+  const contained = (dir, base) => {
+    try {
+      if (!dir || !existsSync(dir)) return null;
+      const real = realpathSync(dir), rel = relative(realpathSync(base), real);
+      return rel && !rel.startsWith('..') && !isAbsolute(rel) ? real : null;
+    } catch { return null; }
+  };
+  if (harness === 'codex') {
+    // Codex plugin cache: ~/.codex/plugins/cache/<marketplace>/collab/<version>/ — newest version wins.
+    const base = join(home, '.codex', 'plugins');
+    const found = [];
+    try {
+      for (const m of readdirSync(join(base, 'cache'))) {
+        const vdir = join(base, 'cache', m, 'collab');
+        if (!existsSync(vdir)) continue;
+        for (const v of readdirSync(vdir)) found.push({ v, dir: join(vdir, v, 'skills', 'collab', 'scripts') });
+      }
+    } catch { return null; }
+    const cmp = (a, b) => { const x = a.v.split(/[.-]/).map(Number), y = b.v.split(/[.-]/).map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
+    for (const f of found.sort(cmp).reverse()) { const ok = contained(f.dir, base); if (ok) return ok; }
+    return null;
+  }
   try {
     const rec = JSON.parse(readFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'));
     const plugins = rec.plugins || rec;
     const key = Object.keys(plugins).find(k => k.startsWith('collab@'));
     const entry = key && (Array.isArray(plugins[key]) ? plugins[key][0] : plugins[key]);
-    const dir = entry?.installPath && join(entry.installPath, 'skills', 'collab', 'scripts');
-    if (!dir || !existsSync(dir)) return null;
-    const real = realpathSync(dir), base = realpathSync(join(home, '.claude', 'plugins'));
-    const rel = relative(base, real);
-    return rel && !rel.startsWith('..') && !isAbsolute(rel) ? real : null;
+    return contained(entry?.installPath && join(entry.installPath, 'skills', 'collab', 'scripts'), join(home, '.claude', 'plugins'));
   } catch { return null; }
 }
 
@@ -67,6 +87,7 @@ export function lookupParticipant(project, collabCli, projectId = null) {
   if (!existsSync(idCli)) return { error: 'this collab version has no read-only identity lookup' };
   const r = spawnSync(process.execPath, [idCli, '--show', projectId], { encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS });
   if (r.status === 3) return { error: 'no collab identity for this project' };
+  if (r.status === 5) return { error: `collab identity belongs to another workspace (${(r.stderr || '').trim().slice(0, 160)})` };
   if (r.status !== 0) return { error: `collab identity unreadable (${(r.stderr || '').trim().slice(0, 120) || `exit ${r.status}`})` };
   try { const id = JSON.parse(r.stdout); return { participants: [id.participant_id, id.triplet].filter(Boolean), projectId }; }
   catch { return { error: 'collab identity output unparseable' }; }
@@ -88,7 +109,9 @@ export function readinessLines(result) {
   ];
 }
 
-export function syncCollab(project, { land = landObservation, projectId = null, participant, collabCli = undefined, collabRoot = process.env.COLLAB_LOCAL_ROOT || join(homedir(), '.collab', 'local'), now = new Date().toISOString() } = {}) {
+export { writeNotice, takeNotice } from './collab-notice.mjs';
+
+export function syncCollab(project, { land = landObservation, projectId = null, budgetMs = TOTAL_BUDGET_MS, clock = Date.now, participant, collabCli = undefined, collabRoot = process.env.COLLAB_LOCAL_ROOT || join(homedir(), '.collab', 'local'), now = new Date().toISOString() } = {}) {
   collabCli ??= findCollabScripts();
   const outcomeCli = collabCli ? join(collabCli, 'collab-outcome.mjs') : null;
   if (!outcomeCli || !existsSync(outcomeCli)) return { status: 'skipped', reason: 'collab is not installed (no collab-outcome.mjs found)', items: [] };
@@ -100,9 +123,13 @@ export function syncCollab(project, { land = landObservation, projectId = null, 
   if (!existsSync(collabRoot)) return { status: 'ok', items: [] };
 
   const items = [];
+  const deadline = clock() + budgetMs;
   for (const name of readdirSync(collabRoot).sort()) {
     const dir = join(collabRoot, name);
-    const r = spawnSync(process.execPath, [outcomeCli, dir, ...[].concat(participant).flatMap(p => ['--participant', p])], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: SPAWN_TIMEOUT_MS });
+    const left = deadline - clock();
+    // the run as a whole is bounded: what the budget can't reach is named, and the next run continues
+    if (left <= 0) { items.push({ collab: name, state: 'pending:budget-exhausted' }); continue; }
+    const r = spawnSync(process.execPath, [outcomeCli, dir, ...[].concat(participant).flatMap(p => ['--participant', p])], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: Math.min(SPAWN_TIMEOUT_MS, left) });
     let report = null;
     try { report = JSON.parse(r.stdout); } catch { /* reported below */ }
     if (r.status !== 0 || !report) { items.push({ collab: name, state: 'refused:render-failed', detail: (r.stderr || '').trim().slice(0, 300) }); continue; }

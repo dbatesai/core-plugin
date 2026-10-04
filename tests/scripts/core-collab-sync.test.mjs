@@ -181,4 +181,36 @@ test('collab discovery reads only the install record, never an environment varia
   rmSync(home, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true });
 });
 
+test('the whole run is bounded: what the budget cannot reach is named pending and logged', { skip }, async () => {
+  const dir = project();
+  const x = await round('budget'); await x.close();
+  const r = syncCollab(dir, { participant: R1, collabCli: COLLAB, collabRoot: process.env.COLLAB_LOCAL_ROOT, budgetMs: 0 });
+  assert.ok(r.items.length > 0);
+  assert.ok(r.items.every(i => i.state === 'pending:budget-exhausted'), r.items.map(i => i.state).join(','));
+  assert.equal(inbox(dir), '');
+  assert.match(readFileSync(join(dir, '_sessions', new Date().toISOString().slice(0, 10), 'handoff-log.jsonl'), 'utf8'), /budget-exhausted/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a misfiled identity record (another workspace id inside) is a named skip', { skip }, async () => {
+  const dir = project();
+  const idDir = join(ROOT, 'identity');
+  mkdirSync(idDir, { recursive: true });
+  writeFileSync(join(idDir, 'proj-A.json'), JSON.stringify({ workspace_id: 'proj-B', triplet: R1, participant_id: 'p-b' }));
+  const r = syncCollab(dir, { projectId: 'proj-A', collabCli: COLLAB, collabRoot: process.env.COLLAB_LOCAL_ROOT });
+  assert.equal(r.status, 'skipped');
+  assert.match(r.reason, /^collab identity belongs to another workspace/);
+  assert.equal(inbox(dir), '');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('Codex discovery reads the Codex plugin cache, newest version first, contained in ~/.codex/plugins', () => {
+  const home = mkdtempSync(join(tmpdir(), 'home-codex-'));
+  assert.equal(findCollabScripts({}, home, 'codex'), null);
+  for (const v of ['1.2.0', '1.10.0', '1.9.3']) mkdirSync(join(home, '.codex', 'plugins', 'cache', 'mk', 'collab', v, 'skills', 'collab', 'scripts'), { recursive: true });
+  assert.equal(findCollabScripts({}, home, 'codex'), realpathSync(join(home, '.codex', 'plugins', 'cache', 'mk', 'collab', '1.10.0', 'skills', 'collab', 'scripts')));
+  assert.equal(findCollabScripts({}, home, 'claude-code'), null, 'a Codex install is not a Claude install');
+  rmSync(home, { recursive: true, force: true });
+});
+
 test('cleanup', () => { rmSync(ROOT, { recursive: true, force: true }); });
