@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = resolve(__dirname, '../../plugins/core/skills/core/scripts');
@@ -21,7 +22,7 @@ const { syncCollab, readinessLines, findCollabScripts } = await import(pathToFil
 const R1 = 'core-codex@codex:host';
 
 function project() {
-  const dir = mkdtempSync(join(tmpdir(), 'sync-proj-'));
+  const dir = removeLocalStateOnExit(mkdtempSync(join(tmpdir(), 'sync-proj-')));
   mkdirSync(join(dir, '_memories'), { recursive: true });
   mkdirSync(join(dir, '_sources'), { recursive: true });
   writeFileSync(join(dir, '_sources', 'collab.yaml'), 'name: collab\n');

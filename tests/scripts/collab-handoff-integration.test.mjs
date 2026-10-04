@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { trustedTestTmpRoot, registryEnvFor } from './trusted-test-tmp.mjs';
+import { trustedTestTmpRoot, registryEnvFor, removeLocalStateOnExit } from './trusted-test-tmp.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CORE = resolve(__dirname, '../../plugins/core/skills/core');
@@ -22,7 +22,7 @@ process.env.COLLAB_STATE_ROOT = join(ROOT, 'state');
 process.env.CORE_HARNESS = 'claude-code';
 const R1 = 'core-codex@codex:host';
 
-const PROJECT = mkdtempSync(join(trustedTestTmpRoot(), 'collab-int-proj-'));
+const PROJECT = removeLocalStateOnExit(mkdtempSync(join(trustedTestTmpRoot(), 'collab-int-proj-')));
 mkdirSync(join(PROJECT, '_memories'), { recursive: true });
 mkdirSync(join(PROJECT, '_sources'), { recursive: true });
 writeFileSync(join(PROJECT, '_sources', 'collab.yaml'), 'name: collab\n');
