@@ -5,10 +5,11 @@
  * path outside FS_CONFINE_ROOTS (path-delimiter separated) is recorded and refused with EACCES,
  * and the list is printed to stderr as `FS_CONFINE_VIOLATIONS <json>` at exit. Refused and
  * recorded both, because best-effort code that swallows the error would otherwise hide the access.
- * Covers the sync, callback and promise forms of the path-taking calls CORE uses; it is a test
+ * Named ESM imports see the wrappers too (synced after wrapping). Covers the sync, callback and promise forms of the path-taking calls CORE uses; it is a test
  * seam, not a sandbox (a native addon or child process is outside it).
  */
 import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { delimiter, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -46,4 +47,6 @@ for (const name of NAMES) {
 }
 const origExists = fs.existsSync;
 fs.existsSync = (p) => { if (!inside(p)) { refuse('existsSync', p); return false; } return origExists(p); };
+// CORE imports fs functions by name; without this, named imports keep the unwrapped originals.
+syncBuiltinESMExports();
 process.on('exit', () => { process.stderr.write(`FS_CONFINE_VIOLATIONS ${JSON.stringify(violations)}\n`); });

@@ -180,10 +180,9 @@ function assertReconciled(projectDir, path, currentText) {
 // Shared-write concurrency: the stamp lands in the PER-PROJECT cache
 // at <project>/_memories/_lib/state-cache.json — a single-owner file, so two
 // projects closing at once can't clobber each other's hashes (a shared global
-// cache write would be an unlocked read-modify-write). For one
-// release, readers take the UNION of per-project + the global
-// ~/.core/state-cache.json (newer last_written
-// wins), and a fresh per-project stamp is always the newer one, so the stamp never
+// cache write would be an unlocked read-modify-write). Readers take the
+// per-project entry whenever one exists and fall back to the global
+// ~/.core/state-cache.json only for a file with none, so the stamp never
 // touches the global cache or its lock.
 // Content outside the marker-delimited hot block is hashed on its own. `last_written_by:
 // hot-section` alone is NOT trustworthy evidence for a later hash mismatch —
@@ -230,7 +229,7 @@ export function recordProjectMdWrite(projectMdPath, { now = null, home = null } 
     try { return readFileSync(projectMdPath, 'utf8'); } catch { return ''; }
   })();
   const projectDir = dirname(resolve(projectMdPath));
-  // Shared stamp-and-prune plumbing lives in state-cache.mjs (shared with
+  // Shared locked-stamp plumbing lives in state-cache.mjs (shared with
   // decorate-graph.mjs so there is one copy of the
   // lock/prune logic). The domain-specific piece — hashing OUTSIDE the hot
   // block so a later mismatch can be classified correctly — stays here,

@@ -20,10 +20,11 @@
  * serialized under a project-local lock
  * (`<project>/_memories/_lib/.state-cache.lock`, same `withFileLock`
  * primitive every other lock in this codebase uses — no new mechanism). A
- * stamp touches nothing outside the project: a stale entry in the older global
- * `~/.core/state-cache.json` carries an older `last_written`, so the newer
- * per-project stamp wins the union read (`data-storage.md` §"Edit detection")
- * without a shared lock that every project's stamp would wait on.
+ * stamp never touches the older global `~/.core/state-cache.json` or a lock
+ * beside it: readers take the per-project entry whenever one exists
+ * (`data-storage.md` §"Edit detection"), so a stale global entry can't shadow
+ * it and no shared lock is needed. (The lock helper still reads
+ * `~/.core/install-id` for lock ownership.)
  *
  * What this module deliberately does NOT own: any domain-specific "what
  * counts as CORE's own write vs a real user edit" classification (e.g.
@@ -32,7 +33,7 @@
  * the code that defines the block markers — see `hot-section.mjs`'s
  * `hashOutsideHotBlock`/`classifyProjectMdChange` and `decorate-graph.mjs`'s
  * `hashOutsideEdgesBlock`/`classifyUnitChange`. This module only provides the
- * generic hash primitive and the stamp-and-prune plumbing both of those
+ * generic hash primitive and the locked stamp plumbing both of those
  * build on.
  */
 

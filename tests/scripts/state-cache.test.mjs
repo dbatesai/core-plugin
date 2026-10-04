@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join, dirname, resolve, delimiter } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -169,10 +169,10 @@ test('stampFiles is a no-op for an empty/absent entries array — never creates 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-// One project folder is enough: a stamp reads and writes only inside its project. The child runs
-// under the attempted-access gate with the project and this repo (the code) as the only roots, so
-// any touch of ~/.core, the OS temp dir or another project is recorded, even if swallowed.
-test('a stamp touches nothing outside its project — no shared lock or global cache', () => {
+// A stamp works inside its project: the child runs under the attempted-access gate with the
+// project and this repo (the code) as the only roots, so any touch of ~/.core, the OS temp dir or
+// another project is refused and recorded, even if the code swallows the error.
+test('a stamp touches no global cache or shared lock — its only outside access is the lock-identity read', () => {
   const { root, project, cachePath } = setup();
   try {
     const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -185,7 +185,9 @@ test('a stamp touches nothing outside its project — no shared lock or global c
     assert.equal(r.status, 0, r.stderr);
     assert.equal(JSON.parse(r.stdout).stamped, true);
     const v = JSON.parse(r.stderr.match(/FS_CONFINE_VIOLATIONS (.*)/)[1]);
-    assert.deepEqual(v, [], 'no access outside the project');
+    // The one outside access left is the lock helper's ownership identity (file-lock.mjs
+    // localMachineId → ~/.core/install-id), an open one-folder item; no global cache read, write or lock.
+    assert.deepEqual(v, [{ call: 'readFileSync', path: join(userInfo().homedir, '.core', 'install-id') }], 'only the lock-identity read leaves the project');
     assert.equal(JSON.parse(readFileSync(cachePath, 'utf8')).files['/a.md'].last_written_by, 'probe');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
