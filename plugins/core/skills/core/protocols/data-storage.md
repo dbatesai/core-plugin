@@ -531,8 +531,8 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
   cache DOES have a shared write within a project — `decorate-graph.mjs`, `hot-section.mjs`,
   and `maintenance-run.mjs` can all stamp it in the same window — so `stampFiles`/`stampFile`
   serialize the read-modify-write under `<project>/_memories/_lib/.state-cache.lock` (an
-  unlocked stamp loses writes under concurrent processes). The residual global cache (cross-project files
-  only) is written under `~/.core/state-cache.lock` via `withFileLock`.
+  unlocked stamp loses writes under concurrent processes). No stamp writes the older global cache or
+  takes a lock beside it.
 - **`agent-profile.md`, `topics.md`** — rare, usually interactive writes. Atomic
   write-temp-then-rename stays mandatory; if the file changed under you mid-session, re-read,
   merge your entry into the fresh copy, and narrate the collision in one line.
@@ -698,7 +698,7 @@ You don't have to narrate placement when the path is fully determined without a 
 - `inbox.md` raw external pulls.
 - Harness-local recall writes (path resolved per the `save-recall-note` adapter verb in `harnesses/<name>.md` — Claude Code's `~/.claude/projects/<hash>/memory/`, Codex's `~/.codex/memories/extensions/ad_hoc/notes/`).
 - Edits to a file the user explicitly named in the same turn.
-- State cache writes (`~/.core/state-cache.json`).
+- State cache writes (`<project>/_memories/_lib/state-cache.json`).
 - Hygiene log entries (`<project>/_sessions/<date>/hygiene-log.jsonl`).
 
 The test: exempt only when the path is determined by the artifact's own name, schema, or the user's explicit statement — not by classification you had to make.
