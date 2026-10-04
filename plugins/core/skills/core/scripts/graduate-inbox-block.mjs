@@ -12,17 +12,25 @@
  * Identity fields (`id`, `source`, `quoted-sha256`, `handoff-*`) are carried unchanged and cannot
  * be overridden; the inbox-only `mode` and `judgment-needed` are dropped; `status` becomes active.
  *
+ * The inbox copy is removed only once a complete, valid, stamped unit exists: a composed unit is
+ * checked against the store schema first; an existing unit must hold the block's body, not just
+ * its header; a creation stamp that fails keeps the block (pending:baseline-failed) and the retry
+ * stamps the verified unit.
+ *
  * Outcomes: graduated · graduated-resumed (unit already written, block removed now) ·
  * already-graduated · refused:<reason> · pending:<reason>.
  *
  * CLI: node graduate-inbox-block.mjs <project> --id <obs-…> [--set '<json frontmatter overrides>']
  *        [--resolution-file <path>]
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isCliEntry } from './cli-entry.mjs';
 import { withFileLock } from './file-lock.mjs';
-import { createFile } from './lifecycle-detect.mjs';
+import { createFile, classifyFileLifecycle, stampCreatedBaseline } from './lifecycle-detect.mjs';
+import { checkSchema } from './check-units.mjs';
+import { loadUnit } from './priority.mjs';
 import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 
 const INBOX_ONLY = new Set(['mode', 'judgment-needed']);
@@ -48,9 +56,32 @@ function locate(lines, id) {
   return null;
 }
 
+/** The unit file for an id in whichever observations/<month>/ holds it, else null. */
+function findUnit(project, id) {
+  const root = join(project, '_memories', 'observations');
+  try { for (const m of readdirSync(root).sort().reverse()) { const p = join(root, m, `${id}.md`); if (existsSync(p)) return p; } } catch { /* none */ }
+  return null;
+}
+
+/** Schema FAILs for a composed unit, checked from a temp copy before it enters the store. */
+function schemaFails(text, id) {
+  const dir = mkdtempSync(join(tmpdir(), 'grad-check-'));
+  try {
+    const p = join(dir, `${id}.md`);
+    writeFileSync(p, text);
+    const report = [];
+    checkSchema([loadUnit(p)], dir, report);
+    return report.filter(r => r.level === 'FAIL').map(r => r.check);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+/** A failed creation stamp, as a pending state the caller can retry; null when stamped. */
+const stampFailure = (stamp, id, path) => (stamp && stamp.stamped === false
+  ? { status: 'pending:baseline-failed', id, path, detail: stamp.reason || stamp.outcome || 'unstamped' } : null);
+
 const sameIdentity = (a, b) => Object.keys({ ...a, ...b }).filter(IMMUTABLE).every(k => (a[k] ?? null) === (b[k] ?? null));
 
-export function graduateInboxBlock(project, { id, set = {}, resolution = '', now = new Date().toISOString(), lockOpts = {}, fsOps = {} } = {}) {
+export function graduateInboxBlock(project, { id, set = {}, resolution = '', now = new Date().toISOString(), lockOpts = {}, fsOps = {}, create = createFile, stamp = stampCreatedBaseline } = {}) {
   if (!ID_RE.test(String(id))) return { status: 'refused:bad-id', id };
   for (const [k, v] of Object.entries(set)) {
     if (IMMUTABLE(k) || INBOX_ONLY.has(k)) return { status: 'refused:immutable-field', id, field: k };
@@ -66,20 +97,29 @@ export function graduateInboxBlock(project, { id, set = {}, resolution = '', now
       const text = existsSync(inbox) ? readFileSync(inbox, 'utf8') : '';
       const lines = text.split(/\r?\n/);
       const hit = locate(lines, id);
-      const unitPath = join(project, '_memories', 'observations', (hit?.fm['extracted-at'] || now).slice(0, 7), `${id}.md`);
-      if (!hit) return existsSync(unitPath) ? { status: 'already-graduated', id, path: unitPath } : { status: 'refused:not-found', id };
+      if (!hit) { const found = findUnit(project, id); return found ? { status: 'already-graduated', id, path: found } : { status: 'refused:not-found', id }; }
+      const unitPath = findUnit(project, id) || join(project, '_memories', 'observations', (hit.fm['extracted-at'] || now).slice(0, 7), `${id}.md`);
 
       let resumed = false;
       if (existsSync(unitPath)) {
-        const [unitFm] = parseFlatFrontmatter(readFileSync(unitPath, 'utf8'));
-        if (!sameIdentity(unitFm, hit.fm)) return { status: 'refused:unit-conflict', id, path: unitPath };
+        const [unitFm, unitBody] = parseFlatFrontmatter(readFileSync(unitPath, 'utf8'));
+        // a matching header is not enough: the inbox copy is removed only when the unit still holds its body
+        if (!sameIdentity(unitFm, hit.fm) || (hit.body && !String(unitBody).includes(hit.body))) return { status: 'refused:unit-conflict', id, path: unitPath };
         resumed = true;                                   // the unit landed before a crash; finish the removal
+        if (classifyFileLifecycle(project, unitPath, { kind: 'unit' }).classification === 'no-baseline') {
+          const failed = stampFailure(stamp(project, unitPath, { kind: 'unit', lastWrittenBy: 'graduate-inbox-block', now }), id, unitPath);
+          if (failed) return failed;
+        }
       } else {
         const fm = {};
         for (const [k, v] of Object.entries(hit.fm)) if (!INBOX_ONLY.has(k)) fm[k] = v;
-        Object.assign(fm, { status: 'active', created: fm.created || now.slice(0, 10), updated: now.slice(0, 10) }, set);
+        Object.assign(fm, { status: 'active', created: fm.created || now.slice(0, 10), updated: now.slice(0, 10), topics: fm.topics || '[]' }, set);
         const body = hit.body + (resolution.trim() ? `\n\n## Resolution\n\n${resolution.trim()}` : '');
-        createFile(project, unitPath, `---\n${Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n${body}\n`, { kind: 'unit', lastWrittenBy: 'graduate-inbox-block', now });
+        const text = `---\n${Object.entries(fm).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n${body}\n`;
+        const fails = schemaFails(text, id);
+        if (fails.length) return { status: 'refused:invalid-unit', id, detail: fails.join(',') };
+        const failed = stampFailure(create(project, unitPath, text, { kind: 'unit', lastWrittenBy: 'graduate-inbox-block', now }), id, unitPath);
+        if (failed) return failed;                        // the unit's bytes landed but its baseline didn't: keep the inbox copy
       }
 
       // remove the block and the one blank separator line after it, by temp file + rename

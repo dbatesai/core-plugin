@@ -80,4 +80,58 @@ test('identity fields cannot be overridden; a different unit already at the path
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('a unit with the same header but a different body is a conflict; neither file changes and the source stays', () => {
+  const dir = project();
+  land(dir);
+  const before = inbox(dir);
+  const path = join(dir, '_memories', 'observations', '2026-10', `${ID}.md`);
+  mkdirSync(dirname(path), { recursive: true });
+  const header = before.split('\n---\n')[0].replace('status: draft', 'status: active').replace('mode: B\n', '');
+  const other = `${header}\n---\nDIFFERENT BODY\n`;
+  writeFileSync(path, other);
+  assert.equal(graduateInboxBlock(dir, { id: ID }).status, 'refused:unit-conflict');
+  assert.equal(readFileSync(path, 'utf8'), other);
+  assert.equal(inbox(dir), before, 'the only copy of the source bytes is kept');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a failed creation stamp keeps the inbox copy; the retry stamps the verified unit and finishes', async () => {
+  const { createFile, classifyFileLifecycle } = await import(pathToFileURL(join(SCRIPTS, 'lifecycle-detect.mjs')).href);
+  const dir = project();
+  land(dir);
+  const create = (p, path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text); return { stamped: false, outcome: 'attribution-unknown', recovery: 'recovery-required', reason: 'LOCK_HELD' }; };
+  const r1 = graduateInboxBlock(dir, { id: ID, create, now: '2026-10-04T06:00:00Z' });
+  assert.equal(r1.status, 'pending:baseline-failed');
+  assert.equal(r1.detail, 'LOCK_HELD');
+  assert.ok(inbox(dir).includes(ID), 'inbox obligation retained');
+  assert.equal(classifyFileLifecycle(dir, r1.path, { kind: 'unit' }).classification, 'no-baseline');
+  const r2 = graduateInboxBlock(dir, { id: ID });
+  assert.equal(r2.status, 'graduated-resumed');
+  assert.notEqual(classifyFileLifecycle(dir, r2.path, { kind: 'unit' }).classification, 'no-baseline', 'now stamped');
+  assert.ok(!inbox(dir).includes(ID));
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a plain land → graduate with no overrides yields a unit that passes the store schema', async () => {
+  const { checkSchema } = await import(pathToFileURL(join(SCRIPTS, 'check-units.mjs')).href);
+  const { loadUnit } = await import(pathToFileURL(join(SCRIPTS, 'priority.mjs')).href);
+  const dir = project();
+  land(dir);
+  const r = graduateInboxBlock(dir, { id: ID });
+  assert.equal(r.status, 'graduated');
+  const report = [];
+  checkSchema([loadUnit(r.path)], join(dir, '_memories'), report);
+  assert.deepEqual(report.filter(x => x.level === 'FAIL'), []);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a retry in a later month finds the unit in its original month', () => {
+  const dir = project();
+  landObservation(dir, { id: ID, source: 'collab', bytes: OUT, sha: sha256(OUT), receipt: R, now: '2026-09-30T05:00:00Z' });
+  const r = graduateInboxBlock(dir, { id: ID, now: '2026-10-01T06:00:00Z' });
+  assert.match(r.path, /observations[\\/]2026-09[\\/]/);
+  assert.equal(graduateInboxBlock(dir, { id: ID, now: '2026-10-01T07:00:00Z' }).status, 'already-graduated');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('cleanup', () => { rmSync(HOME, { recursive: true, force: true }); });
