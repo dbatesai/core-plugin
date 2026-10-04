@@ -160,3 +160,46 @@ test('only restrictions in the unverified manifest take effect; an unreadable on
     try { assert.equal(readPendingManifest(ctx).capture, 'held'); } finally { chmodSync(m, 0o644); }
   } finally { p.cleanup(); }
 });
+
+// A folder can arrive with CORE's own paths as links to somewhere else; nothing may follow them out.
+test('a linked .core, pending folder, manifest or capture file is refused, and nothing is written or read outside', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const run = (root, ...args) => confined(root, [join(CORE, 'scripts/project-only.mjs'), ...args, '--root', root]);
+  for (const linkAt of ['.core', '.core/_project-only', '.core/_project-only/claude-code']) {
+    const p = project();
+    try {
+      const elsewhere = join(p.base, 'elsewhere'); mkdirSync(elsewhere);
+      mkdirSync(dirname(join(p.root, linkAt)), { recursive: true });
+      symlinkSync(elsewhere, join(p.root, linkAt));
+      const r = run(p.root, 'startup');
+      assert.equal(JSON.parse(r.stdout).state, 'refused-link', linkAt);
+      assert.deepEqual(readdirSync(elsewhere), [], `nothing written through ${linkAt}`);
+    } finally { p.cleanup(); }
+  }
+  const p = project();
+  try {
+    const secret = join(p.base, 'secret.json'); writeFileSync(secret, JSON.stringify({ agent_name: 'Leaked', turn_capture: true }));
+    const dir = join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code'); mkdirSync(dir, { recursive: true });
+    symlinkSync(secret, join(dir, 'manifest.json'));
+    const s = JSON.parse(run(p.root, 'status').stdout);
+    assert.deepEqual([s.manifest, s.capture], ['refused-link', 'held'], 'a linked manifest is not read, and capture holds');
+    const tc = join(p.root, '_metrics', 'turn-capture'); mkdirSync(tc, { recursive: true });
+    const outsideRows = join(p.base, 'rows.jsonl'); writeFileSync(outsideRows, '{"x":1}\n{"x":2}\n{"x":3}\n');
+    symlinkSync(outsideRows, join(tc, '2026-10-04.jsonl'));
+    const c = JSON.parse(run(p.root, 'capture-status').stdout);
+    assert.deepEqual([c.in_project.state, c.in_project.rows, c.outside_history], ['refused-link', undefined, 'unknown'], 'a linked capture file refuses the count rather than reading through it');
+  } finally { p.cleanup(); }
+});
+
+test('a link to another place inside the folder is refused too, so pending writes never land in the memory store', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const p = project();
+  try {
+    mkdirSync(join(p.root, '.core'), { recursive: true });
+    symlinkSync(join(p.root, '_memories'), join(p.root, '.core', PROJECT_ONLY_DIR));
+    const before = tree(join(p.root, '_memories'));
+    const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), 'startup', '--root', p.root]);
+    assert.equal(JSON.parse(r.stdout).state, 'refused-link');
+    assert.deepEqual(tree(join(p.root, '_memories')), before);
+  } finally { p.cleanup(); }
+});

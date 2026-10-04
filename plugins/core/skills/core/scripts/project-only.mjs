@@ -22,10 +22,10 @@
  *      purge, retention and finalize answer `unavailable`; anything else is refused.
  * Prints one JSON line. Exits 2 on a refused root or bad arguments.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { join, parse } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join, parse, sep } from 'node:path';
 import { userInfo } from 'node:os';
-import { atomicWriteFileSync } from './fs-atomic.mjs';
+import { randomBytes } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
 
 export const PROJECT_ONLY_DIR = '_project-only';
@@ -54,18 +54,48 @@ export function projectOnlyContext({ root, harness = 'claude-code', session = nu
 
 export const pendingDir = (ctx) => join(ctx.root, '.core', PROJECT_ONLY_DIR, ctx.harness);
 
-/** Creates the pending folder, with `.core/.gitignore` in place before anything else is written. */
-export function ensurePending(ctx) {
-  const core = join(ctx.root, '.core');
-  mkdirSync(core, { recursive: true });
-  const ignore = join(core, '.gitignore');
-  if (!existsSync(ignore)) writeFileSync(ignore, '*\n', { flag: 'wx' });
-  const dir = pendingDir(ctx);
-  mkdirSync(dir, { recursive: true });
-  return dir;
+// A folder can arrive with any of these paths as a link to somewhere else (a cloned repo, an
+// unzipped archive), which would carry writes and reads out of the project. Every component CORE
+// uses here must be a real directory or file under the root, never a link.
+const outside = (what) => Object.assign(new Error(`project-only: ${what} is a link or leaves the folder`), { code: 'OUTSIDE_ROOT' });
+
+/** A real (non-link) directory inside the root, created when absent; throws OUTSIDE_ROOT otherwise. */
+function ownDir(ctx, path) {
+  let st;
+  try { st = lstatSync(path); } catch (e) { if (e.code !== 'ENOENT') throw e; mkdirSync(path); st = lstatSync(path); }
+  if (st.isSymbolicLink() || !st.isDirectory()) throw outside(path);
+  const real = realpathSync.native(path);
+  if (!real.startsWith(ctx.root + sep)) throw outside(path);
+  return real;
 }
 
-function readJson(file) {
+/** A path inside the root that is not a link (absent is fine): the guard before every read. */
+function ownFile(ctx, path) {
+  let st;
+  try { st = lstatSync(path); } catch (e) { if (e.code === 'ENOENT') return false; throw e; }
+  if (st.isSymbolicLink() || !st.isFile()) throw outside(path);
+  return true;
+}
+
+/** Atomic write inside an own directory: an unguessable temp name created exclusively (never
+ *  through a planted link), then renamed over the target (rename replaces a link, never follows it). */
+function writeOwn(dir, name, body) {
+  const tmp = join(dir, `.${name}.${randomBytes(8).toString('hex')}.tmp`);
+  writeFileSync(tmp, body, { flag: 'wx' });
+  try { renameSync(tmp, join(dir, name)); } catch (e) { rmSync(tmp, { force: true }); throw e; }
+}
+
+/** Creates the pending folder, with `.core/.gitignore` in place before anything else is written. */
+export function ensurePending(ctx) {
+  const core = ownDir(ctx, join(ctx.root, '.core'));
+  const ignore = join(core, '.gitignore');
+  if (!existsSync(ignore)) writeFileSync(ignore, '*\n', { flag: 'wx' });   // wx never follows a link or overwrites
+  ownDir(ctx, join(core, PROJECT_ONLY_DIR));
+  return ownDir(ctx, pendingDir(ctx));
+}
+
+function readJson(ctx, file) {
+  try { if (!ownFile(ctx, file)) return { state: 'absent' }; } catch (e) { return { state: e.code === 'OUTSIDE_ROOT' ? 'refused-link' : 'unreadable', reason: e.code }; }
   let raw;
   try { raw = readFileSync(file, 'utf8'); } catch (e) { return e.code === 'ENOENT' ? { state: 'absent' } : { state: 'unreadable', reason: e.code }; }
   try { const v = JSON.parse(raw); return v && typeof v === 'object' && !Array.isArray(v) ? { state: 'ok', value: v } : { state: 'malformed' }; }
@@ -78,7 +108,14 @@ function readJson(file) {
  * different from disabled. A `true` never widens anything.
  */
 export function readPendingManifest(ctx) {
-  const r = readJson(join(pendingDir(ctx), 'manifest.json'));
+  let r;
+  try {
+    for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx)]) {
+      const st = lstatSync(d);
+      if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d);
+    }
+    r = readJson(ctx, join(pendingDir(ctx), 'manifest.json'));
+  } catch (e) { r = e.code === 'ENOENT' ? { state: 'absent' } : { state: e.code === 'OUTSIDE_ROOT' ? 'refused-link' : 'unreadable' }; }
   if (r.state === 'absent') return { state: 'absent', agent_name: null, capture: 'default' };
   if (r.state !== 'ok') return { state: r.state, agent_name: null, capture: 'held' };
   const m = r.value;
@@ -88,9 +125,11 @@ export function readPendingManifest(ctx) {
 }
 
 export function startup(ctx, { now = new Date() } = {}) {
-  const dir = ensurePending(ctx);
+  let dir;
+  try { dir = ensurePending(ctx); }
+  catch (e) { if (e.code === 'OUTSIDE_ROOT') return { status: 'refused', state: 'refused-link', reason: e.message }; throw e; }
   const manifest = readPendingManifest(ctx);
-  atomicWriteFileSync(join(dir, 'bootstrap.json'), JSON.stringify({ mode: 'project-only', harness: ctx.harness, session: ctx.session, at: now.toISOString() }, null, 2) + '\n');
+  writeOwn(dir, 'bootstrap.json', JSON.stringify({ mode: 'project-only', harness: ctx.harness, session: ctx.session, at: now.toISOString() }, null, 2) + '\n');
   return {
     status: 'ok', mode: 'project-only', root: ctx.root, harness: ctx.harness,
     agent_name: manifest.agent_name, manifest: manifest.state, capture: manifest.capture,
@@ -114,11 +153,16 @@ export function captureStatus(ctx) {
   let rows = 0;
   let state = 'ok';
   try {
+    for (const d of [join(ctx.root, '_metrics'), dir]) { const st = lstatSync(d); if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d); }
     for (const f of readdirSync(dir).filter((n) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(n)).sort()) {
+      if (!ownFile(ctx, join(dir, f))) continue;
       files.push(f);
       rows += readFileSync(join(dir, f), 'utf8').split('\n').filter(Boolean).length;
     }
-  } catch (e) { if (e.code === 'ENOENT') state = 'none-in-project'; else return { status: 'ok', mode: 'project-only', in_project: { state: 'unreadable', reason: e.code }, outside_history: 'unknown' }; }
+  } catch (e) {
+    if (e.code === 'ENOENT') state = 'none-in-project';
+    else return { status: 'ok', mode: 'project-only', in_project: { state: e.code === 'OUTSIDE_ROOT' ? 'refused-link' : 'unreadable', reason: e.code }, outside_history: 'unknown' };
+  }
   return { status: 'ok', mode: 'project-only', in_project: { state, files: files.length, rows, first: files[0] || null, last: files.at(-1) || null }, outside_history: 'unknown', capture: readPendingManifest(ctx).capture };
 }
 
