@@ -300,6 +300,15 @@ The graduation step is where the LLM's value lives — noticing connections acro
    This is the ONLY safe first-write: creating a new file establishes its first baseline, which is a different, safe operation from overwriting an existing file that might carry unreconciled user content. If you skip it, the unit is not lost — it is held and surfaced at the next lifecycle pass, and you re-stamp then. (Same seam for a fresh PROJECT.md render: `--stamp-created PROJECT.md --kind project`.)
 9. Source observations stay in place — the raw record is preserved.
 
+### Inbox block → observation: `graduate-inbox-block.mjs`
+
+Moving a tagged block out of `inbox.md` is mechanical, and losing or doubling it would break the acceptance record an installation relies on. So it goes through `scripts/graduate-inbox-block.mjs` (`/process-memory` Step 1 has the call). The agent decides the content: frontmatter adjustments, and a Resolution for a mode-C question. The script, under the project intake lock (`_memories/_lib/intake.lock`, the one `land-observation.mjs` takes):
+
+- writes the observation first, atomically and with its creation baseline stamped (step 8 above, done by the script);
+- then removes the block from `inbox.md` by renaming a temp file into place.
+
+Identity fields (`id`, `source`, `quoted-sha256`, `handoff-*`) carry over unchanged. A crash between the two writes leaves both copies, which counts as one acceptance, and the next pass finishes the removal. It never yields zero.
+
 ### Dispatch gate — Sonnet vs Opus
 
 Graduation runs as a subagent, not in the main agent's context. Classify the call before dispatching:

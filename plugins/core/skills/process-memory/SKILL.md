@@ -75,8 +75,17 @@ It validates block structure — required pre-graduation fields, valid `mode` va
 
 **Tagged observation blocks** carry full frontmatter (id, type, status, source, source-instance, extracted-at, references-person, confidence-level, body) plus two framework fields: `mode: B | C` and, on `mode: C`, `judgment-needed: <prose>`. These come from extractors implementing the source-registration framework (`references/external-sources/source-registration-framework.md §4`). The two framework fields are inbox-only annotations — strip them from the frontmatter before writing the graduated unit.
 
-- **`mode: B` (routine)** — check the proposed frontmatter against the store, adjust anything wrong, and write the block to `<project>/_memories/observations/<YYYY-MM>/obs-<id>.md` with `status: active`. Discard noise with a one-line note. Narrate what you graduated.
+- **`mode: B` (routine)** — check the proposed frontmatter against the store, decide any adjustments, and graduate the block with the script below. It writes `<project>/_memories/observations/<YYYY-MM>/<id>.md` with `status: active`. Discard noise with a one-line note. Narrate what you graduated.
 - **`mode: C` (open question)** — answer the `judgment-needed` question from the evidence: the retrieval ladder, the sources the block and the existing units cite, the user's own words. Expect this to resolve the large majority of mode-C blocks — a contradiction usually has a higher-authority source (sourced beats inferred, newer beats older, the user's own words beat everything), and a genuinely unresolvable tie is rare. When the evidence settles it, graduate the block with your answer and its evidence in a `## Resolution` body subsection, even when you're not fully certain — a wrong call here is corrected by the next supersession, not lost. If it meets the critical bar in `protocols/data-storage.md` §"Deciding on memory writes" and the evidence cannot settle it, or if a required authorization/authorship decision belongs to the user, ask that one question, record it as an open-question unit, and leave the block in `inbox.md` until they answer. In particular, restoring user-removed content is always user-only, even when new evidence supports it.
+
+**Graduate a tagged block with the script, never by hand-editing `inbox.md`:**
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/graduate-inbox-block.mjs" "<project>" --id <block id> \
+  [--set '{"topics":"[a, b]"}'] [--resolution-file <path to your Resolution text>]
+```
+
+You decide the content: frontmatter adjustments go in `--set`, and a mode-C answer goes in a Resolution file. The script does the move. Under the project intake lock it writes the unit first, with its creation baseline stamped, and removes the block second. Identity fields (`id`, `source`, `quoted-sha256`, `handoff-*`) carry over unchanged and can't be overridden, because they are what lets the source deliver the same item again without it landing twice. `refused:unit-conflict` means a different unit already holds that id: look before deciding. `graduated-resumed` means an earlier pass wrote the unit and the block is now removed. `pending:*` means retry on the next pass.
 
 **Untagged entries** (free-form text, observations dropped in without frontmatter):
 - Worth keeping → write to `_memories/observations/<YYYY-MM>/`
