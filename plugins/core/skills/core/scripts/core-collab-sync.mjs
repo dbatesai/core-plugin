@@ -45,7 +45,8 @@ export function syncCollab(project, { participant, collabCli = process.env.COLLA
       id: `obs-collab-${report.collab_id.slice(0, 16)}`,
       source: 'collab',
       bytes, sha: sha256(bytes), now,
-      title: `Collab outcome: ${JSON.parse(report.outcome_bytes).slug}`,
+      // the slug comes from an unauthenticated event: display only its safe characters
+      title: `Collab outcome: ${String(JSON.parse(report.outcome_bytes).slug ?? '').replace(/[^a-z0-9-]/gi, '').slice(0, 100) || '(unnamed)'}`,
       receipt: { collab_id: report.collab_id, origin_anchor: report.origin_anchor, outcome_sha256: report.outcome_sha256, mapping: report.mapping },
     });
     items.push({ collab: name, state: landed.status, id: landed.id, late: report.late });

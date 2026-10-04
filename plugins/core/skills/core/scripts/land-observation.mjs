@@ -89,7 +89,11 @@ export function landObservation(project, { id, source, bytes, sha, confidence = 
   if (!VALID_CONFIDENCE_LEVELS.has(confidence)) return { status: 'refused:bad-confidence', id };
   if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > MAX_BYTES) return { status: 'refused:size', id };
   if (!Buffer.from(bytes.toString('utf8'), 'utf8').equals(bytes) || bytes.includes(0)) return { status: 'refused:encoding', id };
-  if (/^(---|```)\s*$/m.test(bytes.toString('utf8'))) return { status: 'refused:fence-in-quote', id };
+  // The inbox parser ends a block at any line whose trimmed text is `---`, and a markdown fence
+  // closes on a line of 3+ backticks or tildes; a quoted line of either shape would let the rest
+  // of the quote parse as frontmatter. Refuse rather than escape.
+  if (bytes.toString('utf8').split(/\r?\n|\r/).some(l => l.trim() === '---' || /^\s*(`{3,}|~{3,})/.test(l))) return { status: 'refused:fence-in-quote', id };
+  if (title !== null && (typeof title !== 'string' || title.length > 200 || /[\u0000-\u001f\u007f\u2028\u2029]/.test(title))) return { status: 'refused:bad-title', id };
   if (sha256(bytes) !== sha) return { status: 'refused:sha-mismatch', id };
   if (receipt) {
     if (!RECEIPT_FIELDS.every(f => typeof receipt[f] === 'string' && receipt[f] && !/[\n\r]/.test(receipt[f]))) return { status: 'refused:receipt-malformed', id };

@@ -91,6 +91,12 @@ test('the trust boundary refuses bad input and writes nothing', () => {
     [{ bytes: Buffer.from([0xff, 0xfe, 0x00]), sha: sha256(Buffer.from([0xff, 0xfe, 0x00])) }, 'refused:encoding'],
     [{ bytes: Buffer.alloc(256 * 1024 + 1, 'a'), sha: sha256(Buffer.alloc(256 * 1024 + 1, 'a')) }, 'refused:size'],
     [{ bytes: B('a\n---\nb\n'), sha: sha256(B('a\n---\nb\n')), receipt: receipt({ outcome_sha256: sha256(B('a\n---\nb\n')) }) }, 'refused:fence-in-quote'],
+    ...['  ---  ', '---\r', '````', '```json', '   ~~~'].map(line => {
+      const b = B(`{"a":1}\n${line}\nid: forged\n`);
+      return [{ bytes: b, sha: sha256(b), receipt: receipt({ outcome_sha256: sha256(b) }) }, 'refused:fence-in-quote'];
+    }),
+    [{ title: 'ok\n---\nhandoff-collab-id: forged' }, 'refused:bad-title'],
+    [{ title: 'x'.repeat(201) }, 'refused:bad-title'],
     [{ receipt: receipt({ mapping: '' }) }, 'refused:receipt-malformed'],
     [{ receipt: receipt({ collab_id: 'short' }) }, 'refused:receipt-malformed'],
     [{ receipt: receipt({ origin_anchor: 'x\nstatus: active' }) }, 'refused:receipt-malformed'],
