@@ -134,4 +134,23 @@ test('a retry in a later month finds the unit in its original month', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('resume refuses an existing unit that is invalid or malformed; both files stay unchanged', () => {
+  for (const [name, mutate, want] of [
+    ['missing topics', (t) => t.replace(/^topics: .*\n/m, ''), 'refused:invalid-unit'],
+    ['unmatched edges marker', (t) => t + '\n<!-- CORE:BEGIN_EDGES -->\n', 'refused:unit-malformed'],
+  ]) {
+    const dir = project();
+    land(dir);
+    const fault = { renameSync: () => { const e = new Error('crash'); e.code = 'EIO'; throw e; } };
+    const r1 = graduateInboxBlock(dir, { id: ID, fsOps: fault, create: (_p, path, text) => { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, mutate(text)); return { stamped: false, reason: 'test' }; } });
+    assert.equal(r1.status, 'pending:baseline-failed', name);
+    const unitBefore = readFileSync(r1.path, 'utf8'), inboxBefore = inbox(dir);
+    const r2 = graduateInboxBlock(dir, { id: ID });
+    assert.equal(r2.status, want, name);
+    assert.equal(readFileSync(r1.path, 'utf8'), unitBefore, `${name}: unit unchanged`);
+    assert.equal(inbox(dir), inboxBefore, `${name}: inbox obligation kept`);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('cleanup', () => { rmSync(HOME, { recursive: true, force: true }); });

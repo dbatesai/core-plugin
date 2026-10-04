@@ -105,8 +105,13 @@ export function graduateInboxBlock(project, { id, set = {}, resolution = '', now
         const [unitFm, unitBody] = parseFlatFrontmatter(readFileSync(unitPath, 'utf8'));
         // a matching header is not enough: the inbox copy is removed only when the unit still holds its body
         if (!sameIdentity(unitFm, hit.fm) || (hit.body && !String(unitBody).includes(hit.body))) return { status: 'refused:unit-conflict', id, path: unitPath };
+        // the same readiness as a new unit: schema-valid, and not malformed; nothing is repaired here
+        const fails = schemaFails(readFileSync(unitPath, 'utf8'), id);
+        if (fails.length) return { status: 'refused:invalid-unit', id, path: unitPath, detail: fails.join(',') };
+        const life = classifyFileLifecycle(project, unitPath, { kind: 'unit' }).classification;
+        if (life === 'malformed' || life === 'read-only' || life === 'missing') return { status: `refused:unit-${life}`, id, path: unitPath };
         resumed = true;                                   // the unit landed before a crash; finish the removal
-        if (classifyFileLifecycle(project, unitPath, { kind: 'unit' }).classification === 'no-baseline') {
+        if (life === 'no-baseline') {
           const failed = stampFailure(stamp(project, unitPath, { kind: 'unit', lastWrittenBy: 'graduate-inbox-block', now }), id, unitPath);
           if (failed) return failed;
         }
