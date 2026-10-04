@@ -66,6 +66,14 @@ export const DEFAULT_HARD_STALE_MS = 30 * 60 * 1000;
 
 let cachedMachineId;
 
+/**
+ * A process that must not read anything outside its project (project-only mode) declares it has
+ * no install identity before taking any lock, so every lock it takes, directly or through a
+ * shared helper, records `machine: null` and never reads ~/.core/install-id. It can only remove
+ * an identity, never supply one.
+ */
+export function useNoMachineIdentity() { cachedMachineId = null; }
+
 /** This install's id (~/.core/install-id under the trusted home), or null when absent. Never creates it. */
 export function localMachineId() {
   if (cachedMachineId !== undefined) return cachedMachineId;
@@ -351,10 +359,12 @@ export function withFileLock(lockPath, fn, {
   extra = {},
   staleMs = DEFAULT_STALE_MS,
   hardStaleMs = DEFAULT_HARD_STALE_MS,
+  machine,
 } = {}) {
   let got = null;
   for (let attempt = 0; ; attempt++) {
-    got = acquireFileLock(lockPath, { extra, staleMs, hardStaleMs });
+    // A caller's lock identity is passed through; left undefined, acquisition uses this install's.
+    got = acquireFileLock(lockPath, { extra, staleMs, hardStaleMs, ...(machine !== undefined ? { machine } : {}) });
     if (got.ok) break;
     if (attempt >= retries) {
       const err = new Error(`lock held: ${lockPath} (owner pid ${got.lock?.pid ?? '?'}, reason ${got.reason})`);

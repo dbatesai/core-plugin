@@ -204,3 +204,23 @@ test('a link to another place inside the folder is refused too, so pending write
     assert.deepEqual(tree(join(p.root, '_memories')), before);
   } finally { p.cleanup(); }
 });
+
+test('a project-only process takes locks without reading the install id; withFileLock passes a given identity through', () => {
+  const p = project();
+  try {
+    const fl = pathToFileURL(join(CORE, 'scripts/file-lock.mjs')).href;
+    const lock = join(p.root, '_memories', '_lib', '.probe.lock');
+    const code = (declare) => `const m = await import(${JSON.stringify(fl)});
+      ${declare ? 'm.useNoMachineIdentity();' : ''}
+      const { mkdirSync } = await import('node:fs'); mkdirSync(${JSON.stringify(join(p.root, '_memories', '_lib'))}, { recursive: true });
+      m.withFileLock(${JSON.stringify(lock)}, () => {});
+      let seen; m.withFileLock(${JSON.stringify(lock)}, () => { seen = m.inspectFileLock(${JSON.stringify(lock)}, { machine: null }).lock.machine ?? 'none'; }, { machine: 'probe-id' });
+      process.stdout.write(String(seen));`;
+    const none = confined(p.root, ['--input-type=module', '-e', code(true)]);
+    assert.equal(none.status, 0, none.stderr);
+    assert.deepEqual(none.violations, [], 'no install-id read once the process has declared no identity');
+    assert.equal(none.stdout, 'probe-id', 'an explicit identity reaches the lock');
+    const control = confined(p.root, ['--input-type=module', '-e', code(false)]);
+    assert.ok(control.violations.some((v) => v.path.endsWith('install-id')), 'without the declaration the default reads the install id');
+  } finally { p.cleanup(); }
+});

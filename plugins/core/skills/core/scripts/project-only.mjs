@@ -27,6 +27,7 @@ import { join, parse, sep } from 'node:path';
 import { userInfo } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
+import { useNoMachineIdentity } from './file-lock.mjs';
 
 export const PROJECT_ONLY_DIR = '_project-only';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -179,6 +180,7 @@ const UNAVAILABLE = {
 };
 
 export function main(argv) {
+  useNoMachineIdentity();   // no lock in this process reads ~/.core/install-id
   const [cmd, ...rest] = argv;
   const opt = {};
   for (let i = 0; i < rest.length; i++) if (rest[i].startsWith('--')) opt[rest[i].slice(2)] = rest[++i];
