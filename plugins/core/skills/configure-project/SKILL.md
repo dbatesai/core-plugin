@@ -23,11 +23,10 @@ It is **idempotent** and **report-only by default**. The only write it ever perf
 
 **Resolve the plugin root from this skill's path**, the same way the other CORE skills do: take the absolute path you loaded this `SKILL.md` from and strip the trailing `/skills/configure-project/SKILL.md` to get `<PLUGIN_ROOT>`. The script lives at `<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs`. Don't guess the base from an env var; the loaded path carries the resolution.
 
-```bash
-# CORE_ROOT = this skill's base dir minus the trailing /skills/configure-project
-node "<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs" \
-  --project "$(pwd)" \
-  --core-root "<PLUGIN_ROOT>"
+Run from the project directory; omitting `--project` uses the current directory on Bash and PowerShell. Use one line and substitute the resolved plugin path:
+
+```text
+node "<PLUGIN_ROOT>/skills/core/scripts/configure-project.mjs" --core-root "<PLUGIN_ROOT>"
 # add --harness codex|claude-code to override detection
 # add --apply to actually generate AGENTS.md (requires a CONTRACT.md)
 # add --json for the structured report instead of the receipt

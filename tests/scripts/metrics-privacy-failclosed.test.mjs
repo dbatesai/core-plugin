@@ -1,19 +1,11 @@
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { readPinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
-// metrics-privacy-failclosed.test.mjs — the OneDrive privacy redirect must
-// FAIL CLOSED when its storage pin cannot be written.
-//
-// The audited defect: metrics-init wrote storage-path.txt non-atomically and
-// swallowed the failure; log-event.resolveStoragePath then silently fell back
-// to <project>/_metrics — putting turn capture back into the synced folder the
-// redirect exists to avoid. The contract now: the pin write is atomic
-// (fs-atomic sibling temp), and a pin failure disables capture — typed
-// capture-disabled.json marker + one loud CORE-METRICS-PIN-FAILED stderr line
-// — with metricsEnabled/turnCaptureEnabled reading the marker as OFF.
+// metrics-privacy-failclosed.test.mjs — the capture-disabled marker an earlier
+// scaffold left (when it could not pin storage) keeps capture OFF until a scaffold
+// clears it. Nothing writes the marker now; one left behind is still honored.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -23,13 +15,6 @@ const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts');
 const INIT_URL = pathToFileURL(join(SCRIPTS, 'metrics-init.mjs')).href;
 const LOG_EVENT_URL = pathToFileURL(join(SCRIPTS, 'log-event.mjs')).href;
-const TURN_CAPTURE_URL = pathToFileURL(join(SCRIPTS, 'turn-capture.mjs')).href;
-
-// chmod-based unwritability is not enforceable the same way on Windows ACLs;
-// the fail-closed logic itself is platform-neutral and covered on POSIX.
-const WIN_SKIP = process.platform === 'win32'
-  ? 'win32: chmod 0o500 does not make a directory unwritable under Windows ACLs'
-  : false;
 
 function runChild(runner, env) {
   return spawnSync(process.execPath, ['--input-type=module', '-e', runner], {
@@ -37,61 +22,6 @@ function runChild(runner, env) {
     env: { ...process.env, ...env },
   });
 }
-
-test('pin write failure fails CLOSED: ok:false, typed marker, loud stderr, capture gates read OFF', { skip: WIN_SKIP }, () => {
-  const fakeHome = mkdtempSync(join(tmpdir(), 'core-pin-home-'));
-  const project = mkdtempSync(join(tmpdir(), 'core-pin-project-'));
-  const meta = operationalMetricsDir(project, { home: fakeHome, env: {} });
-  mkdirSync(meta, { recursive: true });
-  chmodSync(meta, 0o500); // pin (and meta-dir marker) unwritable
-  const runner = [
-    `import { initMetrics } from ${JSON.stringify(INIT_URL)};`,
-    `import { resolveStoragePath, metricsEnabled } from ${JSON.stringify(LOG_EVENT_URL)};`,
-    `import { turnCaptureEnabled } from ${JSON.stringify(TURN_CAPTURE_URL)};`,
-    `const result = initMetrics({ projectDir: ${JSON.stringify(project)}});`,
-    'process.stdout.write(JSON.stringify({',
-    '  result,',
-    `  resolved: resolveStoragePath(${JSON.stringify(project)}),`,
-    `  metricsOn: metricsEnabled({ project: ${JSON.stringify(project)} }),`,
-    `  turnCaptureOn: turnCaptureEnabled({ project: ${JSON.stringify(project)} }),`,
-    '}));',
-  ].join('\n');
-  try {
-    const child = runChild(runner, {
-      HOME: fakeHome,
-      USERPROFILE: fakeHome,
-      CORE_METRICS_FORCE_APPDATA_FALLBACK: '1', // the redirect-required shape
-    });
-    assert.equal(child.status, 0, child.stderr);
-    const observed = JSON.parse(child.stdout);
-
-    // Never "ok" over a failed pin — the exact adversarial-regression contract.
-    assert.equal(observed.result.ok, false, 'initMetrics must not report success when the pin cannot land');
-    assert.equal(observed.result.reason, 'storage-pin-write-failed');
-    assert.equal(observed.result.captureDisabled, true);
-
-    // One loud stderr line.
-    assert.match(child.stderr, /CORE-METRICS-PIN-FAILED/, 'pin failure must be loud, never swallowed');
-    assert.match(child.stderr, /DISABLED/);
-
-    // Typed marker landed at the project-local fallback location (the meta dir
-    // is the thing that is unwritable in this failure).
-    const marker = join(project, '_metrics', 'capture-disabled.json');
-    assert.ok(existsSync(marker), 'typed capture-disabled marker must exist');
-    const parsed = JSON.parse(readFileSync(marker, 'utf8'));
-    assert.equal(parsed.marker, 'core-capture-disabled');
-    assert.equal(parsed.reason, 'storage-pin-write-failed');
-
-    // The capture gates FAIL CLOSED off the marker — capture never proceeds
-    // into the synced project folder as if nothing happened.
-    assert.equal(observed.metricsOn, false, 'metricsEnabled must read the marker as OFF');
-    assert.equal(observed.turnCaptureOn, false, 'turnCaptureEnabled must follow the closed gate');
-  } finally {
-    chmodSync(meta, 0o700);
-    rmSync(fakeHome, { recursive: true, force: true });
-    rmSync(project, { recursive: true, force: true });
-  }
-});
 
 test('capture-disabled marker beats an explicit CORE_METRICS_ENABLED=1 opt-in (privacy fail-closed wins)', () => {
   const project = mkdtempSync(join(tmpdir(), 'core-pin-optin-'));
@@ -114,7 +44,7 @@ test('capture-disabled marker beats an explicit CORE_METRICS_ENABLED=1 opt-in (p
   }
 });
 
-test('a successful pin is atomic-written and clears a stale capture-disabled marker (recovery path)', () => {
+test('a scaffold clears a stale capture-disabled marker and capture resumes (recovery path), and writes no pin', () => {
   const fakeHome = mkdtempSync(join(tmpdir(), 'core-pin-recover-home-'));
   const project = mkdtempSync(join(tmpdir(), 'core-pin-recover-'));
   try {
@@ -128,25 +58,16 @@ test('a successful pin is atomic-written and clears a stale capture-disabled mar
       `const result = initMetrics({ projectDir: ${JSON.stringify(project)}});`,
       `process.stdout.write(JSON.stringify({ result, metricsOn: metricsEnabled({ project: ${JSON.stringify(project)} }) }));`,
     ].join('\n');
-    const child = runChild(runner, { HOME: fakeHome, USERPROFILE: fakeHome, CORE_METRICS_FORCE_PROJECT_LOCAL: '1' });
+    const child = runChild(runner, { HOME: fakeHome, USERPROFILE: fakeHome });
     assert.equal(child.status, 0, child.stderr);
     const observed = JSON.parse(child.stdout);
     assert.equal(observed.result.ok, true, JSON.stringify(observed.result));
-
-    // Pin landed with the resolved storage path as its exact content.
-    const pin = join(operationalMetricsDir(project, { home: fakeHome, env: {} }), 'storage-path.txt');
-    assert.ok(existsSync(pin), 'pin file exists after a successful scaffold');
-    assert.equal(readPinSigned({ dir: join(pin, '..'), root: projectRootFor(project, { home: fakeHome, coreDir: join(fakeHome, '.core') }), coreDir: join(fakeHome, '.core') }), observed.result.storagePath);
-
-    // Marker cleared; capture re-enabled.
+    assert.equal(observed.result.storagePath, join(project, '_metrics'));
     assert.equal(existsSync(join(project, '_metrics', 'capture-disabled.json')), false,
-      'a successful pin clears the stale fail-closed marker');
+      'the scaffold clears the stale fail-closed marker');
     assert.equal(observed.metricsOn, true);
-
-    // No torn sibling temp left behind by the atomic write.
     const metaDir = operationalMetricsDir(project, { home: fakeHome, env: {} });
-    const leftovers = readdirSync(metaDir).filter((f) => f.includes('.tmp-'));
-    assert.deepEqual(leftovers, [], 'no .tmp- litter after the atomic pin write');
+    assert.equal(existsSync(join(metaDir, 'storage-path.txt')), false, 'no pin is written');
   } finally {
     rmSync(fakeHome, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });

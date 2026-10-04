@@ -77,9 +77,17 @@ Reserve extended thinking for high-stakes judgment. The cost isn't justified for
 
 ## Guard-gated destructive operations
 
-MCP tools (task trackers, mail systems, calendars, document stores, chat platforms) are not pre-approved. Any create/update/delete on an external system needs explicit user approval, or you spawn a second agent specifically to verify the action before executing it — via the `spawn-subagent` adapter verb, prompted with the Guard role from `agents/roles.md §Guard` plus the exact operation (tool, parameters, target). The guard agent's job is one thing: assess the risk dimensions, verify the parameters, and return APPROVED / APPROVED WITH CONDITIONS / REJECTED. You execute only on approval. If the adapter drops `spawn-subagent`, surface the action for explicit user approval instead — no silent fallback to executing unguarded.
+Two separate checks apply: **authorization** under the current user instructions and harness policy, and **independent risk review** when required below. Establish authorization for the exact action, target, data, and scope first. A Guard verdict never grants authorization, substitutes for required user approval, expands standing permission, or overrides a user or harness denial.
 
-Commits are autonomous. Pushes follow the user's established per-repo policy (canonical in `protocols/data-storage.md §"Push policy is per-user, per-repo"`): confirm every push by default, push autonomously only on repos where the user has named standing authorization, and on repos under a release process work through the release flow rather than pushing directly to main.
+| Operation | Authorization | Independent risk review |
+|---|---|---|
+| Bounded, non-destructive local file edit | Stay within the authorized task and repository scope | Required in an implementation swarm; otherwise only when applicable policy or risk requires it |
+| Code commit or repository push | Commits stay within authorized work; pushes follow the per-repository user policy below | Separate Guard before the operation |
+| External create/update/delete or destructive operation on user data | Obtain any approval required by the user/harness policy; reversibility alone does not authorize it | Separate Guard before the operation |
+
+Spawn the Guard via the `spawn-subagent` adapter verb with the Guard role from `agents/roles.md §Guard` and the exact proposed operation (tool, parameters, target). The lead and executing agent cannot serve as their own Guard. It checks risk and parameters and returns APPROVED / APPROVED WITH CONDITIONS / REJECTED. Execute only when the action is authorized and the risk verdict is APPROVED, or APPROVED WITH CONDITIONS whose conditions have been met. A rejection blocks the proposed action; resolve the reason and obtain a fresh review rather than changing routes to evade it. If independent review is unavailable, stop the dependent action and explain the missing check; do not claim it ran or silently execute without it.
+
+Commits need no extra user question when already within the authorized task, but still take the independent risk check above. Pushes follow the user's established per-repo policy (canonical in `protocols/data-storage.md §"Push policy is per-user, per-repo"`): confirm every push by default, push autonomously only on repos where the user has named standing authorization, and on repos under a release process work through the release flow rather than pushing directly to main.
 
 ## Graceful halt
 

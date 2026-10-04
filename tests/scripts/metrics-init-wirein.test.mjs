@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, symlinkSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { symlinkCapable } from './trusted-test-tmp.mjs';
 import { initMetrics } from '../../plugins/core/skills/core/scripts/metrics-init.mjs';
 import { resolveStoragePath, operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
-import { readPinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { readPinSigned, writePinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 
 // Fixtures write state under the claude-code subfolder; CI has no Claude Code env signal.
 process.env.CORE_HARNESS ||= 'claude-code';
@@ -16,51 +16,43 @@ process.env.CORE_HARNESS ||= 'claude-code';
 const METRICS_INIT = fileURLToPath(new URL('../../plugins/core/skills/core/scripts/metrics-init.mjs', import.meta.url));
 
 // prove the actual scaffold + the actual consume path, not prose.
-// metrics-init pins the storage path; log-event must resolve to that pin.
-test('wire-in: metrics-init scaffolds storage + pin, and log-event honors the pin', () => {
+// metrics-init scaffolds the project's own _metrics/; log-event resolves there.
+test('wire-in: metrics-init scaffolds project-local storage, and log-event resolves to it even when an older pin names another folder', () => {
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
-  const origForce = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
   try {
     process.env.HOME = home;
     process.env.USERPROFILE = home; // Windows: os.homedir() reads USERPROFILE, not HOME
     // Precondition: this platform's homedir() must honor the redirected home, or the test is moot.
     assert.equal(homedir(), home, 'test requires os.homedir() to honor the redirected home');
-    // Force a non-default storage path so "honors the pin" is distinguishable from
-    // "fell back to project-local".
-    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
+    const env = { CORE_HARNESS: 'claude-code' };
+    const coreDir = join(home, '.core');
+    const old = join(home, 'AppData', 'Local', 'core-metrics', 'older-redirect');
+    mkdirSync(old, { recursive: true });
+    writePinSigned({ dir: operationalMetricsDir(project, { home, env }), path: old, root: projectRootFor(project, { home, coreDir }), coreDir });
 
-    const r = initMetrics({ projectDir: project, env: { CORE_HARNESS: 'claude-code' } });
+    const r = initMetrics({ projectDir: project, env });
     assert.ok(r.ok, `scaffold ok: ${JSON.stringify(r)}`);
-
-    const pinFile = join(operationalMetricsDir(project, { home, env: { CORE_HARNESS: 'claude-code' } }), 'storage-path.txt');
-    assert.ok(existsSync(pinFile), 'pin file written');
-    const pinned = readPinSigned({ dir: join(pinFile, '..'), root: projectRootFor(project, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') });
-    assert.match(pinned, /core-metrics/, 'pinned to the forced appdata path, not project-local');
-
-    // Storage root created at the pinned location; retired OTel/push
-    // subdirectories are not scaffolded (no shipped producer or consumer).
-    assert.ok(existsSync(pinned), 'storage root scaffolded at the pinned location');
+    assert.equal(r.storagePath, join(project, '_metrics'));
+    assert.ok(existsSync(r.storagePath), 'storage root scaffolded');
     for (const sub of ['traces', 'payloads', 'queue']) {
-      assert.equal(existsSync(join(pinned, sub)), false, `${sub}/ not scaffolded (retired)`);
+      assert.equal(existsSync(join(r.storagePath, sub)), false, `${sub}/ not scaffolded (retired)`);
     }
+    assert.equal(readPinSigned({ dir: operationalMetricsDir(project, { home, env }), root: projectRootFor(project, { home, coreDir }), coreDir }), old, 'the older pin is left alone as history');
 
-    // The actual consume path: log-event's resolveStoragePath reads the pin.
-    const resolved = resolveStoragePath(project, { env: { CORE_HARNESS: 'claude-code' } });
-    assert.equal(resolved, pinned, 'log-event resolves to the metrics-init pin, not the project-local default');
+    // The actual consume path: log-event's resolveStoragePath.
+    assert.equal(resolveStoragePath(project), r.storagePath, 'log-event writes where the scaffold made the store, not where the older pin points');
   } finally {
     if (origHome === undefined) delete process.env.HOME; else process.env.HOME = origHome;
     if (origUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = origUserProfile;
-    if (origForce === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
-    else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = origForce;
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });
   }
 });
 
-test('wire-in: metrics-init is idempotent (second run leaves the pin intact)', () => {
+test('wire-in: metrics-init is idempotent (second run leaves the storage path stable)', () => {
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
   const origHome = process.env.HOME;
@@ -101,8 +93,7 @@ test('metrics-init still runs when invoked through a symlink (entry guard canoni
     // process exits 0 having printed nothing. The fix makes it actually run.
     const parsed = JSON.parse(out);
     assert.equal(parsed.ok, true, 'metrics-init actually executed through the symlink');
-    assert.ok(existsSync(join(operationalMetricsDir(project, { home, env: { CORE_HARNESS: 'claude-code' } }), 'storage-path.txt')),
-      'the storage-path pin was written — the scaffold ran');
+    assert.ok(existsSync(join(project, '_metrics')), 'the storage root was created — the scaffold ran');
   } finally {
     rmSync(home, { recursive: true, force: true });
     rmSync(project, { recursive: true, force: true });

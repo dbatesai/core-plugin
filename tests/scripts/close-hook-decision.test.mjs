@@ -47,7 +47,7 @@ test('decideCloseAction returns enqueue for an unclosed session with real identi
 test('[the bug] decideCloseAction returns skip for a session with a closed receipt', () => {
   const store = freshStore();
   const o = opts();
-  writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed' }, o);
+  writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed', harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z' }, o);
 
   const d = decideCloseAction({ session_id: SESSION_A, reason: 'other', cwd: store }, { store }, o);
 
@@ -59,7 +59,7 @@ test('[the bug] decideCloseAction returns skip for a session with a closed recei
 test('decideCloseAction still returns enqueue for a distinct session after another closed', () => {
   const store = freshStore();
   const o = opts();
-  writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed' }, o);
+  writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed', harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z' }, o);
 
   const d = decideCloseAction({ session_id: SESSION_B, reason: 'other', cwd: store }, { store }, o);
   assert.equal(d.action, 'enqueue');
@@ -87,7 +87,7 @@ test('decideCloseAction degrades honestly on a missing session id, never synthes
 test('decideCloseAction does not treat transcript existence as evidence of work', () => {
   const store = freshStore();
   const o = opts();
-  writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed' }, o);
+  writeCloseReceipt(store, { session_id: SESSION_A, status: 'closed', harness: 'claude-code', closed_at: '2026-10-03T00:00:00Z' }, o);
 
   // The old gate said: transcript exists → didWork → spawn. A closed receipt
   // must win over that regardless of any transcript path on the payload.

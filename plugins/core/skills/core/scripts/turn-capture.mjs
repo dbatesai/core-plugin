@@ -43,12 +43,12 @@
  * Ships with the plugin by convention; .mjs (Node.js) only.
  */
 
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { withFileLock } from './file-lock.mjs';
-import { resolveStoragePath, metricsEnabled, storagePinInvalid, operationalMetricsDir } from './log-event.mjs';
-import { projectRootFor, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
+import { resolveStoragePath, metricsEnabled, metricsHistoryFolders, metricsHistoryHeld, trustedMetricsDir } from './log-event.mjs';
+import { projectRootFor, projectStateDir, localStateDir, stateHarnessesPartial, stateLocations, pathPresence, detectStateHarness, readManifest, manifestTurnCaptureOptsOutUnverified } from './project-state.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { closeStorageRoot, purgeGeneratedCloseDirectory } from './close-artifacts.mjs';
 import { requireTrustedHome } from './trusted-home.mjs';
@@ -361,7 +361,10 @@ export function captureTurnEvidence(projectDir, input, { now, env = process.env 
 
 /** List `<date>.jsonl` files in the stream dir, oldest first. */
 export function listTurnCaptureFiles(projectDir) {
-  const dir = turnCaptureDir(projectDir);
+  return dateFilesIn(turnCaptureDir(projectDir));
+}
+
+function dateFilesIn(dir) {
   if (!existsSync(dir)) return [];
   let names = [];
   try { names = readdirSync(dir); } catch { return []; }
@@ -371,30 +374,35 @@ export function listTurnCaptureFiles(projectDir) {
     .map((n) => ({ date: n.slice(0, 10), file: join(dir, n) }));
 }
 
-/**
- * Cheap census for the /metrics mechanics line: whether the stream is on and
- * how much is captured. Row count is a line count (no per-row parse).
- */
-export function turnCaptureStats(projectDir, { env = process.env } = {}) {
-  // With a pin that no longer verifies, the stream's real folder is unknown, and reading the
-  // project-local fallback would report zero rows for rows that exist elsewhere.
-  if (storagePinInvalid(projectDir, { env })) {
-    return { enabled: false, days: null, rows: null, health: null, dir: null, reason: 'pin-unverified' };
-  }
-  const enabled = turnCaptureEnabled({ project: projectDir, env });
-  const files = listTurnCaptureFiles(projectDir);
+// Row count is a line count (no per-row parse); an unreadable file contributes no rows.
+function countRows(files) {
   let rows = 0;
   for (const { file } of files) {
     try {
       for (const line of readFileSync(file, 'utf8').split('\n')) if (line.trim()) rows++;
     } catch { /* unreadable file contributes no rows */ }
   }
+  return rows;
+}
+
+/**
+ * Cheap census for the /metrics mechanics line: whether the stream is on and
+ * how much is captured. Row count is a line count (no per-row parse).
+ */
+export function turnCaptureStats(projectDir, { env = process.env } = {}) {
+  const enabled = turnCaptureEnabled({ project: projectDir, env });
+  const files = listTurnCaptureFiles(projectDir);
+  const history = metricsHistoryFolders(projectDir, { env }).map(({ folder }) => {
+    const found = dateFilesIn(join(folder, TURN_CAPTURE_DIRNAME));
+    return { dir: join(folder, TURN_CAPTURE_DIRNAME), days: found.length, rows: countRows(found) };
+  });
   return {
     enabled,
     days: files.length,
-    rows,
+    rows: countRows(files),
     health: readCaptureHealth(projectDir),
     dir: turnCaptureDir(projectDir),
+    history,
   };
 }
 
@@ -430,17 +438,88 @@ export function turnCapturePurgeScope(projectDir, { home = requireTrustedHome(),
   // store (the project's own operational-meta dir, never externally redirected — the
   // pin/AppData rules that apply to `base` above don't apply here). The disclosed purge
   // has to reach it too, or "purge everything saved" is false: nothing else deletes it
-  // now that classified retention is no longer run on a schedule.
-  const classifiedBase = operationalMetricsDir(projectDir, { home, env });
+  // now that classified retention is no longer run on a schedule. Planning a purge only reads
+  // state: a writing resolver would set aside state it cannot verify, moving the records the
+  // history check needs before it looks. Without trusted state the path is computed, never
+  // created; state that exists but does not verify is reported by metricsHistoryHeld.
+  const coreDir = join(home, '.core');
+  const classifiedBase = trustedMetricsDir(projectDir, { home, env })
+    || join(projectStateDir({ root: projectRootFor(projectDir, { home, coreDir }), harness: detectStateHarness(env), kind: 'hot', coreDir }).dir, 'metrics');
   const closeBase = join(closeStorageRoot(projectDir, { home, env }), 'close');
+  // Where each entry may physically be: the project folder, and for the classified log also this
+  // project's machine-local fallback state (`~/.core/local/<project>/`), which holds it when the
+  // project folder is unregistered or not writable. Checked again at deletion time.
+  const root = projectRootFor(projectDir, { home, coreDir });
+  const inProject = [projectDir];
+  const inProjectOrLocal = (harness = detectStateHarness(env)) => [projectDir, dirname(localStateDir({ root, harness, coreDir }))];
+  // The classified log is the same captured data in every place a harness's state can be, routed
+  // there today or not (the project folder and the machine-local fallback); each one this project
+  // can read as its own is purged. Places it can't are reported by metricsHistoryHeld.
+  const running = detectStateHarness(env);
+  const otherClassified = [];
+  const seen = new Set([join(classifiedBase, CLASSIFIED_DIRNAME)]);
+  const { harnesses } = stateHarnessesPartial({ root, coreDir, include: [running] }); // listing problems are reported as held
+  for (const harness of harnesses) {
+    let locations = [];
+    try { ({ locations } = stateLocations({ root, harness, coreDir })); } catch { /* reported as held */ }
+    for (const loc of locations) {
+      const path = join(loc.dir, 'metrics', CLASSIFIED_DIRNAME);
+      // Only a missing log is skipped: one that can't be looked at is planned, so its removal fails visibly.
+      if (seen.has(path) || pathPresence(path).state === 'absent') continue;
+      seen.add(path);
+      otherClassified.push({ id: 'classified', harness, path, tree: true, base: join(loc.dir, 'metrics'), within: loc.kind === 'project' ? inProject : [loc.keyDir] });
+    }
+  }
   return [
-    { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true, base },
-    { id: 'health', path: join(base, HEALTH_FILENAME), tree: false, base },
-    { id: 'judgments', path: join(base, JUDGMENT_LOG_FILENAME), tree: false, base },
-    { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase },
-    { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase },
-    { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase },
+    { id: 'stream', path: join(base, TURN_CAPTURE_DIRNAME), tree: true, base, within: inProject },
+    { id: 'health', path: join(base, HEALTH_FILENAME), tree: false, base, within: inProject },
+    { id: 'judgments', path: join(base, JUDGMENT_LOG_FILENAME), tree: false, base, within: inProject },
+    { id: 'classified', path: join(classifiedBase, CLASSIFIED_DIRNAME), tree: true, base: classifiedBase, within: inProjectOrLocal() },
+    ...otherClassified,
+    { id: 'close-summaries', path: join(closeBase, 'summaries'), tree: false, generatedClose: true, base: closeBase, within: inProject },
+    { id: 'close-receipts', path: join(closeBase, 'receipts'), tree: false, generatedClose: true, base: closeBase, within: inProject },
   ];
+}
+
+// The allowed roots are pinned when the purge is planned (their real path and file identity), and
+// each entry is checked against the pins at the moment of deletion: a root replaced or relinked
+// after planning cannot carry its authority to a new place, the entry's folder must resolve inside
+// a pinned root, and the entry must not be a link. Limit: the interval between this check and the
+// removal itself is not closed; CORE does not defend against a same-user process racing the
+// filesystem inside it (the same boundary the close artifacts state).
+function pinRoots(roots, coreDir) {
+  const localRoot = join(coreDir, 'local');
+  return roots.map((r) => {
+    try {
+      // A machine-local fallback folder is this project's only at its own spot under ~/.core/local:
+      // a link there, or one that resolves elsewhere, is not pinned, so nothing inside it is purged.
+      if (dirname(r) === localRoot) {
+        if (lstatSync(r).isSymbolicLink()) return null;
+        if (realpathSync.native(r) !== join(realpathSync.native(localRoot), basename(r))) return null;
+      }
+      const real = realpathSync.native(r); const st = statSync(real); return { root: r, real, dev: st.dev, ino: st.ino };
+    }
+    catch { return null; }
+  });
+}
+
+function assertPhysicallyWithin(entry) {
+  let real;
+  try { real = realpathSync.native(entry.base); } catch (e) { if (e.code === 'ENOENT') return; throw e; }
+  const inside = entry.pins.some((pin) => {
+    if (!pin) return false;
+    let now;
+    try { now = realpathSync.native(pin.root); } catch { return false; }
+    if (now !== pin.real) return false;
+    const st = statSync(pin.real);
+    if (st.dev !== pin.dev || st.ino !== pin.ino) return false;
+    const rel = relative(pin.real, real);
+    return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel));
+  });
+  if (!inside) throw new Error(`refusing purge: ${entry.base} resolves to ${real}, not inside the folders pinned when the purge was planned`);
+  let st = null;
+  try { st = lstatSync(entry.path); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  if (st && st.isSymbolicLink()) throw new Error(`refusing purge: ${entry.path} is a link`);
 }
 
 // A destructive bound is validated before it can delete anything: an entry has
@@ -468,9 +547,6 @@ export function runTurnCaptureRetention(projectDir, {
   apply = true,
   now = new Date().toISOString(),
 } = {}) {
-  if (storagePinInvalid(projectDir)) {
-    return { ran: false, reason: 'pin-unverified', cutoff: null, windowDays, candidates: [], deleted: [], kept: [], verified: false };
-  }
   const dir = turnCaptureDir(projectDir);
   const base = { windowDays, candidates: [], deleted: [], kept: [], verified: true };
   if (!validWindow(windowDays)) {
@@ -515,34 +591,40 @@ export function runTurnCaptureRetention(projectDir, {
  * that could not be removed is reported with its reason and the overall result
  * is not `purged`. Partial success is never narrated as success.
  */
-export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env } = {}) {
-  // Refuse rather than purge the wrong folder and call it done: with a pin that no longer verifies,
-  // the captured rows may sit somewhere other than the project-local fallback this would target.
-  if (storagePinInvalid(projectDir, { home, env })) {
-    return { purged: false, reason: 'pin-unverified', message: 'the metrics storage pin does not verify, so the capture folder cannot be located; run metrics-init for this project first', dir: null, existed: null, scope: [] };
-  }
+export function purgeTurnCapture(projectDir, { apply = true, home = requireTrustedHome(), env = process.env, beforeEntryDelete } = {}) {
   const dir = join(resolveStoragePath(projectDir, { home, env }), TURN_CAPTURE_DIRNAME);
-  const entries = turnCapturePurgeScope(projectDir, { home, env });
+  // What this purge cannot cover is worked out first, read-only, and carried in every result,
+  // including a failed one: a false status alone does not say what is still owed.
+  let heldHistory;
+  try { heldHistory = metricsHistoryHeld(projectDir, { home, env }); }
+  catch (e) { heldHistory = [{ what: projectDir, reason: `whether earlier rows exist could not be worked out (${String(e && (e.code || e.message)).slice(0, 80)})` }]; }
+  let entries;
   try {
+    entries = turnCapturePurgeScope(projectDir, { home, env });
     for (const entry of entries) assertPurgeEntry(entry);
   } catch (e) {
-    return { purged: false, reason: String(e && e.message), dir, existed: existsSync(dir), scope: [] };
+    return { purged: false, reason: String(e && e.message), dir, existed: existsSync(dir), scope: [], held_history: heldHistory };
   }
 
-  const scope = entries.map((entry) => ({ ...entry, existed: existsSync(entry.path), removed: false }));
+  const pinned = new Map();
+  for (const entry of entries) for (const r of entry.within) if (!pinned.has(r)) pinned.set(r, pinRoots([r], join(home, '.core'))[0]);
+  const scope = entries.map((entry) => ({ ...entry, pins: entry.within.map((r) => pinned.get(r)), existed: existsSync(entry.path), removed: false }));
   const existed = scope.some((entry) => entry.existed);
   if (!apply) {
     for (const entry of scope.filter(e => e.generatedClose)) {
       try { Object.assign(entry, purgeGeneratedCloseDirectory(entry.path)); }
       catch (e) { entry.reason = String(e.message).slice(0, 120); }
     }
-    return { purged: false, reason: 'dry-run', dir, existed, scope };
+    return { purged: false, reason: 'dry-run', dir, existed, scope, held_history: heldHistory };
   }
 
   try {
     withFileLock(join(resolveStoragePath(projectDir, { home, env }), '.turn-capture.lock'), () => {
       for (const entry of scope) {
         try {
+          // Test seam: lets a test change the filesystem after planning, before this entry's checks.
+          if (typeof beforeEntryDelete === 'function') beforeEntryDelete(entry);
+          assertPhysicallyWithin(entry);
           if (entry.generatedClose) {
             Object.assign(entry, purgeGeneratedCloseDirectory(entry.path, { apply: true }));
             entry.removed = true; // selected generated files, NOT the directory or kept files
@@ -557,7 +639,7 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
       }
     });
   } catch (e) {
-    return { purged: false, reason: `purge-lock-unavailable: ${String(e && e.message).slice(0, 120)}`, dir, existed, scope };
+    return { purged: false, reason: `purge-lock-unavailable: ${String(e && e.message).slice(0, 120)}`, dir, existed, scope, held_history: heldHistory };
   }
 
   const obstructed = scope.filter((entry) => !entry.removed);
@@ -565,10 +647,19 @@ export function purgeTurnCapture(projectDir, { apply = true, home = requireTrust
     return {
       purged: false,
       reason: `purge incomplete: ${obstructed.map((entry) => `${entry.id} (${entry.reason})`).join('; ')}`,
-      dir, existed, scope,
+      dir, existed, scope, held_history: heldHistory,
     };
   }
-  return { purged: true, dir, existed, scope };
+  // Earlier rows outside the project are never deleted here: they are named, with the reason, and
+  // the purge does not count itself complete while they exist.
+  if (heldHistory.length) {
+    return {
+      purged: false,
+      reason: `history not purged: ${heldHistory.map((h) => `${h.what} (${h.reason})`).join('; ')}`,
+      dir, existed, scope, held_history: heldHistory,
+    };
+  }
+  return { purged: true, dir, existed, scope, held_history: [] };
 }
 
 // ---------- CLI ----------
@@ -608,15 +699,8 @@ export function main(argv) {
     process.stdout.write(JSON.stringify(res) + '\n');
     return res.reason === 'invalid-window' ? 2 : 0;
   }
-  // default: status — enabled/effective state + volumes + health
-  const files = listTurnCaptureFiles(projectDir);
-  const stats = {
-    enabled: turnCaptureEnabled({ project: projectDir }),
-    days: files.length,
-    health: readCaptureHealth(projectDir),
-    dir: turnCaptureDir(projectDir),
-  };
-  process.stdout.write(JSON.stringify(stats) + '\n');
+  // default: status — enabled/effective state + volumes (project and history separately) + health
+  process.stdout.write(JSON.stringify(turnCaptureStats(projectDir)) + '\n');
   return 0;
 }
 

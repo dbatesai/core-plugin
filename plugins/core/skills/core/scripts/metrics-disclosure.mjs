@@ -36,7 +36,7 @@ import { isCliEntry } from './cli-entry.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { projectRootFor, detectStateHarness, readManifest, updateManifest } from './project-state.mjs';
-import { resolveStoragePath } from './log-event.mjs';
+import { metricsHistoryFolders } from './log-event.mjs';
 
 /**
  * Bump whenever the notice describes something materially new being stored.
@@ -44,9 +44,12 @@ import { resolveStoragePath } from './log-event.mjs';
  * changes nothing about what is captured does not earn a bump.
  */
 export const NOTICE_VERSION = 6;
+// A project with earlier rows outside its folder is shown the notice again once, naming them: the
+// version 6 text told it the log was kept there.
+export const HISTORY_NOTICE_VERSION = 7;
 
 export const NOTICE_TEXT = [
-  "One thing worth knowing since this is a brand-new project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",
+  "One thing worth knowing about this project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",
   "If you'd rather it not run, set `CORE_METRICS_ENABLED=0` in your environment, or add `metrics_enabled: false` to this project's `.core/<harness>/workspace.json`.",
   "Part of that log is a local evidence record: each turn's prompt and the memory context CORE delivered are saved with the project (CORE never exports them, and they are kept until you purge them) so retrieval quality can be graded honestly after the fact — the classified turn log the recognition classifier writes is kept the same way. Turn the evidence record off with `CORE_TURN_CAPTURE=0`, or `turn_capture: false` in this project's `.core/<harness>/workspace.json`; you can also purge everything it has saved at any time.",
 ].join('\n\n');
@@ -62,15 +65,16 @@ export const NOTICE_TEXT = [
  * @returns {{ ok: boolean, shown: boolean, alreadyShown: boolean, noticeText: string|null, reason?: string }}
  */
 /**
- * The notice says the log lives in the project's folder. A project whose signed pin still names
- * an older external folder (an earlier Windows OneDrive redirect to AppData) gets a line saying
- * where its log really is, so the notice is never wrong about the location.
+ * The notice says the log lives in the project's folder, and it is always true: new rows are only
+ * written there. A project whose records name an older external folder (an earlier Windows
+ * OneDrive redirect to AppData) gets a line saying where the earlier rows are kept.
  */
 export function noticeTextFor(projectDir, { home = homedir(), env = process.env } = {}) {
-  let where = null;
-  try { where = resolveStoragePath(projectDir, { home, env }); } catch { /* unknown: base text */ }
-  if (!where || where === join(projectDir, '_metrics')) return NOTICE_TEXT;
-  return `${NOTICE_TEXT}\n\nFor this project the log is kept outside the project folder, at \`${where}\`, because an earlier version of CORE put it there. It stays there until it's moved; nothing is deleted.`;
+  let history = [];
+  try { history = metricsHistoryFolders(projectDir, { home, env }).filter((h) => !h.foreign); } catch { /* unknown: base text */ }
+  if (!history.length) return NOTICE_TEXT;
+  const where = history.map((h) => `\`${h.folder}\``).join(' and ');
+  return `${NOTICE_TEXT}\n\nEarlier rows from before this version are kept outside the project folder, at ${where}. Nothing new is written there, and CORE never deletes or moves it: it is outside the project folder. An explicit purge removes the captured data in the project and names this folder; it may hold rows from more than one project, so deleting it is your decision.`;
 }
 
 export function checkMetricsDisclosure({ projectDir, home = homedir(), env = process.env } = {}) {
@@ -88,17 +92,20 @@ export function checkMetricsDisclosure({ projectDir, home = homedir(), env = pro
 
   // Untrusted or absent state reads as null: the notice shows.
   const manifest = readManifest({ root, harness, coreDir }) || {};
+  let hasHistory = false;
+  try { hasHistory = metricsHistoryFolders(projectDir, { home, env }).some((h) => !h.foreign); } catch { /* no history known */ }
+  const version = hasHistory ? HISTORY_NOTICE_VERSION : NOTICE_VERSION;
 
   // Versioned: a project that saw an older notice is shown the current one
   // when the wording changes materially. A bare boolean would strand everyone
   // who was told about a narrower version of what gets stored.
   if (manifest.metrics_disclosure_shown === true
-      && Number(manifest.metrics_disclosure_version || 1) >= NOTICE_VERSION) {
+      && Number(manifest.metrics_disclosure_version || 1) >= version) {
     return { ok: true, shown: false, alreadyShown: true, noticeText: null };
   }
 
   try {
-    updateManifest({ root, harness, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION } });
+    updateManifest({ root, harness, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: version } });
   } catch (err) {
     // Fail toward showing the notice this session even though we couldn't persist
     // the flag — a repeated notice (rare write failure) is a far smaller defect

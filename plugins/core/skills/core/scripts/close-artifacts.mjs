@@ -2,20 +2,15 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { resolveStoragePath, storagePinInvalid } from './log-event.mjs';
-import { detectStoragePath } from './metrics-init.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
+import { resolveStoragePath } from './log-event.mjs';
 
 const MARKER = 'core.generated-close/1';
 const digest = text => createHash('sha256').update(text, 'utf8').digest('hex');
 
-/** Invalid pins must not silently fall back into a synced project. No pin repair here. */
-export function closeStorageRoot(store, { storageRoot = null, home = requireTrustedHome(), env = process.env } = {}) {
+/** Close artifacts live in the project's own `_metrics/`. */
+export function closeStorageRoot(store, { storageRoot = null } = {}) {
   if (storageRoot) return resolve(storageRoot); // trusted in-process test seam only
-  const projectDir = resolve(store);
-  return storagePinInvalid(projectDir, { home, env })
-    ? detectStoragePath({ projectDir, home }).path
-    : resolveStoragePath(projectDir, { home, env });
+  return resolveStoragePath(resolve(store));
 }
 
 function statIfPresent(path) {

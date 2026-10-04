@@ -9,7 +9,7 @@
   - [Tier 1 — Observations](#tier-1--observations)
   - [External-source observations — three-layer filtering](#external-source-observations--three-layer-filtering)
   - [Tier 2 — Units](#tier-2--units)
-  - [The canonical flag](#the-canonical-flag)
+  - [The priority pin](#the-priority-pin)
   - [Open-question units and the `by-when` field](#open-question-units-and-the-by-when-field)
 - [The committed edge types](#the-committed-edge-types)
   - [Governed write-time enrichment](#governed-write-time-enrichment)
@@ -58,7 +58,7 @@ Read this before any Write/Edit on a unit, an observation, a PROJECT.md render, 
 
 ## What lives where
 
-Three surfaces, three responsibilities. Don't mix them.
+Four CORE surfaces, four responsibilities. Don't mix them. Harness-local recall is a fifth, external surface.
 
 - **Project surface** — `<project>/` — the user's editable surface. `PROJECT.md` is the rendered six-section view. `_memories/` is the canonical unit store. `_summaries/`, `_sessions/`, `_outputs/` are CORE-created project artifacts (underscore-prefixed by convention so CORE's scaffolding sorts visibly apart from the user's own folders). `docs/` and any other unprefixed folders are user territory. The user can read, edit, and delete anything in the project surface; the agent treats user edits as ground truth.
 
@@ -70,7 +70,7 @@ Three surfaces, three responsibilities. Don't mix them.
 
 The test if you're unsure where something belongs: if the project folder were wiped, would you still need this file to serve *other projects*? If yes, it's agent meta. If the answer involves "this project's decisions, risks, people, commitments," it's project surface.
 
-There's a fourth surface that isn't CORE's to own but that CORE reads from: **harness-local recall** — Claude Code's `~/.claude/projects/*/memory/MEMORY.md`, Codex's `~/.codex/memories/`, equivalents in future harnesses. CORE treats this as scratch cache, never authoritative. See `dc-86-harness-local-memory-recall` for the principle and the `save-recall-note` adapter verb (resolved per `harnesses/<name>.md`) for the explicit-save mechanism. The trigger for invoking explicit-save — what user phrases mean "save this" to a given user — is install-level configuration in the user's `AGENTS.md`, not CORE prose.
+There's a fifth surface that isn't CORE's to own but that CORE reads from: **harness-local recall** — Claude Code's `~/.claude/projects/*/memory/MEMORY.md`, Codex's `~/.codex/memories/`, equivalents in future harnesses. CORE treats this as scratch cache, never authoritative. See `dc-86-harness-local-memory-recall` for the principle and the `save-recall-note` adapter verb (resolved per `harnesses/<name>.md`) for the explicit-save mechanism. The trigger for invoking explicit-save — what user phrases mean "save this" to a given user — is install-level configuration in the user's `AGENTS.md`, not CORE prose.
 
 ---
 
@@ -84,13 +84,13 @@ When sources conflict, this is the order CORE resolves:
 4. **CORE operational state in `<project>/.core/` and `~/.core/`** — runtime state only; not project fact authority.
 5. **Harness-local recall** — Claude Code `MEMORY.md`, Codex memories at `~/.codex/memories/`, and equivalents in future harnesses. Hints only; must verify against the unit store before acting.
 
-See `dc-86-harness-local-memory-recall` for the principle behind levels 4 and 5 — the four-surface model that makes the divergence between Claude's autonomous-write and Codex's explicit-save-only memory models safe.
+See `dc-86-harness-local-memory-recall` for the principle behind levels 4 and 5 — the separation of operational state from external recall that makes the divergence between Claude's autonomous-write and Codex's explicit-save-only memory models safe.
 
 ---
 
 ## Two tiers — observations and units
 
-The memory architecture is two tiers plus a canonical flag. Both tiers are markdown files with YAML frontmatter.
+The memory architecture is two tiers plus an optional priority pin. Both tiers are markdown files with YAML frontmatter.
 
 ### Tier 1 — Observations
 
@@ -111,7 +111,10 @@ The discard-list — things that *feel* worth keeping but aren't: ephemeral stat
 ---
 id: obs-2026-05-17-1432-architect-timeline
 type: observation
+status: active
 created: 2026-05-17T14:32:00Z
+updated: 2026-05-17T14:32:00Z
+topics: [timeline, deliverable-x]
 session: 2026-05-17-c
 sources:
   - surface: teams-chat
@@ -152,7 +155,7 @@ Model assignments per layer live in `references/model-assignments.md`. When in d
 
 ### Tier 2 — Units
 
-Graduated, reasoned facts. Rich frontmatter, typed edges, body with the full reasoning.
+Graduated, reasoned facts. Rich frontmatter, typed edges, and a body with source evidence, a concise justification, material alternatives, and observable checks. Do not request or store internal reasoning traces.
 
 ```yaml
 ---
@@ -174,7 +177,7 @@ topics:
 edges:
   - {type: cites, target: dc-09-router-design-review, note: "executes design"}
   - {type: supersedes, target: dc-04-routing-hotfix, note: "subsumes the hotfix path"}
-canonical: true
+pinned: true
 last_accessed: 2026-04-02T18:45:00Z
 ---
 The routing rewrite locks 4 phases for the migration to the new
@@ -185,9 +188,11 @@ Location: `<project>/_memories/<prefix>-<slug>.md` — flat layout per the stand
 
 **Field-name distinction between tiers.** Tier 1 observations carry `references-person:` and `references-topic:` — the raw entities mentioned in the capture. Tier 2 units carry curated `people:` and `topics:` arrays — the result of graduation reasoning, which may add, drop, or rename entries from the raw observation lists. `priority.mjs` and `check-units.mjs` read the Tier 2 `topics:` field; the priority function's A signal (Jaccard alignment with session-intent topics) operates on this curated list.
 
-### The canonical flag
+### The priority pin
 
-Top-priority units mark `canonical: true` in frontmatter. Canonical units get a priority floor, drive PROJECT.md rendering, and surface most heavily in retrieval. Not a separate tier — a marker on individual units.
+Top-priority units use `pinned` in frontmatter: `floor` gives the priority scorer a 0.7 floor, `true` a 0.9 floor, and `always` a 1.5 override; `false` is neutral. A pin is not a separate authority tier and does not grant authority. The product retriever has its own title/topics + BM25 ranking; do not infer a product-ranking boost from this priority-score setting.
+
+Keep three terms distinct: **store candidate** means a filename eligible for the startup populated-store check; **non-observation tier** is the index classification whose wire label remains `canonical` (it does not independently verify that graduation happened); **priority-pinned unit** means a unit with the `pinned` setting above. A file's presence proves neither graduation nor pinning. Legacy `canonical: true` is not the pin field read by `priority.mjs`; do not silently migrate existing files during retrieval.
 
 ### Open-question units and the `by-when` field
 
@@ -312,7 +317,7 @@ The graduation subagent — both paths — can invoke Tier 3 retrieval (Explore)
 
 ### Graduation decides; it doesn't wait
 
-The graduation subagent writes the unit, and the main agent narrates the outcome. When the new unit would supersede or conflict with an existing one, resolve it from the evidence: the user's own words outrank everything else, a sourced fact outranks an inferred one, and a newer primary source outranks an older one. Write the successor with a `supersedes` edge (or keep both with `conflicts-with` when both genuinely hold), put the reasoning in the new unit's body, and narrate. The predecessor is retired, never deleted, so the call can be reversed. Go to the user only when the conflict is one of the critical cases in §"Deciding on memory writes" and the evidence doesn't settle it.
+The graduation subagent writes the unit, and the main agent narrates the outcome. When the new unit would supersede or conflict with an existing one, resolve it from the evidence: the user's own words outrank everything else, a sourced fact outranks an inferred one, and a newer primary source outranks an older one. Write the successor with a `supersedes` edge (or keep both with `conflicts-with` when both genuinely hold), put the reasoning in the new unit's body, and narrate. The predecessor is retired, never deleted, so the call can be reversed. User-removed content may be restored only when the user explicitly authorizes it; evidence alone never settles that boundary. For other critical conflicts, follow §"Deciding on memory writes" and any applicable approval requirement.
 
 Full matrix at `references/model-assignments.md`.
 
@@ -324,23 +329,23 @@ When in doubt, write the unit. A slightly-too-eager unit is cheap. A missed crit
 
 ## Retrieval ladder
 
-Four tiers. Score-gated termination — you decide at each tier whether the candidate set is good enough or you need to escalate.
+Four tiers. The shipped per-turn retriever runs the product Tier 1 path; judge sufficiency before escalating to a graph walk or reasoning pass. A manual search is a fallback, not the default product mechanism.
 
 ```
 Tier 0: In-context (already loaded — no retrieval)
    ↓ miss or insufficient
-Tier 1: Lexical via Grep + Read + Glob (keyword-anchored)
+Tier 1: Product retriever (title/topics + body BM25, then one-hop expansion)
    ↓ miss or insufficient
 Tier 2: Graph walk via typed-edge frontmatter (relational)
    ↓ miss or insufficient
-Tier 3: Semantic via Explore subagent (LLM reasoning over the vault)
+Tier 3: Reasoning over exhaustive bounded shards, then Explore if unresolved
 ```
 
-Session-intent topics drive Tier 1's grep terms. At session start, before any user message exists, they default to the bootstrap set `orient`, `memory`, `state` (per `protocols/startup.md` §"Load — returning workspace") and resolve to the user's actual words after the first turn.
+Use the current question for an explicit product query; startup uses `orient memory state` before a user query exists. If the product script is unavailable, use Grep + Read + Glob over the same active population and report the fallback. Preserve source and authority labels, and apply the normal archive, retired, and invalidated exclusions manually.
 
-Harness-local recall (via the `read-auto-memory` adapter verb — Claude Code's `MEMORY.md`, Codex memories, equivalents) is queried alongside `_memories/` at every tier as scratch context. Useful for hints; never authoritative — verify against the unit store before acting. See §"Authority ordering" above for where it sits in the stack.
+Harness-local recall (via the `read-auto-memory` adapter verb when available) supplies startup hints; it is not an input to the automatic per-turn product retriever. Read it manually only when useful for a specific follow-up or fallback and supported by that harness. Verify any hint against current project sources before acting; it cannot restore user-removed content or establish project authority. See §"Authority ordering".
 
-**Default retrieval excludes observations.** Only graduated units surface by default. Observations are queryable on demand ("show me observations about X").
+**Default product retrieval includes active raw observations.** The index recursively discovers eligible active files and labels raw captures `observation`; non-observations carry the existing `canonical` wire label. The shipped default tier policy is flat ranking: tier is a label, not a boost or filter. A raw observation is evidence of a capture, not a graduated project fact; verify it before relying on it as authority. Do not change tier policy or ranking to resolve this prose distinction.
 
 **Default retrieval excludes invalidated units.** A unit whose validity dimension shows `t_invalid` in the past is suppressed from the Tier-2 candidate set the same way a retired unit is — the fact no longer holds in the world. Cold history stays reachable by an explicit point-in-time query (`graph-walk --include-invalid`, `bitemporal --as-of`). See `references/retrieval.md` walk-termination.
 
@@ -367,15 +372,15 @@ Metrics capture is physically two separate streams, and they are never mixed:
 
 | Stream | What it holds | Default | Exporter |
 |---|---|---|---|
-| **Closed-schema metrics** | `retrieval-log.jsonl` / `outcome-log.jsonl` and the derived rollups — counts, tiers, verdicts, identities. No prompts, no diffs, no unit bodies, no paths, no raw errors. | **ON**, opt-out via `metrics_enabled: false` or `CORE_METRICS_ENABLED=0`. | `metrics-package.mjs` reads this and anonymizes it into the shareable package. |
+| **Local operational events and derived metrics** | `retrieval-log.jsonl` / `outcome-log.jsonl` carry counts, tiers, verdicts, identities, and producer-supplied fields. The local writers preserve extra fields; these logs are not a closed-schema or content-free boundary. Do not add raw prompts, bodies, paths, diffs, or errors to operational events. | The base retrieval/outcome event writer is always on; metrics opt-outs do not filter or disable that local JSONL writer. | `metrics-package.mjs` builds the shareable package from its own allowlisted, anonymized fields and checks package bytes for leaks; local event capture and safe export are separate boundaries. |
 | **Turn-capture evidence** | `<metrics-storage-base>/turn-capture/<date>.jsonl` — one row per turn: the user's prompt (64 KiB byte-cap), the combined delivered context-pack text (16 KiB cap), per-unit ids+scores, the top-20 rejected candidates with scores, a store signature for drift detection, and producer identity. This is what the hindsight judge grades later — it exists so retrieval quality is judgeable after the fact. Files are owner-only (dir `0700`, rows `0600`, best-effort where the FS supports it). For local grading and human/agent debugging only; no model inference runs over it. | **ON**. Opt-outs: `CORE_TURN_CAPTURE=0` (env), `turn_capture: false` in the project-root `workspace.json` (an opt-OUT travelling with a copied project is privacy-safe), or the master `CORE_METRICS_ENABLED=0`. | **None.** `metrics-package.mjs` has no import path or read path into `turn-capture/`; a permanent canary tripwire test asserts the built package bytes never contain a planted evidence string. |
 
 The evidence stream is the materially more sensitive one, so it carries **always-visible state** (`/metrics` renders the ON line with the exact disclosure and off-switches, or the OFF line confirming an opt-out took effect), **independent disable** (its own flag; toggling it never touches the numbers stream), **no scheduled deletion** (rows are kept until the user asks), and **purge on explicit ask** (`maintenance-run.mjs --purge-turn-capture`, or `turn-capture.mjs --purge`). The explicit purge reports its declared scope: the turn-capture directory, capture-health counters, derived judgment log, classified turn log, and intact writer-marked automatic-close summaries and receipts. Close files are selected individually, never by recursive deletion of the close directories; a user memory unit or `PROJECT.md` is never a close-purge target. **One exclusion lock** at a stable sibling path OUTSIDE the purged directory (`<metrics-storage-base>/.turn-capture.lock`) is shared by append, retention deletion, automatic close/receipt writes, and purge, so a purge can never unlink the lock out from under a mid-flight writer and the three ops can never race. A health counter (`<metrics-storage-base>/turn-capture-health.json`, a sibling on purpose) records every attempt including ones where the stream itself couldn't be created — a silently dying flight recorder is the exact failure the capture-health tripwire watches. The single writer is `scripts/turn-capture.mjs`; the one wired seam is `retrieve-context-hook.mjs`, writing the evidence row in the same run as the numbers row, joined by `retrieval_id`; a capture outcome (including failures) rides the hook's terminal operational receipt as a closed `turn_capture` status code, never as raw content.
 
 
-**Automatic close privacy.** `<metrics-storage-base>/close/{summaries,receipts}/` holds deterministic lifecycle records. Automatic close uses the same capture gate as turn capture: either `CORE_METRICS_ENABLED=0` or `CORE_TURN_CAPTURE=0` (and the workspace opt-outs) suppresses opening-request and tool-input file-path content while retaining identity, times, tool names, and counts. An invalid pin disables content and independently routes close output to the locally selected storage path, never the invalid-pin project fallback. Generated directories establish self-ignore rules before payload writes; this prevents ordinary Git staging of new untracked files, but cannot untrack previously committed files or prevent `git add -f`.
+**Automatic close privacy.** `<metrics-storage-base>/close/{summaries,receipts}/` holds deterministic lifecycle records. Automatic close uses the same capture gate as turn capture: either `CORE_METRICS_ENABLED=0` or `CORE_TURN_CAPTURE=0` (and the workspace opt-outs) suppresses opening-request and tool-input file-path content while retaining identity, times, tool names, and counts. Close output always goes to the project's own `_metrics/`. Generated directories establish self-ignore rules before payload writes; this prevents ordinary Git staging of new untracked files, but cannot untrack previously committed files or prevent `git add -f`.
 
-The writer stamps new automatic summaries and receipts with `core.generated-close/1` plus an integrity hash. Explicit purge removes only direct hash-named regular files whose marker and hash still match. Manual certifications, manual summaries, edited generated files, pre-fix unmarked files, nested files, links, temporary files, and corrupt quarantines are retained and reported in the close scope's `kept` list. A manual receipt protects its same-session generated summary too. The purge does not follow a receipt's `summary_path`; it does not rewrite, migrate, or delete historical close material. `removed` on a close scope means its selected files were removed, not that the containing directory or `kept` files vanished. A dry run lists candidates without deleting them. If the storage pin is invalid, purge continues to refuse with `pin-unverified`; repair the pin before asking again. No close purge runs on a schedule or during normal close/startup. This change does not clean up existing retained prompt text.
+The writer stamps new automatic summaries and receipts with `core.generated-close/1` plus an integrity hash. Explicit purge removes only direct hash-named regular files whose marker and hash still match. Manual certifications, manual summaries, edited generated files, pre-fix unmarked files, nested files, links, temporary files, and corrupt quarantines are retained and reported in the close scope's `kept` list. A manual receipt protects its same-session generated summary too. The purge does not follow a receipt's `summary_path`; it does not rewrite, migrate, or delete historical close material. `removed` on a close scope means its selected files were removed, not that the containing directory or `kept` files vanished. A dry run lists candidates without deleting them. When an older version kept this project's captured rows in a folder outside the project (a Windows OneDrive redirect to AppData), the purge never deletes there: it names the folder in `held_history` and says the purge is not complete while those rows exist. The folder may hold more than one project's rows, so deleting it is the user's decision. The purge also refuses any entry whose folder physically resolves outside the project (or, for the classified log, outside this project's machine-local fallback state), such as a linked `_metrics`. The allowed folders are pinned when the purge is planned and checked immediately before each removal; a swap in the instant between that check and the removal is outside what CORE defends (a concurrent same-user process). No close purge runs on a schedule or during normal close/startup. This change does not clean up existing retained prompt text.
 
 ---
 
@@ -384,11 +389,11 @@ The writer stamps new automatic summaries and receipts with `core.generated-clos
 The committed priority function:
 
 ```
-priority(unit, t) = w_R · R(unit, t)
-                  + w_F · F(unit, t)
-                  + w_S · S(unit)
-                  + w_A · A(unit, t)
-                  + P(unit)
+base(unit, t) = w_R · R(unit, t)
+              + w_F · F(unit, t)
+              + w_S · S(unit)
+              + w_A · A(unit, t)
+priority(unit, t) = apply the user pin floor/override to base(unit, t)
 ```
 
 Signals:
@@ -397,7 +402,7 @@ Signals:
 - **F (frequency-across-sources)** — distinct surface-types the unit appears in, normalized by 6.
 - **S (source-type weight)** — lookup from the source-type table (PROJECT.md = 1.0, configuration = 0.9, operational meta = 0.7, `_summaries/`/`_outputs/` = 0.5, session logs = 0.3, raw transcripts = 0.2).
 - **A (alignment with current intention)** — Jaccard overlap of unit's topics against session-intent topics.
-- **P (pinning)** — user-only pin levels: `floor` (priority floor 0.7), `true` (floor 0.9, decay bypassed), `always` (priority 1.5, alignment-independent). `pinned: false` or `suppress: true` is an anti-pin (priority × 0.3).
+- **P (pinning)** — user-only pin levels applied after the weighted base score: `floor` (score floor 0.7), `true` (score floor 0.9), `always` (score override 1.5). `pinned: false` is neutral; the scorer does not apply a `suppress: true` penalty. These priority settings do not alter the product retriever's tier policy.
 
 Starting weights: `w_R=0.30, w_F=0.15, w_S=0.20, w_A=0.35`.
 
@@ -411,7 +416,7 @@ Memory decisions are yours. Capturing an observation, graduating it, superseding
 
 When the user tells you directly ("remember X", "forget Y", "pin this", "save as a decision"), do exactly that without re-asking.
 
-**Ask the user only for a critical decision you can't make.** Both conditions must hold, and the bar sits high on purpose: told directly to use your own judgment, you're usually right, so asking is the exception this list carves out, not a default you fall back on when a call merely feels uncomfortable.
+**Within authorized scope, ask for a critical decision you cannot settle from evidence.** This judgment rule never waives a required approval or the user-only authorship boundary below. Asking is not the default for a call that merely feels uncomfortable.
 
 A decision is **critical** when it would:
 
@@ -421,7 +426,9 @@ A decision is **critical** when it would:
 - settle a contradiction between sources on a fact that **materially** changes what someone does (a date, an owner, a commitment, a decision) — not any contradiction, only one where guessing wrong would actually mislead someone;
 - change a structural pattern or a default the user hasn't endorsed (data topology, identity, protocol migration, invariants, global defaults) **and** the change is hard to unwind — most memory writes aren't: the store never deletes, so a wrong supersession call is corrected by the next one, not lost. Reserve this bullet for the rare change that isn't cheaply reversible that way.
 
-You **can't make** it when you've looked (the retrieval ladder, the sources the units cite, the user's own words in the transcript) and the evidence still doesn't settle it. If the evidence does settle it, decide, even when the decision is on the list above, and put the evidence in the unit body. When the call is not critical and you're genuinely torn, decide and narrate the reasoning rather than asking — a visible, reversible call beats an interruption. A decision that is both critical and still unsettled after that evidence review is the one case you ask about.
+**User-only boundary:** restoring user-removed content always requires the user's explicit authorization; stronger evidence, a new source, or agent agreement cannot substitute. Do not reintroduce the removed claim through a successor unit. Other authorship or approval boundaries imposed by the user/harness policy remain binding too.
+
+For an otherwise authorized decision, consult the retrieval ladder, cited sources, and the user's own words. If a critical decision remains unsettled, ask. If the evidence settles it and no approval boundary applies, decide and record the evidence in the unit body. For noncritical, authorized, reversible calls, use your judgment and narrate the concise justification.
 
 When you do ask: one question, in plain words, with your best guess and why. Keep working on everything else while you wait. Record the question as an open-question unit so it outlives the session (the deferral ladder in SKILL.md §"Persist on hard questions" takes it from there).
 
@@ -429,7 +436,7 @@ Everything that isn't memory keeps its own gate: pushes follow the push policy b
 
 ### Push policy is per-user, per-repo
 
-Commits are autonomous — commit as needed without asking. Pushes follow the user's established policy. Default when the user has named no policy: confirm every push, every repo. When the user has named standing authorization for specific repos (in feedback memory under `feedback_commit_push_policy.md` or similar), push to those repos autonomously per the named scope. Common shapes:
+Commit without an extra user question only within the authorized task and repository scope, after the independent risk check in `protocols/execution.md`. Pushes follow the user's established policy. Default when the user has named no policy: confirm every push, every repo. When the user has named standing authorization for specific repos (in feedback memory under `feedback_commit_push_policy.md` or similar), push to those repos autonomously per the named scope. Common shapes:
 
 - *"Push to main on `<repo>` is autonomous"* — push without asking.
 - *"Follow the release process on `<repo>`"* — work on feature branches, open PRs, never push directly to main; the release flow (e.g., `/cut-release`) carries main updates.
@@ -491,7 +498,7 @@ CORE's own writes are not user edits. Scripts that render PROJECT.md or a unit f
 
 `maintenance-run.mjs` stamps `last_written_by: maintenance-run` the same way for the fully machine-generated files it writes (`INDEX-decisions.md`, `INDEX-risks.md`, the summary index) — no block-splitting classifier needed there, since those files have no human-authored region to distinguish from CORE's own.
 
-**Both classifiers also gate the WRITE itself, in code, not just later reads.** Preserving the human-authored bytes on a rewrite is not the same as preserving authorship: a writer that rewrote its generated region and then unconditionally stamped a FRESH `outside_hash` would launder any divergence the human-authored region had already accumulated against the last known baseline — the user's bytes would survive, but the fact that they'd changed would never be observed, attributed, or propagated (a hash mismatch that WOULD read `outside-changed` against the true prior baseline instead reads `edges-block-only`/`hot-block-only` against the writer's own just-laundered one). So the gate sits at the writer boundary, inside `decorateStore`/`decorateStoreLocked` and `applyHotSection`/`clearHotSection`: each reads the PRE-write cache and classifies the file BEFORE writing. A file with a prior cache entry that classifies `outside-changed` or `no-baseline` is refused — not decorated, not re-stamped — and reported as `needs_reconciliation` (decorate-graph: in `decorateStore`'s return value; hot-section: a thrown `NEEDS_RECONCILIATION` error). A file with NO prior cache entry has no established baseline to violate, so its first-ever write still proceeds and establishes that baseline. Because the check lives inside the writer functions themselves, any caller — this protocol, a hook, `/finalize`, a manual script invocation — gets the protection automatically, without needing to call the classifier first at each call site.
+**Both classifiers also gate the WRITE itself, in code, not just later reads.** Preserving the human-authored bytes on a rewrite is not the same as preserving authorship: a writer that rewrote its generated region and then unconditionally stamped a FRESH `outside_hash` would launder any divergence the human-authored region had already accumulated against the last known baseline — the user's bytes would survive, but the fact that they'd changed would never be observed, attributed, or propagated (a hash mismatch that WOULD read `outside-changed` against the true prior baseline instead reads `edges-block-only`/`hot-block-only` against the writer's own just-laundered one). So the gate sits at the writer boundary, inside `decorateStore`/`decorateStoreLocked` and `applyHotSection`/`clearHotSection`: each reads the PRE-write cache and classifies the file BEFORE writing. A file with a prior cache entry that classifies `outside-changed` or `no-baseline` is refused — not decorated, not re-stamped — and reported as `needs_reconciliation` (decorate-graph: in `decorateStore`'s return value; hot-section: a thrown `NEEDS_RECONCILIATION` error). A file with NO prior cache entry always refuses too: absence of a baseline cannot establish CORE authorship. Only the creating CORE writer stamps the bytes it just created; an existing unbaselined file requires reconciliation or the explicit legacy-store adoption flow in `protocols/startup.md` §"The authorship rule". Neither session timing nor a later writer may supply a first-write exception. Because the check lives inside the writer functions themselves, any caller — this protocol, a hook, `/finalize`, a manual script invocation — gets the protection automatically, without needing to call the classifier first at each call site.
 
 Runs at:
 - startup (full sweep).
@@ -615,7 +622,7 @@ Reconcile at the next hygiene pass. The reconciliation either merges them (pick 
 
 ### Retired content re-emerges in a conversation
 
-The anti-resurrection rule fires. You don't re-promote the retired unit. If the new conversation generates a genuinely new framing of the underlying fact, that's a new unit — composed fresh, not a revival. The retired unit stays retired unless the user explicitly un-retires it.
+The anti-resurrection rule fires. You don't re-promote the retired unit. A genuinely new framing may justify a new unit only if it does not restore user-removed content. The removed claim and retired unit stay retired unless the user explicitly authorizes restoration.
 
 ### Cross-project drift (different projects, same fact, different framings)
 
@@ -623,17 +630,19 @@ You don't auto-reconcile across projects. The cross-project store is `~/.core/re
 
 ### No-response-inference default
 
-When the user goes quiet mid-conversation and you've asked them something: act on your best judgment, narrate what you did, log it. The delay is concrete and measured in agent turns — you can't observe wall-clock time between turns. In an autonomous run, proceed after one turn; the user is intentionally unavailable and waiting longer buys nothing. In an interactive session, surface the proposal once more after about three turns, then act. Don't block the session indefinitely waiting for a yes/no on something you can reverse. If the action is irreversible — a push, a create/update/delete on an external system, anything that destroys or publishes what you can't restore — it does not auto-execute at any delay: it blocks for the session until the user answers. Self-unblock by lining up everything short of the irreversible step (staged commit, drafted payload, verified parameters) so the user's "yes" is the only thing left.
+Silence and elapsed turns never supply approval. Pending required approvals, a denial, and user-authorship boundaries (especially restoring user-removed content) remain blocking regardless of reversibility. Continue independent authorized work while waiting.
+
+For an optional proposal that is already within authorized scope, reversible, and outside those boundaries, use your best judgment and narrate the result: in an autonomous run, proceed after one turn; in an interactive session, surface it once more after about three turns. These delays do not apply to approval requests. Prepare the remaining authorized steps so the user's answer can unblock the dependent action without inventing consent.
 
 ---
 
 ## Harness-local recall integration
 
-Harness-local recall is its own store at a harness-specific path — Claude Code uses `~/.claude/projects/<git-root, or cwd outside a repo>/memory/`, Codex uses `~/.codex/memories/`, future harnesses bring their own. The `read-auto-memory` adapter verb resolves the path per harness (see `harnesses/<name>.md`). By design it's surface 4 in the authority stack — recall, never authoritative.
+Harness-local recall is its own store at a harness-specific path — Claude Code uses `~/.claude/projects/<git-root, or cwd outside a repo>/memory/`, Codex uses `~/.codex/memories/`, future harnesses bring their own. The `read-auto-memory` adapter verb resolves the path per harness (see `harnesses/<name>.md`). By design it's level 5 in the authority stack — recall, never authoritative.
 
 - Loaded at session start by the harness when it has an auto-load surface (Claude Code does, Codex doesn't auto-load memory).
 - Holds cross-session workflow lessons — user preferences, patterns, references, harness-specific empirical findings.
-- Retrieval queries BOTH `_memories/` and harness-local recall — no separate path.
+- Automatic product retrieval reads `_memories/` only. Native recall is a separate startup/manual hint source, verified against current project authority before use.
 - Graduation can promote a harness recall entry into `_memories/` when it reveals cross-project implications worth a durable unit. The reverse — auto-write into harness recall from project facts — happens per harness: Claude Code refreshes `MEMORY.md` from top-priority units at `/finalize` Step 5; Codex never auto-writes (explicit-save only, via the `save-recall-note` verb mapped in `harnesses/codex.md`).
 - Hygiene reads harness recall and reconciles with `_memories/` — no duplication. On Codex, reconciliation surfaces divergences rather than silently rewriting.
 - The harness recall index, when one exists (Claude Code's `MEMORY.md`), is maintained by the same agent that maintains `_memories/` indexes.

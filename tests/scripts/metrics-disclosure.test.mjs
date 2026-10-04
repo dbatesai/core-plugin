@@ -6,8 +6,8 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir, platform } from 'node:os';
-import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
-import { updateManifest, readManifest, stateDir, writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { checkMetricsDisclosure, NOTICE_TEXT, NOTICE_VERSION, HISTORY_NOTICE_VERSION } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
+import { updateManifest, readManifest, stateDir, writeSignedFile, writePinSigned, projectRootFor } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 
 const SCRIPT = join(process.cwd(), 'plugins/core/skills/core/scripts/metrics-disclosure.mjs');
 const HARNESS = 'claude-code';
@@ -163,43 +163,47 @@ test('a project stamped at the current notice version stays silent', () => {
   });
 });
 
-test('a project whose pin still names an external folder is told where its log really is', async () => {
-  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+// An earlier Windows OneDrive redirect: a signed pin naming an AppData folder that still holds rows.
+function withOldExternalFolder({ home, coreDir, project }) {
+  const old = join(home, 'AppData', 'Local', 'core-metrics', 'old-redirect');
+  mkdirSync(old, { recursive: true });
+  const meta = join(stateDir({ root: project, harness: HARNESS, coreDir, kind: 'hot', forWrite: true }).dir, 'metrics');
+  mkdirSync(meta, { recursive: true });
+  writePinSigned({ dir: meta, path: old, root: projectRootFor(project, { home, coreDir }), coreDir });
+  return old;
+}
+
+test('a project with earlier rows in an older external folder is told the log lives in the project and where the earlier rows are', () => {
   sandbox(({ home, coreDir, project }) => {
     updateManifest({ root: project, harness: HARNESS, coreDir, fields: { schema_version: 'v2' } });
-    const saved = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
-    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1'; // stands in for an earlier Windows OneDrive redirect
-    try {
-      const r = initMetrics({ projectDir: project, home, env: ENV });
-      assert.equal(r.ok, true, JSON.stringify(r));
-    } finally {
-      if (saved === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = saved;
-    }
+    const old = withOldExternalFolder({ home, coreDir, project });
     const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(result.shown, true);
     assert.ok(result.noticeText.startsWith(NOTICE_TEXT));
-    assert.match(result.noticeText, /kept outside the project folder/);
-    assert.ok(result.noticeText.includes(join(home, 'AppData')), result.noticeText);
+    assert.match(result.noticeText, /Earlier rows from before this version are kept outside the project folder/);
+    assert.ok(result.noticeText.includes(old), result.noticeText);
+    assert.match(result.noticeText, /Nothing new is written there/);
   });
   sandbox(({ home, project }) => {
     const result = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
-    assert.equal(result.noticeText, NOTICE_TEXT, 'a project-local log gets the plain notice');
+    assert.equal(result.noticeText, NOTICE_TEXT, 'a project with no history gets the plain notice');
   });
 });
 
-test('a project that saw the version-5 notice without its location line gets the corrected notice once, then silence', async () => {
-  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+test('a project that saw the version-6 notice is shown the corrected one once if it has history, and a project without history is not shown it again', () => {
   sandbox(({ home, coreDir, project }) => {
-    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: 5 } });
-    const saved = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
-    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
-    try { assert.equal(initMetrics({ projectDir: project, home, env: ENV }).ok, true); }
-    finally { if (saved === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = saved; }
+    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION } });
+    withOldExternalFolder({ home, coreDir, project });
     const first = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(first.shown, true);
-    assert.match(first.noticeText, /kept outside the project folder/);
+    assert.match(first.noticeText, /Earlier rows from before this version/);
+    assert.equal(readManifest({ root: project, harness: HARNESS, coreDir }).metrics_disclosure_version, HISTORY_NOTICE_VERSION);
     const second = checkMetricsDisclosure({ projectDir: project, home, env: ENV });
     assert.equal(second.alreadyShown, true);
     assert.equal(second.noticeText, null);
+  });
+  sandbox(({ home, coreDir, project }) => {
+    updateManifest({ root: project, harness: HARNESS, coreDir, fields: { metrics_disclosure_shown: true, metrics_disclosure_version: NOTICE_VERSION } });
+    assert.equal(checkMetricsDisclosure({ projectDir: project, home, env: ENV }).alreadyShown, true);
   });
 });

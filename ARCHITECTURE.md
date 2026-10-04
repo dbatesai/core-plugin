@@ -20,9 +20,9 @@ Memory is the heart of the design. Everything else organizes around how facts ge
 
 **Tier 1 — observations** at `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Capture-everything. Every utterance, tool output, casual mention. Low-effort YAML frontmatter (id, type, created, session, sources, references-person, references-topic). No edges required at write time.
 
-**Tier 2 — units** at `<project>/_memories/<prefix>-<slug>.md`, flat layout. Graduated, reasoned facts. Rich frontmatter (id, type, status, created, updated, confidence, sources, references-person, references-topic, edges, canonical, last_accessed, access_count). Body holds the agent's reasoned reading — synthesis, not raw extract.
+**Tier 2 — units** at `<project>/_memories/<prefix>-<slug>.md`, flat layout. Graduated, reasoned facts. Rich frontmatter (id, type, status, created, updated, confidence, sources, references-person, references-topic, edges, pinned, last_accessed, access_count). Body holds the agent's reasoned reading — synthesis, not raw extract.
 
-The canonical flag (`canonical: true`) marks the top-priority units that surface in PROJECT.md and get a priority floor. Not a separate tier; a marker.
+The priority pin (`pinned`) affects `priority.mjs` scoring: `floor` gives a 0.7 floor, `true` a 0.9 floor, `always` a 1.5 override, and `false` is neutral. It is distinct from the product index's `canonical` label for non-observations and from startup's store-candidate presence check. The product retriever uses its own ranking; a pin does not itself confer authority or imply a product-ranking boost.
 
 ### Edge types
 
@@ -35,34 +35,34 @@ Three are eager at write time — `supersedes`, `depends-on`, `conflicts-with` �
 ```
 Tier 0 — In-context (already loaded; no retrieval)
    ↓ miss or insufficient
-Tier 1 — Lexical (Grep + Read + Glob; keyword-anchored)
+Tier 1 — Product retriever (title/topics + body BM25, then one-hop expansion)
    ↓
 Tier 2 — Graph walk (typed-edge frontmatter; relational, hop-cap 2-3)
    ↓
-Tier 3 — Semantic (Explore subagent reasoning over the vault)
+Tier 3 — Reasoning (exhaustive bounded shards, then Explore if unresolved)
 ```
 
 Score-gated termination at every transition — the agent decides whether the candidate set is good enough.
 
-Default retrieval excludes observations. Only graduated units surface unless the user explicitly queries observations.
+Default product retrieval includes active observations recursively, labeled `observation`, alongside non-observations labeled `canonical`. The shipped default tier policy ranks them flat; authority labels do not imply a ranking preference. Raw captures remain lower-authority evidence and must be verified before use as project facts.
 
 Auto-memory at `~/.claude/projects/*/memory/` is read once at startup as harness-local warm-start hinting — scratch cache, never authoritative. The automatic per-turn retrieval path reads only `_memories/`; harness memory is not queried per tier.
 
 ### Priority function
 
 ```
-priority(unit, t) = w_R · R(unit, t)
-                  + w_F · F(unit, t)
-                  + w_S · S(unit)
-                  + w_A · A(unit, t)
-                  + P(unit)
+base(unit, t) = w_R · R(unit, t)
+              + w_F · F(unit, t)
+              + w_S · S(unit)
+              + w_A · A(unit, t)
+priority(unit, t) = apply the user pin floor/override to base(unit, t)
 ```
 
 - **R (recency)** = `exp(-recency_days / τ)`, τ=60 days.
 - **F (frequency-across-sources)** = distinct surface-types the unit appears in, normalized by 6.
 - **S (source-type weight)** = lookup (PROJECT.md=1.0, configuration=0.9, ops meta=0.7, _summaries/_outputs=0.5, session logs=0.3, raw transcripts=0.2).
 - **A (alignment)** = Jaccard overlap of unit's topics against session-intent topics.
-- **P (pinning)** = user-only pin levels (floor=0.7 floor, true=0.9 floor & decay bypassed, always=1.5 alignment-independent).
+- **Pinning** = user-only post-score setting (`floor`: minimum 0.7; `true`: minimum 0.9; `always`: override 1.5; `false`: neutral). It is not an additive signal.
 
 Starting weights: `w_R=0.30, w_F=0.15, w_S=0.20, w_A=0.35`. Computed at retrieval time over a candidate set, never persisted as a stored ranked list.
 
@@ -152,7 +152,7 @@ The validation report includes a final qualitative field: *"Did retrieval feel r
 
 CORE measures how well it recognizes a project across sessions. A per-turn classifier labels each turn with one of six recognition states; a daily rollup aggregates them and writes a one-line signal that the readiness summary surfaces when recognition is slipping. Companion detectors flag non-resolving citations, stale context, and anticipation gaps.
 
-Capture runs by default and writes only to local disk under `<project>/_metrics/` — nothing leaves the machine. Opt out per project with `metrics_enabled: false` in the project's `.core/<harness>/workspace.json`, or globally with `CORE_METRICS_ENABLED=0`.
+Capture runs by default into the project's own `_metrics/` folder; capture itself does not upload it, though a cloud-synced project folder syncs it. `metrics_enabled: false` in the project's `.core/<harness>/workspace.json`, or `CORE_METRICS_ENABLED=0`, opts out of producers that honor the capture gate. The base local retrieval/outcome JSONL event writer remains on; these flags are not a guarantee that no operational event is written. See `protocols/data-storage.md` §"Two capture streams, one exporter boundary".
 
 The classifier is **PROVISIONAL**. It isn't calibrated, so the readiness summary only flags an *upward* recognition-failure trend — never an absolute level — and every surface that shows the signal says PROVISIONAL. Calibration clears once a human-labeled set reaches a 0.7-precision gate, and that precision is computed only from the labels, never from the classifier's own output.
 

@@ -1012,10 +1012,10 @@ test('migration signs a carried metrics pin for neither project when a not-yet-m
   } finally { s.cleanup(); }
 });
 
-test('an ambiguous legacy metrics folder is reported by the migration and again by the scaffold, and stays reported until someone claims it', async () => {
+test('an ambiguous legacy metrics folder is recorded by the migration as history and never routed to, claimed or not', async () => {
   const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  const { metricsHistoryFolders } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
   const { s, p, table } = migrationFixture();
-  const savedForce = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
   const savedHome = process.env.HOME;
   try {
     const peerPath = s.mk('Projects', 'PeerProject');
@@ -1030,71 +1030,62 @@ test('an ambiguous legacy metrics folder is reported by the migration and again 
     writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), shared);
 
     const r = applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 });
-    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
     assert.equal(r.metrics_held.folder, shared, 'the migration says which folder it held');
     assert.equal(r.metrics_held.also_named_by.length, 1);
 
-    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
     process.env.HOME = s.home;
-    const init = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
-    assert.equal(init.held_legacy_folder.folder, shared, 'the scaffold reports the same hold from the migration record');
-    assert.notEqual(init.storagePath, shared);
+    const opts = { home: s.home, env: { CORE_HARNESS: H } };
+    const init = initMetrics({ projectDir: p, ...opts });
+    assert.equal(init.storagePath, join(p, '_metrics'), 'writes go to the project');
+    assert.deepEqual(metricsHistoryFolders(p, opts).map((h) => h.folder), [shared], 'named as history');
     writeFileSync(join(shared, '.project-root'), p + '\n');
-    const after = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
-    assert.equal(after.held_legacy_folder, null, 'claimed: no longer reported as held');
-    assert.equal(after.storagePath, shared, 'and capture is pointed back at the old folder, not left at the new one');
-    assert.equal(after.reattached_legacy_folder.folder, shared);
-    assert.equal(after.reattached_legacy_folder.interim_storage, init.storagePath, 'the interim folder is named');
-    const again = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
-    assert.equal(again.storagePath, shared, 'and it stays there on the next scaffold');
-    assert.equal(again.reattached_legacy_folder, null);
-    assert.equal(existsSync(join(hot, 'metrics', 'held-legacy-folder.txt')), false, 'the hold is retired once the pin is written');
+    assert.equal(initMetrics({ projectDir: p, ...opts }).storagePath, join(p, '_metrics'), 'claiming the folder does not route writes to it');
+    assert.deepEqual(metricsHistoryFolders(p, opts).map((h) => h.folder), [shared], 'still history, never a route');
   } finally {
-    if (savedForce === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = savedForce;
     if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
     s.cleanup();
   }
 });
 
-test('a claimed held folder is not lost when the new pin cannot be written: the hold survives and the next scaffold reattaches', async () => {
+// The split-log defect: a Windows OneDrive project whose legacy pin names AppData wrote its
+// captured turns to the project before the first /core (hooks new, state not migrated), then to
+// AppData after the migration carried the pin over. Both upgrade windows must write to the project,
+// and the notice must name AppData as history in the second window.
+test('a legacy AppData pin routes no writes in either upgrade window, and the notice matches where rows are written', async () => {
   const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  const { captureTurnEvidence, turnCaptureStats } = await import('../../plugins/core/skills/core/scripts/turn-capture.mjs');
+  const { noticeTextFor } = await import('../../plugins/core/skills/core/scripts/metrics-disclosure.mjs');
   const { s, p, table } = migrationFixture();
-  const savedForce = process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK;
   const savedHome = process.env.HOME;
+  const savedProfile = process.env.USERPROFILE;
   try {
-    const peerPath = s.mk('Projects', 'PeerProject');
-    const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
-    index.push(legacyWorkspace(s, 'peer', { path: peerPath, files: { 'workspace.json': JSON.stringify({ workspace_id: 'peer' }) } }));
-    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index));
-    const table2 = { ...table, entries: { ...table.entries, peer: { harness: H, evidence: 'fixture' } } };
-    const shared = join(s.home, 'AppData', 'Local', 'core-metrics', 'shared-old');
-    mkdirSync(shared, { recursive: true });
-    mkdirSync(join(s.coreDir, 'workspaces', 'peer', 'metrics'), { recursive: true });
-    writeFileSync(join(s.coreDir, 'workspaces', 'peer', 'metrics', 'storage-path.txt'), shared);
-    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), shared);
-    applyMigration({ root: p, harness: H, coreDir: s.coreDir, table: table2 });
-    const hot = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }).dir;
-    process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = '1';
     process.env.HOME = s.home;
-    initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
-    writeFileSync(join(shared, '.project-root'), p + '\n');
+    process.env.USERPROFILE = s.home;
+    const env = { CORE_HARNESS: H };
+    const old = join(s.home, 'AppData', 'Local', 'core-metrics', 'legacy-id');
+    mkdirSync(old, { recursive: true });
+    writeFileSync(join(s.coreDir, 'workspaces', 'legacy', 'metrics', 'storage-path.txt'), old);
+    writeFileSync(join(p, 'workspace.json'), JSON.stringify({ workspace_id: 'legacy' }));
+    const row = (text) => captureTurnEvidence(p, { prompt_text: text }, { env });
+    const projectRows = () => turnCaptureStats(p, { env }).rows;
+    const appDataRows = () => existsSync(join(old, 'turn-capture')) ? readdirSync(join(old, 'turn-capture')).length : 0;
 
-    // Make the pin unwritable: a directory where storage-path.txt has to go.
-    const pinPath = join(hot, 'metrics', 'storage-path.txt');
-    rmSync(pinPath, { force: true });
-    rmSync(pinPath + '.mac', { force: true });
-    mkdirSync(pinPath);
-    const failed = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
-    assert.equal(failed.ok, false, 'the pin write fails');
-    assert.equal(existsSync(join(hot, 'metrics', 'held-legacy-folder.txt')), true, 'and the hold record is still there');
+    // Window 1: new hooks, legacy state not migrated.
+    assert.equal(row('one').written, true);
+    assert.equal(projectRows(), 1);
+    assert.equal(appDataRows(), 0);
+    assert.ok(noticeTextFor(p, { home: s.home, env }).includes(old), 'the unmigrated legacy pin is read as data, so the notice already names AppData as history');
 
-    rmSync(pinPath, { recursive: true, force: true });
-    const retry = initMetrics({ projectDir: p, home: s.home, env: { CORE_HARNESS: H } });
-    assert.equal(retry.storagePath, shared, 'after the fault is repaired the next scaffold reattaches');
-    assert.equal(existsSync(join(hot, 'metrics', 'held-legacy-folder.txt')), false, 'and only then retires the hold');
+    // Window 2: after the migration carries the pin over, and after a scaffold.
+    assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
+    assert.equal(initMetrics({ projectDir: p, home: s.home, env }).ok, true);
+    assert.equal(row('two').written, true);
+    assert.equal(projectRows(), 2, 'both rows are in the project, in one piece');
+    assert.equal(appDataRows(), 0, 'nothing went back to AppData');
+    assert.ok(noticeTextFor(p, { home: s.home, env }).includes(old), 'the notice names AppData as where earlier rows are kept');
   } finally {
-    if (savedForce === undefined) delete process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK; else process.env.CORE_METRICS_FORCE_APPDATA_FALLBACK = savedForce;
     if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+    if (savedProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedProfile;
     s.cleanup();
   }
 });

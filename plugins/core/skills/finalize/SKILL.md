@@ -23,7 +23,7 @@ node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs begin <project> --session <
   --ops material-capture,render-project-md,session-summary,memory-refresh
 ```
 
-If `begin` refuses ("lock held"), another close is running — stop and say so. Record each op below as you complete it (`close-pass.mjs record <project> --op <op> --status done|skipped|failed`); the per-op trail is what makes a crashed close recoverable.
+Without `--session`, `begin` names the session from the newest project-bound transcript, the same way `certify` does, so the op record belongs to this session. If `begin` refuses ("lock held"), another close is running — stop and say so. Record each op below as you complete it (`close-pass.mjs record <project> --op <op> --status done|skipped|failed`); the per-op trail is what makes a crashed close recoverable.
 
 ## Step 2 — Material capture (from the active context, once)
 
@@ -46,7 +46,7 @@ Run the edit gate first — every PROJECT.md write is edit-gated, no exceptions:
 node ${CORE_ROOT}/skills/core/scripts/lifecycle-detect.mjs <project> --json
 ```
 
-`pending-edit` → the user's edit wins: propagate it to source units, fire anti-resurrection for removals, and do not render over it this pass. `malformed` / `no-baseline` (unsafe) / `missing` / `read-only` → surface plainly, don't write. Only `clean` / `generated-only` (or safe first write) proceeds.
+`pending-edit` → the user's edit wins: propagate it to source units, fire anti-resurrection for removals, and do not render over it this pass. `malformed` / `no-baseline` / `missing` / `read-only` → surface plainly, don't write. A missing baseline always refuses; only `clean` / `generated-only` proceeds. See `protocols/startup.md` §"The authorship rule" for creation-time stamping and explicit legacy-store adoption; neither is an exception for a later writer.
 
 Render only when this session materially changed §State or §Moves — a session that changed neither records `render-project-md` as `skipped`. When it fires interactively, show the draft and let the user accept or edit (their edits become ground truth and propagate back to units). Then refresh the hot section (`hot-section.mjs candidates` → compose 5–7 plain lines → `hot-section.mjs apply --file`), skipping when the existing one still describes current truth.
 
@@ -89,7 +89,7 @@ Certify this exact session's close receipt — this is what stops the SessionEnd
 node ${CORE_ROOT}/skills/core/scripts/close-pass.mjs certify <project> --summary <summary-path>
 ```
 
-`certify` resolves the current session's native id from the newest project-bound transcript and writes the `closed` receipt. If it prints `UNRESOLVED`, pass `--session <id>` explicitly if you know it; otherwise say so — the automatic close will record the session's lifecycle evidence instead, and nothing is lost.
+`certify` resolves the current session's native id from the newest project-bound transcript and writes the `closed` receipt. It counts only ops recorded for this same session: if it prints `MARKER-SESSION-MISMATCH`, the recorded ops belong to another session, so begin again for this one and record its ops. If it prints `UNRESOLVED`, pass `--session <id>` explicitly if you know it; otherwise say so — the automatic close will record the session's lifecycle evidence instead, and nothing is lost.
 
 Then finish the marker and release the lock:
 

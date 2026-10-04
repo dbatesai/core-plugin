@@ -75,11 +75,24 @@ test('restore, yes: history, project_id and agent_name carry over, and the signe
     const m = readManifest({ root: restored, harness: H, coreDir: coreB });
     assert.equal(m.project_id, project_id);
     assert.equal(m.agent_name, 'Wren');
-    assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }).session_started_at, '2026-09-20T10:00:00Z');
+    assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'completion evidence from another install is not carried: startup runs in full here');
     assert.equal(readFileSync(join(restored, '.core', H, 'capability-history.jsonl'), 'utf8'), '{"row":1}\n{"row":2}\n');
     assert.equal(registerProject(coreB, restored).action, 'registered');
     assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null, 'asked once');
     assert.equal(checkMetricsDisclosure({ projectDir: restored, home: homeB, env: ENV }).shown, true, 'the notice shows again on this machine');
+  } finally { s.cleanup(); }
+});
+
+test('restore, yes: a fabricated unsigned bootstrap record is not promoted to verified evidence', () => {
+  const s = sandbox();
+  try {
+    const { coreB, restored } = restoredProject(s);
+    const now = new Date().toISOString();
+    writeFileSync(join(restored, '.core', H, 'last-bootstrap.json'), JSON.stringify({ session_started_at: now, bootstrap_completed_at: now }));
+    rmSync(join(restored, '.core', H, 'last-bootstrap.json.mac'), { force: true });
+    assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'unsigned before adoption');
+    assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' }).status, 'adopted');
+    assert.equal(readBootstrapRecord(coreB, { root: restored, harness: H }), null, 'still not evidence after adoption: startup is owed');
   } finally { s.cleanup(); }
 });
 

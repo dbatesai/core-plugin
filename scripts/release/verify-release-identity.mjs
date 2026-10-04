@@ -3,11 +3,16 @@
  * source it claims?
  *
  * Both harness manifests carry `source_sha`: the commit a release packages,
- * stamped by the version bump as the bump commit's own parent. That stamp is
- * only true at one point in history, so two questions need separate answers:
+ * stamped by the version bump as the bump commit's own parent. A fix that lands
+ * after the bump (a test-only change, say) may move the stamp forward to a later
+ * commit on the release's own history, as long as that commit packages the same
+ * bytes. The stamp is only true while the package it names is the package that
+ * ships, so two questions need separate answers:
  *
  *   --source     Is the committed stamp correct for this ref? At the release
- *                commit the stamp must equal that commit's parent. It stays
+ *                commit the stamp must equal that commit's parent, or name a later
+                commit on the way to this ref whose packaged bytes are the
+                release commit's (stamp lines aside). It stays
  *                fresh for as long as the packaged tree is byte-identical to
  *                that commit's — a merge that carries the release onto another
  *                branch changes no shipped bytes and is still the same release.
@@ -37,6 +42,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isCliEntry } from '../../plugins/core/skills/core/scripts/cli-entry.mjs';
@@ -73,6 +79,40 @@ function shaMatches(a, b) {
   if (a === b) return true;
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   return short.length >= 7 && /^[0-9a-f]+$/.test(short) && long.startsWith(short);
+}
+
+/**
+ * The packaged subtree as a fingerprint that ignores the `source_sha` stamp lines
+ * in the two harness manifests, so re-stamping a release does not change what it
+ * claims to package. Null when the subtree cannot be read.
+ */
+function packagedFingerprint(repo, commit) {
+  let listing;
+  try { listing = git(repo, ['ls-tree', '-r', commit, '--', PACKAGED_SUBDIR]); } catch { return null; }
+  const lines = listing.split('\n').filter(Boolean).map((line) => {
+    const [meta, path] = line.split('\t');
+    if (path !== CLAUDE_REL && path !== CODEX_REL) return line;
+    const text = showAt(repo, commit, path);
+    if (text === null) return line;
+    const unstamped = text.replace(/("source_sha"\s*:\s*")[^"]*(")/, '$1$2');
+    return `${meta.split(' ')[0]} manifest ${createHash('sha256').update(unstamped).digest('hex')}\t${path}`;
+  });
+  return createHash('sha256').update(lines.join('\n')).digest('hex');
+}
+
+/**
+ * True when `stamp` names a commit that is the release commit or comes after it
+ * on the way to `ref`, and that packages the release commit's bytes.
+ */
+function stampPackagesRelease(repo, stamp, release, ref) {
+  let full;
+  try { full = git(repo, ['rev-parse', '--verify', `${stamp}^{commit}`]); } catch { return false; }
+  const isAncestor = (a, b) => {
+    try { execFileSync('git', ['merge-base', '--is-ancestor', a, b], { cwd: repo, stdio: 'ignore' }); return true; } catch { return false; }
+  };
+  if (!isAncestor(release, full) || !isAncestor(full, ref)) return false;
+  const atStamp = packagedFingerprint(repo, full);
+  return atStamp !== null && atStamp === packagedFingerprint(repo, release);
 }
 
 /**
@@ -124,8 +164,8 @@ function verifySource(repo, ref, log) {
     log(`indeterminate: cannot locate the commit that introduced version ${claude.version} and its parent`);
     return INDETERMINATE;
   }
-  if (!shaMatches(claude.source_sha, point.parent)) {
-    log(`mismatch: source_sha ${claude.source_sha} is not the release commit's parent ${point.parent}`);
+  if (!shaMatches(claude.source_sha, point.parent) && !stampPackagesRelease(repo, claude.source_sha, point.release, ref)) {
+    log(`mismatch: source_sha ${claude.source_sha} is not the release commit's parent ${point.parent}, nor a later commit packaging the release's bytes`);
     log(`  release commit ${point.release} introduced version ${claude.version}`);
     return MISMATCH;
   }
@@ -133,18 +173,15 @@ function verifySource(repo, ref, log) {
   // Freshness is a property of the shipped bytes, not of commit distance: the
   // stamp still describes the package for as long as the packaged subtree is
   // the one the release commit produced.
-  const packagedTree = (commit) => {
-    try { return git(repo, ['rev-parse', `${commit}:${PACKAGED_SUBDIR}`]); } catch { return null; }
-  };
-  const atRef = packagedTree(ref);
-  const atRelease = packagedTree(point.release);
+  const atRef = packagedFingerprint(repo, ref);
+  const atRelease = packagedFingerprint(repo, point.release);
   if (!atRef || !atRelease) {
     log(`indeterminate: cannot read the ${PACKAGED_SUBDIR} tree at ${ref} or ${point.release}`);
     return INDETERMINATE;
   }
   if (atRef === atRelease) {
-    log(`release-fresh ${point.parent} — version ${claude.version} build ${claude.build ?? 'unset'} packages this commit`);
-    log(`  packaged tree ${atRef} unchanged since release commit ${point.release}`);
+    log(`release-fresh ${claude.source_sha} — version ${claude.version} build ${claude.build ?? 'unset'} packages this commit`);
+    log(`  packaged bytes unchanged since release commit ${point.release} (stamp lines aside)`);
     return OK;
   }
 

@@ -21,20 +21,18 @@
  * the missing log will surface separately when the analyzer runs.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { containedPath } from './trusted-home.mjs';
 import { homedir } from 'node:os';
-import { captureDisabledMarkerCandidates, EXTERNAL_MARKER, detectStoragePath } from './metrics-init.mjs';
-import { markMetricsEverExternal } from './project-state.mjs';
-import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, metricsStorageAllowed, otherProjectsNamingFolder, readSignedFileAt } from './project-state.mjs';
+import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
+import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
+import { legacyMetricsPins } from './migrate-workspace-state.mjs';
 
 /**
- * Fail-closed capture gate. metrics-init.mjs writes a typed
- * `capture-disabled.json` marker when the storage pin cannot be written —
- * the state where write-time consumers could otherwise fall back silently
- * into the synced project folder the OneDrive redirect exists to avoid.
- * Returns the marker path when capture is disabled, null otherwise.
+ * Capture gate for a typed `capture-disabled.json` marker an earlier scaffold left when it could
+ * not pin storage. Returns the marker path when capture is disabled, null otherwise; the next
+ * metrics-init clears it.
  */
 export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = process.env } = {}) {
   if (!projectDir) return null;
@@ -46,87 +44,152 @@ export function captureDisabledMarkerPath(projectDir, { home = homedir(), env = 
 }
 
 /**
- * Resolve where the metrics storage lives — honors what `metrics-init.mjs`
- * pinned at scaffold time per matrix (+g.5) + (+m).
- *
- * Reads the signed `storage-path.txt` from the project's trusted metrics state if the
- * project has been scaffolded. Falls back to `<projectDir>/_metrics/` if
- * the pin file is absent or the state is untrusted (scaffold not run yet).
- *
- * Without this, writers would hardcode a project-local path and bypass
- * (g.5)'s AppData redirect on Windows+OneDrive.
- *
- * Fail-closed contract: when metrics-init could not WRITE the pin, it leaves
- * the typed capture-disabled marker and `metricsEnabled` returns false — so
- * capture producers never reach this fallback in that state. The fallback here
- * serves the legitimate pre-scaffold default and read-side path resolution.
+ * Where captured rows, scorecards and health files are written: the project's own `_metrics/`,
+ * on every platform. A folder an earlier version used outside the project is history (see
+ * `metricsHistoryFolders`) and is never written to.
  */
-export function resolveStoragePath(projectDir, { home = homedir(), env = process.env } = {}) {
-  const meta = trustedMetricsDir(projectDir, { home, env });
-  if (meta) {
-    // The pin decides where every prompt and context row is written, so it is read only if this
-    // install signed it and it names the project's own _metrics/ or the AppData redirect.
-    const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
-    if (pinned && metricsStorageAllowed(pinned, { projectDir, home })) return pinned;
-  }
+export function resolveStoragePath(projectDir) {
   return join(projectDir, '_metrics');
 }
 
 /**
- * True when the project has a storage pin that no longer verifies: unsigned or tampered, or
- * naming somewhere metrics may not live or a folder another project owns. Capture stays off
- * until the next scaffold writes a fresh signed pin. Falling back to `<project>/_metrics` here
- * would quietly resume capture in the synced folder the redirect exists to avoid.
+ * The folders outside the project that earlier versions wrote this project's captured rows to
+ * (a Windows OneDrive redirect to AppData), read-only history now. Found from the project's
+ * signed records under every harness that has state for it: the storage pin, the held record, and
+ * the ever-external marker. CORE never deletes them: the notice names them, `/metrics` counts
+ * their rows, and an explicit purge lists them for the user to delete. `foreign` marks a folder
+ * whose `.project-root` names another project; the notice does not call those rows this project's.
+ *
+ * @returns {{folder: string, foreign?: boolean}[]}
  */
-export function storagePinInvalid(projectDir, { home = homedir(), env = process.env } = {}) {
-  const meta = trustedMetricsDir(projectDir, { home, env });
-  const bodyExists = !!meta && existsSync(join(meta, 'storage-path.txt'));
-  const macExists = !!meta && existsSync(join(meta, 'storage-path.txt.mac'));
-  if (!bodyExists && !macExists) {
-    // No pin sits where one would be — no metrics state at all yet, or state exists with neither
-    // file in it. A durable marker (kept outside the metrics dir, written the one time an external
-    // pin was created) can still say this project was redirected before; losing both pin files at
-    // once should not silently resume capture into the empty project-local folder.
-    try {
-      const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core') });
-      if (durable && readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir: join(home, '.core') }) !== null) return true;
-    } catch { /* no durable state yet: this really is a project that was never redirected */ }
-    // No pin, no marker — but a project's path alone can say it needs the redirect (a synced
-    // OneDrive folder on Windows), before it has ever been scaffolded. The very first capture can
-    // land before startup's scaffold call runs. Refuse rather than let it land in that synced
-    // folder even once; the scaffold, once it runs, both fixes this and clears it going forward.
-    try {
-      if (detectStoragePath({ projectDir, home }).path !== join(projectDir, '_metrics')) return true;
-    } catch { /* detection itself failing is not grounds to refuse a project with no other signal */ }
-    return false;
+export function metricsHistoryFolders(projectDir, { home = homedir(), env = process.env } = {}) {
+  return historyDiscovery(projectDir, { home, env }).folders;
+}
+
+/** The error code of the first path that can't be resolved for a reason other than absence, or null. */
+function unresolvable(...paths) {
+  for (const p of paths) {
+    try { realpathSync.native(p); }
+    catch (e) { if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) return (e && e.code) || 'error'; }
   }
-  // A signature with no body, or a body with no signature (checked below via readPinSigned, which
-  // needs both files to verify), is not a clean absence — it is what a partial loss of the pin's two
-  // files looks like, and the folder it named cannot be recovered from what remains.
-  const pinned = readPinSigned({ dir: meta, root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), coreDir: join(home, '.core') }) || '';
-  if (!(pinned && metricsStorageAllowed(pinned, { projectDir, home }))) return true;
-  if (pinned !== join(projectDir, '_metrics')) {
-    // A valid external pin found with no marker behind it: an install from before the marker
-    // existed, or a producer that failed to write one. Backfill it now, while the pin is still
-    // known-good, so a later loss of the pin is still caught. Not best-effort any more: a pin
-    // whose marker cannot be persisted is exactly the state the marker exists to prevent reading
-    // as safely established, so a write failure here refuses too, the same as everywhere else the
-    // marker is written. A durable state directory that genuinely does not exist yet (nothing has
-    // ever written to it) is a different, narrower case: nothing has failed, so it is not refused
-    // here on its own.
+  return null;
+}
+
+/** True when a history folder's `.project-root` is readable and names a different project. */
+function claimedByAnother(folder, projectDir) {
+  let text;
+  try { text = readFileSync(join(folder, METRICS_OWNER_FILE), 'utf8').trim(); } catch { return false; }
+  return !!text && canonicalPath(text) !== canonicalPath(projectDir);
+}
+
+/**
+ * The history folders plus whether discovery itself could run. `error` is set when the project's
+ * records of older folders could not be read at all (an unreadable registry or state), which is
+ * different from a project that simply has none.
+ */
+function historyDiscovery(projectDir, { home, env }) {
+  const coreDir = join(home, '.core');
+  const own = join(projectDir, '_metrics');
+  const named = [];
+  const unknown = [];
+  let error = null;
+  try {
+    const root = projectRootFor(projectDir, { home, coreDir });
+    // Listing problems are reported by metricsHistoryHeld; the names that could be seen are read.
+    const { harnesses } = stateHarnessesPartial({ root, coreDir, include: [detectStateHarness(env)] });
+    // One harness whose records can't be read does not discard what the others name.
+    for (const harness of harnesses) {
+      try { named.push(...historyRecordFolders({ root, harness, coreDir })); } catch (e) { error = error || e; }
+    }
+    const legacy = legacyMetricsPins(root, { coreDir, home });
+    named.push(...legacy.folders);
+    unknown.push(...legacy.unknown);
+  } catch (e) { error = e; }
+  const appData = join(home, 'AppData', 'Local', 'core-metrics');
+  const seen = new Set();
+  const folders = [];
+  for (const { folder } of named) {
+    if (typeof folder !== 'string' || !isAbsolute(folder) || containedPath(own, folder) || seen.has(folder)) continue;
+    seen.add(folder);
+    // Only the old Windows redirect location was ever a metrics home outside the project.
+    if (!containedPath(appData, folder)) {
+      // Not provably inside: outside, or a root or folder that can't be resolved. Only the second
+      // is unknown; a missing one is absent.
+      const blind = unresolvable(appData, folder);
+      if (blind) unknown.push({ what: folder, code: blind });
+      continue;
+    }
+    const presence = pathPresence(folder);
+    if (presence.state === 'unknown') { unknown.push({ what: folder, code: presence.code }); continue; }
+    if (presence.state === 'absent') continue;
+    folders.push(claimedByAnother(folder, projectDir) ? { folder, foreign: true } : { folder });
+  }
+  return { folders, unknown, error };
+}
+
+
+/**
+ * What an explicit purge does not cover, named so it never reports itself complete over them:
+ * every older folder outside the project (CORE does not delete outside the project folder); this project's own state under any harness when it exists but cannot be read as its
+ * own (unverified, another install's, a relocation awaiting an answer, or mid-migration), since
+ * any record of an older folder in it is hidden; records that exist but do not verify; and a
+ * discovery that could not run. A purge that leaves any of these reports it instead of "purged".
+ *
+ * @returns {{what: string, reason: string}[]}
+ */
+export function metricsHistoryHeld(projectDir, { home = homedir(), env = process.env } = {}) {
+  const coreDir = join(home, '.core');
+  const held = [];
+  let root;
+  try { root = projectRootFor(projectDir, { home, coreDir }); }
+  catch (e) { return [{ what: projectDir, reason: `this project's records of older external folders could not be read (${String(e.code || e.message).slice(0, 80)}), so whether any exist is unknown` }]; }
+  const registryProblem = registryShapeProblem({ coreDir });
+  // Every problem and every known folder is reported together: one place that can't be read
+  // never hides what the others name.
+  if (registryProblem) {
+    held.push({ what: join(coreDir, 'projects.json'), reason: `the project registry is malformed (${registryProblem}), so this project's records of older external folders cannot be trusted as complete` });
+  }
+  // A folder that can't be listed is reported, and every harness seen in the others is still read.
+  const { harnesses, problems: listing } = stateHarnessesPartial({ root, coreDir, include: [detectStateHarness(env)] });
+  for (const p of listing) held.push({ what: p.what, reason: `this project's state folders here could not be listed (${p.code}), so whether it has records of older external folders is unknown` });
+  // Every place each harness's state can be, not only the one routing picks today: a place that
+  // can't be read as this project's hides any record in it, so it is held.
+  const places = [];
+  for (const harness of harnesses) {
     try {
-      const durable = stateDir({ root: projectRootFor(projectDir, { home, coreDir: join(home, '.core') }), harness: detectStateHarness(env), coreDir: join(home, '.core'), forWrite: true });
-      if (durable && readSignedFileAt({ dir: durable.dir, name: EXTERNAL_MARKER, coreDir: join(home, '.core') }) === null) {
-        markMetricsEverExternal({ projectDir, harness: detectStateHarness(env), home, coreDir: join(home, '.core'), folder: pinned });
-      }
-    } catch { return true; }
+      const { locations, problems } = stateLocations({ root, harness, coreDir });
+      for (const p of problems) held.push({ what: p.what, reason: `${p.reason}, so any record of an older external folder in it is hidden; nothing was moved` });
+      places.push(...locations);
+    } catch (e) {
+      held.push({ what: join(root, '.core', harness), reason: `this project's ${harness} state could not be read (${String(e.code || e.message).slice(0, 80)})` });
+    }
   }
-  // An AppData folder nobody claimed that another project's signed pin also names is not this
-  // project's to write to; if that cannot be ruled out, capture stays off.
-  if (containedPath(join(home, 'AppData', 'Local', 'core-metrics'), pinned) && !existsSync(join(pinned, '.project-root'))) {
-    try { return otherProjectsNamingFolder(pinned, { projectDir, home, env }).length > 0; } catch { return true; }
+  const { folders, unknown, error } = historyDiscovery(projectDir, { home, env });
+  for (const h of folders) {
+    held.push({ what: h.folder, reason: h.foreign
+      ? 'earlier rows outside the project folder, in a folder another project claims; CORE does not delete outside the project'
+      : "earlier rows named by this project's records, outside the project folder; CORE does not delete outside the project, and it cannot prove every row there is this project's, so whether to delete the folder is your call" });
   }
-  return false;
+  for (const u of unknown) {
+    held.push({ what: u.what, reason: `this could not be read (${u.code}), so whether it holds or names earlier rows is unknown` });
+  }
+  if (error) {
+    held.push({ what: projectDir, reason: `this project's records of older external folders could not be read (${String(error.code || error.message).slice(0, 80)}), so whether any exist is unknown` });
+  }
+  for (const { dir } of places) {
+    const meta = join(dir, 'metrics');
+    const unverified = (d, name, verifies) => {
+      const states = [join(d, name), join(d, `${name}.mac`)].map((p) => [p, pathPresence(p)]);
+      const blind = states.find(([, p]) => p.state === 'unknown');
+      if (blind) { held.push({ what: blind[0], reason: `a record of an older external folder could not be looked at (${blind[1].code}), so whether it names one is unknown` }); return; }
+      if (states.every(([, p]) => p.state === 'absent')) return;
+      if (!verifies()) held.push({ what: join(d, name), reason: 'a record of an older external folder exists but does not verify, so the folder it names cannot be found' });
+    };
+    unverified(meta, 'storage-path.txt', () => readPinSigned({ dir: meta, root, coreDir }) !== null);
+    unverified(meta, 'held-legacy-folder.txt', () => readHeldSigned({ dir: meta, coreDir }) !== null);
+    unverified(dir, EXTERNAL_MARKER, () => readSignedFileAt({ dir, name: EXTERNAL_MARKER, coreDir }) !== null);
+  }
+  return held;
 }
 
 export function todayUTC() {
@@ -191,7 +254,6 @@ export function metricsEnabled({ project, env = process.env, home = homedir() } 
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
   if (['0', 'false', 'no', 'off'].includes(flag)) return false; // explicit hard-off wins
   if (project && captureDisabledMarkerPath(project, { home, env })) return false; // fail-closed pin failure beats opt-in
-  if (project && storagePinInvalid(project, { home, env })) return false; // a pin that stops verifying never falls back to project-local
   if (['1', 'true', 'yes', 'on'].includes(flag)) return true;
   if (project) {
     let m = null;

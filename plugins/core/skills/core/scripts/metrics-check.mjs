@@ -438,7 +438,7 @@ export function computeRows(out) {
       trust: TRUST.DIRECT,
       noGauge: true,
       value: tc.enabled
-        ? `ON — each turn's prompt and the delivered memory context are saved locally so retrieval quality can be graded later (never exported, kept until you purge it): ${tc.rows || 0} row(s) / ${tc.days || 0} day(s), ${health.failures || 0} of ${health.attempts || 0} writes failed. Turn off with CORE_TURN_CAPTURE=0 or "turn_capture": false in this project's workspace.json (CORE_METRICS_ENABLED=0 turns off all local capture).`
+        ? `ON — each turn's prompt and the delivered memory context are saved locally so retrieval quality can be graded later (never exported, kept until you purge it): ${tc.rows || 0} row(s) / ${tc.days || 0} day(s), ${health.failures || 0} of ${health.attempts || 0} writes failed.${(tc.history || []).length ? ` Earlier rows kept outside the project folder (read-only history): ${tc.history.reduce((n, h) => n + (h.rows || 0), 0)} row(s) / ${tc.history.reduce((n, h) => n + (h.days || 0), 0)} day(s).` : ''} Turn off with CORE_TURN_CAPTURE=0 or "turn_capture": false in this project's workspace.json (CORE_METRICS_ENABLED=0 turns off all local capture).`
         : 'OFF — turn capture is disabled for this project, so hindsight grading of retrieval quality has no evidence to work from.',
     });
   }

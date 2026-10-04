@@ -22,7 +22,7 @@
 
 import {
   appendFileSync, chmodSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync,
-  rmSync, writeFileSync, accessSync, constants as fsConstants,
+  rmSync, statSync, writeFileSync, accessSync, constants as fsConstants,
 } from 'node:fs';
 import { dirname, join, resolve, sep, isAbsolute } from 'node:path';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -71,6 +71,24 @@ function readJsonArray(file) {
  */
 export function registryEntryPath(entry) {
   return (entry && (entry.path || entry.project_path)) || null;
+}
+
+/**
+ * Why the registry cannot be trusted as a complete list, or null when it can: a file that is not a
+ * JSON array, or an entry without a usable path. readRegisteredRoots skips such entries for
+ * everyday lookups; a caller that must know it saw every project uses this.
+ */
+export function registryShapeProblem({ coreDir = defaultCoreDir() } = {}) {
+  for (const name of ['projects.json', 'index.json']) {
+    const file = join(coreDir, name);
+    if (!existsSync(file)) continue;
+    let parsed;
+    try { parsed = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { return `${name} cannot be read (${e.code || 'not JSON'})`; }
+    if (!Array.isArray(parsed)) return `${name} is not a list`;
+    const bad = parsed.findIndex((e) => !e || typeof (name === 'projects.json' ? e.path : registryEntryPath(e)) !== 'string' || !(name === 'projects.json' ? e.path : registryEntryPath(e)));
+    if (bad !== -1) return `${name} entry ${bad} has no usable path`;
+  }
+  return null;
 }
 
 export function readRegisteredRoots({ coreDir = defaultCoreDir(), includeLegacyIndex = true } = {}) {
@@ -670,8 +688,8 @@ export const METRICS_EXTERNAL_MARKER = 'metrics-ever-external.txt';
 
 /**
  * Record, durably and outside the metrics dir the pin itself lives in, that a project's metrics
- * were ever redirected externally. Every producer of an external pin (the scaffold, the migration
- * that carries one over) calls this; `storagePinInvalid` reads it back when the pin is lost. Throws
+ * were ever redirected externally. The producer of an external pin (the migration
+ * that carries one over) calls this; `metricsHistoryFolders` reads it back to name the folder. Throws
  * on failure — the caller decides whether that failure is fatal to the operation writing the pin.
  */
 export function markMetricsEverExternal({ projectDir, harness, home, coreDir = defaultCoreDir(), folder }) {
@@ -683,9 +701,126 @@ export function markMetricsEverExternal({ projectDir, harness, home, coreDir = d
 
 
 /**
+ * The harnesses with state for this project, in the project's `.core/` and its machine-local
+ * fallback folder: the names found in every folder that could be listed, plus each folder that
+ * couldn't. A missing folder has no harnesses; one that can't be read is a problem, not an
+ * absence, and the names seen in the other one are still returned.
+ * @returns {{harnesses: string[], problems: {what: string, code: string}[]}}
+ */
+export function stateHarnessesPartial({ root, coreDir = defaultCoreDir(), include = [] }) {
+  const names = new Set(include);
+  const problems = [];
+  const real = canonical(root);
+  for (const dir of [join(real, STATE_DIRNAME), join(coreDir, 'local', localRootKey(real))]) {
+    let entries = [];
+    try { entries = readdirSync(dir); }
+    catch (e) {
+      if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) problems.push({ what: dir, code: (e && e.code) || 'error' });
+      continue;
+    }
+    // Every harness-shaped entry counts, a link or a file included: classifying it (refused, for a
+    // link) is how its state gets reported, and skipping it would read as no state at all.
+    for (const name of entries) if (HARNESS_RE.test(name)) names.add(name);
+  }
+  return { harnesses: [...names], problems };
+}
+
+/**
+ * Every place this project's state for one harness can be, whichever one routing picks today: the
+ * project folder (`<root>/.core/<harness>`) and the machine-local fallback
+ * (`~/.core/local/<project>/<harness>`). Registration and root writability move routing between
+ * them, and the one not chosen can still hold records and rows. Read-only: nothing is created,
+ * adopted or set aside. A place that exists but can't be trusted as this project's is a problem,
+ * not an absence: project state whose stamp doesn't verify, or a fallback folder that is a link
+ * or resolves somewhere other than its own spot under `~/.core/local`.
+ *
+ * @returns {{ locations: {kind: 'project'|'local', dir: string, keyDir?: string}[], problems: {what: string, reason: string}[] }}
+ */
+export function stateLocations({ root, harness, coreDir = defaultCoreDir() }) {
+  assertHarnessName(harness);
+  const real = canonical(root);
+  const locations = [];
+  const problems = [];
+  const projectDir = join(real, STATE_DIRNAME, harness);
+  const unreadable = (what) => {
+    const p = pathPresence(what);
+    if (p.state === 'unknown') problems.push({ what, reason: `this project's ${harness} state could not be looked at (${p.code})` });
+    return p.state === 'unknown';
+  };
+  if (unreadable(projectDir)) { /* reported */ }
+  else if (existsSync(projectDir) || isSymlink(projectDir)) {
+    const { status } = classifyStamp({ root: real, harness, coreDir });
+    if (existsSync(join(projectDir, MIGRATING_MARKER))) problems.push({ what: projectDir, reason: `this project's ${harness} state cannot be read as its own (migration in progress)` });
+    else if (status === 'verified' || status === 'moved') locations.push({ kind: 'project', dir: projectDir });
+    else if (status !== 'absent') problems.push({ what: projectDir, reason: `this project's ${harness} state cannot be read as its own (${status})` });
+  }
+  const localRoot = join(coreDir, 'local');
+  const keyDir = join(localRoot, localRootKey(real));
+  const localDir = join(keyDir, harness);
+  if (unreadable(keyDir)) { /* reported */ }
+  else if (existsSync(keyDir) || isSymlink(keyDir)) {
+    let expected = null;
+    try { expected = join(realpathSync.native(localRoot), localRootKey(real)); } catch { /* no local root */ }
+    let actual = null;
+    try { actual = realpathSync.native(keyDir); } catch { /* dangling */ }
+    if (isSymlink(keyDir) || !expected || actual !== expected) {
+      problems.push({ what: keyDir, reason: "this project's machine-local state folder is a link or resolves outside its own place, so it cannot be read as this project's" });
+    } else if (isSymlink(localDir)) {
+      problems.push({ what: localDir, reason: `this project's machine-local ${harness} state is a link, so it cannot be read as this project's` });
+    } else if (unreadable(localDir)) { /* reported */ }
+    else if (existsSync(localDir)) {
+      locations.push({ kind: 'local', dir: localDir, keyDir });
+    }
+  }
+  return { locations, problems };
+}
+
+/**
+ * Whether a path is there, for callers that must not read "could not look" as "absent": only a
+ * missing path (ENOENT, ENOTDIR) is absent; any other failure (EACCES, EPERM) is unknown.
+ * @returns {{state: 'present'|'absent'|'unknown', code?: string}}
+ */
+export function pathPresence(p) {
+  try { statSync(p); return { state: 'present' }; }
+  catch (e) {
+    if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return { state: 'absent' };
+    return { state: 'unknown', code: (e && e.code) || 'error' };
+  }
+}
+
+function isSymlink(p) {
+  try { return lstatSync(p).isSymbolicLink(); } catch { return false; }
+}
+
+/**
+ * The external folders a project's records name for one harness, read from every place its state
+ * can be (`stateLocations`): the signed storage pin and held record under `metrics/`, and the
+ * signed ever-external marker. Records that do not verify name nothing here; `metricsHistoryHeld`
+ * reports them.
+ *
+ * @returns {{folder: string, ambiguous: boolean}[]}
+ */
+export function historyRecordFolders({ root, harness, coreDir = defaultCoreDir() }) {
+  const out = [];
+  for (const { dir } of stateLocations({ root, harness, coreDir }).locations) {
+    const meta = join(dir, 'metrics');
+    const pin = readPinSigned({ dir: meta, root, coreDir });
+    if (pin) out.push({ folder: pin, ambiguous: false });
+    const held = readHeldSigned({ dir: meta, coreDir });
+    if (held) out.push({ folder: held.folder, ambiguous: true });
+    const raw = readSignedFileAt({ dir, name: METRICS_EXTERNAL_MARKER, coreDir });
+    if (raw !== null) {
+      try { const f = JSON.parse(raw).folder; if (typeof f === 'string') out.push({ folder: f, ambiguous: false }); } catch { /* not a marker this code wrote */ }
+    }
+  }
+  return out;
+}
+
+/**
  * The other registered projects, on this machine and readable by this install, whose signed
  * pin (or signed hold record) names `folder`. A hold record keeps the answer the same whichever
- * project scaffolds first.
+ * project scaffolds first. Advisory: the migration uses it to avoid signing a shared folder for
+ * either project. Nothing destructive relies on it, because an unreadable project is skipped.
  */
 export function otherProjectsNamingFolder(folder, { projectDir, home, env }) {
   const coreDir = join(home, '.core');
@@ -806,6 +941,7 @@ export function readBootstrap({ root, harness, coreDir = defaultCoreDir() }) {
 // ---------- adopting another install's state (a restore) ----------
 
 const DECLINED_ADOPT = 'declined-adopt';
+const ADOPTED_INSTALLS = 'adopted-sibling-stamps';
 
 function declinedAdoptFile({ root, coreDir }) {
   return join(coreDir, 'local', localRootKey(root), DECLINED_ADOPT);
@@ -816,6 +952,49 @@ function declinedStamps({ root, coreDir }) {
     return new Set(readFileSync(declinedAdoptFile({ root, coreDir }), 'utf8').split('\n').map((l) => l.trim()).filter(Boolean));
   } catch { return new Set(); }
 }
+
+function pendingAdoptFile({ root, harness, coreDir }) {
+  return join(coreDir, 'local', localRootKey(root), `pending-adopt-${harness}.json`);
+}
+
+/** An adoption this machine started for (root, harness) and didn't finish, with a sound archive. */
+function pendingAdoption({ root, harness, coreDir }) {
+  try {
+    const plan = JSON.parse(readFileSync(pendingAdoptFile({ root, harness, coreDir }), 'utf8'));
+    const superseded = join(root, STATE_DIRNAME, harness, 'superseded');
+    if (!plan || typeof plan.archive !== 'string' || dirname(plan.archive) !== superseded) return null;
+    if (!lstatSync(superseded).isDirectory() || !lstatSync(plan.archive).isDirectory()) return null;
+    return plan;
+  } catch { return null; }
+}
+
+function adoptedInstallsFile({ root, coreDir }) {
+  return join(coreDir, 'local', localRootKey(root), ADOPTED_INSTALLS);
+}
+
+/**
+ * Stamps of the restore's other harnesses, recorded when its first harness was adopted: the
+ * sha256 of each sibling .core/<harness>/stamp exactly as it arrived. An install id inside a
+ * foreign stamp is self-asserted and copyable, so the second-harness offer is bound to these
+ * bytes instead: state planted after the first adoption never matches.
+ */
+function adoptedInstalls({ root, coreDir }) {
+  try {
+    return new Set(readFileSync(adoptedInstallsFile({ root, coreDir }), 'utf8').split('\n').map((l) => l.trim()).filter(Boolean));
+  } catch { return new Set(); }
+}
+
+// Persistent descriptive data a restore carries, each with the only shape it may have. These
+// are data, not controls: the control allowlist below is unchanged. A wrong-typed value is not
+// coerced; it stays in the inert archive and is named in the adoption result.
+const plainText = (max, multiline) => (v) => typeof v === 'string' && v.length > 0 && v.length <= max
+  && !(multiline ? /[\u0000-\u0008\u000b-\u001f\u007f]/ : /[\u0000-\u001f\u007f]/).test(v);
+const ADOPTED_DATA_FIELDS = {
+  name: plainText(200, false),
+  agent_notes: plainText(20000, true),
+  created: (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}([T ][0-9:.+Z-]{0,30})?$/.test(v),
+  session_log_refs: (v) => Array.isArray(v) && v.length <= 500 && v.every(plainText(1000, false)),
+};
 
 function lastWrittenAt(dir) {
   let newest = 0;
@@ -840,10 +1019,13 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
   assertHarnessName(harness);
   const real = canonical(root);
   const core = canonical(coreDir);
-  if (readRegisteredRoots({ coreDir: core }).has(real)) return null;
-  if (classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
+  const registered = readRegisteredRoots({ coreDir: core }).has(real);
+  if (!registered && classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
   if (checkStateContainment({ root: real, harness }) !== 'ok') return null;
   const harnessDir = join(real, STATE_DIRNAME, harness);
+  // an adoption this machine started here and didn't finish is resumed, whatever the stamp now says
+  const resume = pendingAdoption({ root: real, harness, coreDir });
+  if (resume) return { root: real, harness, oldPath: resume.oldPath, lastWritten: lastWrittenAt(harnessDir), stampHmac: null, resume };
   let stamp = null;
   try {
     const st = lstatSync(join(harnessDir, 'stamp'));
@@ -853,6 +1035,11 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
   if (stamp.install_id === ensureInstallIdentity({ coreDir }).installId) return null;
   if (trackedStateFiles(real, harness).has('stamp')) return null;
   if (declinedStamps({ root: real, coreDir }).has(stamp.hmac)) return null;
+  // A registered root is offered only for another harness of an install this machine already
+  // adopted here — the rest of the same restore. Any other foreign state on a registered root
+  // (a synced folder another machine is writing) stays not-a-candidate.
+  const stampHash = createHash('sha256').update(readFileSync(join(harnessDir, 'stamp'))).digest('hex');
+  if (registered && !adoptedInstalls({ root: real, coreDir }).has(stampHash)) return null;
   return { root: real, harness, oldPath: stamp.path, lastWritten: lastWrittenAt(harnessDir), stampHmac: stamp.hmac };
 }
 
@@ -866,9 +1053,12 @@ function setAsideUnparseable(file) {
  * Act on the user's answer to the adoption question. Only an interactive /core
  * startup calls this, after asking.
  *   'no'  — remember the refusal for this stamp; the foreign state is left untouched.
- *   'yes' — make the state this install's: re-stamp it, re-sign the manifest and
- *           bootstrap record (an unparseable one is set aside, not adopted), then
- *           register the folder. project_id and agent_name carry over. Adoption never
+ *   'yes' — make the state this install's: keep the original manifest and stamp byte for
+ *           byte in superseded/adopted-<time>/, re-stamp, re-sign the manifest (an
+ *           unparseable one is set aside, not adopted), then register the folder.
+ *           project_id and agent_name carry over, plus the typed descriptive data in
+ *           ADOPTED_DATA_FIELDS (a wrong-typed field is named in not_imported); the install
+ *           is recorded so the same restore's other harness can be adopted next. Adoption never
  *           switches capture on: an explicit metrics_enabled:true is dropped, an
  *           opt-out (the adopted one or this machine's own) is kept, and the metrics
  *           notice shows again on this machine.
@@ -880,6 +1070,11 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   if (!cand) return { status: 'not-a-candidate' };
   const real = cand.root;
 
+  if (decision === 'no' && cand.resume) {
+    // declining an interrupted adoption ends it: the plan goes, the archive and state stay as they are
+    rmSync(pendingAdoptFile({ root: real, harness, coreDir }), { force: true });
+    return { status: 'declined', oldPath: cand.oldPath, resumed: true };
+  }
   if (decision === 'no') {
     const file = declinedAdoptFile({ root: real, coreDir });
     mkdirSync(dirname(file), { recursive: true });
@@ -892,19 +1087,90 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   const localTurnOptOut = localManifest?.turn_capture === false;
   const harnessDir = join(real, STATE_DIRNAME, harness);
   const manifestFile = join(harnessDir, MANIFEST);
-  const bootstrapFile = join(harnessDir, BOOTSTRAP);
+  const supersededDir = join(harnessDir, 'superseded');
+  const pendingFile = pendingAdoptFile({ root: real, harness, coreDir });
 
+  // A plan recorded before anything is committed makes the adoption resumable: if a later write
+  // fails (the stamp is already local, the manifest or registration isn't), a retry finishes from
+  // the archived original instead of finding nothing to adopt.
+  let plan = cand.resume || null;
   let manifest = null;
-  if (existsSync(manifestFile)) {
-    try { manifest = JSON.parse(readFileSync(manifestFile, 'utf8')); } catch { manifest = null; }
-    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) { setAsideUnparseable(manifestFile); manifest = null; }
-  }
-  let bootstrapBody = null;
-  if (existsSync(bootstrapFile)) {
-    bootstrapBody = readFileSync(bootstrapFile, 'utf8');
-    try { JSON.parse(bootstrapBody); } catch { setAsideUnparseable(bootstrapFile); bootstrapBody = null; }
+  // A read error is not "no manifest": it holds the adoption so the same call can retry. Only a
+  // file that reads fine but isn't a JSON object counts as unparseable.
+  const readJsonFile = (f) => {
+    try { if (!lstatSync(f).isFile()) return { value: null }; } catch { return { value: null }; }   // never through a link
+    let text;
+    try { text = readFileSync(f, 'utf8'); } catch (e) { return { error: e.code || 'read-failed' }; }
+    try { const m = JSON.parse(text); return { value: m && typeof m === 'object' && !Array.isArray(m) ? m : null, parsed: true }; } catch { return { value: null, parsed: false }; }
+  };
+
+  if (!plan) {
+    let manifestIsFile = false;
+    try { manifestIsFile = lstatSync(manifestFile).isFile(); } catch { /* absent */ }
+    // Only a regular file is read: a planted symlink must not pull another file's contents into
+    // the signed manifest. A non-file manifest is left untouched and named in not_archived.
+    if (manifestIsFile) {
+      const got = readJsonFile(manifestFile);
+      if (got.error) return { status: 'held', reason: `manifest-unreadable:${got.error}`, oldPath: cand.oldPath };
+      manifest = got.value;
+      if (!manifest) setAsideUnparseable(manifestFile);
+    }
+    // The bootstrap record is completion evidence, and another install's record proves nothing
+    // about this one: it is never carried or re-signed. Left unsigned where it is, it reads as
+    // absent, so the first session here runs startup in full.
+
+    const wasRegistered = readRegisteredRoots({ coreDir: canonical(coreDir) }).has(real);
+    const siblingStamps = [];
+    for (const other of (() => { try { return readdirSync(join(real, STATE_DIRNAME)); } catch { return []; } })()) {
+      if (other === harness || !HARNESS_RE.test(other)) continue;
+      const f = join(real, STATE_DIRNAME, other, 'stamp');
+      try { if (lstatSync(join(real, STATE_DIRNAME, other)).isDirectory() && lstatSync(f).isFile()) siblingStamps.push(createHash('sha256').update(readFileSync(f)).digest('hex')); } catch { /* absent */ }
+    }
+
+    // Keep the originals byte for byte, inert, before anything is re-signed. The archive folder is
+    // created fresh and exclusively (a non-recursive mkdir fails on anything already there,
+    // including a link), under a superseded/ that must be a real directory, and only regular
+    // files are copied, so a planted link can neither pull bytes in nor redirect the write.
+    try { mkdirSync(supersededDir); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    try { if (!lstatSync(supersededDir).isDirectory()) return { status: 'held', reason: 'superseded-not-a-directory', oldPath: cand.oldPath }; }
+    catch { return { status: 'held', reason: 'superseded-unreadable', oldPath: cand.oldPath }; }
+    const archive = join(supersededDir, `adopted-${isoStamp()}-${randomBytes(4).toString('hex')}`);
+    try { mkdirSync(archive); } catch (e) { if (e.code === 'EEXIST') return { status: 'held', reason: 'archive-name-taken', oldPath: cand.oldPath }; throw e; }
+    if (!lstatSync(archive).isDirectory()) return { status: 'held', reason: 'archive-not-a-directory', oldPath: cand.oldPath };
+    const notArchived = [];
+    for (const name of [MANIFEST, 'stamp']) {
+      const f = join(harnessDir, name);
+      let st = null;
+      try { st = lstatSync(f); } catch { continue; }
+      if (!st.isFile()) { notArchived.push(name); continue; }
+      writeFileSync(join(archive, name), readFileSync(f), { flag: 'wx' });
+    }
+
+    // The sibling stamps are remembered before the commit (harmless while the root is
+    // unregistered), so no later failure can strand the restore's other harness.
+    if (!wasRegistered) {
+      const known = adoptedInstalls({ root: real, coreDir });
+      const fresh = siblingStamps.filter((h) => !known.has(h));
+      if (fresh.length) {
+        const file = adoptedInstallsFile({ root: real, coreDir });
+        mkdirSync(dirname(file), { recursive: true });
+        appendFileSync(file, fresh.map((h) => h + '\n').join(''));
+      }
+    }
+    plan = { archive, notArchived, oldPath: cand.oldPath, manifestArchived: !notArchived.includes(MANIFEST) && existsSync(join(archive, MANIFEST)) };
+    mkdirSync(dirname(pendingFile), { recursive: true });
+    const tmp = `${pendingFile}.tmp-${process.pid}-${randomBytes(2).toString('hex')}`;
+    writeFileSync(tmp, JSON.stringify(plan) + '\n');
+    renameSync(tmp, pendingFile);
+  } else if (plan.manifestArchived) {
+    // resume: the original, from the archive. It was archived, so it is required: anything short of
+    // a readable JSON object holds the adoption with the plan kept, never an empty completion.
+    const got = readJsonFile(join(plan.archive, MANIFEST));
+    if (!got.value) return { status: 'held', reason: `archived-original-unusable:${got.error || 'not-a-json-object'}`, oldPath: plan.oldPath, resumed: true };
+    manifest = got.value;
   }
 
+  const notImported = [];
   writeStamp({ root: real, harness, coreDir });
   if (manifest) {
     // Allowlist, not spread: the stated carry-over contract is project identity/name
@@ -916,6 +1182,10 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     if (typeof manifest.agent_name === 'string' && manifest.agent_name) next.agent_name = manifest.agent_name;
     if (manifest.metrics_enabled === false || localOptOut) next.metrics_enabled = false;
     if (manifest.turn_capture === false || localTurnOptOut) next.turn_capture = false;
+    for (const [field, ok] of Object.entries(ADOPTED_DATA_FIELDS)) {
+      if (!(field in manifest)) continue;
+      if (ok(manifest[field])) next[field] = manifest[field]; else notImported.push(field);
+    }
     withFileLock(`${manifestFile}.lock`, () => {
       writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify(next, null, 2) + '\n', coreDir });
     });
@@ -924,14 +1194,11 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
       writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify({ ...(localOptOut ? { metrics_enabled: false } : {}), ...(localTurnOptOut ? { turn_capture: false } : {}), harness }, null, 2) + '\n', coreDir });
     });
   }
-  if (bootstrapBody !== null) {
-    withFileLock(`${bootstrapFile}.lock`, () => {
-      writeSignedFile({ dir: harnessDir, name: BOOTSTRAP, body: bootstrapBody, coreDir, mode: 0o600 });
-    });
-  }
   const registered = registerProject(coreDir, real, { home: dirname(canonical(coreDir)), confirmNew: true });
+  rmSync(pendingFile, { force: true });                         // the adoption is complete
   return {
-    status: 'adopted', oldPath: cand.oldPath, registration: registered,
+    status: 'adopted', oldPath: plan.oldPath, registration: registered, resumed: Boolean(cand.resume),
     project_id: manifest?.project_id ?? null, agent_name: manifest?.agent_name ?? null,
+    archived: plan.archive, not_archived: plan.notArchived, not_imported: notImported,
   };
 }

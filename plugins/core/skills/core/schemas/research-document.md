@@ -58,7 +58,7 @@ One-paragraph synthesis of key findings and their significance.
 Complete source list with access dates and reliability assessment.
 ```
 
-Three more sections are common but not required — include each when the research warrants it:
+Four more sections are common but not required — include each when the research warrants it:
 
 - **Convergence Analysis** — where multiple independent sources reached the same conclusion. Strong signal worth surfacing when it's there.
 - **Contradictions** — where sources disagreed. Both positions, both with evidence; either resolved with reasoning or named as unresolved.

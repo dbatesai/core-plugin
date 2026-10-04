@@ -66,7 +66,7 @@ The lifecycle is symmetric. Doctrines don't accumulate one-way.
 ## Process for adding a doctrine
 
 1. Confirm the rule has at least one concrete consumer (script or protocol) that will actively cite it.
-2. Write a new doctrine entry below the existing five, following the same structure: rule statement (>quote block), Why, How to apply, First consumer, Codified in.
+2. Write a new doctrine entry after the existing entries, following the same structure: rule statement (>quote block), Why, How to apply, First consumer, Codified in.
 3. Update the consumer's source comments to cite the new doctrine by anchor.
 4. Add a one-line entry in the relevant decision unit's `cites:` edge list pointing to this file's anchor.
 
