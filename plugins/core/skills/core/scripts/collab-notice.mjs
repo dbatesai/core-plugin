@@ -3,7 +3,8 @@
  *
  * Kept apart from core-collab-sync.mjs so the per-turn retrieval hook can read it without
  * loading the intake code. The notice lives in the project's hot state (stateDir, never a
- * hand-built path), holds at most three readiness lines, and is removed as it is read.
+ * hand-built path), holds at most three readiness lines, and is removed as it is read. The
+ * sync's rotating start position lives beside it.
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,3 +36,21 @@ export function takeNotice(project, { dir } = {}) {
   } catch { return null; }
 }
 
+
+const CURSOR = 'collab-sync-cursor.json';
+
+/** Where the next sync run starts (the first collab the last run's budget didn't reach). */
+export function readCursor(project, { dir } = {}) {
+  try {
+    dir ??= stateDir({ root: project, harness: detectStateHarness(), kind: 'hot' })?.dir;
+    if (!dir || !existsSync(join(dir, CURSOR))) return null;
+    const c = JSON.parse(readFileSync(join(dir, CURSOR), 'utf8')).next;
+    return typeof c === 'string' && c ? c : null;
+  } catch { return null; }
+}
+
+export function writeCursor(project, name, { dir = hotDir(project) } = {}) {
+  const p = join(dir, CURSOR);
+  if (!name) { rmSync(p, { force: true }); return; }
+  writeFileSync(p, JSON.stringify({ next: name }) + '\n');
+}

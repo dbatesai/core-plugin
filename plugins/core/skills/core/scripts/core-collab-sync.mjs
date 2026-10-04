@@ -76,16 +76,16 @@ export function findCollabScripts(env = process.env, home = userInfo().homedir, 
  * This project's collab participant: the persisted identity collab holds for the project's
  * opaque project_id, read through collab's read-only `--show`. Never minted, never guessed.
  */
-export function lookupParticipant(project, collabCli, projectId = null) {
+export function lookupParticipant(project, collabCli, projectId = null, timeoutMs = SPAWN_TIMEOUT_MS) {
   const registry = join(dirname(fileURLToPath(import.meta.url)), 'index-registry.mjs');
   if (!projectId) {
-    const m = spawnSync(process.execPath, [registry, 'manifest', '--root', project], { encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS });
+    const m = spawnSync(process.execPath, [registry, 'manifest', '--root', project], { encoding: 'utf8', timeout: timeoutMs });
     try { projectId = JSON.parse(m.stdout).project_id || null; } catch { /* below */ }
   }
   if (!projectId) return { error: 'no project_id in this project\'s manifest' };
   const idCli = join(collabCli, 'collab-identity.mjs');
   if (!existsSync(idCli)) return { error: 'this collab version has no read-only identity lookup' };
-  const r = spawnSync(process.execPath, [idCli, '--show', projectId], { encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS });
+  const r = spawnSync(process.execPath, [idCli, '--show', projectId], { encoding: 'utf8', timeout: timeoutMs });
   if (r.status === 3) return { error: 'no collab identity for this project' };
   // fixed wording only: collab's stderr echoes record contents another process can write
   if (r.status === 5) return { error: 'collab identity belongs to another workspace' };
@@ -119,26 +119,37 @@ export function readinessLines(result) {
 }
 
 export { writeNotice, takeNotice } from './collab-notice.mjs';
+import { readCursor, writeCursor } from './collab-notice.mjs';
+const stateCursor = { read: (p) => readCursor(p), write: (p, name) => writeCursor(p, name) };
 
-export function syncCollab(project, { land = landObservation, projectId = null, budgetMs = TOTAL_BUDGET_MS, clock = Date.now, participant, collabCli = undefined, collabRoot = process.env.COLLAB_LOCAL_ROOT || join(homedir(), '.collab', 'local'), now = new Date().toISOString() } = {}) {
+export function syncCollab(project, { land = landObservation, projectId = null, budgetMs = TOTAL_BUDGET_MS, clock = Date.now, cursor = stateCursor, participant, collabCli = undefined, collabRoot = process.env.COLLAB_LOCAL_ROOT || join(homedir(), '.collab', 'local'), now = new Date().toISOString() } = {}) {
+  const deadline = clock() + budgetMs;     // the whole run, identity lookup included
+  const left = () => deadline - clock();
   collabCli ??= findCollabScripts();
   const outcomeCli = collabCli ? join(collabCli, 'collab-outcome.mjs') : null;
   if (!outcomeCli || !existsSync(outcomeCli)) return { status: 'skipped', reason: 'collab is not installed (no collab-outcome.mjs found)', items: [] };
   if (!participant) {
-    const id = lookupParticipant(project, collabCli, projectId);
+    if (left() <= 0) return { status: 'skipped', reason: 'budget exhausted before the identity lookup', items: [] };
+    const id = lookupParticipant(project, collabCli, projectId, Math.min(SPAWN_TIMEOUT_MS, Math.max(1, Math.floor(left() / 2))));
     if (id.error) return { status: 'skipped', reason: id.error, items: [] };
     participant = id.participants;
   }
   if (!existsSync(collabRoot)) return { status: 'ok', items: [] };
 
   const items = [];
-  const deadline = clock() + budgetMs;
-  for (const name of readdirSync(collabRoot).sort()) {
+  // Start where the last run stopped, so a slow early collab can't starve later ones; what is
+  // owed is still derived from durable state each run, the position only orders the work.
+  const names = readdirSync(collabRoot).sort();
+  const from = cursor.read(project);
+  const at = from ? names.findIndex(n => n >= from) : 0;
+  const order = at > 0 ? [...names.slice(at), ...names.slice(0, at)] : names;
+  let stoppedAt = null;
+  for (const name of order) {
     const dir = join(collabRoot, name);
-    const left = deadline - clock();
-    // the run as a whole is bounded: what the budget can't reach is named, and the next run continues
-    if (left <= 0) { items.push({ collab: name, state: 'pending:budget-exhausted' }); continue; }
-    const r = spawnSync(process.execPath, [outcomeCli, dir, ...[].concat(participant).flatMap(p => ['--participant', p])], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: Math.min(SPAWN_TIMEOUT_MS, left) });
+    // the run as a whole is bounded: what the budget can't reach is named, and the next run starts there
+    if (left() <= 0) { stoppedAt ??= name; items.push({ collab: name, state: 'pending:budget-exhausted' }); continue; }
+    const r = spawnSync(process.execPath, [outcomeCli, dir, ...[].concat(participant).flatMap(p => ['--participant', p])], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, timeout: Math.min(SPAWN_TIMEOUT_MS, left()) });
+    if (r.error?.code === 'ETIMEDOUT' || r.signal) { items.push({ collab: name, state: 'pending:render-timeout' }); continue; }
     let report = null;
     try { report = JSON.parse(r.stdout); } catch { /* reported below */ }
     if (r.status !== 0 || !report) { items.push({ collab: name, state: 'refused:render-failed', detail: (r.stderr || '').trim().slice(0, 300) }); continue; }
@@ -165,6 +176,7 @@ export function syncCollab(project, { land = landObservation, projectId = null, 
     items.push({ collab: name, state: landed.status, id: landed.id, late: report.late });
   }
 
+  try { cursor.write(project, stoppedAt); } catch { /* ordering only; correctness never depends on it */ }
   const day = now.slice(0, 10);
   const logDir = join(project, '_sessions', day);
   mkdirSync(logDir, { recursive: true });

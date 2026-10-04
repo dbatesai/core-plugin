@@ -54,8 +54,12 @@ async function round(tag) {
   return { k, close: async () => { add(R1, 'ratify', 3, { measures: ['M-1'] }, [pc.event_id]); assert.equal((await collab.tickDeterministic(k.slug, { workspaceId: 'int-test', triplet: k.triplet, dryRun: false })).action, 'close'); } };
 }
 
-// The participant is pinned (identity lookup has its own controls); everything else is real.
-const sync = (root, o) => syncCollab(root, { ...o, participant: R1 });
+// The participant comes through the real chain: the project's opaque id → collab's persisted
+// identity record → the read-only --show lookup. (The manifest read that yields the id is
+// index-registry's own tested surface; the id is passed directly here.)
+mkdirSync(join(ROOT, 'identity'), { recursive: true });
+writeFileSync(join(ROOT, 'identity', 'proj-int.json'), JSON.stringify({ workspace_id: 'proj-int', triplet: R1, participant_id: 'p-int' }));
+const sync = (root, o) => syncCollab(root, { ...o, projectId: 'proj-int' });
 const hook = (now) => runCollabSyncHook({ cwd: PROJECT }, { now, findCollab: () => COLLAB, sync });
 
 test('a close after bootstrap lands on a later prompt with no new event, manual sync or /core — exactly once', { skip }, async () => {
