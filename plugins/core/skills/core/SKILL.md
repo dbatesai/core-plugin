@@ -23,6 +23,8 @@ Three steps, in order:
 2. Execute the workspace-resolution and architecture-state routing it defines. If routing lands on cold-start migration or folder-rename, complete that work before continuing.
 3. Compose the readiness summary per the protocol's §"Compose the readiness summary" specification, and record the bootstrap (`index-registry.mjs bootstrap`, which writes `<project>/.core/<harness>/last-bootstrap.json`) with the session-start timestamp.
 
+Exception — project-only mode. When the task includes the word `project-only`, `protocols/startup.md` §"Project-only mode" replaces steps 2 and 3: it reads and writes inside the project folder only, never registers it, and records its bootstrap in the folder.
+
 Exception — already bootstrapped this session. The dedup rule lives in ONE place: `protocols/startup.md` §"Bootstrap dedup" — read and apply it from there; this file deliberately does not restate its steps, so the two can't drift. What stays here is the two SKILL-level behaviors around it: on a bare re-orient ask — `/core` with no task, "where are we" — re-compose a fresh readiness summary per `protocols/startup.md` §"Compose the readiness summary" (resolve `CORE_ROOT` first if you want the capability and recognition-signal lines, since without it they fail open and the summary is prose-only), otherwise pick up where the conversation left off; and when the dedup check can't run cleanly (file absent, stale, workspace won't resolve), run the protocol.
 
 If the user's task explicitly says "skip startup" or "don't bootstrap" — they have a reason, honor it, but flag the skip in your first reply so they see it.

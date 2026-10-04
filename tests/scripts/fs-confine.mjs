@@ -33,7 +33,7 @@ for (const name of NAMES) {
   for (const [obj, key] of [[fs, `${name}Sync`], [fs, name], [fs.promises, name]]) {
     const orig = obj[key];
     if (typeof orig !== 'function') continue;
-    obj[key] = function confined(...args) {
+    const wrapped = function confined(...args) {
       const bad = paths(name, args).find(p => !inside(p));
       if (bad === undefined) return orig.apply(this, args);
       const err = refuse(key, bad);
@@ -43,6 +43,19 @@ for (const name of NAMES) {
       if (cb) return process.nextTick(cb, err);
       throw err;
     };
+    // realpathSync.native / realpath.native ride on the function object: wrap and keep them.
+    if (typeof orig.native === 'function') {
+      const nat = orig.native;
+      wrapped.native = function confinedNative(...args) {
+        if (inside(args[0])) return nat.apply(this, args);
+        const err = refuse(`${key}.native`, args[0]);
+        if (key.endsWith('Sync')) throw err;
+        const cb = args.find(a => typeof a === 'function');
+        if (cb) return process.nextTick(cb, err);
+        throw err;
+      };
+    }
+    obj[key] = wrapped;
   }
 }
 const origExists = fs.existsSync;

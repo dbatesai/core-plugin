@@ -46,4 +46,14 @@ test('existsSync outside reads as absent and is recorded', () => {
   assert.deepEqual(r.violations.map(v => v.call), ['existsSync']);
 });
 
+test('realpathSync.native outside is refused and recorded too; inside it still works', () => {
+  const r = run(`import { realpathSync } from 'node:fs';
+    const out = [];
+    try { realpathSync.native(${S}); out.push('ok'); } catch (e) { out.push(e.code); }
+    out.push(realpathSync.native(${JSON.stringify(inside)}) === ${JSON.stringify(inside)} ? 'inside-ok' : 'inside-bad');
+    process.stdout.write(out.join(','));`);
+  assert.equal(r.stdout, 'EACCES,inside-ok');
+  assert.deepEqual(r.violations.map(v => v.call), ['realpathSync.native']);
+});
+
 test('cleanup', () => { rmSync(inside, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });

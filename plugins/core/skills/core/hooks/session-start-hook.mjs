@@ -41,6 +41,7 @@ import { join } from 'node:path';
 import { logHookEvent } from './hook-log.mjs';
 import { trustedHome } from '../scripts/trusted-home.mjs';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
+import { projectOnlyHint } from '../scripts/project-only.mjs';
 
 // trustedHome() (shared anchor in scripts/trusted-home.mjs): the OS-account home,
 // unspoofable by $HOME/$USERPROFILE. Unresolvable → null → nothing is authorized.
@@ -88,7 +89,13 @@ export function buildDirective(skill) {
   return `CORE session protocol: this environment has the CORE project-intelligence plugin installed. Before anything else this session — before answering the user, before any other tool call — invoke the \`${skill}\` skill. It runs startup routing, loads cross-session project memory, and composes a readiness summary, and it self-deduplicates (it won't re-run if it already ran this session). Run \`${skill}\` first, then address the user's request.`;
 }
 
+export const PROJECT_ONLY_NOTICE = 'CORE project-only mode: this folder runs CORE from the folder alone. Automatic retrieval, end-of-session close and collab sync are off here. Run `/core project-only` to start, and `/finalize project-only` to close.';
+
 function main() {
+  let payload = {};
+  try { const raw = readFileSync(0, 'utf8'); if (raw.trim()) payload = JSON.parse(raw); } catch { payload = {}; }
+  // A project-only folder gets the notice and nothing else: no settings read, no log write.
+  if (projectOnlyHint(payload.cwd || process.cwd())) { process.stdout.write(PROJECT_ONLY_NOTICE + '\n'); return 0; }
   // A session running under CORE_CLOSE_PASS_ACTIVE=1 is discharging a close and must NOT be
   // told to run /core first — it has one job. Without this, such a session takes the /core
   // directive and never cleanly closes.

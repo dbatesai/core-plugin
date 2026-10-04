@@ -49,6 +49,7 @@ import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
 import { thinSignal, shouldEscalate, buildReasoningShards, renderEscalationPack, escalationByteCap, packAllowed } from '../scripts/reasoning-shortlist.mjs';
 import { logHookEvent, PRODUCER_VERSION, PRODUCER_SHA } from './hook-log.mjs';
+import { projectOnlyHint } from '../scripts/project-only.mjs';
 
 const OUTPUT_BYTE_CAP = 2048;
 const TOP_N = 3;
@@ -107,15 +108,19 @@ export function receipt(action, reason, extra = {}) {
 }
 
 export async function main() {
-  // Default-ON, opt-out gate. Runs unless explicitly
-  // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the default-on metrics opt-out).
-  if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
-
   let payload = {};
   // Read stdin synchronously via fd 0 (works under execFileSync's input pipe).
   let raw = '';
   try { raw = readFileSync(0, 'utf8'); } catch { raw = ''; }
   if (raw.trim()) { try { payload = JSON.parse(raw); } catch { payload = {}; } }
+
+  // A project-only folder runs automatic retrieval (and the capture inside it) not at all: exit
+  // before the registry gate and the logger, which live outside the folder.
+  if (projectOnlyHint(payload.cwd || process.cwd())) return 0;
+
+  // Default-ON, opt-out gate. Runs unless explicitly
+  // disabled with CORE_RETRIEVAL_HOOK=0 (mirrors the default-on metrics opt-out).
+  if (process.env.CORE_RETRIEVAL_HOOK === '0') return receipt('skip', 'retrieval-opt-out');
 
   const prompt = String(payload.prompt || '');
   if (!prompt.trim()) return receipt('skip', 'empty-prompt');

@@ -40,6 +40,7 @@ import { spawn } from 'node:child_process';
 import { resolveRegisteredRoot, shouldEnqueueClose } from '../scripts/close-pass.mjs';
 import { logHookEvent } from './hook-log.mjs';
 import { isCliEntry } from '../scripts/cli-entry.mjs';
+import { projectOnlyHint } from '../scripts/project-only.mjs';
 
 // SessionEnd reasons that are NOT real ends — skip them. `resume` suspends for later
 // resumption; closing then is premature (startup catch-up re-detects on resume).
@@ -47,6 +48,14 @@ const SKIP_REASONS = new Set(['resume']);
 
 
 function main() {
+  let payload = {};
+  let raw = '';
+  try { raw = readFileSync(0, 'utf8'); } catch { raw = ''; }
+  if (raw.trim()) { try { payload = JSON.parse(raw); } catch { payload = {}; } }
+  // A project-only folder has no automatic close (its next startup says so): exit before the
+  // registry gate and the logger.
+  if (projectOnlyHint(payload.cwd || process.cwd())) return 0;
+
   // Guard 1 — environment suppression: a close already owns this environment. No-op.
   if (process.env.CORE_CLOSE_PASS_ACTIVE === '1') {
     logHookEvent({ hook: 'session-end', action: 'skip', reason: 'recursion-guard' });
@@ -57,11 +66,6 @@ function main() {
     logHookEvent({ hook: 'session-end', action: 'skip', reason: 'kill-switch' });
     return 0;
   }
-
-  let payload = {};
-  let raw = '';
-  try { raw = readFileSync(0, 'utf8'); } catch { raw = ''; }
-  if (raw.trim()) { try { payload = JSON.parse(raw); } catch { payload = {}; } }
 
   const reason = String(payload.reason || '');
   if (SKIP_REASONS.has(reason)) {

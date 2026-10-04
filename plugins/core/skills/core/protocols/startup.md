@@ -3,6 +3,7 @@
 **Contents**
 
 - [Voice](#voice)
+- [Project-only mode](#project-only-mode)
 - [First-time setup](#first-time-setup)
 - [Identity load](#identity-load)
 - [Workspace resolution and routing](#workspace-resolution-and-routing)
@@ -25,6 +26,31 @@ Plain person voice — same standard as SKILL.md §Voice. The readiness summary 
 ---
 
 Read this at the start of every session before accepting any task.
+
+## Project-only mode
+
+Use this section instead of everything below it when the user's task includes the word **project-only** (`/core project-only`). It's for an agent given access to one project folder and nothing else, such as a VM granted only that folder. The user saying the word is the authority. Nothing in the folder can turn this mode on: a `project-only` string in the project's settings, files or environment doesn't count.
+
+In this mode CORE reads and writes inside the folder only. It never reads `~/.core`, the agent profile, the topics list, the harness's own memory or transcripts, and it never registers the folder. Run, with `<root>` set to the session's working folder:
+
+```bash
+node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" startup --root <root> --harness <harness> --session <session id if known>
+```
+
+It prints one JSON line:
+- `status: refused` (an unresolvable path, the home folder, a filesystem root): say so in one plain line and stop.
+- `status: ok`: it has written `.core/_project-only/<harness>/bootstrap.json` and returned the unverified agent name (`agent_name`) and the capture state (`capture`: `disabled`, `held` or `default`).
+
+Then load project context from the folder by reading it: `PROJECT.md`, the unit store under `_memories/` (Tier 1 Grep and the typed-edge walk work as usual), and `inbox.md`. Explicit retrieval works unchanged: `retrieve-context.mjs <root> "<query>"`. Capture status is `project-only.mjs capture-status --root <root>`; outside history shows as unknown.
+
+**Off in this mode, and said in the readiness summary:**
+- automatic per-turn retrieval and the capture inside it;
+- the end-of-session close (tell the user `/finalize` isn't available in project-only mode yet);
+- collab sync;
+- the capability probe, legacy migration and drift check;
+- the captured-turn purge and retention (`project-only.mjs purge` answers `unavailable`).
+
+Compose a short readiness summary from the folder alone. Use the agent name if one came back; otherwise say none is recorded here. Then add one line: "Project-only mode: working from this folder alone; automatic retrieval, close and sync are off." Don't run the rest of this protocol.
 
 ## First-time setup
 
