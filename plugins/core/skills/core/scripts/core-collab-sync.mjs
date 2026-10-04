@@ -17,30 +17,38 @@
  *
  * CLI: node core-collab-sync.mjs <project> [--participant <id>] [--collab-cli <dir>]
  *        [--collab-root <dir>] [--readiness]
- *   --collab-cli defaults to $COLLAB_SCRIPTS_DIR, else the Claude Code install record;
+ *   --collab-cli defaults to the Claude Code install record (never an environment variable);
  *   --collab-root to $COLLAB_LOCAL_ROOT or ~/.collab/local. --readiness prints at most three
  *   plain lines (nothing when all is well) and never exits non-zero.
  */
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir, userInfo } from 'node:os';
+import { dirname, join, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isCliEntry } from './cli-entry.mjs';
 import { landObservation, sha256 } from './land-observation.mjs';
 
 const SPAWN_TIMEOUT_MS = 20000;
 
-/** collab's scripts dir: $COLLAB_SCRIPTS_DIR, else the Claude Code install record. Null when absent. */
-export function findCollabScripts(env = process.env, home = homedir()) {
-  if (env.COLLAB_SCRIPTS_DIR) return env.COLLAB_SCRIPTS_DIR;
+/**
+ * collab's scripts dir, from the Claude Code install record only. This picks code that the
+ * automatic hook will run, so nothing a project or a hostile environment controls may choose it:
+ * no environment variable, the home folder comes from the OS account database (not $HOME), and
+ * the resolved directory must sit inside that account's ~/.claude/plugins/. Null when absent.
+ * A manual run can still name a scripts dir explicitly with --collab-cli.
+ */
+export function findCollabScripts(_env = process.env, home = userInfo().homedir) {
   try {
     const rec = JSON.parse(readFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'));
     const plugins = rec.plugins || rec;
     const key = Object.keys(plugins).find(k => k.startsWith('collab@'));
     const entry = key && (Array.isArray(plugins[key]) ? plugins[key][0] : plugins[key]);
     const dir = entry?.installPath && join(entry.installPath, 'skills', 'collab', 'scripts');
-    return dir && existsSync(dir) ? dir : null;
+    if (!dir || !existsSync(dir)) return null;
+    const real = realpathSync(dir), base = realpathSync(join(home, '.claude', 'plugins'));
+    const rel = relative(base, real);
+    return rel && !rel.startsWith('..') && !isAbsolute(rel) ? real : null;
   } catch { return null; }
 }
 
@@ -80,7 +88,7 @@ export function readinessLines(result) {
   ];
 }
 
-export function syncCollab(project, { land = landObservation, projectId = null, participant, collabCli = process.env.COLLAB_SCRIPTS_DIR, collabRoot = process.env.COLLAB_LOCAL_ROOT || join(homedir(), '.collab', 'local'), now = new Date().toISOString() } = {}) {
+export function syncCollab(project, { land = landObservation, projectId = null, participant, collabCli = undefined, collabRoot = process.env.COLLAB_LOCAL_ROOT || join(homedir(), '.collab', 'local'), now = new Date().toISOString() } = {}) {
   collabCli ??= findCollabScripts();
   const outcomeCli = collabCli ? join(collabCli, 'collab-outcome.mjs') : null;
   if (!outcomeCli || !existsSync(outcomeCli)) return { status: 'skipped', reason: 'collab is not installed (no collab-outcome.mjs found)', items: [] };

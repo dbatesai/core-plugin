@@ -2,7 +2,7 @@
 // Needs collab's scripts: $COLLAB_SCRIPTS_DIR, else the sibling checkout ../collab-plugin. Skips by name without them.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -164,16 +164,21 @@ test('the --readiness CLI never fails startup: no collab → silent, exit 0', ()
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('collab discovery reads the install record and returns null when collab is absent', () => {
+test('collab discovery reads only the install record, never an environment variable, and only inside ~/.claude/plugins', () => {
   const home = mkdtempSync(join(tmpdir(), 'home-'));
   assert.equal(findCollabScripts({}, home), null);
-  const inst = join(home, 'inst');
-  mkdirSync(join(inst, 'skills', 'collab', 'scripts'), { recursive: true });
   mkdirSync(join(home, '.claude', 'plugins'), { recursive: true });
-  writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { 'collab@collab': [{ installPath: inst }] } }));
-  assert.equal(findCollabScripts({}, home), join(inst, 'skills', 'collab', 'scripts'));
-  assert.equal(findCollabScripts({ COLLAB_SCRIPTS_DIR: '/x' }, home), '/x');
-  rmSync(home, { recursive: true, force: true });
+  const inst = join(home, '.claude', 'plugins', 'cache', 'collab', 'collab', '9.9.9');
+  mkdirSync(join(inst, 'skills', 'collab', 'scripts'), { recursive: true });
+  const record = (installPath) => writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { 'collab@collab': [{ installPath }] } }));
+  record(inst);
+  assert.equal(findCollabScripts({}, home), realpathSync(join(inst, 'skills', 'collab', 'scripts')));
+  assert.equal(findCollabScripts({ COLLAB_SCRIPTS_DIR: '/tmp/evil' }, home), realpathSync(join(inst, 'skills', 'collab', 'scripts')), 'the env var chooses nothing');
+  const outside = mkdtempSync(join(tmpdir(), 'evil-'));
+  mkdirSync(join(outside, 'skills', 'collab', 'scripts'), { recursive: true });
+  record(outside);
+  assert.equal(findCollabScripts({}, home), null, 'an install path outside ~/.claude/plugins is refused');
+  rmSync(home, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true });
 });
 
 test('cleanup', () => { rmSync(ROOT, { recursive: true, force: true }); });
