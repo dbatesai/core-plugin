@@ -889,3 +889,17 @@ test("a state folder that can't be listed does not hide another harness's known 
   });
   if (skipped) t.skip('the platform does not deny the listing');
 });
+
+test('the _metrics ignore rule exists even when the operational-meta folder outside the project fails', () => {
+  const root = mkdtempSync(join(tmpdir(), 'mi-ignore-first-'));
+  try {
+    const project = join(root, 'proj');
+    mkdirSync(project);
+    const home = join(root, 'home-is-a-file');
+    writeFileSync(home, 'not a directory');           // any ~/.core path under it fails with ENOTDIR
+    const r = initMetrics({ projectDir: project, home, env: {} });
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'cannot-create-operational-meta-dir');
+    assert.equal(readFileSync(join(project, '_metrics', '.gitignore'), 'utf8'), '*\n!.gitignore\n!README.md\n');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

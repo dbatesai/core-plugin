@@ -182,7 +182,7 @@ export async function probe(opts = {}) {
   });
 
   // --- Proof 3: working tree state parseable ---
-  const statusResult = gitRun(['status', '--porcelain'], repoPath);
+  const statusResult = gitRun(['--no-optional-locks', 'status', '--porcelain'], repoPath)   // observe only: never refresh the index or take its lock;
   if (!statusResult.ok) {
     evidence.push({
       source: 'git-status',
