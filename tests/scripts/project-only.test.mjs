@@ -264,3 +264,37 @@ test('a project-only close and a normal close on the same project exclude each o
     assert.equal(acquireFileLock(lock, { machine: null }).ok, false, 'and while project-only holds it, a normal close cannot take it');
   } finally { p.cleanup(); }
 });
+
+test('a close marker can record, certify or release only while its begin still owns the project close lock', async () => {
+  const { acquireFileLock, inspectFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const p = project();
+  try {
+    const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
+    const lock = join(p.root, '_memories', '_close.lock');
+    assert.equal(po('finalize-begin', '--session', 's-1').status, 'ok');
+    // begin's process has exited: the lock is still held for the stale window (pid dead, young)
+    assert.equal(inspectFileLock(lock, { machine: null }).held, true);
+    assert.equal(po('finalize-record', '--session', 's-1', '--op', 'material-capture', '--status', 'done').status, 'ok');
+    // past the stale window a newer owner takes it; the old marker is no longer evidence
+    const later = acquireFileLock(lock, { machine: null, now: Date.now() + 11 * 60 * 1000, extra: { session_id: 'other' } });
+    assert.ok(later.ok && later.stolen, 'the lapsed lock is superseded by the normal stale rule');
+    for (const args of [['finalize-record', '--op', 'session-summary', '--status', 'done'], ['finalize-certify'], ['finalize-finish']]) {
+      assert.equal(po(args[0], '--session', 's-1', ...args.slice(1)).state, 'lock-not-owned', args[0]);
+    }
+    assert.equal(inspectFileLock(lock, { machine: null }).lock.nonce, later.nonce, "the newer owner's lock is untouched");
+  } finally { p.cleanup(); }
+});
+
+test('the close folder chain is checked again on every later call', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
+  const { symlinkSync, renameSync } = await import('node:fs');
+  const p = project();
+  try {
+    const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
+    assert.equal(po('finalize-begin', '--session', 's-1').status, 'ok');
+    const close = join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code', 'close');
+    const moved = join(p.base, 'moved-close'); renameSync(close, moved);
+    symlinkSync(moved, close);   // same bytes, now reached through a link
+    assert.equal(po('finalize-record', '--session', 's-1', '--op', 'material-capture', '--status', 'done').state, 'refused-link');
+    assert.equal(JSON.parse(readFileSync(join(moved, 'marker.json'), 'utf8')).ops['material-capture'], undefined, 'nothing was written through the link');
+  } finally { p.cleanup(); }
+});

@@ -29,7 +29,7 @@ import { join, parse, sep } from 'node:path';
 import { userInfo } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
-import { useNoMachineIdentity, acquireFileLock, releaseFileLock } from './file-lock.mjs';
+import { useNoMachineIdentity, acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
 
 export const PROJECT_ONLY_DIR = '_project-only';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -193,9 +193,34 @@ const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const closeLock = (ctx) => join(ctx.root, '_memories', '_close.lock');
 const closeDir = (ctx) => join(pendingDir(ctx), 'close');
 
+/** Every directory from `.core` down to the close folder is a real, non-link directory, checked
+ *  again on each call: a separate CLI call can't trust what an earlier one saw. */
+function closeChain(ctx, extra = []) {
+  for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx), closeDir(ctx), ...extra]) {
+    const st = lstatSync(d);
+    if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d);
+  }
+}
+
 function readMarker(ctx) {
+  try { closeChain(ctx); } catch (e) { return { refused: e.code === 'OUTSIDE_ROOT' ? 'refused-link' : 'no-close-begun' }; }
   const r = readJson(ctx, join(closeDir(ctx), 'marker.json'));
-  return r.state === 'ok' ? r.value : null;
+  return r.state === 'ok' ? r.value : { refused: r.state === 'refused-link' ? 'refused-link' : 'no-close-begun' };
+}
+
+// The marker is evidence only while its begin still owns the project close lock: the current lock
+// generation must carry the nonce and session the begin recorded. After begin's process exits the
+// lock stays held until it ages past the stale window (the normal close's rule); once a newer owner
+// takes it, this marker can no longer record, certify or release.
+function markerFor(ctx) {
+  const m = readMarker(ctx);
+  if (m.refused) return { refused: { status: 'refused', state: m.refused } };
+  if (m.session_id !== ctx.session) return { refused: { status: 'refused', state: 'marker-session-mismatch', session_id: ctx.session } };
+  const held = inspectFileLock(closeLock(ctx), { machine: null });
+  if (!held.held || !held.lock || held.lock.nonce !== m.lock_nonce || held.lock.session_id !== ctx.session) {
+    return { refused: { status: 'refused', state: 'lock-not-owned', reason: 'this close no longer holds the project close lock; begin again' } };
+  }
+  return { marker: m };
 }
 
 function needSession(ctx) {
@@ -216,8 +241,7 @@ export function finalizeBegin(ctx, { now = new Date() } = {}) {
 
 export function finalizeRecord(ctx, { op, opStatus, now = new Date() } = {}) {
   const bad = needSession(ctx); if (bad) return bad;
-  const m = readMarker(ctx);
-  if (!m || m.session_id !== ctx.session) return { status: 'refused', state: 'marker-session-mismatch', session_id: ctx.session };
+  const { marker: m, refused } = markerFor(ctx); if (refused) return refused;
   if (!CLOSE_OPS.includes(op) || op === 'memory-refresh') return { status: 'refused', state: 'bad-op', reason: op === 'memory-refresh' ? 'memory-refresh is unavailable in project-only mode' : `unknown op ${op}` };
   if (!OP_STATUS.has(opStatus)) return { status: 'refused', state: 'bad-status', reason: String(opStatus) };
   m.ops[op] = { status: opStatus, at: now.toISOString() };
@@ -227,12 +251,13 @@ export function finalizeRecord(ctx, { op, opStatus, now = new Date() } = {}) {
 
 export function finalizeCertify(ctx, { now = new Date() } = {}) {
   const bad = needSession(ctx); if (bad) return bad;
-  const m = readMarker(ctx);
-  if (!m || m.session_id !== ctx.session) return { status: 'refused', state: 'marker-session-mismatch', session_id: ctx.session };
+  const { marker: m, refused } = markerFor(ctx); if (refused) return refused;
   const satisfied = (op) => m.ops[op] && (m.ops[op].status === 'done' || (op === 'render-project-md' && m.ops[op].status === 'skipped'));
   const incomplete = CLOSE_OPS.filter((op) => op !== 'memory-refresh' && !satisfied(op));
   if (incomplete.length) return { status: 'refused', state: 'required-ops-incomplete', incomplete };
-  const dir = ownDir(ctx, join(closeDir(ctx), 'receipts'));
+  let dir;
+  try { dir = ownDir(ctx, join(closeDir(ctx), 'receipts')); closeChain(ctx, [dir]); }
+  catch (e) { if (e.code === 'OUTSIDE_ROOT') return { status: 'refused', state: 'refused-link', reason: e.message }; throw e; }
   const receipt = { mode: 'project-only', session_id: ctx.session, harness: ctx.harness, root: ctx.root, outcome: 'partial', unavailable: ['memory-refresh'], certified_at: now.toISOString() };
   writeOwn(dir, `${ctx.session}.json`, JSON.stringify(receipt, null, 2) + '\n');
   return { status: 'ok', outcome: 'partial', unavailable: ['memory-refresh'], session_id: ctx.session };
@@ -240,8 +265,7 @@ export function finalizeCertify(ctx, { now = new Date() } = {}) {
 
 export function finalizeFinish(ctx) {
   const bad = needSession(ctx); if (bad) return bad;
-  const m = readMarker(ctx);
-  if (!m || m.session_id !== ctx.session) return { status: 'refused', state: 'marker-session-mismatch', session_id: ctx.session };
+  const { marker: m, refused } = markerFor(ctx); if (refused) return refused;
   const r = releaseFileLock(closeLock(ctx), m.lock_nonce);
   return r.released ? { status: 'ok', released: true } : { status: 'refused', state: 'release-failed', reason: r.reason };
 }
