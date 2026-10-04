@@ -9,8 +9,9 @@
  * that create paths here MUST register an after() cleanup (see
  * isolatedHooksLog() call sites for the pattern).
  */
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { localStateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { homedir, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
@@ -36,6 +37,18 @@ export function symlinkCapable() {
     rmSync(dir, { recursive: true, force: true });
   }
   return _symlinkCapable;
+}
+
+/**
+ * CORE keeps an unregistered project's state under the real ~/.core/local/<key>/ (the state home
+ * reads the OS account, never $HOME), so every temp test project that reaches state leaves a
+ * folder there. Call when the project is created; its local folder is removed when the process exits.
+ */
+const localLeftovers = new Set();
+export function removeLocalStateOnExit(project) {
+  if (!localLeftovers.size) process.on('exit', () => { for (const d of localLeftovers) try { rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } });
+  localLeftovers.add(dirname(localStateDir({ root: realpathSync(project), harness: 'claude-code' })));
+  return project;
 }
 
 export function trustedTestTmpRoot() {
