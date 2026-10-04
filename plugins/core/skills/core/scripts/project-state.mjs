@@ -953,6 +953,21 @@ function declinedStamps({ root, coreDir }) {
   } catch { return new Set(); }
 }
 
+function pendingAdoptFile({ root, harness, coreDir }) {
+  return join(coreDir, 'local', localRootKey(root), `pending-adopt-${harness}.json`);
+}
+
+/** An adoption this machine started for (root, harness) and didn't finish, with a sound archive. */
+function pendingAdoption({ root, harness, coreDir }) {
+  try {
+    const plan = JSON.parse(readFileSync(pendingAdoptFile({ root, harness, coreDir }), 'utf8'));
+    const superseded = join(root, STATE_DIRNAME, harness, 'superseded');
+    if (!plan || typeof plan.archive !== 'string' || dirname(plan.archive) !== superseded) return null;
+    if (!lstatSync(superseded).isDirectory() || !lstatSync(plan.archive).isDirectory()) return null;
+    return plan;
+  } catch { return null; }
+}
+
 function adoptedInstallsFile({ root, coreDir }) {
   return join(coreDir, 'local', localRootKey(root), ADOPTED_INSTALLS);
 }
@@ -1008,6 +1023,9 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
   if (!registered && classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
   if (checkStateContainment({ root: real, harness }) !== 'ok') return null;
   const harnessDir = join(real, STATE_DIRNAME, harness);
+  // an adoption this machine started here and didn't finish is resumed, whatever the stamp now says
+  const resume = pendingAdoption({ root: real, harness, coreDir });
+  if (resume) return { root: real, harness, oldPath: resume.oldPath, lastWritten: lastWrittenAt(harnessDir), stampHmac: null, resume };
   let stamp = null;
   try {
     const st = lstatSync(join(harnessDir, 'stamp'));
@@ -1052,6 +1070,11 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   if (!cand) return { status: 'not-a-candidate' };
   const real = cand.root;
 
+  if (decision === 'no' && cand.resume) {
+    // declining an interrupted adoption ends it: the plan goes, the archive and state stay as they are
+    rmSync(pendingAdoptFile({ root: real, harness, coreDir }), { force: true });
+    return { status: 'declined', oldPath: cand.oldPath, resumed: true };
+  }
   if (decision === 'no') {
     const file = declinedAdoptFile({ root: real, coreDir });
     mkdirSync(dirname(file), { recursive: true });
@@ -1064,46 +1087,80 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   const localTurnOptOut = localManifest?.turn_capture === false;
   const harnessDir = join(real, STATE_DIRNAME, harness);
   const manifestFile = join(harnessDir, MANIFEST);
-
-  let manifest = null;
-  let manifestIsFile = false;
-  try { manifestIsFile = lstatSync(manifestFile).isFile(); } catch { /* absent */ }
-  // Only a regular file is read: a planted symlink must not pull another file's contents into
-  // the signed manifest. A non-file manifest is left untouched and named in not_archived.
-  if (manifestIsFile) {
-    try { manifest = JSON.parse(readFileSync(manifestFile, 'utf8')); } catch { manifest = null; }
-    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) { setAsideUnparseable(manifestFile); manifest = null; }
-  }
-  // The bootstrap record is completion evidence, and another install's record proves nothing
-  // about this one: it is never carried or re-signed. Left unsigned where it is, it reads as
-  // absent, so the first session here runs startup in full.
-
-  const wasRegistered = readRegisteredRoots({ coreDir: canonical(coreDir) }).has(real);
-  const siblingStamps = [];
-  for (const other of (() => { try { return readdirSync(join(real, STATE_DIRNAME)); } catch { return []; } })()) {
-    if (other === harness || !HARNESS_RE.test(other)) continue;
-    const f = join(real, STATE_DIRNAME, other, 'stamp');
-    try { if (lstatSync(join(real, STATE_DIRNAME, other)).isDirectory() && lstatSync(f).isFile()) siblingStamps.push(createHash('sha256').update(readFileSync(f)).digest('hex')); } catch { /* absent */ }
-  }
-
-  // Keep the originals byte for byte, inert, before anything is re-signed: unknown fields and
-  // the other install's stamp survive for diagnosis and future readers, never as authority.
-  // Only regular files are copied, and never through a linked superseded/ folder, so a planted
-  // symlink can neither pull another file's bytes into the project nor redirect the write.
   const supersededDir = join(harnessDir, 'superseded');
-  try { if (!lstatSync(supersededDir).isDirectory()) return { status: 'held', reason: 'superseded-not-a-directory', oldPath: cand.oldPath }; } catch { /* absent: created below */ }
-  const archive = join(supersededDir, `adopted-${isoStamp()}`);
-  mkdirSync(archive, { recursive: true });
-  const notArchived = [];
-  for (const name of [MANIFEST, 'stamp']) {
-    const f = join(harnessDir, name);
-    let st = null;
-    try { st = lstatSync(f); } catch { continue; }
-    if (!st.isFile()) { notArchived.push(name); continue; }
-    writeFileSync(join(archive, name), readFileSync(f), { flag: 'wx' });
-  }
-  const notImported = [];
+  const pendingFile = pendingAdoptFile({ root: real, harness, coreDir });
 
+  // A plan recorded before anything is committed makes the adoption resumable: if a later write
+  // fails (the stamp is already local, the manifest or registration isn't), a retry finishes from
+  // the archived original instead of finding nothing to adopt.
+  let plan = cand.resume || null;
+  let manifest = null;
+  const readJsonFile = (f) => {
+    try { if (!lstatSync(f).isFile()) return null; } catch { return null; }   // never through a link
+    try { const m = JSON.parse(readFileSync(f, 'utf8')); return m && typeof m === 'object' && !Array.isArray(m) ? m : null; } catch { return null; }
+  };
+
+  if (!plan) {
+    let manifestIsFile = false;
+    try { manifestIsFile = lstatSync(manifestFile).isFile(); } catch { /* absent */ }
+    // Only a regular file is read: a planted symlink must not pull another file's contents into
+    // the signed manifest. A non-file manifest is left untouched and named in not_archived.
+    if (manifestIsFile) {
+      manifest = readJsonFile(manifestFile);
+      if (!manifest) setAsideUnparseable(manifestFile);
+    }
+    // The bootstrap record is completion evidence, and another install's record proves nothing
+    // about this one: it is never carried or re-signed. Left unsigned where it is, it reads as
+    // absent, so the first session here runs startup in full.
+
+    const wasRegistered = readRegisteredRoots({ coreDir: canonical(coreDir) }).has(real);
+    const siblingStamps = [];
+    for (const other of (() => { try { return readdirSync(join(real, STATE_DIRNAME)); } catch { return []; } })()) {
+      if (other === harness || !HARNESS_RE.test(other)) continue;
+      const f = join(real, STATE_DIRNAME, other, 'stamp');
+      try { if (lstatSync(join(real, STATE_DIRNAME, other)).isDirectory() && lstatSync(f).isFile()) siblingStamps.push(createHash('sha256').update(readFileSync(f)).digest('hex')); } catch { /* absent */ }
+    }
+
+    // Keep the originals byte for byte, inert, before anything is re-signed. The archive folder is
+    // created fresh and exclusively (a non-recursive mkdir fails on anything already there,
+    // including a link), under a superseded/ that must be a real directory, and only regular
+    // files are copied, so a planted link can neither pull bytes in nor redirect the write.
+    try { mkdirSync(supersededDir); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+    try { if (!lstatSync(supersededDir).isDirectory()) return { status: 'held', reason: 'superseded-not-a-directory', oldPath: cand.oldPath }; }
+    catch { return { status: 'held', reason: 'superseded-unreadable', oldPath: cand.oldPath }; }
+    const archive = join(supersededDir, `adopted-${isoStamp()}-${randomBytes(4).toString('hex')}`);
+    try { mkdirSync(archive); } catch (e) { if (e.code === 'EEXIST') return { status: 'held', reason: 'archive-name-taken', oldPath: cand.oldPath }; throw e; }
+    if (!lstatSync(archive).isDirectory()) return { status: 'held', reason: 'archive-not-a-directory', oldPath: cand.oldPath };
+    const notArchived = [];
+    for (const name of [MANIFEST, 'stamp']) {
+      const f = join(harnessDir, name);
+      let st = null;
+      try { st = lstatSync(f); } catch { continue; }
+      if (!st.isFile()) { notArchived.push(name); continue; }
+      writeFileSync(join(archive, name), readFileSync(f), { flag: 'wx' });
+    }
+
+    // The sibling stamps are remembered before the commit (harmless while the root is
+    // unregistered), so no later failure can strand the restore's other harness.
+    if (!wasRegistered) {
+      const known = adoptedInstalls({ root: real, coreDir });
+      const fresh = siblingStamps.filter((h) => !known.has(h));
+      if (fresh.length) {
+        const file = adoptedInstallsFile({ root: real, coreDir });
+        mkdirSync(dirname(file), { recursive: true });
+        appendFileSync(file, fresh.map((h) => h + '\n').join(''));
+      }
+    }
+    plan = { archive, notArchived, oldPath: cand.oldPath, manifestArchived: !notArchived.includes(MANIFEST) && existsSync(join(archive, MANIFEST)) };
+    mkdirSync(dirname(pendingFile), { recursive: true });
+    const tmp = `${pendingFile}.tmp-${process.pid}-${randomBytes(2).toString('hex')}`;
+    writeFileSync(tmp, JSON.stringify(plan) + '\n');
+    renameSync(tmp, pendingFile);
+  } else if (plan.manifestArchived) {
+    manifest = readJsonFile(join(plan.archive, MANIFEST));      // resume: the original, from the archive
+  }
+
+  const notImported = [];
   writeStamp({ root: real, harness, coreDir });
   if (manifest) {
     // Allowlist, not spread: the stated carry-over contract is project identity/name
@@ -1128,19 +1185,10 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     });
   }
   const registered = registerProject(coreDir, real, { home: dirname(canonical(coreDir)), confirmNew: true });
-  if (!wasRegistered) {
-    // first adoption of this restore: remember its sibling harnesses' stamps exactly as they arrived
-    const known = adoptedInstalls({ root: real, coreDir });
-    const fresh = siblingStamps.filter((h) => !known.has(h));
-    if (fresh.length) {
-      const file = adoptedInstallsFile({ root: real, coreDir });
-      mkdirSync(dirname(file), { recursive: true });
-      appendFileSync(file, fresh.map((h) => h + '\n').join(''));
-    }
-  }
+  rmSync(pendingFile, { force: true });                         // the adoption is complete
   return {
-    status: 'adopted', oldPath: cand.oldPath, registration: registered,
+    status: 'adopted', oldPath: plan.oldPath, registration: registered, resumed: Boolean(cand.resume),
     project_id: manifest?.project_id ?? null, agent_name: manifest?.agent_name ?? null,
-    archived: archive, not_archived: notArchived, not_imported: notImported,
+    archived: plan.archive, not_archived: plan.notArchived, not_imported: notImported,
   };
 }
