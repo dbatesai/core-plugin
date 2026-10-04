@@ -19,7 +19,9 @@
  *
  * CLI: node project-only.mjs startup --root <dir> [--harness <h>] [--session <id>]
  *      node project-only.mjs status|capture-status --root <dir> [--harness <h>]
- *      purge, retention and finalize answer `unavailable`; anything else is refused.
+ *      node project-only.mjs finalize-begin|finalize-certify|finalize-finish --root <dir> --session <id>
+ *      node project-only.mjs finalize-record --root <dir> --session <id> --op <op> --status done|skipped|failed
+ *      purge and retention answer `unavailable`; anything else is refused.
  * Prints one JSON line. Exits 2 on a refused root or bad arguments.
  */
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -27,7 +29,7 @@ import { join, parse, sep } from 'node:path';
 import { userInfo } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
-import { useNoMachineIdentity } from './file-lock.mjs';
+import { useNoMachineIdentity, acquireFileLock, releaseFileLock } from './file-lock.mjs';
 
 export const PROJECT_ONLY_DIR = '_project-only';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -176,8 +178,73 @@ export function captureStatus(ctx) {
 const UNAVAILABLE = {
   purge: 'the captured-turn purge is not available in project-only mode yet; run it in a normal session',
   retention: 'retention is not available in project-only mode',
-  finalize: 'project-only /finalize is not available yet',
 };
+
+// ---------- /finalize project-only ----------
+//
+// The same close ops as a normal close, under the same project close lock (one mutex per project
+// whichever mode takes it). The native memory refresh writes the harness's own memory outside the
+// folder, so here it is always `unavailable`, and certification is `partial`, never `closed`. All
+// close evidence stays in the pending folder: the normal close's readers (`_metrics/close/receipts`,
+// `_memories/_close-marker.json`) never see it, so it can't suppress a normal close.
+const CLOSE_OPS = ['material-capture', 'render-project-md', 'session-summary', 'memory-refresh'];
+const OP_STATUS = new Set(['done', 'skipped', 'failed']);
+const SESSION_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const closeLock = (ctx) => join(ctx.root, '_memories', '_close.lock');
+const closeDir = (ctx) => join(pendingDir(ctx), 'close');
+
+function readMarker(ctx) {
+  const r = readJson(ctx, join(closeDir(ctx), 'marker.json'));
+  return r.state === 'ok' ? r.value : null;
+}
+
+function needSession(ctx) {
+  if (!ctx.session || !SESSION_RE.test(ctx.session)) return { status: 'refused', state: 'session-required', reason: 'project-only /finalize needs an explicit --session id (transcripts are outside the folder)' };
+  return null;
+}
+
+export function finalizeBegin(ctx, { now = new Date() } = {}) {
+  const bad = needSession(ctx); if (bad) return bad;
+  let dir;
+  try { ensurePending(ctx); dir = ownDir(ctx, closeDir(ctx)); ownDir(ctx, join(ctx.root, '_memories')); }
+  catch (e) { if (e.code === 'OUTSIDE_ROOT') return { status: 'refused', state: 'refused-link', reason: e.message }; throw e; }
+  const lock = acquireFileLock(closeLock(ctx), { extra: { session_id: ctx.session, mode: 'project-only' }, machine: null });
+  if (!lock.ok) return { status: 'refused', state: 'lock-held', reason: lock.reason };
+  writeOwn(dir, 'marker.json', JSON.stringify({ mode: 'project-only', session_id: ctx.session, harness: ctx.harness, begun_at: now.toISOString(), lock_nonce: lock.nonce, ops: { 'memory-refresh': { status: 'unavailable', reason: 'native memory is outside the project folder' } } }, null, 2) + '\n');
+  return { status: 'ok', mode: 'project-only', session_id: ctx.session, ops: CLOSE_OPS };
+}
+
+export function finalizeRecord(ctx, { op, opStatus, now = new Date() } = {}) {
+  const bad = needSession(ctx); if (bad) return bad;
+  const m = readMarker(ctx);
+  if (!m || m.session_id !== ctx.session) return { status: 'refused', state: 'marker-session-mismatch', session_id: ctx.session };
+  if (!CLOSE_OPS.includes(op) || op === 'memory-refresh') return { status: 'refused', state: 'bad-op', reason: op === 'memory-refresh' ? 'memory-refresh is unavailable in project-only mode' : `unknown op ${op}` };
+  if (!OP_STATUS.has(opStatus)) return { status: 'refused', state: 'bad-status', reason: String(opStatus) };
+  m.ops[op] = { status: opStatus, at: now.toISOString() };
+  writeOwn(closeDir(ctx), 'marker.json', JSON.stringify(m, null, 2) + '\n');
+  return { status: 'ok', op, op_status: opStatus };
+}
+
+export function finalizeCertify(ctx, { now = new Date() } = {}) {
+  const bad = needSession(ctx); if (bad) return bad;
+  const m = readMarker(ctx);
+  if (!m || m.session_id !== ctx.session) return { status: 'refused', state: 'marker-session-mismatch', session_id: ctx.session };
+  const satisfied = (op) => m.ops[op] && (m.ops[op].status === 'done' || (op === 'render-project-md' && m.ops[op].status === 'skipped'));
+  const incomplete = CLOSE_OPS.filter((op) => op !== 'memory-refresh' && !satisfied(op));
+  if (incomplete.length) return { status: 'refused', state: 'required-ops-incomplete', incomplete };
+  const dir = ownDir(ctx, join(closeDir(ctx), 'receipts'));
+  const receipt = { mode: 'project-only', session_id: ctx.session, harness: ctx.harness, root: ctx.root, outcome: 'partial', unavailable: ['memory-refresh'], certified_at: now.toISOString() };
+  writeOwn(dir, `${ctx.session}.json`, JSON.stringify(receipt, null, 2) + '\n');
+  return { status: 'ok', outcome: 'partial', unavailable: ['memory-refresh'], session_id: ctx.session };
+}
+
+export function finalizeFinish(ctx) {
+  const bad = needSession(ctx); if (bad) return bad;
+  const m = readMarker(ctx);
+  if (!m || m.session_id !== ctx.session) return { status: 'refused', state: 'marker-session-mismatch', session_id: ctx.session };
+  const r = releaseFileLock(closeLock(ctx), m.lock_nonce);
+  return r.released ? { status: 'ok', released: true } : { status: 'refused', state: 'release-failed', reason: r.reason };
+}
 
 export function main(argv) {
   useNoMachineIdentity();   // no lock in this process reads ~/.core/install-id
@@ -186,8 +253,12 @@ export function main(argv) {
   for (let i = 0; i < rest.length; i++) if (rest[i].startsWith('--')) opt[rest[i].slice(2)] = rest[++i];
   const out = (o) => { process.stdout.write(JSON.stringify(o) + '\n'); return o.status === 'ok' ? 0 : 2; };
   if (UNAVAILABLE[cmd]) return out({ status: 'unavailable', state: 'unavailable', operation: cmd, reason: UNAVAILABLE[cmd] });
-  const run = { startup, status, 'capture-status': captureStatus }[cmd];
-  if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status and capture-status, not ${cmd || '(none)'}` });
+  const run = {
+    startup, status, 'capture-status': captureStatus,
+    'finalize-begin': finalizeBegin, 'finalize-certify': finalizeCertify, 'finalize-finish': finalizeFinish,
+    'finalize-record': (ctx) => finalizeRecord(ctx, { op: opt.op, opStatus: opt.status }),
+  }[cmd];
+  if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status, capture-status and finalize-begin|record|certify|finish, not ${cmd || '(none)'}` });
   const ctx = projectOnlyContext({ root: opt.root, harness: opt.harness || 'claude-code', session: opt.session || null, operation: cmd });
   if (!ctx.ok) return out({ status: 'refused', ...ctx });
   return out(run(ctx));

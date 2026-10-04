@@ -126,7 +126,7 @@ test('capture status reads only the folder and calls outside history unknown; de
     assert.deepEqual(s.violations, []);
     const out = JSON.parse(s.stdout);
     assert.deepEqual([out.in_project.rows, out.outside_history], [2, 'unknown']);
-    for (const [cmd, want] of [['purge', 'unavailable'], ['retention', 'unavailable'], ['finalize', 'unavailable'], ['register', 'refused']]) {
+    for (const [cmd, want] of [['purge', 'unavailable'], ['retention', 'unavailable'], ['finalize', 'refused'], ['register', 'refused']]) {
       const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), cmd, '--root', p.root]);
       assert.equal(JSON.parse(r.stdout).status, want, cmd);
       assert.deepEqual(r.violations, [], cmd);
@@ -222,5 +222,45 @@ test('a project-only process takes locks without reading the install id; withFil
     assert.equal(none.stdout, 'probe-id', 'an explicit identity reaches the lock');
     const control = confined(p.root, ['--input-type=module', '-e', code(false)]);
     assert.ok(control.violations.some((v) => v.path.endsWith('install-id')), 'without the declaration the default reads the install id');
+  } finally { p.cleanup(); }
+});
+
+test('/finalize project-only: same ops, same project lock, memory refresh unavailable, partial outcome, evidence only in pending', () => {
+  const p = project();
+  try {
+    const po = (...a) => { const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]); assert.deepEqual(r.violations, [], a.join(' ')); return JSON.parse(r.stdout); };
+    assert.equal(po('finalize-begin').state, 'session-required', 'no transcript search: the session must be named');
+    assert.equal(po('finalize-begin', '--session', 's-1').status, 'ok');
+    assert.equal(po('finalize-record', '--session', 's-1', '--op', 'memory-refresh', '--status', 'done').state, 'bad-op', 'the native refresh can never be recorded done');
+    assert.equal(po('finalize-record', '--session', 's-2', '--op', 'session-summary', '--status', 'done').state, 'marker-session-mismatch');
+    po('finalize-record', '--session', 's-1', '--op', 'material-capture', '--status', 'done');
+    po('finalize-record', '--session', 's-1', '--op', 'render-project-md', '--status', 'skipped');
+    const early = po('finalize-certify', '--session', 's-1');
+    assert.deepEqual([early.state, early.incomplete], ['required-ops-incomplete', ['session-summary']]);
+    po('finalize-record', '--session', 's-1', '--op', 'session-summary', '--status', 'done');
+    const c = po('finalize-certify', '--session', 's-1');
+    assert.deepEqual([c.status, c.outcome, c.unavailable], ['ok', 'partial', ['memory-refresh']]);
+    assert.equal(po('finalize-finish', '--session', 's-1').released, true);
+    const receipt = JSON.parse(readFileSync(join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code', 'close', 'receipts', 's-1.json'), 'utf8'));
+    assert.deepEqual([receipt.mode, receipt.outcome], ['project-only', 'partial']);
+    assert.equal(existsSync(join(p.root, '_metrics', 'close')), false, "the normal close's receipt folder never sees it");
+    assert.equal(existsSync(join(p.root, '_memories', '_close-marker.json')), false, "nor its owed-work marker");
+  } finally { p.cleanup(); }
+});
+
+test('a project-only close and a normal close on the same project exclude each other through one lock', async () => {
+  const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
+  const p = project();
+  try {
+    const lock = join(p.root, '_memories', '_close.lock');
+    const held = acquireFileLock(lock, { machine: null });
+    assert.ok(held.ok);
+    try {
+      const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), 'finalize-begin', '--root', p.root, '--session', 's-1']);
+      assert.equal(JSON.parse(r.stdout).state, 'lock-held');
+    } finally { releaseFileLock(lock, held.nonce); }
+    const r = confined(p.root, [join(CORE, 'scripts/project-only.mjs'), 'finalize-begin', '--root', p.root, '--session', 's-1']);
+    assert.equal(JSON.parse(r.stdout).status, 'ok');
+    assert.equal(acquireFileLock(lock, { machine: null }).ok, false, 'and while project-only holds it, a normal close cannot take it');
   } finally { p.cleanup(); }
 });

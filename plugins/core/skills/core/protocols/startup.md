@@ -47,7 +47,7 @@ Then load project context from the folder by reading it: `PROJECT.md`, the unit 
 
 **Off in this mode, and said in the readiness summary:**
 - automatic per-turn retrieval and the capture inside it;
-- the end-of-session close (tell the user `/finalize` isn't available in project-only mode yet);
+- the automatic end-of-session close (the user closes with `/finalize project-only`, which records a partial close: the native memory refresh can't run here);
 - collab sync;
 - the capability probe, legacy migration and drift check;
 - the captured-turn purge and retention (`project-only.mjs purge` answers `unavailable`).
