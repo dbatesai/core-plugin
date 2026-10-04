@@ -56,4 +56,18 @@ test('realpathSync.native outside is refused and recorded too; inside it still w
   assert.deepEqual(r.violations.map(v => v.call), ['realpathSync.native']);
 });
 
+test('a link inside a root that leads outside is judged by where it leads; lstat of the link itself is allowed', { skip: process.platform === 'win32' ? 'symlink fixtures need POSIX' : false }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const link = join(inside, 'out-link');
+  symlinkSync(outside, link);
+  const L = JSON.stringify(join(link, 'sentinel.txt'));
+  const r = run(`import { readFileSync, lstatSync } from 'node:fs';
+    const out = [];
+    out.push(lstatSync(${JSON.stringify(link)}).isSymbolicLink() ? 'lstat-ok' : 'lstat-bad');
+    try { readFileSync(${L}, 'utf8'); out.push('read-ok'); } catch (e) { out.push(e.code); }
+    process.stdout.write(out.join(','));`);
+  assert.equal(r.stdout, 'lstat-ok,EACCES');
+  assert.deepEqual(r.violations.map(v => v.call), ['readFileSync']);
+});
+
 test('cleanup', () => { rmSync(inside, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); });

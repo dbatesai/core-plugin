@@ -310,3 +310,44 @@ test('installed-mode harness discovery never lists the project-only folder', asy
     assert.deepEqual(harnesses, ['codex'], 'the real harness folder is found and the pending one is not');
   } finally { p.cleanup(); }
 });
+
+// _memories replaced, between calls, by a link to an outside copy of the lock.
+test('a _memories folder swapped for a link between finalize calls is refused; nothing outside is read or renamed', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
+  const { symlinkSync, renameSync, copyFileSync } = await import('node:fs');
+  const p = project();
+  try {
+    const po = (...a) => confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]);
+    assert.equal(JSON.parse(po('finalize-begin', '--session', 's1').stdout).status, 'ok');
+    const mem = join(p.root, '_memories');
+    const gen = readdirSync(mem).find((n) => /^_close\.lock\.g\d+$/.test(n));
+    const outsideDir = join(p.base, 'outside'); mkdirSync(outsideDir);
+    copyFileSync(join(mem, gen), join(outsideDir, gen));
+    writeFileSync(join(outsideDir, 'sentinel'), 'keep\n');
+    const outsideBefore = tree(outsideDir);
+    const aside = join(p.base, 'memories-aside'); renameSync(mem, aside);
+    symlinkSync(outsideDir, mem);
+    for (const step of [['finalize-finish'], ['finalize-record', '--op', 'session-summary', '--status', 'done'], ['finalize-certify']]) {
+      const r = po(step[0], '--session', 's1', ...step.slice(1));
+      assert.equal(JSON.parse(r.stdout).state, 'refused-link', step[0]);
+      assert.deepEqual(r.violations, [], `${step[0]}: the physical gate saw no outside access`);
+    }
+    assert.deepEqual(tree(outsideDir), outsideBefore, 'the outside copy and sentinel are byte-identical');
+    assert.ok(existsSync(join(aside, gen)) && !existsSync(join(aside, `${gen}.done`)), 'the original in-project lock is intact');
+  } finally { p.cleanup(); }
+});
+
+test('a lock generation file that is a link is refused before the lock is read', { skip: isWin ? 'symlink fixtures need POSIX' : false }, async () => {
+  const { symlinkSync, renameSync } = await import('node:fs');
+  const p = project();
+  try {
+    const po = (...a) => JSON.parse(confined(p.root, [join(CORE, 'scripts/project-only.mjs'), ...a, '--root', p.root]).stdout);
+    po('finalize-begin', '--session', 's1');
+    const mem = join(p.root, '_memories');
+    const gen = readdirSync(mem).find((n) => /^_close\.lock\.g\d+$/.test(n));
+    const outsideFile = join(p.base, 'outside-gen'); renameSync(join(mem, gen), outsideFile);
+    symlinkSync(outsideFile, join(mem, gen));
+    const before = readFileSync(outsideFile);
+    assert.equal(po('finalize-finish', '--session', 's1').state, 'refused-link');
+    assert.ok(readFileSync(outsideFile).equals(before) && existsSync(outsideFile));
+  } finally { p.cleanup(); }
+});

@@ -202,6 +202,20 @@ function closeChain(ctx, extra = []) {
   }
 }
 
+/** The project close lock's folder and every generation file in it: a real `_memories` directory
+ *  inside the root, and regular files, never links, checked on each call before the lock is read,
+ *  taken or released. A link anywhere here would carry lock I/O out of the project. */
+function lockChain(ctx) {
+  const mem = join(ctx.root, '_memories');
+  const st = lstatSync(mem);
+  if (st.isSymbolicLink() || !st.isDirectory() || !realpathSync.native(mem).startsWith(ctx.root + sep)) throw outside(mem);
+  for (const name of readdirSync(mem)) {
+    if (!name.startsWith('_close.lock') && !name.startsWith('._close.lock')) continue;
+    const g = lstatSync(join(mem, name));
+    if (g.isSymbolicLink() || !g.isFile()) throw outside(join(mem, name));
+  }
+}
+
 function readMarker(ctx) {
   try { closeChain(ctx); } catch (e) { return { refused: e.code === 'OUTSIDE_ROOT' ? 'refused-link' : 'no-close-begun' }; }
   const r = readJson(ctx, join(closeDir(ctx), 'marker.json'));
@@ -216,6 +230,7 @@ function markerFor(ctx) {
   const m = readMarker(ctx);
   if (m.refused) return { refused: { status: 'refused', state: m.refused } };
   if (m.session_id !== ctx.session) return { refused: { status: 'refused', state: 'marker-session-mismatch', session_id: ctx.session } };
+  try { lockChain(ctx); } catch (e) { return { refused: { status: 'refused', state: e.code === 'OUTSIDE_ROOT' ? 'refused-link' : 'lock-unreadable', reason: e.message } }; }
   const held = inspectFileLock(closeLock(ctx), { machine: null });
   if (!held.held || !held.lock || held.lock.nonce !== m.lock_nonce || held.lock.session_id !== ctx.session) {
     return { refused: { status: 'refused', state: 'lock-not-owned', reason: 'this close no longer holds the project close lock; begin again' } };
@@ -231,7 +246,7 @@ function needSession(ctx) {
 export function finalizeBegin(ctx, { now = new Date() } = {}) {
   const bad = needSession(ctx); if (bad) return bad;
   let dir;
-  try { ensurePending(ctx); dir = ownDir(ctx, closeDir(ctx)); ownDir(ctx, join(ctx.root, '_memories')); }
+  try { ensurePending(ctx); dir = ownDir(ctx, closeDir(ctx)); ownDir(ctx, join(ctx.root, '_memories')); lockChain(ctx); }
   catch (e) { if (e.code === 'OUTSIDE_ROOT') return { status: 'refused', state: 'refused-link', reason: e.message }; throw e; }
   const lock = acquireFileLock(closeLock(ctx), { extra: { session_id: ctx.session, mode: 'project-only' }, machine: null });
   if (!lock.ok) return { status: 'refused', state: 'lock-held', reason: lock.reason };

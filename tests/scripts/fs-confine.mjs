@@ -6,18 +6,35 @@
  * and the list is printed to stderr as `FS_CONFINE_VIOLATIONS <json>` at exit. Refused and
  * recorded both, because best-effort code that swallows the error would otherwise hide the access.
  * Named ESM imports see the wrappers too (synced after wrapping). Covers the sync, callback and promise forms of the path-taking calls CORE uses; it is a test
- * seam, not a sandbox (a native addon or child process is outside it).
+ * seam, not a sandbox (a native addon or child process is outside it). Paths are judged
+ * physically (links resolved), so a link out of a root is caught; a link swapped in between the
+ * check and the call is not.
  */
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { delimiter, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const roots = (process.env.FS_CONFINE_ROOTS || '').split(delimiter).filter(Boolean).map(r => resolve(r));
+// Physical, not lexical: a path is judged by where it actually leads. The deepest existing
+// ancestor is resolved (links followed) and the rest appended, so a link inside a root that
+// points elsewhere counts as outside. The originals are captured before anything is wrapped.
+const realNative = fs.realpathSync.native.bind(fs);
+const physical = (abs) => {
+  let head = abs, tail = '';
+  for (;;) {
+    try { return tail ? join(realNative(head), tail) : realNative(head); }
+    catch { const parent = dirname(head); if (parent === head) return abs; tail = tail ? join(basename(head), tail) : basename(head); head = parent; }
+  }
+};
+const roots = (process.env.FS_CONFINE_ROOTS || '').split(delimiter).filter(Boolean).map(r => physical(resolve(r)));
 const violations = [];
-const inside = (p) => {
+// Calls that act on a link itself (lstat, readlink, unlink, rm, rename) are judged by where the
+// link sits: its parent resolved physically, plus its own name.
+const ON_LINK = new Set(['lstat', 'readlink', 'unlink', 'rm', 'rmdir', 'rename']);
+const inside = (p, name = '') => {
   if (typeof p !== 'string' && !(p instanceof URL)) return true;   // fds and buffers pass through
-  const abs = resolve(p instanceof URL ? fileURLToPath(p) : p);
+  const lex = resolve(p instanceof URL ? fileURLToPath(p) : p);
+  const abs = ON_LINK.has(name) ? join(physical(dirname(lex)), basename(lex)) : physical(lex);
   return roots.some(r => abs === r || abs.startsWith(r + sep));
 };
 const refuse = (call, p) => {
@@ -34,7 +51,7 @@ for (const name of NAMES) {
     const orig = obj[key];
     if (typeof orig !== 'function') continue;
     const wrapped = function confined(...args) {
-      const bad = paths(name, args).find(p => !inside(p));
+      const bad = paths(name, args).find(p => !inside(p, name));
       if (bad === undefined) return orig.apply(this, args);
       const err = refuse(key, bad);
       if (obj === fs.promises) return Promise.reject(err);
