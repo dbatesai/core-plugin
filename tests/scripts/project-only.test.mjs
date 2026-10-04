@@ -298,3 +298,15 @@ test('the close folder chain is checked again on every later call', { skip: isWi
     assert.equal(JSON.parse(readFileSync(join(moved, 'marker.json'), 'utf8')).ops['material-capture'], undefined, 'nothing was written through the link');
   } finally { p.cleanup(); }
 });
+
+test('installed-mode harness discovery never lists the project-only folder', async () => {
+  const { stateHarnessesPartial } = await import('../../plugins/core/skills/core/scripts/project-state.mjs');
+  const p = project();
+  try {
+    mkdirSync(join(p.root, '.core', PROJECT_ONLY_DIR, 'claude-code', 'close'), { recursive: true });
+    mkdirSync(join(p.root, '.core', 'codex'), { recursive: true });
+    const coreDir = join(p.base, 'synthetic-home', '.core');
+    const { harnesses } = stateHarnessesPartial({ root: p.root, coreDir });
+    assert.deepEqual(harnesses, ['codex'], 'the real harness folder is found and the pending one is not');
+  } finally { p.cleanup(); }
+});
