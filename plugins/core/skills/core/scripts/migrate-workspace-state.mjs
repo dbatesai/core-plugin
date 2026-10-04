@@ -182,8 +182,18 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     const reg = byId.get(id) || null;
     const dir = join(wsRoot, id);
     const dirExists = dirs.includes(id);
-    const manifest = dirExists ? readJson(join(dir, 'workspace.json'), {}) : {};
-    const manifestSha = dirExists ? fileSha(join(dir, 'workspace.json')) : 'absent';
+    // Parsed and fingerprinted from one read, as the registry is: the record must name the bytes
+    // the classifier used. An unreadable or unparseable manifest is classified as empty, as
+    // before, and marked 'unreadable' so that result is never recorded.
+    let manifest = {};
+    let manifestSha = 'absent';
+    if (dirExists) {
+      try {
+        const raw = readFileSync(join(dir, 'workspace.json'));
+        manifestSha = createHash('sha256').update(raw).digest('hex');
+        try { manifest = JSON.parse(raw.toString('utf8')) || {}; } catch { manifestSha = 'unreadable'; }
+      } catch (err) { manifestSha = err.code === 'ENOENT' ? 'absent' : 'unreadable'; }
+    }
     const files = dirExists ? dataFiles(dir) : [];
     const rawPath = registryEntryPath(reg);
     const path = rawPath ? canonical(expandHome(rawPath, home)) : null;

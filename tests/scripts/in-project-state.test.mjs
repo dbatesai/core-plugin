@@ -1217,3 +1217,29 @@ test('a registry that could not be read while classifying is never recorded as n
     assert.deepEqual([r.status, r.fast], ['migrated', undefined], 'the evidence is migrated once the registry reads');
   } finally { s.cleanup(); }
 });
+
+test('a legacy manifest that changes between being classified and being fingerprinted is never recorded as covered', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const s = sandbox();
+  const orig = fs.readFileSync;
+  try {
+    const p = s.mk('Projects', 'Race');
+    const ws = legacyWorkspace(s, 'race', { path: p, files: { 'workspace.json': JSON.stringify({ workspace_id: 'race', harness: 'codex' }), 'notes.md': 'evidence\n' } });
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([ws], null, 2));
+    const target = join(s.coreDir, 'workspaces', 'race', 'workspace.json');
+    let flipped = false;
+    // The first read of the manifest returns the codex bytes, then a writer flips it on disk.
+    fs.readFileSync = function (file, ...rest) {
+      const out = orig.call(this, file, ...rest);
+      if (!flipped && String(file) === target) { flipped = true; fs.writeFileSync(target, JSON.stringify({ workspace_id: 'race', harness: 'claude-code' })); }
+      return out;
+    };
+    syncBuiltinESMExports();
+    try { assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir }).status, 'nothing-to-migrate'); }
+    finally { fs.readFileSync = orig; syncBuiltinESMExports(); }
+    assert.ok(flipped);
+    const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+    assert.deepEqual([r.status, r.fast], ['migrated', undefined], 'the record named the classified codex bytes, so the flip invalidates it');
+  } finally { fs.readFileSync = orig; syncBuiltinESMExports(); s.cleanup(); }
+});
