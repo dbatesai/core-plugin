@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
 import {
   renderBar, computeRows, buildNarrative, renderReport, parseRecognitionSignal,
   checkCalibrationPool, checkGoldRegression, checkLiveRetrievalProxy, gatherMetrics,
@@ -651,7 +652,7 @@ test('computeRows: Telemetry capture row names the rejected-row count by schema 
 });
 
 test('gatherMetrics: real end-to-end run surfaces a rejected row in the rendered Telemetry capture row', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-gather-rejected-'));
+  const root = removeLocalStateOnExit(mkdtempSync(join(tmpdir(), 'core-metrics-check-gather-rejected-')));
   try {
     mkdirSync(join(root, '_memories'), { recursive: true }); // retrieval_log is only computed when a store is present
     const day = join(root, '_sessions', '2026-07-22');
@@ -685,7 +686,7 @@ test('gatherMetrics: real end-to-end run surfaces a rejected row in the rendered
 // ---------------------------------------------------------------------------
 
 test('CLI --json contract: exact four-class placement, identity stamp, old contradictory fields absent, renderer sources the same object', () => {
-  const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-cli-contract-'));
+  const root = removeLocalStateOnExit(mkdtempSync(join(tmpdir(), 'core-metrics-check-cli-contract-')));
   try {
     mkdirSync(join(root, '_memories'), { recursive: true });
     const day = join(root, '_sessions', '2026-07-22');

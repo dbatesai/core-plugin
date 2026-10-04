@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir, platform } from 'node:os';
 import { dirname, join } from 'node:path';
+import { removeLocalStateOnExit } from './trusted-test-tmp.mjs';
 import {
   captureTurnEvidence,
   turnCaptureEnabled,
@@ -337,7 +338,7 @@ test('purge removes the stream dir and refuses anything else', () => {
 test('purge covers the whole declared scope — nested files, interrupted writes, derived judgments, health counters, AND the classified turn log', () => {
   const root = mkdtempSync(join(tmpdir(), 'tc-purge-scope-'));
   try {
-    const project = makeProject(root);
+    const project = removeLocalStateOnExit(makeProject(root));
     captureTurnEvidence(project, goodRow(), { env: cleanEnv() });
     const dir = turnCaptureDir(project);
     const base = join(project, '_metrics');
