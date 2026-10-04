@@ -87,22 +87,31 @@ export function lookupParticipant(project, collabCli, projectId = null) {
   if (!existsSync(idCli)) return { error: 'this collab version has no read-only identity lookup' };
   const r = spawnSync(process.execPath, [idCli, '--show', projectId], { encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS });
   if (r.status === 3) return { error: 'no collab identity for this project' };
-  if (r.status === 5) return { error: `collab identity belongs to another workspace (${(r.stderr || '').trim().slice(0, 160)})` };
-  if (r.status !== 0) return { error: `collab identity unreadable (${(r.stderr || '').trim().slice(0, 120) || `exit ${r.status}`})` };
+  // fixed wording only: collab's stderr echoes record contents another process can write
+  if (r.status === 5) return { error: 'collab identity belongs to another workspace' };
+  if (r.status !== 0) return { error: `collab identity unreadable (exit ${Number(r.status) || 'signal'})` };
   try { const id = JSON.parse(r.stdout); return { participants: [id.participant_id, id.triplet].filter(Boolean), projectId }; }
   catch { return { error: 'collab identity output unparseable' }; }
 }
 
+// Readiness lines reach the model's context, and collab names and states come from directories
+// and files other processes can write. Only these shapes pass; anything else is replaced.
+const safeName = (n) => String(n).replace(/[^A-Za-z0-9._-]/g, '').slice(0, 80) || '(unnamed)';
+const SAFE_STATE = /^(landed|already-landed|open|not-joined|(pending|refused):[a-z-]+(:[a-z-]+)?( [A-Za-z0-9._,-]{1,120})?)$/;
+const safeState = (st) => (SAFE_STATE.test(String(st)) ? String(st) : 'refused:unrecognized-state');
+const SAFE_REASON = /^[A-Za-z0-9 ()._,:'-]{1,160}$/;
+const safeReason = (r) => (SAFE_REASON.test(String(r)) ? String(r) : 'unrecognized reason');
+
 /** At most three readiness lines; nothing when every item is landed, already-landed or open. */
 export function readinessLines(result) {
-  if (result.status === 'skipped') return result.reason?.startsWith('collab is not installed') ? [] : [`Collab handoff: skipped — ${result.reason}.`];
-  if (result.status === 'error') return [`Collab handoff: the sync did not finish (${result.reason}); nothing was lost, it retries next run.`];
+  if (result.status === 'skipped') return result.reason?.startsWith('collab is not installed') ? [] : [`Collab handoff: skipped — ${safeReason(result.reason)}.`];
+  if (result.status === 'error') return [`Collab handoff: the sync did not finish (${safeReason(result.reason)}); nothing was lost, it retries next run.`];
   const quiet = new Set(['landed', 'already-landed', 'open']);
   const loud = result.items.filter(i => !quiet.has(i.state));
   if (!loud.length) return [];
   const counts = {};
-  for (const i of result.items) counts[i.state.split(':')[0]] = (counts[i.state.split(':')[0]] || 0) + 1;
-  const named = loud.slice(0, 5).map(i => `${i.collab} (${i.state})`).join(', ');
+  for (const i of result.items) { const k = safeState(i.state).split(':')[0]; counts[k] = (counts[k] || 0) + 1; }
+  const named = loud.slice(0, 5).map(i => `${safeName(i.collab)} (${safeState(i.state)})`).join(', ');
   return [
     `Collab handoff: ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(', ')}.`,
     `Needs a look: ${named}${loud.length > 5 ? `, +${loud.length - 5} more` : ''} — full list in _sessions/<date>/handoff-log.jsonl.`,
