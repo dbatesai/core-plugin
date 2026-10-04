@@ -941,6 +941,7 @@ export function readBootstrap({ root, harness, coreDir = defaultCoreDir() }) {
 // ---------- adopting another install's state (a restore) ----------
 
 const DECLINED_ADOPT = 'declined-adopt';
+const ADOPTED_INSTALLS = 'adopted-installs';
 
 function declinedAdoptFile({ root, coreDir }) {
   return join(coreDir, 'local', localRootKey(root), DECLINED_ADOPT);
@@ -951,6 +952,29 @@ function declinedStamps({ root, coreDir }) {
     return new Set(readFileSync(declinedAdoptFile({ root, coreDir }), 'utf8').split('\n').map((l) => l.trim()).filter(Boolean));
   } catch { return new Set(); }
 }
+
+function adoptedInstallsFile({ root, coreDir }) {
+  return join(coreDir, 'local', localRootKey(root), ADOPTED_INSTALLS);
+}
+
+/** Install ids whose state this machine adopted for this root (one restore can carry several harnesses). */
+function adoptedInstalls({ root, coreDir }) {
+  try {
+    return new Set(readFileSync(adoptedInstallsFile({ root, coreDir }), 'utf8').split('\n').map((l) => l.trim()).filter(Boolean));
+  } catch { return new Set(); }
+}
+
+// Persistent descriptive data a restore carries, each with the only shape it may have. These
+// are data, not controls: the control allowlist below is unchanged. A wrong-typed value is not
+// coerced; it stays in the inert archive and is named in the adoption result.
+const plainText = (max, multiline) => (v) => typeof v === 'string' && v.length > 0 && v.length <= max
+  && !(multiline ? /[\u0000-\u0008\u000b-\u001f\u007f]/ : /[\u0000-\u001f\u007f]/).test(v);
+const ADOPTED_DATA_FIELDS = {
+  name: plainText(200, false),
+  agent_notes: plainText(20000, true),
+  created: (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}([T ][0-9:.+Z-]{0,30})?$/.test(v),
+  session_log_refs: (v) => Array.isArray(v) && v.length <= 500 && v.every(plainText(1000, false)),
+};
 
 function lastWrittenAt(dir) {
   let newest = 0;
@@ -975,8 +999,8 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
   assertHarnessName(harness);
   const real = canonical(root);
   const core = canonical(coreDir);
-  if (readRegisteredRoots({ coreDir: core }).has(real)) return null;
-  if (classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
+  const registered = readRegisteredRoots({ coreDir: core }).has(real);
+  if (!registered && classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
   if (checkStateContainment({ root: real, harness }) !== 'ok') return null;
   const harnessDir = join(real, STATE_DIRNAME, harness);
   let stamp = null;
@@ -988,7 +1012,11 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
   if (stamp.install_id === ensureInstallIdentity({ coreDir }).installId) return null;
   if (trackedStateFiles(real, harness).has('stamp')) return null;
   if (declinedStamps({ root: real, coreDir }).has(stamp.hmac)) return null;
-  return { root: real, harness, oldPath: stamp.path, lastWritten: lastWrittenAt(harnessDir), stampHmac: stamp.hmac };
+  // A registered root is offered only for another harness of an install this machine already
+  // adopted here — the rest of the same restore. Any other foreign state on a registered root
+  // (a synced folder another machine is writing) stays not-a-candidate.
+  if (registered && !adoptedInstalls({ root: real, coreDir }).has(stamp.install_id)) return null;
+  return { root: real, harness, oldPath: stamp.path, lastWritten: lastWrittenAt(harnessDir), stampHmac: stamp.hmac, installId: stamp.install_id };
 }
 
 function setAsideUnparseable(file) {
@@ -1001,9 +1029,12 @@ function setAsideUnparseable(file) {
  * Act on the user's answer to the adoption question. Only an interactive /core
  * startup calls this, after asking.
  *   'no'  — remember the refusal for this stamp; the foreign state is left untouched.
- *   'yes' — make the state this install's: re-stamp it, re-sign the manifest and
- *           bootstrap record (an unparseable one is set aside, not adopted), then
- *           register the folder. project_id and agent_name carry over. Adoption never
+ *   'yes' — make the state this install's: keep the original manifest and stamp byte for
+ *           byte in superseded/adopted-<time>/, re-stamp, re-sign the manifest (an
+ *           unparseable one is set aside, not adopted), then register the folder.
+ *           project_id and agent_name carry over, plus the typed descriptive data in
+ *           ADOPTED_DATA_FIELDS (a wrong-typed field is named in not_imported); the install
+ *           is recorded so the same restore's other harness can be adopted next. Adoption never
  *           switches capture on: an explicit metrics_enabled:true is dropped, an
  *           opt-out (the adopted one or this machine's own) is kept, and the metrics
  *           notice shows again on this machine.
@@ -1037,6 +1068,15 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   // about this one: it is never carried or re-signed. Left unsigned where it is, it reads as
   // absent, so the first session here runs startup in full.
 
+  // Keep the originals byte for byte, inert, before anything is re-signed: unknown fields and
+  // the other install's stamp survive for diagnosis and future readers, never as authority.
+  const archive = join(harnessDir, 'superseded', `adopted-${isoStamp()}`);
+  mkdirSync(archive, { recursive: true });
+  for (const name of [MANIFEST, 'stamp']) {
+    if (existsSync(join(harnessDir, name))) writeFileSync(join(archive, name), readFileSync(join(harnessDir, name)));
+  }
+  const notImported = [];
+
   writeStamp({ root: real, harness, coreDir });
   if (manifest) {
     // Allowlist, not spread: the stated carry-over contract is project identity/name
@@ -1048,6 +1088,10 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     if (typeof manifest.agent_name === 'string' && manifest.agent_name) next.agent_name = manifest.agent_name;
     if (manifest.metrics_enabled === false || localOptOut) next.metrics_enabled = false;
     if (manifest.turn_capture === false || localTurnOptOut) next.turn_capture = false;
+    for (const [field, ok] of Object.entries(ADOPTED_DATA_FIELDS)) {
+      if (!(field in manifest)) continue;
+      if (ok(manifest[field])) next[field] = manifest[field]; else notImported.push(field);
+    }
     withFileLock(`${manifestFile}.lock`, () => {
       writeSignedFile({ dir: harnessDir, name: MANIFEST, body: JSON.stringify(next, null, 2) + '\n', coreDir });
     });
@@ -1057,8 +1101,14 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
     });
   }
   const registered = registerProject(coreDir, real, { home: dirname(canonical(coreDir)), confirmNew: true });
+  if (cand.installId && !adoptedInstalls({ root: real, coreDir }).has(cand.installId)) {
+    const file = adoptedInstallsFile({ root: real, coreDir });
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, cand.installId + '\n');
+  }
   return {
     status: 'adopted', oldPath: cand.oldPath, registration: registered,
     project_id: manifest?.project_id ?? null, agent_name: manifest?.agent_name ?? null,
+    archived: archive, not_imported: notImported,
   };
 }
