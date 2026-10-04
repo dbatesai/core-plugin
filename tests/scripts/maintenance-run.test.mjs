@@ -17,7 +17,7 @@ const MAINT_SCRIPT = join(HERE, '..', '..',
   'plugins', 'core', 'skills', 'core', 'scripts', 'maintenance-run.mjs');
 const SELF_TEST_FIXTURE = join(HERE, '..', 'fixtures', 'obligation3-store');
 
-// Isolated HOME so the state-cache global-prune step never touches the real
+// Isolated HOME so nothing a run resolves from the home touches the real
 // developer ~/.core during tests (mirrors decorate-graph.test.mjs / hot-section.test.mjs).
 function testHome(root) {
   const home = join(root, 'home');

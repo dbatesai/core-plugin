@@ -183,8 +183,8 @@ function assertReconciled(projectDir, path, currentText) {
 // cache write would be an unlocked read-modify-write). For one
 // release, readers take the UNION of per-project + the global
 // ~/.core/state-cache.json (newer last_written
-// wins); each stamp also prunes its file's entry from the global cache under the
-// lock, so the union converges to per-project.
+// wins), and a fresh per-project stamp is always the newer one, so the stamp never
+// touches the global cache or its lock.
 // Content outside the marker-delimited hot block is hashed on its own. `last_written_by:
 // hot-section` alone is NOT trustworthy evidence for a later hash mismatch —
 // it only says who wrote the PREVIOUS cached bytes, not the current ones. A

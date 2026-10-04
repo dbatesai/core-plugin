@@ -20,11 +20,10 @@
  * serialized under a project-local lock
  * (`<project>/_memories/_lib/.state-cache.lock`, same `withFileLock`
  * primitive every other lock in this codebase uses — no new mechanism). A
- * residual global `~/.core/state-cache.json` exists for genuinely
- * cross-project files; every per-project stamp also prunes its own file
- * paths out of the global cache under `~/.core/state-cache.lock`, so a stale
- * global entry can never shadow a fresher per-project one (see
- * `data-storage.md` §"Shared-write concurrency" for the union-read rule).
+ * stamp touches nothing outside the project: a stale entry in the older global
+ * `~/.core/state-cache.json` carries an older `last_written`, so the newer
+ * per-project stamp wins the union read (`data-storage.md` §"Edit detection")
+ * without a shared lock that every project's stamp would wait on.
  *
  * What this module deliberately does NOT own: any domain-specific "what
  * counts as CORE's own write vs a real user edit" classification (e.g.
@@ -42,16 +41,6 @@ import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { withFileLock } from './file-lock.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
-
-/**
- * The residual global cache lives under the operational root, so it resolves
- * from the OS-account home. An unresolvable one throws rather than writing
- * beneath whatever $HOME happens to say.
- */
-export function globalCacheDir(opts) {
-  return join(requireTrustedHome(opts), '.core');
-}
 
 export function nowIso() {
   return new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -146,10 +135,10 @@ export function quarantineCache(path, now = nowIso()) {
  *   (whole-file or domain-specific, caller's choice) recorded as
  *   `last_hash`; `extra` merges additional fields into the stamp (e.g.
  *   `outside_hash` for a marker-delimited-block classifier).
- * @param {{now?: string, home?: string}} [opts]
+ * @param {{now?: string}} [opts]
  * @returns {{stamped: boolean, outcome?: string, recovery?: string, reason?: string}}
  */
-export function stampFiles(projectDir, entries, { now, home = null } = {}) {
+export function stampFiles(projectDir, entries, { now } = {}) {
   if (!Array.isArray(entries) || entries.length === 0) return { stamped: true };
   const ts = now || nowIso();
   const cachePath = projectCachePath(projectDir);
@@ -223,37 +212,11 @@ export function stampFiles(projectDir, entries, { now, home = null } = {}) {
     };
   }
 
-  // One-release migration prune (matches recordProjectMdWrite's original
-  // behavior): drop these paths from the global cache under the lock, so a
-  // stale global stamp can't shadow the fresher per-project one. A prune
-  // failure is genuinely best-effort — a held lock just defers the prune to
-  // the next stamp and can't corrupt attribution — so it does NOT downgrade a
-  // successful project-local stamp.
-  try {
-    const coreDir = home ? join(home, '.core') : globalCacheDir();
-    const globalCachePath = join(coreDir, 'state-cache.json');
-    withFileLock(join(coreDir, 'state-cache.lock'), () => {
-      let gcache;
-      let readable = true;
-      try { gcache = JSON.parse(readFileSync(globalCachePath, 'utf8')); }
-      catch { gcache = null; readable = !existsSync(globalCachePath); }
-      // A damaged global cache is moved aside rather than left in place to
-      // shadow the fresher per-project stamps it can no longer be pruned from.
-      if (!readable) quarantineCache(globalCachePath, ts);
-      if (!gcache?.files) return;
-      let changed = false;
-      for (const e of entries) {
-        if (e.path in gcache.files) { delete gcache.files[e.path]; changed = true; }
-      }
-      if (changed) atomicWriteFileSync(globalCachePath, JSON.stringify(gcache, null, 2) + '\n');
-    }, { retries: 3, retryDelayMs: 50 });
-  } catch { /* best-effort — a held lock just defers the prune to the next stamp */ }
-
   return stampOutcome;
 }
 
 /** Convenience single-file wrapper around stampFiles. Returns the same
  *  truthful outcome. */
-export function stampFile(projectDir, path, hash, lastWrittenBy, { now, home, extra } = {}) {
-  return stampFiles(projectDir, [{ path, hash, lastWrittenBy, extra }], { now, home });
+export function stampFile(projectDir, path, hash, lastWrittenBy, { now, extra } = {}) {
+  return stampFiles(projectDir, [{ path, hash, lastWrittenBy, extra }], { now });
 }

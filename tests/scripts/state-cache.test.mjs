@@ -8,10 +8,11 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { join, dirname, resolve, delimiter } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   hashText, projectCachePath, readProjectCache, stampFiles, stampFile,
   CACHE_ABSENT, CACHE_CORRUPT,
@@ -168,25 +169,24 @@ test('stampFiles is a no-op for an empty/absent entries array — never creates 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('stampFiles prunes the same paths from the GLOBAL cache (one-release migration), preserving other files\' global entries', () => {
-  const { root, project, home, cachePath } = setup();
+// One project folder is enough: a stamp reads and writes only inside its project. The child runs
+// under the attempted-access gate with the project and this repo (the code) as the only roots, so
+// any touch of ~/.core, the OS temp dir or another project is recorded, even if swallowed.
+test('a stamp touches nothing outside its project — no shared lock or global cache', () => {
+  const { root, project, cachePath } = setup();
   try {
-    const globalPath = join(home, '.core', 'state-cache.json');
-    writeFileSync(globalPath, JSON.stringify({
-      files: {
-        '/a.md': { last_hash: 'stale0000000000', last_written: 'x', last_written_by: 'old' },
-        '/keep-me.md': { last_hash: 'aaaaaaaaaaaaaaaa', last_written: 'y', last_written_by: 'someone-else' },
-      },
-    }, null, 2));
-
-    stampFiles(project, [{ path: '/a.md', hash: hashText('a'), lastWrittenBy: 'maintenance-run' }], { home });
-
-    const globalCache = JSON.parse(readFileSync(globalPath, 'utf8'));
-    assert.ok(!('/a.md' in globalCache.files), 'the stamped file\'s stale global entry is pruned');
-    assert.ok(globalCache.files['/keep-me.md'], 'an unrelated global entry survives the prune');
-
-    const projectCache = JSON.parse(readFileSync(cachePath, 'utf8'));
-    assert.equal(projectCache.files['/a.md'].last_written_by, 'maintenance-run', 'the per-project stamp is the write of record');
+    const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+    const mod = pathToFileURL(join(repo, 'plugins/core/skills/core/scripts/state-cache.mjs')).href;
+    const code = `const { stampFiles } = await import(${JSON.stringify(mod)});
+      process.stdout.write(JSON.stringify(stampFiles(${JSON.stringify(project)}, [{ path: '/a.md', hash: 'abcdabcdabcdabcd', lastWrittenBy: 'probe' }])));`;
+    const r = spawnSync(process.execPath, ['--import', pathToFileURL(join(repo, 'tests/scripts/fs-confine.mjs')).href, '--input-type=module', '-e', code], {
+      env: { ...process.env, FS_CONFINE_ROOTS: [realpathSync(project), project, repo].join(delimiter) }, encoding: 'utf8',
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).stamped, true);
+    const v = JSON.parse(r.stderr.match(/FS_CONFINE_VIOLATIONS (.*)/)[1]);
+    assert.deepEqual(v, [], 'no access outside the project');
+    assert.equal(JSON.parse(readFileSync(cachePath, 'utf8')).files['/a.md'].last_written_by, 'probe');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
