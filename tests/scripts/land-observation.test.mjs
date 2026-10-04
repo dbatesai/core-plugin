@@ -150,6 +150,20 @@ test('a generic intake survives normal graduation: same bytes are already-landed
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('a receipt-bearing call is never satisfied by a same-id record without a complete receipt', () => {
+  const dir = project();
+  const bare = landObservation(dir, { id: 'obs-collab-aaaaaaaaaaaaaaaa', source: 'collab', bytes: OUT, sha: sha256(OUT) });
+  assert.equal(bare.status, 'landed', 'step 1: the same bytes landed with no receipt');
+  const before = inbox(dir);
+  assert.equal(landCollab(dir).status, 'refused:receipt-missing', 'step 2: a valid receipt is not satisfied by it');
+  assert.equal(landCollab(dir, { receipt: receipt({ origin_anchor: 'localhost:10' }) }).status, 'refused:receipt-missing', 'step 3: an anchor change is not masked');
+  assert.equal(inbox(dir), before, 'the existing record is preserved, not upgraded');
+  const dir2 = project();
+  writeFileSync(join(dir2, '_memories', 'obs-collab-aaaaaaaaaaaaaaaa.md'), `---\nid: obs-collab-aaaaaaaaaaaaaaaa\nsource: collab\nquoted-sha256: ${sha256(OUT)}\nhandoff-origin-anchor: localhost:9\nhandoff-outcome-sha256: ${sha256(OUT)}\nhandoff-mapping: collab-outcome/1\n---\nbody\n`);
+  assert.equal(landCollab(dir2).status, 'refused:receipt-missing', 'a partial receipt missing the full collab id');
+  rmSync(dir, { recursive: true, force: true }); rmSync(dir2, { recursive: true, force: true });
+});
+
 test('BBLens-shaped direct intake: every revision lands once, in any arrival order, and retries converge', () => {
   const dir = project();
   const item = (rev, text) => { const b = B(JSON.stringify({ source: 'teams', tenant: 't1', object: 'm42', revision: rev, text }) + '\n'); return { id: `obs-bblens-teams-t1-m42-${rev}`, source: 'bblens', bytes: b, sha: sha256(b) }; };

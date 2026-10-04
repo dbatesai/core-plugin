@@ -112,6 +112,9 @@ export function landObservation(project, { id, source, bytes, sha, confidence = 
       const sameId = records.filter(r => r.fm.id === id);
       for (const r of sameId) {
         if (r.fm[fmKey('collab_id')] && (!receipt || r.fm[fmKey('collab_id')] !== receipt.collab_id)) return { status: 'refused:display-id-collision', id, where: r.where };
+        // A receipt-bearing call is only satisfied by a complete matching receipt (handled above);
+        // a same-id record without one is never accepted or upgraded in its place.
+        if (receipt) return { status: 'refused:receipt-missing', id, where: r.where };
         // the immutable identity is id + source + quoted bytes; graduation rewrites status, mode, dates and topics
         if (r.fm.source !== source || r.fm['quoted-sha256'] !== sha256(bytes)) return { status: 'refused:id-conflict', id, where: r.where };
       }
