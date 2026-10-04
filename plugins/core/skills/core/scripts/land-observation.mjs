@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkInbox, parseInboxBlocks } from './check-inbox.mjs';
+import { parseFlatFrontmatter } from './frontmatter-flat.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { withFileLock } from './file-lock.mjs';
 import { INBOX_DRAFT_STATUS, VALID_CONFIDENCE_LEVELS } from './unit-vocab.mjs';
@@ -36,17 +37,6 @@ const fmKey = (f) => `handoff-${f.replace(/_/g, '-')}`;
 
 export const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 
-function frontmatter(text) {
-  const m = /^---\n([\s\S]*?)\n---\n/.exec(text);
-  if (!m) return null;
-  const fm = {};
-  for (const line of m[1].split('\n')) {
-    const i = line.indexOf(':');
-    if (i > 0) fm[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-  }
-  return fm;
-}
-
 /** Every intake record the project holds: inbox blocks, then units anywhere under _memories/. */
 export function intakeRecords(project) {
   const out = [];
@@ -59,7 +49,11 @@ export function intakeRecords(project) {
     for (const e of entries) {
       const p = join(dir, e.name);
       if (e.isDirectory()) { if (e.name !== '_validation') stack.push(p); }
-      else if (e.name.endsWith('.md')) { const fm = frontmatter(readFileSync(p, 'utf8')); if (fm) out.push({ where: p, fm }); }
+      else if (e.name.endsWith('.md')) {
+        // the shared flat parser tolerates CRLF and lone-CR units (Windows / OneDrive-authored)
+        const [fm] = parseFlatFrontmatter(readFileSync(p, 'utf8'));
+        if (fm && Object.keys(fm).length) out.push({ where: p, fm });
+      }
     }
   }
   return out;
@@ -76,12 +70,6 @@ function composeBlock({ id, source, confidence, receipt, title, bytes, now }) {
     : `${head}. The exact bytes the source delivered (sha256 ${sha256(bytes)}), quoted verbatim.`;
   return `${lines.join('\n')}\n${note}\n\n\`\`\`\n${bytes.toString('utf8').replace(/\n$/, '')}\n\`\`\`\n`;
 }
-
-const sameFields = (fm, block) => {
-  const a = { ...fm }, b = { ...parseInboxBlocks(block)[0].fm };
-  delete a['extracted-at']; delete b['extracted-at'];
-  return JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
-};
 
 export function landObservation(project, { id, source, bytes, sha, confidence = 'sourced', receipt = null, title = null, now = new Date().toISOString(), lockOpts = {} }) {
   if (!ID_RE.test(String(id))) return { status: 'refused:bad-id', id };
@@ -124,7 +112,8 @@ export function landObservation(project, { id, source, bytes, sha, confidence = 
       const sameId = records.filter(r => r.fm.id === id);
       for (const r of sameId) {
         if (r.fm[fmKey('collab_id')] && (!receipt || r.fm[fmKey('collab_id')] !== receipt.collab_id)) return { status: 'refused:display-id-collision', id, where: r.where };
-        if (!sameFields(r.fm, block)) return { status: 'refused:id-conflict', id, where: r.where };
+        // the immutable identity is id + source + quoted bytes; graduation rewrites status, mode, dates and topics
+        if (r.fm.source !== source || r.fm['quoted-sha256'] !== sha256(bytes)) return { status: 'refused:id-conflict', id, where: r.where };
       }
       if (sameId.length) return { status: 'already-landed', id, where: sameId.map(r => r.where) };
 

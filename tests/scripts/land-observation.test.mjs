@@ -119,6 +119,37 @@ test('a held intake lock returns pending:lock-busy and writes nothing; the next 
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('a CRLF-saved graduated unit still carries the receipt: retries are already-landed, a conflicting receipt is refused', () => {
+  const dir = project();
+  landCollab(dir);
+  const crlf = inbox(dir).replace('status: draft', 'status: active').replace(/\n/g, '\r\n');
+  writeFileSync(join(dir, '_memories', 'obs-collab-aaaaaaaaaaaaaaaa.md'), crlf);
+  assert.equal(landCollab(dir).status, 'already-landed', 'inbox + CRLF unit');
+  writeFileSync(join(dir, 'inbox.md'), '');
+  assert.equal(landCollab(dir).status, 'already-landed', 'CRLF unit only');
+  assert.equal(inbox(dir), '', 'inbox byte-preserved');
+  writeFileSync(join(dir, '_memories', 'obs-collab-aaaaaaaaaaaaaaaa.md'), crlf.replace('handoff-origin-anchor: localhost:9', 'handoff-origin-anchor: localhost:8'));
+  assert.equal(landCollab(dir).status, 'refused:receipt-conflict');
+  assert.equal(inbox(dir), '');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('a generic intake survives normal graduation: same bytes are already-landed, changed bytes under the same id conflict', () => {
+  const dir = project();
+  const b = B('{"source":"teams","object":"m7","revision":"r1"}\n');
+  const x = { id: 'obs-bblens-teams-t1-m7-r1', source: 'bblens', bytes: b, sha: sha256(b) };
+  assert.equal(landObservation(dir, x).status, 'landed');
+  // graduation as the protocol specifies: status → active, created/updated/topics added, mode removed, quoted-sha256 kept
+  const unit = inbox(dir).replace('status: draft', 'status: active').replace('mode: B\n', '').replace('---\nid:', '---\ncreated: 2026-10-04\nupdated: 2026-10-04\ntopics: [teams]\nid:');
+  writeFileSync(join(dir, '_memories', 'obs-bblens-teams-t1-m7-r1.md'), unit);
+  writeFileSync(join(dir, 'inbox.md'), '');
+  assert.equal(landObservation(dir, x).status, 'already-landed');
+  assert.equal(inbox(dir), '');
+  const c = B('{"source":"teams","object":"m7","revision":"r1","edited":true}\n');
+  assert.equal(landObservation(dir, { ...x, bytes: c, sha: sha256(c) }).status, 'refused:id-conflict');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('BBLens-shaped direct intake: every revision lands once, in any arrival order, and retries converge', () => {
   const dir = project();
   const item = (rev, text) => { const b = B(JSON.stringify({ source: 'teams', tenant: 't1', object: 'm42', revision: rev, text }) + '\n'); return { id: `obs-bblens-teams-t1-m42-${rev}`, source: 'bblens', bytes: b, sha: sha256(b) }; };
