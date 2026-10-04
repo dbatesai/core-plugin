@@ -1175,3 +1175,45 @@ test('the record is not used when anything that could give the migration new wor
     assert.equal(again().fast, undefined);
   } finally { s.cleanup(); }
 });
+
+// The record certifies only what the pass actually classified (Lantern's three counterexamples).
+const lateWorkspace = (s, p, harness = 'claude-code') => {
+  const index = JSON.parse(readFileSync(join(s.coreDir, 'index.json'), 'utf8'));
+  index.push(legacyWorkspace(s, 'legacy-late', { path: p, files: { 'workspace.json': JSON.stringify({ workspace_id: 'legacy-late', harness }), 'late.md': 'late\n' } }));
+  writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify(index, null, 2));
+};
+
+test('a registration that lands after the pass but before its record is never stamped as covered', () => {
+  const { s, p, table } = migrationFixture();
+  try {
+    applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table, beforeRecord: () => lateWorkspace(s, p) });
+    const next = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
+    assert.equal(next.fast, undefined, 'the record names the bytes the pass read, not the later ones');
+    assert.ok(existsSync(join(p, '.core', 'claude-code', 'superseded', 'legacy-late', 'late.md')), 'the late workspace is copied');
+  } finally { s.cleanup(); }
+});
+
+test("a legacy workspace whose own manifest changes its harness invalidates the record, registry and table unchanged", () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Flip');
+    const ws = legacyWorkspace(s, 'flip', { path: p, files: { 'workspace.json': JSON.stringify({ workspace_id: 'flip', harness: 'codex' }), 'notes.md': 'evidence\n' } });
+    writeFileSync(join(s.coreDir, 'index.json'), JSON.stringify([ws], null, 2));
+    assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir }).status, 'nothing-to-migrate');
+    writeFileSync(join(s.coreDir, 'workspaces', 'flip', 'workspace.json'), JSON.stringify({ workspace_id: 'flip', harness: 'claude-code' }));
+    const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir });
+    assert.deepEqual([r.status, r.fast], ['migrated', undefined]);
+  } finally { s.cleanup(); }
+});
+
+test('a registry that could not be read while classifying is never recorded as nothing to migrate', { skip: isWin || isRoot }, () => {
+  const { s, p, table } = migrationFixture();
+  const index = join(s.coreDir, 'index.json');
+  try {
+    chmodSync(index, 0o000);   // unreadable while classifying, readable again before the record is written
+    try { assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table, beforeRecord: () => chmodSync(index, 0o644) }).status, 'nothing-to-migrate'); }
+    finally { chmodSync(index, 0o644); }
+    const r = applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir, table });
+    assert.deepEqual([r.status, r.fast], ['migrated', undefined], 'the evidence is migrated once the registry reads');
+  } finally { s.cleanup(); }
+});

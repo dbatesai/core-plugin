@@ -68,6 +68,12 @@ function readTextOrNull(file) {
   try { return readFileSync(file, 'utf8').trim(); } catch { return null; }
 }
 
+/** sha256 of a file's bytes, 'absent' when it doesn't exist, 'unreadable' on any other read error. */
+function fileSha(file) {
+  try { return createHash('sha256').update(readFileSync(file)).digest('hex'); }
+  catch (e) { return e.code === 'ENOENT' ? 'absent' : 'unreadable'; }
+}
+
 function readJson(file, fallback) {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return fallback; }
 }
@@ -153,7 +159,16 @@ function lastActive(coreDir, id, indexEntry) {
 /** Build the manifest. Pure read. */
 export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {} }, now = new Date(), applyHarness = null } = {}) {
   const home = join(coreDir, '..');
-  const index = readJson(join(coreDir, 'index.json'), []);
+  // The registry is read once, and the fingerprint is of the exact bytes classified. A read
+  // that fails, or bytes that don't parse, are classified as empty (as before) but marked
+  // 'unreadable', so that result is never recorded as a finished check.
+  let index = [];
+  let indexSha;
+  try {
+    const raw = readFileSync(join(coreDir, 'index.json'));
+    indexSha = createHash('sha256').update(raw).digest('hex');
+    try { index = JSON.parse(raw.toString('utf8')); } catch { indexSha = 'unreadable'; }
+  } catch (e) { indexSha = e.code === 'ENOENT' ? 'absent' : 'unreadable'; }
   const byId = new Map();
   for (const e of Array.isArray(index) ? index : []) if (e && e.workspace_id) byId.set(e.workspace_id, e);
 
@@ -168,6 +183,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     const dir = join(wsRoot, id);
     const dirExists = dirs.includes(id);
     const manifest = dirExists ? readJson(join(dir, 'workspace.json'), {}) : {};
+    const manifestSha = dirExists ? fileSha(join(dir, 'workspace.json')) : 'absent';
     const files = dirExists ? dataFiles(dir) : [];
     const rawPath = registryEntryPath(reg);
     const path = rawPath ? canonical(expandHome(rawPath, home)) : null;
@@ -186,7 +202,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
     const unlabeled = harness === 'unknown' && !(tableEntry && tableEntry.harness === 'unknown');
 
     const e = {
-      workspace_id: id, registered: !!reg, dir_exists: dirExists, path, path_exists: pathExists,
+      workspace_id: id, registered: !!reg, dir_exists: dirExists, path, path_exists: pathExists, manifest_sha256: manifestSha,
       harness, harness_evidence: harnessEvidence, data_files: files.length,
       sample_files: files.slice(0, 5), class: null, reason: null,
       _unlabeled: unlabeled,
@@ -250,7 +266,7 @@ export function buildManifest({ coreDir = defaultCoreDir(), table = { entries: {
   for (const e of entries) counts[e.class] = (counts[e.class] || 0) + 1;
   const flagged = entries.filter((e) => e.class === 'hold' || e.class === 'orphan-unregistered')
     .map((e) => ({ workspace_id: e.workspace_id, class: e.class, reason: e.reason, harness_evidence: e.harness_evidence, sample_files: e.sample_files }));
-  return { generated_at: now.toISOString(), core_dir: coreDir, table_version: table.version ?? null, counts, flagged, entries };
+  return { generated_at: now.toISOString(), core_dir: coreDir, table_version: table.version ?? null, index_sha256: indexSha, counts, flagged, entries };
 }
 
 // ---------- apply ----------
@@ -378,11 +394,13 @@ export function applyMigration(opts = {}) {
 const CHECK_RECORD = 'migration-check.json';
 const RECORDABLE = new Set(['migrated', 'already-migrated', 'nothing-to-migrate']);
 
-function migrationInputs({ coreDir, table }) {
-  let index;
-  try { index = createHash('sha256').update(readFileSync(join(coreDir, 'index.json'))).digest('hex'); }
-  catch (e) { if (e.code !== 'ENOENT') return null; index = 'absent'; }   // unreadable: never fast
-  return { index_sha256: index, table_sha256: createHash('sha256').update(JSON.stringify(table)).digest('hex') };
+const tableSha = (table) => createHash('sha256').update(JSON.stringify(table)).digest('hex');
+
+/** What a pass classified from: the registry bytes, the table, and the legacy manifest of every
+ *  registration on this path (any harness; its own workspace.json can name the harness). */
+function classifiedInputs(manifest, real, table) {
+  return { index_sha256: manifest.index_sha256, table_sha256: tableSha(table),
+    path_entries: manifest.entries.filter((e) => e.path === real).map((e) => ({ workspace_id: e.workspace_id, manifest_sha256: e.manifest_sha256 })) };
 }
 
 function currentMigrationCheck({ real, harness, coreDir, table }) {
@@ -391,9 +409,14 @@ function currentMigrationCheck({ real, harness, coreDir, table }) {
   if (raw === null) return null;
   let rec;
   try { rec = JSON.parse(raw); } catch { return null; }
-  const now = migrationInputs({ coreDir, table });
-  if (!now || !rec || rec.harness !== harness || rec.root !== real || !RECORDABLE.has(rec.status)) return null;
-  if (rec.index_sha256 !== now.index_sha256 || rec.table_sha256 !== now.table_sha256) return null;
+  if (!rec || rec.harness !== harness || rec.root !== real || !RECORDABLE.has(rec.status) || !Array.isArray(rec.path_entries)) return null;
+  const index = fileSha(join(coreDir, 'index.json'));
+  if (index === 'unreadable' || index !== rec.index_sha256 || tableSha(table) !== rec.table_sha256) return null;
+  for (const e of rec.path_entries) {
+    if (!e || !isSafeWorkspaceId(e.workspace_id)) return null;
+    const now = fileSha(join(coreDir, 'workspaces', e.workspace_id, 'workspace.json'));
+    if (now === 'unreadable' || now !== e.manifest_sha256) return null;
+  }
   // The receipt is re-checked every time, as the full path does: project-local reads, no lock.
   if (rec.status !== 'nothing-to-migrate') {
     const durable = stateDir({ root: real, harness, kind: 'durable', coreDir });
@@ -404,10 +427,10 @@ function currentMigrationCheck({ real, harness, coreDir, table }) {
     live: rec.live ?? null, superseded: rec.superseded || [], files: 0, released: rec.released ?? false, fast: true };
 }
 
-function recordMigrationCheck({ real, harness, coreDir, table, result, now }) {
-  if (!RECORDABLE.has(result.status) || result.metrics_held) return;
-  const inputs = migrationInputs({ coreDir, table });
-  if (!inputs) return;
+function recordMigrationCheck({ real, harness, coreDir, result, inputs, now }) {
+  if (!RECORDABLE.has(result.status) || result.metrics_held || !inputs) return;
+  // Only a classification made from bytes that were all read is recorded.
+  if (inputs.index_sha256 === 'unreadable' || inputs.path_entries.some((e) => e.manifest_sha256 === 'unreadable')) return;
   try {
     const durable = stateDir({ root: real, harness, kind: 'durable', coreDir, forWrite: true });
     writeSignedFile({ dir: durable.dir, name: CHECK_RECORD, coreDir, body: JSON.stringify({
@@ -423,12 +446,14 @@ function applyMigrationInner(opts = {}) {
   const real = canonical(root);
   const fast = currentMigrationCheck({ real, harness, coreDir, table });
   if (fast) return fast;
-  const result = fullMigration({ root, harness, coreDir, table, now });
-  recordMigrationCheck({ real, harness, coreDir, table, result, now });
+  const seen = {};
+  const result = fullMigration({ root, harness, coreDir, table, now, seen });
+  if (typeof opts.beforeRecord === 'function') opts.beforeRecord();   // test seam: a change after the pass, before the record
+  recordMigrationCheck({ real, harness, coreDir, result, inputs: seen.inputs, now });
   return result;
 }
 
-function fullMigration({ root, harness, coreDir, table, now }) {
+function fullMigration({ root, harness, coreDir, table, now, seen }) {
   assertHarnessName(harness);
   const real = canonical(root);
   const iso = now.toISOString();
@@ -438,6 +463,7 @@ function fullMigration({ root, harness, coreDir, table, now }) {
   if (!lock.ok) return { status: 'lock-held', root: real, reason: lock.reason };
   try {
     const { manifest } = withManifest(coreDir, table, harness);
+    seen.inputs = classifiedInputs(manifest, real, table);
     const mine = manifest.entries.filter((e) => e.path === real && e.harness === harness);
     const held = manifest.entries.filter((e) => e.path === real && e.class === 'hold');
     const live = mine.find((e) => e.class === 'migrate');
