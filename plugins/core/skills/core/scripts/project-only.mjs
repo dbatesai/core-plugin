@@ -87,6 +87,12 @@ function writeOwn(dir, name, body) {
 
 /** Creates the pending folder, with `.core/.gitignore` in place before anything else is written. */
 export function ensurePending(ctx) {
+  // Every existing component is checked before anything is created, so a refusal changes nothing.
+  for (const d of [join(ctx.root, '.core'), join(ctx.root, '.core', PROJECT_ONLY_DIR), pendingDir(ctx)]) {
+    let st;
+    try { st = lstatSync(d); } catch (e) { if (e.code === 'ENOENT') continue; throw e; }
+    if (st.isSymbolicLink() || !st.isDirectory()) throw outside(d);
+  }
   const core = ownDir(ctx, join(ctx.root, '.core'));
   const ignore = join(core, '.gitignore');
   if (!existsSync(ignore)) writeFileSync(ignore, '*\n', { flag: 'wx' });   // wx never follows a link or overwrites

@@ -174,6 +174,7 @@ test('a linked .core, pending folder, manifest or capture file is refused, and n
       const r = run(p.root, 'startup');
       assert.equal(JSON.parse(r.stdout).state, 'refused-link', linkAt);
       assert.deepEqual(readdirSync(elsewhere), [], `nothing written through ${linkAt}`);
+      if (linkAt !== '.core') assert.equal(existsSync(join(p.root, '.core', '.gitignore')), false, `a refusal at ${linkAt} creates nothing first`);
     } finally { p.cleanup(); }
   }
   const p = project();
