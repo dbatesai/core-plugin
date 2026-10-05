@@ -305,6 +305,20 @@ export function ensureInstallIdentity({ coreDir = defaultCoreDir() } = {}) {
   return { secret: Buffer.from(secretHex, 'hex'), installId };
 }
 
+/**
+ * This install's secret and id as they are on disk, or null when either is absent, unreadable or
+ * malformed. Never creates anything: every check that only reads state uses this, so looking at a
+ * project can't mint an identity. Only a write (enrollment, a stamp, a signed file) creates one.
+ */
+export function readInstallIdentity({ coreDir = defaultCoreDir() } = {}) {
+  try {
+    const secretHex = readFileSync(join(coreDir, 'install-secret'), 'utf8').trim();
+    const installId = readFileSync(join(coreDir, 'install-id'), 'utf8').trim();
+    if (!HEX64_RE.test(secretHex) || !installId) return null;
+    return { secret: Buffer.from(secretHex, 'hex'), installId };
+  } catch { return null; }
+}
+
 export function stampHmac(secret, { path, harness, install_id }) {
   return createHmac('sha256', secret).update(JSON.stringify([path, harness, install_id])).digest('hex');
 }
@@ -356,8 +370,10 @@ export function classifyStamp({ root, harness, coreDir = defaultCoreDir() }) {
   } catch { stamp = null; }
   if (!wellFormed(stamp)) return { status: 'planted', reason: stamp ? 'malformed-stamp' : 'missing-stamp' };
 
-  const { secret, installId } = ensureInstallIdentity({ coreDir });
-  if (stamp.install_id !== installId) return { status: 'foreign-install', stamp };
+  // No identity on this machine: the stamp can't be this install's, so it is another install's.
+  const identity = readInstallIdentity({ coreDir });
+  if (!identity || stamp.install_id !== identity.installId) return { status: 'foreign-install', stamp };
+  const { secret } = identity;
   const expected = Buffer.from(stampHmac(secret, stamp), 'hex');
   const given = Buffer.from(stamp.hmac, 'hex');
   if (stamp.harness !== harness || given.length !== expected.length || !timingSafeEqual(given, expected)) {
@@ -589,8 +605,9 @@ export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir()
   const s = stateDir({ root, harness, kind: 'durable', coreDir });
   if (!s) return null;
   if (s.location === 'project' && trackedStateFiles(canonical(root), harness).has(name)) return null;
-  let secret;
-  try { ({ secret } = ensureInstallIdentity({ coreDir })); } catch { return null; }
+  const identity = readInstallIdentity({ coreDir });
+  if (!identity) return null;   // nothing here was signed by an install that doesn't exist
+  const { secret } = identity;
   const file = join(s.dir, name);
   for (let attempt = 0; attempt < 2; attempt++) {
     let bytes, mac;
@@ -612,8 +629,9 @@ export function readSignedFile({ root, harness, name, coreDir = defaultCoreDir()
  * match this install's secret. A file written by anything but writeSignedFile reads as absent.
  */
 export function readSignedFileAt({ dir, name, coreDir = defaultCoreDir() }) {
-  let secret;
-  try { ({ secret } = ensureInstallIdentity({ coreDir })); } catch { return null; }
+  const identity = readInstallIdentity({ coreDir });
+  if (!identity) return null;   // nothing here was signed by an install that doesn't exist
+  const { secret } = identity;
   const file = join(dir, name);
   for (let attempt = 0; attempt < 2; attempt++) {
     let bytes, mac;
@@ -1032,7 +1050,7 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
     if (st.isFile()) stamp = JSON.parse(readFileSync(join(harnessDir, 'stamp'), 'utf8'));
   } catch { return null; }
   if (!wellFormed(stamp) || stamp.harness !== harness) return null;
-  if (stamp.install_id === ensureInstallIdentity({ coreDir }).installId) return null;
+  if (stamp.install_id === readInstallIdentity({ coreDir })?.installId) return null;
   if (trackedStateFiles(real, harness).has('stamp')) return null;
   if (declinedStamps({ root: real, coreDir }).has(stamp.hmac)) return null;
   // A registered root is offered only for another harness of an install this machine already
