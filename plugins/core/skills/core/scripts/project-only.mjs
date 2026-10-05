@@ -40,7 +40,9 @@ import { useNoMachineIdentity, acquireFileLock, releaseFileLock, inspectFileLock
 
 export const PROJECT_ONLY_DIR = '_project-only';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const NAME_RE = /^[^\r\n]{1,80}$/;
+// A name, not prose: letters, digits and light punctuation. Its source file is unverified and the value reaches the agent's context.
+const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} ._'-]{0,39}$/u;
+const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
 
 /** True when `cwd` carries the project-only marker folder. Disable-only: it never grants anything. */
 export function projectOnlyHint(cwd) {
@@ -323,16 +325,16 @@ export function pickup(ctx) {
     closeChain(ctx, [rdir]);
     for (const f of readdirSync(rdir).filter((n) => n.endsWith('.json')).sort()) {
       const r = readJson(ctx, join(rdir, f));
-      if (r.state === 'ok' && typeof r.value.session_id === 'string') receipts.push({ session_id: r.value.session_id, outcome: r.value.outcome === 'partial' ? 'partial' : 'unrecognized', certified_at: String(r.value.certified_at || '') });
+      if (r.state === 'ok' && typeof r.value.session_id === 'string' && SESSION_RE.test(r.value.session_id)) receipts.push({ session_id: r.value.session_id, outcome: r.value.outcome === 'partial' ? 'partial' : 'unrecognized', certified_at: typeof r.value.certified_at === 'string' && ISO_RE.test(r.value.certified_at) ? r.value.certified_at : null });
     }
   } catch (e) { if (e.code !== 'ENOENT') receiptsState = e.code === 'OUTSIDE_ROOT' ? 'refused-link' : 'unreadable'; }
   const certified = new Set(receipts.map((r) => r.session_id));
-  const unfinished = marker.session_id && !certified.has(marker.session_id) ? marker.session_id : null;
+  const unfinished = typeof marker.session_id === 'string' && SESSION_RE.test(marker.session_id) && !certified.has(marker.session_id) ? marker.session_id : null;
   return {
     status: 'ok', mode: 'pickup', pending: true, root: ctx.root, harness: ctx.harness,
     unverified: true,
     agent_name: manifest.agent_name, manifest: manifest.state, capture: manifest.capture,
-    last_session: boot.state === 'ok' && typeof boot.value.session === 'string' ? boot.value.session : null,
+    last_session: boot.state === 'ok' && typeof boot.value.session === 'string' && SESSION_RE.test(boot.value.session) ? boot.value.session : null,
     partial_closes: receipts, receipts: receiptsState, unfinished_close: unfinished,
     // Every project-only close was partial: a normal close is still owed for the native refresh.
     adopted: { completion: false, enrollment: false },

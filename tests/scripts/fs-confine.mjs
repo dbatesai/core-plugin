@@ -6,7 +6,9 @@
  * and the list is printed to stderr as `FS_CONFINE_VIOLATIONS <json>` at exit. Refused and
  * recorded both, because best-effort code that swallows the error would otherwise hide the access.
  * Named ESM imports see the wrappers too (synced after wrapping). Covers the sync, callback and promise forms of the path-taking calls CORE uses; it is a test
- * seam, not a sandbox (a native addon or child process is outside it). Paths are judged
+ * seam, not a sandbox (a native addon or child process is outside it). FS_CONFINE_ERRNO=ENOENT answers
+ * every outside path as absent instead of unreadable (EACCES, the default); FS_CONFINE_LOG=<file> appends one
+ * JSON line per path-taking call, allowed or refused, written with the unwrapped originals. Paths are judged
  * physically (links resolved), so a link out of a root is caught; a link swapped in between the
  * check and the call is not.
  */
@@ -28,6 +30,10 @@ const physical = (abs) => {
 };
 const roots = (process.env.FS_CONFINE_ROOTS || '').split(delimiter).filter(Boolean).map(r => physical(resolve(r)));
 const violations = [];
+const ERRNO = process.env.FS_CONFINE_ERRNO === 'ENOENT' ? 'ENOENT' : 'EACCES';
+const LOG = process.env.FS_CONFINE_LOG || '';
+const rawAppend = fs.appendFileSync.bind(fs);
+const record = (call, path, verdict) => { if (LOG) { try { rawAppend(LOG, JSON.stringify({ call, path: String(path), verdict }) + '\n'); } catch { /* the log is evidence, never a dependency */ } } };
 // Calls that act on a link itself (lstat, readlink, unlink, rm, rename) are judged by where the
 // link sits: its parent resolved physically, plus its own name.
 const ON_LINK = new Set(['lstat', 'readlink', 'unlink', 'rm', 'rmdir', 'rename']);
@@ -39,7 +45,8 @@ const inside = (p, name = '') => {
 };
 const refuse = (call, p) => {
   violations.push({ call, path: String(p) });
-  return Object.assign(new Error(`fs-confine: ${call} ${p}`), { code: 'EACCES' });
+  record(call, p, `refused-${ERRNO}`);
+  return Object.assign(new Error(`fs-confine: ${call} ${p}`), { code: ERRNO });
 };
 const TWO = new Set(['rename', 'link', 'symlink', 'copyFile', 'cp']);
 const NAMES = ['access', 'appendFile', 'chmod', 'copyFile', 'cp', 'link', 'lstat', 'mkdir', 'mkdtemp', 'open', 'opendir',
@@ -52,7 +59,7 @@ for (const name of NAMES) {
     if (typeof orig !== 'function') continue;
     const wrapped = function confined(...args) {
       const bad = paths(name, args).find(p => !inside(p, name));
-      if (bad === undefined) return orig.apply(this, args);
+      if (bad === undefined) { if (LOG) record(key, paths(name, args)[0], 'allowed'); return orig.apply(this, args); }
       const err = refuse(key, bad);
       if (obj === fs.promises) return Promise.reject(err);
       if (key.endsWith('Sync')) throw err;
@@ -64,7 +71,7 @@ for (const name of NAMES) {
     if (typeof orig.native === 'function') {
       const nat = orig.native;
       wrapped.native = function confinedNative(...args) {
-        if (inside(args[0])) return nat.apply(this, args);
+        if (inside(args[0])) { record(`${key}.native`, args[0], 'allowed'); return nat.apply(this, args); }
         const err = refuse(`${key}.native`, args[0]);
         if (key.endsWith('Sync')) throw err;
         const cb = args.find(a => typeof a === 'function');
@@ -76,7 +83,7 @@ for (const name of NAMES) {
   }
 }
 const origExists = fs.existsSync;
-fs.existsSync = (p) => { if (!inside(p)) { refuse('existsSync', p); return false; } return origExists(p); };
+fs.existsSync = (p) => { if (!inside(p)) { refuse('existsSync', p); return false; } record('existsSync', p, 'allowed'); return origExists(p); };
 // CORE imports fs functions by name; without this, named imports keep the unwrapped originals.
 syncBuiltinESMExports();
 process.on('exit', () => { process.stderr.write(`FS_CONFINE_VIOLATIONS ${JSON.stringify(violations)}\n`); });
