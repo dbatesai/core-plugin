@@ -130,7 +130,14 @@ export function buildRollup({ project, today, home = homedir(), env }) {
     return { date: today || todayUTC(), disabled: true, distribution: {}, headline: null, trailing_avg: null, provisional: true, signal: 'metrics disabled (opt-in not set)' };
   }
   const date = today || todayUTC();
-  const metaDir = operationalMetricsDir(project, { home, env });
+  let metaDir;
+  try { metaDir = operationalMetricsDir(project, { home, env }); }
+  catch (e) {
+    if (e.code !== 'STATE_NO_PROJECT_PLACE') throw e;
+    return { date, status: 'NOT_STORED', written: false, reason: e.reason,
+      error_code: e.code, distribution: {}, headline: null, trailing_avg: null,
+      provisional: true, signal: `metrics not stored: ${e.reason}` };
+  }
   const classifiedDir = join(metaDir, 'classified');
 
   // Read-side replay dedupe + instrument-cohort gate (metrics-dedupe.mjs):
@@ -183,7 +190,7 @@ export function buildRollup({ project, today, home = homedir(), env }) {
 }
 
 export function writeRollup(r) {
-  if (r.disabled) return r; // privacy-gated: write no metrics artifacts
+  if (r.disabled || r.status === 'NOT_STORED') return r;
   try {
     mkdirSync(join(r.metaDir, 'rollups', 'daily'), { recursive: true });
     const headerTag = r.provisional ? '  [PROVISIONAL — classifier uncalibrated]' : '  [calibrated]';

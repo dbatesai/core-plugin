@@ -234,27 +234,26 @@ rtest('writes a local receipt in the project state with content identical to the
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-rtest('refused project state (a symlinked .core) → receipt still written to the flagged fallback location', async () => {
+rtest('refused project state (a symlinked .core) refuses publication and receipt fallback', async () => {
   const { root, home } = fixtureProject();
   const elsewhere = realpathSync.native(mkdtempSync(join(tmpdir(), 'browse-elsewhere-')));
   try {
     symlinkSync(elsewhere, join(root, '.core'), DIR_LINK);
-    const { manifest, receiptWritten } = await generate(root, home);
-    assert.equal(receiptWritten, true);
-    assert.equal(manifest.receipt_fallback, true);
-    assert.equal(manifest.project_id, null);
-    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'artifact-receipts')));
-    assert.ok(existsSync(manifest.receipt_path));
+    const before = snapshotBytes(join(home, '.core'));
+    await assert.rejects(generate(root, home), /refusing .*\.core: symlink/);
+    assert.equal(existsSync(join(root, 'out', 'view.html')), false);
+    assert.deepEqual(snapshotBytes(join(home, '.core')), before);
     assert.deepEqual(readdirSync(elsewhere), [], 'nothing written through the symlink');
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(elsewhere, { recursive: true, force: true }); }
 });
 
-rtest('an unregistered folder keeps its receipt on this machine, never inside the folder', async () => {
+rtest('an unregistered folder refuses generation without writing receipts anywhere', async () => {
   const { root, home } = fixtureProject({ workspace: false });
   try {
-    const { manifest } = await generate(root, home);
-    assert.equal(manifest.receipt_fallback, false);
-    assert.ok(manifest.receipt_path.startsWith(join(home, '.core', 'local')), 'receipt under ~/.core/local');
+    const before = snapshotBytes(join(home, '.core'));
+    await assert.rejects(generate(root, home), error => error.code === 'STATE_NO_PROJECT_PLACE');
+    assert.equal(existsSync(join(root, 'out', 'view.html')), false);
+    assert.deepEqual(snapshotBytes(join(home, '.core')), before);
     assert.equal(existsSync(join(root, '.core')), false, 'no .core/ planted in an unregistered folder');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -689,11 +688,9 @@ test('a planted .core cannot redirect the receipt out of the operational root', 
     mkdirSync(join(home, '.core'), { recursive: true });
     writeFileSync(join(home, '.core', 'projects.json'), JSON.stringify([{ path: project }]));
     symlinkSync(stolen, join(project, '.core'), DIR_LINK);
-    const loc = generationReceiptLocation({ home, projectDir: project, generatedAt: '2026-07-28T00:00:00Z', env: { CORE_HARNESS: 'claude-code' } });
-    assert.equal(loc.projectId, null, 'refused state yields no project id');
-    assert.equal(loc.receiptDir, join(home, '.core', 'artifact-receipts'),
-      'it falls back to the flagged location, never to a project-chosen path');
-    assert.ok(loc.receiptPath.startsWith(join(home, '.core') + sep), 'and the receipt stays under the operational root');
+    const before = snapshotBytes(join(home, '.core'));
+    assert.throws(() => generationReceiptLocation({home, projectDir:project, generatedAt:'2026-07-28T00:00:00Z', env:{CORE_HARNESS:'claude-code'}}), /refusing .*\.core: symlink/);
+    assert.deepEqual(snapshotBytes(join(home, '.core')), before);
     assert.deepEqual(readdirSync(stolen), [], 'nothing lands in the symlink target');
 
     rmSync(join(project, '.core'));

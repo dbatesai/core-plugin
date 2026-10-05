@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -165,6 +166,7 @@ test('probe reads workspace_id from the project manifest project_id', async () =
   const dir = mkdtempSync(join(tmpdir(), 'ma-'));
   const home = mkdtempSync(join(tmpdir(), 'ma-home-'));
   try {
+    registerFixtureProject(home, dir);
     updateManifest({ root: dir, harness: 'claude-code', coreDir: join(home, '.core'), fields: { project_id: 'core-framework' } });
     const tpath = join(dir, 'session.jsonl');
     writeFileSync(tpath, JSON.stringify({ message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }));

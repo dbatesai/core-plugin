@@ -112,3 +112,21 @@ export function regularFileWithin(root, candidate) {
   try { if (!lstatSync(full).isFile()) return null; } catch { return null; }
   return full;
 }
+
+/** Retired account-global payload routes, including their physical aliases.
+ * Lexical and home-ancestor checks cover a first write before ~/.core exists. This is
+ * an exclusion check; it does not certify arbitrary paths as project state.
+ */
+export function isAccountCorePayloadPath(candidate, { home = requireTrustedHome() } = {}) {
+  const root = resolve(home, '.core');
+  const within = (parent, path) => {
+    const rel = relative(parent, path);
+    return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel));
+  };
+  if (within(root, resolve(candidate)) || containedPath(root, candidate) !== null) return true;
+  // Before .core exists, resolve both future paths through the existing home.
+  // This also excludes a first write through a physical alias of that home.
+  const physicalRoot = containedPath(home, root);
+  const physicalCandidate = containedPath(home, candidate);
+  return physicalRoot !== null && physicalCandidate !== null && within(physicalRoot, physicalCandidate);
+}

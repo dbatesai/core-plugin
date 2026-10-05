@@ -194,7 +194,8 @@ export function localStateDir({ root, harness, coreDir = defaultCoreDir() }) {
  * Both kinds, 'durable' (manifest, stamp, drafts) and 'hot' (append logs, metrics,
  * locks), stay in the project, synced folder or not, unless the root is not writable.
  * A root that is not registered (~/.core/projects.json, or the legacy index.json)
- * never gets in-project state: its state lives under ~/.core/local/.
+ * never gets in-project state: new payload writes are refused, while any older
+ * ~/.core/local/ copy remains history for read-only consumers.
  * Returns { dir, location: 'project' | 'local', reason }.
  */
 export function projectStateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), registered }) {
@@ -241,14 +242,12 @@ export function checkStateContainment({ root, harness }) {
  * written before any other file, and a symlinked or non-directory .core refuses.
  */
 export function ensureStateDir(opts) {
-  const target = projectStateDir(opts);
-  if (target.location === 'project') {
-    const dir = join(ensureCoreDir(opts.root, opts.harness), assertHarnessName(opts.harness));
-    if (!existsSync(dir)) writeStamp({ root: opts.root, harness: opts.harness, coreDir: opts.coreDir || defaultCoreDir() });
-    return { ...target, dir };
-  }
-  mkdirSync(target.dir, { recursive: true });
-  return target;
+  // Provisioning uses the same stamp, migration and no-place checks as every writer.
+  return stateDir({ ...opts, forWrite: true });
+}
+
+function noProjectPlace(reason) {
+  throw Object.assign(new Error(`not stored: ${reason}; no writable project state`), { code: 'STATE_NO_PROJECT_PLACE', reason });
 }
 
 /** Create <root>/.core/ — refusing a symlinked or escaping .core — with .gitignore first. */
@@ -392,9 +391,28 @@ export function classifyStamp({ root, harness, coreDir = defaultCoreDir() }) {
 
 // A migration writes into the project's state before it is whole. While its marker is
 // present, everything except the migration itself is kept out of that state: reads see
-// nothing, and writes go to this machine's local state instead, so no reader or writer
-// consumes half a copy.
+// nothing from the fenced state, and ordinary writes are refused, so no reader
+// or writer consumes half a copy. Existing local history remains read-only.
 export const MIGRATING_MARKER = '.migrating';
+
+/** Read-only state preflight: an unfinished or uninspectable state cannot supply
+ * retrieval or capture. Inspect each parent before the marker; never follow a link. */
+export function projectMigrationFence({ root, harness }) {
+  const real = canonical(root);
+  const parent = join(real, STATE_DIRNAME, assertHarnessName(harness));
+  for (const dir of [join(real, STATE_DIRNAME), parent]) {
+    try {
+      const st = lstatSync(dir);
+      if (!st.isDirectory() || st.isSymbolicLink()) return 'state-untrusted';
+    } catch (e) {
+      if (e.code === 'ENOENT') return null;
+      return 'state-uninspectable';
+    }
+  }
+  try { lstatSync(join(parent, MIGRATING_MARKER)); return 'migration-in-progress'; }
+  catch (e) { return e.code === 'ENOENT' ? null : 'state-uninspectable'; }
+}
+
 let migrationDepth = 0;
 export function duringMigration(fn) {
   migrationDepth++;
@@ -459,7 +477,8 @@ function setAside(harnessDir, label) {
  * trustworthy to read (forWrite false). With forWrite true the directory exists on
  * return and is this install's: an absent state dir is created and stamped; planted
  * or copied state is set aside unread under superseded/ and replaced; another
- * install's state and an unresolved move/copy ('ask') route to ~/.core/local/;
+ * install's state and an unresolved move/copy ('ask') refuse new payload writes;
+ * existing ~/.core/local/ history stays available to readers;
  * a moved project is re-stamped at its new path.
  *
  * Refused containment (a symlinked or escaping .core) throws on write and reads as null.
@@ -474,30 +493,33 @@ export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCor
   // Ordinary readers and explicit writers retain their existing behavior.
   if (!forWrite && readDirectoryGuard && !readDirectoryGuard(target.dir)) return null;
   if (target.location === 'local') {
-    if (forWrite) mkdirSync(target.dir, { recursive: true });
-    else if (!existsSync(target.dir)) return null;
+    if (forWrite) noProjectPlace(target.reason);
+    if (!existsSync(target.dir)) return null;
     return { dir: target.dir, location: 'local', status: target.reason, trusted: true };
   }
 
   const verdict = classifyStamp({ root: real, harness, coreDir });
   const harnessDir = join(real, STATE_DIRNAME, harness);
-  const local = () => {
+  const local = (reason = verdict.status) => {
     const dir = localStateDir({ root: real, harness, coreDir });
     if (!forWrite && readDirectoryGuard && !readDirectoryGuard(dir)) return null;
-    if (forWrite) mkdirSync(dir, { recursive: true });
-    else if (!existsSync(dir)) return null;
-    return { dir, location: 'local', status: verdict.status, trusted: true };
+    if (forWrite) noProjectPlace(reason);
+    if (!existsSync(dir)) return null;
+    return { dir, location: 'local', status: reason, trusted: true };
   };
   const note = (event) => { if (typeof onEvent === 'function') onEvent({ ...event, root: real, harness }); };
 
   switch (verdict.status) {
-    case 'verified':
-      if (!migrationDepth && existsSync(join(harnessDir, MIGRATING_MARKER))) {
-        const held = local();
-        return held && { ...held, status: 'migrating' };
+    case 'verified': {
+      const fence = !migrationDepth && projectMigrationFence({root:real, harness});
+      if (fence) {
+        const reason = fence === 'migration-in-progress' ? 'migrating' : fence;
+        const held = local(reason);
+        return held && { ...held, status: reason };
       }
       if (forWrite) mkdirSync(target.dir, { recursive: true });
       return { dir: target.dir, location: 'project', status: 'verified', trusted: true };
+    }
     case 'refused':
       if (forWrite) {
         throw Object.assign(new Error(`refusing ${join(real, STATE_DIRNAME)}: ${verdict.reason}`), { code: 'STATE_CONTAINMENT', reason: verdict.reason });

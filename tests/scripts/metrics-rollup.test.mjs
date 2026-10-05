@@ -22,6 +22,8 @@ test('a calibrated workspace with no turns must not mislabel the signal PROVISIO
 function withClassified(byDate, fn) {
   const home = mkdtempSync(join(tmpdir(), 'rollup-home-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-proj-'));
+  mkdirSync(join(home,'.core'));
+  writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
   const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
   mkdirSync(dir, { recursive: true });
   for (const [date, states] of Object.entries(byDate)) {
@@ -160,6 +162,7 @@ test('metricsEnabled opt-in via the project manifest metrics_enabled flag', () =
   const project = mkdtempSync(join(tmpdir(), 'mw-'));
   const home = mkdtempSync(join(tmpdir(), 'mw-home-'));
   try {
+    mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
     updateManifest({ root: project, harness: 'claude-code', coreDir: join(home, '.core'), fields: { metrics_enabled: true } });
     assert.equal(metricsEnabled({ project, home, env: {} }), true);
     // explicit env-off overrides the manifest flag
@@ -181,6 +184,7 @@ test('detector output (anticipation-gap) can never reach the headline signal', (
   const home = mkdtempSync(join(tmpdir(), 'mr-det-'));
   const project = mkdtempSync(join(tmpdir(), 'mr-proj-'));
   try {
+    mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
     const detDir = join(operationalMetricsDir(project, { home: home }), 'detectors');
     mkdirSync(detDir, { recursive: true });
     writeFileSync(join(detDir, '2026-06-09.jsonl'),
@@ -209,7 +213,9 @@ test('replay dedupe: a session processed twice in one day yields the same rollup
   const home = mkdtempSync(join(tmpdir(), 'rollup-replay-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-replay-proj-'));
   try {
-    const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
+    mkdirSync(join(home,'.core'));
+  writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
+  const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
     mkdirSync(dir, { recursive: true });
     const once = [
       ident({ turn_idx: 0, state: 'rec-fail-tier-0' }),
@@ -237,7 +243,9 @@ test('ACCEPTANCE (rollup): a same-instrument contradiction is EXCLUDED from the 
   const home = mkdtempSync(join(tmpdir(), 'rollup-conflict-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-conflict-proj-'));
   try {
-    const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
+    mkdirSync(join(home,'.core'));
+  writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
+  const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '2026-06-02.jsonl'), [
       // turn 0: an old-instrument row (0.2.0) → out of cohort, coverage gap.
@@ -275,7 +283,9 @@ test("mixed-instrument falsifier: calibrated-true must not aggregate a 0.2.0-era
   const home = mkdtempSync(join(tmpdir(), 'rollup-cohort-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-cohort-proj-'));
   try {
-    const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
+    mkdirSync(join(home,'.core'));
+  writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
+  const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '2026-06-02.jsonl'), [
       // 0.2.0-only row: different turn, NO newer counterpart — survives dedupe.
@@ -333,7 +343,9 @@ test('ACCEPTANCE (order-independence): a same-day contradiction is excluded unde
     const home = mkdtempSync(join(tmpdir(), 'rollup-order-'));
     const project = mkdtempSync(join(tmpdir(), 'rollup-order-proj-'));
     try {
-      const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
+      mkdirSync(join(home,'.core'));
+  writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
+  const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, '2026-06-02.jsonl'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
       return buildRollup({ project, today: '2026-06-02', home, env: { CORE_METRICS_ENABLED: '1' } });
@@ -353,7 +365,9 @@ test('ACCEPTANCE (rollup): a cross-date replay attributes to the EARLIEST observ
   const home = mkdtempSync(join(tmpdir(), 'rollup-xdate-'));
   const project = mkdtempSync(join(tmpdir(), 'rollup-xdate-proj-'));
   try {
-    const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
+    mkdirSync(join(home,'.core'));
+  writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
+  const dir = join(operationalMetricsDir(project, { home: home }), 'classified');
     mkdirSync(dir, { recursive: true });
     const sess = [ident({ turn_idx: 0, state: 'tier-0-win' }), ident({ turn_idx: 1, state: 'tier-0-win' })];
     const lines = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';

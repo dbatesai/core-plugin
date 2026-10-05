@@ -1,3 +1,4 @@
+import {realpathSync} from 'node:fs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
@@ -114,6 +115,7 @@ test('CLI refuses same-day labeled worksheet unless --replace-existing is explic
   const home = join(root, 'home');
   const project = join(root, 'project');
   mkdirSync(home); mkdirSync(project);
+  mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
   const isolate = join(root, 'isolate.mjs');
   // Test-only OS-home shim prevents all CLI state writes from reaching the real account.
   writeFileSync(isolate, `import os from 'node:os'; import {syncBuiltinESMExports} from 'node:module'; const original=os.userInfo; os.userInfo=(...args)=>({...original(...args),homedir:${JSON.stringify(home)}}); syncBuiltinESMExports();`);
@@ -122,7 +124,7 @@ test('CLI refuses same-day labeled worksheet unless --replace-existing is explic
   const resolved = run(['--input-type=module', '-e', `import {operationalMetricsDir} from ${JSON.stringify(METRICS_URL)}; console.log(operationalMetricsDir(${JSON.stringify(project)}));`]);
   assert.equal(resolved.status, 0, resolved.stderr);
   const meta = resolved.stdout.trim();
-  assert.ok(meta.startsWith(root), 'CLI data stays within the disposable fixture');
+  assert.ok(meta.startsWith(realpathSync(root)), 'CLI data stays within the disposable fixture');
   const classifiedDir = join(meta, 'classified');
   mkdirSync(classifiedDir);
   writeFileSync(join(classifiedDir, '2026-10-02.jsonl'), JSON.stringify(row('codex')) + '\n');
@@ -163,4 +165,36 @@ test('an unreadable existing worksheet fails closed without rotating its predict
   `], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(snapshot(first), before);
+});
+
+
+for (const harness of ['claude-code', 'codex']) test(`CLI --harness ${harness} binds export, readiness and label import despite the opposite ambient harness`, t => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'calibration-explicit-harness-')));
+  t.after(() => rmSync(root, {recursive:true, force:true}));
+  const home=join(root,'home'), project=join(root,'project');
+  mkdirSync(join(home,'.core'),{recursive:true}); mkdirSync(project);
+  writeFileSync(join(home,'.core','projects.json'), JSON.stringify([{path:project}]));
+  const meta=join(project,'.core',harness,'metrics');
+  const opposite=harness==='codex'?'claude-code':'codex';
+  const isolate=join(root,'isolate.mjs');
+  writeFileSync(isolate, `import os from 'node:os'; import {syncBuiltinESMExports} from 'node:module'; const original=os.userInfo; os.userInfo=(...args)=>({...original(...args),homedir:${JSON.stringify(home)}}); syncBuiltinESMExports();`);
+  const env={...process.env, HOME:home, USERPROFILE:home, NODE_OPTIONS:'', CORE_HARNESS:opposite};
+  const run=args=>spawnSync(process.execPath,['--import',pathToFileURL(isolate).href,...args],{env,encoding:'utf8'});
+  const initialize=run(['--input-type=module','-e',`import {operationalMetricsDir} from ${JSON.stringify(METRICS_URL)}; console.log(operationalMetricsDir(${JSON.stringify(project)},{harness:${JSON.stringify(harness)}}));`]);
+  assert.equal(initialize.status,0,initialize.stderr); assert.equal(initialize.stdout.trim(),meta);
+  mkdirSync(join(meta,'classified')); writeFileSync(join(meta,'classified','2026-10-02.jsonl'),JSON.stringify(row(harness))+'\n');
+  const exported=run([SCRIPT,project,'--harness',harness,'--export-worksheet']);
+  assert.equal(exported.status,0,exported.stderr||exported.stdout);
+  const worksheet=exported.stdout.match(/JSONL: (.+)/)[1].trim();
+  assert.ok(worksheet.startsWith(join(meta,'calibration')),worksheet);
+  const checked=run([SCRIPT,project,'--harness',harness,'--check','--json']);
+  const view=JSON.parse(checked.stdout); assert.equal(view.metaDir,meta); assert.equal(view.pool_size,1);
+  annotate(worksheet,{gold_state:'tier-0-win',labelers:['human-a','human-b'],adjudicated_by:'human-c',confidence:'high'});
+  const before=readFileSync(worksheet);
+  const imported=run([SCRIPT,project,'--harness',harness,'--import-labels',worksheet,'--json']);
+  assert.equal(imported.status,0,imported.stderr||imported.stdout); assert.equal(JSON.parse(imported.stdout).harness,harness);
+  assert.deepEqual(readFileSync(worksheet),before,'import preserves human labels');
+  const mismatched=run([SCRIPT,project,'--harness',opposite,'--import-labels',worksheet,'--json']);
+  assert.equal(mismatched.status,1); assert.equal(JSON.parse(mismatched.stdout).status,'ERROR');
+  assert.match(JSON.parse(mismatched.stdout).message,/harness/i);
 });

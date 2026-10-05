@@ -444,14 +444,21 @@ export function runDetectors({ project, harness = 'claude-code', cwd, home = hom
     })),
   ];
 
+  let storageFailure = null;
+  let writtenRecords = 0;
   try {
     const dir = join(operationalMetricsDir(project, { home, env }), 'detectors');
     mkdirSync(dir, { recursive: true });
-    for (const r of records) appendFileSync(join(dir, `${date}.jsonl`), JSON.stringify(r) + '\n');
-  } catch { /* best-effort */ }
+    for (const r of records) {
+      appendFileSync(join(dir, `${date}.jsonl`), JSON.stringify(r) + '\n');
+      writtenRecords += 1;
+    }
+  } catch (e) { storageFailure = e; }
 
   return {
-    status: 'OK',
+    status: storageFailure ? (storageFailure.code === 'STATE_NO_PROJECT_PLACE' ? 'NOT_STORED' : 'WRITE_FAILED') : 'OK',
+    written: storageFailure === null, written_records: writtenRecords,
+    ...(storageFailure ? { reason: storageFailure.reason || 'detector-write-failed', error_code: storageFailure.code || 'UNKNOWN' } : {}),
     transcript_resolution: t.meta.transcript_resolution,
     broken_citations: brokenCitations.length,
     stale_units: staleUnits.length,

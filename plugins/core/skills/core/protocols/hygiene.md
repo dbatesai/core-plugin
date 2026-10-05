@@ -320,7 +320,7 @@ Each entry captures: what this swarm revealed about agent effectiveness, what yo
 
 ### Analysis-protocol effectiveness report
 
-After every substantial multi-agent run, write a structured effectiveness report to `~/.core/swarm-effectiveness/<project-slug>-<YYYY-MM-DD>.md` (the slug is the project folder's name). Verify it exists with non-zero size before the swarm's TeamDelete — the after-action checklist in `protocols/analysis.md` carries the full verification step. A silently failed write here costs future calibration: these reports are read before composing the next swarm.
+After every substantial multi-agent run, write a structured effectiveness report to `<project>/_outputs/swarm-effectiveness/<YYYY-MM-DD>.md`. Preserve existing entries and append a separately identified run when a report already exists for that date; never replace an earlier run. Verify it exists with non-zero size before the swarm's TeamDelete — the after-action checklist in `protocols/analysis.md` carries the full verification step. A silently failed write here costs future calibration: these reports are read before composing the next swarm.
 
 | Section | What to cover |
 |---|---|

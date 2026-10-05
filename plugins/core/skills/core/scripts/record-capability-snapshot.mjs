@@ -83,6 +83,11 @@ export async function recordSnapshot(opts = {}) {
       appendOpts,
     );
   } catch (err) {
+    if (err.code === 'STATE_NO_PROJECT_PLACE') {
+      return { root, harness: startup.harness, session_id: sessionId,
+        complete: startup.complete === true, appended: 0, path: null, storage: 'none',
+        status: 'NOT_STORED', reason: err.reason, error_code: err.code, summary: startup.summary };
+    }
     const project = resolveFallbackProject(opts, root);
     if (!project || !isStoreUnavailable(err)) throw err;
     primaryError = err.message;

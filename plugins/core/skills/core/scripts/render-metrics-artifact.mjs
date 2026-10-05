@@ -725,7 +725,7 @@ export async function renderMetricsArtifact(projectDir, {
   const generatedAt = now().toISOString();
   const html = buildMetricsArtifactHtml(metrics, { projectName: basename(root), producer });
 
-  const { projectId, receiptDir, receiptPath } = generationReceiptLocation({
+  const { projectId, receiptDir, receiptPath, receiptLocation } = generationReceiptLocation({
     // The receipt is the audit trail; its root comes from the OS-account home
     // unless a caller names one explicitly (test isolation, --home).
     home: home || requireTrustedHome(), projectDir: root, generatedAt,
@@ -750,7 +750,7 @@ export async function renderMetricsArtifact(projectDir, {
     artifact_sha256: artifactContentDigest(html),
     out_path: outAbs,
     receipt_path: receiptPath,
-    receipt_fallback: projectId === null,
+    receipt_fallback: receiptLocation !== 'project',
   };
 
   // One transaction: the bytes are placed, read back, and proven to be the

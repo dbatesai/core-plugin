@@ -133,8 +133,8 @@ test('state-ask: a verified stamp for a path whose parent is gone waits for the 
       renameSync(gone, here);
       rmSync(join(s.base, 'Drive'), { recursive: true, force: true });
       registerProject(s.coreDir, here);
-      const r = touchProject(s.coreDir, { root: here, harness: H });
-      assert.ok(r.events.some((e) => e.kind === 'state-ask'), `${decision}: the question is raised`);
+      assert.throws(()=>touchProject(s.coreDir, { root: here, harness: H }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='ask');
+      assert.equal(existsSync(join(s.coreDir,'local')),false);
       const out = settleState(s.coreDir, { root: here, harness: H, decision });
       assert.equal(out.changed, true);
       const m = readManifest({ root: here, harness: H, coreDir: s.coreDir });
@@ -144,7 +144,7 @@ test('state-ask: a verified stamp for a path whose parent is gone waits for the 
   }
 });
 
-test('another install\'s valid-looking state is left alone; this machine keeps its own under ~/.core/local', () => {
+test('another install\'s valid-looking state is left alone; new local fallback writes are refused', () => {
   const s = sandbox();
   const other = sandbox();
   try {
@@ -153,10 +153,10 @@ test('another install\'s valid-looking state is left alone; this machine keeps i
     writeStamp({ root: p, harness: H, coreDir: other.coreDir });
     const theirs = readFileSync(join(p, '.core', H, 'stamp'), 'utf8');
     registerProject(s.coreDir, p);
-    const r = touchProject(s.coreDir, { root: p, harness: H });
-    assert.ok(r.events.some((e) => e.kind === 'state-foreign'));
+    assert.throws(()=>touchProject(s.coreDir, { root: p, harness: H }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='foreign-install');
+    assert.equal(existsSync(join(s.coreDir,'local')),false);
     assert.equal(readFileSync(join(p, '.core', H, 'stamp'), 'utf8'), theirs, 'the other machine\'s stamp is untouched');
-    assert.ok(readLastActive(s.coreDir, { root: p, harness: H }), 'this machine\'s record lives locally');
+    assert.equal(readLastActive(s.coreDir, { root: p, harness: H }),null);
   } finally { s.cleanup(); other.cleanup(); }
 });
 

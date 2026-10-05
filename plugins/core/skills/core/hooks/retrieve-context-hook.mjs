@@ -44,6 +44,7 @@ import { resolveRegisteredRoot } from '../scripts/close-pass.mjs';
 import { buildRetrievalTrace } from '../scripts/retrieve-context.mjs';
 import { recordRetrievalEvent } from '../scripts/record-retrieval-event.mjs';
 import { metricsEnabled } from '../scripts/log-event.mjs';
+import { projectMigrationFence } from '../scripts/project-state.mjs';
 import { captureTurnEvidence, turnCaptureEnabled, computeStoreSignature } from '../scripts/turn-capture.mjs';
 import { tokenize } from '../scripts/bm25.mjs';
 import { selectCandidates } from '../scripts/select-relevant-units.mjs';
@@ -136,6 +137,8 @@ export async function main() {
   try { cwd = realpathSync(cwd); } catch { /* keep resolved */ }
   const store = resolveRegisteredRoot(cwd);
   if (!store) return receipt('skip', 'not-registered-workspace', { cwd, projectRoot: null });
+  const fence = projectMigrationFence({ root: store, harness: process.env.CORE_HOOK_HARNESS || 'claude-code' });
+  if (fence) return receipt('skip', fence, { cwd, projectRoot: store });
   if (!existsSync(join(store, '_memories'))) return receipt('skip', 'store-absent', { projectRoot: store, cwd: store });
   try {
     if (!statSync(join(store, '_memories')).isDirectory()) return receipt('skip', 'store-unavailable', { projectRoot: store, cwd: store });

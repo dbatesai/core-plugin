@@ -183,13 +183,12 @@ test('a read-only project root keeps all its state in ~/.core/local', { skip: is
   } finally { chmodSync(p, 0o755); s.cleanup(); }
 });
 
-test('an unregistered folder never gets a .core/: its state stays in ~/.core/local', () => {
+test('an unregistered folder refuses new state without creating a local fallback', () => {
   const s = sandbox();
   try {
     const p = mk(s.home, 'Projects', 'Unregistered');
-    const out = ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir });
-    assert.equal(out.location, 'local');
-    assert.equal(out.reason, 'unregistered');
+    assert.throws(()=>ensureStateDir({ root: p, harness: 'claude-code', coreDir: s.coreDir }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='unregistered');
+    assert.equal(existsSync(join(s.coreDir,'local')),false);
     assert.equal(existsSync(join(p, '.core')), false, 'nothing planted in the folder');
   } finally { s.cleanup(); }
 });

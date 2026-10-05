@@ -471,6 +471,8 @@ test('worksheetDir keeps raw turn text in the project hot state, not the project
   const home = mkdtempSync(join(tmpdir(), 'cal-ws-home-'));
   const project = mkdtempSync(join(tmpdir(), 'cal-ws-proj-'));
   try {
+    mkdirSync(join(home,'.core'));
+    writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
     const dir = worksheetDir(project, { home, env: { CORE_HARNESS: 'claude-code' } });
     assert.ok(!dir.startsWith(join(project, '_metrics')), `worksheet dir ${dir} must not sit in the project's _metrics folder`);
     assert.ok(dir.endsWith(join('metrics', 'calibration')), 'beside the classified rows');

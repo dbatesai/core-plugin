@@ -634,9 +634,9 @@ test('a copy that fails part-way keeps every reader and writer out of the half-c
 
     const read = stateDir({ root: p, harness: H, coreDir: s.coreDir });
     assert.ok(read === null || (read.status === 'migrating' && !read.dir.startsWith(inProject)), 'a reader is not pointed at the half-copied state');
-    assert.equal(stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).status, 'migrating', 'a writer is diverted to this machine');
-    const touched = touchProject(s.coreDir, { root: p, harness: H });
-    assert.ok(!existsSync(join(inProject, 'last-active')), `a writer does not land in it either (${touched.root})`);
+    assert.throws(()=>stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='migrating');
+    assert.throws(()=>touchProject(s.coreDir, { root: p, harness: H }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='migrating');
+    assert.ok(!existsSync(join(inProject, 'last-active')));
 
     chmodSync(blocker, 0o644);
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
@@ -723,7 +723,7 @@ test('an unreadable legacy folder stops the migration: no receipt, no release, s
     assert.equal(existsSync(join(inProject, RECEIPT_NAME)), false, 'no completion receipt');
     assert.ok(existsSync(join(inProject, '.migrating')), 'the marker stays');
     assert.equal(existsSync(join(legacy, 'MOVED.md')), false, 'the old state is not released');
-    assert.equal(stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).status, 'migrating');
+    assert.throws(()=>stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='migrating');
 
     chmodSync(nested, 0o755);
     assert.equal(applyMigration({ root: p, harness: H, coreDir: s.coreDir, table }).status, 'migrated');
@@ -810,8 +810,7 @@ test('a synced project\'s hot state lives in the project and is fenced by the mi
     const dir = stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }).dir;
     writeFileSync(join(dir, '.migrating'), 'x\n');
     assert.equal(stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir }), null, 'a reader sees nothing');
-    const w = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true });
-    assert.equal(w.status, 'migrating');
+    assert.throws(()=>stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true }),e=>e.code==='STATE_NO_PROJECT_PLACE'&&e.reason==='migrating');
     rmSync(join(dir, '.migrating'));
     const after = stateDir({ root: p, harness: H, kind: 'hot', coreDir: s.coreDir, forWrite: true });
     assert.notEqual(after.status, 'migrating');
@@ -1164,6 +1163,7 @@ test('a project with nothing to migrate is recorded too, and its next startup is
   const { acquireFileLock, releaseFileLock } = await import('../../plugins/core/skills/core/scripts/file-lock.mjs');
   try {
     const p = s.mk('Projects', 'Fresh');
+    registerProject(s.coreDir,p);
     writeFileSync(join(s.coreDir, 'index.json'), '[]');
     assert.equal(applyMigration({ root: p, harness: 'claude-code', coreDir: s.coreDir }).status, 'nothing-to-migrate');
     const m = join(s.coreDir, 'migration-manifest.lock'); const l = acquireFileLock(m);

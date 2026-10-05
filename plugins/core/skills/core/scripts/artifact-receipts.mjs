@@ -28,7 +28,7 @@ import { readFileSync, existsSync, lstatSync, mkdirSync, rmSync } from 'node:fs'
 import { join, resolve, basename, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
-import { containedPath } from './trusted-home.mjs';
+import { containedPath, isAccountCorePayloadPath, requireTrustedHome } from './trusted-home.mjs';
 import { projectRootFor, detectStateHarness, updateManifest, stateDir } from './project-state.mjs';
 
 export const PUBLISH_RECEIPT_SCHEMA_VERSION = '1.0.0';
@@ -87,24 +87,19 @@ export function sanitizeTimestamp(iso) {
 /**
  * Where a generation receipt for this project/instant lands: the project's
  * per-harness state (`.core/<harness>/artifact-receipts/`, trust-gated by its
- * stamp). When that state cannot be written — a refused `.core` — the receipt
- * lands in the flagged fallback `~/.core/artifact-receipts/` instead, and
- * `projectId` is null so the caller surfaces `receipt_fallback`.
+ * stamp). A refused or unavailable project state stops the generation before
+ * artifact publication. Existing account-global receipts remain readable
+ * history; no new receipt payload is written beside them.
  */
 export function generationReceiptLocation({ home, projectDir, generatedAt, env = process.env }) {
   const coreDir = join(home, '.core');
-  let projectId = null;
-  let receiptDir;
-  try {
-    const root = projectRootFor(projectDir, { home, coreDir });
-    const harness = detectStateHarness(env);
-    projectId = updateManifest({ root, harness, coreDir }).project_id;
-    receiptDir = join(stateDir({ root, harness, kind: 'durable', coreDir, forWrite: true }).dir, 'artifact-receipts');
-  } catch {
-    projectId = null;
-    receiptDir = join(coreDir, 'artifact-receipts');
-  }
-  return { projectId, receiptDir, receiptPath: join(receiptDir, `${sanitizeTimestamp(generatedAt)}.json`) };
+  const root = projectRootFor(projectDir, { home, coreDir });
+  const harness = detectStateHarness(env);
+  const projectId = updateManifest({ root, harness, coreDir }).project_id;
+  const state = stateDir({ root, harness, kind: 'durable', coreDir, forWrite: true });
+  const receiptDir = join(state.dir, 'artifact-receipts');
+  return { projectId, receiptDir, receiptLocation: state.location,
+    receiptPath: join(receiptDir, `${sanitizeTimestamp(generatedAt)}.json`) };
 }
 
 // ---------- artifact + receipt as one transaction ----------
@@ -205,15 +200,25 @@ export function publishReceiptPathFor(generationReceiptPath) {
   return p.endsWith('.json') ? p.slice(0, -'.json'.length) + '.publish.json' : p + '.publish.json';
 }
 
+// Existing receipts remain readable history. Recording an outcome beside one must
+// not reopen the retired account-global payload route, including through aliases.
+function assertReceiptWritePlace(path, home) {
+  if (isAccountCorePayloadPath(path, { home })) {
+    throw Object.assign(new Error('not stored: historical receipt is outside the project; its existing bytes were preserved'),
+      { code: 'STATE_NO_PROJECT_PLACE', reason: 'historical-receipt-outside-project' });
+  }
+}
+
 export function recordPublishOutcome({
   generationReceiptPath, status, artifactUrl = null,
   privateVerifiedEvidence = null, consentBy = null, consentMechanism = null,
-  note = null, now = () => new Date(),
+  note = null, now = () => new Date(), home = requireTrustedHome(),
 } = {}) {
   if (!PUBLISH_STATUSES.includes(status)) {
     throw Object.assign(new Error(`--status must be one of: ${PUBLISH_STATUSES.join(', ')} (got '${status}')`), { code: 'BAD_STATUS' });
   }
   const genPath = resolve(generationReceiptPath);
+  assertReceiptWritePlace(genPath, home);
   let gen;
   try { gen = JSON.parse(readFileSync(genPath, 'utf8')); }
   catch (e) {
@@ -279,8 +284,9 @@ export function recordPublishOutcome({
   return { receipt, path: outPath };
 }
 
-export function recordRevocation(publishReceiptPath, { now = () => new Date() } = {}) {
+export function recordRevocation(publishReceiptPath, { now = () => new Date(), home = requireTrustedHome() } = {}) {
   const p = resolve(publishReceiptPath);
+  assertReceiptWritePlace(p, home);
   let receipt;
   try { receipt = JSON.parse(readFileSync(p, 'utf8')); }
   catch (e) {

@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 // metrics-privacy-failclosed.test.mjs — the capture-disabled marker an earlier
 // scaffold left (when it could not pin storage) keeps capture OFF until a scaffold
@@ -48,6 +49,7 @@ test('a scaffold clears a stale capture-disabled marker and capture resumes (rec
   const fakeHome = mkdtempSync(join(tmpdir(), 'core-pin-recover-home-'));
   const project = mkdtempSync(join(tmpdir(), 'core-pin-recover-'));
   try {
+    registerFixtureProject(fakeHome, project);
     // Stale marker from a previously failed scaffold.
     mkdirSync(join(project, '_metrics'), { recursive: true });
     writeFileSync(join(project, '_metrics', 'capture-disabled.json'),

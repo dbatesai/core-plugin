@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { operationalMetricsDir } from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -177,6 +178,7 @@ test('share artifact projects local daily telemetry to weekly-only blocks and re
     mkdirSync(secondWeek, { recursive: true });
     writeFileSync(join(secondWeek, 'retrieval-log.jsonl'), `${JSON.stringify({ kind: 'retrieval', tier_reached: 1, dip_back_count: 0 })}\n`);
     writeFileSync(join(secondWeek, 'hygiene-log.jsonl'), `${JSON.stringify({ kind: 'maintenance-run' })}\n`);
+    registerFixtureProject(home, project);
     const classified = join(operationalMetricsDir(project, { home, env: {} }), 'classified');
     mkdirSync(classified, { recursive: true });
     // Current-instrument stamps: the cohort gate only
@@ -539,6 +541,7 @@ test('workspace recognition dedupes replayed classified rows before counting, an
     const home = join(root, 'home');
     const proj = join(root, 'proj-ws-dedupe');
     mkdirSync(proj, { recursive: true });
+    registerFixtureProject(home, proj);
     const clsDir = join(operationalMetricsDir(proj, { home, env: {} }), 'classified');
     mkdirSync(clsDir, { recursive: true });
     const ident = (over = {}) => ({
@@ -589,6 +592,7 @@ test("workspace recognition: the mixed-instrument falsifier — an old-instrumen
     const home = join(root, 'home');
     const proj = join(root, 'proj-ws-cohort');
     mkdirSync(proj, { recursive: true });
+    registerFixtureProject(home, proj);
     const clsDir = join(operationalMetricsDir(proj, { home, env: {} }), 'classified');
     mkdirSync(clsDir, { recursive: true });
     const ident = (over = {}) => ({
@@ -618,6 +622,7 @@ test('ACCEPTANCE (package availability): an old-only store reports UNAVAILABLE-w
     const home = join(root, 'home');
     const proj = join(root, 'proj-ws-oldonly');
     mkdirSync(proj, { recursive: true });
+    registerFixtureProject(home, proj);
     const clsDir = join(operationalMetricsDir(proj, { home, env: {} }), 'classified');
     mkdirSync(clsDir, { recursive: true });
     // Every row is a retired 0.2.0 instrument — nothing in the current cohort.

@@ -426,7 +426,7 @@ export function exportWorksheet({ project: _project, harness, classifiedDir, cal
 }
 
 /** Read a labeled worksheet file, compute precision, write updated calibration state. */
-export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED }) {
+export function importLabels({ worksheetFile, metaDir, expectedHarness, minLabeled = MIN_LABELED }) {
   if (!existsSync(worksheetFile)) {
     return { status: 'ERROR', message: `Worksheet not found: ${worksheetFile}` };
   }
@@ -455,6 +455,7 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
     return { status: 'ERROR', message: 'Labels must contain exactly one harness: claude-code or codex.' };
   }
   const harness = harnesses[0];
+  if (expectedHarness && expectedHarness !== harness) return {status:'ERROR', message:'Worksheet harness does not match the selected --harness.'};
   if (unique.some((row) => row.classifier_version !== CLASSIFIER_VERSION || row.proxy_version !== PROXY_VERSION)) {
     return { status: 'ERROR', message: 'Labels were not captured with the current classifier and proxy versions.' };
   }
@@ -588,12 +589,12 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
  * How close is the calibration pool to the minimum? Useful for the agent to know
  * when to launch the labeling pass.
  */
-export function readinessReport({ project, home = homedir(), env = process.env }) {
+export function readinessReport({ project, home = homedir(), env = process.env, harness }) {
   const minLabeled = resolveMinLabeled(project);
   let metaDir = null, classifiedDir = null;
   let state = emptyCalibrationState(), turns = [], failure = null;
   try {
-    metaDir = trustedMetricsDir(project, { home, env, guardReadParents: true });
+    metaDir = trustedMetricsDir(project, { home, env, harness, guardReadParents: true });
     classifiedDir = metaDir ? join(metaDir, 'classified') : null;
     if (metaDir) {
       state = readCalibrationState(metaDir, { strict: true });
@@ -637,8 +638,18 @@ if (isCliEntry(import.meta.url)) {
   const project = argv.find((a) => !a.startsWith('--')) || process.cwd();
   const harness = opt('harness');
 
+  const writableMetrics = () => {
+    try { return operationalMetricsDir(project, {harness}); }
+    catch (e) {
+      if (e.code !== 'STATE_NO_PROJECT_PLACE') throw e;
+      const result = { status: 'NOT_STORED', reason: e.reason, error_code: e.code };
+      process.stdout.write(argv.includes('--json') ? JSON.stringify(result) + '\n' : `calibrate-classifier: not stored: ${e.reason}\n`);
+      process.exit(1);
+    }
+  };
+
   if (has('check')) {
-    const r = readinessReport({ project });
+    const r = readinessReport({ project, harness });
     if (argv.includes('--json')) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(r.is_calibrated ? 0 : 1); }
     process.stdout.write(`calibrate-classifier: ${r.is_calibrated ? '✔ CALIBRATED' : '○ PROVISIONAL'}\n`);
     process.stdout.write(`  pool: ${r.pool_size} turns | labeled: ${r.labeled_count} | precision: ${r.overall_precision !== null ? (r.overall_precision * 100).toFixed(0) + '%' : 'n/a'}\n`);
@@ -648,9 +659,9 @@ if (isCliEntry(import.meta.url)) {
   }
 
   if (has('export-worksheet')) {
-    const metaDir = operationalMetricsDir(project);
+    const metaDir = writableMetrics();
     const classifiedDir = join(metaDir, 'classified');
-    const calibrationDir = worksheetDir(project);
+    const calibrationDir = join(metaDir, 'calibration');
     const count = parseInt(opt('count') || '200', 10);
     const r = exportWorksheet({ project, harness, classifiedDir, calibrationDir, count, minLabeled: resolveMinLabeled(project), replaceExisting: has('replace-existing') });
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
@@ -663,8 +674,8 @@ if (isCliEntry(import.meta.url)) {
   if (has('import-labels')) {
     const worksheetFile = opt('import-labels');
     if (!worksheetFile) { process.stdout.write('calibrate-classifier: --import-labels requires a file path\n'); process.exit(1); }
-    const metaDir = operationalMetricsDir(project);
-    const r = importLabels({ worksheetFile, metaDir, minLabeled: resolveMinLabeled(project) });
+    const metaDir = writableMetrics();
+    const r = importLabels({ worksheetFile, metaDir, expectedHarness:harness, minLabeled: resolveMinLabeled(project) });
     if (argv.includes('--json')) { process.stdout.write(JSON.stringify(r, null, 2) + '\n'); process.exit(r.status === 'OK' ? 0 : 1); }
     if (r.status !== 'OK') { process.stdout.write(`calibrate-classifier: ${r.message}\n`); process.exit(1); }
     process.stdout.write(`calibrate-classifier: ${r.is_calibrated ? '✔ CALIBRATED' : '○ still provisional'} — ${r.notes}\n`);

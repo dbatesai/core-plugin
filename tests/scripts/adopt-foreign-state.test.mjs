@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 // Adopting another install's CORE state: a project restored from backup onto a new
 // machine or path is offered once; yes carries its history, no touches nothing.
 import { test } from 'node:test';
@@ -6,13 +8,13 @@ import {
   mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, realpathSync, cpSync, statSync, existsSync, symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { registerProject, recordBootstrap, readBootstrapRecord, main as registryMain } from '../../plugins/core/skills/core/scripts/index-registry.mjs';
 import {
-  readManifest, updateManifest, classifyStamp, adoptionCandidate, adoptForeignState,
+  readManifest, updateManifest, classifyStamp, adoptionCandidate, adoptForeignState, localStateDir, writeSignedFile, stateDir,
 } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import { checkMetricsDisclosure } from '../../plugins/core/skills/core/scripts/metrics-disclosure.mjs';
 import { metricsEnabled } from '../../plugins/core/skills/core/scripts/log-event.mjs';
@@ -45,7 +47,7 @@ function treeHashes(dir) {
 }
 
 /** A project that lived under install A, then its archive restored at a new path under install B. */
-function restoredProject(s, manifestFields = { agent_name: 'Wren' }) {
+function restoredProject(s, manifestFields = { agent_name: 'Wren' }, sibling = false) {
   const homeA = s.home('homeA');
   const coreA = join(homeA, '.core');
   const original = s.mk('Old', 'Garden');
@@ -53,6 +55,7 @@ function restoredProject(s, manifestFields = { agent_name: 'Wren' }) {
   const m = updateManifest({ root: original, harness: H, coreDir: coreA, fields: manifestFields });
   recordBootstrap(coreA, { root: original, harness: H, sessionStartedAt: '2026-09-20T10:00:00Z' });
   writeFileSync(join(original, '.core', H, 'capability-history.jsonl'), '{"row":1}\n{"row":2}\n');
+  if (sibling) updateManifest({root:original, harness:'codex', coreDir:coreA, fields:{agent_name:'Synthetic sibling'}});
   const homeB = s.home('homeB');
   const coreB = join(homeB, '.core');
   const restored = join(s.base, 'New', 'Garden');
@@ -159,7 +162,9 @@ test("this machine's own opt-out for the folder survives adopting a manifest tha
   const s = sandbox();
   try {
     const { coreB, restored } = restoredProject(s);
-    updateManifest({ root: restored, harness: H, coreDir: coreB, fields: { metrics_enabled: false } });
+    const local = localStateDir({root:restored, harness:H, coreDir:coreB});
+    mkdirSync(local, {recursive:true});
+    writeSignedFile({dir:local, name:'workspace.json', body:JSON.stringify({metrics_enabled:false}), coreDir:coreB});
     adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
     assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }).metrics_enabled, false);
   } finally { s.cleanup(); }
@@ -175,7 +180,9 @@ test('the turn-evidence opt-out carries through adoption from either side: the a
   const t = sandbox();
   try {
     const { coreB, restored } = restoredProject(t);
-    updateManifest({ root: restored, harness: H, coreDir: coreB, fields: { turn_capture: false } });
+    const local = localStateDir({root:restored, harness:H, coreDir:coreB});
+    mkdirSync(local, {recursive:true});
+    writeSignedFile({dir:local, name:'workspace.json', body:JSON.stringify({turn_capture:false}), coreDir:coreB});
     adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' });
     assert.equal(readManifest({ root: restored, harness: H, coreDir: coreB }).turn_capture, false);
   } finally { t.cleanup(); }
@@ -335,4 +342,38 @@ test('a hand-built hostile stamp (never written by a real install) is offered wi
     assert.equal('metrics_enabled' in m, false, 'a hostile opt-in from a fully fabricated source is dropped, same as a copied one');
     assert.deepEqual(Object.keys(m).sort(), ['agent_name', 'harness', 'project_id'], 'the carry-over is allowlisted: no unexpected key from a hostile manifest survives signing, even one shaped like a future trust flag');
   } finally { s.cleanup(); }
+});
+
+
+test('the narrow account-local adoption exception writes consent/recovery records, while fresh payload writers still refuse', () => {
+  const observed = [];
+  for (const decision of ['no', 'yes']) {
+    const s = sandbox();
+    const originals = Object.fromEntries(['writeFileSync', 'appendFileSync', 'renameSync'].map(name => [name, fs[name]]));
+    try {
+      const {coreB, restored} = restoredProject(s, {agent_name:'Synthetic restore'}, true);
+      const localRoot = join(coreB, 'local');
+      for (const name of Object.keys(originals)) fs[name] = (...args) => {
+        const destinations = name === 'renameSync' ? [args[0], args[1]] : [args[0]];
+        for (const path of destinations) if (typeof path === 'string' && path.startsWith(localRoot + sep)) observed.push(relative(localRoot, path).split(sep).join('/'));
+        return originals[name](...args);
+      };
+      syncBuiltinESMExports();
+      assert.equal(adoptForeignState({root:restored, harness:H, coreDir:coreB, decision}).status, decision === 'yes' ? 'adopted' : 'declined');
+      const before = treeHashes(localRoot);
+      const fresh = s.mk('Fresh', 'Unregistered');
+      assert.throws(() => stateDir({root:fresh, harness:H, coreDir:coreB, forWrite:true}), error => error.code === 'STATE_NO_PROJECT_PLACE');
+      assert.deepEqual(treeHashes(localRoot), before, 'a refused current payload writer does not reuse the consent exception');
+      if (decision === 'yes') assert.ok(!Object.keys(before).some(name => name.includes('pending-adopt-')), 'the completed recovery plan is removed');
+    } finally {
+      for (const [name, fn] of Object.entries(originals)) fs[name] = fn;
+      syncBuiltinESMExports();
+      s.cleanup();
+    }
+  }
+  assert.ok(observed.some(path => path.endsWith('/declined-adopt')), 'actual refusal stamp observed');
+  assert.ok(observed.some(path => path.endsWith('/adopted-sibling-stamps')), 'actual sibling consent hashes observed');
+  assert.ok(observed.some(path => path.endsWith('/pending-adopt-claude-code.json')), 'actual interrupted-recovery plan observed');
+  assert.ok(observed.some(path => /\/pending-adopt-claude-code\.json\.tmp-/.test(path)), 'actual atomic companion observed');
+  assert.ok(observed.every(path => /^[^/]+\/(declined-adopt|adopted-sibling-stamps|pending-adopt-claude-code\.json|pending-adopt-claude-code\.json\.tmp-[^/]+)$/.test(path)), JSON.stringify(observed));
 });

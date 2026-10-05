@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 /** Finding 6: opt-out suppresses automatic metrics writes; write failures stay visible. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,6 +19,7 @@ function fixture(t) {
   const home = join(root, 'home');
   const project = join(root, 'project');
   mkdirSync(home);
+  registerFixtureProject(home, project);
   mkdirSync(join(project, '_memories'), { recursive: true });
   writeFileSync(join(project, '_memories', 'unit-1.md'), '---\nid: unit-1\ntype: decision\n---\n# Synthetic decision\n');
   // HOME alone does not isolate CORE's trusted OS-account home. Keep the shim

@@ -1527,8 +1527,8 @@ export async function renderBrowseArtifact(projectDir, {
     },
   });
 
-  // Unwritable project state → the flagged fallback location; the audit trail is kept anyway.
-  const { projectId, receiptDir, receiptPath } = generationReceiptLocation({
+  // A receipt needs project state; a refused destination stops publication visibly.
+  const { projectId, receiptDir, receiptPath, receiptLocation } = generationReceiptLocation({
     // The receipt is the audit trail; its root comes from the OS-account home
     // unless a caller names one explicitly (test isolation, --home).
     home: home || requireTrustedHome(), projectDir: root, generatedAt,
@@ -1564,7 +1564,7 @@ export async function renderBrowseArtifact(projectDir, {
     metrics_as_of: metrics.available ? metrics.as_of : null,
     out_path: outAbs,
     receipt_path: receiptPath,
-    receipt_fallback: projectId === null,
+    receipt_fallback: receiptLocation !== 'project',
     sensitivity_warning: SENSITIVITY_WARNING,
   };
 

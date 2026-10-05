@@ -36,7 +36,7 @@ import { isCliEntry } from './cli-entry.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { projectRootFor, detectStateHarness, readManifest, updateManifest } from './project-state.mjs';
-import { metricsHistoryFolders } from './log-event.mjs';
+import { metricsHistoryFolders, localClassifiedHistory } from './log-event.mjs';
 
 /**
  * Bump whenever the notice describes something materially new being stored.
@@ -46,7 +46,7 @@ import { metricsHistoryFolders } from './log-event.mjs';
 export const NOTICE_VERSION = 6;
 // A project with earlier rows outside its folder is shown the notice again once, naming them: the
 // version 6 text told it the log was kept there.
-export const HISTORY_NOTICE_VERSION = 7;
+export const HISTORY_NOTICE_VERSION = 8;
 
 export const NOTICE_TEXT = [
   "One thing worth knowing about this project: CORE keeps a log of how well it's answering you, turn by turn, so it can get better at working with you over time. That happens automatically and the log lives in this project's folder. CORE never sends it anywhere, but if the folder syncs to a cloud service such as OneDrive, iCloud Drive or Dropbox, the log syncs with it.",
@@ -72,9 +72,15 @@ export const NOTICE_TEXT = [
 export function noticeTextFor(projectDir, { home = homedir(), env = process.env } = {}) {
   let history = [];
   try { history = metricsHistoryFolders(projectDir, { home, env }).filter((h) => !h.foreign); } catch { /* unknown: base text */ }
-  if (!history.length) return NOTICE_TEXT;
-  const where = history.map((h) => `\`${h.folder}\``).join(' and ');
-  return `${NOTICE_TEXT}\n\nEarlier rows from before this version are kept outside the project folder, at ${where}. Nothing new is written there, and CORE never deletes or moves it: it is outside the project folder. An explicit purge removes the captured data in the project and names this folder; it may hold rows from more than one project, so deleting it is your decision.`;
+  const classified = localClassifiedHistory(projectDir, { home, env });
+  const paragraphs = [NOTICE_TEXT];
+  if (history.length) {
+    const where = history.map((h) => `\`${h.folder}\``).join(' and ');
+    paragraphs.push(`Earlier rows from before this version are kept outside the project folder, at ${where}. Nothing new is written there, and CORE never deletes or moves it: it is outside the project folder. An explicit purge removes the captured data in the project and names this folder; it may hold rows from more than one project, so deleting it is your decision.`);
+  }
+  if (classified.folders.length) paragraphs.push(`Earlier classified turn copies remain at ${classified.folders.map(f => `\`${f}\``).join(' and ')}. Nothing new is stored there. These project-specific copies remain in the explicit purge preview; no history was moved or deleted.`);
+  if (classified.problems.length) paragraphs.push('Whether additional earlier classified copies exist could not be established safely. Review capture status and the purge preview before treating the stored copies as fully accounted for.');
+  return paragraphs.join('\n\n');
 }
 
 export function checkMetricsDisclosure({ projectDir, home = homedir(), env = process.env } = {}) {
@@ -93,7 +99,9 @@ export function checkMetricsDisclosure({ projectDir, home = homedir(), env = pro
   // Untrusted or absent state reads as null: the notice shows.
   const manifest = readManifest({ root, harness, coreDir }) || {};
   let hasHistory = false;
-  try { hasHistory = metricsHistoryFolders(projectDir, { home, env }).some((h) => !h.foreign); } catch { /* no history known */ }
+  const classifiedHistory = localClassifiedHistory(projectDir, { home, env });
+  hasHistory = classifiedHistory.folders.length > 0 || classifiedHistory.problems.length > 0;
+  try { hasHistory = hasHistory || metricsHistoryFolders(projectDir, { home, env }).some((h) => !h.foreign); } catch { /* retain classified uncertainty */ }
   const version = hasHistory ? HISTORY_NOTICE_VERSION : NOTICE_VERSION;
 
   // Versioned: a project that saw an older notice is shown the current one

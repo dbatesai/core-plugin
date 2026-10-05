@@ -29,7 +29,7 @@
  *   node index-registry.mjs touch [--root <dir>] [--when <ISO>]       [--core-dir <dir>]
  *        also prints one line per state event: state-created, state-unverified (set aside
  *        unread), state-copied, state-moved (registry updated), state-foreign (another
- *        install's state; this machine's lives under ~/.core/local/), state-ask
+ *        install's state; no new local fallback payload), state-ask
  *   node index-registry.mjs state --accept-move|--fresh [--root <dir>] [--core-dir <dir>]
  *   node index-registry.mjs manifest [--root <dir>] [--set-json '<json>'] [--core-dir <dir>]
  *   node index-registry.mjs path --kind durable|hot [--name <file>] [--root <dir>] [--core-dir <dir>]

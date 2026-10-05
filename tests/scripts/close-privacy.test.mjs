@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 /** Production-path privacy boundaries. Synthetic data and isolated OS home only. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,6 +20,7 @@ function fixture(t, suffix = 'project') {
   const home = join(root, 'home');
   const project = join(root, suffix);
   mkdirSync(home, { recursive: true });
+  registerFixtureProject(home, project);
   mkdirSync(join(project, '_memories'), { recursive: true });
   // CORE's trusted-home ignores HOME. Patch the OS-account accessor only in this
   // disposable child's preload, BEFORE imports, and synchronize named exports.

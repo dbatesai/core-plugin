@@ -1,3 +1,4 @@
+import { registerFixtureProject } from './registered-project-fixture.mjs';
 import { updateManifest } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 // The answer-shaped /metrics default view (v3.14.0 Component 6): three
 // outcome questions in sentences, sourced from PINNED scorecards + tripwire
@@ -23,6 +24,7 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 process.on('exit', () => { try { rmSync(TEST_HOME, { recursive: true, force: true }); } catch { /* best effort */ } });
 function writeManifestFlags(project, fields) {
+  registerFixtureProject(TEST_HOME, project);
   updateManifest({ root: project, harness: 'claude-code', coreDir: join(TEST_HOME, '.core'), fields });
 }
 

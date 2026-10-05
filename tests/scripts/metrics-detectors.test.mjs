@@ -339,6 +339,8 @@ test('runDetectors refuses a session mismatch instead of tagging findings with t
   const home = mkdtempSync(join(tmpdir(), 'md-mismatch-'));
   const project = mkdtempSync(join(tmpdir(), 'md-mismatch-proj-'));
   try {
+    mkdirSync(join(home,'.core'),{recursive:true});
+    writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
     mkdirSync(join(project, '_memories'), { recursive: true });
     writeFileSync(join(project, '_memories', 'dc-64-retrieval-ladder.md'), '---\ntype: decision\n---\n# ladder\n');
     const slugDir = join(home, '.claude', 'projects', project.replace(/[/.\\:]/g, '-'));
@@ -359,6 +361,8 @@ test('anticipation-gap records are stamped provisional + low severity at the sou
   const home = mkdtempSync(join(tmpdir(), 'md-prov-'));
   const project = mkdtempSync(join(tmpdir(), 'md-proj-'));
   try {
+    mkdirSync(join(home,'.core'),{recursive:true});
+    writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
     mkdirSync(join(project, '_memories'), { recursive: true });
     writeFileSync(join(project, '_memories', 'dc-64-retrieval-ladder.md'), '---\ntype: decision\n---\n# ladder\n');
     const slugDir = join(home, '.claude', 'projects', project.replace(/[/.\\:]/g, '-')); // backslash + drive-colon: Windows temp paths, matches mapProjectPathToSlug

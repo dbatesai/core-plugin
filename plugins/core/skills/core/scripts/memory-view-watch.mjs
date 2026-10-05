@@ -69,6 +69,7 @@ import { join, resolve, dirname } from 'node:path';
 import { collectUnits } from './render-browse-artifact.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
+import { isAccountCorePayloadPath, requireTrustedHome } from './trusted-home.mjs';
 
 export const DEFAULT_DEBOUNCE_MS = 250;
 export const DEFAULT_SWEEP_INTERVAL_MS = 300000; // 5 min
@@ -240,7 +241,7 @@ export function readLiveState(path) {
 export function writeLiveState(path, {
   artifactUrl, scope, excludeTopics = [], baselineSnapshot,
   publishCount = 0, windowStart = null, retryAt = null,
-  grantBasis = null, now = () => new Date(),
+  grantBasis = null, now = () => new Date(), home = requireTrustedHome(),
 } = {}) {
   if (!artifactUrl) throw new Error('--write-live-state requires --artifact-url');
   if (!WATCH_SCOPES.includes(scope)) throw new Error(`--write-live-state requires --scope ${WATCH_SCOPES.join('|')}`);
@@ -275,6 +276,10 @@ export function writeLiveState(path, {
   };
   assertLiveState(record); // same schema check the reader boundary applies
   const abs = resolve(path);
+  if (isAccountCorePayloadPath(abs, { home })) {
+    throw Object.assign(new Error('not stored: live-state is outside the project; existing grant and budget were preserved'),
+      { code: 'STATE_NO_PROJECT_PLACE', reason: 'historical-live-state-outside-project' });
+  }
   mkdirSync(dirname(abs), { recursive: true });
   atomicWriteFileSync(abs, JSON.stringify(record, null, 2) + '\n');
   return record;

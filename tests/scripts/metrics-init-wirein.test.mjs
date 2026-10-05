@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync, symlinkSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, symlinkSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -20,6 +20,7 @@ const METRICS_INIT = fileURLToPath(new URL('../../plugins/core/skills/core/scrip
 test('wire-in: metrics-init scaffolds project-local storage, and log-event resolves to it even when an older pin names another folder', () => {
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
+  mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
   try {
@@ -55,6 +56,7 @@ test('wire-in: metrics-init scaffolds project-local storage, and log-event resol
 test('wire-in: metrics-init is idempotent (second run leaves the storage path stable)', () => {
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
+  mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
   const origHome = process.env.HOME;
   const origUserProfile = process.env.USERPROFILE;
   try {
@@ -81,6 +83,7 @@ test('metrics-init still runs when invoked through a symlink (entry guard canoni
   if (!symlinkCapable()) return t.skip('symlink privilege unavailable (Windows non-elevated box)');
   const home = mkdtempSync(join(tmpdir(), 'mi-home-'));
   const project = mkdtempSync(join(tmpdir(), 'mi-project-'));
+  mkdirSync(join(home,'.core'));writeFileSync(join(home,'.core','projects.json'),JSON.stringify([{path:project}]));
   const linkDir = mkdtempSync(join(tmpdir(), 'mi-link-'));
   const link = join(linkDir, 'metrics-init.mjs');
   try {

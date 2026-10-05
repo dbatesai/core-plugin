@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { useNoMachineIdentity } from '../../plugins/core/skills/core/scripts/file-lock.mjs';
-import { updateManifest, stateDir } from '../../plugins/core/skills/core/scripts/project-state.mjs';
+import { updateManifest, stateDir, localStateDir, writeSignedFile } from '../../plugins/core/skills/core/scripts/project-state.mjs';
 import * as metrics from '../../plugins/core/skills/core/scripts/log-event.mjs';
 import * as capture from '../../plugins/core/skills/core/scripts/turn-capture.mjs';
 
@@ -18,7 +18,12 @@ function fixture(fields, registered = true) {
   fs.mkdirSync(root); fs.mkdirSync(coreDir, { recursive: true });
   assert.equal(spawnSync('git', ['init', '-q', root]).status, 0);
   fs.writeFileSync(join(coreDir, 'projects.json'), JSON.stringify(registered ? [{ path: root }] : []));
-  if (fields) updateManifest({ root, harness: 'codex', coreDir, fields });
+  if (fields && registered) updateManifest({ root, harness: 'codex', coreDir, fields });
+  if (fields && !registered) {
+    const dir = localStateDir({root, harness:'codex', coreDir});
+    fs.mkdirSync(dir, {recursive:true});
+    writeSignedFile({dir, name:'workspace.json', body:JSON.stringify(fields), coreDir});
+  }
   const dir = fields ? stateDir({ root, harness: 'codex', coreDir }).dir : join(root, '.core/codex');
   return { base, root, home, manifest: join(dir, 'workspace.json'),
     options: { project: root, home, env: { CORE_HARNESS: 'codex' } } };

@@ -34,7 +34,7 @@ Entries get archived to keep PROJECT.md lean — but archived entries can become
 
 For each archive file not modified recently, extract decision/risk/assumption IDs and grep the current read surface (PROJECT.md, recent session summaries, protocols, skill references) for references beyond each entry's own stub line. Surface candidates above the match threshold to the user, who decides: promote the stub back to §D&R, reject, or suppress for N cycles.
 
-Suppression state persists at `~/.core/swarm-effectiveness/archive-reconciliation-state.json`. Narrate all outcomes in the pass's own report.
+Suppression state persists at `<durable>/archive-reconciliation-state.json` only after `index-registry.mjs path --kind durable --name archive-reconciliation-state.json` succeeds with a nonempty absolute path. On refusal, retain the findings in the project report, name suppression state as not stored, and do not create a substitute folder. Existing account-global suppression material remains read-only history. Narrate all outcomes in the pass's own report.
 
 **Calibration defaults** — starting points to tune after a few cycles, not fixed rules: 14-day recency gate (skip files modified too recently), ≥3 match threshold (below this is noise), top-10 candidates per cycle.
 

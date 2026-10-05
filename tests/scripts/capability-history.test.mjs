@@ -25,6 +25,10 @@ function tmpHome() {
 function tgt(home, name) {
   const root = join(home, `proj-${name}`);
   mkdirSync(root, { recursive: true });
+  mkdirSync(join(home,'.core'),{recursive:true});
+  const registry=join(home,'.core','projects.json');
+  const entries=existsSync(registry)?JSON.parse(readFileSync(registry,'utf8')):[];
+  if(!entries.some(e=>e.path===root)){entries.push({path:root});writeFileSync(registry,JSON.stringify(entries));}
   return { root, harness: 'claude-code' };
 }
 

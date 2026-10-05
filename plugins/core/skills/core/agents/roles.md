@@ -167,7 +167,7 @@ effectiveness_notes: when this configuration has worked well, why
 ```
 
 `proven` and `effectiveness_notes` are **manually maintained**. No shipped hygiene step reads
-the `~/.core/swarm-effectiveness/` reports back into composition frontmatter, so `proven: true`
+the `<project>/_outputs/swarm-effectiveness/` reports back into composition frontmatter, so `proven: true`
 records a human judgment at save time — don't treat it as machine-verified. Reopen condition:
 when the effectiveness corpus is large enough to be worth mining, a hygiene pass that proposes
 `proven` flips (the natural wiring: 3+ swarms with positive notes) replaces this note.

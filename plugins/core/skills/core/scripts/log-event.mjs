@@ -66,6 +66,27 @@ export function metricsHistoryFolders(projectDir, { home = homedir(), env = proc
   return historyDiscovery(projectDir, { home, env }).folders;
 }
 
+/** Retired classified copies under this project's local key, across both harnesses.
+ * Read-only discovery: refuse unsafe parent chains and retain uncertainty for disclosure. */
+export function localClassifiedHistory(projectDir, { home = homedir(), env = process.env } = {}) {
+  const folders = [], problems = [];
+  try {
+    const coreDir = join(home, '.core'), root = projectRootFor(projectDir, { home, coreDir });
+    const listing = stateHarnessesPartial({ root, coreDir, include: [detectStateHarness(env)] });
+    problems.push(...listing.problems);
+    for (const harness of listing.harnesses) {
+      const places = stateLocations({ root, harness, coreDir });
+      problems.push(...places.problems);
+      for (const loc of places.locations.filter(l => l.kind === 'local')) {
+        const folder = join(loc.dir, 'metrics', 'classified');
+        try { if (checkMetricsParentChain(home, folder)) folders.push(folder); }
+        catch (e) { problems.push({ what: folder, reason: e.code || e.message }); }
+      }
+    }
+  } catch (e) { problems.push({ what: projectDir, reason: e.code || e.message }); }
+  return { folders: [...new Set(folders)], problems };
+}
+
 /** The error code of the first path that can't be resolved for a reason other than absence, or null. */
 function unresolvable(...paths) {
   for (const p of paths) {
@@ -199,9 +220,9 @@ export function todayUTC() {
 /**
  * Operational-meta metrics dir for a project (spec §17.6): the derived,
  * regeneratable side of the split — classified/, detectors/, rollups/, etc.
- * It lives in the project's per-harness state (`.core/<harness>/metrics`), or
- * under ~/.core/local/ when the project is synced, read-only, or another
- * install's. Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
+ * New data lives in the project's per-harness state (`.core/<harness>/metrics`).
+ * Unsupported state routes throw STATE_NO_PROJECT_PLACE; any older local copy
+ * is read-only history. Ground-truth traces/payloads stay project-scoped via resolveStoragePath.
  * Creates the directory (stamping new state) — use trustedMetricsDir for a pure read.
  */
 export function operationalMetricsDir(projectDir, { home = homedir(), env = process.env, harness } = {}) {

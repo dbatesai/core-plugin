@@ -312,6 +312,10 @@ export function runClassification({ project, harness = 'claude-code', cwd, home 
     }
     chmodSync(file, 0o600);
   } catch (e) {
+    if (e?.code === 'STATE_NO_PROJECT_PLACE') {
+      return { status: 'NOT_STORED', written: false, written_records: writtenRecords,
+        reason: e.reason, error_code: e.code, ...result };
+    }
     return { status: 'WRITE_FAILED', written: false, written_records: writtenRecords,
       reason: 'classified-write-failed', error_code: e?.code || 'UNKNOWN', ...result };
   }

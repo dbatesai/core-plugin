@@ -171,17 +171,17 @@ Echo any line after the first verbatim into the readiness summary, then add one 
 - `state-unverified … set aside unread at …` — state in `.core/` didn't carry this install's valid stamp (it came with a clone, a download, or was damaged). It was moved aside unread; nothing was deleted.
 - `state-copied` — this folder is a copy of another project. It starts with fresh state; the original is untouched.
 - `state-moved` — the project was moved here; its history and registration followed.
-- `state-foreign` — another machine's state is in this synced or shared folder. It's left alone, and this machine's state for the project lives under `~/.core/local/`.
+- `not stored: foreign-install` — another machine's state is in this synced or shared folder. It is left alone; new operational state is not written until a writable project-owned route is available. Any existing `~/.core/local/` copy remains read-only history.
 - `state-ask` — the state names an old location that no longer exists, parent folder included. Ask: *"This project's CORE history says it used to be at <old path>. Did you move it here, or is this a new project?"* Then run `index-registry.mjs state --accept-move --root <root>` or `state --fresh --root <root>`.
 
-**State paths.** Never build a path under `<root>/.core/` by hand: a read-only folder, a fenced migration or another install's state routes elsewhere. Ask the registry, guarded like every script call:
+**State paths.** Never build a path under `<root>/.core/` by hand: a read-only folder, a fenced migration or another install's state can refuse new storage. Ask the registry, guarded like every script call:
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
 node "${CORE_ROOT}/skills/core/scripts/index-registry.mjs" path --root <root> --kind durable --name <file>
 ```
 
-`--kind durable` is for records (drafts, the swarm narrative, the manifest); `--kind hot` is for append-heavy files (capability state and history, metrics, the source pull log). Below, `<durable>/<file>` and `<hot>/<file>` mean the printed path for that kind and file name.
+`--kind durable` is for records (drafts, the swarm narrative, the manifest); `--kind hot` is for append-heavy files (capability state and history, metrics, the source pull log). Below, `<durable>/<file>` and `<hot>/<file>` mean the printed path for that kind and file name. Use it only after a successful resolver exit with a nonempty absolute path. On `STATE_NO_PROJECT_PLACE` or any failed/unresolved lookup, defer that write and name the reason in readiness; do not redirect to an empty value, construct a substitute, or create account-global fallback state. Existing local history stays readable and retains its explicit purge/disclosure accounting.
 
 **Layer separation reminder.** Project synthesis lives in `<project>/PROJECT.md`. The unit store lives in `<project>/_memories/`. CORE's operational state for the project lives at `<project>/.core/<harness>/` (self-ignored by git, trusted only when its stamp verifies). `~/.core/` holds only what serves every project.
 

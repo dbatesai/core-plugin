@@ -68,25 +68,24 @@ export function initMetrics({ projectDir, home = homedir(), env = process.env })
   const detection = detectStoragePath({ projectDir });
   const storagePath = detection.path;
 
-  // Create the storage root and its ignore rule first, so a later failure (the operational-meta
-  // directory outside the project, say) never leaves _metrics/ without it. Writers
-  // (scorecard-log.jsonl, capture files) land directly under it.
-  try {
-    mkdirSync(storagePath, { recursive: true });
-    // Generated captures stay out of git unless the project already carries its own rules here.
-    if (!existsSync(join(storagePath, '.gitignore'))) writeFileSync(join(storagePath, '.gitignore'), '*\n!.gitignore\n!README.md\n');
-  } catch (err) {
-    return { ok: false, reason: 'cannot-create-storage-dir', err: err.message };
-  }
-
-  // Write the forensic line before the remaining work so a partial failure
-  // still leaves a debug trail.
+  // Establish the writable project route before creating capture folders or
+  // clearing any old marker. Unsupported routes preserve existing history.
   let operationalMetaDir;
   try {
     operationalMetaDir = operationalMetricsDir(projectDir, { home, env });
-    mkdirSync(operationalMetaDir, { recursive: true });
   } catch (err) {
+    if (err.code === 'STATE_NO_PROJECT_PLACE') {
+      return { ok: false, status: 'NOT_STORED', written: false,
+        reason: err.reason, error_code: err.code, err: err.message };
+    }
     return { ok: false, reason: 'cannot-create-operational-meta-dir', err: err.message };
+  }
+
+  try {
+    mkdirSync(storagePath, { recursive: true });
+    if (!existsSync(join(storagePath, '.gitignore'))) writeFileSync(join(storagePath, '.gitignore'), '*\n!.gitignore\n!README.md\n');
+  } catch (err) {
+    return { ok: false, reason: 'cannot-create-storage-dir', err: err.message };
   }
 
   const scaffoldLogLine = formatScaffoldLog({

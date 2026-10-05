@@ -42,7 +42,13 @@ test('readiness refuses a linked core directory before any foreign traversal',t=
 });
 
 function enrolledFixture(t, {local=false}={}) {
- const f=fixture(t);if(local){fs.writeFileSync(join(f.home,'.core','projects.json'),'[]');fs.mkdirSync(join(f.root,'.git'));}f.meta=run(f,`const {operationalMetricsDir}=await import(${JSON.stringify(log)});const {writeCalibrationState,emptyCalibrationState}=await import(${JSON.stringify(cal)});const dir=operationalMetricsDir(${JSON.stringify(f.root)},{home:${JSON.stringify(f.home)}});writeCalibrationState(dir,{...emptyCalibrationState(),is_calibrated:true,provisional:false,labeled_count:120,overall_precision:0.84});console.log(JSON.stringify(dir));`);return f;
+ const f=fixture(t);
+ if(local){fs.writeFileSync(join(f.home,'.core','projects.json'),'[]');fs.mkdirSync(join(f.root,'.git'));}
+ const directory=local
+  ? `join(localStateDir({root:${JSON.stringify(f.root)},harness:process.env.CORE_HARNESS,coreDir:${JSON.stringify(join(f.home,'.core'))}}),'metrics')`
+  : `operationalMetricsDir(${JSON.stringify(f.root)},{home:${JSON.stringify(f.home)}})`;
+ f.meta=run(f,`const {operationalMetricsDir}=await import(${JSON.stringify(log)});const {localStateDir}=await import(${JSON.stringify(new URL('../../plugins/core/skills/core/scripts/project-state.mjs',import.meta.url).href)});const {writeCalibrationState,emptyCalibrationState}=await import(${JSON.stringify(cal)});const fs=await import('node:fs');const {join}=await import('node:path');const dir=${directory};fs.mkdirSync(dir,{recursive:true});writeCalibrationState(dir,{...emptyCalibrationState(),is_calibrated:true,provisional:false,labeled_count:120,overall_precision:0.84});console.log(JSON.stringify(dir));`);
+ return f;
 }
 const readBody=f=>`const {readinessReport}=await import(${JSON.stringify(cal)});console.log(JSON.stringify(readinessReport({project:${JSON.stringify(f.root)},home:${JSON.stringify(f.home)}})));`;
 for(const mode of ['malformed-state','denied-state','linked-state','hardlinked-state','linked-classified','linked-daily','hardlinked-daily','malformed-daily','denied-daily'])test(`readiness reports unavailable without foreign traversal or mutation: ${mode}`,t=>{
@@ -115,7 +121,7 @@ test('a linked unselected local route does not suppress healthy project evidence
 for(const linked of [false,true])test(`foreign-install selection preserves local reader custody: ${linked?'linked parent refused':'healthy evidence readable'}`,t=>{
  if(linked&&!symlinkCapable())return t.skip('symlink fixture privilege unavailable');const f=enrolledFixture(t);
  const stampPath=join(f.root,'.core','codex','stamp'),stamp=JSON.parse(fs.readFileSync(stampPath));stamp.install_id='synthetic-foreign-install';fs.writeFileSync(stampPath,JSON.stringify(stamp));
- f.meta=run(f,`const {operationalMetricsDir}=await import(${JSON.stringify(log)});const {writeCalibrationState,emptyCalibrationState}=await import(${JSON.stringify(cal)});const dir=operationalMetricsDir(${JSON.stringify(f.root)},{home:${JSON.stringify(f.home)}});writeCalibrationState(dir,{...emptyCalibrationState(),is_calibrated:true,provisional:false,labeled_count:120,overall_precision:0.84});console.log(JSON.stringify(dir));`);
+ f.meta=run(f,`const {operationalMetricsDir}=await import(${JSON.stringify(log)});const {writeCalibrationState,emptyCalibrationState}=await import(${JSON.stringify(cal)});const {localStateDir}=await import(${JSON.stringify(new URL('../../plugins/core/skills/core/scripts/project-state.mjs',import.meta.url).href)});const fs=await import('node:fs');const {join}=await import('node:path');const dir=join(localStateDir({root:${JSON.stringify(f.root)},harness:'codex',coreDir:${JSON.stringify(join(f.home,'.core'))}}),'metrics');fs.mkdirSync(dir,{recursive:true});writeCalibrationState(dir,{...emptyCalibrationState(),is_calibrated:true,provisional:false,labeled_count:120,overall_precision:0.84});console.log(JSON.stringify(dir));`);
  let foreign=null;if(linked){foreign=join(f.base,'foreign-local');fs.mkdirSync(foreign);const localRoot=join(f.home,'.core','local');fs.renameSync(localRoot,join(foreign,'retained'));fs.symlinkSync(join(foreign,'retained'),localRoot,'dir');}
  const beforeRoot=snap(f.root),beforeHome=snap(f.home),beforeForeign=foreign?snap(foreign):null;const r=run(f,readBody(f));assert.equal(r.available,!linked);assert.equal(r.is_calibrated,!linked);if(!linked)assert.equal(r.labeled_count,120);else assert.match(r.reason,/METRICS_DIRECTORY_CUSTODY/);
  assert.deepEqual(snap(f.root),beforeRoot);assert.deepEqual(snap(f.home),beforeHome);if(foreign)assert.deepEqual(snap(foreign),beforeForeign);
