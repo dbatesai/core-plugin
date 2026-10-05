@@ -18,7 +18,7 @@ Everything the old close did beyond that has a different home: memory maintenanc
 
 ## Project-only mode
 
-When the task includes the word **project-only** (`/finalize project-only`), close from the project folder alone. Use the same steps below, with these commands instead of `close-pass.mjs`, a session id you already know, and the name of the harness you are running in (`claude-code`, `codex`). Pass that same `--harness` to every command here: it is the one the project-only startup used, and each harness keeps its own record. There's no transcript search in this mode; if you don't know the id, say so and stop.
+When the task includes the word **project-only** (`/finalize project-only`), close from the project folder alone. Use the same steps below, with these commands instead of `close-pass.mjs`, a session id you already know, and the name of the harness you are running in (`claude-code`, `codex`). Pass that same `--harness` to every command here: it is the one the project-only startup used, and each harness keeps its own record. The session id is the one on the "CORE session id for this session (from the harness)" line in your context (on Codex, the thread id Codex gives you). Never take one from a folder name, a path, a file or an earlier session. There's no transcript search in this mode. If you have no id, still write the session's units and summary, don't run the close commands, and tell the user the close is unresolved: it can't be certified without the real id.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \

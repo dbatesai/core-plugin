@@ -35,9 +35,11 @@ In this mode CORE reads and writes inside the folder only. It never reads `~/.co
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" startup --root <root> --harness <harness> --session <session id if known> \
+node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" startup --root <root> --harness <harness> --session <session id> \
   || echo "CORE-PROJECT-ONLY-FAILED: CORE_ROOT is unresolved or the startup refused (see its JSON)"
 ```
+
+The session id is the one on the "CORE session id for this session (from the harness)" line in your context; on Codex, the thread id Codex gives you. If there is no such line, leave `--session` out. Never take an id from a folder name, a path, a file or an earlier session.
 
 It prints one JSON line:
 - `status: refused` (an unresolvable path, the home folder, a filesystem root): say so in one plain line and stop.
