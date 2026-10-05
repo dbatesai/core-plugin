@@ -180,6 +180,9 @@ export function inspectFileLock(lockPath, {
   hardStaleMs = DEFAULT_HARD_STALE_MS,
   machine = localMachineId(),
 } = {}) {
+  // A lock file that is a link, a pipe or has a name elsewhere is never read: it reads as held.
+  const unsafe = foreignLockArtifact(lockPath);
+  if (unsafe) return { held: true, lock: null, stale: false, unsafe };
   return inspectFromGenerations(listGenerations(lockPath), { now, staleMs, hardStaleMs, machine: lockMachine(machine) });
 }
 
@@ -223,6 +226,9 @@ export function acquireFileLock(lockPath, {
 } = {}) {
   machine = lockMachine(machine);
   mkdirSync(dirname(lockPath), { recursive: true });
+  // Checked before any lock file is opened: a pipe would block the read, a link would read elsewhere.
+  const unsafe = foreignLockArtifact(lockPath);
+  if (unsafe) return { ok: false, reason: 'unsafe-lock-file', unsafe };
   const nonce = newNonce();
 
   // maxN and the held-check MUST derive from the SAME listGenerations()
@@ -411,6 +417,9 @@ export function withFileLock(lockPath, fn, {
     // A caller's lock identity is passed through; left undefined, acquisition uses this install's.
     got = acquireFileLock(lockPath, { extra, staleMs, hardStaleMs, ...(machine !== undefined ? { machine } : {}) });
     if (got.ok) break;
+    if (got.reason === 'unsafe-lock-file') {
+      throw Object.assign(new Error(`lock refused: ${join(dirname(lockPath), got.unsafe)} is a link, a pipe or has a name outside its folder`), { code: 'LOCK_UNSAFE', path: join(dirname(lockPath), got.unsafe) });
+    }
     if (attempt >= retries) {
       const err = new Error(`lock held: ${lockPath} (owner pid ${got.lock?.pid ?? '?'}, reason ${got.reason})`);
       err.code = 'LOCK_HELD';

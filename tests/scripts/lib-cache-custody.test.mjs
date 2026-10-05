@@ -80,3 +80,22 @@ test('a linked _lib folder gets no sidecar, lock or session inventory where the 
     assert.deepEqual(readdirSync(outside), [], 'nothing was created through the link');
   } finally { f.cleanup(); }
 });
+
+test('a lock file that is a FIFO, a link or a second hard link is refused before it is read: no hang, nothing written, the planted file kept', { skip: isWin }, () => {
+  for (const shape of ['a FIFO', 'a link', 'a second hard link']) {
+    const f = fixture();
+    try {
+      const lock = join(f.lib, '.enrichment-sidecar.lock');
+      if (shape === 'a FIFO') execFileSync('mkfifo', [lock]);
+      else if (shape === 'a link') symlinkSync(f.foreign, lock);
+      else linkSync(f.foreign, lock);
+      inChild(f.root, `const fl = await import(${JSON.stringify(scripts + 'file-lock.mjs')});
+        const lock = ${JSON.stringify(lock)};
+        assert.equal(fl.acquireFileLock(lock).reason, 'unsafe-lock-file');
+        assert.equal(fl.inspectFileLock(lock).held, true);
+        assert.throws(() => e.writeEnrichment(root, payload), (err) => err.code === 'LOCK_UNSAFE' || err.code === 'STORE_OUTSIDE_ROOT');`);
+      assert.equal(existsSync(join(f.lib, 'enrichment-sidecar.json')), false, `${shape}: no sidecar`);
+      assert.equal(readFileSync(f.foreign, 'utf8'), FOREIGN, `${shape}: the other name keeps its bytes`);
+    } finally { f.cleanup(); }
+  }
+});
