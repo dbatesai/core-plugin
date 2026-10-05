@@ -1182,3 +1182,17 @@ rtest('the renderer makes the scratch ignore file before a nested cache is writt
     assert.ok(existsSync(join(root, '_core', '_scratch', 'nested', 'metrics-cache.json')));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a hard-linked cache file inside the project is refused before it is read', { skip: process.platform === 'win32' }, async () => {
+  const { linkSync } = await import('node:fs');
+  const { root } = fixtureProject();
+  const outside = mkdtempSync(join(tmpdir(), 'cache-link-'));
+  try {
+    writeFileSync(join(outside, 'c.json'), JSON.stringify({ report: 'OUTSIDE', generated_at: '2026-01-01T00:00:00Z' }));
+    linkSync(join(outside, 'c.json'), join(root, 'cache.json'));
+    let ran = 0;
+    await assert.rejects(() => resolveMetricsForRender(root, { metricsProvider: async () => { ran += 1; return { report: 'R' }; }, metricsCachePath: join(root, 'cache.json'), generatedAt: 'x' }),
+      (e) => e.code === 'CACHE_OUTSIDE_PROJECT' && /single-named/.test(e.message));
+    assert.equal(ran, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+});

@@ -1820,3 +1820,62 @@ test('a capture-disabled marker left in an older .core still turns capture off, 
     assert.equal(metricsEnabled({ project: p, env, home: s.home }), false);
   } finally { s.cleanup(); }
 });
+
+test('project-only status and dry runs never rename an older .core; a writing command does', async () => {
+  const { main: poMain } = await import('../../plugins/core/skills/core/scripts/project-only.mjs');
+  const s = sandbox();
+  const write = process.stdout.write;
+  try {
+    const p = s.mk('Projects', 'POnly');
+    mkdirSync(join(p, '.core', '_project-only', H), { recursive: true });
+    let out = '';
+    process.stdout.write = (c) => { out += c; return true; };
+    try {
+      for (const args of [['status'], ['capture-status'], ['purge'], ['retention'], ['process-memory']]) {
+        out = '';
+        await poMain([...args, '--root', p, '--harness', H]);
+        assert.match(out, /rename-pending/, args[0]);
+      }
+    } finally { process.stdout.write = write; }
+    assert.ok(existsSync(join(p, '.core')) && !existsSync(join(p, '_core')), 'nothing renamed by a read');
+    process.stdout.write = () => true;
+    try { await poMain(['startup', '--root', p, '--harness', H, '--session', 's1']); } finally { process.stdout.write = write; }
+    assert.ok(existsSync(join(p, '_core', '_project-only', H)) && !existsSync(join(p, '.core')));
+  } finally { process.stdout.write = write; s.cleanup(); }
+});
+
+test('a registered project that already has _core and gets an older .core restored beside it keeps using _core', () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Restored');
+    registerProject(s.coreDir, p);
+    updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Current' } });
+    mkdirSync(join(p, '.core', H), { recursive: true });
+    writeFileSync(join(p, '.core', H, 'workspace.json'), '{"agent_name":"Restored"}');
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Current');
+    assert.equal(stateDir({ root: p, harness: H, coreDir: s.coreDir }).dir, join(realpathSync(p), '_core', H));
+    assert.equal(readFileSync(join(p, '.core', H, 'workspace.json'), 'utf8'), '{"agent_name":"Restored"}');
+  } finally { s.cleanup(); }
+});
+
+test('hot writers refuse a linked _sessions or _metrics and write nothing through it; an older marker is never removed', { skip: isWin }, async () => {
+  const { logEvent, prepareStorageDir } = await import('../../plugins/core/skills/core/scripts/log-event.mjs');
+  const { initMetrics } = await import('../../plugins/core/skills/core/scripts/metrics-init.mjs');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Hot');
+    const away = s.mk('away');
+    symlinkSync(away, join(p, '_sessions'));
+    assert.equal(logEvent(p, 'retrieval-log.jsonl', { k: 1 }, { today: '2026-10-05' }).reason, 'sessions-folder-unsafe');
+    symlinkSync(away, join(p, '_metrics'));
+    assert.throws(() => prepareStorageDir(p), (e) => e.code === 'STORAGE_UNSAFE');
+    assert.deepEqual(readdirSync(away), []);
+    const q = s.mk('Projects', 'Marker2');
+    registerProject(s.coreDir, q);
+    updateManifest({ root: q, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
+    mkdirSync(join(q, '.core', H, 'metrics'), { recursive: true });
+    writeFileSync(join(q, '.core', H, 'metrics', 'capture-disabled.json'), '{}');
+    initMetrics({ projectDir: q, home: s.home, env: { CORE_HARNESS: H } });
+    assert.ok(existsSync(join(q, '.core', H, 'metrics', 'capture-disabled.json')), 'left in place');
+  } finally { s.cleanup(); }
+});

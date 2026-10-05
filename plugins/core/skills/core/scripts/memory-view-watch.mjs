@@ -70,6 +70,7 @@ import { collectUnits } from './render-browse-artifact.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { isAccountCorePayloadPath, requireTrustedHome } from './trusted-home.mjs';
+import { LEGACY_STATE_DIRNAME } from './state-dirname.mjs';
 
 export const DEFAULT_DEBOUNCE_MS = 250;
 export const DEFAULT_SWEEP_INTERVAL_MS = 300000; // 5 min
@@ -243,6 +244,8 @@ export function writeLiveState(path, {
   publishCount = 0, windowStart = null, retryAt = null,
   grantBasis = null, now = () => new Date(), home = requireTrustedHome(),
 } = {}) {
+  // A path kept from before the state folder was renamed would recreate `.core` beside `_core`.
+  if (String(path).split(/[\\/]/).includes(LEGACY_STATE_DIRNAME)) throw new Error(`live-state path refused: the path is inside an older ${LEGACY_STATE_DIRNAME} folder; resolve it again with index-registry.mjs path`);
   if (!artifactUrl) throw new Error('--write-live-state requires --artifact-url');
   if (!WATCH_SCOPES.includes(scope)) throw new Error(`--write-live-state requires --scope ${WATCH_SCOPES.join('|')}`);
   if (!baselineSnapshot) throw new Error('--write-live-state requires --baseline-snapshot');

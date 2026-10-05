@@ -28,7 +28,7 @@ import { homedir } from 'node:os';
 import { captureDisabledMarkerCandidates, EXTERNAL_MARKER } from './metrics-init.mjs';
 import { projectRootFor, stateDir, detectStateHarness, readManifest, manifestOptsOutUnverified, readCaptureOptOuts, readPinSigned, readHeldSigned, historyRecordFolders, stateHarnessesPartial, stateLocations, registryShapeProblem, readSignedFileAt, canonical as canonicalPath, METRICS_OWNER_FILE, pathPresence } from './project-state.mjs';
 import { legacyMetricsPins } from './migrate-workspace-state.mjs';
-import { ensureStoreIgnores, METRICS_IGNORE, SESSIONS_IGNORE } from './store-ignores.mjs';
+import { ensureStoreIgnores, folderChain, METRICS_IGNORE, SESSIONS_IGNORE } from './store-ignores.mjs';
 import { STATE_DIRNAME } from './state-dirname.mjs';
 
 /**
@@ -57,8 +57,11 @@ export function resolveStoragePath(projectDir) {
 /** The project's `_metrics/`, made with its ignore file in place before any lock or data is written there. */
 export function prepareStorageDir(projectDir) {
   const base = resolveStoragePath(projectDir);
-  mkdirSync(base, { recursive: true });
-  ensureStoreIgnores(projectDir, { families: [METRICS_IGNORE], verify: false });
+  const chain = folderChain(projectDir, '_metrics');
+  if (chain !== 'real' && chain !== 'absent') throw Object.assign(new Error(`not stored: _metrics: ${chain}`), { code: 'STORAGE_UNSAFE' });
+  if (chain === 'absent') mkdirSync(base);
+  const problems = ensureStoreIgnores(projectDir, { families: [METRICS_IGNORE], verify: false });
+  if (problems.length) throw Object.assign(new Error(`not stored: ${problems.join('; ')}`), { code: 'STORAGE_UNSAFE' });
   return base;
 }
 
@@ -414,11 +417,17 @@ export function logEvent(projectDir, filename, event, { today, now } = {}) {
   if (!existsSync(projectDir)) { outcome.reason = 'project-dir-missing'; return outcome; }
   const date = today || todayUTC();
   const sessionDir = join(projectDir, '_sessions', date);
-  try {
-    mkdirSync(sessionDir, { recursive: true });
-  } catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
   // Machine telemetry stays out of git from its first line; the rest of `_sessions/` stays visible.
-  ensureStoreIgnores(projectDir, { families: [SESSIONS_IGNORE], verify: false });
+  // A linked folder on the way, or an ignore file that couldn't be made, means nothing is appended.
+  const chain = folderChain(projectDir, '_sessions');
+  if (chain !== 'real' && chain !== 'absent') { outcome.reason = 'sessions-folder-unsafe'; return outcome; }
+  try { if (chain === 'absent') mkdirSync(join(projectDir, '_sessions')); }
+  catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
+  if (ensureStoreIgnores(projectDir, { families: [SESSIONS_IGNORE], verify: false }).length) { outcome.reason = 'ignore-policy-not-established'; return outcome; }
+  const dated = folderChain(projectDir, `_sessions/${date}`);
+  if (dated !== 'real' && dated !== 'absent') { outcome.reason = 'sessions-folder-unsafe'; return outcome; }
+  try { if (dated === 'absent') mkdirSync(sessionDir); }
+  catch { outcome.reason = 'session-dir-create-failed'; return outcome; }
   const ts = now || new Date().toISOString();
   const record = { ts, ...event };
 

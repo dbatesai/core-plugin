@@ -50,7 +50,10 @@ export function captureDisabledMarkerCandidates({ projectDir, operationalMetaDir
 }
 
 function clearCaptureDisabledMarkers({ projectDir, operationalMetaDir }) {
-  for (const path of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir })) {
+  // An older `.core` copy is read by the gate but never removed here: that folder is history, and a
+  // link in it could point the removal anywhere. Left in place, it keeps capture off, which is safe.
+  const inOlder = `${sep}${LEGACY_STATE_DIRNAME}${sep}`;
+  for (const path of captureDisabledMarkerCandidates({ projectDir, operationalMetaDir }).filter((p) => !p.includes(inOlder))) {
     try { rmSync(path, { force: true }); } catch { /* best-effort; a stale marker only keeps capture off */ }
   }
 }

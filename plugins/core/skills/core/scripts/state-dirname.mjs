@@ -18,6 +18,13 @@ export const LEGACY_STATE_DIRNAME = '.core';
  * ~/.core (the home folder's, the one passed as `coreDir`, or any folder holding the install keys or
  * registry) is never renamed. Returns what it found.
  */
+/** True when only the older `.core` is there, as a real folder: a rename is still to come. Reads only. */
+export function folderNeedsRename(root) {
+  try { const st = lstatSync(join(root, LEGACY_STATE_DIRNAME)); if (!st.isDirectory() || st.isSymbolicLink()) return false; }
+  catch { return false; }
+  try { lstatSync(join(root, STATE_DIRNAME)); return false; } catch { return true; }
+}
+
 export function settleStateFolderName(root, { coreDir } = {}) {
   const from = join(root, LEGACY_STATE_DIRNAME), to = join(root, STATE_DIRNAME);
   let st;

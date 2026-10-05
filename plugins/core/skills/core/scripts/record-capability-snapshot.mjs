@@ -67,7 +67,12 @@ export async function recordSnapshot(opts = {}) {
 
   // The startup probe already ran this session: its saved result is recorded, not a second probe.
   const startup = opts.from ? JSON.parse(readFileSync(opts.from, 'utf8')) : await runStartup({ harness, cwd });
-  if (!Array.isArray(startup?.rows)) throw new Error(`no probe rows in ${opts.from}`);
+  if (opts.from) {
+    // A saved result is recorded only if it is this session's startup probe for this harness.
+    const want = harness || startup?.harness;
+    if (startup?.mode !== 'startup' || typeof startup.harness !== 'string' || startup.harness !== want) throw new Error(`${opts.from} is not a startup probe result for ${want}`);
+    if (!Array.isArray(startup.rows) || !startup.rows.length || !startup.rows.every((r) => r && typeof r.capability_id === 'string' && typeof r.identity_status === 'string')) throw new Error(`no probe rows in ${opts.from}`);
+  }
   const rows = startup.rows || [];
 
   const appendOpts = {};

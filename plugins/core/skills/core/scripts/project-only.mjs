@@ -42,7 +42,7 @@ import { randomBytes } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
 import { useNoMachineIdentity, acquireFileLock, releaseFileLock, inspectFileLock } from './file-lock.mjs';
 import { ensureStoreIgnores } from './store-ignores.mjs';
-import { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName } from './state-dirname.mjs';
+import { STATE_DIRNAME, LEGACY_STATE_DIRNAME, settleStateFolderName, folderNeedsRename } from './state-dirname.mjs';
 
 export const PROJECT_ONLY_DIR = '_project-only';
 const HARNESS_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -76,7 +76,7 @@ export function projectOnlyHint(cwd) {
 }
 
 /** The root for a project-only operation: an existing directory resolved physically, or a refusal. */
-export function projectOnlyContext({ root, harness = 'claude-code', session = null, operation = 'startup' } = {}) {
+export function projectOnlyContext({ root, harness = 'claude-code', session = null, operation = 'startup', mutates = true } = {}) {
   if (!root) return { ok: false, state: 'root-unresolved', reason: 'no --root given' };
   if (!HARNESS_RE.test(String(harness))) return { ok: false, state: 'bad-harness', reason: String(harness) };
   let real;
@@ -87,7 +87,10 @@ export function projectOnlyContext({ root, harness = 'claude-code', session = nu
   let home = null;
   try { home = userInfo().homedir || null; } catch { /* no account record: the home check is skipped */ }
   if (home && real === home) return { ok: false, state: 'refused', reason: 'home folder' };
-  settleStateFolderName(real);
+  // Only a command that writes gives an older `.core` its visible name. A status or dry run changes
+  // nothing, so it holds instead, until a writing command or a normal session renames it.
+  if (mutates) settleStateFolderName(real);
+  else if (folderNeedsRename(real)) return { ok: false, state: 'rename-pending', reason: 'this folder still has an older .core; run project-only startup (or a normal session) to rename it to _core' };
   return { ok: true, mode: 'project-only', root: real, harness, session, operation };
 }
 
@@ -553,7 +556,8 @@ export function main(argv) {
   // A close and a pickup belong to one harness's folder. The caller knows which harness it is and must
   // say so: a default would file one harness's close under another's name, where its own pickup never looks.
   if (/^(finalize-|pickup)/.test(cmd) && !opt.harness) return out({ status: 'refused', state: 'harness-required', reason: `${cmd} needs --harness <name>` });
-  const ctx = projectOnlyContext({ root: opt.root, harness: opt.harness || 'claude-code', session: opt.session || null, operation: cmd });
+  const mutates = !['status', 'capture-status'].includes(cmd) && !(['purge', 'retention', 'process-memory'].includes(cmd) && opt.apply !== true);
+  const ctx = projectOnlyContext({ root: opt.root, harness: opt.harness || 'claude-code', session: opt.session || null, operation: cmd, mutates });
   if (!ctx.ok) return out({ status: 'refused', ...ctx });
   const result = run(ctx);
   return result instanceof Promise ? result.then(out) : out(result);

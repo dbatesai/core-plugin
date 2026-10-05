@@ -25,6 +25,7 @@ import { ensureProjectArtifactDir, assertArtifactFile, projectArtifactRoot } fro
 import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { STATE_DIRNAME } from './state-dirname.mjs';
+import { folderChain } from './store-ignores.mjs';
 
 export const RECEIPT = 'import-receipt.json';
 const DONE = new Set(['copied', 'absent', 'local-present', 'source-is-link']);
@@ -146,11 +147,11 @@ function runFamily({ name, source, dest, kind, dir }, receipt, save, now) {
   if (src.isSymbolicLink()) return record({ result: 'source-is-link', source });
   const staging = `.importing-${name}-${randomBytes(4).toString('hex')}`;
   const out = { files: Object.create(null), omitted: [] };
-  try {
-    try { mkdirSync(join(dir, staging), { mode: 0o700 }); } catch (e) { throw stageErr('write', e); }
-    copyTree(source, join(dir, staging, 'payload'), '', out);
-  } catch (e) {
-    rmSync(join(dir, staging), { recursive: true, force: true });
+  try { mkdirSync(join(dir, staging), { mode: 0o700 }); }
+  catch (e) { return { family: name, result: 'not-copied', stage: 'write', code: e.code }; }   // not ours: left as found
+  try { copyTree(source, join(dir, staging, 'payload'), '', out); }
+  catch (e) {
+    rmSync(join(dir, staging), { recursive: true, force: true });   // made by this call just above
     return { family: name, result: 'not-copied', stage: e.stage || 'write', code: e.code };
   }
   record({ result: 'pending', source, staging, files: out.files, omitted: out.omitted });
@@ -203,9 +204,14 @@ if (isCliEntry(import.meta.url)) {
   try {
     const root = at >= 0 ? a[at + 1] : process.cwd();
     // --check reads only the project's own notes folder: no import, nothing outside, nothing written.
-    const r = a.includes('--check')
-      ? { status: 'ok', dir: join(projectArtifactRoot(resolve(root)), STATE_DIRNAME, '_agent'), results: [], notes: noteCustody(join(projectArtifactRoot(resolve(root)), STATE_DIRNAME, '_agent')) }
-      : importAgentNotes({ root, research: a.includes('--research') });
+    let r;
+    if (a.includes('--check')) {
+      const real = projectArtifactRoot(resolve(root));
+      const chain = folderChain(real, `${STATE_DIRNAME}/_agent`);
+      if (chain !== 'real' && chain !== 'absent') throw Object.assign(new Error(`not checked: ${chain}`), { code: 'NOTES_UNSAFE' });
+      const dir = join(real, STATE_DIRNAME, '_agent');
+      r = { status: 'ok', dir, results: [], notes: chain === 'absent' ? Object.fromEntries(FAMILIES.map((f) => [f.to, 'absent'])) : noteCustody(dir) };
+    } else r = importAgentNotes({ root, research: a.includes('--research') });
     for (const x of r.results) if (x.result !== 'already-decided') {
       const why = [x.source && `from ${x.source}`, x.stage && `at ${x.stage}`, x.code, x.reason, x.omitted?.length && `not copied: ${x.omitted.join(', ')}`].filter(Boolean).join('; ');
       process.stdout.write(`${x.family}: ${x.result}${why ? ` (${why})` : ''}\n`);

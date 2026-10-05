@@ -228,3 +228,37 @@ test('a file named __proto__ is hashed like any other; a saved folder holding a 
     assert.match(out.stdout, /readable: dm-profile\.md, topics\.md/);
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
+
+test('--check refuses a linked notes folder without reading through it', { skip: process.platform === 'win32' }, async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { base, root } = setup();
+  try {
+    mkdirSync(join(base, 'elsewhere'));
+    writeFileSync(join(base, 'elsewhere', 'topics.md'), 'outside\n');
+    mkdirSync(join(root, '_core'));
+    symlinkSync(join(base, 'elsewhere'), join(root, '_core', '_agent'));
+    const out = spawnSync(process.execPath, [join(import.meta.dirname, '../../plugins/core/skills/core/scripts/import-agent-notes.mjs'), '--root', root, '--check'], { encoding: 'utf8' });
+    assert.equal(out.status, 1);
+    assert.match(out.stderr, /not checked: _agent is not a real folder/);
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
+test('a staging folder that already exists under the chosen name is not this call\'s and is left alone', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { base, home, root, agent } = setup();
+  try {
+    const real = fs.mkdirSync;
+    let taken = null;
+    fs.mkdirSync = (p, ...a) => {
+      if (String(p).includes('.importing-agents-') && !taken) { taken = String(p); real(p, { recursive: true }); writeFileSync(join(p, 'keep.md'), 'not ours\n'); throw Object.assign(new Error('exists'), { code: 'EEXIST' }); }
+      return real(p, ...a);
+    };
+    syncBuiltinESMExports();
+    let r;
+    try { r = importAgentNotes({ root, home }); } finally { fs.mkdirSync = real; syncBuiltinESMExports(); }
+    assert.deepEqual(['not-copied', 'write', 'EEXIST'], ['result', 'stage', 'code'].map((k) => r.results.find((x) => x.family === 'agents')[k]));
+    assert.equal(readFileSync(join(taken, 'keep.md'), 'utf8'), 'not ours\n');
+    void agent;
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});

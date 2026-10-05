@@ -89,7 +89,7 @@
  * --metrics-cache, bad record-mode input);
  * 1 fatal failure (including fail-closed producer identity).
  */
-import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { isCliEntry } from './cli-entry.mjs';
@@ -1429,6 +1429,14 @@ export async function resolveMetricsForRender(root, {
   // the project, judged on the real target, and never in the memory store.
   if (metricsCachePath && (!containedPath(root, metricsCachePath) || containedPath(join(root, '_memories'), metricsCachePath))) {
     throw Object.assign(new Error(`--metrics-cache must really lie inside the project and outside _memories/ (${metricsCachePath})`), { code: 'CACHE_OUTSIDE_PROJECT' });
+  }
+  // A second name for the cache file (a hard link) could be a file outside the project: only a
+  // single-named regular file, or none, is read or replaced. A leaf that can't be examined is refused.
+  if (metricsCachePath) {
+    let leaf = null;
+    try { leaf = lstatSync(metricsCachePath); }
+    catch (e) { if (e.code !== 'ENOENT') throw Object.assign(new Error(`--metrics-cache could not be examined (${e.code})`), { code: 'CACHE_OUTSIDE_PROJECT' }); }
+    if (leaf && (!leaf.isFile() || leaf.nlink !== 1)) throw Object.assign(new Error(`--metrics-cache must be a single-named regular file (${metricsCachePath})`), { code: 'CACHE_OUTSIDE_PROJECT' });
   }
   if (metricsCachePath && existsSync(metricsCachePath)) {
     try {

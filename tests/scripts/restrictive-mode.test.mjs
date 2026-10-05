@@ -57,10 +57,15 @@ test('the snapshot recorder records the startup probe it is handed instead of pr
   const f = fixture({ projectOnly: false });
   try {
     const from = join(f.base, 'capability-state.json');
-    writeFileSync(from, JSON.stringify({ harness: 'claude-code', mode: 'startup', complete: true, rows: [], summary: { marker: 'from-the-startup-probe' } }));
-    const r = await recordSnapshot({ cwd: f.root, root: f.root, from, harness: 'claude-code', home: f.home });
-    assert.deepEqual(r.summary, { marker: 'from-the-startup-probe' });
-    writeFileSync(from, '{"rows": "not a list"}');
-    await assert.rejects(() => recordSnapshot({ cwd: f.root, root: f.root, from, harness: 'claude-code', home: f.home }), /no probe rows/);
+    const row = { capability_id: 'x', identity_status: 'UNKNOWN' };
+    const saved = (o) => writeFileSync(from, JSON.stringify({ harness: 'claude-code', mode: 'startup', complete: true, rows: [row], summary: { marker: 'from-the-startup-probe' }, ...o }));
+    const rec = () => recordSnapshot({ cwd: f.root, root: f.root, from, harness: 'claude-code', home: f.home });
+    saved({});
+    assert.deepEqual((await rec()).summary, { marker: 'from-the-startup-probe' });
+    saved({ harness: 'codex' });
+    await assert.rejects(rec, /not a startup probe result for claude-code/, 'another harness\'s result is not recorded as this one');
+    saved({ mode: 'pre-action' });
+    await assert.rejects(rec, /not a startup probe result/);
+    for (const rows of [[], 'not a list', [{ capability_id: 'x' }]]) { saved({ rows }); await assert.rejects(rec, /no probe rows/); }
   } finally { rmSync(f.base, { recursive: true, force: true }); }
 });
