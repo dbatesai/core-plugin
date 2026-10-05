@@ -45,6 +45,8 @@ import { projectOnlyHint } from '../scripts/project-only.mjs';
 // SessionEnd reasons that are NOT real ends — skip them. `resume` suspends for later
 // resumption; closing then is premature (startup catch-up re-detects on resume).
 const SKIP_REASONS = new Set(['resume']);
+// How long SessionEnd waits to learn whether its close child started.
+const SPAWN_CONFIRM_MS = Number(process.env.CORE_CLOSE_SPAWN_CONFIRM_MS) > 0 ? Number(process.env.CORE_CLOSE_SPAWN_CONFIRM_MS) : 2000;
 
 
 function main() {
@@ -100,21 +102,20 @@ function main() {
   // actually started, and `spawn-failed` with the reason otherwise. The runner is this same Node
   // binary, by its own path, so a PATH without `node` cannot lose it. Never blocks the exit.
   return new Promise((done) => {
-    const failed = (why) => { logHookEvent({ hook: 'session-end', action: 'spawn-failed', reason: String(why || 'error'), cwd: store, session: decision.sessionId }); done(0); };
+    // One launch, one receipt: whichever of started / errored / no confirmation comes first settles
+    // it. The process exits as soon as it settles, so a later event has nowhere to land; the flag
+    // keeps that true if this is ever called without exiting.
+    let settled = false; let timer = null;
+    const settle = (row) => { if (settled) return; settled = true; clearTimeout(timer); logHookEvent(row); done(0); };
+    const failed = (why) => settle({ hook: 'session-end', action: 'spawn-failed', reason: String(why || 'error'), cwd: store, session: decision.sessionId });
     let child;
     try { child = spawn(process.execPath, decision.args, { cwd: store, env: process.env, detached: true, stdio: 'ignore' }); }
     catch (e) { return failed(e?.code || e?.message); }
-    const timer = setTimeout(() => failed('no-spawn-confirmation'), 2000);
-    child.once('error', (e) => { clearTimeout(timer); failed(e?.code || e?.message); });
+    timer = setTimeout(() => failed('no-spawn-confirmation'), SPAWN_CONFIRM_MS);
+    child.once('error', (e) => failed(e?.code || e?.message));
     child.once('spawn', () => {
-      clearTimeout(timer);
-      child.unref();
-      logHookEvent({
-        hook: 'session-end', action: 'spawn',
-        reason: 'session-reason=' + (reason || 'unknown'),
-        cwd: store, session: decision.sessionId,
-      });
-      done(0);
+      try { child.unref(); } catch { /* already gone */ }
+      settle({ hook: 'session-end', action: 'spawn', reason: 'session-reason=' + (reason || 'unknown'), cwd: store, session: decision.sessionId });
     });
   });
 }
