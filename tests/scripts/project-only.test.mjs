@@ -430,3 +430,45 @@ test('pickup refuses a pending folder that is a link out of the project, and arc
     assert.ok(existsSync(join(outsideDir, 'manifest.json')), 'nothing outside was moved');
   } finally { p.cleanup(); }
 });
+
+// ---------- two projects, one machine ----------
+
+test('two projects run /finalize project-only at the same time: separate locks, both certify, neither tree is touched by the other; the same project twice contends', async () => {
+  const { spawn } = await import('node:child_process');
+  const A = project();
+  const B = project();
+  const run = (root, ...a) => new Promise((res) => {
+    const c = spawn(process.execPath, ['--import', GATE, join(CORE, 'scripts/project-only.mjs'), ...a, '--root', root], { cwd: root, env: { ...process.env, FS_CONFINE_ROOTS: [root, REPO].join(delimiter) } });
+    let out = ''; let err = '';
+    c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+    c.on('close', () => { const m = err.match(/FS_CONFINE_VIOLATIONS (.*)/); res({ out: JSON.parse(out), violations: m ? JSON.parse(m[1]) : null }); });
+  });
+  const cycle = async (root, session) => {
+    const seen = [];
+    const step = async (...a) => { const r = await run(root, ...a, '--session', session); assert.deepEqual(r.violations, [], a.join(' ')); seen.push(r.out); return r.out; };
+    assert.equal((await step('finalize-begin')).status, 'ok');
+    for (const op of ['material-capture', 'render-project-md', 'session-summary']) assert.equal((await step('finalize-record', '--op', op, '--status', 'done')).status, 'ok');
+    assert.equal((await step('finalize-certify')).outcome, 'partial');
+    assert.equal((await step('finalize-finish')).released, true);
+    return seen;
+  };
+  try {
+    const bBefore = tree(B.root);
+    const [a1, b1] = await Promise.all([cycle(A.root, 'sa'), cycle(B.root, 'sb')]);
+    assert.equal(a1.length, 6); assert.equal(b1.length, 6);
+    // Each project's evidence is its own, and nothing from one run appears in the other's tree.
+    const files = (root) => Object.keys(tree(root)).map((f) => f.slice(root.length + 1));
+    assert.ok(files(A.root).includes(join('.core', PROJECT_ONLY_DIR, 'claude-code', 'close', 'receipts', 'sa.json')));
+    assert.ok(files(B.root).includes(join('.core', PROJECT_ONLY_DIR, 'claude-code', 'close', 'receipts', 'sb.json')));
+    assert.ok(!files(A.root).some((f) => f.includes('sb.json')) && !files(B.root).some((f) => f.includes('sa.json')));
+    const bAfter = tree(B.root);
+    for (const [f, h] of Object.entries(bBefore)) assert.equal(bAfter[f], h, `B's pre-existing file changed: ${f}`);
+    assert.notEqual(realpathSync(join(A.root, '_memories')), realpathSync(join(B.root, '_memories')));
+
+    // Control: two sessions on the SAME project do contend for its one lock.
+    assert.equal((await run(A.root, 'finalize-begin', '--session', 'x1')).out.status, 'ok');
+    const second = await run(A.root, 'finalize-begin', '--session', 'x2');
+    assert.deepEqual([second.out.status, second.out.state], ['refused', 'lock-held']);
+    assert.equal((await run(B.root, 'finalize-begin', '--session', 'x3')).out.status, 'ok', 'while A is locked B still begins');
+  } finally { A.cleanup(); B.cleanup(); }
+});
