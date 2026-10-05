@@ -291,7 +291,7 @@ test('--all packages the healthy project and records the broken one in coverage'
       { id: 'fixture-ws-alpha', path: good },
       { id: 'broken-ws', path: broken },
     ]));
-    const result = runPackage(['--all', '--home', home, '--out', join(root, 'out')]);
+    const result = runPackage(['--all', '--scratch-project', good, '--home', home, '--out', join(root, 'out')]);
     assert.ok(!result.error, `no fatal error: ${result.error}`);
     assert.equal(result.exit, 1);
     const covered = result.coverage.filter(c => c.available).length;

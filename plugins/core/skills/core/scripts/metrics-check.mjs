@@ -62,9 +62,9 @@
  * CLI: node metrics-check.mjs [project-dir] [--json]
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, resolve, basename, dirname } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { readinessReport } from './calibrate-classifier.mjs';
 import { runHarness } from './retrieval-harness.mjs';
@@ -74,6 +74,7 @@ import { turnCaptureStats } from './turn-capture.mjs';
 import { latestScorecards, scorecardLogPath } from './scorecard.mjs';
 import { evaluateTripwires } from './metrics-tripwires.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
+import { ensureProjectArtifactDir } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
@@ -697,11 +698,12 @@ export async function gatherMetrics(cwd, { home = homedir() } = {}) {
   const mech = out.mechanics;
 
   // ---- 1. LIVE PROBE on a scratch store ----
-  const scratch = join(tmpdir(), `core-metrics-probe-${process.pid}`);
-  const mem = join(scratch, '_memories');
+  let scratch = null;
   const TOKEN = 'zephyrine-cobalt-ledger';       // unique: must be retrieved
   const RETIRED_TOKEN = 'halcyon-probe-retired'; // unique: must be suppressed
   try {
+    scratch = mkdtempSync(join(ensureProjectArtifactDir(resolve(cwd), '_scratch'), 'probe-'));
+    const mem = join(scratch, '_memories');
     mkdirSync(mem, { recursive: true });
     const unit = (id, status, body, topics) => writeFileSync(join(mem, `${id}.md`),
 `---
@@ -737,7 +739,12 @@ ${body}
   } catch (e) {
     mech.probe.round_trip = false; out.caveats.push(`probe crashed: ${String(e).slice(0, 120)}`);
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    if (scratch) {
+      try { rmSync(scratch, { recursive: true, force: true }); } catch (e) {
+        mech.probe.round_trip = false;
+        out.caveats.push(`probe scratch cleanup failed: ${e.code || 'cleanup-error'}`);
+      }
+    }
   }
 
   // ---- 2. THIS-STORE HEALTH (read-only) ----

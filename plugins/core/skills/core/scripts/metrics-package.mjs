@@ -30,16 +30,17 @@
  *   --all   package every workspace registered in ~/.core/index.json whose path
  *           exists and contains _memories/
  *   --out   destination dir (default: the platform Desktop, else home)
+ *   --scratch-project  project hosting local scratch (required with --all)
  *   --home  test seam: treat <dir> as the user home (tests must never touch ~)
  * Exit: 0 complete · 1 partial (sources or projects unavailable, package produced)
- *       · 2 aborted (leakage hit or fatal; nothing shipped)
+ *       · 2 failure (may include a verified output or retained scratch; inspect the result)
  */
 import {
   existsSync, readFileSync, readdirSync, statSync, mkdirSync, writeFileSync,
   mkdtempSync, rmSync, chmodSync, appendFileSync, cpSync,
 } from 'node:fs';
 import { join, resolve, basename, dirname, sep } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +52,7 @@ import { resolveOutcomeAuthority, USEFULNESS_OUTCOMES } from './outcome-vocab.mj
 import { cohortClassifiedByDay } from './metrics-dedupe.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { SELF_TEST_LOG_FILENAME, DEFAULT_QUOTA } from './self-test-round.mjs';
+import { ensureProjectArtifactDir, projectArtifactRoot } from './project-artifacts.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots, registryEntryPath } from './project-state.mjs';
@@ -1299,7 +1301,10 @@ export function moveStagingToFolder(staging, folder) {
       source_retained: staging,
     };
   }
-  rmSync(staging, { recursive: true, force: true });
+  try { rmSync(staging, { recursive: true, force: true }); } catch (e) {
+    return { ok: true, path: folder, source_retained: staging,
+      scratch_cleanup: { error_code: e.code || 'cleanup-error', path: staging } };
+  }
   return { ok: true, path: folder };
 }
 
@@ -1307,19 +1312,29 @@ export function moveStagingToFolder(staging, folder) {
  * Byte receipt for an archive: extract it and hash-compare against the staged
  * tree. `tar -t` proves names were listed; this proves the contents match.
  */
-export function verifyArchiveRoundTrip(zipPath, stagingDir) {
-  const scratch = mkdtempSync(join(tmpdir(), 'core-metrics-verify-'));
+export function verifyArchiveRoundTrip(zipPath, stagingDir, { projectRoot } = {}) {
+  let scratch = null, outcome;
   try {
+    scratch = mkdtempSync(join(ensureProjectArtifactDir(projectRoot, '_scratch'), 'verify-'));
     const res = spawnSync('tar', ['-x', '-f', basename(zipPath), '-C', scratch], { cwd: dirname(zipPath), encoding: 'utf8', timeout: 120_000 });
-    if (res.error || res.status !== 0) return { ok: false, reason: `archive did not extract (tar exit ${res.status})` };
-    const verified = verifyCopiedTree(stagingDir, scratch);
-    if (!verified.ok) {
-      return { ok: false, reason: verified.reason || `archive contents differ (${verified.missing.length} missing, ${verified.mismatched.length} changed)` };
+    if (res.error || res.status !== 0) outcome = { ok: false, reason: `archive did not extract (tar exit ${res.status})` };
+    else {
+      const verified = verifyCopiedTree(stagingDir, scratch);
+      outcome = verified.ok ? { ok: true } : { ok: false,
+        reason: verified.reason || `archive contents differ (${verified.missing.length} missing, ${verified.mismatched.length} changed)` };
     }
-    return { ok: true };
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
+  } catch (e) {
+    outcome = { ok: false, reason: `archive verification failed (${e.code || 'verification-error'})` };
   }
+  if (scratch) {
+    try { rmSync(scratch, { recursive: true, force: true }); } catch (e) {
+      outcome.content_verified = outcome.ok;
+      outcome.ok = false;
+      outcome.reason ||= 'archive verification scratch cleanup failed';
+      outcome.scratch_cleanup = { error_code: e.code || 'cleanup-error', path: scratch };
+    }
+  }
+  return outcome;
 }
 
 export function zipStaging(stagingDir, destZip) {
@@ -1341,10 +1356,11 @@ function desktopDir(home) {
 
 export function runPackage(argv, { homeOverride } = {}) {
   const args = [...argv];
-  const flagsIn = { all: false, out: null, json: false, home: homeOverride || null };
+  const flagsIn = { all: false, out: null, json: false, home: homeOverride || null, scratchProject: null };
   const positional = [];
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--all') flagsIn.all = true;
+    else if (args[i] === '--scratch-project') { flagsIn.scratchProject = args[i + 1]; i += 1; }
     else if (args[i] === '--json') flagsIn.json = true;
     else if (args[i] === '--out') { flagsIn.out = args[i + 1]; i += 1; }
     else if (args[i] === '--home') { flagsIn.home = args[i + 1]; i += 1; }
@@ -1352,8 +1368,7 @@ export function runPackage(argv, { homeOverride } = {}) {
   }
   const home = flagsIn.home || trustedHome() || homedir();
   const coreDir = join(home, '.core');
-  const { salt, created: saltCreated } = loadOrCreateSalt(coreDir);
-  const seal = makeSeal(salt);
+  if (flagsIn.all && !flagsIn.scratchProject) return { exit: 2, error: '--all requires --scratch-project naming one exported project' };
 
   // Every registered project's name and path feed the leak scan, legacy registrations included.
   const indexEntries = [];
@@ -1378,6 +1393,20 @@ export function runPackage(argv, { homeOverride } = {}) {
     const p = resolve(positional[0] || process.cwd());
     projectDirs = [p];
   }
+
+  // Scratch has one explicit owner, never the first registry entry or an inferred staging parent.
+  let scratchProject, scratchDir;
+  try {
+    scratchProject = projectArtifactRoot(flagsIn.scratchProject || projectDirs[0]);
+    if (!projectDirs.some(p => projectArtifactRoot(p) === scratchProject)) {
+      return { exit: 2, error: '--scratch-project must name an exported project' };
+    }
+    scratchDir = ensureProjectArtifactDir(scratchProject, '_scratch');
+  } catch (e) {
+    return { exit: 2, error: 'project scratch is unavailable', error_code: e.code || 'scratch-error' };
+  }
+  const { salt, created: saltCreated } = loadOrCreateSalt(coreDir);
+  const seal = makeSeal(salt);
 
   // collect
   const coverage = [];
@@ -1446,99 +1475,131 @@ export function runPackage(argv, { homeOverride } = {}) {
   }
 
   // stage
-  const staging = mkdtempSync(join(tmpdir(), 'core-metrics-package-'));
-  const generatedAt = new Date().toISOString();
-  const manifestDraft = {
-    schema_version: SCHEMA_VERSION,
-    generated_at: generatedAt,
-    mode: flagsIn.all ? 'all-projects' : 'single-project',
-    plugin,
-    generator,
-    pseudonym_note: 'Ids are HMAC pseudonyms from a local salt that never ships; stable per install. Deleting ~/.core/metrics-package-salt rotates them.',
-    residual_risk: 'Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across packages from one install (rotate the salt to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.',
-    salt_rotated_this_run: saltCreated,
-    field_policy: {
-      enforcement: 'allowlist',
-      dropped_fields: droppedFields,
-      note: 'Every value in this package passed a declared field schema. Fields the schema does not name are dropped at every depth before staging; this count is how many were removed from this package.',
-    },
-    coverage,
+  let staging = null, retainStaging = false;
+  const result = { exit: 2, coverage,
+    projects: projects.map(p => ({ project: p.pseudonym, flags: p.flags, headline: p.headline })) };
+  const noteCleanup = (failure) => {
+    if (result.scratch_cleanup) result.scratch_cleanup_failures = [...(result.scratch_cleanup_failures || [result.scratch_cleanup]), failure];
+    else result.scratch_cleanup = failure;
   };
-  const manifestFiltered = enforceExportAllowlist(manifestDraft, EXPORT_SCHEMAS.manifest);
-  const manifestOut = manifestFiltered.value;
-  manifestOut.field_policy.dropped_fields += manifestFiltered.dropped;
-  writeFileSync(join(staging, 'manifest.json'), JSON.stringify(manifestOut, null, 2));
-  for (const proj of projects) {
-    const pdir = join(staging, 'projects', proj.pseudonym);
-    mkdirSync(pdir, { recursive: true });
-    for (const [name, block] of Object.entries(proj.blocks)) {
-      writeFileSync(join(pdir, `${name}.json`), JSON.stringify(block, null, 2));
+  try {
+    staging = mkdtempSync(join(scratchDir, 'package-'));
+    const generatedAt = new Date().toISOString();
+    const manifestDraft = {
+      schema_version: SCHEMA_VERSION,
+      generated_at: generatedAt,
+      mode: flagsIn.all ? 'all-projects' : 'single-project',
+      plugin,
+      generator,
+      pseudonym_note: 'Ids are HMAC pseudonyms from a local salt that never ships; stable per install. Deleting ~/.core/metrics-package-salt rotates them.',
+      residual_risk: 'Designed to minimize reconstruction risk, not to zero it: stable pseudonyms allow linking the same anonymous project across packages from one install (rotate the salt to sever); daily counts could correlate with externally visible activity. Small cells are suppressed at k=3 and per-unit rankings gate on store population.',
+      salt_rotated_this_run: saltCreated,
+      field_policy: {
+        enforcement: 'allowlist',
+        dropped_fields: droppedFields,
+        note: 'Every value in this package passed a declared field schema. Fields the schema does not name are dropped at every depth before staging; this count is how many were removed from this package.',
+      },
+      coverage,
+    };
+    const manifestFiltered = enforceExportAllowlist(manifestDraft, EXPORT_SCHEMAS.manifest);
+    const manifestOut = manifestFiltered.value;
+    manifestOut.field_policy.dropped_fields += manifestFiltered.dropped;
+    writeFileSync(join(staging, 'manifest.json'), JSON.stringify(manifestOut, null, 2));
+    for (const proj of projects) {
+      const pdir = join(staging, 'projects', proj.pseudonym);
+      mkdirSync(pdir, { recursive: true });
+      for (const [name, block] of Object.entries(proj.blocks)) {
+        writeFileSync(join(pdir, `${name}.json`), JSON.stringify(block, null, 2));
+      }
+      writeFileSync(join(pdir, 'headline.json'), JSON.stringify({ ...proj.headline, flags: proj.flags, deltas: proj.deltas }, null, 2));
     }
-    writeFileSync(join(pdir, 'headline.json'), JSON.stringify({ ...proj.headline, flags: proj.flags, deltas: proj.deltas }, null, 2));
-  }
-  writeFileSync(join(staging, 'REPORT.md'), buildReportMd({ manifest: manifestOut, projects }));
-  writeFileSync(join(staging, 'report.html'), buildReportHtml({ manifest: manifestOut, projects }));
+    writeFileSync(join(staging, 'REPORT.md'), buildReportMd({ manifest: manifestOut, projects }));
+    writeFileSync(join(staging, 'report.html'), buildReportHtml({ manifest: manifestOut, projects }));
 
-  // fail-closed leakage scan
-  const patterns = buildLeakPatterns({ home, projectDirs, indexEntries });
-  const hits = leakScanDir(staging, patterns);
-  if (hits.length) {
-    rmSync(staging, { recursive: true, force: true });
-    return { exit: 2, error: 'LEAKAGE SCAN HIT — package aborted, nothing shipped', hits: hits.slice(0, 10) };
-  }
-
-  // ship
-  const outDir = flagsIn.out ? resolve(flagsIn.out) : desktopDir(home);
-  mkdirSync(outDir, { recursive: true });
-  const stamp = generatedAt.replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
-  let zipPath = join(outDir, `core-metrics-package-${stamp}.zip`);
-  let suffix = 2;
-  while (existsSync(zipPath)) { zipPath = join(outDir, `core-metrics-package-${stamp}-${suffix}.zip`); suffix += 1; }
-  // Owner-only while the package sits where it landed: it is de-identified, not
-  // public, and the user decides where it goes next. Best-effort by platform.
-  const harden = (path, mode) => { try { chmodSync(path, mode); } catch { /* mode is advisory here */ } };
-  const hardenTree = (dir) => {
-    harden(dir, 0o700);
-    for (const name of readdirSync(dir)) {
-      const p = join(dir, name);
-      if (statSync(p).isDirectory()) hardenTree(p);
-      else harden(p, 0o600);
+    // fail-closed leakage scan
+    const patterns = buildLeakPatterns({ home, projectDirs, indexEntries });
+    const hits = leakScanDir(staging, patterns);
+    if (hits.length) {
+      return Object.assign(result, { exit: 2, error: 'LEAKAGE SCAN HIT — package aborted, nothing shipped', hits: hits.slice(0, 10) });
     }
-  };
-  const zip = zipStaging(staging, zipPath);
-  const receipt = zip.ok ? verifyArchiveRoundTrip(zipPath, staging) : zip;
-  let shipped;
-  if (receipt.ok) {
-    harden(zipPath, 0o600);
-    rmSync(staging, { recursive: true, force: true });
-    shipped = { kind: 'zip', path: zipPath };
-  } else {
-    // An archive that cannot be proven to hold the staged bytes does not ship.
-    rmSync(zipPath, { force: true });
-    // self-healing fallback: leave a folder instead of failing the run
-    const folder = zipPath.replace(/\.zip$/, '');
-    const moved = moveStagingToFolder(staging, folder);
-    if (moved.ok) hardenTree(folder);
-    shipped = moved.ok
-      ? { kind: 'folder', path: folder, reason: receipt.reason }
-      : { kind: 'staging', path: staging, reason: `${receipt.reason}; ${moved.reason}` };
-  }
-  // Ship succeeded — NOW the delta baseline may advance (never on abort).
-  for (const proj of projects) {
-    try { appendHistory(home, proj.pseudonym, proj.headline); } catch { /* history is best-effort */ }
-  }
 
-  // Partial detection descends one level: a workspace-metrics block whose
-  // recognition/calibration/capability sub-blocks are unavailable is partial
-  // coverage too (review rule: nested missing sources must force partial status).
-  const blockPartial = (b) => b && (b.available === false
-    || Object.values(b).some((v) => v && typeof v === 'object' && v.available === false));
-  const partial = coverage.some(c => !c.available)
-    || projects.some(p => Object.values(p.blocks).some(blockPartial));
-  return {
-    exit: partial ? 1 : 0, shipped, coverage, desktop_fallback: !flagsIn.out && !existsSync(join(home, 'Desktop')),
-    projects: projects.map(p => ({ project: p.pseudonym, flags: p.flags, headline: p.headline })),
-  };
+    // ship
+    // Once leakage checks pass, retain recoverable staging until delivery is verified.
+    retainStaging = true;
+    const outDir = flagsIn.out ? resolve(flagsIn.out) : desktopDir(home);
+    mkdirSync(outDir, { recursive: true });
+    const stamp = generatedAt.replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
+    let zipPath = join(outDir, `core-metrics-package-${stamp}.zip`);
+    let suffix = 2;
+    while (existsSync(zipPath)) { zipPath = join(outDir, `core-metrics-package-${stamp}-${suffix}.zip`); suffix += 1; }
+    // Owner-only while the package sits where it landed: it is de-identified, not
+    // public, and the user decides where it goes next. Best-effort by platform.
+    const harden = (path, mode) => { try { chmodSync(path, mode); } catch { /* mode is advisory here */ } };
+    const hardenTree = (dir) => {
+      harden(dir, 0o700);
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        if (statSync(p).isDirectory()) hardenTree(p);
+        else harden(p, 0o600);
+      }
+    };
+    const zip = zipStaging(staging, zipPath);
+    const receipt = zip.ok ? verifyArchiveRoundTrip(zipPath, staging, { projectRoot: scratchProject }) : zip;
+    if (!receipt.ok) result.archive_verification = receipt;
+    if (receipt.scratch_cleanup) noteCleanup(receipt.scratch_cleanup);
+    if (receipt.ok || receipt.content_verified) {
+      result.shipped = { kind: 'zip', path: zipPath };
+      retainStaging = false;
+      harden(zipPath, 0o600);
+    } else {
+      // An archive that cannot be proven to hold the staged bytes does not ship.
+      result.retained_archive = { path: zipPath, verified: false };
+      rmSync(zipPath, { force: true });
+      delete result.retained_archive;
+      // self-healing fallback: leave a folder instead of failing the run
+      const folder = zipPath.replace(/\.zip$/, '');
+      const moved = moveStagingToFolder(staging, folder);
+      if (!moved.ok) {
+        result.staging_retained = staging;
+        result.unverified_destination = { path: folder, verified: false };
+        return Object.assign(result, { exit: 2, error: `${receipt.reason}; ${moved.reason}` });
+      }
+      result.shipped = { kind: 'folder', path: folder, reason: receipt.reason };
+      retainStaging = Boolean(moved.source_retained);
+      if (moved.scratch_cleanup) noteCleanup(moved.scratch_cleanup);
+      if (!retainStaging) staging = null; // The verified move already removed its source.
+      hardenTree(folder);
+    }
+    // Ship succeeded — NOW the delta baseline may advance (never on abort).
+    for (const proj of projects) {
+      try { appendHistory(home, proj.pseudonym, proj.headline); } catch { /* history is best-effort */ }
+    }
+
+    // Partial detection descends one level: a workspace-metrics block whose
+    // recognition/calibration/capability sub-blocks are unavailable is partial
+    // coverage too (review rule: nested missing sources must force partial status).
+    const blockPartial = (b) => b && (b.available === false
+      || Object.values(b).some((v) => v && typeof v === 'object' && v.available === false));
+    const partial = coverage.some(c => !c.available)
+      || projects.some(p => Object.values(p.blocks).some(blockPartial));
+    return Object.assign(result, {
+      exit: result.scratch_cleanup ? 2 : partial ? 1 : 0,
+      ...(result.scratch_cleanup ? { error: 'metrics package scratch cleanup failed' } : {}),
+      desktop_fallback: !flagsIn.out && !existsSync(join(home, 'Desktop')),
+    });
+  } catch (e) {
+    return Object.assign(result, { exit: 2, error: 'metrics package failed', error_code: e.code || 'package-error' });
+  } finally {
+    if (staging && retainStaging) result.staging_retained = staging;
+    if (staging && !retainStaging) {
+      try { rmSync(staging, { recursive: true, force: true }); } catch (e) {
+        result.exit = 2;
+        result.error ||= 'metrics package scratch cleanup failed';
+        const failure = { error_code: e.code || 'cleanup-error', path: staging };
+        noteCleanup(failure);
+      }
+    }
+  }
 }
 
 // ---------- CLI entry ----------
@@ -1547,16 +1608,26 @@ if (isCliEntry(import.meta.url)) {
   const result = runPackage(process.argv.slice(2));
   if (result.error) {
     process.stderr.write(`error: ${result.error}\n`);
+    for (const failure of result.scratch_cleanup_failures || (result.scratch_cleanup ? [result.scratch_cleanup] : [])) process.stderr.write(`scratch retained: ${failure.path} (${failure.error_code})\n`);
+    if (result.staging_retained) process.stderr.write(`staging retained: ${result.staging_retained}\n`);
+    if (result.retained_archive) process.stderr.write(`unverified archive retained: ${result.retained_archive.path}\n`);
+    if (result.unverified_destination) process.stderr.write(`unverified destination: ${result.unverified_destination.path}\n`);
+    if (result.archive_verification && !result.archive_verification.ok) process.stderr.write(`archive verification: ${result.archive_verification.reason}\n`);
+    if (result.shipped) process.stdout.write(`package: ${result.shipped.path}\n`);
     if (result.hits) for (const h of result.hits) process.stderr.write(`  leak-hit: ${h.kind} pattern in ${h.file}\n`);
   } else {
     process.stdout.write(`package: ${result.shipped.path}\n`);
     if (result.shipped.kind === 'folder') process.stdout.write(`note: zip unavailable (${result.shipped.reason}) — staged folder shipped instead\n`);
+  }
+  if (result.coverage) {
     const covered = result.coverage.filter(c => c.available).length;
     process.stdout.write(`coverage: ${covered}/${result.coverage.length} project(s)\n`);
+  }
+  if (result.projects) {
     for (const p of result.projects) {
       for (const f of p.flags) process.stdout.write(`flag[${p.project}] ${f.level}: ${f.text}\n`);
     }
-    if (process.argv.includes('--json')) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   }
+  if (process.argv.includes('--json')) process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   process.exit(result.exit);
 }
