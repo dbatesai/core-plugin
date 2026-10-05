@@ -2,7 +2,7 @@
 // startup having run; project content never is; an ignore file the user already has is left alone.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, realpathSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
@@ -262,4 +262,55 @@ test('no CORE working file is written into the store before its ignore file exis
       assert.deepEqual(v, [], `${name}: written before its folder's ignore file existed`);
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
+});
+
+test('an ignore file that is a FIFO is reported without being opened', { skip: isWin }, () => {
+  const root = project();
+  try {
+    execFileSync('mkfifo', [join(root, '_memories', '.gitignore')]);
+    const code = `const m = await import(${JSON.stringify(new URL('../../plugins/core/skills/core/scripts/store-ignores.mjs', import.meta.url).href)}); console.log(JSON.stringify(m.ensureStoreIgnores(${JSON.stringify(root)})));`;
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8', timeout: 5000 });
+    assert.equal(r.signal, null, 'did not block');
+    assert.match(r.stdout, /not a file/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a project with no repository of its own never asks git, even inside a parent repository', { skip: isWin }, async () => {
+  const { chmodSync } = await import('node:fs');
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), 'core-store-parent-')));
+  const bin = join(parent, 'bin'); mkdirSync(bin);
+  const marker = join(parent, 'git-was-run');
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\ntouch ${JSON.stringify(marker)}\nexit 1\n`); chmodSync(join(bin, 'git'), 0o755);
+  const path = process.env.PATH;
+  try {
+    execFileSync('git', ['-C', parent, 'init', '-q'], { env });
+    const child = join(parent, 'child'); mkdirSync(join(child, '_memories'), { recursive: true });
+    writeFileSync(join(child, '_memories', '.gitignore'), '# mine\n');
+    process.env.PATH = `${bin}:${path}`;
+    assert.deepEqual(ensureStoreIgnores(child), []);
+    assert.equal(existsSync(marker), false, 'git was never run, so the parent repository was not consulted');
+  } finally { process.env.PATH = path; rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('an exact exception the user wrote for one of the names CORE writes is reported', { skip: isWin }, () => {
+  const root = project();
+  try {
+    writeFileSync(join(root, '_memories', '.gitignore'), '_close.lock*\n._close.lock*\n.*.lock*\n.*.tmp-*\n_close-marker.json\n_maintenance-state.json\n_pm-state.json\n_capability-drift-log.md\n!_close.lock.g1.done\n');
+    assert.match(ensureStoreIgnores(root).join(), /leaves _close\.lock\* visible to git/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a .git that cannot be examined is unknown: the cache folder is refused and the check says it could not run', { skip: isWin }, async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
+  const { ensureLibDir } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
+  const root = project();
+  writeFileSync(join(root, '_memories', '.gitignore'), '# mine\n');
+  const orig = fs.lstatSync;
+  fs.lstatSync = (p, ...a) => { if (String(p) === join(root, '.git')) throw Object.assign(new Error('injected'), { code: 'EIO' }); return orig(p, ...a); };
+  syncBuiltinESMExports();
+  try {
+    assert.match(ensureStoreIgnores(root).join(), /could not check/);
+    assert.throws(() => ensureLibDir(root), (e) => e.code === 'cache-tracking-unknown');
+  } finally { fs.lstatSync = orig; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
 });

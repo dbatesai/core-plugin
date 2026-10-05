@@ -13,6 +13,15 @@ import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const HEADER = '# Written by CORE: its own working files in this folder, never project content.\n';
+// The names CORE actually writes for each rule: git is asked about these, so an exact exception a
+// user wrote for one of them is seen.
+const SAMPLES = {
+  '_close.lock*': ['_close.lock', '_close.lock.g1', '_close.lock.g1.done'], '._close.lock*': ['._close.lock.new-0'],
+  '.*.lock*': ['.decorate-graph.lock.g1.done', '.project-md-writer.lock.g1.done', '._close.lock.g1.new-0'],
+  '.*.tmp-*': ['._close-marker.json.tmp-1-1', '._maintenance-state.json.tmp-1-1'],
+  'round-*/': ['round-1/results-1.json', 'round-1/goldset.json'],
+};
+
 export const STORE_IGNORES = [
   ['_memories', ['_close.lock*', '._close.lock*', '.*.lock*', '.*.tmp-*', '_close-marker.json', '_maintenance-state.json', '_pm-state.json', '_capability-drift-log.md']],
   // Generated test rounds hold answer keys and run state: local evaluation, not project content.
@@ -60,9 +69,9 @@ export function ensureLibDir(projectRoot) {
     const rules = readFileSync(ignore, 'utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
     if (rules.at(-1) !== '*' || rules.some((r) => r.startsWith('!'))) refuse('cache-ignore-unsafe', 'its ignore file does not end in * or re-includes a file');
   }
-  let dotGit = null;
-  try { dotGit = lstatSync(join(projectRoot, '.git')); } catch { /* no repository of its own at the root */ }
-  if (dotGit) {
+  const repo = ownRepository(projectRoot);
+  if (repo === 'unknown') refuse('cache-tracking-unknown', 'the project\'s .git could not be examined');
+  if (repo === 'yes') {
     const r = spawnSync('git', ['-C', projectRoot, 'ls-files', '-z', '--', '_memories/_lib/'], { encoding: 'utf8', timeout: 3000, env: { ...gitEnv(), GIT_CEILING_DIRECTORIES: dirname(projectRoot) } });
     if (r.status !== 0) refuse('cache-tracking-unknown', 'git could not say whether it is tracked');
     if (r.stdout.split('\0').some((n) => n && n !== '_memories/_lib/.gitignore')) refuse('cache-tracked', 'git tracks files in it');
@@ -70,18 +79,35 @@ export function ensureLibDir(projectRoot) {
   return lib;
 }
 
-/** The rules whose files git would still show, judged by git itself with every rule in the repository.
- *  Outside a repository, or when git can't answer, nothing is reported. */
+/** 'yes' when the project has its own repository at its root, 'no' when it plainly doesn't, else 'unknown'. */
+function ownRepository(root) {
+  try { lstatSync(join(root, '.git')); return 'yes'; } catch (e) { return e.code === 'ENOENT' ? 'no' : 'unknown'; }
+}
+
+/**
+ * The rules whose files git would still show, asked of the project's own repository only (git is kept
+ * from looking above the project). Without a repository at the project root nothing is checked: a
+ * repository above the project is not consulted, which is a stated limit, not a finding of "ignored".
+ * The ignore file is examined before it is read, and a failure to check is reported, never read as clean.
+ */
 function visibleToGit(root, rel, dir, rules) {
-  try { if (readFileSync(join(dir, '.gitignore'), 'utf8').startsWith(HEADER)) return []; } catch { return []; }
-  const env = gitEnv();
-  const visible = [];
-  for (const rule of rules) {
-    const sample = `${rel}/${rule.replace(/\*/g, 'x').replace(/\/$/, '/x')}`;
-    const r = spawnSync('git', ['-C', root, 'check-ignore', '-q', '--no-index', sample], { env, timeout: 3000 });
-    if (r.status === 1) visible.push(rule);
-  }
-  return visible;
+  const repo = ownRepository(root);
+  if (repo === 'no') return [];
+  if (repo === 'unknown') return ['(could not check: the project\'s .git could not be examined)'];
+  try {
+    const st = lstatSync(join(dir, '.gitignore'));
+    if (st.isSymbolicLink() || !st.isFile() || st.nlink !== 1) return ['(its .gitignore is a link, a second name or not a file, so git does not use it as written)'];
+    // Exactly the file CORE writes: a folder's own rules decide for its files, so nothing above can undo them.
+    if (readFileSync(join(dir, '.gitignore'), 'utf8') === HEADER + rules.join('\n') + '\n') return [];
+  } catch (e) { return [`(could not check: ${e.code})`]; }
+  const samples = rules.flatMap((rule) => (SAMPLES[rule] || [rule]).map((n) => [rule, `${rel}/${n}`]));
+  const r = spawnSync('git', ['-C', root, 'check-ignore', '--no-index', '-z', '--stdin'], {
+    input: samples.map(([, p]) => p).join('\0') + '\0', encoding: 'utf8', timeout: 3000,
+    env: { ...gitEnv(), GIT_CEILING_DIRECTORIES: dirname(root) },
+  });
+  if (r.status !== 0 && r.status !== 1) return [`(could not check: git ${r.status ?? r.error?.code ?? 'failed'})`];
+  const ignored = new Set(r.stdout.split('\0').filter(Boolean));
+  return [...new Set(samples.filter(([, p]) => !ignored.has(p)).map(([rule]) => rule))];
 }
 
 /** Problems found, as short strings; empty when every rule file is in place. Never throws. */
