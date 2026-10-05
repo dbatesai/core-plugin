@@ -245,7 +245,7 @@ export function writeLiveState(path, {
   grantBasis = null, now = () => new Date(), home = requireTrustedHome(),
 } = {}) {
   // A path kept from before the state folder was renamed would recreate `.core` beside `_core`.
-  if (String(path).split(/[\\/]/).includes(LEGACY_STATE_DIRNAME)) throw new Error(`live-state path refused: the path is inside an older ${LEGACY_STATE_DIRNAME} folder; resolve it again with index-registry.mjs path`);
+  if (String(path).split(/[\\/]/).includes(LEGACY_STATE_DIRNAME)) throw Object.assign(new Error(`not stored: the live-state path is inside a .core folder; resolve it again with index-registry.mjs path`), { code: "STATE_NO_PROJECT_PLACE" });
   if (!artifactUrl) throw new Error('--write-live-state requires --artifact-url');
   if (!WATCH_SCOPES.includes(scope)) throw new Error(`--write-live-state requires --scope ${WATCH_SCOPES.join('|')}`);
   if (!baselineSnapshot) throw new Error('--write-live-state requires --baseline-snapshot');

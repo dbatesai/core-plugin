@@ -1114,7 +1114,7 @@ test('a live-state path inside an older .core is refused rather than recreating 
   const { join } = await import('node:path');
   const base = mkdtempSync(join(tmpdir(), 'live-old-'));
   try {
-    assert.throws(() => writeLiveState(join(base, '.core', 'claude-code', 'memory-view-live.json'), {}), /older \.core folder/);
+    assert.throws(() => writeLiveState(join(base, '.core', 'claude-code', 'memory-view-live.json'), {}), /inside a \.core folder/);
     assert.equal(existsSync(join(base, '.core')), false);
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
