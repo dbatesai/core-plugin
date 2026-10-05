@@ -448,7 +448,7 @@ test('renderReport: never claims retrieval regression or user benefit inside the
 // checkCalibrationPool — the integration point with calibrate-classifier.mjs.
 // ---------------------------------------------------------------------------
 
-test('checkCalibrationPool: a fresh project/home with no calibration state fails open to labeled_count 0', () => {
+test('checkCalibrationPool: a fresh project/home with no calibration state reports unavailable with labeled_count 0', () => {
   const root = mkdtempSync(join(tmpdir(), 'core-metrics-check-cal-'));
   try {
     const project = join(root, 'proj');
@@ -456,7 +456,8 @@ test('checkCalibrationPool: a fresh project/home with no calibration state fails
     mkdirSync(project, { recursive: true });
     mkdirSync(home, { recursive: true });
     const r = checkCalibrationPool(project, { home });
-    assert.equal(r.available, true);
+    assert.equal(r.available, false);
+    assert.match(r.reason, /trusted calibration/);
     assert.equal(r.labeled_count, 0);
     assert.equal(r.min_needed, 100);
     assert.equal(r.is_calibrated, false);

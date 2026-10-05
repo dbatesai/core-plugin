@@ -35,7 +35,7 @@ import {
 import { createHash, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { todayUTC, operationalMetricsDir } from './log-event.mjs';
+import { todayUTC, operationalMetricsDir, trustedMetricsDir } from './log-event.mjs';
 import { atomicWriteFileSync } from './fs-atomic.mjs';
 import { CLASSIFIER_VERSION, PROXY_VERSION, CLASSIFIED_SCHEMA_VERSION } from './classify-turns.mjs';
 import { isCliEntry } from './cli-entry.mjs';
@@ -563,11 +563,13 @@ export function importLabels({ worksheetFile, metaDir, minLabeled = MIN_LABELED 
  */
 export function readinessReport({ project, home = homedir(), env = process.env }) {
   const minLabeled = resolveMinLabeled(project);
-  const metaDir = operationalMetricsDir(project, { home, env });
-  const classifiedDir = join(metaDir, 'classified');
-  const state = readCalibrationState(metaDir);
-  const turns = collectClassifiedTurns(classifiedDir, minLabeled + 50);
+  const metaDir = trustedMetricsDir(project, { home, env });
+  const classifiedDir = metaDir ? join(metaDir, 'classified') : null;
+  const state = metaDir ? readCalibrationState(metaDir) : emptyCalibrationState();
+  const turns = classifiedDir ? collectClassifiedTurns(classifiedDir, minLabeled + 50) : [];
   return {
+    available: Boolean(metaDir),
+    ...(metaDir ? {} : { reason: 'No trusted calibration data is available.' }),
     is_calibrated: state.is_calibrated,
     provisional: state.provisional,
     pool_size: turns.length,
@@ -575,7 +577,7 @@ export function readinessReport({ project, home = homedir(), env = process.env }
     ready_to_label: turns.length >= minLabeled,
     overall_precision: state.overall_precision,
     labeled_count: state.labeled_count,
-    notes: state.notes,
+    notes: metaDir ? state.notes : 'No trusted calibration data is available.',
     metaDir,
     classifiedDir,
   };

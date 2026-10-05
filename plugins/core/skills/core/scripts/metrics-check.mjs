@@ -216,7 +216,8 @@ export function checkCalibrationPool(project, { home = homedir() } = {}) {
   try {
     const r = readinessReport({ project, home });
     return {
-      available: true,
+      available: r.available,
+      ...(r.reason ? { reason: r.reason } : {}),
       labeled_count: r.labeled_count,
       min_needed: r.min_needed,
       is_calibrated: r.is_calibrated,
