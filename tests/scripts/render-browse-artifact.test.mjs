@@ -14,7 +14,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync, cpSync, statSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename, sep } from 'node:path';
@@ -1147,5 +1147,38 @@ test('a cache nested inside _core/_scratch/ gets the scratch ignore file before 
   try {
     ensureScratchFor(root, join(root, '_core', '_scratch', 'nested', 'metrics-cache.json'));
     assert.equal(readFileSync(join(root, '_core', '_scratch', '.gitignore'), 'utf8'), '*\n');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a metrics cache outside the project, or reached through a folder that links outside, is refused before anything is read or written', { skip: process.platform === 'win32' }, async () => {
+  const { root } = fixtureProject();
+  const outside = mkdtempSync(join(tmpdir(), 'cache-outside-'));
+  try {
+    let ran = 0;
+    const provider = async () => { ran += 1; return { report: 'R', mechanics: { status: 'ok' } }; };
+    for (const cache of [join(outside, 'c.json'), (symlinkSync(outside, join(root, 'alias')), join(root, 'alias', 'c.json'))]) {
+      await assert.rejects(() => resolveMetricsForRender(root, { metricsProvider: provider, metricsCachePath: cache, generatedAt: '2026-10-05T00:00:00.000Z' }), (e) => e.code === 'CACHE_OUTSIDE_PROJECT');
+    }
+    assert.equal(ran, 0);
+    assert.deepEqual(readdirSync(outside), []);
+    const inside = join(root, '_core', '_scratch', 'c.json');
+    mkdirSync(join(root, '_core', '_scratch'), { recursive: true });
+    await resolveMetricsForRender(root, { metricsProvider: provider, metricsCachePath: inside, generatedAt: '2026-10-05T00:00:00.000Z' });
+    assert.equal(statSync(inside).mode & 0o777, 0o600);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+});
+
+rtest('the renderer makes the scratch ignore file before a nested cache is written', async () => {
+  const { root, home } = fixtureProject();
+  try {
+    const ignore = join(root, '_core', '_scratch', '.gitignore');
+    let seen = null;
+    await renderBrowseArtifact(root, {
+      outPath: join(root, '_core', '_scratch', 'view.html'), home,
+      metricsCachePath: join(root, '_core', '_scratch', 'nested', 'metrics-cache.json'),
+      metricsProvider: async () => { seen = existsSync(ignore); return { report: 'R', mechanics: { status: 'ok' } }; },
+    });
+    assert.equal(seen, true, 'the ignore file was there before the cache write');
+    assert.ok(existsSync(join(root, '_core', '_scratch', 'nested', 'metrics-cache.json')));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

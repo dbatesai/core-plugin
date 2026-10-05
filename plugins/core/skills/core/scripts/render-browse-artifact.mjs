@@ -99,7 +99,7 @@ import { loadSnapshot, stripGeneratedEdgesBlock, deriveSummary } from './generat
 import { parseFrontmatter, extractEdges } from './priority.mjs';
 import { gatherMetrics } from './metrics-check.mjs';
 import { truthfulProducerIdentity } from './artifact-provenance.mjs';
-import { requireTrustedHome } from './trusted-home.mjs';
+import { requireTrustedHome, containedPath } from './trusted-home.mjs';
 import {
   PUBLISH_RECEIPT_SCHEMA_VERSION, PUBLISH_STATUSES, publishReceiptPathFor,
   recordPublishOutcome, recordRevocation, runRecordCli, generationReceiptLocation,
@@ -1425,6 +1425,11 @@ export async function resolveMetricsForRender(root, {
   if (metricsProvider === null) {
     return { available: false, reason: 'skipped by --no-metrics for this generation' };
   }
+  // The cache is this project's working state: it is read or written only where it really lies inside
+  // the project, judged on the real target, and never in the memory store.
+  if (metricsCachePath && (!containedPath(root, metricsCachePath) || containedPath(join(root, '_memories'), metricsCachePath))) {
+    throw Object.assign(new Error(`--metrics-cache must really lie inside the project and outside _memories/ (${metricsCachePath})`), { code: 'CACHE_OUTSIDE_PROJECT' });
+  }
   if (metricsCachePath && existsSync(metricsCachePath)) {
     try {
       const cache = JSON.parse(readFileSync(metricsCachePath, 'utf8'));
@@ -1447,7 +1452,7 @@ export async function resolveMetricsForRender(root, {
           generated_at: generatedAt,
           report: m.report,
           mechanics_status: m.mechanics?.status ?? null,
-        }, null, 2) + '\n');
+        }, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
       } catch (e) {
         process.stderr.write(`render-browse-artifact: metrics cache write failed (${e && e.message}) — the page still carries the live metrics\n`);
       }
@@ -1647,7 +1652,7 @@ async function main(argv) {
     }
     return 0;
   } catch (e) {
-    if (e.code === 'OUT_REQUIRED' || e.code === 'BAD_SCOPE' || e.code === 'OUT_IN_STORE' || e.code === 'CACHE_IN_STORE') {
+    if (e.code === 'OUT_REQUIRED' || e.code === 'BAD_SCOPE' || e.code === 'OUT_IN_STORE' || e.code === 'CACHE_IN_STORE' || e.code === 'CACHE_OUTSIDE_PROJECT') {
       process.stderr.write(`render-browse-artifact: ${e.message}\n`);
       return 2;
     }

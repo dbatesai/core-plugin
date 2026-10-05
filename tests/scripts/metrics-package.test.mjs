@@ -756,3 +756,18 @@ test("with no --out the package lands in the project's _outputs/metrics-package/
     assert.deepEqual(readdirSync(join(home, 'Desktop')), []);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('the default destination is refused when _outputs links outside the project; nothing lands outside', { skip: process.platform === 'win32' }, async () => {
+  const { symlinkSync } = await import('node:fs');
+  const root = mkdtempSync(join(tmpdir(), 'mp-test-'));
+  const outside = mkdtempSync(join(tmpdir(), 'mp-outside-'));
+  try {
+    const home = makeFixtureHome(root);
+    const project = makeFixtureProject(root, { plant: true });
+    symlinkSync(outside, join(project, '_outputs'));
+    const result = runPackage([project, '--home', home]);
+    assert.equal(result.exit, 2);
+    assert.match(result.error, /not a real folder/);
+    assert.deepEqual(readdirSync(outside), []);
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); }
+});

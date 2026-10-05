@@ -58,6 +58,7 @@ import { isCliEntry } from './cli-entry.mjs';
 import { trustedMetricsDir } from './log-event.mjs';
 import { projectRootFor, detectStateHarness, readManifest, readRegisteredRoots, registryEntryPath } from './project-state.mjs';
 import { aggregateCalibration } from './calibrate-classifier.mjs';
+import { folderChain } from './store-ignores.mjs';
 
 export const SCHEMA_VERSION = '1.0.0';
 const SALT_FILE = 'salt';
@@ -1588,8 +1589,16 @@ export function runPackage(argv, { homeOverride } = {}) {
     // ship
     // Once leakage checks pass, retain recoverable staging until delivery is verified.
     retainStaging = true;
+    // The default lands in the project only when every folder on the way is a real folder in it.
+    const chain = flagsIn.out ? 'explicit' : folderChain(scratchProject, '_outputs/metrics-package');
+    if (chain !== 'explicit' && chain !== 'real' && chain !== 'absent') {
+      return Object.assign(result, { exit: 2, error: `default destination _outputs/metrics-package is not a real folder in the project (${chain}); pass --out` });
+    }
     const outDir = flagsIn.out ? resolve(flagsIn.out) : join(scratchProject, '_outputs', 'metrics-package');
     mkdirSync(outDir, { recursive: true });
+    if (chain === 'absent' && folderChain(scratchProject, '_outputs/metrics-package') !== 'real') {
+      return Object.assign(result, { exit: 2, error: 'default destination changed while it was being made; pass --out' });
+    }
     const stamp = generatedAt.replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
     let zipPath = join(outDir, `core-metrics-package-${stamp}.zip`);
     let suffix = 2;
