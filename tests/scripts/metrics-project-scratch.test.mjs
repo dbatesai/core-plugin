@@ -199,3 +199,13 @@ test('cleanup-error CLI preserves coverage and project warnings beside verified 
   assert.equal(r.thrown,undefined,JSON.stringify(r.thrown));assert.equal(r.result.status,2);assert.match(r.result.stdout,/coverage: 1\/1 project/);assert.match(r.result.stdout,/flag\[.*PROJECT\.md/);assert.match(r.result.stderr,/scratch retained:/);assert.equal(r.result.result.shipped.kind,'zip');assert.ok(fs.existsSync(r.result.result.shipped.path));assert.deepEqual(r.violations,[]);
  }finally{f.cleanup();}
 });
+
+test('actual --all CLI preserves explicit scratch, home and export paths containing spaces',()=>{
+ const f=fixture();try{
+  for(const [key,name] of [['root','project with spaces'],['home','home with spaces'],['out','exports with spaces']]){const path=join(f.base,name);fs.renameSync(f[key],path);f[key]=path;}
+  fs.writeFileSync(join(f.home,'.core','projects.json'),JSON.stringify([{path:f.root},{path:f.other}]));
+  const args=[fileURLToPath(new URL('metrics-package.mjs',scripts)),'--all','--scratch-project',f.root,'--home',f.home,'--out',f.out,'--json'];
+  const r=run(f,`const {spawnSync}=await import('node:child_process');const child=spawnSync(process.execPath,${JSON.stringify(args)},{encoding:'utf8',env:process.env});return {status:child.status,stdout:child.stdout,stderr:child.stderr,result:JSON.parse(child.stdout.slice(child.stdout.indexOf('{')))};`);
+  assert.equal(r.thrown,undefined,JSON.stringify(r.thrown));assert.ok([0,1].includes(r.result.status),r.result.stderr);assert.equal(r.result.result.coverage.length,2);assert.ok(r.result.stdout.includes('coverage: 2/2 project'));assert.ok(fs.existsSync(r.result.result.shipped.path));assert.ok(norm(r.result.result.shipped.path).startsWith(norm(f.out)+'/'));localAllocations(r,f.root);cleanScratch(f.root);assert.deepEqual(r.violations,[]);
+ }finally{f.cleanup();}
+});
