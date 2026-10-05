@@ -262,8 +262,10 @@ export function main(argv) {
   // dated folder is still somebody else's unit.
   const chain = [memoriesDir];
   const below = relative(memoriesDir, seedPath);
-  if (below && !below.startsWith('..') && !isAbsolute(below)) { let at = memoriesDir; for (const part of below.split(sep)) { at = join(at, part); chain.push(at); } }
-  else chain.push(seedPath);
+  // A seed that is not inside the store it is walked against is refused: its folders can't be checked
+  // from here, and its edges would steer a walk over a store it doesn't belong to.
+  if (!below || below.startsWith('..') || isAbsolute(below)) { process.stderr.write(`refused: seed ${seedPath} is not inside the store ${memoriesDir}\n`); return 3; }
+  { let at = memoriesDir; for (const part of below.split(sep)) { at = join(at, part); chain.push(at); } }
   for (const p of chain) {
     let st = null;
     try { st = lstatSync(p); } catch (e) { if (e.code !== 'ENOENT') { process.stderr.write(`refused: ${p} could not be checked (${e.code}); the walk stays in the folder it was given\n`); return 3; } }

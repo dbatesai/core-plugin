@@ -951,3 +951,20 @@ test('graph-walk: a seed under a linked dated folder is refused; in a project-on
     assert.deepEqual(r.violations, [], 'no outside folder was scanned');
   } finally { b.cleanup(); }
 });
+
+test('graph-walk refuses a seed that is not inside the store it is walked against', () => {
+  const GW = join(CORE, 'scripts/graph-walk.mjs');
+  const u = (id, edge) => `---\nid: ${id}\ntype: decision\nstatus: active\ncreated: 2026-10-01\nupdated: 2026-10-01\ntopics: [w]\nsources: [PROJECT.md]\n${edge ? `edges:\n  - { type: depends-on, target: ${edge} }\n` : ''}---\n${id} body.\n`;
+  const p = project({ withUnits: false });
+  try {
+    const mem = join(p.root, '_memories'); mkdirSync(mem); writeFileSync(join(mem, 'dc-2-neighbour.md'), u('dc-2-neighbour'));
+    const out = join(p.base, 'elsewhere'); mkdirSync(out); writeFileSync(join(out, 'dc-3-seed.md'), u('dc-3-seed', 'dc-2-neighbour'));
+    for (const seed of [join(out, 'dc-3-seed.md'), join(mem, '..', '..', 'elsewhere', 'dc-3-seed.md')]) {
+      const r = confined(p.root, [GW, seed, '--memories', mem]);
+      assert.equal(r.status, 3, seed);
+      assert.match(r.stderr, /is not inside the store/);
+      assert.doesNotMatch(r.stdout, /dc-2-neighbour/, 'an outside seed did not drive a walk over this store');
+      assert.deepEqual(r.violations, [], 'and it was never probed');
+    }
+  } finally { p.cleanup(); }
+});
