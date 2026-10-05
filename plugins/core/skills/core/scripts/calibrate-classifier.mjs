@@ -638,9 +638,9 @@ export function readinessReport({ project, home = homedir(), env = process.env, 
   const available = Boolean(metaDir) && !failure;
   const reason = failure ? `Calibration evidence is unavailable (${failure}).`
     : !metaDir ? 'No trusted calibration data is available.' : null;
-  // The conclusion comes from every harness's own state, not from this harness's file alone.
+  // Counts are this harness's; the conclusion comes from every harness's own state, not this file alone.
   const gate = available ? aggregateCalibration(project, { home, env }) : null;
-  if (gate) state = { ...state, ...gate };
+  if (gate) state = { ...state, is_calibrated: gate.is_calibrated, provisional: gate.provisional, notes: gate.notes };
   return {
     available,
     ...(reason ? { reason } : {}),
