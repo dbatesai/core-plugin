@@ -172,7 +172,7 @@ export function startup(ctx, { now = new Date() } = {}) {
     status: 'ok', mode: 'project-only', root: ctx.root, harness: ctx.harness,
     agent_name: manifest.agent_name, manifest: manifest.state, capture: manifest.capture,
     automatic: 'off',
-    skipped: ['agent-profile', 'topics', 'native-recall', 'register', 'migration', 'drift-check', 'touch', 'capability-probe'],
+    skipped: ['agent-notes-import', 'native-recall', 'register', 'migration', 'drift-check', 'touch', 'capability-probe'],
   };
 }
 

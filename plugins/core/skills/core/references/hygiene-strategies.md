@@ -73,7 +73,7 @@ One firing cycle is a signal; two consecutive cycles is grounds to propose a DC 
 
 ## Phase 5: Agent Refresh
 
-Review agents that participated in recent swarms. Files at `~/.core/agents/<kebab-case-name>.md`. Check swarm effectiveness reports for patterns; update Identity, Analytical Lens, or Blind Spots for agents with consistent behavior. Retire underperformers to `~/.core/agents/retired/` rather than deleting — the config retains reference value. Annotate any `task-configs/` entries pointing at retired agents.
+Review agents that participated in recent swarms. Files at `<project>/.core/_agent/agents/<kebab-case-name>.md`. Check swarm effectiveness reports for patterns; update Identity, Analytical Lens, or Blind Spots for agents with consistent behavior. Retire underperformers to `<project>/.core/_agent/agents/retired/` rather than deleting — the config retains reference value. Annotate any `task-configs/` entries pointing at retired agents.
 
 ## Output
 

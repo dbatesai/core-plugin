@@ -102,7 +102,7 @@ const ruleRe = (rule) => new RegExp('^' + rule.replace(/\/$/, '').replace(/[.+^$
  */
 function visibleToGit(root, rel, dir, rules) {
   const repo = ownRepository(root);
-  if (repo === 'no' || repo === 'elsewhere') return [];
+  if (repo === 'no') return [];
   if (repo === 'unknown') return ['(could not check: the project\'s .git could not be examined)'];
   let text;
   try {
@@ -112,6 +112,7 @@ function visibleToGit(root, rel, dir, rules) {
   } catch (e) { return [`(could not check: ${e.code})`]; }
   // Exactly the file CORE writes: a folder's own rules decide for its files, so nothing above can undo them.
   if (text === HEADER + rules.join('\n') + '\n') return [];
+  if (repo === 'elsewhere') return ['(was not checked: the project\'s .git is a link or pointer file, and the repository it names is not consulted)'];
   const lines = text.split(/\r?\n/).map((l) => l.trim());
   const samples = rules.flatMap((rule) => (SAMPLES[rule] || [rule]).map((n) => [rule, `${rel}/${n}`]));
   // The CORE files already here, whatever their generation or round number.

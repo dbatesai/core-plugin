@@ -1,6 +1,6 @@
 # Research Document Schema
 
-The canonical shape for research documents persisted to `~/.core/research/`. The multi-agent analysis protocol at `protocols/analysis.md` (Research mode) produces documents in this shape.
+The canonical shape for research documents persisted to `<project>/_outputs/research/`. The multi-agent analysis protocol at `protocols/analysis.md` (Research mode) produces documents in this shape.
 
 ---
 
@@ -67,7 +67,7 @@ Four more sections are common but not required — include each when the researc
 
 ---
 
-## Library index (`~/.core/research/index.json`)
+## Library index (`<project>/_outputs/research/index.json`)
 
 ```json
 {

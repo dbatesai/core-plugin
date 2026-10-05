@@ -52,7 +52,7 @@ Critic is always present. Anti-anchoring discipline is non-negotiable regardless
 
 Hardware budget caps the upper end. From `protocols/execution.md`: ≥48GB → up to 6–8; ≥24GB → 4–5; <24GB → 2–3.
 
-Compose fresh personas for the task's specific shape. Saved compositions at `~/.core/agents/<name>.md` are starting points for continuity across multi-session work — reach for them when the value is recognizing the same agent across sessions, not as shortcuts when the right shape happens to share a name with a saved one. The lens framework in `agents/roles.md` is built for fresh composition; that's the primary practice.
+Compose fresh personas for the task's specific shape. Saved compositions at `<project>/.core/_agent/agents/<name>.md` are starting points for continuity across multi-session work — reach for them when the value is recognizing the same agent across sessions, not as shortcuts when the right shape happens to share a name with a saved one. The lens framework in `agents/roles.md` is built for fresh composition; that's the primary practice.
 
 Three starting templates ship at `templates/swarm-implement.md`, `templates/swarm-research.md`, and `templates/swarm-review.md` — roster skeletons plus briefing scaffolds for the three common shapes in the sizing table above. `references/refinement-strategies.md` catalogs refinement dispositions for when a first composition isn't converging. Both are seed material, same status as saved compositions: starting points, never verbatim.
 
@@ -165,7 +165,7 @@ When the task is research-primary (investigation, document synthesis, comparativ
 
 **Source quality classification.** Every cited claim carries the credibility of its source. The formality spectrum (per `agents/base-protocol.md`): formal (RFCs, design specs, approved comms) > semi-formal (tracked issues, recorded minutes) > informal (chat, 1:1s, unrecorded). Informal signal can direct attention; it cannot anchor claims about people in formal output.
 
-**Research library.** Outputs from investigation runs land in `~/.core/research/<topic>-<YYYY-MM-DD>.md` when they're generalizable across projects, or in `<project>/_outputs/` when they're project-specific. The split is one question: would this finding be useful on a different project? If yes, generalize and put it in `~/.core/research/`.
+**Research library.** Outputs from investigation runs land in `<project>/_outputs/research/<topic>-<YYYY-MM-DD>.md`, listed in that folder's `index.json`. CORE keeps no research library outside the project. Older documents in `~/.core/research/` are copied in only when the user asks (`import-agent-notes.mjs --research`), because that library mixes every project's work.
 
 **Provenance discipline.** Every research document carries `sources:`, `sensitivity:` (public/internal/restricted), and `derived-from-restricted:` (true/false) in frontmatter. Sensitivity inherits from source material. If a finding is supported only by informal sources, name it as such — don't fill the gap with an informal attribution.
 
@@ -230,7 +230,7 @@ Once accepted:
 2. Write the review-finding unit at `<project>/_memories/rf-<topic>-<YYYY-MM-DD>.md` with edges to implicated files.
 3. Append the effectiveness narrative to `<durable>/swarm-narrative.md` (path from `index-registry.mjs path --kind durable`) only on successful nonempty absolute path resolution. If refused, retain the narrative in the in-project effectiveness report and mark the operational append not stored; do not create a fallback.
 4. Write the effectiveness report at `<project>/_outputs/swarm-effectiveness/<YYYY-MM-DD>.md` per `protocols/hygiene.md §"Self-evolution — hygiene and post-analysis learning"`.
-5. Promote generalizable insights to `~/.core/research/` (research mode) or `~/.core/agents/` + `~/.core/task-configs/` (compositional patterns).
+5. Save research to `<project>/_outputs/research/` (research mode) and compositional patterns to `<project>/.core/_agent/agents/` + `<project>/.core/_agent/task-configs/`.
 6. Update `PROJECT.md` if the synthesis produced new decisions, risks, or moves.
 7. Verify the writes landed before freeing anything: the synthesis, the review-finding unit, the effectiveness report, and any successfully resolved swarm-narrative append must exist on disk with non-zero size; a refused operational append must be explicitly recorded as not stored in the effectiveness report (check each materialized file and the explicit refusal note). A write can fail silently — disk full, permission, a bad path — and after TeamDelete the content is unrecoverable. On any missing or empty file, surface the error and retry the write; don't TeamDelete until every required output or explicitly recorded refusal checks out.
 8. TeamDelete to free the context.

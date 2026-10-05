@@ -64,7 +64,8 @@ Four CORE surfaces, four responsibilities. Don't mix them. Harness-local recall 
 
 - **Project operational state** — `<project>/.core/<harness>/` — how you've been working on this project: the manifest (`workspace.json`, with your `agent_name` for the project), last-active, the bootstrap record, capability history, derived metrics, artifact receipts, drafts. One subfolder per harness, so two harnesses on one folder never write the same file. The folder carries its own `*` `.gitignore`, so git ignores it by default (a force-added file is committable, but CORE does not trust a tracked state file), and it's trusted only when its `stamp` verifies against this install's secret — state that arrives in a clone or download is set aside unread. It stays in the project even when the folder syncs (OneDrive, iCloud Drive, Dropbox, Google Drive). A read-only folder, a fenced migration or another install's project refuses new operational payload. Copies an older version left under `~/.core/local/` remain read-only history, named in disclosure and explicit purge planning; they are not silently moved or deleted. Every path goes through `scripts/project-state.mjs`; never build one by hand. None of this holds project facts.
 
-- **Agent operational meta** — `~/.core/` — only what serves every project. `agent-profile.md` is your cross-project home (legacy installs: `dm-profile.md` until the startup migration renames it). `projects.json` lists the registered project roots. `topics.md` is the controlled vocabulary. `state-cache.json` is the edit-detection cache for cross-project files. `install-secret` and `install-id` sign project state. None of this holds project facts.
+- **Agent notes** — `<project>/.core/_agent/` — `agent-profile.md` (personality and the user model), `topics.md` (controlled vocabulary), saved `agents/` and `task-configs/`. Git-ignored. Copied once from the older shared `~/.core` folder by `import-agent-notes.mjs`; never read from there again.
+- **Install keys and registry** — `~/.core/` — `install-secret` and `install-id` sign project state; `projects.json` (and the legacy `index.json`) lists the registered project roots; `local/<key>/` keeps only the adoption-consent records. The older `state-cache.json`, `agent-profile.md`, `topics.md`, `agents/`, `task-configs/` and `research/` there are read-only history. None of this holds project facts.
 
 - **Skill product** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace install) or `~/.claude/skills/core/` (legacy direct install) — the installed skill. Read-only at runtime. Writes here require declared `intent: skill-edit`.
 
@@ -131,7 +132,7 @@ during weekly sync.
 
 Location: `<project>/_memories/observations/<YYYY-MM>/obs-<timestamp>-<slug>.md`. Date-organized for browsability — observations are high-volume; flat-with-prefix at the unit-store root would overwhelm. This is the explicit observation exception to the flat-layout rule.
 
-You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `~/.core/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, add it yourself and narrate it. When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
+You auto-extract `references-person` and `references-topic` at write time using the topic vocabulary at `<project>/.core/_agent/topics.md` plus your own judgment. If you encounter a person or topic not in the vocabulary, add it yourself and narrate it. When you assign `confidence-level` on an observation, the pattern catalog at `references/confidence-assignment-guide.md` is the reference — the sourced / inferred / reconstructed call is the same whether an extractor or you is making it.
 
 ### External-source observations — three-layer filtering
 
@@ -143,7 +144,7 @@ Observations from external sources (Teams, SharePoint, Jira, Confluence, Figma, 
 | 2. In-memory cheap filter | Pull subagent context | Haiku | No |
 | 3. Relevance judgment + extraction | Relevance subagent | Sonnet (default), Opus (multi-session context calls) | **Yes** — only here |
 
-**Layer 1** is critical for high-volume sources. The pull subagent never asks Teams for all messages — it queries with parameters informed by project context: topic vocabulary from `~/.core/topics.md`, relevant keywords from current units, time scope, channel/space/project scope. The MCP query is shaped by what the project cares about *before* anything transfers.
+**Layer 1** is critical for high-volume sources. The pull subagent never asks Teams for all messages — it queries with parameters informed by project context: topic vocabulary from `<project>/.core/_agent/topics.md`, relevant keywords from current units, time scope, channel/space/project scope. The MCP query is shaped by what the project cares about *before* anything transfers.
 
 **Layer 2** runs entirely in the pull subagent's context. Keyword + topic-vocabulary scan; drops obvious misses. Nothing written.
 
@@ -541,14 +542,14 @@ Multiple agents can run startup and `/finalize` at the same time. The rules, per
   serialize the read-modify-write under `<project>/_memories/_lib/.state-cache.lock` (an
   unlocked stamp loses writes under concurrent processes). No stamp writes the older global cache or
   takes a lock beside it.
-- **`agent-profile.md`, `topics.md`** — rare, usually interactive writes. Atomic
+- **`.core/_agent/agent-profile.md`, `.core/_agent/topics.md`** — rare, usually interactive writes. Atomic
   write-temp-then-rename stays mandatory; if the file changed under you mid-session, re-read,
   merge your entry into the fresh copy, and narrate the collision in one line.
 - **Lock order (deadlock prevention):** a per-project lock (e.g. the close pass's
   `_close.lock`) is always taken BEFORE any global `~/.core/` lock, never after.
-- A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace —
-  `~/.core/<wrapper>/` — and must not write `projects.json`, `index.json`, `state-cache.json`,
-  `agent-profile.md`, or `topics.md`.
+- A co-installed wrapper (e.g. bblens-plugin) writes only under its own sub-namespace in the
+  project — `<project>/.core/<wrapper>/` — and must not write `~/.core`, CORE's harness folders,
+  or `.core/_agent/`.
 
 Accepted residual, named: a crashed writer's lock stalls registry writes for the stale window
 (10–30 min) — availability, not data loss. And if `~/.core` lands on a virtualized/synced path
@@ -559,7 +560,7 @@ treats that as "couldn't acquire" and retries, never crashes.
 
 ## Topic vocabulary
 
-`~/.core/topics.md` holds the controlled vocabulary. Currently 18 tags. You evolve the vocabulary during runs — add tags as units accumulate.
+`<project>/.core/_agent/topics.md` holds the controlled vocabulary. Currently 18 tags. You evolve the vocabulary during runs — add tags as units accumulate.
 
 Each addition is appended to a changelog at the top of the file:
 
@@ -581,7 +582,7 @@ When you write an observation that references a person, topic, or deliverable th
 **Stub creation triggers:**
 
 - Observation's `references-person` field names someone with no `who-<slug>.md` unit.
-- Observation's `references-topic` field uses a tag that doesn't have a `topic-<slug>.md` unit (the topic itself may already exist in `~/.core/topics.md`; the unit holds the substantive description).
+- Observation's `references-topic` field uses a tag that doesn't have a `topic-<slug>.md` unit (the topic itself may already exist in `<project>/.core/_agent/topics.md`; the unit holds the substantive description).
 - Observation mentions a deliverable (named work product, milestone, named artifact) with no `del-<slug>.md` unit.
 
 **Stub frontmatter (minimal — graduate later):**
@@ -634,7 +635,7 @@ The anti-resurrection rule fires. You don't re-promote the retired unit. A genui
 
 ### Cross-project drift (different projects, same fact, different framings)
 
-You don't auto-reconcile across projects. The cross-project store is `~/.core/research/` for shared knowledge; `agent-profile.md` is cross-project patterns only. Project facts stay in their project. If the user switches projects mid-conversation and starts referencing facts from a different project, surface the project-switch and either context-shift to the other project or ask the user to restate the relevant facts.
+You don't auto-reconcile across projects. Each project keeps its own research and profile; nothing reads another project's copy. Project facts stay in their project. If the user switches projects mid-conversation and starts referencing facts from a different project, surface the project-switch and either context-shift to the other project or ask the user to restate the relevant facts.
 
 ### No-response-inference default
 
@@ -740,6 +741,7 @@ Three rings, one read at runtime.
 ├── docs/                          ← architecture, explainers (user surface)
 ├── .claude/                       ← harness config + scripts
 └── .core/                         ← CORE operational state (self-ignored: `.gitignore` = `*`)
+    ├── _agent/                    ← agent-profile.md, topics.md, agents/, task-configs/, import-receipt.json
     └── <harness>/                 ← one per harness: claude-code, codex, …
         ├── stamp                  ← provenance: HMAC of (path, harness, install id)
         ├── workspace.json         ← manifest: project_id, agent_name, disclosure flags, opt-outs
@@ -758,15 +760,13 @@ Three rings, one read at runtime.
 
 ```
 ~/.core/
-├── agent-profile.md               ← cross-project personality, portfolio observations
 ├── projects.json                  ← registered project roots (auto-close trust anchor)
 ├── install-secret, install-id     ← sign and identify this install's project state
-├── topics.md                      ← controlled vocabulary
-├── state-cache.json               ← edit-detection hashes for cross-project files
-├── local/<root-slug>/<harness>/   ← project state that must stay on this disk (synced, read-only, or another install's)
+├── local/<key>/                   ← adoption-consent records only; older project state here is read-only history
+├── migration-manifest.json        ← the migration's record of the legacy workspaces/ folders
 ├── index.json, workspaces/<id>/   ← legacy layout; read by the migration, never written for new projects
-├── research/                      ← cross-project knowledge library
-└── <wrapper>/                     ← co-installed wrapper sub-namespace (writes only here — never the shared files above)
+└── agent-profile.md, topics.md, agents/, task-configs/, research/, state-cache.json
+                                   ← older shared copies; read-only history, copied into a project once
 ```
 
 **Skill ring** — `${CLAUDE_PLUGIN_ROOT}/skills/core/` (marketplace) or `~/.claude/skills/core/` (legacy direct install)

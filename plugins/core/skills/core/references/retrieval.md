@@ -23,7 +23,7 @@ The agent checks these in order and stops as soon as the answer is sufficient. E
 
 ### Tier 0 — Already loaded
 
-At session start, `<project>/PROJECT.md` and `~/.core/agent-profile.md` are read. Files Read this session are in context. If the answer is there, no further retrieval happens. This is free.
+At session start, `<project>/PROJECT.md` and `<project>/.core/_agent/agent-profile.md` are read. Files Read this session are in context. If the answer is there, no further retrieval happens. This is free.
 
 **When to escalate:** The question references a fact or unit not visible in PROJECT.md or recently-read files.
 

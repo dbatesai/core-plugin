@@ -26,7 +26,7 @@ export function projectArtifactRoot(projectRoot) {
   return realpathSync(path);
 }
 export function ensureProjectArtifactDir(projectRoot, kind) {
-  if (!['_hooks', '_scratch', '_package'].includes(kind)) refuse();
+  if (!['_hooks', '_scratch', '_package', '_agent'].includes(kind)) refuse();
   return ensureGeneratedDir(projectRoot, ['.core', kind]);
 }
 

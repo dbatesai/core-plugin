@@ -334,7 +334,7 @@ test('a later lock generation or round re-included by the user is seen: present 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('a .git that is a link or a pointer file keeps its repository outside: git is not run and the cache folder is not refused', { skip: isWin }, async () => {
+test('a .git that is a link or a pointer file keeps its repository outside: git is not run, a custom ignore file is reported as not checked, and the cache folder is not refused', { skip: isWin }, async () => {
   const { symlinkSync, chmodSync } = await import('node:fs');
   const { ensureLibDir } = await import('../../plugins/core/skills/core/scripts/store-ignores.mjs');
   for (const shape of ['link', 'pointer file']) {
@@ -351,8 +351,11 @@ test('a .git that is a link or a pointer file keeps its repository outside: git 
     const path = process.env.PATH;
     try {
       process.env.PATH = `${bin}:${path}`;
-      assert.deepEqual(ensureStoreIgnores(root), [], shape);
+      assert.deepEqual(ensureStoreIgnores(root), ["_memories/.gitignore was not checked: the project's .git is a link or pointer file, and the repository it names is not consulted"], shape);
       assert.ok(ensureLibDir(root), `${shape}: the cache folder is made`);
+      rmSync(join(root, '_memories', '.gitignore'));
+      assert.deepEqual(ensureStoreIgnores(root), [], `${shape}: CORE's own file needs no repository to decide`);
+      assert.deepEqual(ensureStoreIgnores(root), [], `${shape}: and stays quiet once written`);
       assert.equal(existsSync(marker), false, `${shape}: git was never run against the outside repository`);
     } finally { process.env.PATH = path; rmSync(root, { recursive: true, force: true }); rmSync(outside, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true }); }
   }

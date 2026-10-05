@@ -338,6 +338,13 @@
       "surface": "shipped"
     },
     {
+      "name": "import-agent-notes",
+      "kind": "script",
+      "harness": "shared",
+      "path": "skills/core/scripts/import-agent-notes.mjs",
+      "surface": "shipped"
+    },
+    {
       "name": "index-registry",
       "kind": "script",
       "harness": "shared",
