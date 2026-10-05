@@ -1,11 +1,12 @@
 /**
  * CORE's own working files inside a project's memory store stay out of git. Each writer that
- * creates one calls ensureStoreIgnores first, so a project gets the rules even if startup never ran.
+ * creates one calls ensureStoreIgnores before its first write there (after creating the folder), so a
+ * project gets the rules even if startup never ran.
  *
  * Written only when absent, and never edited: an ignore file the user already has is theirs.
  * Canonical content (units, PROJECT.md, INDEX-*.md, inbox.md) is never matched.
  */
-import { lstatSync, mkdirSync, writeFileSync } from 'node:fs';
+import { lstatSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const HEADER = '# Written by CORE: its own working files in this folder, never project content.\n';
@@ -23,11 +24,8 @@ export function ensureStoreIgnores(projectRoot) {
     const dir = join(projectRoot, ...rel.split('/'));
     try {
       let st;
-      try { st = lstatSync(dir); } catch (e) {
-        if (e.code !== 'ENOENT' || rel === '_memories') { if (e.code !== 'ENOENT') problems.push(`${rel}: ${e.code}`); break; }
-        mkdirSync(dir);   // _lib, inside a store already checked as a real folder
-        st = lstatSync(dir);
-      }
+      // A folder that doesn't exist yet gets its rules when its own writer creates it.
+      try { st = lstatSync(dir); } catch (e) { if (e.code !== 'ENOENT') problems.push(`${rel}: ${e.code}`); break; }
       if (st.isSymbolicLink() || !st.isDirectory()) { problems.push(`${rel} is not a real folder`); break; }
       writeFileSync(join(dir, '.gitignore'), HEADER + rules.join('\n') + '\n', { flag: 'wx' });
     } catch (e) {

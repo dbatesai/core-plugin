@@ -63,6 +63,7 @@ test("a store's existing .gitignore is left byte-identical, and a second call ch
   try {
     const mine = '# mine\n!keep-this.json\n';
     writeFileSync(join(root, '_memories', '.gitignore'), mine);
+    mkdirSync(join(root, '_memories', '_lib'));
     assert.deepEqual(ensureStoreIgnores(root), []);
     assert.equal(readFileSync(join(root, '_memories', '.gitignore'), 'utf8'), mine);
     const lib = readFileSync(join(root, '_memories', '_lib', '.gitignore'), 'utf8');
@@ -77,6 +78,10 @@ test('no store, nothing written; a store that is a link is reported, not written
   try {
     assert.deepEqual(ensureStoreIgnores(root), []);
     assert.equal(existsSync(join(root, '_memories')), false);
+    mkdirSync(join(root, '_memories'));
+    assert.deepEqual(ensureStoreIgnores(root), []);
+    assert.equal(existsSync(join(root, '_memories', '_lib')), false, 'no _lib is created by the rules alone');
+    rmSync(join(root, '_memories'), { recursive: true });
     mkdirSync(join(root, 'elsewhere'));
     symlinkSync(join(root, 'elsewhere'), join(root, '_memories'));
     assert.match(ensureStoreIgnores(root).join(), /not a real folder/);

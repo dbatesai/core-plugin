@@ -166,8 +166,8 @@ export function recordSessionStart(projectDir, { sessionId = null, now = new Dat
   const inv = { session: sessionId, started_at: now, paths: inventoryPaths(projectDir) };
   const path = sessionInventoryPath(projectDir);
   assertStoreBoundary(projectDir);
-  ensureStoreIgnores(resolve(projectDir));
   mkdirSync(dirname(path), { recursive: true });
+  ensureStoreIgnores(resolve(projectDir));
   atomicWriteFileSync(path, JSON.stringify(inv, null, 2) + '\n');
   return inv;
 }

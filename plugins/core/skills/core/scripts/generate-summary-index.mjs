@@ -242,8 +242,8 @@ export function loadFreshIndex(storePath) {
       }
     } catch { /* fall through to regenerate */ }
   }
-  ensureStoreIgnores(root);
   mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
+  ensureStoreIgnores(root);
   atomicWriteFileSync(indexPath, JSON.stringify(current, null, 2) + '\n');
   return current;
 }
@@ -531,8 +531,8 @@ export function captureStore(storePath, { retainRaw = false, refreshCache = true
       let cached = null;
       try { cached = JSON.parse(readFileSync(libPath, 'utf8')); } catch { /* absent/corrupt */ }
       if (!cached || cached.incomplete || (cached.read_errors || []).length || cached.source_sig !== source_sig) {
-        ensureStoreIgnores(resolve(storePath));
         mkdirSync(join(memoriesDir, '_lib'), { recursive: true });
+        ensureStoreIgnores(resolve(storePath));
         atomicWriteFileSync(libPath, JSON.stringify(index, null, 2) + '\n');
       }
     } catch { /* cache refresh is a convenience; the capture itself is complete */ }

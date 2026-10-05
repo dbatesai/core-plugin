@@ -112,8 +112,8 @@ export function writeEnrichment(store, {
 
   const path = enrichmentSidecarPath(root);
   assertStoreBoundary(root);
-  ensureStoreIgnores(root);
   mkdirSync(join(root, '_memories', '_lib'), { recursive: true });
+  ensureStoreIgnores(root);
   // Load, mutate, and replace under one lock — the read is inside it, because a
   // snapshot taken outside the lock is already stale by the time it is written.
   withFileLock(enrichmentSidecarLockPath(root), () => {

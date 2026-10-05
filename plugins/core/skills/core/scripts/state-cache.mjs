@@ -497,8 +497,8 @@ export function stampFiles(projectDir, entries, { now } = {}) {
   const custody = cacheCustodyProblem(projectDir);
   if (custody) return { stamped: false, outcome: 'refused', recovery: 'recovery-required', reason: `cache-custody: ${custody}` };
   try {
-    ensureStoreIgnores(resolve(projectDir));
     mkdirSync(dirname(cachePath), { recursive: true });
+    ensureStoreIgnores(resolve(projectDir));
     const lockResult = withFileLock(join(dirname(cachePath), '.state-cache.lock'), () => {
       const cache = readProjectCache(projectDir);
       // A damaged baseline is preserved, never overwritten: the rebuild below
