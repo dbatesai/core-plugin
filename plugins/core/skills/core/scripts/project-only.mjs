@@ -242,6 +242,7 @@ export function purge(ctx, { apply = false } = {}) {
   const lock = acquireFileLock(lockPath, { extra: { mode: 'project-only', op: 'purge' }, machine: null });
   if (!lock.ok) return { status: 'refused', state: 'lock-held', reason: lock.reason };
   const removed = [];
+  let release = { released: false, reason: 'not-attempted' };
   try {
     for (const name of present) {
       const target = join(metrics, name);
@@ -250,7 +251,10 @@ export function purge(ctx, { apply = false } = {}) {
       rmSync(target, { recursive: true, force: true });   // removes a link found inside, never follows it
       if (existsSync(target)) refused.push({ path: `_metrics/${name}`, reason: 'still-present' }); else removed.push(`_metrics/${name}`);
     }
-  } finally { releaseFileLock(lockPath, lock.nonce); }
+  } finally { release = releaseFileLock(lockPath, lock.nonce); }
+  // The removal report stands either way. A lock that would not release is a failure of its own: it
+  // blocks later capture work, so it is never folded into a clean result.
+  if (!release.released) return { status: 'refused', state: 'lock-release-failed', applied: true, removed, refused, outside_history: 'unknown', lock: '_metrics/.turn-capture.lock', reason: `${release.reason}${release.error ? `: ${release.error}` : ''}`, recovery: 'the capture lock is still held; it clears when it ages past the stale window, or a normal session can release it' };
   return { ...base, applied: true, outcome: refused.length ? 'partly-purged-in-project' : removed.length ? 'purged-in-project' : 'nothing-in-project', removed, would_remove: [], refused };
 }
 
@@ -527,6 +531,9 @@ export function main(argv) {
     'finalize-record': (ctx) => finalizeRecord(ctx, { op: opt.op, opStatus: opt.status }),
   }[cmd];
   if (!run) return out({ status: 'refused', state: 'unknown-command', reason: `project-only supports startup, status, capture-status, purge, retention, process-memory, pickup, pickup-archive and finalize-begin|record|certify|finish, not ${cmd || '(none)'}` });
+  // A close and a pickup belong to one harness's folder. The caller knows which harness it is and must
+  // say so: a default would file one harness's close under another's name, where its own pickup never looks.
+  if (/^(finalize-|pickup)/.test(cmd) && !opt.harness) return out({ status: 'refused', state: 'harness-required', reason: `${cmd} needs --harness <name>` });
   const ctx = projectOnlyContext({ root: opt.root, harness: opt.harness || 'claude-code', session: opt.session || null, operation: cmd });
   if (!ctx.ok) return out({ status: 'refused', ...ctx });
   const result = run(ctx);

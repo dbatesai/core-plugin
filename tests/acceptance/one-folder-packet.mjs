@@ -113,7 +113,7 @@ for (const errno of ['EACCES', 'ENOENT']) {
     await step('hook-user-prompt-submit', 'hooks/retrieve-context-hook.mjs (UserPromptSubmit)', [join(CORE, 'hooks/retrieve-context-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: root, prompt: 'what color are the widgets', session_id: 'pk-1' }) , outcome: { exit: 0, emptyStdout: true } });
     await step('hook-session-end', 'hooks/close-pass-hook.mjs (SessionEnd)', [join(CORE, 'hooks/close-pass-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'SessionEnd', cwd: root, reason: 'other', session_id: 'pk-1' }) , outcome: { exit: 0, emptyStdout: true } });
     await step('hook-session-start', 'hooks/session-start-hook.mjs (SessionStart)', [join(CORE, 'hooks/session-start-hook.mjs')], 'confined', { input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: root, source: 'startup', session_id: 'pk-1' }) , outcome: { exit: 0, stdout: /project-only/i } });
-    for (const [i, a] of [['begin', ['finalize-begin', '--session', 'pk-1']], ['record-capture', ['finalize-record', '--session', 'pk-1', '--op', 'material-capture', '--status', 'done']], ['record-render', ['finalize-record', '--session', 'pk-1', '--op', 'render-project-md', '--status', 'done']], ['record-summary', ['finalize-record', '--session', 'pk-1', '--op', 'session-summary', '--status', 'done']], ['certify', ['finalize-certify', '--session', 'pk-1']], ['finish', ['finalize-finish', '--session', 'pk-1']]]) {
+    for (const [i, a] of [['begin', ['finalize-begin', '--harness', 'claude-code', '--session', 'pk-1']], ['record-capture', ['finalize-record', '--harness', 'claude-code', '--session', 'pk-1', '--op', 'material-capture', '--status', 'done']], ['record-render', ['finalize-record', '--harness', 'claude-code', '--session', 'pk-1', '--op', 'render-project-md', '--status', 'done']], ['record-summary', ['finalize-record', '--harness', 'claude-code', '--session', 'pk-1', '--op', 'session-summary', '--status', 'done']], ['certify', ['finalize-certify', '--harness', 'claude-code', '--session', 'pk-1']], ['finish', ['finalize-finish', '--harness', 'claude-code', '--session', 'pk-1']]]) {
       await step(`finalize-${i}`, `project-only.mjs ${a[0]}`, po(...a), 'confined', { outcome: { exit: 0, status: 'ok', files: i === 'certify' ? ['.core/_project-only/claude-code/close/receipts/pk-1.json'] : [] } });
     }
     await step('purge-dry-run', 'project-only.mjs purge', po('purge'), 'confined', { outcome: { exit: 0, status: 'ok', files: ['_metrics/turn-capture/2026-10-01.jsonl'], check: (j) => (j?.outcome === 'dry-run' && j.would_remove?.includes('_metrics/turn-capture') && j.outside_history === 'unknown' ? null : 'dry run report wrong') } });
@@ -122,11 +122,11 @@ for (const errno of ['EACCES', 'ENOENT']) {
     await step('process-memory-apply', 'project-only.mjs process-memory --apply', po('process-memory', '--apply'), 'confined', { outcome: { exit: 0, status: 'ok', files: ['_memories/INDEX-decisions.md', '_memories/INDEX-risks.md', '_memories/_lib/unit-summaries.json'], check: (j) => (j?.upkeep?.ran?.includes('summary-index') && j.not_run?.length === 5 && !existsSync(join(root, '_metrics/scorecard-log.jsonl')) ? null : 'indexes not regenerated, or derived metrics ran') } });
     await step('retention-dry-run', 'project-only.mjs retention', po('retention'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (['dry-run', 'nothing-in-project'].includes(j?.outcome) ? null : 'retention report wrong') } });
     for (const name of ['metrics', 'metrics-export', 'configure-project', 'memory-view']) await step(`unavailable-${name}`, `project-only.mjs ${name}`, po(name), 'confined', { outcome: { exit: 2, status: 'unavailable' } });
-    await step('pickup', 'project-only.mjs pickup (normal-session read)', po('pickup'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.pending === true && j.partial_closes?.[0]?.session_id === 'pk-1' && j.adopted?.completion === false ? null : 'pickup report wrong') } });
+    await step('pickup', '--harness', 'claude-code', 'project-only.mjs pickup (normal-session read)', po('pickup', '--harness', 'claude-code'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.pending === true && j.partial_closes?.[0]?.session_id === 'pk-1' && j.adopted?.completion === false ? null : 'pickup report wrong') } });
     // Unsupported in this mode: observed, not claimed. Each shows what still reaches outside the folder.
     await step('maintenance-run', 'maintenance-run.mjs <root> (housekeeping)', [join(CORE, 'scripts/maintenance-run.mjs'), root, '--json'], 'unsupported');
     await step('close-pass-detect', 'close-pass.mjs detect <root> (normal close bookkeeping)', [join(CORE, 'scripts/close-pass.mjs'), 'detect', root], 'unsupported');
-    await step('pickup-archive', 'project-only.mjs pickup-archive', po('pickup-archive'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.archived === true && !existsSync(join(root, '.core/_project-only/claude-code')) ? null : 'not archived') } });
+    await step('pickup-archive', '--harness', 'claude-code', 'project-only.mjs pickup-archive', po('pickup-archive', '--harness', 'claude-code'), 'confined', { outcome: { exit: 0, status: 'ok', check: (j) => (j?.archived === true && !existsSync(join(root, '.core/_project-only/claude-code')) ? null : 'not archived') } });
     // After pickup the automatic hooks are no longer suppressed: the same hook now goes on to look the
     // project up in the registry, which under this gate shows as an outside attempt.
     const post = await runConfined(root, errno, [join(CORE, 'hooks/retrieve-context-hook.mjs')], { input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', cwd: root, prompt: 'what color are the widgets', session_id: 'pk-2' }) });
@@ -167,9 +167,9 @@ for (const errno of ['EACCES', 'ENOENT']) {
       const res = [];
       const go = async (...a) => { const r = await runConfined(root, errno, [PO, ...a, '--session', session, '--root', root]); res.push(r); return JSON.parse(r.stdout); };
       await go('startup');
-      await go('finalize-begin'); held.owner = lockOwner(root);
-      for (const op of ['material-capture', 'render-project-md', 'session-summary']) await go('finalize-record', '--op', op, '--status', 'done');
-      const c = await go('finalize-certify'); const f = await go('finalize-finish');
+      await go('finalize-begin', '--harness', 'claude-code'); held.owner = lockOwner(root);
+      for (const op of ['material-capture', 'render-project-md', 'session-summary']) await go('finalize-record', '--harness', 'claude-code', '--op', op, '--status', 'done');
+      const c = await go('finalize-certify', '--harness', 'claude-code'); const f = await go('finalize-finish', '--harness', 'claude-code');
       return { certified: c.outcome, released: f.released, violations: res.flatMap((r) => r.violations || []), operations: res.reduce((n, r) => n + r.ops.length, 0) };
     };
     const bBefore = tree(B.root); const aBefore = tree(A.root);
@@ -195,8 +195,8 @@ const controls = [];
     controls.push({ id: 'N1-global-identity-lock-reintroduced', what: 'a lock taken without the no-identity declaration reads the install id', expected: 'violation on install-id', violations: c1.violations, result: c1.violations?.some((v) => v.path.endsWith('install-id')) ? 'pass (the packet would fail)' : 'FAIL (control did not trigger)' });
     const c2 = await probe(`import { readFileSync } from 'node:fs'; try { readFileSync(${JSON.stringify(join(home, '.core', 'install-id'))}); } catch {}`);
     controls.push({ id: 'N2-direct-home-read', what: 'code that reads ~/.core directly is recorded and refused', expected: 'violation on ~/.core', violations: c2.violations, result: c2.violations?.some((v) => v.path.includes('.core')) ? 'pass (the packet would fail)' : 'FAIL (control did not trigger)' });
-    await runConfined(root, 'EACCES', [PO, 'finalize-begin', '--session', 'n3a', '--root', root]);
-    const c3 = await runConfined(root, 'EACCES', [PO, 'finalize-begin', '--session', 'n3b', '--root', root]);
+    await runConfined(root, 'EACCES', [PO, 'finalize-begin', '--harness', 'claude-code', '--session', 'n3a', '--root', root]);
+    const c3 = await runConfined(root, 'EACCES', [PO, 'finalize-begin', '--harness', 'claude-code', '--session', 'n3b', '--root', root]);
     const j = JSON.parse(c3.stdout);
     controls.push({ id: 'N3-same-project-lock-separation', what: 'a second close on the same project is refused while the first holds the lock', expected: 'lock-held', observed: j.state, result: j.state === 'lock-held' ? 'pass (separation is real: the same project contends)' : 'FAIL' });
     // The hook rows above pass because the project-only folder makes the hooks exit first. Without that

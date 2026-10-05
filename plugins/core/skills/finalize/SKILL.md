@@ -18,15 +18,15 @@ Everything the old close did beyond that has a different home: memory maintenanc
 
 ## Project-only mode
 
-When the task includes the word **project-only** (`/finalize project-only`), close from the project folder alone. Use the same steps below, with these commands instead of `close-pass.mjs`, and a session id you already know. There's no transcript search in this mode; if you don't know the id, say so and stop.
+When the task includes the word **project-only** (`/finalize project-only`), close from the project folder alone. Use the same steps below, with these commands instead of `close-pass.mjs`, a session id you already know, and the name of the harness you are running in (`claude-code`, `codex`). Pass that same `--harness` to every command here: it is the one the project-only startup used, and each harness keeps its own record. There's no transcript search in this mode; if you don't know the id, say so and stop.
 
 ```bash
 [ -n "$CORE_ROOT" ] && [ -d "$CORE_ROOT/skills/core/scripts" ] && \
-node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" finalize-begin --root <project> --session <session-id> \
+node "${CORE_ROOT}/skills/core/scripts/project-only.mjs" finalize-begin --root <project> --harness <harness> --session <session-id> \
   || echo "CORE-PROJECT-ONLY-FAILED: CORE_ROOT is unresolved or begin refused (see its JSON)"
 ```
 
-Record `material-capture`, `render-project-md` (`done` or `skipped`) and `session-summary` as you finish each, with `project-only.mjs finalize-record --root <project> --session <id> --op <op> --status done|skipped|failed`. Skip Step 5's native memory refresh: the harness's own memory is outside the folder, and the op is already recorded `unavailable`. Then run `finalize-certify` and `finalize-finish` with the same `--root` and `--session`. Certification returns `outcome: partial` with `unavailable: ["memory-refresh"]`. Tell the user exactly that: the session's work is captured in the project, and the native memory refresh didn't run. Each step refuses a linked or substituted path, but it can't defend against another program running as the user that renames project folders during the step itself. The record stays in `.core/_project-only/`, so a later normal session still treats this session's close as owed.
+Record `material-capture`, `render-project-md` (`done` or `skipped`) and `session-summary` as you finish each, with `project-only.mjs finalize-record --root <project> --harness <harness> --session <id> --op <op> --status done|skipped|failed`. Skip Step 5's native memory refresh: the harness's own memory is outside the folder, and the op is already recorded `unavailable`. Then run `finalize-certify` and `finalize-finish` with the same `--root`, `--harness` and `--session`. A command run without `--harness` refuses with `harness-required`. Certification returns `outcome: partial` with `unavailable: ["memory-refresh"]`. Tell the user exactly that: the session's work is captured in the project, and the native memory refresh didn't run. Each step refuses a linked or substituted path, but it can't defend against another program running as the user that renames project folders during the step itself. The record stays in `.core/_project-only/`, so a later normal session still treats this session's close as owed.
 
 ## Step 1 — Begin: lock and owed-ops marker
 

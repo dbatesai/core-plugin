@@ -249,7 +249,8 @@ export function trustedMetricsDir(projectDir, { home = homedir(), env = process.
  *      It may be committed by the repo's owner, so it is untrusted, and an untrusted
  *      source can only ever switch capture off, never on.
  *   7. default → ON.
- * A failure while reading the project list or manifest (steps 2–6) → OFF.
+ * A failure while reading the project list or manifest → OFF on the default path. The explicit
+ * environment opt-in (step 3) is the user's own word and is decided before those reads.
  */
 export function metricsEnabled({ project, env = process.env, home = homedir() } = {}) {
   const flag = (env.CORE_METRICS_ENABLED || '').toString().toLowerCase();
@@ -257,7 +258,7 @@ export function metricsEnabled({ project, env = process.env, home = homedir() } 
   // Everything below reads the project list and the project's manifest. When one of those reads
   // fails (an unreadable or malformed project list), whether this project opted out is unknown,
   // and unknown is OFF: capture never proceeds on a guess.
-  try { return metricsEnabledFromState({ project, env, home, flag }); }
+  try { const on = metricsEnabledFromState({ project, env, home, flag }); metricsGateFailure = null; return on; }
   catch (e) {
     // OFF, and said once per process on stderr so the failure stays visible: a defect in this path
     // must not look like an ordinary opt-out.
@@ -267,7 +268,7 @@ export function metricsEnabled({ project, env = process.env, home = homedir() } 
   }
 }
 
-/** The reason the gate last failed to read project state in this process, or null. */
+/** Why the most recent gate call failed to read project state, or null when that call read it. */
 export let metricsGateFailure = null;
 let gateFailureSaid = false;
 
