@@ -1716,17 +1716,53 @@ test('a linked .core is left alone, and the project-only hint sees a folder not 
   } finally { s.cleanup(); }
 });
 
-test('a .core that cannot be renamed stores nothing new', { skip: isWin || isRoot }, () => {
+test('a .core that cannot be renamed stores nothing new', async () => {
+  const fs = (await import('node:fs')).default;
+  const { syncBuiltinESMExports } = await import('node:module');
   const s = sandbox();
   try {
     const p = s.mk('Projects', 'Stuck');
     registerProject(s.coreDir, p);
     updateManifest({ root: p, harness: H, coreDir: s.coreDir, fields: { agent_name: 'Plover' } });
     renameSync(join(p, '_core'), join(p, '.core'));
-    chmodSync(p, 0o555);
+    const real = fs.renameSync;
+    fs.renameSync = (from, ...a) => { if (String(from).endsWith(`${p.split('/').pop()}/.core`) || String(from) === join(p, '.core')) throw Object.assign(new Error('busy'), { code: 'EPERM' }); return real(from, ...a); };
+    syncBuiltinESMExports();
     try {
-      assert.throws(() => ensureStateDirForRename({ root: p, harness: H, coreDir: s.coreDir }), (e) => e.code === 'STATE_NO_PROJECT_PLACE' && /could not be renamed/.test(e.reason));
+      assert.throws(() => ensureStateDirForRename({ root: p, harness: H, coreDir: s.coreDir }), (e) => e.code === 'STATE_NO_PROJECT_PLACE' && /could not be renamed \(EPERM\)/.test(e.message));
       assert.equal(existsSync(join(p, '_core')), false);
-    } finally { chmodSync(p, 0o755); }
+    } finally { fs.renameSync = real; syncBuiltinESMExports(); }
+    assert.equal(readManifest({ root: p, harness: H, coreDir: s.coreDir }).agent_name, 'Plover', 'the next try renames it');
+  } finally { s.cleanup(); }
+});
+
+test('an unregistered folder or the home folder is never renamed by a state read; registering the folder renames it first', () => {
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Unregistered');
+    mkdirSync(join(p, '.core', H), { recursive: true });
+    writeFileSync(join(p, '.core', H, 'workspace.json'), '{}');
+    assert.equal(stateDir({ root: p, harness: H, coreDir: s.coreDir }), null);
+    try { stateDir({ root: p, harness: H, coreDir: s.coreDir, forWrite: true }); } catch { /* unregistered: not stored */ }
+    assert.ok(existsSync(join(p, '.core', H, 'workspace.json')), 'left as found');
+    assert.equal(existsSync(join(p, '_core')), false);
+    mkdirSync(join(s.home, '.core', H), { recursive: true });
+    assert.equal(stateDir({ root: s.home, harness: H, coreDir: s.coreDir }), null);
+    assert.ok(existsSync(join(s.home, '.core', H)) && !existsSync(join(s.home, '_core')), 'the home folder is untouched');
+    assert.equal(registerProject(s.coreDir, p).action, 'new');
+    assert.ok(existsSync(join(p, '_core', H, 'workspace.json')) && !existsSync(join(p, '.core')), 'registration renamed it');
+  } finally { s.cleanup(); }
+});
+
+test('a generated _core folder is not created beside an older .core that is not renamed yet', async () => {
+  const { ensureProjectArtifactDir } = await import('../../plugins/core/skills/core/scripts/project-artifacts.mjs');
+  const s = sandbox();
+  try {
+    const p = s.mk('Projects', 'Hooks');
+    mkdirSync(join(p, '.core'));
+    assert.throws(() => ensureProjectArtifactDir(p, '_hooks'), (e) => e.code === 'project-artifact-unsafe-target');
+    assert.equal(existsSync(join(p, '_core')), false);
+    renameSync(join(p, '.core'), join(p, '_core'));
+    assert.ok(ensureProjectArtifactDir(p, '_hooks'));
   } finally { s.cleanup(); }
 });

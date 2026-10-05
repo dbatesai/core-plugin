@@ -490,9 +490,12 @@ function setAside(harnessDir, label) {
 export function stateDir({ root, harness, kind = 'durable', coreDir = defaultCoreDir(), forWrite = false, onEvent, readDirectoryGuard } = {}) {
   assertHarnessName(harness);
   const real = canonical(root);
-  const settled = settleStateFolderName(real, { coreDir });
-  if (forWrite && settled?.startsWith('not-renamed')) noProjectPlace(`the older ${LEGACY_STATE_DIRNAME} folder could not be renamed (${settled.slice(12)})`);
   const target = projectStateDir({ root: real, harness, kind, coreDir });
+  // Only a registered project's own folder is renamed, and before anything in it is read.
+  if (target.location === 'project') {
+    const settled = settleStateFolderName(real, { coreDir });
+    if (forWrite && settled?.startsWith('not-renamed')) noProjectPlace(`the older ${LEGACY_STATE_DIRNAME} folder could not be renamed (${settled.slice(12)})`);
+  }
   // Strict consumers inspect the selected parent chain before any child probe.
   // Ordinary readers and explicit writers retain their existing behavior.
   if (!forWrite && readDirectoryGuard && !readDirectoryGuard(target.dir)) return null;
@@ -1110,7 +1113,7 @@ function lastWrittenAt(dir) {
  * times only, never any other state file.
  * Returns { root, harness, oldPath, lastWritten, stampHmac }.
  */
-export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() }) {
+export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir(), forDecline = false }) {
   assertHarnessName(harness);
   const real = canonical(root);
   const core = canonical(coreDir);
@@ -1118,7 +1121,8 @@ export function adoptionCandidate({ root, harness, coreDir = defaultCoreDir() })
   if (!registered && classifyRegistration(real, { home: dirname(core), coreDir: core }).action === 'refuse') return null;
   if (checkStateContainment({ root: real, harness }) !== 'ok') return null;
   // Nothing is offered while a migration is unfinished: adopting would archive and re-stamp half-copied state.
-  if (!migrationDepth && projectMigrationFence({ root: real, harness })) return null;
+  // A no to an offer already made is still recorded: it writes only this machine's consent record.
+  if (!forDecline && !migrationDepth && projectMigrationFence({ root: real, harness })) return null;
   const harnessDir = join(real, STATE_DIRNAME, harness);
   // an adoption this machine started here and didn't finish is resumed, whatever the stamp now says
   const resume = pendingAdoption({ root: real, harness, coreDir });
@@ -1166,7 +1170,7 @@ export function adoptForeignState({ root, harness, coreDir = defaultCoreDir(), d
   // A yes is held, before anything is read or moved, while a migration is unfinished.
   const fence = decision === 'yes' && !migrationDepth && projectMigrationFence({ root: canonical(root), harness: assertHarnessName(harness) });
   if (fence) return { status: 'held', reason: fence };
-  const cand = adoptionCandidate({ root, harness, coreDir });
+  const cand = adoptionCandidate({ root, harness, coreDir, forDecline: decision === 'no' });
   if (!cand) return { status: 'not-a-candidate' };
   const real = cand.root;
 

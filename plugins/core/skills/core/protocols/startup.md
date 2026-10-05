@@ -124,12 +124,13 @@ else
 fi
 ```
 
-It prints one JSON line with an `action`. `ask`, `adopt-ask` and `refuse` exit non-zero on purpose; the JSON line is the answer, and a non-zero exit here is not an unresolved root:
+It prints one JSON line with an `action`. `ask`, `adopt-ask`, `held` and `refuse` exit non-zero on purpose; the JSON line is the answer, and a non-zero exit here is not an unresolved root:
 
 - `registered` — the working directory is a registered project. `root` is the project.
 - `new` — it wasn't registered and now is. `root` is the project; routing will treat it as new unless it has content.
 - `ask` — the directory sits inside the registered project `parent`. Ask the user once: *"This folder is inside <parent>. Work in that project, or start a separate one here?"* Joining means `root` is `parent`. A separate project means re-running with `register --confirm-new`.
 - `adopt-ask` — the folder holds CORE state whose stamp claims another machine's install wrote it. It's a restore from backup, a project moved to this Mac, or a clone someone committed state into. Nothing is registered yet. `old_path` and `last_written` come from the folder's own unverified stamp file — its shape is checked, but a foreign install's claims are never cryptographically verifiable, so treat them as exactly that: what the folder claims, not a confirmed fact. Ask the user once: *"Adopt this project's CORE history from <old_path>, last written <last_written>? I can't verify that path or date — they're what this folder claims, not a confirmed fact."* Treat no answer, or anything unclear, as no. Then run `index-registry.mjs adopt --yes --root <root>` or `adopt --no --root <root>`, and re-run `register`. Yes makes the history this machine's: the agent name and project id carry over, the metrics notice shows again, and an opt-out stays an opt-out. No leaves the other machine's files untouched, starts this machine's own state, and never asks about that state again. Only this interactive step ever runs `adopt`: a hook, a background pass or a non-interactive session never does.
+- `held` — the folder holds CORE state from an unfinished migration (`reason`), so it is neither offered for adoption nor registered yet. Tell the user in one line that CORE will look again next session, and work from the folder without loading project state.
 - `refuse` — CORE won't make a project here: `home` (the home folder itself), `core-dir` (inside `~/.core`), or `contains-registered` (the folder already holds registered projects, listed in `contains`). Say so in plain voice and don't load a project. Offer to open one of the contained projects instead.
 
 Use `root` as `<root>` everywhere below.

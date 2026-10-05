@@ -47,7 +47,7 @@ import { requireTrustedHome } from './trusted-home.mjs';
 import { isCliEntry } from './cli-entry.mjs';
 import {
   canonical, classifyRegistration, resolveProjectRoot, stateDir, detectStateHarness, updateManifest, readManifest, writeBootstrap, readBootstrap,
-  classifyStamp, writeStamp, STATE_DIRNAME, adoptionCandidate, adoptForeignState, projectMigrationFence, insideMigration,
+  classifyStamp, writeStamp, STATE_DIRNAME, settleStateFolderName, adoptionCandidate, adoptForeignState, projectMigrationFence, insideMigration,
 } from './project-state.mjs';
 
 /**
@@ -114,9 +114,16 @@ export function registerProject(coreDir, dir, { home, confirmNew = false, offerA
   if (verdict.action === 'registered') return verdict;
   if (verdict.action === 'ask' && !confirmNew) return verdict;
   const root = canonical(dir);
+  // The user is registering this folder: an older `.core` in it takes its visible name before any
+  // adoption check reads it.
+  settleStateFolderName(root, { coreDir: core });
   if (offerAdopt) {
-    const cand = adoptionCandidate({ root, harness: harness || detectStateHarness(), coreDir: core });
+    const h = harness || detectStateHarness();
+    const cand = adoptionCandidate({ root, harness: h, coreDir: core });
     if (cand) return { action: 'adopt-ask', root, old_path: cand.oldPath, last_written: cand.lastWritten };
+    // A restore with an unfinished migration is not registered as new: that would lose its offer.
+    const fence = projectMigrationFence({ root, harness: h });
+    if (fence) return { action: 'held', root, reason: fence };
   }
   return mutateProjects(core, (entries) => {
     if (entries.some((e) => e && typeof e.path === 'string' && canonical(e.path) === root)) {
@@ -274,7 +281,7 @@ export function main(argv = process.argv.slice(2)) {
       case 'register': {
         const r = registerProject(coreDir, target || process.cwd(), { confirmNew: !!args.confirmNew, offerAdopt: true, harness });
         process.stdout.write(JSON.stringify(r) + '\n');
-        return r.action === 'refuse' ? 3 : r.action === 'ask' ? 4 : r.action === 'adopt-ask' ? 5 : 0;
+        return r.action === 'refuse' ? 3 : r.action === 'ask' ? 4 : r.action === 'adopt-ask' ? 5 : r.action === 'held' ? 6 : 0;
       }
       case 'adopt-status': {
         const c = adoptionCandidate({ root: args.root || target || process.cwd(), harness, coreDir });

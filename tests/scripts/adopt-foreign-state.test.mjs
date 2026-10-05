@@ -392,6 +392,13 @@ test('a restored project with an unfinished migration is not offered, and a yes 
         assert.equal(r.status, 'held'); assert.equal(r.reason, 'migration-in-progress');
         assert.deepEqual(treeHashes(join(restored, '_core')), before, 'marker, foreign stamp and files exactly as found');
         assert.equal(fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null, registryBefore, 'nothing registered');
+        const reg = registerProject(coreB, restored, { offerAdopt: true, harness: H });
+        assert.deepEqual([reg.action, reg.reason], ['held', 'migration-in-progress'], 'registration is held, not new');
+        assert.equal(fs.existsSync(join(coreB, 'projects.json')) ? fs.readFileSync(join(coreB, 'projects.json'), 'utf8') : null, registryBefore, 'still nothing registered');
+        assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'no' }).status, 'declined', 'a no is recorded while fenced');
+        assert.deepEqual(treeHashes(join(restored, '_core')), before, 'the no touched nothing in the project');
+        fs.rmSync(join(restored, '_core', H, '.migrating'));
+        assert.equal(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), null, 'the no is remembered once the marker clears');
       } else {
         assert.ok(adoptionCandidate({ root: restored, harness: H, coreDir: coreB }), 'control: offered');
         assert.equal(adoptForeignState({ root: restored, harness: H, coreDir: coreB, decision: 'yes' }).status, 'adopted');
